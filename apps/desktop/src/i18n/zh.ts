@@ -3072,7 +3072,7 @@ export const zh: Record<Key, string> = {
   "voice.set.onDevice": "{lang}：在这台 Mac 上识别，不发送任何内容。",
   "voice.set.appleOnly": "{lang}：这台 Mac 无法独自识别，只能在你同意后通过 Apple 的服务器使用。",
   "voice.set.none": "{lang}：这台 Mac 无法把它转成文字。",
-  "voice.set.thaiLater": "仅靠这台 Mac 识别泰语还不可用。较新的 macOS（26 及以上）能在 Mac 上识别泰语，但 Manut AI 还没有使用它。",
+  "voice.set.thaiLater": "仅靠这台 Mac 识别泰语还不可用：这台 Mac 表示它无法独自识别泰语。以后如果可以，Manut AI 会自动在 Mac 上使用它，不发送任何内容。",
   "voice.set.asks": "语音模式从不回答确认请求。有需要批准的事项时，它会停下，等你用卡片决定。",
   "voice.set.read": "回复由这台 Mac 自己的声音在这台 Mac 上朗读。",
   "voice.set.kept": "不录任何音。声音不会写入文件，声音和听到的文字都不会进入日志。",

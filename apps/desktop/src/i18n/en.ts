@@ -3103,7 +3103,7 @@ export const en = {
   "voice.set.onDevice": "{lang}: recognized on this Mac. Nothing is sent.",
   "voice.set.appleOnly": "{lang}: this Mac cannot recognize it by itself, so it works only through Apple's servers, after your yes.",
   "voice.set.none": "{lang}: this Mac cannot turn it into text.",
-  "voice.set.thaiLater": "Thai on this Mac alone is not here yet. Newer macOS (26 and later) can recognize Thai on the Mac itself, but Manut AI does not use that yet.",
+  "voice.set.thaiLater": "Thai on this Mac alone is not here yet: this Mac says it cannot recognize Thai by itself. If it can later, Manut AI uses it on the Mac by itself, with nothing sent.",
   "voice.set.asks": "Voice mode never answers an ask. When there is something to approve, it stops and waits for you to decide with the card.",
   "voice.set.read": "Answers are read aloud by this Mac's own voices, on this Mac.",
   "voice.set.kept": "Nothing is recorded. No audio is written to a file, and neither the audio nor the words heard go to a log.",

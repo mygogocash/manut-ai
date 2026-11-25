@@ -3072,7 +3072,7 @@ export const ko: Record<Key, string> = {
   "voice.set.onDevice": "{lang}: 이 Mac에서 알아듣습니다. 아무것도 보내지 않습니다.",
   "voice.set.appleOnly": "{lang}: 이 Mac이 혼자서 알아듣지 못해, 허용한 뒤 Apple 서버를 거쳐서만 됩니다.",
   "voice.set.none": "{lang}: 이 Mac에서는 글자로 바꿀 수 없습니다.",
-  "voice.set.thaiLater": "이 Mac만으로 하는 태국어는 아직 없습니다. 새 macOS(26 이상)는 Mac에서 태국어를 알아들을 수 있지만, Manut AI는 아직 그것을 쓰지 않습니다.",
+  "voice.set.thaiLater": "이 Mac만으로 하는 태국어는 아직 없습니다. 이 Mac은 혼자서 태국어를 알아듣지 못한다고 알려 줍니다. 나중에 할 수 있게 되면 Manut AI는 아무것도 보내지 않고 Mac에서 그것을 씁니다.",
   "voice.set.asks": "음성 모드는 확인 요청에 답하지 않습니다. 승인할 것이 있으면 멈추고, 카드에서 정할 때까지 기다립니다.",
   "voice.set.read": "답장은 이 Mac의 목소리로, 이 Mac에서 읽습니다.",
   "voice.set.kept": "아무것도 녹음하지 않습니다. 소리는 파일로 저장되지 않고, 소리도 알아들은 말도 로그에 남지 않습니다.",

@@ -128,3 +128,17 @@ describe("an answer read aloud", () => {
     expect(chunks("one\n\ntwo")).toEqual(["one", "two"]);
   });
 });
+
+describe("what the page's voice code keeps", () => {
+  it("logs nothing, and reaches the shell only to read, listen and stop", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const src = (p: string) => readFileSync(join(__dirname, "..", p), "utf8");
+    const files = ["voice/voice.ts", "voice/engine.ts", "voice/mic.ts", "voice/mode.ts", "chat/box/Voice.tsx", "settings/VoicePage.tsx"];
+    for (const f of files) expect(src(f), f).not.toMatch(/console\.|indexedDB|sessionStorage|\bfetch\(/);
+    const engine = src("voice/engine.ts");
+    expect([...engine.matchAll(/invoke(?:<[^>]*>)?\("([\w_]+)"/g)].map((m) => m[1]).sort()).toEqual(["voice_listen", "voice_status", "voice_stop", "voice_stop"]);
+    // what is kept in this computer's storage: the three choices, never words or audio
+    expect([...src("voice/voice.ts").matchAll(/"(manut\.voice\.\w+)"/g)].map((m) => m[1]).sort()).toEqual(["manut.voice.lang", "manut.voice.voices", "manut.voice.where"]);
+  });
+});

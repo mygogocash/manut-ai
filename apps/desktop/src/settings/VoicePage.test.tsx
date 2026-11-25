@@ -37,7 +37,7 @@ describe("Settings › Voice", () => {
     expect(text).toContain("Thai (ไทย): this Mac cannot recognize it by itself, so it works only through Apple's servers, after your yes.");
     expect(text).toContain("English: recognized on this Mac. Nothing is sent.");
     // and what does not work yet, plainly
-    expect(text).toContain("Thai on this Mac alone is not here yet.");
+    expect(text).toContain("Thai on this Mac alone is not here yet: this Mac says it cannot recognize Thai by itself.");
     expect(draw({ statuses: { "th-TH": { ...thai, onDevice: true }, "en-US": english } })).not.toContain("voice-thai-later");
     expect(worksLine(undefined, "th-TH")).toBe("Thai (ไทย): this Mac cannot turn it into text.");
     expect(words(draw({ statuses: null }))).toContain("Checking what this Mac can do");

@@ -3072,7 +3072,7 @@ export const ja: Record<Key, string> = {
   "voice.set.onDevice": "{lang}: この Mac 上で認識します。何も送りません。",
   "voice.set.appleOnly": "{lang}: この Mac は単独で認識できないため、あなたが許可した後に Apple のサーバー経由でのみ使えます。",
   "voice.set.none": "{lang}: この Mac では文字にできません。",
-  "voice.set.thaiLater": "この Mac だけでのタイ語はまだありません。新しい macOS (26 以降) は Mac 上でタイ語を認識できますが、Manut AI はまだそれを使っていません。",
+  "voice.set.thaiLater": "この Mac だけでのタイ語はまだありません。この Mac は単独ではタイ語を認識できないと答えています。後でできるようになれば、Manut AI は何も送らずに Mac 上でそれを使います。",
   "voice.set.asks": "音声モードは確認に答えません。承認待ちのものがあると止まり、あなたがカードで決めるのを待ちます。",
   "voice.set.read": "返信はこの Mac の声で、この Mac 上で読み上げます。",
   "voice.set.kept": "何も録音しません。音声はファイルに書かれず、音声も聞き取った言葉もログに残りません。",
