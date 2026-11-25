@@ -125,20 +125,20 @@ test("a bot with nothing yet says so instead of an empty panel", async ({ page }
   await expect(page.getByTestId("panel-worktrees")).toContainText("No git worktrees");
 });
 
-test("default faces are drawn whole (not cropped to a circle); an uploaded picture is round", async ({ page }) => {
+test("each member's face is the brand's drawn face, on a team colour no other member has", async ({ page }) => {
   await page.goto("/");
   await chatOpen(page);
-  // the Team page draws each member's face, as the sidebar's rows did
+  // the Team page draws each member's face, as the sidebar's rows did: the kit's SVG, never a picture cropped to a circle
   await page.getByTestId("menu-team").click();
-  const av = page.getByTestId("team-kami").locator("img.ui-av");
-  await expect(av).toHaveAttribute("src", /face-blob|data:image\/svg/);
+  const av = page.getByTestId("team-kami").locator(".ui-av");
+  await expect(av.locator("span.face svg path.fs")).toHaveCount(1);
   expect(await av.evaluate((e) => getComputedStyle(e).borderRadius)).toBe("0px");
-  // the three bots with a fixed face each have their own (a fourth bot draws one of the four faces by name)
-  const srcs = await page
-    .locator('[data-testid="team-kami"] img.ui-av, [data-testid="team-friren"] img.ui-av, [data-testid="team-default"] img.ui-av')
-    .evaluateAll((els) => els.map((e) => (e as HTMLImageElement).src));
-  expect(srcs.length).toBe(3);
-  expect(new Set(srcs).size).toBe(srcs.length);
+  // the mock's four members are none of the canvas's team, so each takes one of the team colours, and no two the same
+  const fills = await page
+    .locator(["kami", "friren", "default", "omh-tui"].map((m) => `[data-testid="team-${m}"] .ui-av rect.fg`).join(", "))
+    .evaluateAll((els) => els.map((e) => e.getAttribute("fill")));
+  expect(fills.length).toBe(4);
+  expect(new Set(fills).size).toBe(fills.length);
 });
 
 test("Worktrees and Diff share one worktree list; Terminal reads once on open", async ({ page }) => {

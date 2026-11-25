@@ -284,32 +284,6 @@
   flex: 0 0 52px;
   justify-content: center;
 }
-/* Needs you: an ask's exact action sits under what is asked, as Home sets it, and Look first stands beside the row. */
-.mpage .need code.act {
-  display: block;
-  margin: 4px 0;
-  padding: 6px 9px;
-  font-family: var(--mono);
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--ink);
-  background: var(--soft);
-  border-radius: var(--rad-sm);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  max-height: 160px;
-  overflow-y: auto;
-}
-/* A browser write's sentence, whole, as its card shows it (cards.css .card-cmd.whole). */
-.mpage .need code.act.whole {
-  max-height: none;
-  overflow-y: visible;
-}
-.mpage .need .look {
-  flex: none;
-  margin: 0 6px;
-}
-
 /* A member's role sits beside their name on the first line, as the canvas sets it, and what they are doing is the second line,
    with how long it has run or how many more asks wait quietly at its end. Look first sits between the row and its menu. */
 .mpage .l1 .role {
@@ -480,4 +454,45 @@
 }
 .mpage .archive .band .lk {
   font: inherit;
+}
+
+/* Loading, in the shape of what is coming (StatesSystem.dc.html): the shimmer itself is the Motion board's, named in
+   markup as .mo-loading; here only its sizes. */
+.mpage .skels {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 8px 10px;
+}
+.mpage .skel.wide {
+  width: 100%;
+  height: 32px;
+}
+.mpage .skel-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.mpage .skel.dot {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--rad-pill);
+}
+.mpage .skel-lines {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.mpage .skel-lines .skel {
+  width: var(--w, 60%);
+  height: 12px;
+}
+
+/* A page's body comes in quietly the first time it opens in a session (the header stays still, an anchor for the eye):
+   a short fade where it stands, the Arrive of the Motion board with no distance. Its rows rise on top, each in turn. */
+.mpage-body.arriving {
+  --rise-by: 0px;
+  animation: var(--anim-arrive);
 }

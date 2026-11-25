@@ -5,7 +5,7 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import "./terminal.css";
 import { useStore } from "../../state/store";
 import { useResolvedTheme } from "../../app/theme";
-import { Seg } from "../../chat/model/Seg";
+import { Modes } from "../../ui/Modes";
 import { CheckIcon } from "../../chat/model/CheckIcon";
 import { locale, t, type Key } from "../../i18n";
 import { rendererInUse } from "../../sessions/term/engine";
@@ -154,8 +154,7 @@ export function TerminalPage() {
       <TermPreview theme={candidate?.theme ?? picked} settings={candidate?.settings ?? term} />
       <div className="tm-bar">
         <div className="tm-slot">
-          <Seg
-            small
+          <Modes
             label={t("term.themeFor")}
             value={slot}
             options={(["dark", "light"] as Mode[]).map((m) => ({ value: m, label: t(SLOT[m]) }))}
@@ -226,8 +225,7 @@ export function TerminalPage() {
           <Stepper value={term.lineHeight} min={TERM_LINE_HEIGHT.min} max={TERM_LINE_HEIGHT.max} step={0.1} label={t("term.lineHeight")} onChange={(n) => set({ lineHeight: n })} testId="term-line-height" />
         </Row>
         <Row title={t("term.contrast")} hints={[t(CONTRAST_HINT[term.contrast])]} testId="term-contrast-row">
-          <Seg
-            small
+          <Modes
             label={t("term.contrast")}
             value={term.contrast}
             options={TERM_CONTRASTS.map((c) => ({ value: c, label: t(CONTRAST[c]) }))}
@@ -246,8 +244,7 @@ export function TerminalPage() {
       <div className="st-gh">{t("term.cursor")}</div>
       <div className="st-grp">
         <Row title={t("term.cursorStyle")}>
-          <Seg
-            small
+          <Modes
             label={t("term.cursorStyle")}
             value={term.cursorStyle}
             options={TERM_CURSORS.map((c) => ({ value: c, label: t(CURSOR[c]) }))}
@@ -256,7 +253,7 @@ export function TerminalPage() {
           />
         </Row>
         <Row title={t("term.blink")}>
-          <Seg small label={t("term.blink")} value={term.cursorBlink ? "on" : "off"} options={ON_OFF()} onChange={(v) => set({ cursorBlink: v === "on" })} testId="term-blink" />
+          <Modes label={t("term.blink")} value={term.cursorBlink ? "on" : "off"} options={ON_OFF()} onChange={(v) => set({ cursorBlink: v === "on" })} testId="term-blink" />
         </Row>
       </div>
 
@@ -280,8 +277,7 @@ export function TerminalPage() {
           </Row>
         )}
         <Row title={t("term.scrollback")} hints={[t("term.scrollbackHint")]} testId="term-scrollback-row">
-          <Seg
-            small
+          <Modes
             label={t("term.scrollback")}
             value={String(term.scrollback)}
             options={TERM_SCROLLBACKS.map((n) => ({ value: String(n), label: rows(n) }))}
@@ -291,44 +287,43 @@ export function TerminalPage() {
         </Row>
         {isMac() && (
           <Row title={t("term.optionMeta")} hints={[t("term.optionMetaHint")]} testId="term-option-meta-row">
-            <Seg small label={t("term.optionMeta")} value={term.optionIsMeta ? "on" : "off"} options={ON_OFF()} onChange={(v) => set({ optionIsMeta: v === "on" })} testId="term-option-meta" />
+            <Modes label={t("term.optionMeta")} value={term.optionIsMeta ? "on" : "off"} options={ON_OFF()} onChange={(v) => set({ optionIsMeta: v === "on" })} testId="term-option-meta" />
           </Row>
         )}
         <Row title={t("term.gpu")} hints={[t("term.gpuHint"), using ? t(IN_USE[using]) : null]} testId="term-gpu-row">
-          <Seg small label={t("term.gpu")} value={term.gpu} options={TERM_GPUS.map((g) => ({ value: g, label: t(GPU[g]) }))} onChange={(v) => set({ gpu: v as TermGpu })} testId="term-gpu" />
+          <Modes label={t("term.gpu")} value={term.gpu} options={TERM_GPUS.map((g) => ({ value: g, label: t(GPU[g]) }))} onChange={(v) => set({ gpu: v as TermGpu })} testId="term-gpu" />
         </Row>
         <Row title={t("term.kittyKeys")} hints={[t("term.kittyKeysHint")]} testId="term-kitty-row">
-          <Seg small label={t("term.kittyKeys")} value={term.kittyKeys ? "on" : "off"} options={ON_OFF()} onChange={(v) => set({ kittyKeys: v === "on" })} testId="term-kitty" />
+          <Modes label={t("term.kittyKeys")} value={term.kittyKeys ? "on" : "off"} options={ON_OFF()} onChange={(v) => set({ kittyKeys: v === "on" })} testId="term-kitty" />
         </Row>
         <Row title={t("term.images")} hints={[t("term.imagesHint")]} testId="term-images-row">
-          <Seg small label={t("term.images")} value={term.images ? "on" : "off"} options={ON_OFF()} onChange={(v) => set({ images: v === "on" })} testId="term-images" />
+          <Modes label={t("term.images")} value={term.images ? "on" : "off"} options={ON_OFF()} onChange={(v) => set({ images: v === "on" })} testId="term-images" />
         </Row>
       </div>
 
       <div className="st-gh">{t("term.clipboard")}</div>
       <div className="st-grp">
         <Row title={t("term.copyOnSelect")} hints={[t("term.copyOnSelectHint")]} testId="term-copy-select-row">
-          <Seg small label={t("term.copyOnSelect")} value={term.copyOnSelect ? "on" : "off"} options={ON_OFF()} onChange={(v) => set({ copyOnSelect: v === "on" })} testId="term-copy-select" />
+          <Modes label={t("term.copyOnSelect")} value={term.copyOnSelect ? "on" : "off"} options={ON_OFF()} onChange={(v) => set({ copyOnSelect: v === "on" })} testId="term-copy-select" />
         </Row>
         <Row title={t("term.rightClickPaste")} hints={[t("term.rightClickPasteHint")]} testId="term-right-paste-row">
-          <Seg small label={t("term.rightClickPaste")} value={term.rightClickPaste ? "on" : "off"} options={ON_OFF()} onChange={(v) => set({ rightClickPaste: v === "on" })} testId="term-right-paste" />
+          <Modes label={t("term.rightClickPaste")} value={term.rightClickPaste ? "on" : "off"} options={ON_OFF()} onChange={(v) => set({ rightClickPaste: v === "on" })} testId="term-right-paste" />
         </Row>
         <Row title={t("term.confirmPaste")} hints={[t("term.confirmPasteHint")]} testId="term-confirm-paste-row">
-          <Seg small label={t("term.confirmPaste")} value={term.confirmPaste ? "on" : "off"} options={ON_OFF()} onChange={(v) => set({ confirmPaste: v === "on" })} testId="term-confirm-paste" />
+          <Modes label={t("term.confirmPaste")} value={term.confirmPaste ? "on" : "off"} options={ON_OFF()} onChange={(v) => set({ confirmPaste: v === "on" })} testId="term-confirm-paste" />
         </Row>
         <Row title={t("term.osc52")} hints={[t("term.osc52Hint")]} testId="term-osc52-row">
-          <Seg small label={t("term.osc52")} value={term.osc52 ? "on" : "off"} options={ON_OFF()} onChange={(v) => set({ osc52: v === "on" })} testId="term-osc52" />
+          <Modes label={t("term.osc52")} value={term.osc52 ? "on" : "off"} options={ON_OFF()} onChange={(v) => set({ osc52: v === "on" })} testId="term-osc52" />
         </Row>
       </div>
 
       <div className="st-gh">{t("term.history")}</div>
       <div className="st-grp">
         <Row title={t("term.keepHistory")} hints={[t("term.keepHistoryHint")]} testId="term-keep-history-row">
-          <Seg small label={t("term.keepHistory")} value={term.keepHistory ? "on" : "off"} options={ON_OFF()} onChange={(v) => set({ keepHistory: v === "on" })} testId="term-keep-history" />
+          <Modes label={t("term.keepHistory")} value={term.keepHistory ? "on" : "off"} options={ON_OFF()} onChange={(v) => set({ keepHistory: v === "on" })} testId="term-keep-history" />
         </Row>
         <Row title={t("term.undoClose")} hints={[t("term.undoCloseHint")]} testId="term-undo-close-row">
-          <Seg
-            small
+          <Modes
             label={t("term.undoClose")}
             value={String(term.undoClose)}
             options={TERM_UNDO_CLOSE.map((n) => ({ value: String(n), label: n ? t("term.undoCloseSec", { n }) : t("set.off") }))}

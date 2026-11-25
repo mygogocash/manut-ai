@@ -106,7 +106,7 @@ describe("publishing while it is switched off", () => {
     // Listing stays open, and says why nothing can be published.
     const list = await listed(owner);
     expect(list.status).toBe(200);
-    expect(list.body).toEqual({ publishing: "feature_disabled", artifacts: [] });
+    expect(list.body).toEqual({ publishing: "feature_disabled", skillPublishing: "feature_disabled", origin: ORIGIN, artifacts: [] });
   });
 
   it("answers artifact_origin_not_configured and stores nothing while the switch is on and no origin is set", async () => {
@@ -116,7 +116,8 @@ describe("publishing while it is switched off", () => {
     expect(refused.status).toBe(503);
     expect(refused.body).toEqual({ error: "artifact_origin_not_configured" });
     expect(await storedKeys(shop)).toEqual([]);
-    expect((await listed(owner, bindings)).body).toEqual({ publishing: "artifact_origin_not_configured", artifacts: [] });
+    expect((await listed(owner, bindings)).body).toEqual({ publishing: "artifact_origin_not_configured",
+      skillPublishing: "artifact_origin_not_configured", origin: null, artifacts: [] });
     // An origin on the app's own host is no origin at all.
     const own = { ...bindings, ARTIFACT_ORIGIN: "https://api.manut.test" } as Env;
     expect((await publish(owner, { title: "Menu", kind: "html", text: PAGE }, own)).body)

@@ -227,27 +227,40 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    approvals keyed to the developer's folder but applied to a lane's file, whether a preview starts a repository's
    script without a click, other names for the settings that skip an agent's asks, and whether an agent can write a
    file into `~/.manut/workflows` without an ask that says what that folder is.
-   Running on 26 Nov at 03:00, each a subagent of the lead's session in its own worktree:
+   Also merged by 03:30 on 26 Nov: 78a (the encrypted channel, after a second reviewer's seven fixes), 78f part 1
+   (reading Tailscale's state), 84 (skills shared by a link, switched off), 85b and 85c (motion in the chats, lists
+   and pages), 85e (the brand's faces), 85g (an approval's card and Needs you), 85h (Settings as one column), and
+   eight browser specs brought up to the motion rules.
+   A SECOND SECURITY REVIEW, read on 26 Nov over those fixes and the night's merges, found eight more problems: one
+   critical or high, three high, four medium. Unlike the first review's, several are in the published 0.1.1: how Kit's
+   dial reads a command, a repository's own agent settings taking effect in a lane with no question asked, and the
+   Code page's own git reads in a repository with submodules. Each needs a hostile repository, a hostile page the
+   agent reads, or another program already on the Mac. They are items 88 to 92, each fixed with a failing test first;
+   the details stay out of these docs until the fixes merge. No build is cut before they merge, and the owner decides
+   what to say on the 0.1.1 release page.
+   Running on 26 Nov at 03:30, each a subagent of the lead's session in its own worktree:
+   - items 88 to 92, the second review's fixes (`fix/dial-reading`, `fix/lane-trust`, `fix/git-submodules`,
+     `fix/workflow-binding`, `fix/computer-use-cards`, all Opus, worktrees `cc-item88-dial-reading` to
+     `cc-item92-computer-use-cards`);
    - item 78b, the Mac's side of reaching it from a phone and Settings, Sharing and access, built switched off
-     (`feat/remote-mac`, Opus, `cc-item78b-remote-mac`), on item 78a's package, which merged at 03:40 with 85b;
-   - item 78f part 1, reading Tailscale's state, read only (`feat/tailscale-state`, Opus,
-     `cc-item78f1-tailscale-state`);
-   - item 84, skills shared by a link, built switched off (`feat/skill-links`, Opus, `cc-item84-skill-links`);
-   - item 85c, motion in the lists and pages (`feat/motion-lists`, Sonnet, `cc-item85c-motion-lists`);
-   - item 85f, the chat's type (`feat/chat-type`, Opus, `cc-item85f-chat-type`), and 85g, an approval's card and Needs
-     you (`feat/ask-card`, Opus, `cc-item85g-ask-card`);
-   - item 85e, the brand's faces (`feat/brand-faces`, Opus, `cc-item85e-faces`), and 85h, Settings as one column
-     (`feat/settings-column`, Opus, `cc-item85h-settings-column`).
-   Next: 85i once 85e to 85h have merged, 78c and 78f part 2 (they need the owner's relay, a tailnet and phones to
-   try), and seven browser specs that items 85a and 85b left failing in `live`, `runs` and `wire` (they assert the old
-   mechanics of reduced motion, or the app regressed: not yet read; CI's Playwright shards do not fail a run). The
-   briefs the helpers were given are not kept in the repository; each item's row in `docs/plan.md` says what it is.
+     (`feat/remote-mac`, Opus, `cc-item78b-remote-mac`);
+   - item 85f, the chat's type (`feat/chat-type`, Opus, `cc-item85f-chat-type`), and 85i, the last sweep of the audit
+     (`feat/quiet-sweep`, Opus, `cc-item85i-quiet-sweep`).
+   Next: 78c and 78f part 2 (they need the owner's relay, a tailnet and phones to try), a third read of the security
+   fixes once they merge, and a redeploy of dev for the API routes of items 83 and 84 (both behind flags that are
+   off). The briefs the helpers were given are not kept in the repository; each item's row in `docs/plan.md` says what
+   it is.
    At 23:55 on 25 Nov the account reached its five-hour limit and six helpers stopped mid-work; the limit reset at
    02:50 and each was sent on in its own thread, with its uncommitted work intact. From about 22:50 the Mac had also
    been sleeping fifteen minutes in every seventeen once the owner was away, which timed tests out and failed two
    gates; the lead holds it awake with `caffeinate -i -s` for ten hours from 23:26 (it changes no setting and ends by
    itself; `killall caffeinate` ends it sooner). If gates time out by about 925 seconds again, read `pmset -g log` for
    sleeps first.
+   Three more gates failed that night on tests that were not wrong: the Rust tests' scratch keychain locked itself
+   while the screen was locked, and two long tests passed their five seconds. All three causes are fixed, and the gate
+   now runs every package to the end and each failed file once more by itself; it caught one real regression that way,
+   in the stack of 85g. Each API test run also prints one uncaught `rows.filter is not a function` from
+   `shops-store.ts` while every test passes: not yet read.
    Next, as each finishes: item 80 (the chat box: model, effort, approval, add context, after 67), 72 (MCP and Skills
    everywhere), 81 (voice), 82 (computer use, lifted from Orca), 73 (worktree settings), then 71, 74, 75, 69, 76, 77, and 83 and 84
    (artifacts and skills shared by a link, from two more of Orca's pages: built switched off, as they need a sign-in, an

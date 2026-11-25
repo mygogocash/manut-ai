@@ -321,7 +321,7 @@ export function HistoryView({
     ) : undefined;
   return (
     <MenuPageFrame page="history" title={t("menu.history")} middle={chips} acts={acts}>
-      <div className="pane">
+      <div className="pane" data-arrive="history" data-arrive-rows=".hist-li" data-flip-list data-flip-scope={`${query}|${lane}`}>
         {days.length ? (
           days.map((d) => (
             <section key={d.key} className="day" aria-label={d.label}>
@@ -333,7 +333,7 @@ export function HistoryView({
                 {d.rows.map((r) => {
                   const st = r.tag ? { word: r.tag.word, tag: r.tag.cls } : STATUS[r.status];
                   return (
-                    <li key={r.key} className="hist-li" data-place={r.place}>
+                    <li key={r.key} className="hist-li" data-flip={r.key} data-place={r.place}>
                       <button type="button" className="rowl" onClick={r.open} data-testid="history-row">
                         {r.lane && (
                           <span className="tag kind" data-testid="history-kind">

@@ -2172,6 +2172,8 @@ export interface Actions {
    *  settled with a yes (src/runtime/artifactAsks.ts). Nothing else can publish or remove a link. */
   artifactsList(): Promise<OpMap["artifacts.list"]["result"]>;
   artifactsPublish(ask: string): Promise<OpMap["artifacts.publish"]["result"]>;
+  /** A bundle of skills (item 84), by the id of the ask the person settled with a yes after looking at every file. */
+  artifactsPublishSkills(ask: string): Promise<OpMap["artifacts.publishSkills"]["result"]>;
   artifactsRemove(ask: string): Promise<OpMap["artifacts.remove"]["result"]>;
   /** Tasks › Linear: whether `bot`'s config names a Linear MCP server (bridge `tasks.linear`, config only). */
   tasksLinear(bot: string): Promise<{ configured: boolean; server: string }>;
@@ -3153,6 +3155,7 @@ export function createStore(bridge: BridgeLike, opts: StoreOptions = {}): Store 
     routineRemove: (shop, routine) => bridge.request("routine.remove", { shop, routine }),
     artifactsList: () => bridge.request("artifacts.list", {}),
     artifactsPublish: (ask) => bridge.request("artifacts.publish", { ask }),
+    artifactsPublishSkills: (ask) => bridge.request("artifacts.publishSkills", { ask }),
     artifactsRemove: (ask) => bridge.request("artifacts.remove", { ask }),
     tasksLinear: (bot) => (bridge.request as unknown as (op: string, p: unknown) => Promise<{ configured: boolean; server: string }>)("tasks.linear", { bot }),
     async startTaskThread(bot, title, text) {
