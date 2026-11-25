@@ -169,15 +169,22 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    helper that ends its turn while its own gate runs in the background is marked finished without a report: send it on
    to wait with `t3_background_wait`. They run, each on its own branch from `pilot/week-1`; review each, merge it after
    the full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
-   - item 51, the pane beside a lane: Diff, Preview and Tests as the canvas's Code board has them, and mocha,
-     Playwright and `unittest` read by `testRun.ts` (`feat/lane-pane`, Sonnet), started 25 Nov when item 50 merged.
+   - none: Claude access for helpers was turned off on 25 Nov (see below), so the lead builds the next items itself.
    A helper's run can also fail when the API sends nothing for 10 minutes; that is not a usage limit and nothing sends
    it on. Item 50 failed so at 00:39 on 25 Nov, after its page, tests and visual check: its last commit was local only.
    Push such a commit from the helper's worktree, review it and finish what is left as the lead.
+   On 25 Nov item 51's run failed with "Your organization has disabled Claude subscription access for Claude Code":
+   helpers on Claude cannot start or go on until the owner turns that access back on or gives an API key. Nothing
+   resumes such a run either; item 51's commits were all made, so the lead pushed its branch from its worktree.
    The security review of 24 Nov (findings only) found no critical issue, two high and three medium ones that need
    `EMAIL_SIGN_IN` or `SELF_SERVE_SHOPS` on, and three low ones; its proofs are in the review thread's report, and
    `docs/turning-on.md` says to keep both switches off until items 41 and 42 merge.
-   Merged: 52 (Show older on the connected desktop: History and the activity log say when a shop has more than its
+   Merged: 51 (the pane beside a lane: Diff lists each file the session changed, from the chat's own steps, so a
+   rewound turn's files leave it; Preview says the app has no preview yet and shows the Sample rows; Tests shows the
+   last run's result, when, and its command with any key masked before it is cut, never its output; mocha, Playwright
+   Test and `unittest` are read with the same pass rule, a flaky Playwright test counting as passed as its exit status
+   does; desktop only, so nothing to deploy),
+   52 (Show older on the connected desktop: History and the activity log say when a shop has more than its
    newest 50 tasks and read 25 more at a time from the list's cursor, with the shop's own session; the older pages live
    in memory only and the offline cache stays at version 5; the minute's read carries the tasks it pushes out into them,
    and lets them go only when 50 or more tasks were made between two reads; desktop only, so nothing to deploy),
