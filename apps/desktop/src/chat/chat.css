@@ -901,8 +901,8 @@
   outline: 0;
   color: var(--ink);
   font-size: var(--fs-msg);
-  /* 20px at the board's 15px, and room for the larger sizes */
-  line-height: max(20px, calc(var(--fs-msg) * 1.35));
+  /* the box's line (tokens.css), which its mirror (parts/skills.css) shares */
+  line-height: var(--lh-box);
   padding: 5px 0;
   max-height: 200px;
 }

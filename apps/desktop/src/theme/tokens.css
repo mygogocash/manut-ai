@@ -127,6 +127,8 @@
   --lh-read: 1.65;
   --fs-read-h: 20px;
   --fs-read-code: 14px;
+  /* a line of the box's text: 20px at the board's 15px and at Small; Large below */
+  --lh-box: 20px;
 
   /* shape + type */
   --r: var(--rad);
@@ -276,6 +278,7 @@
 }
 [data-text="large"] {
   --fs-msg: 17px;
+  --lh-box: 23px;
   --fs-read: 20px;
   --fs-read-h: 20px;
   --fs-read-code: 15px;

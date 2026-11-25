@@ -1,5 +1,6 @@
 // The chat reads like the Chat board (item 85f, docs/design-audit.md findings 2 and 7). CHAT_SHOTS=<dir> keeps a
-// picture of each state in light and dark at 1280 and 900 wide, and BOARD_SHOTS=<dir> the board rendered the same way.
+// picture of each state in light and dark at 1280 and 900 wide, and BOARD_SHOTS=<dir> with BOARD_DIR=<the canvas's
+// app-screens/project folder> the board rendered the same way.
 import { expect, test, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -164,6 +165,17 @@ test.describe("screens", () => {
   }
 });
 
+test.describe("the Appearance preview", () => {
+  test.skip(!SHOTS, "pictures only: CHAT_SHOTS=<dir>");
+  for (const theme of ["light", "dark"] as const)
+    test(`Settings › Appearance shows the chat's new look (${theme})`, async ({ page }) => {
+      await start(page, theme, 1280);
+      await page.getByTestId("nav-settings").click();
+      await expect(page.getByTestId("appearance")).toBeVisible();
+      await shot(page, `appearance-${theme}-1280`);
+    });
+});
+
 // A coding lane (Kit's chat) as the Code board draws it: the agent's answer is `.prose` there too, so the serif.
 test.describe("a coding lane", () => {
   test.skip(!SHOTS, "pictures only: CHAT_SHOTS=<dir>");
@@ -200,12 +212,16 @@ test.describe("a coding lane", () => {
   }
 });
 
-const BOARDS = "/Users/kunanonjarat/Developer/gospark-main/manut-ai-artifacts/app-screens/project";
+// The design canvas's folder (read only) and where to put the pictures: BOARD_DIR=<canvas>/app-screens/project.
+const BOARDS = process.env.BOARD_DIR || "";
 test.describe("the board", () => {
-  test.skip(!process.env.BOARD_SHOTS, "pictures only: BOARD_SHOTS=<dir>");
-  for (const [board, theme] of [["Chat", "light"], ["ChatDark", "dark"]] as const) {
+  test.skip(!process.env.BOARD_SHOTS || !BOARDS, "pictures only: BOARD_DIR=<canvas folder> BOARD_SHOTS=<dir>");
+  // ChatDark.dc.html imports Chat.dc.html, which a file:// page cannot fetch: the dark board is Chat's own markup with
+  // the kit's dark switch (`data-t="dark"`) set on it, as ChatDark's `dark` prop does
+  for (const theme of ["light", "dark"] as const) {
+    const board = "Chat";
     for (const width of [1280, 900]) {
-      test(`${board} at ${width}`, async ({ page }) => {
+      test(`${board} ${theme} at ${width}`, async ({ page }) => {
         const dir = process.env.BOARD_SHOTS!;
         mkdirSync(dir, { recursive: true });
         // the board's own files only: its web fonts are not fetched, so it falls back as the app does
@@ -213,6 +229,7 @@ test.describe("the board", () => {
         await page.setViewportSize({ width, height: 820 });
         await page.goto(`file://${BOARDS}/${board}.dc.html`);
         await page.waitForTimeout(1500);
+        if (theme === "dark") await page.evaluate(() => document.querySelectorAll("[data-t]").forEach((e) => e.setAttribute("data-t", "dark")));
         await page.screenshot({ path: join(dir, `board-${theme}-${width}.png`) });
       });
     }
