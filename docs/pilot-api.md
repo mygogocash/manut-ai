@@ -3075,7 +3075,8 @@ it through approval-core (`docs/code-editor.md`, "Artifact links"); this API is 
   `url` null while no origin is set. Listing stays open while publishing is off.
 - `POST /v1/artifacts` with exactly `{ title, kind, text }`: `title` 1 to 120 characters once trimmed with no control or
   line-separator character (400 `invalid_title`), `kind` `"html"` or `"markdown"` (400 `invalid_kind`), `text` not empty
-  (400 `invalid_text`) and at most 256 KiB in UTF-8 bytes (413 `{ error: "too_large", max: 262144 }`). Then 403
+  (400 `invalid_text`) and at most 128 KiB in UTF-8 bytes (413 `{ error: "too_large", max: 131072 }`), so that with JSON's
+  escaping of quotes and line breaks the body fits the desktop's 256 KiB request (the desktop checks the whole body too). Then 403
   `{ error: "feature_disabled", feature: "artifactLinks" }` while the switch is off, 503 `artifact_origin_not_configured`
   while no usable origin is set, and 409 `{ error: "too_many", max: 50 }` once the shop holds 50 links. Answers
   `{ artifact }` as listed, with `cache-control: no-store`. Nothing is stored for any refusal.

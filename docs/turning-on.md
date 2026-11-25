@@ -88,7 +88,7 @@ Counted from the code:
 | A removal | 1 Worker request; the session, the shop's record and the write | 1 read, 4 written |
 | A visit to a link | 1 Worker request and 1 request to the shop's object; the switch is read from the AuthObject at most twice a minute per Worker instance | 3 read, none written |
 
-Storage: a shop holds at most 50 links of at most 256 KiB each, 12.5 MiB, so the pilot's ten shops hold at most 125 MiB,
+Storage: a shop holds at most 50 links of at most 128 KiB each, 6.25 MiB, so the pilot's ten shops hold at most 62.5 MiB,
 inside the included 5 GB-month. A page opened 10,000 times a month is 10,000 Worker requests, 10,000 object requests and
 30,000 rows read, inside the Paid plan's inclusions. Visits are limited to 120 a minute from one address.
 

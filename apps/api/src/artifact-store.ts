@@ -30,10 +30,12 @@ import { isValidTenant } from "./companies";
 import { sortableId } from "./pilot-store";
 import { base64url } from "./relay";
 
-/// The most text one page holds, in UTF-8 bytes: 256 KiB, a long page with small inline images. The Worker refuses more
-/// before anything is woken; this object refuses it again.
-export const MAX_ARTIFACT_BYTES = 256 * 1024;
-/// The most links one shop holds at a time. With the size above, at most 12.5 MiB of one shop's storage.
+/// The most text one page holds, in UTF-8 bytes: 128 KiB, a long page with a few small inline images. The desktop sends a
+/// body of at most 256 KiB (its shell's request command, src-tauri/src/api_link.rs), and JSON escaping can double a page made
+/// of quotes and line breaks, so a page under this fits (the desktop checks the whole body as well). The Worker refuses more before anything is woken; this object
+/// refuses it again.
+export const MAX_ARTIFACT_BYTES = 128 * 1024;
+/// The most links one shop holds at a time. With the size above, at most 6.25 MiB of one shop's storage.
 export const MAX_ARTIFACTS = 50;
 /// The longest title, in characters as JavaScript counts them.
 export const MAX_TITLE = 120;
