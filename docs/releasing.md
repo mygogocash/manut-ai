@@ -37,8 +37,13 @@ it is 0.1.2.
 - **Updates.** GitHub's latest release is the newest one that is not a pre-release, so while this pre-release is the only one
   the app's update check finds nothing and stays quiet. Publishing 0.1.2 as a full release is what offers it to every
   installed 0.1.1.
-- **Publishing a pre-release:** `gh release edit desktop-v<version> --draft=false --prerelease`, after the checks
-  below. Only the owner, or Claude when the owner said so for that release, publishes.
+- **Publishing a pre-release:** `gh release edit desktop-v<version> --draft=false --prerelease --latest=false`, with a
+  title and notes written for the people who download it, after the checks below. Only the owner, or Claude when the
+  owner said so for that release, publishes. 0.1.1 was published so on 25 Nov 2026.
+- **Checking the update files:** each `.sig` is a minisign signature by the key pinned in `tauri.conf.json` over the
+  `.app.tar.gz` beside it, and `latest.json` carries the same signatures for `darwin-aarch64` and `darwin-x86_64`. For
+  0.1.0 and 0.1.1 every one verified (Ed25519 over the file's BLAKE2b-512, and the trusted comment), which also proves
+  that the key in GitHub's secrets is the one the app trusts.
 
 ## Where Windows is
 
@@ -125,8 +130,9 @@ without it add `--config '{"bundle":{"createUpdaterArtifacts":false}}'`.
 
 ## Not verified yet
 
-The workflow has never run: it is checked by `actionlint`, by its test, and against the documentation of Tauri's
-GitHub guide, macOS signing guide, updater guide and `tauri-apps/tauri-action` (pinned at action-v1.0.0). The first run
-should confirm that the draft holds both `.dmg` files and a `latest.json` that names both chips (`darwin-aarch64` and
-`darwin-x86_64`), and that the signed path passes its own check. How the action finds the draft and adds to
+The unsigned path has run twice (25 Nov 2026, for `desktop-v0.1.0` and `desktop-v0.1.1`), about ten minutes a chip:
+each made one draft with both `.dmg` files and a `latest.json` that names both chips, and the Windows installer built
+on its first try. The signed path has never run: it is checked by `actionlint`, by its test, and against the
+documentation of Tauri's GitHub guide, macOS signing guide and `tauri-apps/tauri-action` (pinned at action-v1.0.0). Its
+first run, for 0.1.2, should confirm that signing, notarization and the run's own check of the built app all pass. How the action finds the draft and adds to
 `latest.json` was read in its own source at the pinned commit (`src/create-release.ts`, `src/upload-version-json.ts`).

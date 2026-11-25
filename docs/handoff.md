@@ -171,6 +171,25 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
 - The night build's queue gained shop-memory, books and routine-rules; one run was started by hand for
   slip-rules.
 
+## The first release (25 Nov 2026)
+
+Manut AI 0.1.1 for Mac is published as a pre-release at
+https://github.com/mygogocash/manut-ai/releases/tag/desktop-v0.1.1 (the owner, 25 Nov: a download from GitHub, unsigned
+for now, published by Claude once checked, and nothing to the App Store). It is Practice mode and the code editor,
+for Apple silicon and Intel, with Manut AI's own mark as its icon.
+
+- Built by the Release desktop workflow from the tag `desktop-v0.1.1` (`4e0498d`), the workflow's second run: the first,
+  for `desktop-v0.1.0`, proved it end to end (one draft, both chips one after the other, a `latest.json` naming both)
+  and stayed an unpublished draft because the owner saw the placeholder "M" icon in it.
+- Checked before publishing: every update file's signature against the key pinned in the app (a script that reads
+  the minisign signatures; `docs/releasing.md` says what it checks), both disk images opened, the version, chip,
+  identifier and ad-hoc signature of each app, the icon taken out of the built app and looked at, and the Apple silicon
+  app started on this Mac and left running with no crash. The Intel app was not started: this Mac is Apple silicon.
+- The public download answers without a login, and `releases/latest/download/latest.json` answers 404, so an
+  installed 0.1.1 is offered nothing until a full release is published.
+- Not checked: what macOS shows a person who downloads it in a browser (the copy checked here came through `gh`, which
+  sets no quarantine), and a real Claude Code or Codex lane started from Chat with Kit in the built app.
+
 ## Next steps, in order
 
 1. One helper is running (24 Nov). Items 27, 28 and 29 stopped at the account's 5-hour usage limit at about 11:00
@@ -383,13 +402,14 @@ Every switch that turns a built part on, and what each needs from the owner, is 
   list should load. That proves the admin gate gets `ctx.access` on the deployed front door.
 - **Merge pull request #1 into `main`** when happy. That also switches on Dependabot, the weekly CodeQL scan, the
   Deploy dev button and the Release desktop button, because GitHub reads those from the default branch.
-- **The Mac release (item 63, `docs/releasing.md`):** add five GitHub Actions secrets from the business's Apple
+- **The signed Mac release, 0.1.2 (`docs/releasing.md`):** add five GitHub Actions secrets from the business's Apple
   Developer account (`APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID`;
-  the doc says where each comes from), then start Release desktop once and read its summary. Without them the run
-  still builds, unsigned, into a draft titled UNSIGNED that must not be published. The workflow has never run, so its
-  first run is also its test: the draft should hold a `.dmg` for each chip and a `latest.json` naming both. Publishing
-  the draft is what sends an update to installed apps. Any other release made in this repository must be marked a
-  prerelease, or the updater finds no `latest.json`.
+  the doc says where each comes from). Then set the version to 0.1.2, push the tag `desktop-v0.1.2`, check the draft and
+  publish it as a full release: that is what offers the update to every installed 0.1.1. The signed path of the
+  workflow has not run yet. Any other release made in this repository must be marked a pre-release, or the updater
+  finds no `latest.json`.
+- **The 0.1.0 draft:** an unpublished draft release and the tag `desktop-v0.1.0` are left from the first build, which had
+  the placeholder icon. Nothing uses them; delete both on GitHub, or say so and the lead does.
 - **A test LINE Official Account** for the dry run (later, by the owner's choice).
 - **Staging and production in a separate Cloudflare account** before they exist. A Cloudflare token cannot be
   limited to one Worker.
