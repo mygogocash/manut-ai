@@ -319,6 +319,12 @@ export function ProviderDetail({ v, version, signin, onSaved }: { v: ProviderVie
           </div>
         )}
       </Field>
+      {/* the checks above are about a mistake or a pasted line in the person's own tool, and say so once */}
+      {(v.takes_args || v.takes_vars) && (
+        <p className="st-note prov-guard" data-testid="provider-guard">
+          {t("prov.guard", { agent: name })}
+        </p>
+      )}
       {(v.chat || v.terminal) && (
         <div className="st-row prov-runs">
           <div className="st-k">
