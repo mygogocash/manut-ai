@@ -20,6 +20,8 @@ and tested on `feat/show-older`, 25 Nov 2026 (December item 52), the same way: a
 History and the activity log, and Show older reads the next page from the cursor the minute's read stopped at. How a card closes
 when nobody here answered it (below) is built and tested on `feat/how-decided`, 25 Nov 2026 (December item 55), the same way: an ask
 that left the open approvals on its own closes saying whether it was approved or declined and by whom, taken back, ended or timed out.
+The live feed (below) is built and tested on `feat/live-feed`, 25 Nov 2026 (December item 61), and switched off: while the API says
+it is on, a change at a shop the person is in shows within seconds instead of at the next minute's read.
 
 ## Choosing it
 
@@ -92,7 +94,8 @@ here answered it, below); a new or vanished task is
 `thread.added` or `thread.removed`; a
 new attention item is a `message` in Buddy's chat; a schedule or team routine change is `routines.update`; the team
 changing (a member starting or stopping work, Pause everyone, a member switched on or off) is `bots.update`. A task already listed changes its row only when the list is read again (after a reconnect or a
-restart); following tasks live is the streaming slice below. A task that falls out of the newest 50 as newer ones are made
+restart). While the API's live feed is on, a ping from any shop the read shows brings that read, and the events it emits, forward
+to within seconds (The live feed, below); a row of a task already listed still changes only when its list is read again. A task that falls out of the newest 50 as newer ones are made
 is `thread.removed`, as a task that is gone; it is no thread of Buddy's, but once Show older has read older tasks it stays a job and
 in the activity log (Older tasks, below).
 
@@ -531,6 +534,56 @@ newest 50 tasks showed only those, and an owner could not reach older ones.
 - **Not in this slice.** Older tasks are not Buddy's threads. An older task is not read again until the app restarts or its pages are
   let go. Nothing follows tasks live (the streaming slice). Older pages are never kept for offline use.
 
+## The live feed
+
+Built on `feat/live-feed` (December item 61, 25 Nov 2026) and switched off: `src/runtime/http/feed.ts` (each shop's follower),
+`host.ts`, `index.ts` and the app's CSP. The API's half is `apps/api/src/feed.ts` (`docs/pilot-api.md`, "The shop's live feed");
+turning it on is the owner's (`docs/turning-on.md`).
+
+- **What it does.** While the API says the feed is on, the host keeps one socket open for each shop the latest read shows, owned
+  or helped at, opened with that shop's own session. A ping on any of them moves the next read to a second from now
+  (`FEED_DEBOUNCE_MS`), and never sooner than 15 seconds (`FRESH_MS`) after the last read, so the feed never reads more often
+  than a screen may. Pings from several shops, or several from one, are one read; a ping that comes while a read is on its way
+  gets one more read after it, since that read may have been asked before the change. The read is the minute's read, with each
+  shop's own session, so the feed shows nobody anything their sessions could not read, and the minute's timer starts again from
+  it. Before the first read and during an outage a ping changes nothing: the host's own retries decide.
+- **What a ping carries.** Nothing but that something changed: `{ "v": 1, "seq": n }`. Any other message is ignored, and nothing of
+  a message reaches the screens.
+- **Asking first.** Each shop's follower asks `GET /v1/feed` with the shop's own session, through the shell's request command like
+  every read, which opens the session again when it has ended. 200 `{ feed: "on" }` opens the socket with the session that answer
+  was given for. 403 `feature_disabled`, and the 404 of an API from before the feed, are off, and asked again an hour later
+  (`FEED_OFF_MS`): a running app takes up a switch turned on within the hour, and at its next start at once. A 401 that ends the
+  person's place in the shop ends it as the minute's read does (`depart`). Anything else, a 200 this build cannot read among
+  them, is tried again later.
+- **The socket.** The page's own `WebSocket`, the only socket the desktop has: macOS's curl (8.7.1) speaks no WebSocket, and the
+  shell has no WebSocket crate. A page's WebSocket can send no `Authorization` header, so the shop session goes as one of the
+  handshake's protocol entries, `manut-bearer.<token>`, beside `manut-feed.v1`, the one protocol the API answers; never in the
+  address. The packaged app's CSP lets the page connect to `wss://manut.xyz` and `wss://*.manut.xyz` and no other outside origin
+  (`connect-src` in `src-tauri/tauri.conf.json`, `csp` and `devCsp` alike), so a runtime connected to any other origin, a local
+  API among them, has no feed and asks nothing about it (`feedUrl`); `feed.test.ts` keeps the rule and the CSP in step.
+- **When it drops.** A drop backs off: 2 seconds, doubling each time, up to an hour (`FEED_RETRY_MIN_MS`, `FEED_RETRY_MAX_MS`), so a
+  socket that a network or a proxy keeps refusing costs one look an hour. A socket that stayed open a minute (`FEED_STEADY_MS`)
+  starts the backoff over. The API closes each socket after its hour (4000), and the next one opens at once after a good run;
+  4503 (switched off) waits an hour like an off answer. Every 50 seconds the socket says `ping` (`KEEPALIVE_MS`), which the API's
+  runtime answers `pong` without waking the shop's object; no answer in 15 seconds (`PONG_WAIT_MS`) is a drop. The minute's read
+  goes on whatever the feed does.
+- **Closing.** Signing out, or the API ending the sign-in; the person's place in a shop ending, whichever read, look or answer
+  finds it; and the host stopping when its last client lets go, all close the sockets at once. A shop the read no longer shows
+  lets its socket go at that read.
+- **A person in no shop** is read as their own sign-in's tenant, which is no shop and has no feed: the API answers a person's own
+  sign-in 404 there, and the host asks nothing.
+- **Unchanged.** Practice, which reaches no network; the offline cache, which keeps nothing of the feed; and every screen's words.
+  The feed brings forward the reads the minute's read made and the events they emit, no more: a row of a task already listed still
+  changes when its screen reads its list again.
+- **Tests.** `feed.test.ts` (each shop's follower over a fake socket and fake timers: the address and the protocols, a ping and
+  nothing else, off, the backoff and its cap, a good run starting it over, 4000 and 4503, the keepalive, letting shops go,
+  `feedUrl` and the CSP), `feed.host.test.ts` (the host over a fake API: a socket for each shop with its own session, when a ping's
+  read comes, one read for several pings, one more after a read on its way, the session opened again, off and missing, a 200 it
+  cannot read, a drop, an origin with no feed, a person in no shop, a ping offline, sign-out, the host stopping, a departure found
+  by a read, by an answer and by a look, and a look that ends after the host stopped). The CSP's other directives stay pinned in
+  `src/code/previewFrame.test.ts`. The Connected Playwright specs read the feed's look as an API from before the feed (their fake
+  answers 404) and pass unchanged.
+
 ## Customize › Connections
 
 The shop's vault and outposts, for its owner (`src/runtime/http/connections.ts`; the routes are `docs/pilot-api.md`, "The
@@ -860,12 +913,16 @@ instead of an empty screen, and says so (`src/runtime/http/cache.ts`, `host.ts`,
 
 1. **Answering approvals: built** (above), through the decide route for a session and approval-core's settle-once
    rules, never a second way round.
-2. **Streaming events.** The API long-polls one task's events (`GET /v1/tasks/:id/events/wait`); following a whole
-   shop needs a tenant-wide feed, or the relay once the owner turns it on (gate G3). That replaces the one-minute
-   re-read and lets a task's row change live.
+2. **Streaming events: the live feed is built, and switched off** (The live feed, above; `docs/pilot-api.md`, "The shop's
+   live feed"; December item 61): a tenant-wide feed of pings over a WebSocket each shop's object holds, so a change shows
+   within seconds; it brings the one-minute re-read forward and leaves it running underneath. Turning it on is the owner's
+   (`docs/turning-on.md`). What it leaves for later: a task's row changing live (the store follows `thread.added` and
+   `thread.removed` only, so a row of a task already listed changes when its screen reads its list again); reading only the
+   shop that pinged rather than every shop; and the relay, once the owner turns it on (gate G3), as another way to carry the
+   same pings.
 3. **Asks of the API**, none built here: a way for Pause everyone to stop a job already running, and for a request to wait
    while the team is paused, if the owner wants the canvas's pause; a way to link an owner's identity to their shop; `APPLE_CLIENT_ID` on dev, or a LINE Login
-   provider; a tenant-wide event feed; and a helper's name with a decision (so "Already decided by Mint" does not depend on
+   provider; a tenant-wide event feed (built since: the live feed); and a helper's name with a decision (so "Already decided by Mint" does not depend on
    a note she passed on). A way to say how a request that left on its own was decided is built (When nobody here answered it, above:
    `GET /v1/approvals?state=recent` read when an ask leaves, at one more request). So is the index of a shop's open requests
    this list asked for: the API's approval lookup (December item 48, `docs/pilot-api.md`, "How the shop's approvals are
@@ -878,6 +935,12 @@ instead of an empty screen, and says so (`src/runtime/http/cache.ts`, `host.ts`,
    built: Older tasks, above. What it leaves for later is at the end of that section.)
 
 ## Undoing it
+
+To take only the live feed out: drop `feed`, `feeds`, `timerAt`, `pinged`, `readBy`, `onFeedPing` and `lookAtFeed` in `host.ts`
+(`schedule` and `clearTimer` then set no due time), `src/runtime/http/feed.ts` with `feed.test.ts` and `feed.host.test.ts`,
+`FakeSocket` and `socketOpener` in `testkit.ts`, `pageSocket` in `index.ts`, and `wss://manut.xyz wss://*.manut.xyz` from
+`connect-src` in `src-tauri/tauri.conf.json` (both entries) with the pins in `src/code/previewFrame.test.ts`. With the switch
+off nothing needs taking out: every look reads off and no socket opens.
 
 To take only how a card closes when nobody here answered it out: drop `closeFromRecent`, `readRecent`, `settledClosings`, `emitClosing`
 and `keepClosing` in `host.ts` (the answer paths set `closings` as they did: only for an answer the API refused with a closing), the
