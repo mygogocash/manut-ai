@@ -36,6 +36,7 @@ waits on the review any more: each waits only for what its row below needs from 
 | Any write that leaves the app (a reply sent, a form submitted, a sheet appended) | `PUT /v1/admin/flags` with `officeExternalWrites`, as well as each write's own approval | The owner's go-ahead, and for the first browser write on a real site (a Shopee chat reply, say) a supervised trial | `docs/browser-control.md` |
 | LINE messages coming in | `PUT /v1/admin/flags` with `officeInbound` | LINE is parked by the owner; it needs a LINE Official Account for a test shop first | `docs/connectors.md`, 1 |
 | The live feed: a connected desktop shows a change at a shop within seconds instead of at its next one-minute read | `PUT /v1/admin/flags` with `shopFeed` (the console's operator key); var `SHOP_FEED` is its default, and no environment sets it | The owner's go, and a desktop build from `feat/live-feed` or later, whose CSP lets the page reach Manut AI's own API hosts and which opens each socket with a one-use ticket, so no session reaches Cloudflare's request logs. Running apps take it up within an hour, or at their next start. What it costs is below | `docs/pilot-api.md`, "The shop's live feed"; `docs/runtime-adapter.md`, "The live feed" |
+| Artifact links: an HTML or Markdown page published as a link anyone with it can open (the API, the desktop's Artifacts page and Settings › Artifacts, item 83) | `PUT /v1/admin/flags` with `artifactLinks` (var `ARTIFACT_LINKS` is its default, and no environment sets it); var `ARTIFACT_ORIGIN`, the links' own web address; and on each Mac, Settings › Artifacts › Allow publishing public artifact links, off by default | A sign-in turned on (a link belongs to a shop's account: email or Apple, rows above); a domain of its own for other people's pages, routed to this Worker as a custom domain, never `manut.xyz` or a host under it (`docs/pilot-api.md`, "The artifact origin"); the words of use for public content, which every person agrees to before their first link; and how a link is taken down on a complaint (today only the shop's owner can remove one, or the operator can switch every link off at once). What it costs is below | `docs/pilot-api.md`, "Artifact links" |
 
 ### What the live feed costs on Cloudflare
 
@@ -67,6 +68,29 @@ duration while it is idle. The pilot's ten shops with two desktops each, twenty 
 inside the Paid plan's million. What a busy shop adds is reads: each ping makes every desktop that follows the shop read it
 again, at most once in 15 seconds each, so a desktop reads a busy shop up to four times a minute instead of once, each read the
 same requests the minute's read makes now. A quiet shop is read once a minute, as now.
+
+### What artifact links cost on Cloudflare
+
+They use the shop's own Durable Object and nothing new: no R2, no KV, no new product. From Cloudflare's Durable Objects
+pricing (developers.cloudflare.com/durable-objects/platform/pricing/, read on 25 Nov 2026), SQLite storage on the Workers Paid
+plan includes 25 billion rows read and 50 million rows written a month (then $0.001 a million read and $1.00 a million
+written) and 5 GB-month of stored data (then $0.20 a GB-month); the Free plan allows 5 million rows read and 100,000 written a
+day and 5 GB in all. A key-value `get`, `put` or `delete` on a SQLite-backed object counts as rows read or written. Workers
+requests: the Paid plan includes 10 million a month, then $0.30 a million (Workers pricing, read the same day). The rate limit
+binding's own pricing was not checked.
+
+Counted from the code:
+
+| What | Requests | Storage rows |
+| --- | --- | --- |
+| A publish | 1 Worker request; Durable Object requests for the session check, the switch, the shop's record and the write | About 4 written (the record, the text, the way in, the audit entry) and one read per link the shop holds, for the cap |
+| The owner's list | 1 Worker request; the session, the switch, the shop's record and the read | One read per link |
+| A removal | 1 Worker request; the session, the shop's record and the write | 1 read, 4 written |
+| A visit to a link | 1 Worker request and 1 request to the shop's object; the switch is read from the AuthObject at most twice a minute per Worker instance | 3 read, none written |
+
+Storage: a shop holds at most 50 links of at most 128 KiB each, 6.25 MiB, so the pilot's ten shops hold at most 62.5 MiB,
+inside the included 5 GB-month. A page opened 10,000 times a month is 10,000 Worker requests, 10,000 object requests and
+30,000 rows read, inside the Paid plan's inclusions. Visits are limited to 120 a minute from one address.
 
 ## Not built, and waiting on the owner
 

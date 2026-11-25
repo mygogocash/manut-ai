@@ -138,6 +138,10 @@ export const AUDIT_ACTIONS = [
   // (`month`) and carries the cap it was measured against (`amountSatang`), never what any call said.
   "model.cap_near",
   "model.cap_reached",
+  // Artifact links (artifact-store.ts): the owner publishing a page as a link anyone with it can open, after the desktop's
+  // ask, and removing one. Each names the link by its id, never its title, its text or the link itself.
+  "artifact.published",
+  "artifact.removed",
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 
@@ -184,6 +188,8 @@ export const AUDIT_SUBJECT_KEYS = [
   "ownerAccountId",
   // A Bangkok month (`YYYY-MM`), which names that month's total in the model meter (model-meter.ts).
   "month",
+  // An artifact link's id (`art-…`, artifact-store.ts), which is not the link's secret.
+  "artifactId",
 ] as const;
 export type AuditSubject = Partial<Record<(typeof AUDIT_SUBJECT_KEYS)[number], string>>;
 

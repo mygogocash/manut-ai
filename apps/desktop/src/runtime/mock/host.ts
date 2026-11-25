@@ -1365,6 +1365,12 @@ export class MockHost {
     "google.disconnect": (p) => this.atGoogle(p.shop, () => this.google.disconnect()),
     "google.books": (p) => this.atGoogle(p.shop, () => this.google.books(p.month, this.nowMs())),
 
+    // ---- The Artifacts page: Practice publishes nothing. A link is public and belongs to a shop's account on the API, so every
+    // op is refused here with words that say so, and nothing is kept or sent.
+    "artifacts.list": () => this.practiceLinks(),
+    "artifacts.publish": () => this.practiceLinks(),
+    "artifacts.remove": () => this.practiceLinks(),
+
     // ---- Settings › People: the sample owner, helper and invite, which only the person's own shop has. The list is the shop
     // being viewed; a change acts on the shop its list was read for, as on the connected runtime.
     "people.list": () => this.atPeople(this.shop, () => ({ ok: true, value: this.people.list(OWN_SHOP, this.now()) })),
@@ -1453,6 +1459,11 @@ export class MockHost {
     if (shop === HELPED_SHOP) throw new OpError("owner_only", `Only Noi, the shop's owner, sees or changes ${what} at Ran Pa Noi.`);
     if (shop !== OWN_SHOP && !this.made.some((one) => one.id === shop)) throw new OpError("not_found", "no such shop");
     return run();
+  }
+
+  /** Every artifact op in Practice: a public link needs a shop's account on the API, which Practice has none of. */
+  private practiceLinks(): never {
+    throw new OpError("practice", t("art.err.practice"));
   }
 
   private unsupported(): never {
