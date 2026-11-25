@@ -55,6 +55,7 @@ export function Composer({
   onFolder,
   mentions,
   actions,
+  rows = false,
 }: {
   bot: Bot;
   running: boolean;
@@ -94,6 +95,9 @@ export function Composer({
   mentions?: Member[];
   /** Add context › Actions: this chat has a `/` menu (the agent's commands and skills). */
   actions?: boolean;
+  /** The text field on a row of its own, with the +, the controls and Send under it, as the design canvas draws its ask
+   *  box: a chat whose box carries the model and the approval level (item 80) keeps a wide field however many there are. */
+  rows?: boolean;
 }) {
   // unsent text survives switching chats and restarts (drafts.ts; the composer is keyed by its chat)
   const [text, setText] = useState(() => getDraft(bot.name));
@@ -428,6 +432,181 @@ export function Composer({
           : lead === "/" ? "sigil" : null;
   const showStop = running && !has;
 
+  // the parts of the row: the +, the text field and Send (or Stop); `rows` puts the field above the others
+  const attachEl = (onSendFiles || onFolder || !!mentions?.length || actions) && (
+    <AttachButton
+      disabled={offline || sending}
+      onFiles={onSendFiles ? add : undefined}
+      plugins={pluginsOn ? readPlugins : undefined}
+      onPlugin={addPlugin}
+      onManage={() => store.openPlugins(bot.name)}
+      onFolder={onFolder ? () => void addFolder() : undefined}
+      onMention={mentions?.length ? addMention : undefined}
+      onActions={actions ? openActions : undefined}
+    />
+  );
+  const fieldEl = (
+    <div className="cm-field">
+      <div className="cm-mirror" ref={mirror} aria-hidden="true" data-testid="composer-mirror">
+        {tokens.length || picking ? mirrorText(text, tokens, picking && frag ? frag.start : null, anchor) : null}
+      </div>
+      <textarea
+        ref={ref}
+        rows={1}
+        value={text}
+        disabled={offline}
+        placeholder={
+          offline
+            ? (offlineText ?? t("cmp.offline", { bot: bot.display_name }))
+            : reply
+              ? t("cmp.replyThere", { bot: bot.display_name })
+              : asking
+                ? t("cmp.asking")
+                : t("cmp.message", { bot: bot.display_name })
+        }
+        aria-label={t("cmp.message", { bot: bot.display_name })}
+        data-testid="composer"
+        onChange={(e) => {
+          edit(e.target.value);
+          trackCaret(e.target);
+        }}
+        onSelect={(e) => trackCaret(e.currentTarget)}
+        onScroll={syncMirror}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        onPaste={(e) => {
+          const files = [...e.clipboardData.files];
+          if (!files.length || !onSendFiles) return;
+          e.preventDefault();
+          add(files);
+        }}
+        onKeyDown={(e) => {
+          const composing = imeComposing(e);
+          if (threadPicking && !composing) {
+            // Enter or Tab puts `./thread ` in; Enter on a finished `./thread` sends (a new empty thread)
+            if ((e.key === "Tab" || (e.key === "Enter" && !e.shiftKey && tFrag !== "thread")) && !e.shiftKey) {
+              e.preventDefault();
+              pickThread();
+              return;
+            }
+            if (e.key === "Escape") {
+              e.preventDefault();
+              setTDismissed(text);
+              return;
+            }
+          }
+          if (mentioning && !composing) {
+            const n = mItems.length;
+            if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+              e.preventDefault();
+              setMActive((mAt + (e.key === "ArrowDown" ? 1 : n - 1)) % n);
+              return;
+            }
+            if ((e.key === "Enter" || e.key === "Tab") && !e.shiftKey) {
+              e.preventDefault();
+              pickMention(mItems[mAt]);
+              return;
+            }
+            if (e.key === "Escape") {
+              e.preventDefault();
+              setMDismissed(mKey);
+              return;
+            }
+          }
+          if (cmdOpen && cmd && !composing) {
+            const n = cmd.shown.length;
+            if ((e.key === "ArrowDown" || e.key === "ArrowUp") && n) {
+              e.preventDefault();
+              setCmdActive((cmdAt + (e.key === "ArrowDown" ? 1 : n - 1)) % n);
+              return;
+            }
+            if (e.key === "Tab" && n) {
+              e.preventDefault();
+              pickCommand(cmd.shown[cmdAt]);
+              return;
+            }
+            // Enter takes the highlighted command unless the text already names it exactly, or (a bot chat, whose
+            // menu lists Hermes' commands only) names one of the bot's skills the Hermes way: then it is sent
+            const named = text === `${cmd.shown[cmdAt].prefix}${cmd.shown[cmdAt].name}` || (!commands && names.includes(text.slice(1)));
+            if (e.key === "Enter" && !e.shiftKey && n && !named) {
+              e.preventDefault();
+              pickCommand(cmd.shown[cmdAt]);
+              return;
+            }
+            if (e.key === "Escape") {
+              e.preventDefault();
+              setCmdDismissed(cqKey);
+              setForced(false);
+              return;
+            }
+          }
+          if (picking && !composing) {
+            const n = items.length;
+            if ((e.key === "ArrowDown" || e.key === "ArrowUp") && n) {
+              e.preventDefault();
+              setActive(e.key === "ArrowDown" ? (at + 1) % n : at <= 0 ? n - 1 : at - 1);
+              return;
+            }
+            // with no row chosen Enter is not for the list (it sends); Tab still completes to the first row
+            const row = at >= 0 ? at : e.key === "Tab" ? 0 : -1;
+            if ((e.key === "Enter" || e.key === "Tab") && !e.shiftKey && row >= 0 && items[row]) {
+              e.preventDefault();
+              pick(items[row]);
+              return;
+            }
+            if (e.key === "Escape") {
+              e.preventDefault(); // the picker takes Esc, not the running answer
+              setDismissed(fragKey);
+              return;
+            }
+          }
+          // shell-like history: an arrow with no line left to move to recalls the person's earlier prompts;
+          // Alt+arrow recalls from any line, so a multi-line draft need not be walked to its edge first
+          const plain = !e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey;
+          const alt = e.altKey && !e.shiftKey && !e.ctrlKey && !e.metaKey;
+          if ((e.key === "ArrowUp" || e.key === "ArrowDown") && (plain || alt) && history?.length && !composing && !threadPicking && !cmdOpen && !picking) {
+            const el = e.currentTarget;
+            const step =
+              e.key === "ArrowUp"
+                ? alt || onFirstLine(text, el.selectionStart) ? older(history, recall.current, text) : null
+                : alt || onLastLine(text, el.selectionEnd) ? newer(history, recall.current) : null;
+            if (step) {
+              e.preventDefault();
+              showRecalled(el, step);
+              return;
+            }
+          }
+          if (e.key === "Enter" && !e.shiftKey && !composing) {
+            e.preventDefault();
+            void send();
+          } else if (e.key === "Backspace" && !text && reply) {
+            e.preventDefault();
+            onClearReply?.();
+          }
+        }}
+      />
+    </div>
+  );
+  const buttonEl = action ? (
+    action
+  ) : showStop ? (
+    <button type="button" className="send stop" aria-label={t("cmp.stop")} title={t("cmp.stop")} onClick={onStop} data-testid="stop">
+      <StopIcon />
+    </button>
+  ) : (
+    <button
+      type="button"
+      className="send"
+      aria-label={t("cmp.send")}
+      title={t("cmp.send")}
+      disabled={!has || offline || sending}
+      onClick={() => void send()}
+      data-testid="send"
+    >
+      <ArrowUp />
+    </button>
+  );
+
   return (
     <div className="cw" ref={wrap}>
       {overlay}
@@ -443,7 +622,7 @@ export function Composer({
             : tx("cmp.skillHint", { example: <code>/plan</code>, bot: bot.display_name })}
         </div>
       )}
-      <div className={`composer${has ? " has" : ""}`} data-testid="composer-box">
+      <div className={`composer${has ? " has" : ""}${rows ? " bx-rows" : ""}`} data-testid="composer-box">
         <Chips chips={chips} onRemove={remove} />
         <FolderChips folders={folders} onRemove={(f) => setFolders((cur) => cur.filter((x) => x !== f))} />
         {err && (
@@ -472,180 +651,24 @@ export function Composer({
             </button>
           </span>
         )}
-        <div className="composer-row">
-          {(onSendFiles || onFolder || !!mentions?.length || actions) && (
-            <AttachButton
-              disabled={offline || sending}
-              onFiles={onSendFiles ? add : undefined}
-              plugins={pluginsOn ? readPlugins : undefined}
-              onPlugin={addPlugin}
-              onManage={() => store.openPlugins(bot.name)}
-              onFolder={onFolder ? () => void addFolder() : undefined}
-              onMention={mentions?.length ? addMention : undefined}
-              onActions={actions ? openActions : undefined}
-            />
-          )}
-          <div className="cm-field">
-            <div className="cm-mirror" ref={mirror} aria-hidden="true" data-testid="composer-mirror">
-              {tokens.length || picking ? mirrorText(text, tokens, picking && frag ? frag.start : null, anchor) : null}
+        {rows ? (
+          <>
+            {fieldEl}
+            <div className="composer-row bx-row">
+              {attachEl}
+              <span className="bx-gap" />
+              {tools}
+              {buttonEl}
             </div>
-            <textarea
-              ref={ref}
-              rows={1}
-              value={text}
-              disabled={offline}
-              placeholder={
-                offline
-                  ? (offlineText ?? t("cmp.offline", { bot: bot.display_name }))
-                  : reply
-                    ? t("cmp.replyThere", { bot: bot.display_name })
-                    : asking
-                      ? t("cmp.asking")
-                      : t("cmp.message", { bot: bot.display_name })
-              }
-              aria-label={t("cmp.message", { bot: bot.display_name })}
-              data-testid="composer"
-              onChange={(e) => {
-                edit(e.target.value);
-                trackCaret(e.target);
-              }}
-              onSelect={(e) => trackCaret(e.currentTarget)}
-              onScroll={syncMirror}
-              onFocus={() => setFocused(true)}
-              onBlur={() => setFocused(false)}
-              onPaste={(e) => {
-                const files = [...e.clipboardData.files];
-                if (!files.length || !onSendFiles) return;
-                e.preventDefault();
-                add(files);
-              }}
-              onKeyDown={(e) => {
-                const composing = imeComposing(e);
-                if (threadPicking && !composing) {
-                  // Enter or Tab puts `./thread ` in; Enter on a finished `./thread` sends (a new empty thread)
-                  if ((e.key === "Tab" || (e.key === "Enter" && !e.shiftKey && tFrag !== "thread")) && !e.shiftKey) {
-                    e.preventDefault();
-                    pickThread();
-                    return;
-                  }
-                  if (e.key === "Escape") {
-                    e.preventDefault();
-                    setTDismissed(text);
-                    return;
-                  }
-                }
-                if (mentioning && !composing) {
-                  const n = mItems.length;
-                  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-                    e.preventDefault();
-                    setMActive((mAt + (e.key === "ArrowDown" ? 1 : n - 1)) % n);
-                    return;
-                  }
-                  if ((e.key === "Enter" || e.key === "Tab") && !e.shiftKey) {
-                    e.preventDefault();
-                    pickMention(mItems[mAt]);
-                    return;
-                  }
-                  if (e.key === "Escape") {
-                    e.preventDefault();
-                    setMDismissed(mKey);
-                    return;
-                  }
-                }
-                if (cmdOpen && cmd && !composing) {
-                  const n = cmd.shown.length;
-                  if ((e.key === "ArrowDown" || e.key === "ArrowUp") && n) {
-                    e.preventDefault();
-                    setCmdActive((cmdAt + (e.key === "ArrowDown" ? 1 : n - 1)) % n);
-                    return;
-                  }
-                  if (e.key === "Tab" && n) {
-                    e.preventDefault();
-                    pickCommand(cmd.shown[cmdAt]);
-                    return;
-                  }
-                  // Enter takes the highlighted command unless the text already names it exactly, or (a bot chat, whose
-                  // menu lists Hermes' commands only) names one of the bot's skills the Hermes way: then it is sent
-                  const named = text === `${cmd.shown[cmdAt].prefix}${cmd.shown[cmdAt].name}` || (!commands && names.includes(text.slice(1)));
-                  if (e.key === "Enter" && !e.shiftKey && n && !named) {
-                    e.preventDefault();
-                    pickCommand(cmd.shown[cmdAt]);
-                    return;
-                  }
-                  if (e.key === "Escape") {
-                    e.preventDefault();
-                    setCmdDismissed(cqKey);
-                    setForced(false);
-                    return;
-                  }
-                }
-                if (picking && !composing) {
-                  const n = items.length;
-                  if ((e.key === "ArrowDown" || e.key === "ArrowUp") && n) {
-                    e.preventDefault();
-                    setActive(e.key === "ArrowDown" ? (at + 1) % n : at <= 0 ? n - 1 : at - 1);
-                    return;
-                  }
-                  // with no row chosen Enter is not for the list (it sends); Tab still completes to the first row
-                  const row = at >= 0 ? at : e.key === "Tab" ? 0 : -1;
-                  if ((e.key === "Enter" || e.key === "Tab") && !e.shiftKey && row >= 0 && items[row]) {
-                    e.preventDefault();
-                    pick(items[row]);
-                    return;
-                  }
-                  if (e.key === "Escape") {
-                    e.preventDefault(); // the picker takes Esc, not the running answer
-                    setDismissed(fragKey);
-                    return;
-                  }
-                }
-                // shell-like history: an arrow with no line left to move to recalls the person's earlier prompts;
-                // Alt+arrow recalls from any line, so a multi-line draft need not be walked to its edge first
-                const plain = !e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey;
-                const alt = e.altKey && !e.shiftKey && !e.ctrlKey && !e.metaKey;
-                if ((e.key === "ArrowUp" || e.key === "ArrowDown") && (plain || alt) && history?.length && !composing && !threadPicking && !cmdOpen && !picking) {
-                  const el = e.currentTarget;
-                  const step =
-                    e.key === "ArrowUp"
-                      ? alt || onFirstLine(text, el.selectionStart) ? older(history, recall.current, text) : null
-                      : alt || onLastLine(text, el.selectionEnd) ? newer(history, recall.current) : null;
-                  if (step) {
-                    e.preventDefault();
-                    showRecalled(el, step);
-                    return;
-                  }
-                }
-                if (e.key === "Enter" && !e.shiftKey && !composing) {
-                  e.preventDefault();
-                  void send();
-                } else if (e.key === "Backspace" && !text && reply) {
-                  e.preventDefault();
-                  onClearReply?.();
-                }
-              }}
-            />
+          </>
+        ) : (
+          <div className="composer-row">
+            {attachEl}
+            {fieldEl}
+            {tools}
+            {buttonEl}
           </div>
-          {tools}
-          {action ? (
-            action
-          ) : showStop ? (
-            <button type="button" className="send stop" aria-label={t("cmp.stop")} title={t("cmp.stop")} onClick={onStop} data-testid="stop">
-              <StopIcon />
-            </button>
-          ) : (
-            <button
-              type="button"
-              className="send"
-              aria-label={t("cmp.send")}
-              title={t("cmp.send")}
-              disabled={!has || offline || sending}
-              onClick={() => void send()}
-              data-testid="send"
-            >
-              <ArrowUp />
-            </button>
-          )}
-        </div>
+        )}
       </div>
       {heldNote && has && (
         <div className="cmp-held" role="note" data-testid="composer-held">

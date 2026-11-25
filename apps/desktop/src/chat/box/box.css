@@ -69,3 +69,28 @@
 .att-chip.bx-folder .att-badge svg {
   color: var(--muted);
 }
+/* the box in two rows (Composer `rows`): the text field across the whole box, then the + at the left and the controls
+   and Send at the right, as the canvas's ask box has `askin` over `askrow` */
+.composer.bx-rows {
+  gap: 4px;
+}
+.composer.bx-rows > .cm-field {
+  padding: 0 2px;
+}
+.composer-row.bx-row {
+  align-items: center;
+  gap: 2px;
+}
+.composer-row.bx-row .att-wrap {
+  align-self: center;
+  margin: 0 4px 0 0;
+}
+.composer-row.bx-row .mp.bx-pick,
+.composer-row.bx-row .bx-approval,
+.composer-row.bx-row .ss-pick {
+  align-self: center;
+}
+.bx-gap {
+  flex: 1;
+  min-width: 0;
+}

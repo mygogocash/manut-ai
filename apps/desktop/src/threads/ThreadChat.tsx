@@ -68,6 +68,7 @@ export function ThreadChat({ bot, thread }: { bot: Bot; thread: string }) {
           onFolder={box ? pickFolder : undefined}
           mentions={box ? teammates(s.bots, bot.name) : undefined}
           actions={!!box}
+          rows={!!box}
         />
       </div>
     </>

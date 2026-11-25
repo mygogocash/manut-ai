@@ -202,6 +202,7 @@ function ChatPane({ rec, chatKey }: { rec: SessionRec; chatKey: string }) {
         // folder on the Code page), the `/` menu is the agent's own; a coding chat mentions no teammate
         onFolder={takesFiles ? () => getSessions().pickFolder(rec.lane?.dir || rec.cwd) : undefined}
         actions={!!commands}
+        rows
         tools={
           <>
             <AgentFixed agent={rec.agent} />

@@ -63,6 +63,7 @@ export function Chat() {
           onFolder={box ? pickFolder : undefined}
           mentions={box ? teammates(s.bots, bot.name) : undefined}
           actions={!!box}
+          rows={!!box}
         />
       </div>
     </>
