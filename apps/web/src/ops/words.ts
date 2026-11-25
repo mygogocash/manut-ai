@@ -3,7 +3,9 @@ import { formatMoney } from "@manut/format";
 import { MAX_FACTS, MAX_TEXT } from "@manut/shop-memory";
 import {
   ApiError,
+  MAX_ROUTINES,
   MODEL_CAP_MAX_SATANG,
+  ROUTINE_WORK,
   SIGN_IN_MEMBERS,
   type ApprovalState,
   type AuditActor,
@@ -23,6 +25,7 @@ import {
   type People,
   type PilotGate,
   type Routine,
+  type RoutineAction,
   type RoutineRun,
   type Shop,
   type Team,
@@ -1883,16 +1886,14 @@ export function connectionsErrorText(error: unknown, what: "sign-ins" | "outpost
 /// The Routines page: what Buddy's team does for one shop on its own schedule (docs/pilot-api.md, "Routines"), as the operator's routes
 /// list it: the team's state, and each routine with whose job it is, when it runs, its next run in Bangkok time or why there is none,
 /// whether it asks the owner first, the template it came from and how its last run ended. A routine only ever makes a draft for the
-/// owner to read, so nothing on the page sends anything; the console makes no routine yet. An action that changes something asks
-/// first, in its row, and the question names exactly what will happen. Sentences that hold a name or a time are functions.
+/// owner to read, so nothing on the page sends anything. An action that changes something asks first, in its row, and the question
+/// names exactly what will happen; making a routine has a form of its own (`makeRoutineWords`). Sentences that hold a name or a time
+/// are functions.
 export const routinesWords = {
   nav: "Routines",
   title: "Routines",
   intro:
     "What Buddy's team does for this shop on its own schedule, with each routine's next run in Bangkok time. A routine only makes a draft for the owner to read: nothing it does is sent, posted or paid without the owner's yes.",
-  /// The one line that says what this page cannot do, and how it is done.
-  makeNote:
-    "This console does not make routines yet. An operator makes one with POST /v1/admin/routines, and a shop made from a template starts with the template's.",
   shopLabel: "Shop",
   refresh: "Refresh",
   tryAgain: "Try again",
@@ -1953,7 +1954,7 @@ export const routinesWords = {
   routinesCount: (total: number, paused: number) => `${countOf(total, "routine", "routines")}${paused > 0 ? `, ${paused} paused` : ""}`,
   routinesLoading: "Loading the shop's routines",
   routinesEmpty:
-    "No routines yet. A shop made from a template starts with the template's routines, each paused. Any other is made by an operator with POST /v1/admin/routines.",
+    "No routines yet. A shop made from a template starts with the template's routines, each paused. Make one with the form below.",
   /// Whose job each run is. Not "done by", which beside a Failed tag reads as if the job had been done.
   jobOf: (member: string) => `${memberName(member)}'s job.`,
   /// The trigger in the API's own words. A routine that runs in another zone than the shop's says which, since its times are that zone's.
@@ -2001,7 +2002,7 @@ export const routinesWords = {
   // Removing a routine
   removeTitle: (name: string) => `Remove ${name}?`,
   removeEffect: (name: string) => `${name}, its runs and its clock go at once, and it will not run again. The audit log keeps how each of its runs ended.`,
-  removeNote: "This cannot be undone. To have it again, an operator makes it again with POST /v1/admin/routines.",
+  removeNote: "This cannot be undone. To have it again, make it again with the form below.",
   removeYes: (name: string) => `Remove ${name}`,
   removeNo: "Keep it",
   removed: (name: string) => `Removed ${name}. Its runs and its clock are gone.`,
@@ -2124,6 +2125,156 @@ export function routinesErrorText(error: unknown, what: "read" | "change"): stri
     }
   }
   return errorText(error);
+}
+
+/// What each kind of routine is, in the words the form offers it in, and one line under it that says what it is for and whether it always
+/// asks the owner first (`mustAskFirst` in `@manut/routine-rules`: a reply, a send, a payment and a deletion do, and a brief and a draft,
+/// which only the owner sees, may be made to ask).
+const ROUTINE_ACTIONS: Readonly<Record<RoutineAction, { label: string; help: string }>> = {
+  brief: { label: "Brief the owner", help: "A summary for the owner to read. It only reaches the owner, so asking first is your choice." },
+  draft: { label: "Draft something", help: "Something written for the owner to read. It only reaches the owner, so asking first is your choice." },
+  reply: { label: "Reply to a customer", help: "An answer to a customer's message. It always asks the owner first." },
+  send: { label: "Send something out", help: "A post or a message that goes out. It always asks the owner first." },
+  pay: { label: "Pay something", help: "A payment. It always asks the owner first." },
+  delete: { label: "Delete something", help: "A deletion. It always asks the owner first." },
+};
+
+/// What a kind of routine is called in the form, or the code as it is for one this console does not know.
+export function routineActionText(action: string): string {
+  return Object.hasOwn(ROUTINE_ACTIONS, action) ? ROUTINE_ACTIONS[action as RoutineAction].label : action;
+}
+
+/// The Make a routine form on the Routines page (MakeRoutineForm.tsx; docs/pilot-api.md, "Routines"): the routine's name, whose job it
+/// is, what it does, when it runs, in which zone, and whether it asks the owner first. Before anything is sent the form says the routine
+/// back in the API's own words (`describeTrigger`, and its next run from `nextRun`) in a question, as the page's other changes do. A
+/// refusal is said beside the field it is about; the codes with no field of their own are said above the form. Sentences that hold a
+/// name, a shop or a time are functions.
+export const makeRoutineWords = {
+  title: (shop: string) => `Make a routine for ${shop}`,
+  intro:
+    "A routine does its work on its own schedule. Each run only makes a draft for the owner to read: nothing it does is sent, posted or paid without the owner's yes. A new routine starts switched on.",
+
+  nameLabel: "Name",
+  nameHelp: "What the owner sees it called, from 1 to 80 characters.",
+
+  memberLegend: "Whose job is it?",
+  memberHelp:
+    "Each member does only some kinds of work: Nam replies to customers, Pim drafts and sends posts, and Ton briefs the owner, drafts, sends, pays and deletes.",
+  /// A member as the form offers them: their name and their part.
+  member: (member: string) => {
+    const role = memberRole(member);
+    return role ? `${memberName(member)}, ${role}` : memberName(member);
+  },
+
+  actionLabel: "What it does",
+  /// The line under the chosen kind of work.
+  actionHelp: (action: string) => (Object.hasOwn(ROUTINE_ACTIONS, action) ? ROUTINE_ACTIONS[action as RoutineAction].help : ""),
+  action: routineActionText,
+
+  kindLabel: "When it runs",
+  kinds: {
+    daily: "Every day at a time",
+    weekly: "On chosen weekdays at a time",
+    monthly: "On a day of the month at a time",
+    window: "In a window of the day",
+    stockBelow: "When stock drops under a number",
+  },
+  atLabel: "Time of day",
+  timeHelp: "On a 24-hour clock, like 08:00 or 21:30, in the time zone below.",
+  weekdaysLegend: "On these days",
+  weekdaysHelp: "Choose at least one.",
+  /// Indexed by routine-rules' own number for the day, which counts Sunday as 0.
+  weekdayNames: ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"],
+  dayLabel: "Day of the month",
+  dayNone: "Choose a day",
+  dayLast: "The last day of the month",
+  dayHelp: "Days after the 28th are left out because not every month has them: choose the last day for those.",
+  fromLabel: "From",
+  toLabel: "To",
+  windowHelp: "A window runs once a day, at its start. It may cross midnight, like 21:00 to 08:00. Times are on a 24-hour clock, in the time zone below.",
+  thresholdLabel: "Stock drops under",
+  thresholdHelp: "A whole number from 1 up. Stock levels are not connected yet, so this routine waits until they are.",
+
+  zoneLabel: "Time zone",
+  zoneHelp: "Every time above is in this zone. Asia/Bangkok, unless the shop runs on another.",
+
+  asksLabel: "Ask the owner first",
+  /// Under the box, for work the owner may or may not want to be asked about, and for work that is always asked about.
+  asksOptional: "A brief or a draft only reaches the owner, so asking first is your choice.",
+  asksLocked: "Always on for a reply, a send, a payment and a deletion, so it cannot be turned off.",
+
+  submit: "Make routine",
+
+  // The question, before anything is sent: the routine in the API's own words.
+  questionTitle: (name: string, shop: string) => `Make ${name} for ${shop}?`,
+  does: (action: string) => `What it does: ${routineActionText(action)}.`,
+  startsOn:
+    "It starts switched on. Each run still reads the switches and the owner's consent first, and only makes a draft for the owner to read.",
+  /// A stock routine has no clock: it waits for stock levels, which Manut AI cannot read yet (the API's `waitsFor: "stock_feed"`).
+  stockWaits: "It waits until stock levels are connected: Manut AI has no stock feed yet, so it does not run before then.",
+  yes: (name: string) => `Make ${name}`,
+  no: "Keep editing",
+  making: "Making",
+  /// What the API answered, in the list's own words: when it runs and its next run, or why it has none.
+  made: (routine: Routine, team: Team, now: number = Date.now()) =>
+    `Made ${routine.name}. ${routinesWords.when(routine)}. ${nextRunText(routine, team, now)}`,
+
+  // What was refused, in words
+  /// A refusal of the shop's own limit has no field.
+  full: (shop: string) => `${shop} already has ${MAX_ROUTINES} routines, which is the most a shop may have. Remove one, then make this one. What you typed is kept.`,
+  /// The API could not say whether the routine was written, so making it again could make it twice.
+  unsure: "The API could not reach this shop's routines, so this routine may or may not have been made. Press Refresh and look at the list before making it again.",
+  noAnswer: "Could not reach the API. This routine may or may not have been made: press Refresh and look at the list before making it again.",
+  clockUnavailable: "The API could not set this routine's clock, so nothing was made. What you typed is kept. Try again.",
+} as const;
+
+/// Why a field was refused, in words, beside that field. Every code the API says of one field is here (`RoutineRefusal` in
+/// `@manut/routine-rules` and `BuildRefusal` in apps/api/src/routine-setup.ts; a test reads both); `invalid_id` is the one it cannot say,
+/// since the API gives a routine its own id. `wrong_member` names who it is about, and what that member does.
+export const MAKE_REFUSALS: Readonly<Record<string, (about: { member: string; action: string }) => string>> = {
+  invalid_name: () => "A name takes 1 to 80 characters, not counting spaces at either end.",
+  invalid_action: () => "Choose what it does from the list.",
+  invalid_time_zone: () => "That is not a time zone the API knows. Write one like Asia/Bangkok or Asia/Tokyo.",
+  invalid_trigger: () => "Choose when it runs.",
+  invalid_time: () => "Write the time as two digits, a colon and two digits on a 24-hour clock, like 08:00 or 21:30.",
+  invalid_weekdays: () => "Choose at least one day of the week.",
+  invalid_day: () => "Choose a day from the 1st to the 28th, or the last day of the month.",
+  invalid_window: () => "A window must start and end at different times. It may cross midnight, like 21:00 to 08:00.",
+  invalid_threshold: () => "Write a whole number from 1 up, like 5.",
+  must_ask_first: () => "A reply, a send, a payment and a deletion always ask the owner first, so this cannot be turned off.",
+  unknown_member: () => "Choose Nam, Pim or Ton.",
+  wrong_member: ({ member }) => {
+    const work = Object.hasOwn(ROUTINE_WORK, member) ? ROUTINE_WORK[member as keyof typeof ROUTINE_WORK].map((action) => routineActionText(action)) : [];
+    return `${memberName(member)} does not do that kind of work.${work.length > 0 ? ` ${memberName(member)} can: ${listOf(work.map((label) => label.toLowerCase()))}.` : ""}`;
+  },
+};
+
+/// When a new routine next runs, said before it is made, as the list will say it. A stock routine says it waits until stock levels are
+/// connected, and still says what else would keep it from running; any other is the page's own words for a next run, which is worked
+/// out from the team as the API works it (`routineView` in apps/api/src/routine-setup.ts): none while everyone is paused or its member is
+/// not on the team.
+export function makeNextText(routine: Pick<Routine, "next" | "member" | "waitsFor">, team: Team, now: number = Date.now()): string {
+  if (routine.waitsFor !== "stock_feed") return nextRunText({ next: routine.next, paused: false, member: routine.member }, team, now);
+  const others = noNextReasons({ paused: false, member: routine.member }, team);
+  return `${makeRoutineWords.stockWaits}${others.length > 0 ? ` It will also not run: ${listOf(others)}.` : ""}`;
+}
+
+/// What went wrong with making a routine that no field is to blame for, in words: the shop's limit, an answer the API did not give (so
+/// the routine may or may not exist), a clock it could not set (so it does not), and the page's usual words for the rest. A refusal of
+/// one field is said beside it (`MAKE_REFUSALS`), and never here.
+export function makeErrorText(error: unknown, shop: string): string {
+  if (error instanceof ApiError && !isAuthError(error)) {
+    if (error.status === 0) return makeRoutineWords.noAnswer;
+    switch (error.code) {
+      case "full":
+        return makeRoutineWords.full(shop);
+      case "routines_unavailable":
+        return makeRoutineWords.unsure;
+      case "clock_unavailable":
+        return makeRoutineWords.clockUnavailable;
+    }
+  }
+  return routinesErrorText(error, "change");
 }
 
 /// The Shops overview: every pilot shop on one page, from the routes the console already reads (the shop list, the pilot

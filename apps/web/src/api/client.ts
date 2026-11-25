@@ -26,6 +26,7 @@ import {
   type NewModelCap,
   type NewPayment,
   type NewReply,
+  type NewRoutine,
   type NewShop,
   type NewSignInMembers,
   type NewSubscriptionPayment,
@@ -41,6 +42,7 @@ import {
   type Routine,
   type RoutineRemoval,
   type RoutinesView,
+  type RoutineTrigger,
   type Shop,
   type ShopDeletion,
   type ShopExport,
@@ -82,6 +84,24 @@ type Request = {
   /// same in the answer's `cache-control`; this is the other half.
   noStore?: boolean;
 };
+
+/// A trigger as its own kind takes it, field by field. The console's form holds a time for every kind, so a field that belongs to another
+/// kind is left behind here and never travels; a kind this client does not know is dropped whole, and the API refuses a routine with no
+/// trigger as `invalid_trigger`, as it would refuse the kind.
+function triggerBody(trigger: RoutineTrigger): RoutineTrigger {
+  switch (trigger.kind) {
+    case "daily":
+      return { kind: "daily", at: trigger.at };
+    case "weekly":
+      return { kind: "weekly", weekdays: [...trigger.weekdays], at: trigger.at };
+    case "monthly":
+      return { kind: "monthly", day: trigger.day, at: trigger.at };
+    case "window":
+      return { kind: "window", from: trigger.from, to: trigger.to };
+    case "stockBelow":
+      return { kind: "stockBelow", threshold: trigger.threshold };
+  }
+}
 
 /// The real client. Admin routes carry `Authorization: Bearer <operator key>` and send cookies, so a
 /// Cloudflare Access session for the API host travels with them. The owner's routes carry neither: the
@@ -374,10 +394,27 @@ export function createHttpApi(options: HttpApiOptions): PilotApi {
       }),
 
     // The shop's routines. A change is built field by field, as its route takes exactly these fields, so nothing a caller adds
-    // ever travels. A pause or a resume answers the routine as it now stands, and a team change answers the team, each unwrapped
-    // from its route's object; a removal answers the id it removed.
+    // ever travels. A make, a pause or a resume answers the routine as it now stands, and a team change answers the team, each
+    // unwrapped from its route's object; a removal answers the id it removed.
     getRoutines: (tenant) =>
       request<RoutinesView>({ method: "GET", path: "/v1/admin/routines", query: { tenant }, admin: true }),
+    // A new routine goes with the fields its route takes. Each optional one goes only when the caller gave it, so the API's own
+    // defaults decide the rest, and the trigger is built from its kind's own fields (`triggerBody`).
+    createRoutine: async (input: NewRoutine) =>
+      (await request<{ routine: Routine }>({
+        method: "POST",
+        path: "/v1/admin/routines",
+        body: {
+          tenant: input.tenant,
+          name: input.name,
+          action: input.action,
+          trigger: triggerBody(input.trigger),
+          ...(input.timeZone !== undefined ? { timeZone: input.timeZone } : {}),
+          ...(input.asksFirst !== undefined ? { asksFirst: input.asksFirst } : {}),
+          ...(input.member !== undefined ? { member: input.member } : {}),
+        },
+        admin: true,
+      })).routine,
     pauseRoutine: async (input) =>
       (await request<{ routine: Routine }>({
         method: "POST",

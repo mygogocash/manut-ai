@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createHttpApi } from "../src/api/client";
-import { ApiError, type PilotApi } from "../src/api/types";
+import { ApiError, type NewRoutine, type PilotApi } from "../src/api/types";
 // The API's own sources, read as text (they run in the Worker and cannot be imported): the routes the client calls must be ones the
 // API's admin gate and handlers still have.
 import browserControlSource from "../../api/src/browser-control.ts?raw";
@@ -830,9 +830,9 @@ describe("the API client, for a shop's sign-ins and outposts", () => {
   });
 });
 
-// A shop's routines (docs/pilot-api.md, "Routines"): the team and its routines are read, and the operator may pause, resume and remove a
-// routine and pause or resume the team. Each change sends the tenant and exactly what its route takes, and answers what the API answers,
-// unwrapped; no route here makes a routine.
+// A shop's routines (docs/pilot-api.md, "Routines"): the team and its routines are read, and the operator may make a routine, pause,
+// resume and remove one and pause or resume the team. Each change sends the tenant and exactly what its route takes, and answers what the
+// API answers, unwrapped.
 describe("the API client, for a shop's routines and team", () => {
   const routine = {
     id: "rt-0a1b2c3d4-000-0a1b2c3d", name: "Morning brief", action: "brief", trigger: { kind: "daily", at: "08:00" },
@@ -840,8 +840,12 @@ describe("the API client, for a shop's routines and team", () => {
     next: "2026-11-24T01:00:00.000Z", createdAt: "2026-11-14T03:00:00.000Z", lastRun: null,
   };
   const team = { paused: true, since: "2026-11-23T03:00:00.000Z", members: ["nam", "pim", "ton"] };
+  // The routine as the form hands it over: every field the route takes, the one the operator read before saying yes.
+  const made: NewRoutine = { tenant: "pilot:1", name: "Morning brief", action: "brief", trigger: { kind: "daily", at: "08:00" },
+    timeZone: "Asia/Bangkok", asksFirst: false, member: "ton" };
   const answers: Record<string, unknown> = {
     "GET /v1/admin/routines": { tenant: "pilot:1", team: { ...team, paused: false, since: null }, routines: [routine] },
+    "POST /v1/admin/routines": { routine },
     "POST /v1/admin/routines/pause": { routine: { ...routine, paused: true, next: null } },
     "POST /v1/admin/routines/resume": { routine },
     "POST /v1/admin/routines/remove": { removed: routine.id },
@@ -863,6 +867,7 @@ describe("the API client, for a shop's routines and team", () => {
 
   async function everyRoutineRoute(api: PilotApi) {
     await api.getRoutines("pilot:1");
+    await api.createRoutine(made);
     await api.pauseRoutine({ tenant: "pilot:1", routineId: routine.id });
     await api.resumeRoutine({ tenant: "pilot:1", routineId: routine.id });
     await api.removeRoutine({ tenant: "pilot:1", routineId: routine.id });
@@ -870,12 +875,13 @@ describe("the API client, for a shop's routines and team", () => {
     await api.resumeTeam({ tenant: "pilot:1" });
   }
 
-  it("sends the operator key to the contract's six paths, with the tenant and exactly what each route takes", async () => {
+  it("sends the operator key to the contract's seven paths, with the tenant and exactly what each route takes", async () => {
     const { api, calls } = harnessOf("op-key-123");
     await everyRoutineRoute(api);
 
     expect(calls.map((c) => `${c.method} ${c.url}`)).toEqual([
       "GET https://api.example.test/v1/admin/routines?tenant=pilot%3A1",
+      "POST https://api.example.test/v1/admin/routines",
       "POST https://api.example.test/v1/admin/routines/pause",
       "POST https://api.example.test/v1/admin/routines/resume",
       "POST https://api.example.test/v1/admin/routines/remove",
@@ -887,20 +893,21 @@ describe("the API client, for a shop's routines and team", () => {
       expect(call.credentials).toBe("include");
     }
     expect(calls[0]?.raw).toBeUndefined();
-    for (const change of [1, 2, 3]) expect(calls[change]?.body).toEqual({ tenant: "pilot:1", routineId: routine.id });
-    for (const change of [4, 5]) expect(calls[change]?.body).toEqual({ tenant: "pilot:1" });
+    expect(calls[1]?.body).toEqual(made);
+    for (const change of [2, 3, 4]) expect(calls[change]?.body).toEqual({ tenant: "pilot:1", routineId: routine.id });
+    for (const change of [5, 6]) expect(calls[change]?.body).toEqual({ tenant: "pilot:1" });
   });
 
   it("calls only routes the API's admin gate and its routine handlers still have", () => {
     for (const route of [
-      "GET /v1/admin/routines", "POST /v1/admin/routines/pause", "POST /v1/admin/routines/resume", "POST /v1/admin/routines/remove",
-      "POST /v1/admin/team/pause", "POST /v1/admin/team/resume",
+      "GET /v1/admin/routines", "POST /v1/admin/routines", "POST /v1/admin/routines/pause", "POST /v1/admin/routines/resume",
+      "POST /v1/admin/routines/remove", "POST /v1/admin/team/pause", "POST /v1/admin/team/resume",
     ]) {
       expect(indexSource, `${route} in the admin gate`).toContain(`"${route}"`);
     }
     // The handlers read the same paths as a session's, without `/admin`: a change is the same whoever makes it.
-    for (const route of ["GET /v1/admin/routines", "POST /v1/routines/pause", "POST /v1/routines/resume", "POST /v1/routines/remove",
-      "POST /v1/team/pause", "POST /v1/team/resume"]) {
+    for (const route of ["GET /v1/admin/routines", "POST /v1/routines", "POST /v1/routines/pause", "POST /v1/routines/resume",
+      "POST /v1/routines/remove", "POST /v1/team/pause", "POST /v1/team/resume"]) {
       expect(routinesSource, `${route} in the routine routes`).toContain(`"${route}"`);
     }
   });
@@ -927,6 +934,8 @@ describe("the API client, for a shop's routines and team", () => {
   it("answers what the API answers: the view whole, each routine and the team unwrapped, and the id that was removed", async () => {
     const { api } = harnessOf("op-key-123");
     expect(await api.getRoutines("pilot:1")).toEqual(answers["GET /v1/admin/routines"]);
+    // The routine as the API made it, with its id and its own words, which the page puts in the list as they are.
+    expect(await api.createRoutine(made)).toEqual(routine);
     expect(await api.pauseRoutine({ tenant: "pilot:1", routineId: routine.id })).toEqual({ ...routine, paused: true, next: null });
     expect(await api.resumeRoutine({ tenant: "pilot:1", routineId: routine.id })).toEqual(routine);
     expect(await api.removeRoutine({ tenant: "pilot:1", routineId: routine.id })).toEqual({ removed: routine.id });
@@ -937,13 +946,23 @@ describe("the API client, for a shop's routines and team", () => {
   it("sets no-store on none of the routine routes, since no routine answer holds a secret", async () => {
     const { api, calls } = harnessOf("op-key-123");
     await everyRoutineRoute(api);
-    expect(calls.map((c) => c.cache)).toEqual([undefined, undefined, undefined, undefined, undefined, undefined]);
+    expect(calls.map((c) => c.cache)).toEqual([undefined, undefined, undefined, undefined, undefined, undefined, undefined]);
   });
 
   it("turns every refusal of the routine routes into an ApiError with the API's status and code", async () => {
     const calls: [(api: PilotApi) => Promise<unknown>, number, string][] = [
       [(api) => api.getRoutines(""), 400, "tenant_required"],
       [(api) => api.getRoutines("t1"), 503, "routines_unavailable"],
+      // Making a routine: every refusal the route has, from the one it says of a field to the shop's own limit and the two it says of
+      // an object it could not reach.
+      ...["invalid_name", "invalid_action", "invalid_time_zone", "invalid_trigger", "invalid_time", "invalid_weekdays", "invalid_day",
+        "invalid_window", "invalid_threshold", "must_ask_first", "unknown_member", "wrong_member", "invalid_request",
+        "tenant_required"].map((code): [(api: PilotApi) => Promise<unknown>, number, string] => [(api) => api.createRoutine(made), 400, code]),
+      [(api) => api.createRoutine(made), 404, "shop_not_found"],
+      [(api) => api.createRoutine(made), 409, "full"],
+      [(api) => api.createRoutine(made), 503, "clock_unavailable"],
+      [(api) => api.createRoutine(made), 503, "routines_unavailable"],
+      [(api) => api.createRoutine(made), 503, "shop_unavailable"],
       [(api) => api.pauseRoutine({ tenant: "t1", routineId: "rt-9" }), 404, "shop_not_found"],
       [(api) => api.pauseRoutine({ tenant: "t1", routineId: "rt-9" }), 404, "not_found"],
       [(api) => api.pauseRoutine({ tenant: "t1", routineId: "nope" }), 400, "invalid_request"],
@@ -969,6 +988,7 @@ describe("the API client, for a shop's routines and team", () => {
     const api = createHttpApi({ origin: "https://api.example.test", operatorKey: () => "op-key-123",
       fetch: () => Promise.reject(new TypeError("offline")) });
     await expect(api.getRoutines("t1")).rejects.toMatchObject({ status: 0, code: "network" });
+    await expect(api.createRoutine(made)).rejects.toMatchObject({ status: 0, code: "network" });
     await expect(api.pauseTeam({ tenant: "t1" })).rejects.toMatchObject({ status: 0, code: "network" });
   });
 
@@ -977,6 +997,7 @@ describe("the API client, for a shop's routines and team", () => {
     await expect(everyRoutineRoute(api)).rejects.toMatchObject({ code: "operator_key_missing" });
     for (const call of [
       () => api.getRoutines("t1"),
+      () => api.createRoutine(made),
       () => api.pauseRoutine({ tenant: "t1", routineId: "rt-1" }),
       () => api.resumeRoutine({ tenant: "t1", routineId: "rt-1" }),
       () => api.removeRoutine({ tenant: "t1", routineId: "rt-1" }),
@@ -984,5 +1005,75 @@ describe("the API client, for a shop's routines and team", () => {
       () => api.resumeTeam({ tenant: "t1" }),
     ]) await expect(call()).rejects.toMatchObject({ code: "operator_key_missing" });
     expect(fetch).not.toHaveBeenCalled();
+  });
+});
+
+// The exact body a new routine travels in. The route takes `{ tenant, name, action, trigger, timeZone?, asksFirst?, member? }` and the
+// console's form hands over all of them, so each test reads the raw text the API would be sent, in its order, and not only its values.
+describe("the API client, for the body of a new routine", () => {
+  function sent() {
+    const calls: { raw: unknown; method: string; url: string }[] = [];
+    const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({ raw: init?.body, method: init?.method ?? "GET", url: String(input) });
+      return json({ routine: { id: "rt-1" } });
+    });
+    return { api: createHttpApi({ origin: "https://api.example.test", operatorKey: () => "op-key-123", fetch }), calls };
+  }
+  const base = { tenant: "t1", name: "Morning brief", action: "brief", member: "ton", timeZone: "Asia/Bangkok", asksFirst: false } as const;
+
+  it("sends every field the route takes, in the route's own order, and nothing else", async () => {
+    const { api, calls } = sent();
+    await api.createRoutine({ ...base, trigger: { kind: "daily", at: "08:00" } });
+    expect(calls).toHaveLength(1);
+    expect(`${calls[0]!.method} ${calls[0]!.url}`).toBe("POST https://api.example.test/v1/admin/routines");
+    expect(calls[0]!.raw).toBe(
+      '{"tenant":"t1","name":"Morning brief","action":"brief","trigger":{"kind":"daily","at":"08:00"},"timeZone":"Asia/Bangkok","asksFirst":false,"member":"ton"}');
+  });
+
+  it("sends a trigger built from its own kind's fields, whatever else the caller's object holds", async () => {
+    const { api, calls } = sent();
+    // A form holds a time for every kind, so what belongs to the others is in the object and must not travel.
+    const everything = { at: "09:15", weekdays: [1, 5], day: 7, from: "21:00", to: "08:00", threshold: 4 };
+    const triggers = [
+      { kind: "daily", at: "09:15" },
+      { kind: "weekly", weekdays: [1, 5], at: "09:15" },
+      { kind: "monthly", day: 7, at: "09:15" },
+      { kind: "monthly", day: "last", at: "09:15" },
+      { kind: "window", from: "21:00", to: "08:00" },
+      { kind: "stockBelow", threshold: 4 },
+    ] as const;
+    for (const trigger of triggers) await api.createRoutine({ ...base, trigger: { ...everything, ...trigger } as never });
+    expect(calls.map((call) => (JSON.parse(String(call.raw)) as { trigger: unknown }).trigger)).toEqual(triggers);
+    expect(calls.map((call) => String(call.raw).match(/"trigger":(\{[^}]*\})/)![1])).toEqual([
+      '{"kind":"daily","at":"09:15"}',
+      '{"kind":"weekly","weekdays":[1,5],"at":"09:15"}',
+      '{"kind":"monthly","day":7,"at":"09:15"}',
+      '{"kind":"monthly","day":"last","at":"09:15"}',
+      '{"kind":"window","from":"21:00","to":"08:00"}',
+      '{"kind":"stockBelow","threshold":4}',
+    ]);
+  });
+
+  it("never sends a field the route does not take, however the caller's object came by it", async () => {
+    const { api, calls } = sent();
+    await api.createRoutine({ ...base, trigger: { kind: "daily", at: "08:00" }, id: "rt-forged", paused: true, createdAt: "2020-01-01T00:00:00.000Z",
+      template: "handmade", password: "hunter2" } as never);
+    expect(Object.keys(JSON.parse(String(calls[0]!.raw)) as object)).toEqual(
+      ["tenant", "name", "action", "trigger", "timeZone", "asksFirst", "member"]);
+  });
+
+  it("leaves out an optional field the caller did not give, so the API's own default decides it", async () => {
+    const { api, calls } = sent();
+    await api.createRoutine({ tenant: "t1", name: "Answer messages", action: "reply", trigger: { kind: "daily", at: "12:00" } });
+    expect(calls[0]!.raw).toBe('{"tenant":"t1","name":"Answer messages","action":"reply","trigger":{"kind":"daily","at":"12:00"}}');
+    // A field the caller gave as false is given, not left out: false is a choice.
+    await api.createRoutine({ tenant: "t1", name: "Brief", action: "brief", trigger: { kind: "daily", at: "08:00" }, asksFirst: false });
+    expect(calls[1]!.raw).toBe('{"tenant":"t1","name":"Brief","action":"brief","trigger":{"kind":"daily","at":"08:00"},"asksFirst":false}');
+  });
+
+  it("sends the name as it was given, with no trimming of its own: the API trims and counts it", async () => {
+    const { api, calls } = sent();
+    await api.createRoutine({ ...base, name: "  Brief  ", trigger: { kind: "daily", at: "08:00" } });
+    expect((JSON.parse(String(calls[0]!.raw)) as { name: string }).name).toBe("  Brief  ");
   });
 });

@@ -139,17 +139,16 @@ describe("the Routines page, reading a shop's routines", () => {
     expect(calls.getRoutines).toHaveBeenCalledTimes(1);
   });
 
-  it("says that nothing it does is sent, and that an operator makes a routine, in two lines; it has no field and makes none", async () => {
-    const { container } = renderPage();
+  it("says that nothing it does is sent, and offers the form that makes a routine after the team and the routines, and no longer sends an operator to the route", async () => {
+    renderPage();
     await screen.findByRole("list", { name: LIST });
     expect(screen.getByText("What Buddy's team does for this shop on its own schedule, with each routine's next run in Bangkok time. A routine only makes a draft for the owner to read: nothing it does is sent, posted or paid without the owner's yes."))
       .toBeTruthy();
-    expect(screen.getByText("This console does not make routines yet. An operator makes one with POST /v1/admin/routines, and a shop made from a template starts with the template's."))
-      .toBeTruthy();
-    // No way to make one: the one control that is not a button is the shop picker.
-    expect(container.querySelector("input, textarea")).toBeNull();
-    expect(container.querySelectorAll("select")).toHaveLength(1);
-    expect(screen.queryByRole("button", { name: /^(add|new|make|create)\b/i })).toBeNull();
+    expect(screen.queryByText(/POST \/v1\/admin\/routines/)).toBeNull();
+    expect(screen.queryByText(/does not make routines yet/)).toBeNull();
+    // The team, then the routines, then the form for the shop chosen.
+    expect(screen.getAllByRole("region").map((region) => region.querySelector("h2")?.textContent)).toEqual([
+      "Team for Baan Mali", "Routines for Baan Mali", "Make a routine for Baan Mali"]);
     expect(screen.getAllByRole("button").map((button) => button.getAttribute("aria-label") ?? button.textContent)).toEqual([
       "Refresh",
       PAUSE_TEAM,
@@ -157,6 +156,7 @@ describe("the Routines page, reading a shop's routines", () => {
       "Pause the routine Answer new customer messages", "Remove the routine Answer new customer messages",
       RESUME_POST, "Remove the routine Draft the Friday post",
       "Pause the routine Tell me when candles run low", "Remove the routine Tell me when candles run low",
+      "Make routine",
     ]);
   });
 
@@ -323,7 +323,7 @@ describe("the Routines page, reading a shop's routines", () => {
 
   it("says a shop has no routines, and where they come from, never an empty box", async () => {
     renderPage({ getRoutines: async () => view([]) });
-    expect(await screen.findByText("No routines yet. A shop made from a template starts with the template's routines, each paused. Any other is made by an operator with POST /v1/admin/routines."))
+    expect(await screen.findByText("No routines yet. A shop made from a template starts with the template's routines, each paused. Make one with the form below."))
       .toBeTruthy();
     expect(screen.queryByRole("list", { name: LIST })).toBeNull();
     expect(within(section("Routines for Baan Mali")).getByText("0 routines")).toBeTruthy();
@@ -627,7 +627,7 @@ describe("removing a routine", () => {
     expect(rowWith("Morning brief").contains(dialog)).toBe(true);
     expect(within(dialog).getByText("Morning brief, its runs and its clock go at once, and it will not run again. The audit log keeps how each of its runs ended."))
       .toBeTruthy();
-    expect(within(dialog).getByText("This cannot be undone. To have it again, an operator makes it again with POST /v1/admin/routines.")).toBeTruthy();
+    expect(within(dialog).getByText("This cannot be undone. To have it again, make it again with the form below.")).toBeTruthy();
     expect(calls.removeRoutine).not.toHaveBeenCalled();
 
     fireEvent.click(within(dialog).getByRole("button", { name: "Keep it" }));

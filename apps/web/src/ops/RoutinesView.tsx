@@ -1,10 +1,15 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState } from "react";
 // The API's own name for the answer is `RoutinesView`, which this page's component is also called, so the type is read under another.
 import { ApiError, useApi, type Routine, type RoutinesView as RoutinesRead, type Shop, type Team } from "../api";
+import { MakeRoutineForm } from "./MakeRoutineForm";
+import type { Review } from "./makeRoutine";
+import { Failed, Question, Said, type Problem } from "./RoutinesParts";
 import { useLoad, type Loaded } from "./useLoad";
 import {
   errorText,
   isAuthError,
+  makeErrorText,
+  makeRoutineWords as M,
   nextRunText,
   routineTag,
   routinesErrorText,
@@ -22,11 +27,12 @@ import {
 /// template it came from and how its last run ended. The shop is chosen on the page, starting from the one in the side menu, as on
 /// the Connections and Model spend pages.
 ///
-/// A routine only ever makes a draft for the owner to read, so nothing here sends, posts or pays anything. The operator may do five
-/// things, and each one asks first, in its row, in words that name exactly what will happen, and sends nothing until it is answered
-/// yes: pause a routine, resume one, remove one, and pause or resume the whole team (Pause everyone). One change runs at a time, so a
+/// A routine only ever makes a draft for the owner to read, so nothing here sends, posts or pays anything. The operator may do six
+/// things, and each one asks first, in words that name exactly what will happen, and sends nothing until it is answered yes: pause a
+/// routine, resume one, remove one (each in its row), pause or resume the whole team (Pause everyone), and make a routine, from the form
+/// under the list (MakeRoutineForm.tsx), whose question says the new routine in the API's own words. One change runs at a time, so a
 /// double press sends one request, and a refusal that says the list moved on (the routine was removed meanwhile by another operator)
-/// reads it again. The page makes no routine: an operator does that through the route, and says so in one line.
+/// reads it again. A routine that was made joins the list as the API answered it, until the list is read again.
 ///
 /// The team and the routines come in one answer, so one failure to read them is said once, where the routines would be, with its own
 /// way to try again, and the page draws neither half from an answer it did not get.
@@ -34,13 +40,12 @@ import {
 /// The one question open in the board, and what it is about. Asking another closes this one, so two are never open at once.
 type Asking =
   | { kind: "pause" | "resume" | "remove"; id: string }
-  | { kind: "pause-team" | "resume-team" };
+  | { kind: "pause-team" | "resume-team" }
+  | { kind: "make"; review: Review };
 
 /// Which part of the board a change, its notice or its refusal belongs to.
-type Place = "team" | "routines";
+type Place = "team" | "routines" | "make";
 type Notice = { place: Place; text: string };
-/// Why a change was not made, in words, and whether the API refused the operator key, which is the one refusal with a way out.
-type Problem = { text: string; refused: boolean };
 
 const listStyle = { listStyle: "none", margin: 0, padding: 0 } as const;
 const sectionStyle = { display: "flex", flexDirection: "column", gap: 10 } as const;
@@ -104,9 +109,6 @@ export function RoutinesView({ shops, tenant: chosen, onForget }: {
         <p className="hint" style={{ margin: 0 }}>
           {W.intro}
         </p>
-        <p className="hint" style={{ margin: 0 }}>
-          {W.makeNote}
-        </p>
         {shops && shops.length === 0 ? (
           <p className="hint" style={{ margin: 0 }}>
             {W.noShops}
@@ -134,11 +136,21 @@ function RoutinesBoard({ shop, routines, onForget }: {
   const [busy, setBusy] = useState<string | null>(null);
   const running = useRef(false);
   const [notice, setNotice] = useState<Notice | null>(null);
-  const [errors, setErrors] = useState<Record<Place, Problem | null>>({ team: null, routines: null });
+  const [errors, setErrors] = useState<Record<Place, Problem | null>>({ team: null, routines: null, make: null });
+  // The routines this page has made since the list it holds was read, as the API answered each, with the list that was held when it
+  // answered. They are listed after it at once, so a routine that was made is never missing while the page reads again, or when that read
+  // fails. The next read says what the API now keeps, so it replaces them, whether it lists them or not. A routine is listed once: a read
+  // that landed while it was being made (Refresh is never locked) may already list it.
+  const [made, setMade] = useState<{ after: RoutinesRead; routines: Routine[] } | null>(null);
   const locked = busy !== null;
   const now = Date.now();
   const view = routines.data;
-  const list = view?.routines ?? [];
+  const latest = useRef(view);
+  latest.current = view;
+  const joined = view !== null && made !== null && made.after === view
+    ? made.routines.filter((one) => !view.routines.some((known) => known.id === one.id))
+    : [];
+  const list = [...(view?.routines ?? []), ...joined];
   // The template a routine came from is named by the API's own list of templates, which is read only once a routine names one (so the
   // key changes with that, and the read starts when the routines arrive). A name it cannot read is shown as the id the API sent, so
   // nothing is lost when that read fails.
@@ -148,8 +160,10 @@ function RoutinesBoard({ shop, routines, onForget }: {
 
   /// One change. `work` makes the call and answers what to say when it is done. A refusal is said in the part of the board the change
   /// belongs to and leaves the question open, so it can be tried again or kept; one that means the list moved on closes it and reads
-  /// the list again.
-  async function change(place: Place, key: string, work: () => Promise<string>): Promise<void> {
+  /// the list again. A change may take a refusal first (`refused`, which answers whether it said it, beside a field of a form: the
+  /// question is then closed, since what it asked is no longer right) and may say its failures in words of its own (`say`).
+  async function change(place: Place, key: string, work: () => Promise<string>,
+    how: { refused?: (error: unknown) => boolean; say?: (error: unknown) => string } = {}): Promise<void> {
     if (running.current) return;
     running.current = true;
     setBusy(key);
@@ -161,9 +175,13 @@ function RoutinesBoard({ shop, routines, onForget }: {
       setNotice({ place, text });
       routines.reload();
     } catch (error) {
+      if (how.refused?.(error)) {
+        setAsking(null);
+        return;
+      }
       setErrors((current) => ({
         ...current,
-        [place]: { text: routinesErrorText(error, "change"), refused: isAuthError(error) },
+        [place]: { text: (how.say ?? ((failed) => routinesErrorText(failed, "change")))(error), refused: isAuthError(error) },
       }));
       if (error instanceof ApiError && ROUTINES_MOVED_ON.has(error.code)) {
         setAsking(null);
@@ -202,6 +220,17 @@ function RoutinesBoard({ shop, routines, onForget }: {
       await api.resumeTeam({ tenant: shop.tenant });
       return W.teamResumedDone(shop.name);
     });
+  // Making a routine sends exactly the body the question was worked out from. What the API answers is the routine as it made it, which
+  // is listed as it is (above) and said in the notice in its own words; the form is cleared only once it is made.
+  const makeRoutine = (review: Review, handlers: { refused: (error: unknown) => boolean; made: () => void }) =>
+    change("make", "make", async () => {
+      const answer = await api.createRoutine(review.body);
+      // After the list the page holds now, which is not the one it held when yes was pressed if a read landed in between.
+      const after = latest.current;
+      if (after) setMade((current) => ({ after, routines: [...(current?.after === after ? current.routines : []), answer] }));
+      handlers.made();
+      return M.made(answer, team ?? { paused: false, since: null, members: ["nam", "pim", "ton"] }, Date.now());
+    }, { refused: handlers.refused, say: (error) => makeErrorText(error, shop.name) });
 
   const readFailed = routines.error != null && !isAuthError(routines.error);
   const pausedCount = list.filter((routine) => routine.paused).length;
@@ -267,29 +296,36 @@ function RoutinesBoard({ shop, routines, onForget }: {
           </ul>
         )}
       </section>
-    </>
-  );
-}
 
-function Said({ text }: { text: string }) {
-  return (
-    <div className="banner ok" role="status">
-      <span className="grow">{text}</span>
-    </div>
-  );
-}
-
-/// A change that was not made. A key the API refused comes with the way to enter another.
-function Failed({ problem, onForget }: { problem: Problem; onForget: () => void }) {
-  return (
-    <div className="banner err" role="alert">
-      <span className="grow">{problem.text}</span>
-      {problem.refused && (
-        <button type="button" className="btn" style={{ color: "var(--ink)" }} onClick={onForget}>
-          {W.anotherKey}
-        </button>
+      {/* The form is offered once the routines are read, since a routine that was made joins that list, and what the question says (its
+          next run) depends on the team. */}
+      {view && team && (
+        <section aria-labelledby="routines-make" style={sectionStyle}>
+          <div className="band">
+            <h2 id="routines-make" className="h2" style={{ fontSize: 13, color: "inherit" }}>
+              {M.title(shop.name)}
+            </h2>
+          </div>
+          <p className="hint" style={{ margin: 0, padding: "0 10px" }}>
+            {M.intro}
+          </p>
+          {notice?.place === "make" && <Said text={notice.text} />}
+          {errors.make && <Failed problem={errors.make} onForget={onForget} />}
+          <div style={{ padding: "0 10px" }}>
+            <MakeRoutineForm
+              shop={shop}
+              team={team}
+              review={asking?.kind === "make" ? asking.review : null}
+              locked={locked}
+              busy={busy === "make"}
+              onReview={(review) => setAsking({ kind: "make", review })}
+              onKeep={() => setAsking(null)}
+              onMake={(review, handlers) => void makeRoutine(review, handlers)}
+            />
+          </div>
+        </section>
       )}
-    </div>
+    </>
   );
 }
 
@@ -301,38 +337,6 @@ function ReadFailed({ text, onRetry }: { text: string; onRetry: () => void }) {
       <button type="button" className="btn" style={{ color: "var(--ink)" }} onClick={onRetry}>
         {W.tryAgain}
       </button>
-    </div>
-  );
-}
-
-/// A question in a row: what will happen, in words that name it exactly, and two buttons, the one that does it first. Nothing is sent
-/// until the first is pressed, and the second sends nothing. While a change is on its way every button waits.
-function Question({ id, title, yes, no, busyLabel, busy, locked, danger = false, onYes, onNo, children }: {
-  id: string;
-  title: string;
-  yes: string;
-  no: string;
-  busyLabel: string;
-  busy: boolean;
-  locked: boolean;
-  danger?: boolean;
-  onYes: () => void;
-  onNo: () => void;
-  children: ReactNode;
-}) {
-  return (
-    <div className="dialog" role="dialog" aria-labelledby={id} style={{ flexBasis: "100%", maxWidth: 560 }}>
-      <h3 id={id}>{title}</h3>
-      {children}
-      <div className="chips">
-        <button type="button" className={danger ? "btn danger solid" : "btn dark"} disabled={locked}
-          aria-busy={busy ? true : undefined} onClick={onYes}>
-          {busy ? busyLabel : yes}
-        </button>
-        <button type="button" className="btn" disabled={locked} onClick={onNo}>
-          {no}
-        </button>
-      </div>
     </div>
   );
 }

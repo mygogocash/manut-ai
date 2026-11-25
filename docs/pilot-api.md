@@ -216,9 +216,26 @@ resume one (`/routines/resume`), remove one (`/routines/remove`), Pause everyone
 Each asks first, in its row, in words that name what will happen (a removal says the routine, its runs and its clock go; Pause
 everyone says what stops, below), and one change runs at a time. A 404 `not_found` says the routine is already gone and reads the
 list again, as the Connections page does for a sign-in that moved on; 404 `shop_not_found` is said plainly (it is not one of the
-pilot's shops); a 503 `routines_unavailable` on a change says nothing may have changed. The page makes no routine: operators make
-one through `POST /v1/admin/routines`, and a page for making one is left for a later slice. Nothing on it sends, posts or pays
+pilot's shops); a 503 `routines_unavailable` on a change says nothing may have changed. Nothing on it sends, posts or pays
 anything, since a routine only makes a draft for the owner to read.
+
+The page also makes a routine (`POST /v1/admin/routines`), from a form under the list that is drawn once the routines are read: its
+name, whose job it is (Nam, Pim or Ton), what it does (only the kinds of work that member may run, as "Who runs it" says), when it
+runs (every day at a time, on chosen weekdays at a time, on a day of the month from 1 to 28 or the last at a time, in a window from
+one time to another, or when stock drops under a number), the time zone (Asia/Bangkok unless changed) and whether it asks the owner
+first, which is shown on and locked for a reply, a send, a payment and a deletion and is the operator's choice for a brief and a
+draft. Nothing is sent as it is filled in. Making it checks every field by `@manut/routine-rules`' own rules, which are the API's,
+and says what is wrong beside each field that is wrong, all at once. A form with nothing wrong asks first, in a question that says
+the routine in the API's own words: its trigger from `describeTrigger` and its next run from `nextRun` in Bangkok time (none, with
+the reason, while everyone is paused or its member is off the team, as the API's list works it), whose job it is, whether it asks
+first, and that it starts switched on; a stock routine says it waits until stock levels are connected. The fields are locked while
+the question is open, so what was read is what is sent, and on yes the body is every field the route takes, built field by field
+(the trigger from its own kind's fields alone), one change at a time. Each refusal of a field (the 400 codes in the table under
+"Routines") is said in plain words beside the field it is about, closes the question and keeps everything typed. A refusal no field
+is to blame for is said above the form and leaves the question open: `full` says the shop already has 50 routines, a 503
+`routines_unavailable`, or no answer at all, says the routine may or may not have been made (look at the list before making it
+again), and `clock_unavailable` says nothing was made. A routine that was made joins the list as the API answered it, in its own
+words, until the list is read again, which says what the API now keeps.
 
 The console's **Shops** page, first in its side menu, adds no route. It lists every pilot shop from routes in this table and
 reads them all at once, one request each: `GET /v1/admin/pilot/shops` for the rows, `GET /v1/admin/pilot/gate` for each
@@ -2138,9 +2155,8 @@ written: a routine made for it would set a clock that fires for nothing, every t
 never be a session, so its routines are the operator's until the operator links the owner's account: that account's
 owner session then has these routes for its shop ("Several shops", below), and the log names the account's id.
 
-The console reads a shop's routines and pauses, resumes and removes them from its Routines page (the paragraph beside the
-Connections page's, above). It makes none: an operator makes a routine with `POST /v1/admin/routines`, and a page for making one
-is left for later.
+The console reads a shop's routines, makes one and pauses, resumes and removes them from its Routines page (the paragraph beside
+the Connections page's, above), each change asked first.
 
 Making, pausing, resuming or removing a routine needs neither a switch nor the owner's consent: nothing runs then. Every
 run reads both.
@@ -2214,7 +2230,8 @@ A refusal answers `{ "error": code }`, and nothing is kept:
   draft, which only the owner sees. A brief or a draft may still be made to ask.
 - **Who runs it.** Nam drafts replies (`reply`); Pim drafts posts (`draft`, or `send` for a post that sending will ask
   for); Ton drafts the owner's briefs and the books (`brief`, `draft`, `send`, `pay`, `delete`). Left out, the member
-  is Nam for a reply and Ton for the rest.
+  is Nam for a reply and Ton for the rest. The console's form offers only these pairs, and sends the member and the asks-first
+  setting it showed rather than leave either to this default.
 - **Clocks.** A daily or weekly routine is a schedule on the shop's lifted schedule object, through routine-rules'
   `toSchedule` (its `ScheduleJSON` carries `routineId`, and the public `/v1/schedules` routes answer 409
   `routine_schedule` to saving over it or deleting it). A monthly or window routine is a timer in the same object, timed
@@ -2250,9 +2267,13 @@ A refusal answers `{ "error": code }`, and nothing is kept:
 - **Practice mode.** The fake in `apps/web` keeps each shop's team, routines and runs, and says a routine's words and next run
   by `@manut/routine-rules`' own `describeTrigger` and `nextRun`. Its read answers the empty state for any tenant that is one, as
   the API's does (only a change looks for the shop), and its changes answer the API's refusals and write the same audit entries by
-  the routine's id, none for a change that changes nothing. A shop made from a template starts with the template's routines, each
-  paused, its members on and each logged as `routine.created`. Baan Mali starts with six routines that show every way a run can
-  stand. The world is saved as version 13, and one saved before routines is replaced.
+  the routine's id, none for a change that changes nothing. It makes a routine as the API does, in its order: the key, the tenant, a
+  pilot shop, a field the route does not take or `asksFirst` that is no boolean (`invalid_request`), `@manut/routine-rules`' own
+  refusals, whose job it is (`unknown_member`, then `wrong_member`), and the shop's limit of 50 (409 `full`). A refusal keeps nothing
+  and logs nothing, and a routine that is made is switched on, answered as a list shows it and logged as `routine.created`. A shop
+  made from a template starts with the template's routines, each paused, its members on and each logged as `routine.created`. Baan
+  Mali starts with six routines that show every way a run can stand. The world is saved as version 14, and one saved before a
+  routine could be made here is replaced.
 
 ## Shop templates
 

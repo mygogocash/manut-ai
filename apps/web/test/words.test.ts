@@ -1519,13 +1519,15 @@ describe("the Routines page's words", () => {
     lastRun: null, ...overrides,
   });
 
-  it("names the page and says what it cannot do: it makes no routine, and a routine only drafts", () => {
+  it("names the page and says a routine only drafts, and sends an empty shop to the form that makes one, not to the route", () => {
     expect(W.nav).toBe("Routines");
     expect(W.title).toBe("Routines");
     expect(W.intro).toContain("only makes a draft for the owner to read");
     expect(W.intro).toContain("Bangkok time");
-    expect(W.makeNote).toBe("This console does not make routines yet. An operator makes one with POST /v1/admin/routines, and a shop made from a template starts with the template's.");
-    expect(W.routinesEmpty).toContain("POST /v1/admin/routines");
+    expect(W.routinesEmpty).toBe("No routines yet. A shop made from a template starts with the template's routines, each paused. Make one with the form below.");
+    // The page makes routines now: nothing on it says it cannot, or sends an operator to curl.
+    expect(W).not.toHaveProperty("makeNote");
+    for (const words of Object.values(W)) if (typeof words === "string") expect(words).not.toContain("POST /v1/admin/routines");
   });
 
   it("says since when everyone is paused, today with the time and another day with the date, and leaves out a time that is not one", () => {
@@ -1614,7 +1616,7 @@ describe("the Routines page's words", () => {
   it("says what removing a routine takes with it, and that it cannot be undone", () => {
     expect(W.removeTitle("Morning brief")).toBe("Remove Morning brief?");
     expect(W.removeEffect("Morning brief")).toBe("Morning brief, its runs and its clock go at once, and it will not run again. The audit log keeps how each of its runs ended.");
-    expect(W.removeNote).toBe("This cannot be undone. To have it again, an operator makes it again with POST /v1/admin/routines.");
+    expect(W.removeNote).toBe("This cannot be undone. To have it again, make it again with the form below.");
     expect(W.removed("Morning brief")).toBe("Removed Morning brief. Its runs and its clock are gone.");
   });
 
