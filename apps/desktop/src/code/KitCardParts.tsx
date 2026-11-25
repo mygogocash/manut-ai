@@ -40,7 +40,8 @@ export interface KitButton {
   keep?: true;
 }
 
-/** The canvas's buttons, the safe answer first and all of the same weight, as every ask card here orders them. */
+/** The canvas's buttons, the safe answer first, as every ask card here orders them (Allow once is drawn as the card's
+ *  one black button, chat/cards/cards.css; the order is this). */
 export function kitButtons(card: KitCard, choices: readonly ApprovalChoice[]): KitButton[] {
   const out: KitButton[] = [];
   if (choices.includes("deny")) out.push({ choice: "deny", label: "kit.ask.no", key: "1" });

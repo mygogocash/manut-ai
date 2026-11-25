@@ -171,7 +171,7 @@ test.describe("lists arrive once", () => {
     await still(page);
     await page.getByTestId("menu-needs").click();
     await expect(page.getByTestId("needs-row").first()).toBeVisible();
-    const needs = await frames(page, "page-needs", 'li.tli', "needs-light");
+    const needs = await frames(page, "page-needs", "li[data-ask]", "needs-light");
     for (const at of ["start", "middle", "end"] as const) for (const r of needs[at]) expect(r.y, `a Needs you row never moves (${at})`).toBe(0);
     expect(needs.end[0]!.opacity).toBe(1);
   });
@@ -213,6 +213,6 @@ test.describe("lists arrive once", () => {
     });
     await page.getByTestId("menu-needs").click();
     await expect(page.getByTestId("needs-row").first()).toBeVisible();
-    await frames(page, "page-needs", 'li.tli', "needs-dark");
+    await frames(page, "page-needs", "li[data-ask]", "needs-dark");
   });
 });
