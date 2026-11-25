@@ -53,4 +53,4 @@ of GoSpark's services.
 ## Credits
 
 Code lifted from other projects keeps its notice here: GoSpark (`mygogocash/gospark`, our own); Oh My Hermes
-(MIT, `apps/desktop`, see its `NOTICE.md` and `THIRD_PARTY_NOTICES.md`); Orca (MIT) as its code arrives; dtinth/promptpay-qr (MIT) for the PromptPay format and test vectors.
+(MIT, `apps/desktop`, see its `NOTICE.md` and `THIRD_PARTY_NOTICES.md`; its `omher-release.yml` for the release workflow's tag check and target matrix, `.github/workflows/release-desktop.yml`); Orca (MIT) as its code arrives; dtinth/promptpay-qr (MIT) for the PromptPay format and test vectors.
