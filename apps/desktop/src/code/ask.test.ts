@@ -242,6 +242,19 @@ describe("deciding an ask by Kit's dial", () => {
     expect(decide({ title: "Allow Edit to change src/.gitignore?", command: "" }, at("edits_alone"))).toEqual({ answer: "alone" });
   });
 
+  it("never decides a computer use ask: the person answers each one on its card, at every level (item 82)", () => {
+    // as the shell sends one (src-tauri/src/computer/tap.rs): an MCP tool of the app's own server, its card in the app's
+    // words, even with words a command or a file read would match
+    for (const words of [
+      { title: "Click button “Save” in TextEdit?", command: "App: TextEdit\nWindow: Untitled\nControl: button “Save”" },
+      { title: "Run this command?", command: "ls" },
+      { title: "Allow Read?", command: "notes.txt" },
+    ]) {
+      const tool: AskTool = { kind: "other", name: "mcp__manut-computer__click", cwd: root, server: "manut-computer", computer: { act: "click", app: "TextEdit", window: "Untitled", control: "button “Save”" } };
+      expect(readAsk({ ...words, cwd: root, tool }, where)).toBeNull();
+    }
+  });
+
   it("asks before going live at every level", () => {
     expect(decide(run("git push origin main"), at("everything_in_project"))).toEqual({ answer: "ask", kind: "command", mayAlwaysAllow: false });
   });
