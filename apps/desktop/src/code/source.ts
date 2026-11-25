@@ -89,11 +89,15 @@ export function readDraft(v: unknown): ReviewDraft | null {
   return { branch: str(v.branch), base: str(v.base), commits: Array.isArray(v.commits) ? v.commits.filter((c): c is string => typeof c === "string") : [], count: num(v.count) };
 }
 
-/** The shell's ask (src-tauri/src/review.rs `Ask`): to push a lane's branch and open its pull request (`open`). Every text in it
- *  is what will be sent; the page shows it as it is. */
+/** How a pull request is merged: a merge commit, one squashed commit, or the commits rebased onto the base. */
+export const MERGE_METHODS = ["merge", "squash", "rebase"] as const;
+export type MergeMethod = (typeof MERGE_METHODS)[number];
+
+/** The shell's ask (src-tauri/src/review.rs `Ask`): to push a lane's branch and open its pull request (`open`), or to merge it
+ *  (`merge`). Every text in it is what will be sent; the page shows it as it is. */
 export interface ReviewAsk {
   id: string;
-  kind: "open";
+  kind: "open" | "merge";
   source: "github" | "gitlab";
   repo: string;
   remote: string;
@@ -104,19 +108,47 @@ export interface ReviewAsk {
   uncommitted: number;
   title: string;
   body: string;
+  /** A merge's own: the pull request, the method, and the message's subject and body exactly as they will be sent ("" for a
+   *  rebase, which makes none). */
+  number: number;
+  url: string;
+  method: MergeMethod | "";
+  subject: string;
+  message: string;
 }
 
 export function readAsk(v: unknown): ReviewAsk | null {
-  if (!isObj(v) || !/^[0-9a-f]{32}$/.test(str(v.id)) || v.kind !== "open") return null;
+  if (!isObj(v) || !/^[0-9a-f]{32}$/.test(str(v.id)) || (v.kind !== "open" && v.kind !== "merge")) return null;
   const source = v.source === "github" || v.source === "gitlab" ? v.source : null;
   if (!source || !str(v.repo) || !str(v.branch) || !str(v.base) || typeof v.title !== "string" || typeof v.body !== "string") return null;
-  return { id: str(v.id), kind: "open", source, repo: str(v.repo), remote: str(v.remote), branch: str(v.branch), base: str(v.base), head: str(v.head), commits: num(v.commits), uncommitted: num(v.uncommitted), title: v.title, body: v.body };
+  const method = MERGE_METHODS.find((m) => m === v.method) ?? "";
+  if (v.kind === "merge" && (!method || num(v.number) === 0)) return null;
+  const url = str(v.url);
+  return {
+    id: str(v.id),
+    kind: v.kind,
+    source,
+    repo: str(v.repo),
+    remote: str(v.remote),
+    branch: str(v.branch),
+    base: str(v.base),
+    head: str(v.head),
+    commits: num(v.commits),
+    uncommitted: num(v.uncommitted),
+    title: v.title,
+    body: v.body,
+    number: num(v.number),
+    url: /^https:\/\/\S+$/.test(url) ? url : "",
+    method,
+    subject: str(v.subject),
+    message: str(v.message),
+  };
 }
 
-/** What a settled ask did (`review_settle`): `declined` (nothing ran), `opened`, or `failed` at `step` (`check`, `push`,
- *  `create`) with the CLI's own line. `pushed`: the branch reached the remote. */
+/** What a settled ask did (`review_settle`): `declined` (nothing ran), `opened`, `merged`, or `failed` at `step` (`check`, `push`,
+ *  `create`, `merge`) with the CLI's own line. `pushed`: the branch reached the remote. */
 export interface ReviewDone {
-  outcome: "declined" | "opened" | "failed";
+  outcome: "declined" | "opened" | "merged" | "failed";
   pushed: boolean;
   url: string;
   number: number;
@@ -126,7 +158,7 @@ export interface ReviewDone {
 
 export function readDone(v: unknown): ReviewDone | null {
   if (!isObj(v)) return null;
-  const outcome = v.outcome === "declined" || v.outcome === "opened" || v.outcome === "failed" ? v.outcome : null;
+  const outcome = v.outcome === "declined" || v.outcome === "opened" || v.outcome === "merged" || v.outcome === "failed" ? v.outcome : null;
   if (!outcome) return null;
   const url = str(v.url);
   return { outcome, pushed: v.pushed === true, url: /^https:\/\/\S+$/.test(url) ? url : "", number: num(v.number), step: str(v.step), error: str(v.error) };

@@ -17,7 +17,7 @@ import { readView, type GitView } from "../code/moved";
 import { MOCK_MOVED, MOCK_MOVED_ROOT } from "../code/mockMoved";
 import { readCleaned, readKept, readMade, readReleased, readRemoved, type KeptLane, type LaneCleaned, type LaneMade, type LaneReleased, type LaneRemoveAsk, type LaneRemoved } from "../code/laneBranch";
 import { readAgentConfig, type AgentConfig } from "../settings/mcp/agentConfig";
-import { readAsk, readDone, readDraft, readPulled, readTools, type Pulled, type ReviewAsk, type ReviewDone, type ReviewDraft, type SourceTools } from "../code/source";
+import { readAsk, readDone, readDraft, readPulled, readTools, type MergeMethod, type Pulled, type ReviewAsk, type ReviewDone, type ReviewDraft, type SourceTools } from "../code/source";
 
 /** What the person did in a chat. Mirrors `Input` in src-tauri/src/agent_chat.rs. `images`: saved copies
  *  (`saveFile`) of attached pictures, for the agent's own image input. */
@@ -171,6 +171,10 @@ export interface SessionHost extends HistoryHost {
   /** The ask to push the lane at `worktree` and open its pull request with `title` and `body`: the exact repository, branch,
    *  base, title and body. Writes nothing; rejects with a code (`no_remote`, `not_signed_in`, `no_commits`, ...). */
   reviewAsk?(worktree: string, title: string, body: string): Promise<ReviewAsk>;
+  /** The ask to merge pull request `number`, made from the lane at `worktree`, with `method`: asked only when it can merge now,
+   *  with the method and exactly the message that will be sent. Writes nothing; rejects with a code (`cannot_merge:<why>`,
+   *  `not_this_lane`, `not_signed_in`, ...). */
+  reviewMerge?(worktree: string, number: number, method: MergeMethod): Promise<ReviewAsk>;
   /** The person's answer to ask `id`, after approval-core settled it (code/reviewAsk.ts is the only caller): a No runs nothing, a
    *  Yes runs what the ask named, once. Only the id and the answer go to the shell. Rejects with `already_decided`,
    *  `withdrawn`, `expired` or `not_found`. */
@@ -390,6 +394,12 @@ export class TauriHost implements SessionHost, BuddyHost {
     const { invoke } = await this.core();
     const ask = readAsk(await invoke<unknown>("review_ask_open", { worktree, title, body }));
     if (!ask) throw new Error("unread");
+    return ask;
+  }
+  async reviewMerge(worktree: string, number: number, method: MergeMethod) {
+    const { invoke } = await this.core();
+    const ask = readAsk(await invoke<unknown>("review_ask_merge", { worktree, number, method }));
+    if (!ask || ask.kind !== "merge") throw new Error("unread");
     return ask;
   }
   async reviewSettle(id: string, yes: boolean) {
@@ -714,7 +724,7 @@ export type MockGlobals = MockTurnGlobals & {
   __manutPulled?: Record<string, unknown>;
   /** e2e: what each lane would go up for review with, by worktree: its repository, its commits' subjects, a code its ask is
    *  refused with, or the step its Yes fails at */
-  __manutReview?: Record<string, { source?: "github" | "gitlab"; repo?: string; commits?: string[]; refuse?: string; fail?: { step: string; error: string } }>;
+  __manutReview?: Record<string, { source?: "github" | "gitlab"; repo?: string; commits?: string[]; refuse?: string; fail?: { step: string; error: string }; cannot?: string; title?: string }>;
   /** e2e: what a merged clean-up of each project's lanes finds */
   __manutCleanMerged?: Record<string, { removed: string[]; kept: { branch: string; why: string }[]; cannot: string | null }>;
   /** e2e: how many changed files the developer's folders have, by folder: they do not come along into a lane's */
@@ -1261,7 +1271,7 @@ export class MockHost implements SessionHost, BuddyHost {
   /** The mock's asks, by id, as review.rs keeps them: each answered once. */
   private asks = new Map<string, { state: "waiting" | "decided" | "withdrawn"; ask: ReviewAsk }>();
   /** What e2e says a lane would go up with (`__manutReview`, by worktree); none: one commit, on github.com/you/<project>. */
-  private reviewOf(worktree: string): { source: "github" | "gitlab"; repo: string; commits: string[]; refuse?: string; fail?: { step: string; error: string } } {
+  private reviewOf(worktree: string): { source: "github" | "gitlab"; repo: string; commits: string[]; refuse?: string; fail?: { step: string; error: string }; cannot?: string; title?: string } {
     const lane = (this.g.__manutLanes ?? []).find((l) => l.worktree === worktree);
     if (!lane) return { source: "github", repo: "", commits: [], refuse: "not_a_lane" };
     const name = lane.project.split("/").filter(Boolean).pop() ?? "project";
@@ -1280,7 +1290,22 @@ export class MockHost implements SessionHost, BuddyHost {
     if (r.commits.length === 0) throw new Error("no_commits");
     if (!title.trim() || /[\u0000-\u001f]/.test(title)) throw new Error("bad_title");
     const id = Array.from({ length: 32 }, () => "0123456789abcdef"[Math.floor(Math.random() * 16)]).join("");
-    const ask: ReviewAsk = { id, kind: "open", source: r.source, repo: r.repo, remote: "origin", branch: lane.branch, base: lane.base, head: "0".repeat(40), commits: r.commits.length, uncommitted: this.g.__manutLaneChanged?.[worktree] ?? 0, title: title.trim(), body: body.replace(/\r\n/g, "\n").trimEnd() };
+    const ask: ReviewAsk = { id, kind: "open", source: r.source, repo: r.repo, remote: "origin", branch: lane.branch, base: lane.base, head: "0".repeat(40), commits: r.commits.length, uncommitted: this.g.__manutLaneChanged?.[worktree] ?? 0, title: title.trim(), body: body.replace(/\r\n/g, "\n").trimEnd(), number: 0, url: "", method: "", subject: "", message: "" };
+    this.asks.set(id, { state: "waiting", ask });
+    this.log({ op: "review.ask", path: worktree, branch: lane.branch });
+    return ask;
+  }
+  /** As the shell: a merge is asked only for a pull request that can merge (`__manutReview[worktree].merge`: why it cannot, or
+   *  the title it has), with GitHub's own messages. */
+  async reviewMerge(worktree: string, number: number, method: MergeMethod): Promise<ReviewAsk> {
+    const lane = (this.g.__manutLanes ?? []).find((l) => l.worktree === worktree);
+    const r = this.reviewOf(worktree);
+    if (!lane || r.refuse) throw new Error(r.refuse ?? "not_a_lane");
+    if (r.cannot) throw new Error(`cannot_merge:${r.cannot}`);
+    const title = r.title ?? "Work in this lane";
+    const [subject, message] = method === "rebase" ? ["", ""] : method === "squash" ? [`${title} (#${number})`, r.commits.map((c) => `* ${c}`).join("\n\n")] : [`Merge pull request #${number} from ${lane.branch}`, title];
+    const id = Array.from({ length: 32 }, () => "0123456789abcdef"[Math.floor(Math.random() * 16)]).join("");
+    const ask: ReviewAsk = { id, kind: "merge", source: r.source, repo: r.repo, remote: "origin", branch: lane.branch, base: lane.base, head: "0".repeat(40), commits: r.commits.length, uncommitted: 0, title, body: "", number, url: `https://github.com/${r.repo}/pull/${number}`, method, subject, message };
     this.asks.set(id, { state: "waiting", ask });
     this.log({ op: "review.ask", path: worktree, branch: lane.branch });
     return ask;
@@ -1290,10 +1315,11 @@ export class MockHost implements SessionHost, BuddyHost {
     if (!e) throw new Error("not_found");
     if (e.state !== "waiting") throw new Error(e.state === "decided" ? "already_decided" : "withdrawn");
     e.state = "decided";
-    this.log({ op: "review.settle", path: e.ask.branch, yes, ...(yes ? { title: e.ask.title, body: e.ask.body } : {}) });
+    this.log({ op: "review.settle", path: e.ask.branch, yes, ...(yes ? (e.ask.kind === "merge" ? { title: e.ask.subject, body: e.ask.message } : { title: e.ask.title, body: e.ask.body }) : {}) });
     if (!yes) return { outcome: "declined", pushed: false, url: "", number: 0, step: "", error: "" };
     const fail = this.reviewOf((this.g.__manutLanes ?? []).find((l) => l.branch === e.ask.branch)?.worktree ?? "").fail;
     if (fail) return { outcome: "failed", pushed: fail.step === "create", url: "", number: 0, step: fail.step, error: fail.error };
+    if (e.ask.kind === "merge") return { outcome: "merged", pushed: false, url: e.ask.url, number: e.ask.number, step: "", error: "" };
     const number = 100 + this.asks.size;
     return { outcome: "opened", pushed: true, url: `https://github.com/${e.ask.repo}/pull/${number}`, number, step: "", error: "" };
   }

@@ -6,7 +6,7 @@ import { MockHost, TauriHost, type MockCall } from "../sessions/host";
 import { answerReviewAsk, openReviewAsk, resetReviewAsks, reviewAskRecord, withdrawReviewAsk } from "./reviewAsk";
 import type { ReviewAsk, ReviewDone } from "./source";
 
-const ASK: ReviewAsk = { id: "0123456789abcdef0123456789abcdef", kind: "open", source: "github", repo: "o/r", remote: "origin", branch: "kit/qr", base: "main", head: "a".repeat(40), commits: 2, uncommitted: 0, title: "Add the PromptPay QR", body: "- one\n- two" };
+const ASK: ReviewAsk = { id: "0123456789abcdef0123456789abcdef", kind: "open", source: "github", repo: "o/r", remote: "origin", branch: "kit/qr", base: "main", head: "a".repeat(40), commits: 2, uncommitted: 0, title: "Add the PromptPay QR", body: "- one\n- two", number: 0, url: "", method: "", subject: "", message: "" };
 const OPENED: ReviewDone = { outcome: "opened", pushed: true, url: "https://github.com/o/r/pull/7", number: 7, step: "", error: "" };
 
 const shell = (answer: () => Promise<ReviewDone> = async () => OPENED) => {
@@ -86,11 +86,11 @@ class Host extends TauriHost {
 }
 
 describe("the host's way to the shell", () => {
-  it("has no call that writes without an ask: its review calls are a draft, an ask, a settle by id and a withdraw", () => {
+  it("has no call that writes without an ask: its review calls are a draft, two asks, a settle by id and a withdraw", () => {
     const names = Object.getOwnPropertyNames(TauriHost.prototype);
-    expect(names.filter((n) => /^review/.test(n)).sort()).toEqual(["reviewAsk", "reviewDraft", "reviewSettle", "reviewWithdraw"]);
+    expect(names.filter((n) => /^review/.test(n)).sort()).toEqual(["reviewAsk", "reviewDraft", "reviewMerge", "reviewSettle", "reviewWithdraw"]);
     // nothing else pushes, creates or merges (laneCleanMerged removes the folders of lanes that merged; it writes to no remote)
-    expect(names.filter((n) => /push|Push|create|Create|[mM]erge(?!d)/.test(n))).toEqual([]);
+    expect(names.filter((n) => !/^review/.test(n) && /push|Push|create|Create|[mM]erge(?!d)/.test(n))).toEqual([]);
   });
 
   it("sends the ask's words to be checked and written down, then only the id and the answer", async () => {
@@ -108,6 +108,15 @@ describe("the host's way to the shell", () => {
     // an answer that is not an ask or an outcome is not believed
     await expect(new Host(() => ({ id: "x" })).reviewAsk("/w", "t", "")).rejects.toThrow("unread");
     await expect(new Host(() => ({ outcome: "merged-maybe" })).reviewSettle(ASK.id, true)).rejects.toThrow("unread");
+  });
+
+  it("sends a merge's pull request and method to be checked, and believes only a merge's ask", async () => {
+    const MERGE = { ...ASK, kind: "merge", number: 7, url: "https://github.com/o/r/pull/7", method: "squash", subject: "Add the PromptPay QR (#7)", message: "* one" };
+    const h = new Host(() => MERGE);
+    expect(await h.reviewMerge("/w/qr", 7, "squash")).toEqual(MERGE);
+    expect(h.sent).toEqual([{ cmd: "review_ask_merge", args: { worktree: "/w/qr", number: 7, method: "squash" } }]);
+    await expect(new Host(() => ASK).reviewMerge("/w/qr", 7, "squash")).rejects.toThrow("unread");
+    await expect(new Host(() => ({ ...MERGE, method: "fast-forward" })).reviewMerge("/w/qr", 7, "merge")).rejects.toThrow("unread");
   });
 
   it("MockHost keeps the shell's rules: one answer per ask, and the text the ask showed is the text it sends", async () => {

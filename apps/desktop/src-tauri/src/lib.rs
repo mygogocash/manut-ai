@@ -832,6 +832,16 @@ async fn review_ask_open(asks: State<'_, Arc<review::Ledger>>, worktree: String,
     tauri::async_runtime::spawn_blocking(move || l.ask_open(&home, &worktree, &title, &body)).await.map_err(|e| e.to_string())?
 }
 
+/// The ask to merge pull request `number`, made from the lane at `worktree`, with `method` (`merge`, `squash` or `rebase`;
+/// review.rs `ask_merge`): asked only when it can merge now, naming the method and exactly the message that will be sent.
+/// Writes nothing.
+#[tauri::command]
+async fn review_ask_merge(asks: State<'_, Arc<review::Ledger>>, worktree: String, number: u64, method: String) -> Result<review::Ask, String> {
+    let home = user_home()?;
+    let l = Arc::clone(&asks);
+    tauri::async_runtime::spawn_blocking(move || l.ask_merge(&home, &worktree, number, &method)).await.map_err(|e| e.to_string())?
+}
+
 /// The person's answer to ask `id`, once approval-core settled it on the page (review.rs `settle`): a No runs nothing, a Yes runs
 /// what the ask named, once. Only the id and the answer cross; never an argv, a branch or a text.
 #[tauri::command]
@@ -1442,6 +1452,7 @@ fn commands(invoke: tauri::ipc::Invoke) -> bool {
         source_pull,
         review_draft,
         review_ask_open,
+        review_ask_merge,
         review_settle,
         review_withdraw,
         session_main_moved,

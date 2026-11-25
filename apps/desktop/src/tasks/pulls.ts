@@ -55,6 +55,15 @@ export function notePulls(source: CliSource, repo: string, items: readonly TaskI
   bump();
 }
 
+/** Forgets pull request `number` of `repo` once the app merged it: it is no longer open, so the lane's row stops offering it before
+ *  the next read of the list says so. */
+export function dropPull(source: CliSource, repo: string, number: number): void {
+  const k = known.get(keyOf(source, repo));
+  if (!k) return;
+  for (const [branch, p] of k.byBranch) if (p.number === number) k.byBranch.delete(branch);
+  bump();
+}
+
 /** The open pull request made from `branch` in `repo`, or null. */
 export function pullFor(source: CliSource, repo: string, branch: string): LanePull | null {
   return known.get(keyOf(source, repo))?.byBranch.get(branch) ?? null;

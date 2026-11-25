@@ -22,7 +22,14 @@ const ASK: ReviewAsk = {
   uncommitted: 2,
   title: "Add the PromptPay QR",
   body: "- Draw the QR\n- Read the amount\n\nCo-authored-by: Ana <ana@shop.co>",
+  number: 0,
+  url: "",
+  method: "",
+  subject: "",
+  message: "",
 };
+const MERGE: ReviewAsk = { ...ASK, kind: "merge", number: 12, url: "https://github.com/mygogocash/web-app/pull/12", method: "squash", subject: "Add the PromptPay QR (#12)", message: "* Draw the QR\n\nCo-authored-by: Ana <ana@shop.co>\n\n* Read the amount", uncommitted: 0 };
+const PULL = { source: "github" as const, repo: "mygogocash/web-app", number: 12, state: "open" as const, title: "Add the PromptPay QR" };
 
 function draw(step: ReviewStep, over: Partial<ReviewViewProps> = {}) {
   return renderToString(<ReviewView step={step} onStart={noop} onTitle={noop} onBody={noop} onAsk={noop} onYes={noop} onNo={noop} onClose={noop} onChange={noop} {...over} />);
@@ -56,6 +63,38 @@ describe("Put up for review", () => {
     expect(draw({ at: "ask", ask: ASK, busy: true, why: null }).match(/disabled=""/g)?.length).toBeGreaterThanOrEqual(2);
   });
 
+  it("offers Merge for an open pull request, never for a draft, and starts from the method chosen", () => {
+    expect(words(draw({ at: "closed" }, { pull: PULL, onMergeStart: noop }))).toBe("Merge pull request #12");
+    expect(draw({ at: "closed" }, { pull: { ...PULL, state: "draft" }, onMergeStart: noop })).toBe("");
+    const html = draw({ at: "method", method: "rebase", busy: false, why: null }, { pull: PULL });
+    expect(html).toMatch(/<option value="rebase" selected="">Rebase and merge<\/option>/);
+    expect(words(html)).toContain("Create a merge commit");
+    expect(words(draw({ at: "method", method: "merge", busy: false, why: "cannot_merge:blocked" }))).toContain("The app does not turn on auto-merge.");
+  });
+
+  it("asks to merge with the pull request, the method and exactly the message that will be sent", () => {
+    const html = draw({ at: "ask", ask: MERGE, busy: false, why: null });
+    const text = words(html);
+    expect(text).toContain("Merge pull request #12 into main?");
+    expect(text).toContain("#12 Add the PromptPay QR");
+    expect(text).toContain("kit/promptpay-qr into main");
+    expect(html).toContain('data-method="squash"');
+    expect(text).toContain("Squash and merge");
+    expect(html).toContain(`data-testid="review-subject">Add the PromptPay QR (#12)</pre>`);
+    expect(html).toContain(`data-testid="review-message">* Draw the QR\n\nCo-authored-by: Ana &lt;ana@shop.co&gt;\n\n* Read the amount</pre>`);
+    expect(text).toContain(t("review.merge.never"));
+    expect(t("review.merge.never")).toContain("the app never deletes it");
+    expect(text).toContain(t("review.merge.yes"));
+    // a rebase makes no message, and the ask says so instead of showing an empty one
+    const rebase = draw({ at: "ask", ask: { ...MERGE, method: "rebase", subject: "", message: "" }, busy: false, why: null });
+    expect(rebase).toContain('data-testid="review-no-message"');
+    expect(rebase).not.toContain('data-testid="review-message"');
+    // GitLab's squash sends the one message for both commits it may make, and says so
+    expect(words(draw({ at: "ask", ask: { ...MERGE, source: "gitlab" }, busy: false, why: null }))).toContain(t("review.merge.messageBoth"));
+    expect(doneWords({ outcome: "merged", pushed: false, url: "", number: 12, step: "", error: "" }, "merge")).toBe("Merged pull request #12.");
+    expect(doneWords({ outcome: "failed", pushed: false, url: "", number: 0, step: "check", error: "changed" }, "merge")).toBe(t("review.done.mergeCheck"));
+  });
+
   it("holds Ask until there is a title, and says why the shell refused one", () => {
     expect(draw({ at: "draft", title: " ", body: "", busy: false, why: null })).toMatch(/disabled=""[^>]*data-testid="review-ask-button"|data-testid="review-ask-button"[^>]*disabled=""/);
     expect(words(draw({ at: "draft", title: "x", body: "", busy: false, why: "not_signed_in" }))).toContain("gh auth login");
@@ -73,7 +112,7 @@ describe("Put up for review", () => {
   it("words every refusal, and shows anything else as the shell said it, masked", () => {
     for (const l of LANGS) {
       setLang(l);
-      for (const code of ["no_remote", "not_installed", "not_signed_in", "no_commits", "base_not_on_remote", "mirror_remote", "bad_title", "bad_body", "not_a_lane", "gone", "moved", "unread", "git_missing", "bad_name", "already_decided", "withdrawn", "expired", "not_found", "changed", "no_shell"]) {
+      for (const code of ["no_remote", "not_installed", "not_signed_in", "no_commits", "base_not_on_remote", "mirror_remote", "bad_title", "bad_body", "not_a_lane", "gone", "moved", "unread", "git_missing", "bad_name", "already_decided", "withdrawn", "expired", "not_found", "changed", "no_shell", "not_this_lane", "bad_method", "bad_number", ...["closed", "draft", "conflicts", "behind", "blocked", "checking"].map((w) => `cannot_merge:${w}`)]) {
         expect(whyWords(code), `${l} ${code}`).not.toContain("review.why");
         expect(whyWords(code), `${l} ${code}`).not.toBe(code);
       }

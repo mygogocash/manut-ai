@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { renderToString } from "react-dom/server";
 import { LANGS, setLang, t } from "../i18n";
 import type { MockCall } from "../sessions/host";
-import { lastPull, markPull, parseSource, PULL_EVERY_MS, pullDue, setSourceSettings, SOURCE_DEFAULTS, sourceSettings } from "../lib/sourceControl";
+import { lastPull, markPull, parseSource, PULL_EVERY_MS, pullDue, setSourceSettings, SOURCE_DEFAULTS, sourceSettings, startMethod } from "../lib/sourceControl";
 import { AutoPullView, pullIfDue, pullLine, resetAutoPull } from "./AutoPull";
 import { PULL_CODES, readPulled, type Pulled } from "./source";
 
@@ -24,7 +24,14 @@ describe("the switch", () => {
   it("is off by default and a damaged value is the default", () => {
     expect(sourceSettings()).toEqual(SOURCE_DEFAULTS);
     expect(SOURCE_DEFAULTS.autoPull).toBe(false);
-    for (const damaged of [null, "", "not json", "[]", '{"autoPull":"yes"}']) expect(parseSource(damaged), String(damaged)).toEqual(SOURCE_DEFAULTS);
+    for (const damaged of [null, "", "not json", "[]", '{"autoPull":"yes","mergeMethod":"fast-forward","lastMethod":7}']) expect(parseSource(damaged), String(damaged)).toEqual(SOURCE_DEFAULTS);
+    // what a merge's ask starts with: the last method chosen (a merge commit until one is), or the one set
+    expect(SOURCE_DEFAULTS).toMatchObject({ mergeMethod: "last", lastMethod: "merge" });
+    expect(startMethod(sourceSettings())).toBe("merge");
+    setSourceSettings({ lastMethod: "squash" });
+    expect(startMethod(sourceSettings())).toBe("squash");
+    setSourceSettings({ mergeMethod: "rebase" });
+    expect(startMethod(sourceSettings())).toBe("rebase");
     setSourceSettings({ autoPull: true });
     expect(sourceSettings().autoPull).toBe(true);
   });

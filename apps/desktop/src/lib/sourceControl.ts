@@ -5,13 +5,21 @@
 //   commits changed into their folder), which nobody should find has happened without having asked for it. T3 Code's own default
 //   is off too. The person who wants it turns it on; it then runs only as `git_pull.rs` says (a clean default branch, a
 //   fast-forward, never a lane's folder).
+// - Default merge method: default "the last one I chose", which starts as a merge commit (GitHub's and GitLab's own first choice)
+//   until the person picks another in a merge's ask. It only picks what the ask starts with: every merge is still asked, with the
+//   method shown and changeable there, and no setting merges without asking.
 import { useSyncExternalStore } from "react";
+import { MERGE_METHODS, type MergeMethod } from "../code/source";
 
 export interface SourceSettings {
   autoPull: boolean;
+  /** What a merge's ask starts with: a method, or `last`, the one the person last chose there. */
+  mergeMethod: MergeMethod | "last";
+  /** The method the person last chose in a merge's ask on this computer. */
+  lastMethod: MergeMethod;
 }
 
-export const SOURCE_DEFAULTS: SourceSettings = { autoPull: false };
+export const SOURCE_DEFAULTS: SourceSettings = { autoPull: false, mergeMethod: "last", lastMethod: "merge" };
 
 const KEY = "manut.source";
 const PULLED_KEY = "manut.source.pulled";
@@ -46,8 +54,16 @@ export function parseSource(text: string | null): SourceSettings {
     /* damaged: the defaults */
   }
   const d = SOURCE_DEFAULTS;
-  return { autoPull: typeof o.autoPull === "boolean" ? o.autoPull : d.autoPull };
+  const method = (v: unknown): MergeMethod | undefined => MERGE_METHODS.find((m) => m === v);
+  return {
+    autoPull: typeof o.autoPull === "boolean" ? o.autoPull : d.autoPull,
+    mergeMethod: o.mergeMethod === "last" ? "last" : (method(o.mergeMethod) ?? d.mergeMethod),
+    lastMethod: method(o.lastMethod) ?? d.lastMethod,
+  };
 }
+
+/** The method a merge's ask starts with. */
+export const startMethod = (s: SourceSettings): MergeMethod => (s.mergeMethod === "last" ? s.lastMethod : s.mergeMethod);
 
 const listeners = new Set<() => void>();
 let cache: { text: string | null; value: SourceSettings } | null = null;

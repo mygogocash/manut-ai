@@ -5,13 +5,14 @@
 //   in (names only), read through the runners Tasks already uses (src-tauri/src/source_tools.rs). Nothing is installed or signed
 //   in from here: a CLI that is missing or signed out says how, in the CLI's own words, in a terminal (`gh auth login`).
 // - Repositories: Automatically pull (off by default; lib/sourceControl.ts says why), which keeps a project's default branch
-//   current only when its checkout is clean, by a fast-forward (src-tauri/src/git_pull.rs, code/AutoPull.tsx).
+//   current only when its checkout is clean, by a fast-forward (src-tauri/src/git_pull.rs, code/AutoPull.tsx); and Default merge
+//   method, what a merge's ask starts with ("the last one I chose" by default). Every merge is still asked (code/Review.tsx).
 //
 // `SourceControlView` draws a given state so a test can draw each one; `SourceControlPage` reads the shell and acts.
 import { useCallback, useEffect, useState } from "react";
 import { t, type Key } from "../i18n";
 import { getHost } from "../sessions/host";
-import type { SourceTool, SourceTools } from "../code/source";
+import { MERGE_METHODS, type MergeMethod, type SourceTool, type SourceTools } from "../code/source";
 import { setSourceSettings, SOURCE_DEFAULTS, useSourceSettings, type SourceSettings } from "../lib/sourceControl";
 import { Toggle } from "../pages/kit";
 import { Row } from "./DevRow";
@@ -25,6 +26,7 @@ export interface SourceControlViewProps {
   /** The page's own choices, saved on this computer. */
   saved?: SourceSettings;
   onAutoPull?: (on: boolean) => void;
+  onMergeMethod?: (method: MergeMethod | "last") => void;
 }
 
 /** The two CLIs, with the words each one's rows use. */
@@ -104,6 +106,16 @@ export function SourceControlView(p: SourceControlViewProps) {
         <Row title={t("src.pull.title")} hint={t("src.pull.hint")}>
           <Toggle on={saved.autoPull} label={t("src.pull.title")} onChange={(on) => p.onAutoPull?.(on)} testId="src-auto-pull" />
         </Row>
+        <Row title={t("src.merge.title")} hint={t("src.merge.hint")}>
+          <select className="dev-in" value={saved.mergeMethod} aria-label={t("src.merge.title")} onChange={(e) => p.onMergeMethod?.(e.currentTarget.value as MergeMethod | "last")} data-testid="src-merge-method">
+            <option value="last">{t("src.merge.last")}</option>
+            {MERGE_METHODS.map((m) => (
+              <option key={m} value={m}>
+                {t(`review.method.${m}` as Key)}
+              </option>
+            ))}
+          </select>
+        </Row>
       </div>
       <div className="st-note">
         <button type="button" className="st-btn" onClick={p.onCheck} disabled={reading && !p.failed} data-testid="src-check">
@@ -143,5 +155,5 @@ export function SourceControlPage() {
     return () => window.removeEventListener("focus", again);
   }, [read]);
   const saved = useSourceSettings();
-  return <SourceControlView tools={tools} failed={failed} onCheck={() => read(true)} saved={saved} onAutoPull={(autoPull) => setSourceSettings({ autoPull })} />;
+  return <SourceControlView tools={tools} failed={failed} onCheck={() => read(true)} saved={saved} onAutoPull={(autoPull) => setSourceSettings({ autoPull })} onMergeMethod={(mergeMethod) => setSourceSettings({ mergeMethod })} />;
 }

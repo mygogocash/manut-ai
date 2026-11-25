@@ -37,6 +37,10 @@ describe("Settings › Source control", () => {
     expect(html).toMatch(/aria-checked="false"[^>]*data-testid="src-auto-pull"|data-testid="src-auto-pull"[^>]*aria-checked="false"/);
     expect(text).toContain(t("src.pull.hint"));
     expect(t("src.pull.hint")).toMatch(/never a merge, a rebase or a stash, and never in a lane's folder/);
+    // Default merge method: the last one chosen, with the three methods offered
+    expect(html).toMatch(/<option value="last" selected="">The last one I chose<\/option>/);
+    for (const m of ["Create a merge commit", "Squash and merge", "Rebase and merge"]) expect(text).toContain(m);
+    expect(text).toContain(t("src.merge.hint"));
   });
 
   it("says where to get a missing program and never offers to install or sign in from here", () => {
@@ -48,7 +52,7 @@ describe("Settings › Source control", () => {
     expect(text).toContain("glab is not on this computer.");
     expect(html).toContain('data-testid="src-git-state" data-ok="false"');
     // the buttons read again or are the page's own switches: none installs or signs in
-    expect(html.match(/data-testid="src-[a-z-]+"/g)?.filter((m) => !m.endsWith('-state"'))).toEqual(['data-testid="src-providers"', 'data-testid="src-auto-pull"', 'data-testid="src-check"']);
+    expect(html.match(/data-testid="src-[a-z-]+"/g)?.filter((m) => !m.endsWith('-state"'))).toEqual(['data-testid="src-providers"', 'data-testid="src-auto-pull"', 'data-testid="src-merge-method"', 'data-testid="src-check"']);
     expect(html.match(/<button/g)).toHaveLength(2);
   });
 
