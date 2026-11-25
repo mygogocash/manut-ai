@@ -15,6 +15,8 @@ export interface ConfigItem {
   from: ConfigFrom;
   plugin?: string;
   state: ConfigState;
+  /** A skill's folder name (not its path), which sharing it by a link names (item 84). */
+  folder?: string;
 }
 
 export interface AgentConfig {
@@ -44,7 +46,8 @@ function item(raw: unknown): ConfigItem | null {
   const state = STATES.find((s) => s === r.state);
   if (!n || !from || !state) return null;
   const plugin = from === "plugin" ? name(r.plugin) : null;
-  return plugin ? { name: n, from, plugin, state } : { name: n, from, state };
+  const folder = typeof r.folder === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(r.folder) && !r.folder.includes("..") ? r.folder : null;
+  return { name: n, from, ...(plugin ? { plugin } : {}), state, ...(folder ? { folder } : {}) };
 }
 
 /** The shell's answer (`agent_config_list`), with anything that is not a name, a source and a state left out. */
