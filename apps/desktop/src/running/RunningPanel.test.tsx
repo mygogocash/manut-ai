@@ -74,6 +74,26 @@ describe("the items", () => {
     expect(runningItems(state([lane]), ctx({ project: ROOT })).map((i) => i.row.pid)).toEqual([]);
   });
 
+  it("list a lane's preview as a Preview, with its project and its lane, though it runs in the lane's own folder", () => {
+    const shown = row({ pid: 5, kind: "preview", session: 1, folder: "/home/you/.manut/lanes/baanmali-preorder/promptpay-qr", argv: ["node", "/opt/homebrew/lib/node_modules/pnpm/bin/pnpm.cjs", "run", "dev"], ports: [5173] });
+    const command = row({ pid: 6, kind: "chat", session: 1, started: NOW - 3_600_000 });
+    const open = vi.fn();
+    // the page knows whose preview it is (previewStore.ts), and so its lane and that lane's project
+    const projectOf = (r: RunningRow) => (r.kind === "preview" ? ROOT : r.folder);
+    const lane = (r: RunningRow) => (r.kind === "preview" && r.session === 1 ? { name: "PromptPay QR at checkout", open } : null);
+    const items = runningItems(state([shown, command]), ctx({ project: ROOT, projectOf, lane }));
+    expect(items.map((i) => [i.row.pid, i.preview, i.label, i.ports, i.lane])).toEqual([
+      [6, false, "pnpm dev", "port 3000", null],
+      [5, true, "pnpm run dev", "port 5173", "PromptPay QR at checkout"],
+    ]);
+    const tags = byId(items, "running-tag").map((e) => e.props.children);
+    expect(tags).toEqual(["Running", "Preview"]);
+    // the same number as a chat's is the preview's own Stop, by its kind
+    const onStop = vi.fn();
+    (byId(items, "running-stop", onStop)[1].props.onClick as () => void)();
+    expect(onStop).toHaveBeenCalledWith(shown);
+  });
+
   it("name the terminal a command runs in, only for a terminal", () => {
     const open = vi.fn();
     const lane = vi.fn((r: RunningRow) => (r.kind === "pty" && r.session === 1 ? { name: "PromptPay QR at checkout", open } : null));
@@ -202,13 +222,13 @@ describe("the panel", () => {
 
   it("is in all four languages", () => {
     for (const [lang, words] of [
-      ["ko", ["계속 실행 중인 명령", "실행 중", "멈추기", "포트 3000", "42분"]],
-      ["ja", ["実行し続けているコマンド", "実行中", "停止", "ポート 3000", "42分"]],
-      ["zh", ["持续运行的命令", "运行中", "停止", "端口 3000", "42 分钟"]],
+      ["ko", ["계속 실행 중인 명령", "실행 중", "멈추기", "포트 3000", "42분", "미리보기"]],
+      ["ja", ["実行し続けているコマンド", "実行中", "停止", "ポート 3000", "42分", "プレビュー"]],
+      ["zh", ["持续运行的命令", "运行中", "停止", "端口 3000", "42 分钟", "预览"]],
     ] as const) {
       setLang(lang);
       // the items carry their words, so they are made after the language is set, as the page makes them on each draw
-      const out = html(runningItems(state([row()]), ctx()));
+      const out = html(runningItems(state([row(), row({ kind: "preview", pid: 7 })]), ctx()));
       for (const w of words) expect(out, `${lang} ${w}`).toContain(w);
     }
   });

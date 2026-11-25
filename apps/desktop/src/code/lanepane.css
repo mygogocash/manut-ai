@@ -135,6 +135,71 @@
   margin: 0;
 }
 
+/* The preview (LanePreview.tsx): the canvas's .btn and .btn.dark, as home.css copies them, scoped here, in a row that wraps. */
+.lpane .lp-acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
+.lpane .btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 12px;
+  border-radius: var(--rad);
+  border: 1px solid var(--line);
+  background: var(--aui-surface);
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: background 0.15s;
+}
+.lpane .btn:hover {
+  background: var(--hov);
+}
+.lpane .btn.dark {
+  border-color: var(--aui-primary);
+  background: var(--aui-primary);
+  color: var(--aui-on-primary);
+}
+.lpane .btn.dark:hover {
+  opacity: 0.88;
+}
+.lpane .btn:focus-visible {
+  outline: 2px solid var(--aui-border-strong);
+  outline-offset: 1px;
+}
+/* The desktop's own: a Stop that was pressed waits, as the running list's does, and looks it. */
+.lpane .btn[aria-busy="true"] {
+  opacity: 0.6;
+  cursor: progress;
+}
+/* The canvas's larger touch targets: each control reaches a few pixels past its top and bottom. */
+.lpane .btn::after {
+  content: "";
+  position: absolute;
+  inset: -5px 0;
+}
+/* The desktop's own: a run's last lines in mono, wrapped rather than scrolled sideways, so the pane is never wider than its column. */
+.lpane .lp-lines {
+  margin: 4px 0 0;
+  padding: 8px 10px;
+  border-radius: var(--rad);
+  background: var(--aui-subtle);
+  color: var(--aui-muted);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+}
+.lpane .lp-samples {
+  overflow-wrap: anywhere;
+}
+
 /* The Sample rows (PreviewSample.tsx) as Kit's panel draws them: the canvas's .rowl, .tag and .lk, scoped here. */
 .lpane .rowl {
   display: flex;

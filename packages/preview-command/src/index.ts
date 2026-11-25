@@ -34,6 +34,13 @@ const LOCKFILES: ReadonlyArray<readonly [string, Manager]> = [
 
 const MANAGERS: readonly string[] = ["pnpm", "yarn", "bun", "npm"];
 
+/// Whether `table` has its own `key`. `Object.hasOwn` would say the same, but
+/// the desktop runs this in macOS 11's webview, whose Safari can be older than
+/// 15.4, the first that has it, and a call to it there would fail.
+function own(table: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(table, key);
+}
+
 /// A script that publishes would make the preview deploy something. The
 /// check is on the script's text, so a script that calls another script by
 /// name (`npm run deploy`) is caught by the word in it.
@@ -52,7 +59,7 @@ function publishes(text: string): boolean {
 /// preview can publish.
 function hooksOf(table: Record<string, unknown>, name: string): string[] {
   return [`pre${name}`, `post${name}`].flatMap((hook) => {
-    const text = Object.hasOwn(table, hook) ? table[hook] : undefined;
+    const text = own(table, hook) ? table[hook] : undefined;
     return typeof text === "string" ? [text] : [];
   });
 }
@@ -88,7 +95,7 @@ export function previewCommand(input: PreviewInput): PreviewCommand {
 
   let found = false;
   for (const name of SCRIPTS) {
-    if (!Object.hasOwn(table, name)) continue;
+    if (!own(table, name)) continue;
     const text = table[name];
     if (typeof text !== "string" || text.trim() === "") continue;
     found = true;

@@ -464,7 +464,7 @@ describe("the facts of the Tests view beside a lane", () => {
   });
 
   it("is in every language, with the same slots", () => {
-    const keys = ["lane.pane.title", "lane.pane.diff", "lane.pane.preview", "lane.pane.tests", "lane.pane.diff.none", "lane.pane.preview.none", "lane.pane.tests.none", "lane.pane.tests.running", "lane.pane.tests.at", "lane.pane.tests.stale", "lane.pane.why.no_output", "lane.pane.why.no_summary", "lane.pane.why.no_tests", "lane.pane.why.errors", "lane.pane.why.exit"] as const;
+    const keys = ["lane.pane.title", "lane.pane.diff", "lane.pane.preview", "lane.pane.tests", "lane.pane.diff.none", "lane.pane.tests.none", "lane.pane.tests.running", "lane.pane.tests.at", "lane.pane.tests.stale", "lane.pane.why.no_output", "lane.pane.why.no_summary", "lane.pane.why.no_tests", "lane.pane.why.errors", "lane.pane.why.exit"] as const;
     for (const l of LANGS) for (const k of keys) expect(DICT[l][k].trim(), `${l} ${k}`).not.toBe("");
   });
 });

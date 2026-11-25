@@ -192,7 +192,9 @@ export class TauriHost implements SessionHost {
   }
   async reset() {
     const { invoke } = await this.core();
-    await Promise.all([invoke("session_close_all"), invoke("chat_close_all")]);
+    // the lanes' previews too (src-tauri/src/preview.rs): a preview whose page is gone would run on unseen. A shell older than
+    // the preview has no such command, and that stops nothing else.
+    await Promise.all([invoke("session_close_all"), invoke("chat_close_all"), invoke("preview_close_all").catch(() => undefined)]);
   }
   async agents() {
     const { invoke } = await this.core();

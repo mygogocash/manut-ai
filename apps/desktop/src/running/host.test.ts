@@ -9,9 +9,11 @@ const row = (o: Partial<RunningRow> = {}): RunningRow => ({ ...good, kind: "pty"
 describe("a row from the shell", () => {
   it("is read whole from the file the shell's own test writes it to, so neither side changes the shape alone", () => {
     // src-tauri/src/running.rs (`a_row_is_the_json_the_page_reads`) checks the shell's rows against this same file
-    expect(shellRows).toHaveLength(2);
+    expect(shellRows).toHaveLength(3);
     expect(shellRows.flatMap(readRow)).toEqual(shellRows);
     expect(shellRows[1].started).toBeNull();
+    // a lane's preview is a kind of its own (src-tauri/src/preview.rs)
+    expect(shellRows[2].kind).toBe("preview");
   });
 
   it("is read whole, a missing start as unknown", () => {

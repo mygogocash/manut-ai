@@ -24,7 +24,7 @@ state that needs the owner: a real GitHub account, money, a real sign-in or real
 | The request, "Edited 3 files and ran 14 tests", Kit's note, the changed files with their counts | Part: the session's timeline shows each step and a file edit's diff, and (this branch) the pane beside a lane lists the changed files with their counts. No line that counts the files and the tests together | `chat/activity/Work.tsx` (`DiffView`), `code/LanePane.tsx` |
 | Tell Kit what to change, add a file, the Code chip | Has: the session's composer, files and modes | `sessions/SessionView.tsx` |
 | "Your Claude Code plan" in the composer | Part: a session runs on the developer's own sign-in; the composer names the model, not the plan | `sessions/SessionView.tsx` |
-| Diff, Preview and Tests beside the lane | Part (this branch): the chat of a lane has a pane beside it, "What to look at", with the chips Diff, Preview and Tests, Diff first; it goes under the chat when the column is too narrow for both. Diff: each file the session changed, its newest change with the added and removed counts, drawn as the timeline draws a change. Tests: the last finished run's result as the lane read it, when it finished, the command that ran it, whether a file changed since, and any run in progress; none of the run's output, which the lane never kept. Preview: that the app has no preview of its own yet, and the Sample rows of the secrets Kit's changed code reads. Lacks the preview itself: nothing is started. See [The pane beside a lane](#the-pane-beside-a-lane) | `code/LanePane.tsx`, `code/changes.ts`, `code/lanepane.css`, `sessions/SessionView.tsx` (`LaneSplit`) |
+| Diff, Preview and Tests beside the lane | Part (this branch): the chat of a lane has a pane beside it, "What to look at", with the chips Diff, Preview and Tests, Diff first; it goes under the chat when the column is too narrow for both. Diff: each file the session changed, its newest change with the added and removed counts, drawn as the timeline draws a change. Tests: the last finished run's result as the lane read it, when it finished, the command that ran it, whether a file changed since, and any run in progress; none of the run's output, which the lane never kept. Preview (this branch): the lane's project run with its own dev server in the lane's own folder: the command named first (`$ pnpm run dev`) with Start, then Running at its address with Open and Stop, Stopped, Ended with its exit code and its last lines, or Could not start with why; the Sample rows under it. Not drawn: the project's page inside the pane (Open hands the address to the browser). See [The pane beside a lane](#the-pane-beside-a-lane) and [The preview of a lane](#the-preview-of-a-lane) | `code/LanePane.tsx`, `code/LanePreview.tsx`, `code/previewStore.ts`, `src-tauri/src/preview.rs`, `code/changes.ts`, `code/lanepane.css`, `sessions/SessionView.tsx` (`LaneSplit`) |
 | The owner sees only the note; a developer gets the diff, the preview and the tests | Lacks: the Code page is the developer's view only | |
 
 ## StatesCode: lanes, test output and artifacts
@@ -54,7 +54,7 @@ state that needs the owner: a real GitHub account, money, a real sign-in or real
 | --- | --- | --- |
 | Kit needs a secret: typed once into the vault, Kit uses it without seeing it | Lacks on the desktop. The API's vault keeps the shop's sign-ins; the desktop keeps only its own session in the keychain (Owner: real secrets) | `apps/api/src/sign-in-vault.ts`, `src-tauri/src/api_link.rs` |
 | A secret found in the code: moved out, never committed | Part (this branch): a key in Kit's changes is found and named, a commit or push then asks at every level, and no diff shows it. Moving it to a vault lacks | `code/secrets.ts`, `code/kitAsks.ts`, `chat/activity/Work.tsx` |
-| No secret in the preview: a sample until the owner adds one | Part (this branch): the state and its words. A secret Kit's changed code reads by name (`process.env.PROMPTPAY_SHOP_ID`) shows as Sample, "The preview has no shop ID yet, so the QR code is a sample", with Add the shop ID, which says the vault comes later. The rule for what a preview runs with (a sample unless the owner added that secret) is `previewEnv`. There is no preview to run with it yet, and nothing adds a secret: the owner has not said where a developer's secrets live (Owner: real secrets) | `code/preview.ts`, `code/PreviewSample.tsx` |
+| No secret in the preview: a sample until the owner adds one | Part (this branch): the state and its words. A secret Kit's changed code reads by name (`process.env.PROMPTPAY_SHOP_ID`) shows as Sample, "The preview has no shop ID yet, so the QR code is a sample", with Add the shop ID, which says the vault comes later. The rule for what a preview runs with (a sample unless the owner added that secret) is `previewEnv`, and the preview of a lane runs with it (this branch), with a sample too for each secret the lane folder's `.env.example` names. Nothing adds a secret: the owner has not said where a developer's secrets live (Owner: real secrets) | `code/preview.ts`, `code/previewRun.ts` (`previewSecrets`), `code/PreviewSample.tsx` |
 
 ### The project and its history
 
@@ -78,7 +78,7 @@ state that needs the owner: a real GitHub account, money, a real sign-in or real
 | State | Desktop | Where |
 | --- | --- | --- |
 | The terminal: Kit runs commands here, and you can type too | Has | `sessions/term/`, `terminal/Panel.tsx` |
-| Something that keeps running: "Dev server, 42 minutes, port 3000", Stop | Has (this branch): a list under Kit's panel, for the project it shows, of each command a terminal or a chat started that still runs, with the command, how long it has run, its port and Stop (see "What keeps running" below). A lane's commands run in its own folder and are listed with its project. Not on Windows | `running/RunningPanel.tsx`, `src-tauri/src/running.rs` |
+| Something that keeps running: "Dev server, 42 minutes, port 3000", Stop | Has (this branch): a list under Kit's panel, for the project it shows, of each command a terminal or a chat started that still runs, and each lane's preview (tagged Preview), with the command, how long it has run, its port and Stop (see "What keeps running" below). A lane's commands run in its own folder and are listed with its project. Not on Windows | `running/RunningPanel.tsx`, `src-tauri/src/running.rs` |
 
 ## KitCode: the parts
 
@@ -149,6 +149,11 @@ The states whose rules are pure functions, with their tests, then the screens th
 - `apps/desktop/src/code/preview.ts`: the secrets Kit's changed code reads, by name, and `previewEnv`, the one rule for
   what a preview runs with. `PreviewSample.tsx` draws the Sample row, on the Code page and (without its band, which the chip
   names) under Preview in the pane beside a lane; `needsOfChat` gives one session's.
+- The preview of a lane (see [The preview of a lane](#the-preview-of-a-lane)): `src-tauri/src/preview.rs` reads a lane's folder,
+  runs the chosen command there with an environment that starts empty, hands its lines on and stops its process group;
+  `code/previewRun.ts` chooses the command (`@manut/preview-command`), says what it runs with (`previewSecrets`) and what each
+  thing the shell says makes of a run; `code/previewStore.ts` keeps each lane's; `code/previewHost.ts` is the shell, or a fake run
+  in a plain browser; `code/LanePreview.tsx` draws it under the Preview chip. `e2e/preview-run.spec.ts` walks it.
 - The stand-in coding agent (`sessions/host.ts`) answers `/kit install`, `test`, `edit`, `outside`, `key`, `shop`, `merge`,
   `commit` and `deploy`, and the mock host answers what git would say for the canvas's project (`code/mockMoved.ts`), so each
   state can be seen in a browser; `e2e/kit-code.spec.ts` and `e2e/kit-preview-moved.spec.ts` walk them. It also answers
@@ -263,8 +268,8 @@ for it, which its changelog says); this Mac has 3.9, so that line was not run.
 
 The canvas's Code board puts a pane beside an open lane: "What to look at", with the chips Diff, Preview and Tests. The desktop
 draws it beside the chat of every lane (`isLaneChat`: a coding session that runs as a chat in the app; not the terminal view of
-the same session, and not a Hermes folder chat), opened on Diff. It looks at what the session did; it changes nothing and
-starts nothing.
+the same session, and not a Hermes folder chat), opened on Diff. It looks at what the session did and changes nothing; the one
+thing it starts is the lane's preview, when the person presses Start.
 
 - **Where it is.** To the right of the chat while the session view holds both: the chat takes `3 1 440px` and the pane
   `3 1 380px`, as the canvas's `.split` lays out its `.pane` and `.side2`, and the pane is no wider than 640px. When the session
@@ -279,10 +284,11 @@ starts nothing.
   removed counts of that change, the lines in mono, and `maskSecrets` over every line, as the timeline does. The pane's diff
   has ids of its own (`lane-diff-*`) and does not scroll itself into view, so the timeline's `diff-view` ids are the timeline's
   alone. A file changed twice shows its later change, not both. "Kit has not changed any file yet." is said only while none is listed.
-- **Preview.** Says that the preview does not run in the app yet, and under it shows the Sample rows of the secrets Kit's
-  changed code reads (`needsOfChat`, drawn by `PreviewSampleView` as on the Code page, without the band that the chip names),
-  each with Add, which says the vault comes later. No process is started and no environment is read; a preview that is
-  started later has `previewEnv` for what it runs with.
+- **Preview.** The lane's project run with its own dev server in the lane's own folder (`LanePreview.tsx`; see
+  [The preview of a lane](#the-preview-of-a-lane)): the command named first with Start, its state as it runs, the names of the
+  secrets it runs on samples, and under it the Sample rows of the secrets Kit's changed code reads (`needsOfChat`, drawn by
+  `PreviewSampleView` as on the Code page, without the band that the chip names), each with Add, which says the vault comes
+  later. A session that works in the developer's own folder gets no Start.
 - **Tests.** What the lane keeps (`laneTests`): the last run that finished, in the lane's own words (`resultLine`, the row's
   line too: "14 tests passed.", or "1 of 14 tests failed. Nothing is live." with the failing tests' names, a few, and how
   many more; or Not confirmed with the reason in words: the agent handed on no output, the output has no summary the app can
@@ -298,9 +304,64 @@ starts nothing.
   so the list holds what the chat still holds. A subagent's own edits come as `subagent` events, not `tool.diff`, and are not
   listed.
 
-The words are in en, ko, ja and zh. `LanePane.test.tsx` draws each view and the chips from props, `changes.test.ts` drives the
-chat's own reducer through a rewind, `Work.test.tsx` holds the diff view's ids and its scroll, and `e2e/lane-pane.spec.ts` walks
-the pane in a browser.
+The words are in en, ko, ja and zh. `LanePane.test.tsx` draws each view and the chips from props, the preview's states among
+them, `changes.test.ts` drives the chat's own reducer through a rewind, `Work.test.tsx` holds the diff view's ids and its scroll,
+and `e2e/lane-pane.spec.ts` walks the pane in a browser (`e2e/preview-run.spec.ts` the preview's run).
+
+### The preview of a lane
+
+The canvas's Code board has a Preview beside an open lane. The desktop runs the lane's project with its own dev server, in the
+lane's own folder, says where it runs, and Open hands that address to the person's browser (`src-tauri/src/preview.rs`,
+`code/previewRun.ts`, `code/previewStore.ts`, `code/previewHost.ts`, `code/LanePreview.tsx`).
+
+- **Only in a lane's own folder.** A folder two names or more below `~/.manut/lanes`, read after every link is followed. A session
+  that works in the developer's own folder gets no Start, and its Preview says why: that folder can hold a real `.env.local`, and
+  a lane's worktree has none, since git ignores it and nothing ignored comes into a lane.
+- **The command, named first.** Each time Preview is looked at, the shell reads the lane folder's `package.json`, the names at its
+  root and its `.env.example` (`preview_read`: a link is never followed, and a `package.json` over 512 KiB reads as unreadable).
+  `@manut/preview-command` chooses: `dev`, `start`, `preview` or `serve`, the first that is there and does not look like it
+  publishes (nor does its pre or post script), run by the manager the `packageManager` field or the lockfile names. The view
+  shows it as `$ pnpm run dev` with Start, or says in words why there is none: no package.json, one that cannot be read, no such
+  script, or scripts that look like they publish or deploy.
+- **Start.** The folder is read again and the command chosen from what it holds now. The shell (`preview_start`) runs it only when
+  it is one of the sixteen commands the package can choose, as a list of words with no shell, with the manager found where a
+  chat's agent is found, and only while package.json is still the text the page chose from; otherwise `changed`, and the view
+  shows the command it would run now. One preview per lane.
+- **What it runs with.** An environment that starts empty. From the app's own: `HOME`, `USER`, `LOGNAME`, `SHELL`, `TMPDIR`,
+  `LANG` (`en_US.UTF-8` when the app has none, as a chat gets it) and the `LC_*` categories; `PATH` as a chat gets it (the
+  manager's folder first); `TERM=dumb`, since the output goes to a pipe read as plain lines. Then each secret the preview knows
+  of, set explicitly so that it wins over a `.env` file the framework loads (`previewSecrets`): each name Kit's changes read
+  through `previewEnv` (a sample, unless the owner added that very secret, which nothing can do yet), each variable
+  `.env.example` marks as a secret by its own rule with `sampleEnv`'s fake value, and each `.env.example` name that says what kind
+  of secret it is through `previewEnv` too, so a shop ID is all zeros whatever its line wrote. Its other variables (`PORT`) are
+  left to the project. Nothing else of the app's environment reaches it. The view names the secrets that run on samples; no
+  value is ever on the page.
+- **Its states.** Starting, until it prints an address of this computer (`@manut/dev-url`) or for a minute. Running at that
+  address, with Open and Stop. After a minute with no address: that it runs but has printed no address the app can open, with
+  its last lines and Stop (an address printed later still counts). Stopping, then Stopped. Ended by itself, with its exit code
+  and its last six lines, each through the app's masker. Could not start, with why in words: not a lane's folder, a command or a
+  secret's name the shell will not take, package.json changed, a preview already running, the manager not installed, Windows.
+  Start again after any end.
+- **Its lines.** stdout and stderr go to the page as they come, every 50 ms and at most 500 at once, a line cut at 4 KiB, a progress
+  line read as what shows last; the shell keeps none. The page keeps the last 200, in memory only, with a terminal's escapes taken
+  out.
+- **Open.** `preview_open` takes only `http` or `https`, then `localhost`, `127.0.0.1` or `[::1]`, a port or none, and a closing
+  `/` with nothing after it, and hands it to the system opener. Nothing of the project is drawn in the app, whose pages may frame nothing (`frame-src 'none'`).
+- **Stop, and the other ends.** Stop hangs up the preview's process group, as a chat's close does, and kills what still runs 1.5
+  seconds later. A preview also stops when its lane's session closes, when the page loads again (`preview_close_all`) and when the
+  app quits; a start the shell answers after its lane closed is stopped at once. When its program ends by itself, what it started
+  goes with it.
+- **What keeps running** lists each preview, tagged Preview and named by its lane, with the ports of everything it started; its Stop
+  is the preview's own, so the pane says Stopped.
+- **Where.** macOS and Linux. On Windows the view says the preview runs on macOS and Linux for now.
+- **In a browser.** No shell, so a fake preview (`MockPreviewHost`) prints a dev server's lines and its address and lists itself
+  with what keeps running; `window.__manutMockPreview` says what a folder holds and how the run goes, and `window.__manutPreviewCalls`
+  records each call. `e2e/preview-run.spec.ts` walks it in light, dark and narrow and in ko, ja and zh.
+
+The tests: `preview.rs` (the environment, the sixteen commands, the folder, the address Open takes, and real runs with a stand-in
+manager: its words, its folder, its environment, Stop ending its whole group, an end by itself, `changed`, `running`),
+`running.rs` (a preview's row), and `previewRun.test.ts`, `previewStore.test.ts`, `previewHost.test.ts`, `LanePane.test.tsx` and
+`RunningPanel.test.tsx` on the page.
 
 ### Where a lane works
 
@@ -411,8 +472,8 @@ never a value, and only code Kit changed (its `tool.diff` events). `previewEnv` 
 a sample for every secret unless the owner added that very secret. Nothing else can put a real one in: not this computer's
 environment, not a value found in the code. The sample for a shop ID is all zeros, so no payment can reach an account.
 
-The app has no preview of its own yet, so nothing runs with `previewEnv` today; a preview started by the app must use it. And
-nothing saves a secret: Add the shop ID says the vault comes later.
+The preview of a lane runs with `previewEnv` (see [The preview of a lane](#the-preview-of-a-lane)), with a sample too for each secret
+the lane folder's `.env.example` names. Nothing saves a secret: Add the shop ID says the vault comes later.
 
 ## What keeps running
 
@@ -458,6 +519,11 @@ process only if it is still the one it listed (same program, same start time), s
 that took a finished one's number, a session's own shell, a process deeper in a command's tree, and anything outside the
 app's own sessions are never touched. After Stop the row says Stopping until the command is gone; if it is still there
 after 10 seconds the button comes back, with "Could not stop it. Try again."
+
+**A lane's preview** (see [The preview of a lane](#the-preview-of-a-lane)) is listed too, as a kind of its own (`Kind::Preview`,
+from `Previews::roots`): one row, the preview's own program (`pnpm run dev`), with the ports of everything it started, tagged
+Preview instead of Running and named by its lane. Its Stop goes through the preview's own stop, which ends its process group, so
+its pane says Stopped.
 
 **Files.** `src-tauri/src/running.rs` (the walk, its tests with a table of processes and with real ones, `running_list`
 and `running_stop` in `lib.rs`; `Sessions::roots` and `ChatSessions::roots` give the programs; `fg.rs` lends its readers).
@@ -597,9 +663,12 @@ rewind.
   open session does not show its own commands. Also: Windows has no reader, so the page draws nothing there; a command
   that left its parent for good (a daemon) is no longer found; a long-lived `sh -c` that an agent keeps for its own use
   would be listed as a command; and so might a helper a shell's startup file leaves running (not seen yet).
-- The preview itself: the project run, in the pane beside the lane where its Preview view now says the app has none, started
-  with `previewEnv`, so a secret it reads is a sample. Reading what a project needs from its `.env.example` as well as from
-  Kit's changes.
+- The preview of a lane, past its first slice: the project's page drawn inside the pane (the app's pages may frame nothing, and
+  what may be framed wants its own decision); Windows (an environment list of its own and the package manager's `.cmd` shim); a
+  preview from the Code page's lane row, where only the session view has one; the owner's own secrets once a vault exists
+  (`previewSecrets` already takes them as `added`); an address read from the ports a preview listens on when it prints none; a
+  preview kept through a reload or a restart of the app (every one stops); and a lane that runs in its own terminal, which has no
+  pane.
 - Where Claude Code's shell is. Its ask does not say, and a `cd` in one command carries to the next inside the project
   and the session's attachments folder (the shell adds it with `--add-dir`), so the dial reads a command from the
   session's folder. It does check the path Claude Code itself found outside. Starting Claude Code with

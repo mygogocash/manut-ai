@@ -10,12 +10,12 @@ import { pathKey } from "../sessions/folders";
 import { duration } from "../sidebar/usageFormat";
 
 /** One command still running, as the shell reports it (`Row` in src-tauri/src/running.rs). It is the command a
- *  session's shell or agent started, and what it started in turn is part of it: `ports` are the ones any of them listens
- *  on. `argv` is the command's own program and arguments, as the system holds them. */
+ *  session's shell or agent started, or a lane's preview, and what it started in turn is part of it: `ports` are the ones
+ *  any of them listens on. `argv` is the command's own program and arguments, as the system holds them. */
 export interface RunningRow {
-  /** A terminal (the shell's pty) or a chat (an agent on pipes). */
-  kind: "pty" | "chat";
-  /** The id the shell gave that terminal or chat. */
+  /** A terminal (the shell's pty), a chat (an agent on pipes), or a lane's preview (src-tauri/src/preview.rs). */
+  kind: "pty" | "chat" | "preview";
+  /** The id the shell gave that terminal, chat or preview. */
   session: number;
   /** The folder the session started in: the project it belongs to. */
   folder: string;

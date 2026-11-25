@@ -1,13 +1,14 @@
 // The pane beside a lane (the design canvas's Code board, "What to look at"): three chips, Diff, Preview and Tests, and what the one
 // picked shows for the coding session whose chat is beside it. Diff lists each file the session changed, the newest change to each,
-// drawn as the timeline draws a file edit's change (chat/activity/Work.tsx) with the same masker. Preview says the app has no preview
-// of its own yet, and shows the Sample rows of the secrets Kit's changed code reads (PreviewSample.tsx), so it starts nothing.
+// drawn as the timeline draws a file edit's change (chat/activity/Work.tsx) with the same masker. Preview is the lane's project run
+// with its own dev server in the lane's own folder (LanePreview.tsx, previewStore.ts): the command first, then Start, its address
+// with Open and Stop, and how it ended; under it the Sample rows of the secrets Kit's changed code reads (PreviewSample.tsx).
 // Tests shows what the lane keeps of its tests (lane.ts): the last run that finished, as testRun.ts read it, with when it finished
 // and the command that ran it, whether a file changed since, and any run still in progress. The lane keeps none of a test's output
 // (it can print anything), so the board's sample output is not drawn: what is shown is the result that was read.
 // `LanePaneView` takes everything it shows as props and uses no hooks, so a test can draw it; `LanePane` reads the stores.
 import "./lanepane.css";
-import { memo, useState } from "react";
+import { memo, useEffect, useState } from "react";
 import { hhmm } from "../app/time";
 import { DiffView } from "../chat/activity/Work";
 import { t, type Key } from "../i18n";
@@ -16,8 +17,11 @@ import type { Chat } from "../state/store";
 import { diffsOf, newestFirst, sameDiffs } from "./changes";
 import { laneTests, type LaneTests } from "./lane";
 import { laneOf, useLanesVersion } from "./laneStore";
+import { LanePreviewView, type LanePreviewProps } from "./LanePreview";
 import { PreviewSampleView } from "./PreviewSample";
 import { needsOfChat, onSample, usePreviewVersion, type Need } from "./preview";
+import { isLive, previewSecrets } from "./previewRun";
+import { openPreview, readPreview, startPreview, stopPreview, usePreviewRecord } from "./previewStore";
 
 export type PaneView = "diff" | "preview" | "tests";
 const VIEWS: readonly PaneView[] = ["diff", "preview", "tests"];
@@ -33,6 +37,8 @@ export interface LanePaneProps {
   /** The secret whose Add was pressed: the vault's note shows under it. */
   asked: string | null;
   onAdd: (name: string) => void;
+  /** The lane's preview (LanePreview.tsx): its folder, its run and what Start, Stop and Open do. */
+  preview: LanePreviewProps;
   /** What the lane keeps of its tests (lane.ts). */
   tests: LaneTests;
   /** How a time (ms) is written; the time of day by default. */
@@ -56,13 +62,11 @@ function DiffPane({ files }: { files: DiffFile[] }) {
   return <ChangedFiles files={files} />;
 }
 
-function PreviewPane({ needs, asked, onAdd }: Pick<LanePaneProps, "needs" | "asked" | "onAdd">) {
+function PreviewPane({ needs, asked, onAdd, preview }: Pick<LanePaneProps, "needs" | "asked" | "onAdd" | "preview">) {
   return (
     <>
-      {/* the app has no preview to run yet: what the owner is told is that, and which secrets a preview would run on a sample */}
-      <div className="box lp-box" data-testid="lane-preview-note">
-        <p className="mut">{t("lane.pane.preview.none")}</p>
-      </div>
+      <LanePreviewView {...preview} />
+      {/* which secrets Kit's code reads, each on its sample: the preview runs with the sample, never a real one */}
       <PreviewSampleView needs={needs} asked={asked} onAdd={onAdd} bare />
     </>
   );
@@ -124,7 +128,7 @@ function TestsPane({ tests, time }: { tests: LaneTests; time: (ms: number) => st
   );
 }
 
-export function LanePaneView({ view, onView, files, needs, asked, onAdd, tests, time = (ms) => hhmm(new Date(ms)) }: LanePaneProps) {
+export function LanePaneView({ view, onView, files, needs, asked, onAdd, preview, tests, time = (ms) => hhmm(new Date(ms)) }: LanePaneProps) {
   return (
     <aside className="lpane" data-testid="lane-pane" data-view={view}>
       <div className="fgroup" role="group" aria-label={t("lane.pane.title")}>
@@ -136,7 +140,7 @@ export function LanePaneView({ view, onView, files, needs, asked, onAdd, tests, 
       </div>
       <div className="lp-view" data-testid={`lane-view-${view}`}>
         {view === "diff" && <DiffPane files={files} />}
-        {view === "preview" && <PreviewPane needs={needs} asked={asked} onAdd={onAdd} />}
+        {view === "preview" && <PreviewPane needs={needs} asked={asked} onAdd={onAdd} preview={preview} />}
         {view === "tests" && <TestsPane tests={tests} time={time} />}
       </div>
     </aside>
@@ -154,14 +158,32 @@ function useChangedFiles(chat: Chat | undefined): DiffFile[] {
   return next.files;
 }
 
-/** The pane of the lane whose chat has key `chatKey`, which holds `chat`. */
-export function LanePane({ chatKey, chat }: { chatKey: string; chat: Chat | undefined }) {
+/** The pane of the lane whose chat has key `chatKey`, which holds `chat`. `laneDir` is the lane's own folder, or null when the
+ *  session works in the developer's own folder, where no preview is started. */
+export function LanePane({ chatKey, chat, laneDir = null }: { chatKey: string; chat: Chat | undefined; laneDir?: string | null }) {
   // the lane and what Kit's changes read move with the session's events
   useLanesVersion();
   usePreviewVersion();
   const [view, setView] = useState<PaneView>("diff");
   const [asked, setAsked] = useState<string | null>(null);
   const files = useChangedFiles(chat);
+  const record = usePreviewRecord(chatKey);
+  const live = isLive(record.run);
+  // The folder is read each time its Preview is looked at, so the command named is chosen from what the folder holds now.
+  useEffect(() => {
+    if (view === "preview" && laneDir && !live) void readPreview(chatKey, laneDir);
+  }, [view, laneDir, chatKey, live]);
+  const all = needsOfChat(chatKey);
   // The owner can add no secret yet (there is no vault), so every secret the code reads is still on its sample.
-  return <LanePaneView view={view} onView={setView} files={files} needs={onSample(needsOfChat(chatKey))} asked={asked} onAdd={setAsked} tests={laneTests(laneOf(chatKey))} />;
+  const preview: LanePreviewProps = {
+    dir: laneDir,
+    record,
+    samples: previewSecrets(all, record.project?.envExample ?? null).map(([name]) => name),
+    onStart: () => {
+      if (laneDir) void startPreview(chatKey, laneDir, all);
+    },
+    onStop: () => void stopPreview(chatKey),
+    onOpen: () => void openPreview(chatKey),
+  };
+  return <LanePaneView view={view} onView={setView} files={files} needs={onSample(all)} asked={asked} onAdd={setAsked} preview={preview} tests={laneTests(laneOf(chatKey))} />;
 }

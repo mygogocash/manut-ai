@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { findDevUrl } from "../src/index";
+import { findDevUrl, withoutEscapes } from "../src/index";
 
 const ESC = "\u001b";
 
@@ -81,6 +81,11 @@ describe("ports", () => {
 });
 
 describe("terminal escapes", () => {
+  it("are taken out of a line as a person reads it, and its words are kept", () => {
+    expect(withoutEscapes(`${ESC}[32m✓${ESC}[39m built in ${ESC}[1m212ms${ESC}[22m`)).toBe("✓ built in 212ms");
+    expect(withoutEscapes(`${ESC}]0;vite${ESC}\\  ready`)).toBe("  ready");
+    expect(withoutEscapes("plain words")).toBe("plain words");
+  });
   it("strips colours inside the address", () => {
     const line = `  ${ESC}[32m➜${ESC}[39m  ${ESC}[1mLocal${ESC}[22m:   ${ESC}[36mhttp://localhost:${ESC}[1m5173${ESC}[22m/${ESC}[39m`;
     expect(findDevUrl([line])).toEqual({ url: "http://localhost:5173/", port: 5173, line: 1 });
