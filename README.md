@@ -57,7 +57,10 @@ Code lifted from other projects keeps its notice here: GoSpark (`mygogocash/gosp
 idea behind an added account's home: Codex's own home shared entry by entry as links, its sign-in kept apart
 (`apps/desktop/src-tauri/src/accounts.rs`, `share`; rewritten in Rust with an allow-list, no code copied); and for the
 idea of the sidebar's places (pinned on top, snoozed and done-for-now below, an archive, the pull request on a row, a suggested
-next message): `apps/desktop/src/sidebar/rows.ts`, written here from the description, no code copied.
+next message): `apps/desktop/src/sidebar/rows.ts`, written here from the description, no code copied; and (at `1c3f0ee`) for
+Settings › Providers' layout and field names (a list of the agents with a switch each; for the chosen one a display name,
+the program's path, its home folder, launch arguments and environment variables whose values are never sent back):
+`apps/desktop/src/settings/providers/` and `src-tauri/src/providers.rs`, read for behaviour and wording, no code copied.
 
 Libraries added for one feature are named here too: `objc2-speech`, `objc2-avf-audio` and `objc2-av-foundation`
 (the objc2 project's bindings to Apple's Speech, AVFAudio and AVFoundation frameworks, Zlib OR Apache-2.0 OR MIT), which
