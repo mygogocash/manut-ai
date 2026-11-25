@@ -18,6 +18,11 @@
 //! ignores (installed dependencies, build output) is copied or linked. No hook runs while a folder is made or removed, so
 //! nothing a project sets up on checkout happens by itself: Kit may install what the lane needs, and the dial asks first.
 //!
+//! Settings › Worktrees (item 73): the folder lanes are made under can be the person's own (`Start::root`, checked by
+//! `check_lanes_root`: never inside a checkout, never unwritable), while the record stays under `~/.manut/lanes`; a lane can start
+//! from the remote's latest commit of its base branch (`Start::remote`, `remote_start`); the branch prefix is the page's
+//! (`valid_prefix`); and `release` removes a folder for a clean-up only when nothing in it is changed, new or unpushed.
+//!
 //! When a folder goes: when its session is closed, if nothing in it would be lost (git says no file in it is changed or new).
 //! Otherwise it is kept, and the Code page lists it with Remove, which says how many changed files go with it; the branch
 //! stays unless the person also asks for it to go, and a branch with commits that are not on its base goes only after the
@@ -72,26 +77,43 @@ pub struct Made {
     pub dir: String,
     pub worktree: String,
     pub left: u32,
+    /// The remote branch the lane started from (`origin/main`), when Start from the remote was on and it worked; "" otherwise.
+    pub from: String,
+    /// Why the lane started from the local branch although Start from the remote was on: `no_remote`, `fetch_failed`,
+    /// `detached`, `ahead` (the local branch has commits the remote lacks), `diverged`, `not_in_remote` (the remote's commit has
+    /// no such folder); "" when the setting was off or the remote was used. The page says it in the lane's first line.
+    pub local: String,
+}
+
+/// What Settings › Worktrees asks of a new lane: where its folder is made ("" is the default under `~/.manut/lanes`) and
+/// whether it starts from the latest commit of its base branch on the remote. Both come from the page on each call, never
+/// kept here.
+#[derive(Debug, Deserialize, Default, Clone)]
+pub struct Start {
+    #[serde(default)]
+    pub root: String,
+    #[serde(default)]
+    pub remote: bool,
 }
 
 /// The app's record of one worktree it made, `<lanes>/<project>/<words>.json`, beside the folder it names.
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
-struct Record {
-    v: u32,
+pub(crate) struct Record {
+    pub(crate) v: u32,
     /// The worktree's folder: always the record's own path without `.json`.
-    worktree: String,
+    pub(crate) worktree: String,
     /// git's own folder of the repository, the one every worktree of it shares (its common dir), as a real path.
-    repo: String,
+    pub(crate) repo: String,
     /// The developer's folder the lane was made from.
-    project: String,
+    pub(crate) project: String,
     /// Where the lane works inside the worktree ("" or `apps/web`).
-    prefix: String,
-    branch: String,
-    base: String,
+    pub(crate) prefix: String,
+    pub(crate) branch: String,
+    pub(crate) base: String,
     /// The commit the branch was made at.
-    at: String,
+    pub(crate) at: String,
     /// When, in seconds since 1970.
-    made: u64,
+    pub(crate) made: u64,
 }
 
 /// A lane's working folder as the Code page lists it: the folders the app made for one repository, with whether each is still
@@ -107,6 +129,8 @@ pub struct Kept {
     pub exists: bool,
     pub changed: Option<u32>,
     pub ahead: Option<u32>,
+    /// How many commits on its branch are on no remote branch (null: not read): what a clean-up keeps a folder for.
+    pub unpushed: Option<u32>,
 }
 
 /// What the person said yes to when a lane's folder goes. `changed`: how many changed or new files they saw counted and said
@@ -134,12 +158,29 @@ pub struct Removed {
     pub error: Option<String>,
 }
 
-/// Whether `name` is a branch name Kit makes: `kit/` and then lower case words and numbers joined by single hyphens.
+/// Whether `word` is one lower case word or number run joined by single hyphens (`promptpay-qr`).
+fn word_ok(word: &str) -> bool {
+    !word.is_empty() && word.split('-').all(|w| !w.is_empty() && w.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit()))
+}
+
+/// Whether `prefix` is a branch prefix Kit makes names with: one or two words ending in `/` (`kit/`, `team/ana/`), at most 24
+/// characters. Settings › Worktrees checks the same rule in the page (`src/code/laneBranch.ts`). Only lower case letters,
+/// numbers and hyphens, so every prefix is a name git takes and never one a shell, an option or a path reads as anything else.
+pub fn valid_prefix(prefix: &str) -> bool {
+    let Some(body) = prefix.strip_suffix('/') else { return false };
+    let words: Vec<&str> = body.split('/').collect();
+    prefix.len() <= 24 && (1..=2).contains(&words.len()) && words[0] != "refs" && words.iter().all(|w| word_ok(w))
+}
+
+/// The prefix of a branch name Kit made: everything up to and including the last `/` ("" when there is none).
+fn prefix_of(name: &str) -> &str {
+    name.rfind('/').map_or("", |i| &name[..=i])
+}
+
+/// Whether `name` is a branch name Kit makes: a prefix (see [`valid_prefix`]) and then lower case words and numbers joined by
+/// single hyphens. A lane made under an earlier prefix keeps its name, so any prefix is read here, not only the current one.
 pub fn valid_name(name: &str) -> bool {
-    let Some(rest) = name.strip_prefix("kit/") else { return false };
-    name.len() <= NAME_MAX
-        && !rest.is_empty()
-        && rest.split('-').all(|w| !w.is_empty() && w.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit()))
+    name.len() <= NAME_MAX && valid_prefix(prefix_of(name)) && word_ok(&name[prefix_of(name).len()..])
 }
 
 /// `<home>/.manut/lanes`: the app's own folder for every lane's working folder.
@@ -150,7 +191,13 @@ pub fn lanes_dir(home: &Path) -> PathBuf {
 /// Whether `path` is a lane's working folder or a folder inside one: two names or more below [`lanes_dir`]. turn_files.rs
 /// keeps a lane's turns there, while the app's own data folder around it stays far too broad to keep.
 pub fn in_a_lane(home: &Path, path: &Path) -> bool {
-    path.strip_prefix(lanes_dir(home)).map(|rest| rest.components().count() >= 2 && rest.components().all(|c| matches!(c, Component::Normal(_)))).unwrap_or(false)
+    path.strip_prefix(lanes_dir(home)).map(|rest| rest.components().count() >= 2 && rest.components().all(|c| matches!(c, Component::Normal(_)))).unwrap_or(false) || in_a_record(home, path)
+}
+
+/// Whether `path` is the folder of a lane made under a folder the person chose, or inside it: the folder a record names. `path`
+/// must be a real path, as the callers' are, and has no `..` in it.
+pub fn in_a_record(home: &Path, path: &Path) -> bool {
+    path.is_absolute() && path.components().all(|c| matches!(c, Component::RootDir | Component::Prefix(_) | Component::Normal(_))) && records(home).iter().any(|(_, r)| path.starts_with(Path::new(&r.worktree)) || path.starts_with(real(Path::new(&r.worktree))))
 }
 
 /// The files and folders git keeps while it is partway through something that moves `HEAD` or the index. A lane made then
@@ -167,46 +214,54 @@ const REDIRECTS: [&str; 7] = ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT
 /// The person's own `git`, run with no hook and no file-system monitor (each can run a program the repository names: a
 /// post-checkout hook that installs dependencies, a reference-transaction hook on a deleted branch), English messages, no
 /// prompt, and no optional lock (a status never takes the index's lock to refresh it).
-struct Git {
-    exe: PathBuf,
+pub(crate) struct Git {
+    pub(crate) exe: PathBuf,
     /// `core.hooksPath`: a folder that is never made, so git finds no hook in it.
     hooks: String,
 }
 
 impl Git {
-    fn new(home: &Path) -> Result<Git, String> {
+    pub(crate) fn new(home: &Path) -> Result<Git, String> {
         let exe = tasks::find("git").ok_or("git_missing")?;
         Ok(Git { exe, hooks: format!("core.hooksPath={}", lanes_dir(home).join(".no-hooks").display()) })
     }
 
     /// `git -C <cwd> <args>`, at most `limit`.
-    fn run_for(&self, cwd: &Path, args: &[&str], limit: Duration) -> Result<tasks::Ran, String> {
-        let mut argv: Vec<String> = vec!["-C".into(), cwd.to_string_lossy().into_owned(), "-c".into(), self.hooks.clone(), "-c".into(), "core.fsmonitor=false".into()];
-        argv.extend(args.iter().map(|a| (*a).to_string()));
-        tasks::run_env_for(&self.exe, &argv, true, &[("GIT_TERMINAL_PROMPT", "0"), ("LC_ALL", "C"), ("GIT_OPTIONAL_LOCKS", "0")], &REDIRECTS, limit)
+    pub(crate) fn run_for(&self, cwd: &Path, args: &[&str], limit: Duration) -> Result<tasks::Ran, String> {
+        self.run_with(cwd, args, limit, &[])
     }
 
-    fn run(&self, cwd: &Path, args: &[&str]) -> Result<tasks::Ran, String> {
+    /// `run_for` with `extra` added to git's environment (a fetch's: nothing may ask for a password).
+    pub(crate) fn run_with(&self, cwd: &Path, args: &[&str], limit: Duration, extra: &[(&str, &str)]) -> Result<tasks::Ran, String> {
+        let mut argv: Vec<String> = vec!["-C".into(), cwd.to_string_lossy().into_owned(), "-c".into(), self.hooks.clone(), "-c".into(), "core.fsmonitor=false".into()];
+        argv.extend(args.iter().map(|a| (*a).to_string()));
+        let mut env: Vec<(&str, &str)> = vec![("GIT_TERMINAL_PROMPT", "0"), ("LC_ALL", "C"), ("GIT_OPTIONAL_LOCKS", "0")];
+        env.extend_from_slice(extra);
+        tasks::run_env_for(&self.exe, &argv, true, &env, &REDIRECTS, limit)
+    }
+
+    pub(crate) fn run(&self, cwd: &Path, args: &[&str]) -> Result<tasks::Ran, String> {
         self.run_for(cwd, args, tasks::TIMEOUT)
     }
 
     /// The first line git printed, when it ran and said yes.
-    fn line(&self, cwd: &Path, args: &[&str]) -> Option<String> {
+    pub(crate) fn line(&self, cwd: &Path, args: &[&str]) -> Option<String> {
         let ran = self.run(cwd, args).ok()?;
         (ran.code == Some(0)).then(|| ran.out.lines().next().unwrap_or("").trim().to_string())
     }
 
     /// git's own folder for the repository `cwd` is in, the one every worktree of it shares, as a real path.
-    fn common_dir(&self, cwd: &Path) -> Option<PathBuf> {
+    pub(crate) fn common_dir(&self, cwd: &Path) -> Option<PathBuf> {
         let line = self.line(cwd, &["rev-parse", "--git-common-dir"]).filter(|l| !l.is_empty())?;
         let p = PathBuf::from(line);
         let p = if p.is_absolute() { p } else { cwd.join(p) };
         p.canonicalize().ok()
     }
 
-    /// The branches under `kit/` that exist, lower-cased (a file system that ignores letter case treats two as one).
-    fn taken(&self, cwd: &Path) -> Result<HashSet<String>, String> {
-        let ran = self.run(cwd, &["for-each-ref", "--format=%(refname:short)", "refs/heads/kit/"])?;
+    /// The branches under `prefix` (`kit/`) that exist, lower-cased (a file system that ignores letter case treats two as one).
+    fn taken(&self, cwd: &Path, prefix: &str) -> Result<HashSet<String>, String> {
+        let pattern = format!("refs/heads/{prefix}");
+        let ran = self.run(cwd, &["for-each-ref", "--format=%(refname:short)", &pattern])?;
         if ran.code != Some(0) {
             return Err(tasks::error_line(&ran.err));
         }
@@ -214,7 +269,7 @@ impl Git {
     }
 
     /// The worktrees git lists for the repository whose git folder is `repo`, as real paths where they exist.
-    fn worktrees(&self, repo: &Path) -> Option<Vec<PathBuf>> {
+    pub(crate) fn worktrees(&self, repo: &Path) -> Option<Vec<PathBuf>> {
         let ran = self.run(repo, &["worktree", "list", "--porcelain"]).ok()?;
         if ran.code != Some(0) {
             return None;
@@ -223,14 +278,14 @@ impl Git {
     }
 
     /// How many files in worktree `wt` are changed or new (not ignored), or None when git could not say.
-    fn changed(&self, wt: &Path) -> Option<u32> {
+    pub(crate) fn changed(&self, wt: &Path) -> Option<u32> {
         let ran = self.run(wt, &["status", "--porcelain=v1", "--untracked-files=all", "--ignore-submodules=none"]).ok()?;
         (ran.code == Some(0)).then(|| ran.out.lines().filter(|l| !l.trim().is_empty()).count() as u32)
     }
 
     /// How many commits on `branch` are not on `base` (the branch it was made from, as it is now; else the commit it was
     /// made at, when that branch is gone), or None when git could not say.
-    fn ahead(&self, at: &Path, rec: &Record) -> Option<u32> {
+    pub(crate) fn ahead(&self, at: &Path, rec: &Record) -> Option<u32> {
         if !valid_name(&rec.branch) {
             return None;
         }
@@ -247,13 +302,34 @@ impl Git {
     }
 }
 
+impl Git {
+    /// How many commits on `branch` are on no remote branch (the ones a clean-up keeps a folder for), or None when git could
+    /// not say. With no remote at all that is every commit of the branch.
+    pub(crate) fn unpushed(&self, at: &Path, branch: &str) -> Option<u32> {
+        if !valid_name(branch) {
+            return None;
+        }
+        let r = format!("refs/heads/{branch}");
+        self.line(at, &["rev-list", "--count", &r, "--not", "--remotes"]).and_then(|l| l.parse().ok())
+    }
+
+    /// Whether the worktree at `wt` is partway through a rebase, merge, cherry-pick, revert or bisect, or holds an index lock.
+    pub(crate) fn busy(&self, wt: &Path) -> bool {
+        match self.line(wt, &["rev-parse", "--absolute-git-dir"]) {
+            Some(d) if !d.is_empty() => in_progress(Path::new(&d)),
+            // git could not say: a folder that cannot be read is not one to remove
+            _ => true,
+        }
+    }
+}
+
 /// `p` as its real path when it exists, else as it is.
-fn real(p: &Path) -> PathBuf {
+pub(crate) fn real(p: &Path) -> PathBuf {
     p.canonicalize().unwrap_or_else(|_| p.to_path_buf())
 }
 
 /// Whether `rev` is a branch name or commit id that can stand on either side of `..` and never be read as an option.
-fn safe_rev(rev: &str) -> bool {
+pub(crate) fn safe_rev(rev: &str) -> bool {
     !rev.is_empty()
         && rev.len() <= 200
         && !rev.starts_with(['-', '.', '/'])
@@ -331,9 +407,17 @@ fn write_new(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     })
 }
 
+/// Whether a record's folder `wt` is one the record may name: the folder beside it (`own`, the record's own path without
+/// `.json`), or, for a lane made under a folder the person chose in Settings › Worktrees, an absolute folder with no `.` or
+/// `..` in it that has the same last name. The record itself always stays under `~/.manut/lanes`, which only the app writes,
+/// so a record can still never name the developer's folder or anything else it did not make: a folder is removed only when
+/// git lists it as a worktree of the recorded repository too (see [`remove`]).
+fn worktree_ok(wt: &Path, own: &Path) -> bool {
+    wt == own || (wt.is_absolute() && wt.file_name().is_some() && wt.file_name() == own.file_name() && wt.components().all(|c| matches!(c, Component::RootDir | Component::Prefix(_) | Component::Normal(_))))
+}
+
 /// The record at `path`, when it is a plain file the app wrote: a link, a file too big or one that does not read as a
-/// record is no record. Its folder must be the record's own path without `.json`, so a record can only ever name the folder
-/// beside it.
+/// record is no record. Its folder must be the one beside it or a chosen folder's with the same name ([`worktree_ok`]).
 fn read_record(path: &Path) -> Option<Record> {
     let md = fs::symlink_metadata(path).ok()?;
     if !md.is_file() || md.len() > RECORD_BYTES {
@@ -343,12 +427,12 @@ fn read_record(path: &Path) -> Option<Record> {
     fs::File::open(path).ok()?.take(RECORD_BYTES).read_to_string(&mut text).ok()?;
     let r: Record = serde_json::from_str(&text).ok()?;
     let own = path.with_extension("");
-    (r.v == 1 && valid_name(&r.branch) && Path::new(&r.worktree) == own && Path::new(&r.repo).is_absolute()).then_some(r)
+    (r.v == 1 && valid_name(&r.branch) && worktree_ok(Path::new(&r.worktree), &own) && Path::new(&r.repo).is_absolute()).then_some(r)
 }
 
 /// Every record of a folder the app made, with its path: `<lanes>/<project>/<words>.json`, two names below the lanes'
 /// folder, none of them a link.
-fn records(home: &Path) -> Vec<(PathBuf, Record)> {
+pub(crate) fn records(home: &Path) -> Vec<(PathBuf, Record)> {
     let lanes = lanes_dir(home);
     if is_link(&home.join(".manut")) || is_link(&lanes) {
         return Vec::new();
@@ -377,10 +461,156 @@ fn now_secs() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
+/// The folder the person chose for lanes (Settings › Worktrees) as the real path lanes are made under, made when it is missing,
+/// or a short code for why not. Checked when it is chosen and again each time a lane is made, since a folder can become a
+/// checkout or lose its write permission afterwards:
+///
+/// - `bad_root`: not an absolute path, or one with `.` or `..` in it.
+/// - `root_too_broad`: the disk's root, the home folder, or the app's own data folder (`~/.manut`).
+/// - `root_in_checkout`: inside a repository's own work tree (a `.git` in it or in a folder above it, the home folder aside), so
+///   a lane's folder would sit among the developer's own files and show up in their `git status`.
+/// - `root_unwritable`: not a folder, or one a file cannot be made in.
+pub fn check_lanes_root(home: &Path, root: &str) -> Result<PathBuf, String> {
+    let path = Path::new(root);
+    if root.is_empty() || root.chars().any(char::is_control) || !path.is_absolute() || path.components().any(|c| !matches!(c, Component::RootDir | Component::Prefix(_) | Component::Normal(_))) {
+        return Err("bad_root".into());
+    }
+    // the folder as a real path even when it is not made yet: the nearest folder that exists, then the names after it
+    let mut tail: Vec<&OsStr> = Vec::new();
+    let mut at = path;
+    let base = loop {
+        match at.canonicalize() {
+            Ok(b) => break b,
+            Err(_) => {
+                let (Some(name), Some(parent)) = (at.file_name(), at.parent()) else { return Err("bad_root".into()) };
+                tail.push(name);
+                at = parent;
+            }
+        }
+    };
+    let real = tail.iter().rev().fold(base, |acc, n| acc.join(n));
+    let home_real = real_of(home);
+    if real.parent().is_none() || real == home_real || real.starts_with(home_real.join(".manut")) {
+        return Err("root_too_broad".into());
+    }
+    // a repository's work tree: every folder from it up to the home folder (or to the top, outside it)
+    for a in real.ancestors() {
+        if a == home_real || a.parent().is_none() {
+            break;
+        }
+        if fs::symlink_metadata(a.join(".git")).is_ok() {
+            return Err("root_in_checkout".into());
+        }
+    }
+    fs::create_dir_all(&real).map_err(|_| "root_unwritable")?;
+    if !real.is_dir() {
+        return Err("root_unwritable".into());
+    }
+    // writable for real: a file made and taken away again
+    let probe = real.join(format!(".manut-write-test-{}", std::process::id()));
+    write_new(&probe, b"").map_err(|_| "root_unwritable")?;
+    let _ = fs::remove_file(&probe);
+    Ok(real)
+}
+
+/// `p` as a real path when it exists, else as it is (a name, as [`real`], but for a home folder passed by tests too).
+fn real_of(p: &Path) -> PathBuf {
+    real(p)
+}
+
+/// The most time a fetch of the base branch may take before the lane starts from the local branch instead. A lane is made while
+/// the person waits for their first message to be answered, so the wait is short, and the chat itself is open the whole time.
+const FETCH_LIMIT: Duration = Duration::from_secs(10);
+
+/// The environment of a command that reaches the network, so none can wait for a person who is not there: git asks no password
+/// on a terminal or through a helper program, the credential manager shows no window, and ssh asks no passphrase (unless the
+/// person set their own ssh command, which is left as theirs).
+pub(crate) fn net_env(git: &Git, cwd: &Path) -> Vec<(&'static str, String)> {
+    let mut env = vec![("GIT_ASKPASS", "true".to_string()), ("SSH_ASKPASS", "true".to_string()), ("GCM_INTERACTIVE", "never".to_string())];
+    let own_ssh = std::env::var_os("GIT_SSH_COMMAND").is_some() || std::env::var_os("GIT_SSH").is_some() || git.line(cwd, &["config", "--get", "core.sshCommand"]).is_some_and(|l| !l.is_empty());
+    if !own_ssh {
+        env.push(("GIT_SSH_COMMAND", "ssh -o BatchMode=yes".to_string()));
+    }
+    env
+}
+
+/// Fetches branch `branch` of `remote` into its remote-tracking branch, nothing else: no tags, no submodules, no other
+/// branch, no maintenance run. Err is git's own last line, or the time limit. The only write is the remote-tracking branch,
+/// as any `git fetch` makes.
+pub(crate) fn fetch_branch(git: &Git, cwd: &Path, remote: &str, branch: &str) -> Result<(), String> {
+    if !safe_rev(remote) || !safe_rev(branch) {
+        return Err("bad_name".into());
+    }
+    let spec = format!("+refs/heads/{branch}:refs/remotes/{remote}/{branch}");
+    let env = net_env(git, cwd);
+    let env: Vec<(&str, &str)> = env.iter().map(|(k, v)| (*k, v.as_str())).collect();
+    let ran = git.run_with(cwd, &["fetch", "--no-tags", "--no-recurse-submodules", "--no-write-fetch-head", "--no-auto-maintenance", remote, &spec], FETCH_LIMIT, &env)?;
+    if ran.code == Some(0) {
+        Ok(())
+    } else {
+        Err(tasks::error_line(&ran.err))
+    }
+}
+
+/// The remote and the branch on it that local branch `base` stands for: the one it tracks, else the same name on `origin`.
+/// Err(`no_remote`) when the repository has no such remote.
+fn remote_of(git: &Git, cwd: &Path, base: &str) -> Result<(String, String), String> {
+    let remotes: Vec<String> = git.run(cwd, &["remote"]).ok().filter(|r| r.code == Some(0)).map(|r| r.out.lines().map(|l| l.trim().to_string()).collect()).unwrap_or_default();
+    let tracked = git.line(cwd, &["config", "--get", &format!("branch.{base}.remote")]).filter(|r| !r.is_empty() && r != ".");
+    let merge = git.line(cwd, &["config", "--get", &format!("branch.{base}.merge")]).and_then(|m| m.strip_prefix("refs/heads/").map(str::to_string));
+    match tracked {
+        Some(r) if remotes.contains(&r) && safe_rev(&r) => Ok((r, merge.filter(|m| safe_rev(m)).unwrap_or_else(|| base.to_string()))),
+        _ if remotes.iter().any(|r| r == "origin") => Ok(("origin".into(), base.to_string())),
+        _ => Err("no_remote".into()),
+    }
+}
+
+/// Where a lane starts when Start from the remote is on: the commit of `base`'s branch on its remote as it is now, with its name
+/// (`origin/main`), or why the local commit is used (see [`Made::local`]). The fetch reads one branch, ends within
+/// [`FETCH_LIMIT`] and asks no password. The remote's commit is used only when the local branch is that commit or behind it:
+/// a local branch with commits of its own (ahead, or both moved) would lose them in the lane, so it starts from the local one.
+fn remote_start(git: &Git, cwd: &Path, base: &str, prefix: &str, local_at: &str) -> Result<(String, String), String> {
+    let branch_ref = format!("refs/heads/{base}");
+    if !safe_rev(base) || git.line(cwd, &["rev-parse", "--verify", "--quiet", &branch_ref]).as_deref() != Some(local_at) {
+        return Err("detached".into());
+    }
+    let (remote, theirs) = remote_of(git, cwd, base)?;
+    fetch_branch(git, cwd, &remote, &theirs).map_err(|_| "fetch_failed".to_string())?;
+    let tracking = format!("refs/remotes/{remote}/{theirs}^{{commit}}");
+    let Some(at) = git.line(cwd, &["rev-parse", "--verify", "--quiet", &tracking]).filter(|l| l.len() >= 40 && l.bytes().all(|b| b.is_ascii_hexdigit())) else {
+        return Err("fetch_failed".into());
+    };
+    if at != local_at {
+        let behind = git.run(cwd, &["merge-base", "--is-ancestor", local_at, &at]).map_err(|_| "fetch_failed")?;
+        if behind.code != Some(0) {
+            let ahead = git.run(cwd, &["merge-base", "--is-ancestor", &at, local_at]).map(|r| r.code == Some(0)).unwrap_or(false);
+            return Err(if ahead { "ahead" } else { "diverged" }.into());
+        }
+    }
+    // a folder the remote's commit does not hold would not be in the lane's folder
+    if !prefix.is_empty() && git.line(cwd, &["cat-file", "-t", &format!("{at}:{prefix}")]).as_deref() != Some("tree") {
+        return Err("not_in_remote".into());
+    }
+    Ok((at, format!("{remote}/{theirs}")))
+}
+
 /// Makes a lane's working folder: the first of `names` that no branch has, as a new branch made from the commit the folder
 /// `cwd` is on, checked out in a worktree of its own under [`lanes_dir`]. The developer's folder is not touched.
 pub fn make(home: &Path, cwd: &Path, names: &[String]) -> Result<Made, String> {
+    make_with(home, cwd, names, &Start::default())
+}
+
+/// [`make`], where `start` says where the folder is made and whether the lane starts from the remote (Settings › Worktrees).
+/// The folder is under `start.root` when the person chose one (checked again here: a code from [`check_lanes_root`] when it is
+/// no longer usable, and the lane is then not made anywhere else), else under [`lanes_dir`]; the record is under [`lanes_dir`]
+/// either way.
+pub fn make_with(home: &Path, cwd: &Path, names: &[String], start: &Start) -> Result<Made, String> {
     if names.is_empty() || names.len() > NAMES_MAX || !names.iter().all(|n| valid_name(n)) {
+        return Err("bad_name".into());
+    }
+    // one prefix for every name: the page makes them from the one setting
+    let prefix_name = prefix_of(&names[0]);
+    if names.iter().any(|n| prefix_of(n) != prefix_name) {
         return Err("bad_name".into());
     }
     if !cwd.is_absolute() || !cwd.is_dir() {
@@ -415,22 +645,35 @@ pub fn make(home: &Path, cwd: &Path, names: &[String]) -> Result<Made, String> {
     if base.is_empty() {
         return Err("not_a_repository".into());
     }
+    // where the folder goes, before anything is fetched or written: the person's own folder, still usable, or the default
+    let lanes = lanes_dir(home);
+    let place = if start.root.is_empty() { lanes.clone() } else { check_lanes_root(home, &start.root)? };
+    // the commit the lane starts from: the remote's latest of the base branch when that was asked for and it works (the fetch
+    // takes no lock, so it is done before the turn below and never holds up another lane being made or removed)
+    let (at, from, local) = if start.remote {
+        match remote_start(&git, cwd, &base, &prefix, &at) {
+            Ok((remote_at, name)) => (remote_at, name, String::new()),
+            Err(why) => (at, String::new(), why),
+        }
+    } else {
+        (at, String::new(), String::new())
+    };
 
     let _turn = WRITING.lock().unwrap_or_else(|e| e.into_inner());
-    let exists = git.taken(cwd)?;
-    let lanes = lanes_dir(home);
-    let parent = lanes.join(project_word(&top));
-    for d in [home.join(".manut"), lanes.clone(), parent.clone()] {
+    let exists = git.taken(cwd, prefix_name)?;
+    let record_parent = lanes.join(project_word(&top));
+    let parent = place.join(project_word(&top));
+    for d in [home.join(".manut"), lanes.clone(), record_parent.clone(), place.clone(), parent.clone()] {
         own_dir(&d)?;
     }
     for name in names.iter().filter(|n| !exists.contains(&n.to_lowercase())) {
-        let words = &name["kit/".len()..];
+        let words = &name[prefix_name.len()..];
         // the first folder name nothing has on disk, its record written first: the record is what says the folder is the
         // app's, and writing it as a new file claims the name before git makes the folder
         let Some((wt, rec_path)) = (1..=FOLDER_TRIES).find_map(|n| {
             let folder = if n == 1 { words.to_string() } else { format!("{words}-{n}") };
             let wt = parent.join(&folder);
-            let rec_path = parent.join(format!("{folder}.json"));
+            let rec_path = record_parent.join(format!("{folder}.json"));
             if fs::symlink_metadata(&wt).is_ok() || fs::symlink_metadata(&rec_path).is_ok() {
                 return None;
             }
@@ -460,7 +703,7 @@ pub fn make(home: &Path, cwd: &Path, names: &[String]) -> Result<Made, String> {
             let dir = if prefix.is_empty() || !inner.is_dir() { wt.clone() } else { inner };
             // read without the index's lock, so the developer's index is never written
             let left = git.changed(cwd).unwrap_or(0);
-            return Ok(Made { branch: name.clone(), base, dir: dir.to_string_lossy().into_owned(), worktree: wt_s, left });
+            return Ok(Made { branch: name.clone(), base, dir: dir.to_string_lossy().into_owned(), worktree: wt_s, left, from, local });
         }
         let err = match &ran {
             Ok(r) => tasks::error_line(&r.err),
@@ -524,6 +767,7 @@ pub fn list(home: &Path, cwd: &Path) -> Result<Vec<Kept>, String> {
                 dir: dir.to_string_lossy().into_owned(),
                 changed: if read { git.changed(&wt) } else { None },
                 ahead: if read { git.ahead(&wt, &r) } else { None },
+                unpushed: if read { git.unpushed(&wt, &r.branch) } else { None },
                 exists,
                 worktree: r.worktree,
                 branch: r.branch,
@@ -548,22 +792,8 @@ pub fn projects(home: &Path) -> Vec<String> {
 /// to their number, a branch with commits not on its base only with `ask.ahead` equal to theirs; otherwise nothing is done
 /// and the answer says what is there now. Refuses anything the app did not make (`not_a_lane`).
 pub fn remove(home: &Path, worktree: &str, ask: &RemoveAsk) -> Result<Removed, String> {
-    let lanes = lanes_dir(home);
-    let wt = PathBuf::from(worktree);
-    let rest: Vec<Component> = match wt.strip_prefix(&lanes) {
-        Ok(r) if wt.is_absolute() => r.components().collect(),
-        _ => return Err("not_a_lane".into()),
-    };
-    if rest.len() != 2 || !rest.iter().all(|c| matches!(c, Component::Normal(_))) {
-        return Err("not_a_lane".into());
-    }
+    let (wt, rec_path, rec) = own_lane(home, worktree)?;
     let parent = wt.parent().ok_or("not_a_lane")?.to_path_buf();
-    if [home.join(".manut"), lanes.clone(), parent.clone(), wt.clone()].iter().any(|p| is_link(p)) {
-        return Err("not_a_lane".into());
-    }
-    let rec_path = wt.with_extension("json");
-    // the record beside the folder, naming exactly this folder (a name with a dot in it would read another's record)
-    let rec = read_record(&rec_path).filter(|r| Path::new(&r.worktree) == wt).ok_or("not_a_lane")?;
     let git = Git::new(home)?;
     let _turn = WRITING.lock().unwrap_or_else(|e| e.into_inner());
     let repo = real(Path::new(&rec.repo));
@@ -571,7 +801,7 @@ pub fn remove(home: &Path, worktree: &str, ask: &RemoveAsk) -> Result<Removed, S
     if exists {
         // the folder must still be a worktree of the recorded repository, as git lists it: anything else put there since is
         // not the app's to remove
-        let ours = git.common_dir(&wt).as_ref() == Some(&repo) && git.worktrees(&repo).is_some_and(|l| l.contains(&real(&wt)));
+        let ours = git.common_dir(&wt).as_ref() == Some(&repo) && git.worktrees(&repo).is_some_and(|l| l.contains(&real(&wt)) && l.first() != Some(&real(&wt)));
         if !ours {
             return Err("not_a_lane".into());
         }
@@ -606,15 +836,91 @@ pub fn remove(home: &Path, worktree: &str, ask: &RemoveAsk) -> Result<Removed, S
     let _ = fs::remove_file(&rec_path);
     // the project's folder goes when it holds no other lane (a folder with anything in it stays)
     let _ = fs::remove_dir(&parent);
+    if let Some(record_parent) = rec_path.parent() {
+        let _ = fs::remove_dir(record_parent);
+    }
     Ok(out)
 }
 
+/// The folder `worktree` and its record, when it is one the app made: a record under [`lanes_dir`] (two names below it, none a
+/// link) that names exactly this folder, which is not a link and has no link for a parent. `not_a_lane` for anything else.
+fn own_lane(home: &Path, worktree: &str) -> Result<(PathBuf, PathBuf, Record), String> {
+    let wt = PathBuf::from(worktree);
+    if !wt.is_absolute() || wt.components().any(|c| !matches!(c, Component::RootDir | Component::Prefix(_) | Component::Normal(_))) {
+        return Err("not_a_lane".into());
+    }
+    let lanes = lanes_dir(home);
+    let parent = wt.parent().ok_or("not_a_lane")?.to_path_buf();
+    if [home.join(".manut"), lanes, parent, wt.clone()].iter().any(|p| is_link(p)) {
+        return Err("not_a_lane".into());
+    }
+    // the record names exactly this folder (a name with a dot in it would read another's record)
+    let (rec_path, rec) = records(home).into_iter().find(|(_, r)| Path::new(&r.worktree) == wt).ok_or("not_a_lane")?;
+    Ok((wt, rec_path, rec))
+}
+
+/// What a clean-up did with one lane's folder: `removed`, or why it was kept. `kept` is a short code the page words:
+/// `changes` (a changed or new file), `unpushed` (commits on its branch that are on no remote), `busy` (git is partway through
+/// something there), `unread` (git could not say what is there), `changed` (it changed while this ran), `held` (a session still
+/// works in it). `changed` and `unpushed` give the numbers.
+#[derive(Debug, Serialize, PartialEq, Default)]
+pub struct Released {
+    pub removed: bool,
+    pub kept: Option<String>,
+    pub changed: Option<u32>,
+    pub unpushed: Option<u32>,
+}
+
+/// Removes the lane's folder `worktree` for a clean-up (a deleted chat's, or one whose pull request merged), never one with
+/// work of its own in it: nothing changed or new, git not partway through something, and every commit on its branch on a
+/// remote (`pushed`, which a merged lane overrides in `lane_clean.rs` with the proof of its own). The branch always stays. No
+/// force flag reaches git here: the removal is [`remove`] with nothing to lose, which git itself refuses when it finds
+/// anything it would not take. `Err` as [`remove`]'s for a folder the app did not make.
+pub fn release(home: &Path, worktree: &str, pushed: bool) -> Result<Released, String> {
+    let (wt, _, rec) = own_lane(home, worktree)?;
+    let git = Git::new(home)?;
+    let repo = real(Path::new(&rec.repo));
+    let exists = fs::symlink_metadata(&wt).map(|m| m.is_dir()).unwrap_or(false);
+    if exists {
+        let ours = git.common_dir(&wt).as_ref() == Some(&repo) && git.worktrees(&repo).is_some_and(|l| l.contains(&real(&wt)) && l.first() != Some(&real(&wt)));
+        if !ours {
+            return Err("not_a_lane".into());
+        }
+        let keep = |code: &str, changed: Option<u32>, unpushed: Option<u32>| Ok(Released { removed: false, kept: Some(code.into()), changed, unpushed });
+        let changed = git.changed(&wt);
+        match changed {
+            None => return keep("unread", None, None),
+            Some(n) if n > 0 => return keep("changes", Some(n), None),
+            _ => {}
+        }
+        if git.busy(&wt) {
+            return keep("busy", Some(0), None);
+        }
+        if pushed {
+            let unpushed = git.unpushed(&repo, &rec.branch);
+            match unpushed {
+                None => return keep("unread", Some(0), None),
+                Some(n) if n > 0 => return keep("unpushed", Some(0), Some(n)),
+                _ => {}
+            }
+        }
+    }
+    // a folder removed by hand has only git's note and the record left, which `remove` takes
+    match remove(home, worktree, &RemoveAsk::default()) {
+        Ok(r) if r.removed => Ok(Released { removed: true, ..Released::default() }),
+        Ok(r) => Ok(Released { removed: false, kept: Some("changed".into()), changed: r.changed, unpushed: None }),
+        Err(e) if e == "not_a_lane" => Err(e),
+        // git's own refusal (an untracked file it will not take, a locked worktree): the folder stays
+        Err(_) => Ok(Released { removed: false, kept: Some("changes".into()), ..Released::default() }),
+    }
+}
+
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::process::Command;
 
-    fn tmp(name: &str) -> PathBuf {
+    pub(crate) fn tmp(name: &str) -> PathBuf {
         let d = std::env::temp_dir().join(format!("manut-lane-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&d);
         fs::create_dir_all(&d).unwrap();
@@ -622,7 +928,7 @@ mod tests {
     }
 
     /// Runs git in `dir` for a test's setup, with an identity so a commit works on a machine that has none.
-    fn sh(dir: &Path, args: &[&str]) -> String {
+    pub(crate) fn sh(dir: &Path, args: &[&str]) -> String {
         let out = Command::new("git")
             .args(["-c", "user.name=Test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", "-c", "init.defaultBranch=main"])
             .args(args)
@@ -638,7 +944,7 @@ mod tests {
     /// A home folder and, in it, a repository `web-app` on `main` with one commit, a tracked `a.txt` and `apps/web/b.txt`,
     /// and `node_modules` ignored; or None when this machine has no git (the tests then say so and pass, as the rest of the
     /// shell's tests do for a program that is not there).
-    fn repo(name: &str) -> Option<(PathBuf, PathBuf)> {
+    pub(crate) fn repo(name: &str) -> Option<(PathBuf, PathBuf)> {
         tasks::find("git")?;
         let home = tmp(name);
         let d = home.join("code").join("web-app");
@@ -653,11 +959,11 @@ mod tests {
         Some((home, d))
     }
 
-    fn names(list: &[&str]) -> Vec<String> {
+    pub(crate) fn names(list: &[&str]) -> Vec<String> {
         list.iter().map(|s| s.to_string()).collect()
     }
 
-    fn commit_in(dir: &Path, file: &str, text: &str) {
+    pub(crate) fn commit_in(dir: &Path, file: &str, text: &str) {
         fs::write(dir.join(file), text).unwrap();
         sh(dir, &["add", file]);
         sh(dir, &["commit", "-q", "-m", file]);
@@ -665,11 +971,11 @@ mod tests {
 
     #[test]
     fn a_name_is_only_ever_the_narrow_form_kit_makes() {
-        for ok in ["kit/promptpay-qr", "kit/x", "kit/fix-stock-sync-2", "kit/a1-b2"] {
+        for ok in ["kit/promptpay-qr", "kit/x", "kit/fix-stock-sync-2", "kit/a1-b2", "team/ana/fix-login", "manut/x"] {
             assert!(valid_name(ok), "{ok}");
         }
         let long = format!("kit/{}", "a".repeat(80));
-        for bad in ["", "main", "kit/", "kit", "Kit/x", "kit/X", "kit/a b", "kit/a--b", "kit/-a", "kit/a-", "kit/a/b", "kit/..", "kit/a.lock", "kit/a.b", "-kit/x", "--help", "kit/--x", "kit/é", "kit/a\n", &long] {
+        for bad in ["", "main", "kit/", "kit", "Kit/x", "kit/X", "kit/a b", "kit/a--b", "kit/-a", "kit/a-", "kit/a/b/c", "kit/a//b", "refs/heads/x", "kit/..", "kit/a.lock", "kit/a.b", "-kit/x", "--help", "kit/--x", "kit/é", "kit/a\n", &long] {
             assert!(!valid_name(bad), "{bad:?}");
         }
     }
@@ -712,7 +1018,7 @@ mod tests {
         let made = make(&home, &d, &names(&["kit/promptpay-qr", "kit/promptpay-qr-2"])).unwrap();
         let wt = home.join(".manut/lanes/web-app/promptpay-qr");
         // three of the developer's files did not come along: a change, a staged change and a new file (never what git ignores)
-        assert_eq!(made, Made { branch: "kit/promptpay-qr".into(), base: "main".into(), dir: wt.to_string_lossy().into(), worktree: wt.to_string_lossy().into(), left: 3 });
+        assert_eq!(made, Made { branch: "kit/promptpay-qr".into(), base: "main".into(), dir: wt.to_string_lossy().into(), worktree: wt.to_string_lossy().into(), left: 3, from: String::new(), local: String::new() });
         // the developer's folder: same branch, same index, same stash, same files
         assert_eq!((sh(&d, &["status", "--porcelain"]), sh(&d, &["stash", "list"]), sh(&d, &["symbolic-ref", "HEAD"])), before);
         assert_eq!(git_branch::branch(&d), "main");
@@ -1034,6 +1340,366 @@ mod tests {
         assert_eq!((m.ours.clone(), m.theirs.clone()), (vec!["a.txt".to_string()], vec!["a.txt".to_string()]));
         // read from the developer's folder, it is about the developer's branch, which is main itself: nothing to say
         assert_eq!(crate::git_moved::main_moved(&d, Some("main"), &[]).unwrap(), None);
+        let _ = fs::remove_dir_all(home);
+    }
+
+    /// A bare repository `origin.git` in `home`, set as `origin` of `d` with `main` pushed and tracked.
+    pub(crate) fn with_origin(home: &Path, d: &Path) -> PathBuf {
+        let bare = home.join("origin.git");
+        fs::create_dir_all(&bare).unwrap();
+        sh(&bare, &["init", "-q", "--bare"]);
+        sh(&bare, &["symbolic-ref", "HEAD", "refs/heads/main"]);
+        sh(d, &["remote", "add", "origin", bare.to_str().unwrap()]);
+        sh(d, &["push", "-q", "-u", "origin", "main"]);
+        sh(d, &["remote", "set-head", "origin", "main"]);
+        bare
+    }
+
+    /// Moves `main` on the remote by one commit from a second clone, so the developer's own copy is behind.
+    fn advance_remote(home: &Path, bare: &Path, file: &str) -> String {
+        let other = home.join("other");
+        let _ = fs::remove_dir_all(&other);
+        sh(home, &["clone", "-q", bare.to_str().unwrap(), other.to_str().unwrap()]);
+        commit_in(&other, file, "from the remote\n");
+        sh(&other, &["push", "-q", "origin", "main"]);
+        sh(&other, &["rev-parse", "HEAD"])
+    }
+
+    #[test]
+    fn a_prefix_is_one_or_two_plain_words_that_end_in_a_slash() {
+        for ok in ["kit/", "manut/", "team/ana/", "fix-it/", "a1/"] {
+            assert!(valid_prefix(ok), "{ok}");
+        }
+        let long = format!("{}/", "a".repeat(30));
+        for bad in ["", "/", "kit", "Kit/", "kit//", "/kit/", "a/b/c/", "kit/ana", "refs/", "kit /", "-kit/", "kit-/", "ki..t/", "kit/.lock/", "é/", "kit\n/", "x y/", &long] {
+            assert!(!valid_prefix(bad), "{bad:?}");
+        }
+        assert_eq!(prefix_of("team/ana/x"), "team/ana/");
+        assert_eq!(prefix_of("kit/x"), "kit/");
+    }
+
+    #[test]
+    fn a_lane_is_made_under_the_prefix_the_person_chose_and_an_earlier_prefix_still_lists_and_removes() {
+        let Some((home, d)) = repo("prefix") else { return };
+        let old = make(&home, &d, &names(&["kit/a"])).unwrap();
+        let new = make(&home, &d, &names(&["team/ana/b", "team/ana/b-2"])).unwrap();
+        assert_eq!(new.branch, "team/ana/b");
+        assert_eq!(git_branch::branch(Path::new(&new.worktree)), "team/ana/b");
+        assert!(new.worktree.ends_with("/web-app/b"));
+        // the names taken are counted under the prefix asked for, so another prefix's branch is not in the way
+        sh(&d, &["branch", "team/ana/c"]);
+        assert_eq!(make(&home, &d, &names(&["team/ana/c", "team/ana/c-2"])).unwrap().branch, "team/ana/c-2");
+        // names of two prefixes in one ask, and a name outside the form, are refused before git runs
+        assert_eq!(make(&home, &d, &names(&["kit/x", "team/x"])), Err("bad_name".into()));
+        assert_eq!(make(&home, &d, &names(&["x"])), Err("bad_name".into()));
+        let listed: Vec<String> = list(&home, &d).unwrap().into_iter().map(|k| k.branch).collect();
+        assert!(listed.contains(&"kit/a".to_string()) && listed.contains(&"team/ana/b".to_string()));
+        assert!(remove(&home, &old.worktree, &RemoveAsk::default()).unwrap().removed);
+        assert!(remove(&home, &new.worktree, &RemoveAsk::default()).unwrap().removed);
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn a_folder_for_lanes_is_refused_inside_a_checkout_or_where_nothing_can_be_written() {
+        let Some((home, d)) = repo("root") else { return };
+        let ok = home.join("elsewhere/lanes");
+        let real_ok = check_lanes_root(&home, ok.to_str().unwrap()).unwrap();
+        assert!(real_ok.is_dir() && real_ok.ends_with("elsewhere/lanes"));
+        // inside a project's checkout (the folder itself, and one below it), even when it is not made yet
+        for inside in [d.clone(), d.join("apps"), d.join("not/made/yet")] {
+            assert_eq!(check_lanes_root(&home, inside.to_str().unwrap()), Err("root_in_checkout".into()), "{}", inside.display());
+        }
+        assert!(!d.join("not").exists(), "a refused folder is never made");
+        // too broad, not a path, and not absolute
+        for (bad, code) in [("/", "root_too_broad"), (home.to_str().unwrap(), "root_too_broad"), (home.join(".manut").to_str().unwrap(), "root_too_broad"), (home.join(".manut/lanes/x").to_str().unwrap(), "root_too_broad"), ("", "bad_root"), ("relative/x", "bad_root"), ("/tmp/../etc", "bad_root")] {
+            assert_eq!(check_lanes_root(&home, bad), Err(code.into()), "{bad}");
+        }
+        // a file where the folder goes, and a folder that cannot be written
+        fs::write(home.join("afile"), "x").unwrap();
+        assert_eq!(check_lanes_root(&home, home.join("afile").to_str().unwrap()), Err("root_unwritable".into()));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let locked = home.join("locked");
+            fs::create_dir_all(&locked).unwrap();
+            fs::set_permissions(&locked, fs::Permissions::from_mode(0o500)).unwrap();
+            // root can write anywhere, so the check only means something for anyone else
+            if fs::write(locked.join("probe"), "").is_err() {
+                assert_eq!(check_lanes_root(&home, locked.join("in").to_str().unwrap()), Err("root_unwritable".into()));
+                assert_eq!(check_lanes_root(&home, locked.to_str().unwrap()), Err("root_unwritable".into()));
+            }
+            fs::set_permissions(&locked, fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn a_lane_made_under_the_chosen_folder_keeps_its_record_in_the_app_s_own_folder_and_is_listed_and_removed() {
+        let Some((home, d)) = repo("chosen") else { return };
+        let old = make(&home, &d, &names(&["kit/old"])).unwrap();
+        let root = home.join("work/lanes");
+        let start = Start { root: root.to_string_lossy().into(), remote: false };
+        let made = make_with(&home, &d, &names(&["kit/new"]), &start).unwrap();
+        let wt = root.canonicalize().unwrap().join("web-app/new");
+        assert_eq!(made.worktree, wt.to_string_lossy());
+        assert_eq!(git_branch::branch(&wt), "kit/new");
+        // the record is under the lanes' folder, not beside the folder; the earlier lane stays where it was
+        assert!(lanes_dir(&home).join("web-app/new.json").is_file() && !wt.with_extension("json").exists());
+        assert!(old.worktree.starts_with(lanes_dir(&home).to_str().unwrap()));
+        // a second lane of the same words takes the next folder name, in both places
+        let again = make_with(&home, &d, &names(&["kit/new-2"]), &start).unwrap();
+        assert!(again.worktree.ends_with("/web-app/new-2"));
+        assert_eq!(list(&home, &d).unwrap().len(), 3);
+        // what reads a lane's folder reads this one as a lane's
+        assert!(in_a_lane(&home, &wt) && in_a_lane(&home, &wt.join("apps/web")) && !in_a_lane(&home, &root));
+        assert_eq!(crate::preview::lane_folder(&home, &wt.join("nope")).ok(), None, "a folder that does not exist is not a lane's");
+        assert_eq!(crate::preview::lane_folder(&home, &wt.join("apps/web")).unwrap(), wt.join("apps/web"));
+        assert!(crate::preview::lane_folder(&home, &d).is_err());
+        let gone = remove(&home, &made.worktree, &RemoveAsk::default()).unwrap();
+        assert!(gone.removed && !wt.exists() && !lanes_dir(&home).join("web-app/new.json").exists());
+        // the folder chosen has become a checkout since: no lane is made there, and none is made anywhere else
+        sh(&home.join("work"), &["init", "-q"]);
+        assert_eq!(make_with(&home, &d, &names(&["kit/third"]), &start), Err("root_in_checkout".into()));
+        assert!(git_branch::branch(&d) == "main" && sh(&d, &["branch", "--list", "kit/third"]).is_empty());
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn a_record_cannot_name_a_folder_the_app_did_not_make() {
+        let Some((home, d)) = repo("forged") else { return };
+        let made = make(&home, &d, &names(&["kit/a"])).unwrap();
+        let rec_dir = lanes_dir(&home).join("web-app");
+        // a record whose folder has another last name than itself, or is not a plain absolute path, is no record
+        for (name, wt) in [("x", d.to_string_lossy().into_owned()), ("web-app", format!("{}/../web-app", d.display())), ("web-app", "relative/web-app".to_string())] {
+            let rec = Record { v: 1, worktree: wt, repo: d.join(".git").to_string_lossy().into(), project: String::new(), prefix: String::new(), branch: "kit/a".into(), base: "main".into(), at: String::new(), made: 0 };
+            fs::write(rec_dir.join(format!("{name}.json")), serde_json::to_string(&rec).unwrap()).unwrap();
+        }
+        assert_eq!(records(&home).len(), 1);
+        // a record that does name the developer's own folder under its own name is still refused: git lists it as the main
+        // worktree, never a linked one
+        let rec = Record { v: 1, worktree: d.to_string_lossy().into(), repo: d.join(".git").to_string_lossy().into(), project: String::new(), prefix: String::new(), branch: "kit/a".into(), base: "main".into(), at: String::new(), made: 0 };
+        fs::write(rec_dir.join("web-app.json"), serde_json::to_string(&rec).unwrap()).unwrap();
+        for ask in [&RemoveAsk::default(), &RemoveAsk { changed: 9, branch: true, ahead: Some(9) }] {
+            assert_eq!(remove(&home, d.to_str().unwrap(), ask), Err("not_a_lane".into()));
+        }
+        assert_eq!(release(&home, d.to_str().unwrap(), true), Err("not_a_lane".into()));
+        assert!(d.join("a.txt").exists());
+        assert_eq!(release(&home, "/nowhere/x", true), Err("not_a_lane".into()));
+        let _ = made;
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn the_fetch_asks_no_password_and_ends_within_its_limit() {
+        let Some((home, d)) = repo("net") else { return };
+        let git = Git::new(&home).unwrap();
+        let env = net_env(&git, &d);
+        let get = |k: &str| env.iter().find(|(n, _)| *n == k).map(|(_, v)| v.clone());
+        assert_eq!(get("GIT_ASKPASS").as_deref(), Some("true"));
+        assert_eq!(get("GCM_INTERACTIVE").as_deref(), Some("never"));
+        if std::env::var_os("GIT_SSH_COMMAND").is_none() && std::env::var_os("GIT_SSH").is_none() {
+            assert_eq!(get("GIT_SSH_COMMAND").as_deref(), Some("ssh -o BatchMode=yes"));
+            // the person's own ssh command is left as theirs
+            sh(&d, &["config", "core.sshCommand", "ssh -i mine"]);
+            assert_eq!(net_env(&git, &d).iter().find(|(n, _)| *n == "GIT_SSH_COMMAND"), None);
+        }
+        // a name that is not a remote or a branch never reaches git
+        assert_eq!(fetch_branch(&git, &d, "--upload-pack=x", "main"), Err("bad_name".into()));
+        assert_eq!(fetch_branch(&git, &d, "origin", "-x"), Err("bad_name".into()));
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn starts_from_the_latest_commit_of_the_base_branch_on_the_remote_when_asked() {
+        let Some((home, d)) = repo("remote") else { return };
+        let bare = with_origin(&home, &d);
+        let theirs = advance_remote(&home, &bare, "r.txt");
+        let local = sh(&d, &["rev-parse", "main"]);
+        assert_ne!(theirs, local);
+        let on = Start { remote: true, ..Start::default() };
+        // off: the local commit, and nothing said
+        let off = make(&home, &d, &names(&["kit/off"])).unwrap();
+        assert_eq!((sh(&d, &["rev-parse", "kit/off"]), off.from.as_str(), off.local.as_str()), (local.clone(), "", ""));
+        // on: fetched, and the lane starts at the remote's commit, which has the remote's file
+        let made = make_with(&home, &d, &names(&["kit/on"]), &on).unwrap();
+        assert_eq!((made.from.as_str(), made.local.as_str(), made.base.as_str()), ("origin/main", "", "main"));
+        assert_eq!(sh(&d, &["rev-parse", "kit/on"]), theirs);
+        assert!(Path::new(&made.worktree).join("r.txt").exists());
+        // the developer's folder: its branch has not moved, only the remote-tracking branch was fetched
+        assert_eq!((sh(&d, &["rev-parse", "main"]), git_branch::branch(&d)), (local.clone(), "main".to_string()));
+        let rec = records(&home).into_iter().find(|(_, r)| r.branch == "kit/on").unwrap().1;
+        assert_eq!(rec.at, theirs);
+        // the base is the same local branch name, so the count of its own commits reads against it
+        assert_eq!(git_branch::branch(Path::new(&made.worktree)), "kit/on");
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn starts_from_the_local_commit_and_says_why_when_the_remote_cannot_be_used() {
+        let Some((home, d)) = repo("local-why") else { return };
+        let on = Start { remote: true, ..Start::default() };
+        // no remote at all
+        let a = make_with(&home, &d, &names(&["kit/a"]), &on).unwrap();
+        assert_eq!((a.from.as_str(), a.local.as_str()), ("", "no_remote"));
+        let bare = with_origin(&home, &d);
+        // the remote cannot be reached: the fetch fails, and the lane still starts
+        fs::rename(&bare, home.join("moved.git")).unwrap();
+        let b = make_with(&home, &d, &names(&["kit/b"]), &on).unwrap();
+        assert_eq!((b.from.as_str(), b.local.as_str()), ("", "fetch_failed"));
+        fs::rename(home.join("moved.git"), &bare).unwrap();
+        // the local branch has commits the remote lacks: the lane starts from them, and does not lose them
+        commit_in(&d, "mine.txt", "local only\n");
+        let c = make_with(&home, &d, &names(&["kit/c"]), &on).unwrap();
+        assert_eq!((c.from.as_str(), c.local.as_str()), ("", "ahead"));
+        assert!(Path::new(&c.worktree).join("mine.txt").exists());
+        // both moved: neither is the latest, so the local one, again with its own commits
+        advance_remote(&home, &bare, "r.txt");
+        let e = make_with(&home, &d, &names(&["kit/e"]), &on).unwrap();
+        assert_eq!((e.from.as_str(), e.local.as_str()), ("", "diverged"));
+        assert!(Path::new(&e.worktree).join("mine.txt").exists());
+        // a detached folder has no base branch to ask the remote about
+        let head = sh(&d, &["rev-parse", "HEAD"]);
+        sh(&d, &["checkout", "-q", "--detach", &head]);
+        let f = make_with(&home, &d, &names(&["kit/f"]), &on).unwrap();
+        assert_eq!((f.from.as_str(), f.local.as_str()), ("", "detached"));
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn the_remote_is_the_one_the_base_tracks_else_origin_and_a_missing_folder_falls_back() {
+        let Some((home, d)) = repo("tracks") else { return };
+        let bare = with_origin(&home, &d);
+        // main tracks a remote named upstream whose branch is called trunk; origin also has a main that is not the one
+        let up = home.join("upstream.git");
+        fs::create_dir_all(&up).unwrap();
+        sh(&up, &["init", "-q", "--bare"]);
+        sh(&d, &["remote", "add", "upstream", up.to_str().unwrap()]);
+        sh(&d, &["push", "-q", "upstream", "main:trunk"]);
+        sh(&d, &["config", "branch.main.remote", "upstream"]);
+        sh(&d, &["config", "branch.main.merge", "refs/heads/trunk"]);
+        let other = home.join("other");
+        sh(&home, &["clone", "-q", up.to_str().unwrap(), other.to_str().unwrap()]);
+        sh(&other, &["checkout", "-q", "trunk"]);
+        commit_in(&other, "t.txt", "trunk\n");
+        sh(&other, &["push", "-q", "origin", "trunk"]);
+        let trunk = sh(&other, &["rev-parse", "HEAD"]);
+        let on = Start { remote: true, ..Start::default() };
+        let made = make_with(&home, &d, &names(&["kit/t"]), &on).unwrap();
+        assert_eq!((made.from.as_str(), sh(&d, &["rev-parse", "kit/t"])), ("upstream/trunk", trunk));
+        // a branch that tracks nothing is the same name on origin
+        sh(&d, &["checkout", "-q", "-b", "feature"]);
+        let feature = advance_remote_branch(&home, &bare, "feature");
+        let made = make_with(&home, &d, &names(&["kit/f"]), &on).unwrap();
+        assert_eq!((made.from.as_str(), sh(&d, &["rev-parse", "kit/f"])), ("origin/feature", feature));
+        let _ = fs::remove_dir_all(home);
+    }
+
+    /// Creates `branch` on the remote one commit past `main`, from a second clone.
+    fn advance_remote_branch(home: &Path, bare: &Path, branch: &str) -> String {
+        let other = home.join("other2");
+        let _ = fs::remove_dir_all(&other);
+        sh(home, &["clone", "-q", bare.to_str().unwrap(), other.to_str().unwrap()]);
+        sh(&other, &["checkout", "-q", "-b", branch]);
+        commit_in(&other, "f.txt", "feature\n");
+        sh(&other, &["push", "-q", "origin", branch]);
+        sh(&other, &["rev-parse", "HEAD"])
+    }
+
+    /// A lane with `kit/<name>` made, optionally pushed, in a repository with an origin.
+    fn pushed_lane(home: &Path, d: &Path, name: &str) -> Made {
+        let made = make(home, d, &names(&[&format!("kit/{name}")])).unwrap();
+        let wt = Path::new(&made.worktree);
+        commit_in(wt, &format!("{name}.txt"), "work\n");
+        sh(wt, &["push", "-q", "origin", &made.branch]);
+        made
+    }
+
+    #[test]
+    fn a_clean_up_removes_a_folder_with_nothing_of_its_own_and_keeps_the_branch() {
+        let Some((home, d)) = repo("release-ok") else { return };
+        with_origin(&home, &d);
+        let made = pushed_lane(&home, &d, "done");
+        assert_eq!(release(&home, &made.worktree, true), Ok(Released { removed: true, ..Released::default() }));
+        assert!(!Path::new(&made.worktree).exists());
+        assert!(!sh(&d, &["branch", "--list", "kit/done"]).is_empty(), "the branch stays");
+        assert!(!lanes_dir(&home).join("web-app/done.json").exists());
+        // a folder already removed by hand: only git's note and the record go
+        let gone = make(&home, &d, &names(&["kit/gone"])).unwrap();
+        fs::remove_dir_all(&gone.worktree).unwrap();
+        assert_eq!(release(&home, &gone.worktree, true).map(|r| r.removed), Ok(true));
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn a_clean_up_never_removes_a_folder_with_work_of_its_own() {
+        let Some((home, d)) = repo("release-keep") else { return };
+        with_origin(&home, &d);
+        let keeps = |home: &Path, made: &Made, code: &str| {
+            let r = release(home, &made.worktree, true).unwrap();
+            assert_eq!((r.removed, r.kept.as_deref()), (false, Some(code)), "{code}: {r:?}");
+            assert!(Path::new(&made.worktree).join(".git").exists(), "{code}: the folder is still there");
+        };
+        // a changed tracked file
+        let a = pushed_lane(&home, &d, "a");
+        fs::write(Path::new(&a.worktree).join("a.txt"), "changed\n").unwrap();
+        keeps(&home, &a, "changes");
+        // a staged file
+        let b = pushed_lane(&home, &d, "b");
+        fs::write(Path::new(&b.worktree).join("staged.txt"), "x\n").unwrap();
+        sh(Path::new(&b.worktree), &["add", "staged.txt"]);
+        keeps(&home, &b, "changes");
+        // an untracked file that is not ignored, in a folder below
+        let c = pushed_lane(&home, &d, "c");
+        fs::create_dir_all(Path::new(&c.worktree).join("apps/web/new")).unwrap();
+        fs::write(Path::new(&c.worktree).join("apps/web/new/x.txt"), "x\n").unwrap();
+        keeps(&home, &c, "changes");
+        // a commit on no remote
+        let e = make(&home, &d, &names(&["kit/e"])).unwrap();
+        commit_in(Path::new(&e.worktree), "e.txt", "unpushed\n");
+        let r = release(&home, &e.worktree, true).unwrap();
+        assert_eq!((r.removed, r.kept.as_deref(), r.unpushed), (false, Some("unpushed"), Some(1)));
+        // with no remote at all every commit of the branch is unpushed
+        // a rebase in progress, with nothing changed in the files
+        let f = pushed_lane(&home, &d, "f");
+        let gd = sh(Path::new(&f.worktree), &["rev-parse", "--absolute-git-dir"]);
+        fs::create_dir_all(Path::new(&gd).join("rebase-merge")).unwrap();
+        keeps(&home, &f, "busy");
+        // what git ignores goes with the folder, so it never keeps one
+        let g = pushed_lane(&home, &d, "g");
+        fs::create_dir_all(Path::new(&g.worktree).join("node_modules/x")).unwrap();
+        fs::write(Path::new(&g.worktree).join("node_modules/x/i.js"), "x\n").unwrap();
+        assert_eq!(release(&home, &g.worktree, true).map(|r| r.removed), Ok(true));
+        // and nothing that was kept lost a file
+        assert_eq!(fs::read_to_string(Path::new(&a.worktree).join("a.txt")).unwrap(), "changed\n");
+        assert!(Path::new(&c.worktree).join("apps/web/new/x.txt").exists() && Path::new(&e.worktree).join("e.txt").exists());
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn a_clean_up_with_no_remote_keeps_a_branch_with_commits_and_removes_one_with_none() {
+        let Some((home, d)) = repo("release-noremote") else { return };
+        let fresh = make(&home, &d, &names(&["kit/fresh"])).unwrap();
+        // no remote: main's own commit is on no remote either, so nothing here is "pushed"
+        let r = release(&home, &fresh.worktree, true).unwrap();
+        assert_eq!((r.removed, r.kept.as_deref()), (false, Some("unpushed")));
+        // the page's other path (a merged lane) has its own proof of the commits and asks for no remote
+        let r = release(&home, &fresh.worktree, false).unwrap();
+        assert!(r.removed);
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn a_clean_up_never_passes_a_force_flag_so_git_s_own_refusal_keeps_the_folder() {
+        let Some((home, d)) = repo("release-noforce") else { return };
+        with_origin(&home, &d);
+        let made = pushed_lane(&home, &d, "locked");
+        // git's own refusal to remove a locked worktree is not got past
+        sh(&d, &["worktree", "lock", &made.worktree]);
+        let r = release(&home, &made.worktree, true).unwrap();
+        assert!(!r.removed, "{r:?}");
+        assert!(Path::new(&made.worktree).join("a.txt").exists());
+        sh(&d, &["worktree", "unlock", &made.worktree]);
+        assert!(release(&home, &made.worktree, true).unwrap().removed);
         let _ = fs::remove_dir_all(home);
     }
 }

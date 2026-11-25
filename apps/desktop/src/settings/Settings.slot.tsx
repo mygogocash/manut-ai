@@ -27,6 +27,7 @@ import { AvatarEditor, BotFacts, NameEditor, PictureActions, placeName, useBotIn
 import { ShopSettings } from "../onboarding/ShopSettings";
 import { PeoplePage, peopleOffered } from "../pages/PeoplePane";
 import { DeveloperPage } from "./DeveloperPage";
+import { WorktreesPage } from "./WorktreesPage";
 
 export const slot = "settings";
 
@@ -35,6 +36,8 @@ const APP_PAGES: { id: string; label: Key }[] = [
   { id: "terminal", label: "set.terminal" },
   { id: "agents", label: "set.agents" },
   { id: "computer", label: "set.computer" },
+  // where lanes' folders are made, the remote start, the branch prefix and the clean-up (WorktreesPage.tsx)
+  { id: "worktrees", label: "set.worktrees" },
   // Practice or Connected, and signing in to the API (DeveloperPage.tsx)
   { id: "developer", label: "set.developer" },
 ];
@@ -107,6 +110,8 @@ export default function Settings({ page }: SlotProps["settings"]) {
           <AgentsPage />
         ) : current === "computer" ? (
           <ComputerPage />
+        ) : current === "worktrees" ? (
+          <WorktreesPage />
         ) : current === "developer" ? (
           <DeveloperPage />
         ) : current === "people" ? (

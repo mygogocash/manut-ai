@@ -96,8 +96,8 @@ pub enum PreviewOut {
 // The checks, pure
 // ---------------------------------------------------------------------------------------------
 
-/// `cwd` as a real path, when it is a lane's own folder or a folder inside one: two names or more below `~/.manut/lanes`
-/// (lane.rs `in_a_lane`), read after every link is followed, so a link there that points at the developer's folder is not a
+/// `cwd` as a real path, when it is a lane's own folder or a folder inside one: two names or more below `~/.manut/lanes`, or
+/// inside a folder a record names (lane.rs `in_a_lane`), read after every link is followed, so a link there that points at the developer's folder is not a
 /// lane's. `not_a_lane` otherwise.
 pub fn lane_folder(home: &Path, cwd: &Path) -> Result<PathBuf, String> {
     let refuse = || "not_a_lane".to_string();
@@ -105,10 +105,12 @@ pub fn lane_folder(home: &Path, cwd: &Path) -> Result<PathBuf, String> {
         return Err(refuse());
     }
     let real = fs::canonicalize(cwd).map_err(|_| refuse())?;
-    let lanes = fs::canonicalize(lane::lanes_dir(home)).map_err(|_| refuse())?;
-    let rest = real.strip_prefix(&lanes).map_err(|_| refuse())?;
-    let deep = rest.components().count() >= 2 && rest.components().all(|c| matches!(c, Component::Normal(_)));
-    if !deep || !real.is_dir() {
+    // under `~/.manut/lanes`, or inside the folder of a lane made under a folder the person chose (a record names it)
+    let default = fs::canonicalize(lane::lanes_dir(home)).ok().and_then(|lanes| {
+        let rest = real.strip_prefix(&lanes).ok()?;
+        Some(rest.components().count() >= 2 && rest.components().all(|c| matches!(c, Component::Normal(_))))
+    });
+    if !(default == Some(true) || lane::in_a_record(home, &real)) || !real.is_dir() {
         return Err(refuse());
     }
     Ok(real)

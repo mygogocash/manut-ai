@@ -21,7 +21,8 @@ interface Setup {
   /** The branch each folder is on: the developer's never moves; a lane's folder is on its own branch. */
   folders: Record<string, string>;
   calls: string[];
-  made: { cwd: string; names: string[] }[];
+  made: { cwd: string; names: string[]; start?: unknown }[];
+  released: string[];
   /** The folder each agent was started in. */
   started: string[];
   removed: { worktree: string; ask: LaneRemoveAsk }[];
@@ -30,11 +31,13 @@ interface Setup {
 /** The folder the fake shell makes for a lane, as lane.rs names it. */
 const laneDir = (branch: string, cwd = DEV) => `/w/.manut/lanes/${cwd.split("/").pop()}/${branch.slice(4)}`;
 
-async function setup(over: { branch?: string; left?: number; laneWorktree?: SessionHost["laneWorktree"] | null } = {}) {
-  (globalThis as { localStorage?: unknown }).localStorage = { getItem: () => null, setItem: () => {}, removeItem: () => {} };
+async function setup(over: { branch?: string; left?: number; laneWorktree?: SessionHost["laneWorktree"] | null; settings?: Record<string, unknown>; release?: boolean; made?: Partial<LaneMade> } = {}) {
+  // Settings › Worktrees are read from storage: `over.settings` is what the person saved
+  const saved = over.settings ? JSON.stringify(over.settings) : null;
+  (globalThis as { localStorage?: unknown }).localStorage = { getItem: (k: string) => (k === "manut.worktrees" ? saved : null), setItem: () => {}, removeItem: () => {} };
   resetKitProjects();
   resetKitAsks();
-  const s: Setup = { folders: { [DEV]: over.branch ?? "main", "/w/one": "main", "/w/two": "main" }, calls: [], made: [], started: [], removed: [] };
+  const s: Setup = { folders: { [DEV]: over.branch ?? "main", "/w/one": "main", "/w/two": "main" }, calls: [], made: [], started: [], removed: [], released: [] };
   const sinks = new Map<string, (e: ChatEvent) => void>();
   const sent: string[] = [];
   const inputs: ChatInput[] = [];
@@ -71,15 +74,24 @@ async function setup(over: { branch?: string; left?: number; laneWorktree?: Sess
       return { removed: true, deleted: false, changed: null, ahead: null, error: null };
     },
   };
-  const lane: SessionHost["laneWorktree"] = async (cwd, names) => {
+  const lane: SessionHost["laneWorktree"] = async (cwd, names, start) => {
     s.calls.push("laneWorktree");
-    s.made.push({ cwd, names });
+    s.made.push({ cwd, names, start });
     const dir = laneDir(names[0], cwd);
     // the lane's folder is on its own branch; the developer's stays where it was
     s.folders[dir] = names[0];
-    return { branch: names[0], base: s.folders[cwd], dir, worktree: dir, left: over.left ?? 0 } satisfies LaneMade;
+    return { branch: names[0], base: s.folders[cwd], dir, worktree: dir, left: over.left ?? 0, from: "", local: "", ...over.made } satisfies LaneMade;
   };
-  const host = { ...base, ...(over.laneWorktree === null ? {} : { laneWorktree: over.laneWorktree ?? lane }) } as unknown as SessionHost;
+  const release = over.release
+    ? {
+        laneRelease: async (worktree: string) => {
+          s.calls.push("laneRelease");
+          s.released.push(worktree);
+          return { removed: true, kept: null, changed: null, unpushed: null };
+        },
+      }
+    : {};
+  const host = { ...base, ...release, ...(over.laneWorktree === null ? {} : { laneWorktree: over.laneWorktree ?? lane }) } as unknown as SessionHost;
   const store = createStore(bridge);
   const ss = createSessions(host, () => store);
   await ss.loadAgents();
@@ -102,7 +114,7 @@ test("makes a folder of its own as a session starts, named from the first messag
   // the shell is asked for the folder's branch, makes the lane's folder, starts the agent in it, reads the branch of the
   // folder the agent works in for the composer's foot, and only then sends the first message
   expect(t.s.calls).toEqual(["branch", "laneWorktree", "chatStart", "branch", "input:send"]);
-  expect(t.s.made).toEqual([{ cwd: DEV, names: expect.arrayContaining(["kit/add-promptpay-qr-checkout"]) }]);
+  expect(t.s.made).toEqual([{ cwd: DEV, names: expect.arrayContaining(["kit/add-promptpay-qr-checkout"]), start: { root: "", remote: false } }]);
   const dir = laneDir("kit/add-promptpay-qr-checkout");
   expect(t.row(id)?.lane).toEqual({ name: "kit/add-promptpay-qr-checkout", base: "main", dir, worktree: dir });
   expect(t.s.started).toEqual([dir]);
@@ -279,4 +291,56 @@ test("Chat with Kit with no folder named starts where a New session chat does, t
   const t = await setup();
   const id = t.ss.draftChat("claude" as never);
   expect(t.row(id)).toMatchObject({ cwd: "/w", status: "draft" });
+});
+
+test("makes the lane's branch under the prefix the person chose and tells the shell where and whether to start from the remote", async () => {
+  const t = await setup({ settings: { prefix: "team/ana/", root: "/w/lanes", remote: true } });
+  await t.startIn("Fix the totals");
+  expect(t.s.made[0].names[0]).toBe("team/ana/fix-totals");
+  expect(t.s.made[0].start).toEqual({ root: "/w/lanes", remote: true });
+  // a prefix that fails the check is the default
+  const bad = await setup({ settings: { prefix: "Bad Prefix" } });
+  await bad.startIn("Fix the totals");
+  expect(bad.s.made[0].names[0]).toBe("kit/fix-totals");
+  expect(bad.s.made[0].start).toEqual({ root: "", remote: false });
+});
+
+test("the lane's first line says where it started when the remote was asked for", async () => {
+  const from = await setup({ settings: { remote: true }, made: { from: "origin/main" } });
+  expect(from.notes(await from.startIn("Fix the totals"))[0]).toContain("It starts from origin/main as it is on the remote now.");
+  const behind = await setup({ settings: { remote: true }, made: { local: "fetch_failed" } });
+  expect(behind.notes(await behind.startIn("Fix the totals"))[0]).toContain("The remote did not answer in time, so it starts from your own main.");
+  const ahead = await setup({ settings: { remote: true }, made: { local: "ahead" } });
+  expect(ahead.notes(await ahead.startIn("Fix the totals"))[0]).toContain("Your own main has commits the remote does not, so it starts from your own main.");
+  // off: nothing is said about the remote, whatever the shell answered
+  const off = await setup({ made: { local: "no_remote" } });
+  expect(off.notes(await off.startIn("Fix the totals"))[0]).not.toContain("remote");
+});
+
+test("a chosen folder that cannot be used now says so and makes no lane anywhere else", async () => {
+  const t = await setup({
+    settings: { root: "/w/lanes" },
+    laneWorktree: async () => {
+      throw new Error("root_in_checkout");
+    },
+  });
+  const id = await t.startIn("Fix the totals");
+  expect(t.row(id)?.lane).toBeUndefined();
+  expect(t.notes(id).join(" ")).toContain("The folder chosen for lanes cannot be used now, so no lane was made");
+  expect(t.s.started).toEqual([DEV]);
+});
+
+test("a deleted chat's folder goes through the shell's clean-up when it is on, and stays when it is off", async () => {
+  const on = await setup({ release: true });
+  const a = await on.startIn("Fix the totals");
+  on.ss.close(a);
+  await new Promise((r) => setTimeout(r, 0));
+  expect(on.s.released).toEqual([laneDir("kit/fix-totals")]);
+  expect(on.s.removed).toEqual([]);
+  const off = await setup({ release: true, settings: { cleanDeleted: false } });
+  const b = await off.startIn("Fix the totals");
+  off.ss.close(b);
+  await new Promise((r) => setTimeout(r, 0));
+  expect(off.s.released).toEqual([]);
+  expect(off.s.removed).toEqual([]);
 });

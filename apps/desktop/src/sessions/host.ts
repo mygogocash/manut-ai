@@ -15,7 +15,7 @@ import type { DiskLevel, DiskState } from "../lib/disk";
 import type { ImportApp, ImportProfile } from "./term/import";
 import { readView, type GitView } from "../code/moved";
 import { MOCK_MOVED, MOCK_MOVED_ROOT } from "../code/mockMoved";
-import { readKept, readMade, readRemoved, type KeptLane, type LaneMade, type LaneRemoveAsk, type LaneRemoved } from "../code/laneBranch";
+import { readCleaned, readKept, readMade, readReleased, readRemoved, type KeptLane, type LaneCleaned, type LaneMade, type LaneReleased, type LaneRemoveAsk, type LaneRemoved } from "../code/laneBranch";
 
 /** What the person did in a chat. Mirrors `Input` in src-tauri/src/agent_chat.rs. `images`: saved copies
  *  (`saveFile`) of attached pictures, for the agent's own image input. */
@@ -140,7 +140,15 @@ export interface SessionHost extends HistoryHost {
    *  branch, index, stash and HEAD stay as they are), and nothing is pushed or merged. Rejects with a short code
    *  (`not_a_repository`, `no_commit`, `not_committed`, `busy`, `taken`, `git_missing`) or git's own words. Absent in a shell
    *  older than lanes' folders: the session then works in its own folder, with no lane of its own. */
-  laneWorktree?(cwd: string, names: string[]): Promise<LaneMade>;
+  laneWorktree?(cwd: string, names: string[], start?: LaneStart): Promise<LaneMade>;
+  /** Settings › Worktrees: check the folder chosen for lanes' folders and make it; resolves with its real path, rejects with a
+   *  code (`bad_root`, `root_too_broad`, `root_in_checkout`, `root_unwritable`). */
+  laneRootCheck?(root: string): Promise<string>;
+  /** A clean-up removes a deleted chat's folder only when nothing in it is changed, new or unpushed; the branch stays. */
+  laneRelease?(worktree: string): Promise<LaneReleased>;
+  /** A clean-up of the lanes of `cwd`'s repository whose pull request merged, through the person's own `gh` or `glab`;
+   *  `held` are folders a session still works in. */
+  laneCleanMerged?(cwd: string, held: string[]): Promise<LaneCleaned>;
   /** The lanes' working folders the app made for the repository `cwd` is in, newest first (only reads). */
   laneList?(cwd: string): Promise<KeptLane[]>;
   /** The developer's folders the app's lanes were made from, so the Code page lists a project whose last session closed while
@@ -319,9 +327,21 @@ export class TauriHost implements SessionHost, BuddyHost {
     const { invoke } = await this.core();
     return invoke<string>("session_branch", { cwd });
   }
-  async laneWorktree(cwd: string, names: string[]) {
+  async laneRootCheck(root: string) {
     const { invoke } = await this.core();
-    const made = readMade(await invoke<unknown>("lane_worktree", { cwd, names }));
+    return invoke<string>("lane_root_check", { root });
+  }
+  async laneRelease(worktree: string) {
+    const { invoke } = await this.core();
+    return readReleased(await invoke<unknown>("lane_release", { worktree }));
+  }
+  async laneCleanMerged(cwd: string, held: string[]) {
+    const { invoke } = await this.core();
+    return readCleaned(await invoke<unknown>("lane_clean_merged", { cwd, held }));
+  }
+  async laneWorktree(cwd: string, names: string[], start?: LaneStart) {
+    const { invoke } = await this.core();
+    const made = readMade(await invoke<unknown>("lane_worktree", { cwd, names, start: start ?? null }));
     if (!made) throw new Error("no_folder");
     return made;
   }
@@ -482,6 +502,9 @@ export interface MockCall {
     | "power.busy"
     | "lane.worktree"
     | "lane.remove"
+    | "lane.root"
+    | "lane.release"
+    | "lane.clean"
     | "buddy.start"
     | "buddy.input"
     | "buddy.close"
@@ -512,6 +535,11 @@ export interface MockCall {
   /** lane.worktree: the branch the shell made for a lane, and the one it was made from (main.moved: the one the page named) */
   branch?: string;
   base?: string;
+  /** lane.worktree: where the folder was asked to be made ("" is the default) and whether it was asked to start from the remote;
+   *  lane.clean: the folders a session still held */
+  root?: string;
+  remote?: boolean;
+  held?: string[];
   /** main.moved: the paths whose two diffs were asked for */
   show?: string[];
   /** history: the terminal's key (a session id or `panel-<n>`) */
@@ -549,6 +577,12 @@ const utf8 = new TextEncoder();
 /** One message of a mock program that prints fast: 64 KiB of 64-byte lines, the size the shell hands output on in
  *  (`COALESCE_BYTES` in src-tauri/src/sessions.rs). */
 const FLOOD_MESSAGE = `${"build output ".repeat(5).slice(0, 62)}\r\n`.repeat(1024);
+
+/** What Settings › Worktrees asks of a new lane: where its folder is made ("" is the default) and whether it starts from the remote. */
+export interface LaneStart {
+  root: string;
+  remote: boolean;
+}
 
 /** A lane's working folder the mock shell made: its record, as lane.rs writes one. */
 export interface MockLane {
@@ -588,6 +622,12 @@ export type MockGlobals = MockTurnGlobals & {
    *  by the folder's worktree (none: 0) */
   __manutLaneChanged?: Record<string, number>;
   __manutLaneAhead?: Record<string, number>;
+  /** e2e: how many commits on each lane's branch are on no remote, by worktree (none: 0) */
+  __manutLaneUnpushed?: Record<string, number>;
+  /** e2e: the remote branch (`origin/main`) a folder's base starts a lane from when asked to; a folder left out has no remote */
+  __manutRemoteFrom?: Record<string, string>;
+  /** e2e: what a merged clean-up of each project's lanes finds */
+  __manutCleanMerged?: Record<string, { removed: string[]; kept: { branch: string; why: string }[]; cannot: string | null }>;
   /** e2e: how many changed files the developer's folders have, by folder: they do not come along into a lane's */
   __manutLeft?: Record<string, number>;
   /** e2e: what git says of each folder for the main branch moving (src/code/moved.ts; none = the canvas's project, a
@@ -1062,7 +1102,7 @@ export class MockHost implements SessionHost, BuddyHost {
    *  a folder of its own under `~/.manut/lanes/<project>/<words>`, which is then on that branch; the developer's folder stays
    *  on its own. `__manutBranches` is where the folders' branches are (a folder with none is not a repository),
    *  `__manutMockTaken` the names that exist already, and `__manutLanes` the folders made, as the shell's records. */
-  async laneWorktree(cwd: string, names: string[]): Promise<LaneMade> {
+  async laneWorktree(cwd: string, names: string[], start?: LaneStart): Promise<LaneMade> {
     const folders = (this.g.__manutBranches ??= { "/home/you/code/manut": "feat/session-controls" });
     const base = folders[cwd];
     if (!base) throw new Error("not_a_repository");
@@ -1071,14 +1111,44 @@ export class MockHost implements SessionHost, BuddyHost {
     if (!branch) throw new Error("taken");
     const lanes = (this.g.__manutLanes ??= []);
     const project = (cwd.split("/").filter(Boolean).pop() ?? "project").replace(/[^A-Za-z0-9._-]+/g, "-");
-    const words = branch.slice("kit/".length);
-    let worktree = `/home/you/.manut/lanes/${project}/${words}`;
-    for (let n = 2; lanes.some((l) => l.worktree === worktree); n++) worktree = `/home/you/.manut/lanes/${project}/${words}-${n}`;
+    const words = branch.slice(branch.lastIndexOf("/") + 1);
+    const under = start?.root ? start.root.replace(/\/+$/, "") : "/home/you/.manut/lanes";
+    let worktree = `${under}/${project}/${words}`;
+    for (let n = 2; lanes.some((l) => l.worktree === worktree); n++) worktree = `${under}/${project}/${words}-${n}`;
     taken.push(branch);
     folders[worktree] = branch;
     lanes.unshift({ worktree, dir: worktree, branch, base, project: cwd, made: Math.floor(Date.now() / 1000) });
-    this.log({ op: "lane.worktree", cwd, branch, base, path: worktree });
-    return { branch, base, dir: worktree, worktree, left: this.g.__manutLeft?.[cwd] ?? 0 };
+    this.log({ op: "lane.worktree", cwd, branch, base, path: worktree, ...(start ? { root: start.root, remote: start.remote } : {}) });
+    // e2e: `__manutRemoteFrom` names the remote branch a folder's base has; without one a lane asked to start from the remote
+    // says the folder has no remote
+    const remoteFrom = start?.remote ? (this.g.__manutRemoteFrom?.[cwd] ?? "") : "";
+    return { branch, base, dir: worktree, worktree, left: this.g.__manutLeft?.[cwd] ?? 0, from: remoteFrom, local: start?.remote && !remoteFrom ? "no_remote" : "" };
+  }
+  /** As the shell: a folder inside a checkout (a folder `__manutBranches` knows, or one below it) is refused, as is a relative one. */
+  async laneRootCheck(root: string): Promise<string> {
+    if (!root.startsWith("/") || root.includes("..")) throw new Error("bad_root");
+    if (root === "/" || root === "/home/you") throw new Error("root_too_broad");
+    const checkouts = Object.keys(this.g.__manutBranches ?? { "/home/you/code/manut": "" });
+    if (checkouts.some((c) => root === c || root.startsWith(`${c}/`))) throw new Error("root_in_checkout");
+    this.log({ op: "lane.root", path: root });
+    return root.replace(/\/+$/, "");
+  }
+  /** As the shell: a folder with changed files, or commits on no remote, is kept; the branch always stays. */
+  async laneRelease(worktree: string): Promise<LaneReleased> {
+    const lane = (this.g.__manutLanes ?? []).find((l) => l.worktree === worktree);
+    if (!lane) throw new Error("not_a_lane");
+    const changed = this.g.__manutLaneChanged?.[worktree] ?? 0;
+    const unpushed = this.g.__manutLaneUnpushed?.[worktree] ?? 0;
+    if (changed > 0) return { removed: false, kept: "changes", changed, unpushed: null };
+    if (unpushed > 0) return { removed: false, kept: "unpushed", changed: 0, unpushed };
+    this.g.__manutLanes = (this.g.__manutLanes ?? []).filter((l) => l !== lane);
+    this.log({ op: "lane.release", path: worktree });
+    return { removed: true, kept: null, changed: null, unpushed: null };
+  }
+  /** As the shell, from what `__manutCleanMerged` says each project's clean-up finds. */
+  async laneCleanMerged(cwd: string, held: string[]): Promise<LaneCleaned> {
+    this.log({ op: "lane.clean", cwd, held });
+    return this.g.__manutCleanMerged?.[cwd] ?? { removed: [], kept: [], cannot: null };
   }
   /** The mock lane whose folder `dir` is, or is in. */
   private laneAt(dir: string): MockLane | undefined {
@@ -1092,7 +1162,7 @@ export class MockHost implements SessionHost, BuddyHost {
     const repo = this.repoOf(cwd);
     return (this.g.__manutLanes ?? [])
       .filter((l) => l.project === repo)
-      .map((l) => ({ worktree: l.worktree, dir: l.dir, branch: l.branch, base: l.base, made: l.made, exists: true, changed: this.g.__manutLaneChanged?.[l.worktree] ?? 0, ahead: this.g.__manutLaneAhead?.[l.worktree] ?? 0 }));
+      .map((l) => ({ worktree: l.worktree, dir: l.dir, branch: l.branch, base: l.base, made: l.made, exists: true, changed: this.g.__manutLaneChanged?.[l.worktree] ?? 0, ahead: this.g.__manutLaneAhead?.[l.worktree] ?? 0, unpushed: this.g.__manutLaneUnpushed?.[l.worktree] ?? 0 }));
   }
   async laneProjects(): Promise<string[]> {
     return [...new Set((this.g.__manutLanes ?? []).map((l) => l.project))].sort();
