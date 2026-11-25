@@ -523,13 +523,15 @@ describe("the seal on the saved file", () => {
 
   it("takes no answer that is not a key for one, and then keeps and deletes nothing", async () => {
     const sealed = await sealedFile(encodeSnapshot(wordy()), ORIGIN, TENANT);
-    for (const odd of ["not a key", "A".repeat(64), "a".repeat(63), ""]) {
-      const store = memoryCacheStore({ [KEY]: sealed }, odd);
+    for (const odd of ["not a key", "A".repeat(64), "a".repeat(63), "", undefined, 42, {}]) {
+      const store = memoryCacheStore({ [KEY]: sealed });
+      store.sealKey = async () => odd as never;
+      const what = JSON.stringify(odd) ?? "undefined";
       const c = new ShopCache(store, () => NOW);
-      expect(await c.load(ORIGIN, TENANT), odd).toEqual({ kind: "none" });
+      expect(await c.load(ORIGIN, TENANT), what).toEqual({ kind: "none" });
       await c.keep(ORIGIN, TENANT, snapshot(), c.ticket());
-      expect(store.calls, odd).toEqual([]);
-      expect(store.files.get(KEY), odd).toBe(sealed);
+      expect(store.calls, what).toEqual([]);
+      expect(store.files.get(KEY), what).toBe(sealed);
     }
   });
 });

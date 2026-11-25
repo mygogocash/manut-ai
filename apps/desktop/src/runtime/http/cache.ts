@@ -484,7 +484,8 @@ export class ShopCache {
       if (e instanceof NoKeychain) return "unkept";
       throw e;
     }
-    if (typeof hex !== "string") return null;
+    // Only the shell's null says none is held; any other answer that is not a key is a failure, so no file goes for it.
+    if (hex === null) return null;
     const key = await importSealKey(hex);
     if (!key) throw new Error("not a key");
     this.sealing = key;
