@@ -6,6 +6,7 @@
 /// - `malformed`: bytes that are not the message expected at this step.
 /// - `unauthenticated`: a proof, a tag or a commitment did not check out.
 /// - `expired`: the pairing offer's two minutes are over.
+/// - `wrong_code`: the code typed at the Mac is not the one the phone shows. The pairing is spent.
 /// - `used`: a one-use thing (a pairing offer, a handshake step) was used again.
 /// - `unknown_device`: the Mac holds no key for the device a hello names.
 /// - `too_large`: a frame or a whole message over its limit.
@@ -17,6 +18,7 @@ export type RemoteChannelProblem =
   | "malformed"
   | "unauthenticated"
   | "expired"
+  | "wrong_code"
   | "used"
   | "unknown_device"
   | "too_large"
@@ -29,6 +31,7 @@ const MESSAGES: Readonly<Record<RemoteChannelProblem, string>> = {
   malformed: "A message from the other side could not be read.",
   unauthenticated: "A message from the other side did not prove who sent it.",
   expired: "The pairing code has expired.",
+  wrong_code: "That is not the code on the phone. Show a new pairing code to try again.",
   used: "This was already used once.",
   unknown_device: "This device is not paired with this Mac.",
   too_large: "A message was larger than the channel allows.",

@@ -106,7 +106,9 @@ interface Entry {
 }
 
 /// The Mac's open challenges. Keep one per Mac, or one per connection as GoSpark did; either way
-/// it lives in memory only, so a restart spends every open challenge.
+/// it lives in memory only, so a restart spends every open challenge. Two answers from one device
+/// checked at once each return a counter; the caller stores them in the order it checked them,
+/// or checks one device's answers one at a time.
 export class DecisionChallenges {
   readonly #random: RandomBytes;
   readonly #entries = new Map<string, Entry>();
@@ -132,6 +134,20 @@ export class DecisionChallenges {
     const expiresAt = now + DECISION_TTL_MS;
     this.#entries.set(id, { binding: bound, challenge, expiresAt });
     return { id, nonce, challenge, expiresAt };
+  }
+
+  /// Drops every challenge that waits for `deviceId`, and says how many. The Mac calls it at
+  /// Unpair, with closing that device's channels itself: the relay's own `revoke` is not trusted
+  /// to end anything, and a phone on another road has no relay at all.
+  revoke(deviceId: string): number {
+    let dropped = 0;
+    for (const [id, entry] of this.#entries) {
+      if (entry.binding.deviceId === deviceId) {
+        this.#entries.delete(id);
+        dropped++;
+      }
+    }
+    return dropped;
   }
 
   /// Checks one answer from the device whose session it arrived on. The challenge is spent before

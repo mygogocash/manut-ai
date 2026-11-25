@@ -52,13 +52,22 @@ export async function sharedSecret(own: CryptoKeyPair, peer: Bytes): Promise<Byt
 /// passes the key itself.
 export async function importSharedSecret(secret: Uint8Array): Promise<CryptoKey> {
   if (secret.length !== SECRET_BYTES) throw new RemoteChannelError("invalid");
-  return guarded("invalid", () => crypto.subtle.importKey("raw", copyBytes(secret), "HKDF", false, ["deriveBits"]));
+  const copy = copyBytes(secret);
+  try {
+    return await guarded("invalid", () => crypto.subtle.importKey("raw", copy, "HKDF", false, ["deriveBits"]));
+  } finally {
+    copy.fill(0);
+  }
 }
 
-/// The secret as an HKDF key, whichever form it came in.
+/// The secret as an HKDF key, whichever form it came in. A key that script could export is
+/// refused: K is only ever kept as one that cannot be read back, and taking an exportable one
+/// would let a caller's mistake go unnoticed.
 export async function secretKey(secret: CryptoKey | Uint8Array): Promise<CryptoKey> {
   if (secret instanceof Uint8Array) return importSharedSecret(secret);
-  if (secret.algorithm.name !== "HKDF" || !secret.usages.includes("deriveBits")) throw new RemoteChannelError("invalid");
+  if (secret.extractable || secret.algorithm.name !== "HKDF" || !secret.usages.includes("deriveBits")) {
+    throw new RemoteChannelError("invalid");
+  }
   return secret;
 }
 
@@ -79,28 +88,33 @@ export async function derive(secret: CryptoKey, ecdh: Bytes, label: string, tran
     copyBytes(new Uint8Array(await crypto.subtle.deriveBits({ name: "HKDF", hash: "SHA-256", salt: ecdh, info }, secret, bytes * 8))));
 }
 
-/// HMAC-SHA-256 of `data` under a derived key.
-export async function hmac(key: Bytes, data: Bytes): Promise<Bytes> {
-  return guarded("invalid", async () => {
-    const hmacKey = await crypto.subtle.importKey("raw", key, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-    return copyBytes(new Uint8Array(await crypto.subtle.sign("HMAC", hmacKey, data)));
-  });
+/// HMAC-SHA-256 of `data` under a confirm key.
+export async function hmac(key: CryptoKey, data: Bytes): Promise<Bytes> {
+  return guarded("invalid", async () => copyBytes(new Uint8Array(await crypto.subtle.sign("HMAC", key, data))));
 }
 
-export async function aesKey(raw: Bytes): Promise<CryptoKey> {
-  return guarded("invalid", () => crypto.subtle.importKey("raw", raw, "AES-GCM", false, ["encrypt", "decrypt"]));
+/// Imports derived key bytes as a non-extractable key and zeroes the bytes, best effort:
+/// JavaScript cannot promise that no copy of them survives, which is why the key itself is the
+/// only form kept.
+async function importAndZero(raw: Bytes, algorithm: AlgorithmIdentifier | HmacImportParams, usages: KeyUsage[]): Promise<CryptoKey> {
+  try {
+    return await guarded("invalid", () => crypto.subtle.importKey("raw", raw, algorithm, false, usages));
+  } finally {
+    raw.fill(0);
+  }
 }
 
 /// What a handshake hands the channel: one key and one IV for each direction. Keys are
-/// non-extractable Web Crypto keys; the IVs are not secret on their own.
+/// non-extractable Web Crypto keys; the IVs are the only derived values kept as bytes, because
+/// every record's nonce is computed from them, and the channel zeroes them when it closes.
 export interface DirectionKeys {
   readonly key: CryptoKey;
   readonly iv: Bytes;
 }
 
 export interface HandshakeKeys {
-  readonly phoneConfirm: Bytes;
-  readonly macConfirm: Bytes;
+  readonly phoneConfirm: CryptoKey;
+  readonly macConfirm: CryptoKey;
   readonly phoneToMac: DirectionKeys;
   readonly macToPhone: DirectionKeys;
 }
@@ -118,15 +132,11 @@ export async function handshakeKeys(purpose: "pair" | "session", secret: CryptoK
     derive(secret, ecdh, label("mac to phone key"), th, 32),
     derive(secret, ecdh, label("mac to phone iv"), th, 12),
   ]);
-  const keys: HandshakeKeys = {
-    phoneConfirm,
-    macConfirm,
-    phoneToMac: { key: await aesKey(phoneToMacKey), iv: phoneToMacIv },
-    macToPhone: { key: await aesKey(macToPhoneKey), iv: macToPhoneIv },
+  const hmacParams: HmacImportParams = { name: "HMAC", hash: "SHA-256" };
+  return {
+    phoneConfirm: await importAndZero(phoneConfirm, hmacParams, ["sign"]),
+    macConfirm: await importAndZero(macConfirm, hmacParams, ["sign"]),
+    phoneToMac: { key: await importAndZero(phoneToMacKey, "AES-GCM", ["encrypt", "decrypt"]), iv: phoneToMacIv },
+    macToPhone: { key: await importAndZero(macToPhoneKey, "AES-GCM", ["encrypt", "decrypt"]), iv: macToPhoneIv },
   };
-  // Best effort: the raw key bytes are no longer needed once imported. JavaScript cannot promise
-  // that no copy survives, which is why the keys themselves are non-extractable.
-  phoneToMacKey.fill(0);
-  macToPhoneKey.fill(0);
-  return keys;
 }

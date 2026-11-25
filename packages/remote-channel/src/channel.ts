@@ -32,10 +32,11 @@ export const MAX_FRAME_BYTES = 65_532;
 /// Type byte, flags byte and tag.
 export const RECORD_OVERHEAD = 1 + 1 + TAG_BYTES;
 export const MAX_CHUNK_BYTES = MAX_FRAME_BYTES - RECORD_OVERHEAD;
-/// Records one key may seal in one direction. RFC 8446, section 5.5: AES-GCM keeps a safety
-/// margin of about 2^-57 up to 2^24.5 full-size records on one connection, so the session stops
-/// at 2^24 and a new handshake brings new keys. The counter therefore never wraps and a nonce is
-/// never used twice under one key.
+/// Records one key may seal in one direction. RFC 8446, section 5.5, gives AES-GCM a safety
+/// margin of about 2^-57 for 2^24.5 records of TLS's full size, 16 KiB. These records are up to
+/// 64 KiB, four times as many AES blocks each, and the bound grows with the square of the blocks,
+/// so at 2^24 records the margin is about 2^-54: still far past what any session sends, and a new
+/// handshake brings new keys. The counter never wraps, so a nonce is never used twice under a key.
 export const RECORD_LIMIT = 2 ** 24;
 /// The largest whole message, before splitting. A chat's catch-up from the journal is at most
 /// about 1 MB (`docs/remote-access.md`), so 4 MiB leaves room while keeping a phone's memory safe
@@ -112,11 +113,14 @@ export class Channel {
     return this.#closed;
   }
 
-  /// Ends the session: nothing more is sealed or opened, and a partly received message is dropped.
+  /// Ends the session: nothing more is sealed or opened, a partly received message is dropped,
+  /// and the IVs, the only derived values held as bytes, are zeroed.
   close(): void {
     this.#closed = true;
     this.#chunks = [];
     this.#pendingBytes = 0;
+    this.#send.iv.fill(0);
+    this.#receive.iv.fill(0);
   }
 
   /// Encrypts one whole message into the frames to send, in order. Refusing to seal sends

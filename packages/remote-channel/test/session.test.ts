@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { type Bytes, acceptSession, ephemeralKeyPair, exportPublicKey, importSharedSecret, startSession } from "../src/index";
+import { type Bytes, acceptSession, importSharedSecret, startSession } from "../src/index";
+import { ephemeralKeyPair, exportPublicKey } from "../src/testing";
 import { DEVICE_ID, HOST_ID, OTHER_DEVICE_ID, OTHER_HOST_ID, bytesOf, flipBit, openSession, read, refusal, text } from "./support";
 
 /// Each connection's handshake (ported from GoSpark's hello proof, `RemoteAuthentication.proof`,
@@ -56,8 +57,20 @@ describe("the session handshake", () => {
     for (const frame of await mac.seal(text("hello from the Mac"))) expect(read(await phone.open(frame))).toBe("hello from the Mac");
   });
 
-  it("takes K as a key script cannot read back, as the desktop and the phone keep it", async () => {
+  it("takes K as a key script cannot read back, as the desktop and the phone keep it, and refuses one it could", async () => {
     const secret = await importSharedSecret(K);
+    expect(secret.extractable).toBe(false);
+    await expect(crypto.subtle.exportKey("raw", secret)).rejects.toThrow();
+    // Web Crypto never makes an exportable HKDF key, so an exportable stand-in and an exportable
+    // key of another kind show the check: a key script could read back is refused either way.
+    await expect(crypto.subtle.importKey("raw", K, "HKDF", true, ["deriveBits"])).rejects.toThrow();
+    const standIn = { type: "secret", extractable: true, algorithm: { name: "HKDF" }, usages: ["deriveBits"] } as unknown as CryptoKey;
+    const hmacKey = await crypto.subtle.importKey("raw", K, { name: "HMAC", hash: "SHA-256" }, true, ["sign"]);
+    for (const readable of [standIn, hmacKey]) {
+      expect(await refusal(() => startSession({ hostId: HOST_ID, deviceId: DEVICE_ID, secret: readable }))).toBe("invalid");
+      const hello = (await startSession({ hostId: HOST_ID, deviceId: DEVICE_ID, secret })).hello;
+      expect(await refusal(() => acceptSession(hello, { hostId: HOST_ID, secretFor: () => readable }))).toBe("invalid");
+    }
     const started = await startSession({ hostId: HOST_ID, deviceId: DEVICE_ID, secret });
     const accepted = await acceptSession(started.hello, { hostId: HOST_ID, secretFor: async () => secret });
     const { finish } = await started.phone.receiveWelcome(accepted.welcome);

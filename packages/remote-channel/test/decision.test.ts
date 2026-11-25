@@ -144,6 +144,25 @@ describe("decision challenges", () => {
     expect(await fresh.verify({ ...answer, challengeId: 42 as unknown as string }, context())).toEqual({ ok: false, refused: "unknown" });
   });
 
+  it("Unpair drops every challenge waiting for that device, and only that device's", async () => {
+    const vault = new DecisionChallenges({ random: seededRandom(9) });
+    const device = await newAuthenticator();
+    const mine = [await vault.issue(ALLOW, T0), await vault.issue({ ...ALLOW, requestId: "req-43" }, T0)];
+    const theirs = await vault.issue({ ...ALLOW, deviceId: OTHER_DEVICE_ID }, T0);
+    expect(vault.revoke(DEVICE_ID)).toBe(2);
+    expect(vault.size).toBe(1);
+    expect(vault.revoke(DEVICE_ID)).toBe(0);
+    const context = { deviceId: DEVICE_ID, passkey: device.passkey, rp: RP, now: T0 + 1 };
+    for (const issued of mine) {
+      const answer = { challengeId: issued.id, requestId: ALLOW.requestId, revision: ALLOW.revision, optionId: ALLOW.optionId, ...(await assertion(device, issued.challenge)) };
+      expect(await vault.verify(answer, context)).toEqual({ ok: false, refused: "unknown" });
+    }
+    // The other device's challenge still answers.
+    const other = await newAuthenticator(0xc5);
+    const answer = { challengeId: theirs.id, requestId: ALLOW.requestId, revision: ALLOW.revision, optionId: ALLOW.optionId, ...(await assertion(other, theirs.challenge)) };
+    expect((await vault.verify(answer, { deviceId: OTHER_DEVICE_ID, passkey: other.passkey, rp: RP, now: T0 + 1 })).ok).toBe(true);
+  });
+
   it("at most sixteen wait at once; an expired one makes room", async () => {
     expect(DECISION_LIMIT).toBe(16);
     const vault = new DecisionChallenges();

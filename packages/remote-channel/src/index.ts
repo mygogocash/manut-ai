@@ -27,7 +27,7 @@ export {
   uuidFromBytes,
   uuidToBytes,
 } from "./bytes";
-export { ephemeralKeyPair, exportPublicKey, importSharedSecret, SECRET_BYTES } from "./keys";
+export { importSharedSecret, SECRET_BYTES } from "./keys";
 export {
   type Channel,
   type ChannelOptions,
