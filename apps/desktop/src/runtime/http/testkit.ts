@@ -8,6 +8,7 @@ import { createRoutine, describeTrigger, nextRun, type ActionKind, type Trigger 
 import { confirm as confirmFact, correct as correctFact, emptyState, forget as forgetFact, propose, remember as rememberFact, type FactSource, type MemoryState, type Result } from "@manut/shop-memory";
 import { vi } from "vitest";
 import { cacheKey, encodeSnapshot, NoKeychain, openFile, sealFile, type CacheStore } from "./cache";
+import { TICKET_PROTOCOL, type FeedSocket } from "./feed";
 import { importSealKey } from "./seal";
 import { ApiSession } from "./session";
 import type { FetchLike, SessionVault } from "./shell";
@@ -924,4 +925,49 @@ function ownerRoutineRoutes(api: FakeApi, owned: Owned, now: () => number): void
       return { status: 200, json: { removed: body.routineId } };
     }),
   );
+}
+
+/** A socket as the page's WebSocket behaves for the live feed (feed.ts), driven by the test: it opens, takes messages and
+ *  drops only when told, and records what was sent on it and how it was closed. */
+export class FakeSocket implements FeedSocket {
+  onopen: (() => void) | null = null;
+  onmessage: ((ev: { data: unknown }) => void) | null = null;
+  onclose: ((ev: { code: number }) => void) | null = null;
+  onerror: (() => void) | null = null;
+  sent: string[] = [];
+  closed: { code?: number; reason?: string } | null = null;
+  constructor(
+    readonly url: string,
+    readonly protocols: string[],
+  ) {}
+  send(data: string): void {
+    this.sent.push(data);
+  }
+  close(code?: number, reason?: string): void {
+    this.closed = { code, reason };
+  }
+  opened(): void {
+    this.onopen?.();
+  }
+  says(data: unknown): void {
+    this.onmessage?.({ data });
+  }
+  drops(code = 1006): void {
+    this.onerror?.();
+    this.onclose?.({ code });
+  }
+  /** The ticket the socket was opened with, from its protocol entry. */
+  get ticket(): string | undefined {
+    return this.protocols.find((p) => p.startsWith(TICKET_PROTOCOL))?.slice(TICKET_PROTOCOL.length);
+  }
+}
+
+/** Opens fake sockets, keeping each one in the order opened. */
+export function socketOpener(): { sockets: FakeSocket[]; open: (url: string, protocols: string[]) => FakeSocket } {
+  const sockets: FakeSocket[] = [];
+  return { sockets, open: (url, protocols) => {
+    const socket = new FakeSocket(url, protocols);
+    sockets.push(socket);
+    return socket;
+  } };
 }
