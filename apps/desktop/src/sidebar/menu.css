@@ -75,7 +75,6 @@
   padding: 0 10px;
   border-radius: var(--rad);
   color: var(--aui-muted);
-  transition: background 0.15s;
   /* This sets back sidebar.css's .nav (12px type, its own padding) and makes the row a full-width button. */
   flex: none;
   width: 100%;
@@ -256,6 +255,8 @@
   border-radius: var(--rad-lg);
   background: var(--pop);
   box-shadow: var(--pop-shadow);
+  --rise-by: var(--arrive-by);
+  animation: var(--anim-arrive);
 }
 .sb .shop-item {
   display: flex;

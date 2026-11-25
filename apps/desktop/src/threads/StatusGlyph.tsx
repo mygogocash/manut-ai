@@ -1,6 +1,6 @@
-// The small mark at the start of a thread row: a turning arc (running), a slow-pulsing amber dot (needs you), a
-// check that pops once and then stays still (done), an x (failed or stopped), a faint hollow dot (idle). Static under
-// prefers-reduced-motion (threads.css).
+// The small mark at the start of a thread row: a turning arc (running), an amber dot that waits still (needs you: only
+// work in progress loops), a check that settles once and then stays still (done), an x (failed or stopped), a faint
+// hollow dot (idle). Static under prefers-reduced-motion (theme/motion.css).
 import type { ThreadStatus } from "./status";
 import { t } from "../i18n";
 

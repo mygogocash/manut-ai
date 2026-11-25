@@ -51,7 +51,6 @@
   border-radius: var(--r-sm);
   color: var(--quiet);
   opacity: 0.75;
-  transition: color 0.12s, opacity 0.12s;
 }
 .tk-bar-ic:hover,
 .tk-bar-ic:focus-visible {
@@ -386,34 +385,14 @@
   opacity: 0.45;
   cursor: default;
 }
+/* the board's Loading on a hairline: a light sweeps across it while the list loads */
 .tk-loading {
   position: absolute;
   inset: 0 0 auto;
   height: 1px;
-  background: var(--muted);
-  animation: tk-load 1.2s ease-in-out infinite;
-}
-@keyframes tk-load {
-  0% {
-    transform: scaleX(0);
-    transform-origin: left;
-  }
-  50% {
-    transform: scaleX(1);
-    transform-origin: left;
-  }
-  51% {
-    transform-origin: right;
-  }
-  100% {
-    transform: scaleX(0);
-    transform-origin: right;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .tk-loading {
-    animation: none;
-  }
+  background: linear-gradient(90deg, transparent 0%, var(--muted) 50%, transparent 100%);
+  background-size: 200% 100%;
+  animation: var(--anim-loading);
 }
 .tk-pages {
   display: flex;

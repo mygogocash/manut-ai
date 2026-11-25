@@ -195,7 +195,7 @@
   background: var(--raise2);
   box-shadow: inset 0 0 0 1px var(--line-strong);
   position: relative;
-  transition: background 0.12s;
+  transition: var(--tr-switch-track);
 }
 .acc-switch > span {
   position: absolute;
@@ -205,7 +205,7 @@
   height: 10px;
   border-radius: 50%;
   background: var(--muted);
-  transition: transform 0.12s, background 0.12s;
+  transition: var(--tr-switch-thumb);
 }
 .acc-switch[aria-checked="true"] {
   background: var(--muted);
@@ -288,12 +288,7 @@
   border-radius: 50%;
   border: 2px solid var(--line-strong);
   border-top-color: var(--ink);
-  animation: acc-spin 0.9s linear infinite;
-}
-@keyframes acc-spin {
-  to {
-    transform: rotate(360deg);
-  }
+  animation: var(--anim-spin);
 }
 /* the lines under a group (auto-switch, "Also found", a message, + Add account) keep one 8px rhythm: each sits
    8px under whatever is above it, line height fixed so the gaps measure the same */

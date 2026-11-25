@@ -32,7 +32,7 @@
   border: 1px solid transparent;
   border-radius: 8px;
   cursor: pointer;
-  transition: background 0.12s, border-color 0.12s;
+  transition: background-color var(--tr-hover), border-color var(--tr-hover);
 }
 /* every card but the last carries the rail on past itself (and the gap) to the next */
 .th-row:not(.th-last)::before {
@@ -248,14 +248,14 @@
   color: var(--term-run, #f2b705);
 }
 .th-g-running svg {
-  animation: th-spin 0.9s linear infinite;
+  animation: var(--anim-spin);
 }
 .th-g-needs_you .th-dot {
   width: 6px;
   height: 6px;
   border-radius: 50%;
+  /* waiting for the person, not working: it stays still (the board: only work in progress loops) */
   background: var(--needs, #e9a23b);
-  animation: th-pulse 2.4s ease-in-out infinite;
 }
 .th-ring {
   width: 5px;
@@ -266,43 +266,12 @@
 .th-g-done {
   color: var(--ok);
 }
+/* done: the mark settles into its row */
 .th-g-done svg {
-  animation: th-pop 0.32s ease-out 1;
+  animation: var(--anim-settle);
 }
 .th-g-failed {
   color: var(--danger);
-}
-@keyframes th-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-@keyframes th-pulse {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.6;
-  }
-}
-@keyframes th-pop {
-  0% {
-    transform: scale(0.4);
-  }
-  70% {
-    transform: scale(1.18);
-  }
-  100% {
-    transform: scale(1);
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .th-g-running svg,
-  .th-g-needs_you .th-dot,
-  .th-g-done svg {
-    animation: none;
-  }
 }
 
 /* ---- remove confirm ---------------------------------------------------------------------------------- */
@@ -316,6 +285,9 @@
   font-size: 12px;
   color: var(--body);
   box-shadow: 0 6px 18px rgb(0 0 0 / 0.22);
+  /* an ask: it fades in and stays still */
+  --rise-by: 0px;
+  animation: var(--anim-arrive);
 }
 .th-confirm p {
   margin: 0 0 8px;

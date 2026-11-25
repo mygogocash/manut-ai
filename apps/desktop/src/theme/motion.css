@@ -1,0 +1,331 @@
+/* How the desktop moves: the design canvas's Motion board (BrandMotion), once, for every stylesheet.
+
+   "Things move to show what just changed, and for no other reason. One springy curve and a handful of named moves."
+   The curve, the moves' times and their keyframes are packages/ui-kit/app.css's own (and tokens.json's "motion");
+   src/theme/motion.test.ts fails when a number here drifts from the kit, and src/theme/motionRule.test.ts fails when a
+   stylesheet types a curve, a time or a move of its own. So a move is changed on the board and in the kit first, here
+   second, and every other stylesheet only names it. docs/motion.md says where each move may be used and where never.
+
+   The rules, from the board: nothing moves for decoration; only work in progress may loop; keep it under a second;
+   money, approvals and errors do not bounce, they appear and stay still; with reduced motion on, every move is off and
+   the shimmer becomes plain grey text. */
+
+:root {
+  /* The one springy curve. It overshoots a little and comes back, like something set down by hand: entrances,
+     presses, the switch and a word rolling use it. */
+  --aui-ease: cubic-bezier(0.22, 1.25, 0.36, 1);
+  /* The plain ease (tokens.json `plainEase`): fades, bars, meters and anything that moves the layout, so a number, an
+     edge or a column never bounces. */
+  --ease-plain: cubic-bezier(0.22, 1, 0.36, 1);
+
+  /* ---- each named move's time ---------------------------------------------------------------------------------- */
+  /* plays once */
+  --move-rise: 0.5s; /* Rise: something arrives */
+  --move-step: 50ms; /* Rise: each item after the last (at most four steps, so a long list never waits) */
+  --move-settle: 0.45s; /* Settle: a decision lands in its row */
+  --move-fill: 0.9s; /* Fill: a bar or a meter fills */
+  /* answers a hand */
+  --move-press: 0.2s; /* Press: a button while it is held */
+  --move-switch: 0.25s; /* Switch: the thumb slides */
+  --move-hover: 0.15s; /* Hover: the fill fades in */
+  /* loops, only while someone is working */
+  --move-shimmer: 2.4s; /* Shimmer: the working line */
+  --move-pulse: 1.6s; /* Pulse: the working dot */
+  --move-roll: 12s; /* Roll: five working words, one loop */
+  --move-loading: 1.6s; /* Loading: the skeleton while a page loads */
+  --move-spin: 0.8s; /* Spin: the kit's busy spinner (app.css .spin), the one loop the board does not draw */
+  /* overlays: a menu, a popover, a tooltip, the palette or a dialog arrives with a short Rise (the kit's own short
+     Rise, its bulk-action bar's) and leaves faster than it came, in a fade as quick as Hover */
+  --move-arrive: 0.3s;
+  --move-leave: var(--move-hover);
+
+  /* how far and how deep */
+  --arrive-by: 4px; /* an overlay's Rise; the board's own Rise is 8px (the keyframes' default) */
+  --press-by: 0.97; /* Press: 97% while held */
+  --press-by-round: 0.94; /* the round send button presses deeper, as the kit's .send does: 3% of 34px is one pixel */
+
+  /* ---- ready to use: `transition: background-color var(--tr-hover)` ------------------------------------------- */
+  --tr-hover: var(--move-hover) var(--ease-plain);
+  --tr-press: var(--move-press) var(--aui-ease);
+  --tr-switch: var(--move-switch) var(--aui-ease);
+  /* a panel, a column or a row sliding between two places: the Switch's time on the plain ease, since a layout that
+     overshoots reflows its text twice */
+  --tr-slide: var(--move-switch) var(--ease-plain);
+  /* what a control fades or presses: its fill, edge and text, its opacity, and the Press */
+  --tr-control:
+    background-color var(--tr-hover), border-color var(--tr-hover), color var(--tr-hover), opacity var(--tr-hover),
+    scale var(--tr-press);
+  /* a switch's track and thumb: the thumb slides on the curve, both fills fade as the kit's track does (0.2 s) */
+  --tr-switch-track: background-color var(--move-press) var(--ease-plain), box-shadow var(--move-press) var(--ease-plain);
+  --tr-switch-thumb: transform var(--tr-switch), background-color var(--move-press) var(--ease-plain);
+
+  /* ---- ready to use: `animation: var(--anim-rise)` ---------------------------------------------------------------- */
+  --anim-rise: rise var(--move-rise) var(--aui-ease) both;
+  --anim-arrive: rise var(--move-arrive) var(--aui-ease) both;
+  --anim-leave: leave var(--move-leave) var(--ease-plain) both;
+  --anim-settle: pop var(--move-settle) var(--aui-ease) both;
+  --anim-fill: grow var(--move-fill) var(--ease-plain) both;
+  --anim-shimmer: shim var(--move-shimmer) linear infinite;
+  --anim-pulse: pulse var(--move-pulse) ease-in-out infinite;
+  --anim-roll: roll6 var(--move-roll) var(--aui-ease) infinite;
+  --anim-loading: shim var(--move-loading) linear infinite;
+  --anim-spin: spin var(--move-spin) linear infinite;
+}
+
+/* ---- the keyframes: the kit's, word for word (motion.test.ts compares them) ---------------------------------------
+   Rise's distance is a property so an overlay can rise less (--arrive-by) and a ticker a whole line; without one it is
+   the board's 8px. */
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(var(--rise-by, 8px));
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes pop {
+  from {
+    opacity: 0;
+    transform: scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes grow {
+  from {
+    transform: scaleX(0.12);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+@keyframes shim {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.35;
+    transform: scale(0.7);
+  }
+}
+@keyframes roll6 {
+  0%,
+  14% {
+    transform: translateY(0);
+  }
+  18%,
+  32% {
+    transform: translateY(-16.667%);
+  }
+  36%,
+  50% {
+    transform: translateY(-33.333%);
+  }
+  54%,
+  68% {
+    transform: translateY(-50%);
+  }
+  72%,
+  86% {
+    transform: translateY(-66.667%);
+  }
+  90%,
+  100% {
+    transform: translateY(-83.333%);
+  }
+}
+/* the kit's busy spinner (its keyframes are called fspin there) */
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+/* an overlay leaving: it fades where it stands (a ticker's old line also goes up a line, --leave-by) */
+@keyframes leave {
+  to {
+    opacity: 0;
+    transform: translateY(var(--leave-by, 0px));
+  }
+}
+
+/* ---- the moves as classes, for markup (the kit's .rise, .pop, .bar, .shim, .wordroll, .skel and .spin) --------- */
+/* Rise, each item `--i` steps after the first: style={{ "--i": n }} */
+.mo-rise {
+  animation: var(--anim-rise);
+  animation-delay: calc(min(var(--i, 0), 4) * var(--move-step));
+}
+.mo-settle {
+  animation: var(--anim-settle);
+}
+.mo-fill {
+  transform-origin: left bottom;
+  animation: var(--anim-fill);
+}
+.mo-shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--muted) 0%,
+    var(--muted) 35%,
+    var(--ink) 50%,
+    var(--muted) 65%,
+    var(--muted) 100%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: var(--anim-shimmer);
+}
+.mo-pulse {
+  animation: var(--anim-pulse);
+}
+/* Roll: five words and the first again as a sixth, so the loop has no jump */
+.mo-roll {
+  display: inline-flex;
+  height: 1.7em;
+  overflow: hidden;
+  vertical-align: bottom;
+}
+.mo-roll > span {
+  display: flex;
+  flex-direction: column;
+  animation: var(--anim-roll);
+}
+.mo-roll > span > span {
+  height: 1.7em;
+  line-height: 1.7em;
+  white-space: nowrap;
+}
+.mo-loading {
+  min-height: 12px;
+  border-radius: var(--rad);
+  background: linear-gradient(90deg, var(--aui-subtle) 0%, var(--hov) 50%, var(--aui-subtle) 100%);
+  background-size: 200% 100%;
+  animation: var(--anim-loading);
+}
+.mo-spin {
+  animation: var(--anim-spin);
+}
+
+/* ---- the moves that answer a hand --------------------------------------------------------------------------------
+   Hover: whatever a person can point at fades its fill in over 0.15 s. The fade lives on :hover alone, so the fill
+   goes at once when the pointer leaves (quicker out), and a theme change never fades a control it did not touch. A
+   stylesheet that gives a control a transition of its own (zero specificity loses to it) writes `var(--tr-control)`
+   into it to keep the fade and the Press. */
+:where(button, [role="button"], [role="option"], [role="menuitem"], [role="tab"], a[href]):hover {
+  transition: var(--tr-control);
+}
+
+/* Press: every button shrinks to 97% while it is held and comes back on the curve; the primary, the quiet and the icon
+   button alike. A class named like a button (btn, ib, send, *-btn, *-ib, *-send, *-plus, *-x) belongs in this list,
+   which motionRule.test.ts checks. Rows, chips, tabs and links answer with the Hover fade only, as the kit's do: a
+   whole row shrinking reads as the row moving. `scale` composes with a control's own transform (a × centred with
+   translateY), where `transform` would replace it. */
+:where(
+    .btn,
+    .ib,
+    .send,
+    .ui-ib,
+    .st-btn,
+    .pg-btn,
+    .tk-btn,
+    .card-btn,
+    .ss-btn,
+    .upd-dlg-btn,
+    .acc-addbtn,
+    .acc-dotbtn,
+    .tm-imp-btn,
+    .pv-add-btn,
+    .copy-btn,
+    .termpanel-ib,
+    .pg-send,
+    .ap-pv-send,
+    .att-plus,
+    .ss-plus,
+    .att-x,
+    .ss-x,
+    .th-x,
+    .sq-x,
+    .rc-x,
+    .pg-x,
+    .omhp-x,
+    .ss-split-x,
+    .termpanel-tab-x
+  ) {
+  transition: scale var(--tr-press);
+}
+:where(
+    .btn,
+    .ib,
+    .ui-ib,
+    .st-btn,
+    .pg-btn,
+    .tk-btn,
+    .card-btn,
+    .ss-btn,
+    .upd-dlg-btn,
+    .acc-addbtn,
+    .acc-dotbtn,
+    .tm-imp-btn,
+    .pv-add-btn,
+    .copy-btn,
+    .termpanel-ib,
+    .att-plus,
+    .ss-plus,
+    .att-x,
+    .ss-x,
+    .th-x,
+    .sq-x,
+    .rc-x,
+    .pg-x,
+    .omhp-x,
+    .ss-split-x,
+    .termpanel-tab-x
+  ):active:not(:disabled, [aria-disabled="true"]) {
+  scale: var(--press-by);
+}
+:where(.send, .pg-send, .ap-pv-send):active:not(:disabled, [aria-disabled="true"]) {
+  scale: var(--press-by-round);
+}
+
+/* Switch: each switch's own stylesheet gives its track `transition: var(--tr-switch-track)` and its thumb
+   `transition: var(--tr-switch-thumb)`; the shapes differ, the move is one. */
+
+/* The focus ring appears and stays still: it is never in a transition (motionRule.test.ts refuses `outline` and
+   `all` in one), so it does not draw the eye by moving. Its look is base.css's :focus-visible. */
+
+/* ---- reduced motion: every move off, in this one place --------------------------------------------------------------
+   Each move finishes at once in its end state rather than being removed (`animation: none`): a part that waits for
+   its move's end to take the old element away (the ticker's old line, a leaving overlay) still hears that it ended, and
+   a loop lands on its still frame (a spinner's arc, a dot at full strength). A stylesheet's own reduced-motion block
+   may say what that still frame looks like; it never turns moves off itself. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-delay: 0s !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0s !important;
+    transition-delay: 0s !important;
+  }
+  /* the shimmer becomes plain grey text */
+  .mo-shimmer {
+    color: var(--muted);
+    background: none;
+  }
+}

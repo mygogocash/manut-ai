@@ -130,7 +130,8 @@
   background: linear-gradient(to bottom, var(--bg) 70%, transparent);
   font: inherit;
   cursor: pointer;
-  animation: pop 0.16s ease both;
+  --rise-by: calc(var(--arrive-by) * -1);
+  animation: var(--anim-arrive);
 }
 .tl-pin-t {
   max-width: min(70%, 560px);
@@ -149,7 +150,7 @@
 .tl-jump {
   pointer-events: auto;
   position: absolute;
-  /* centred without a transform: the pop animation owns transform */
+  /* centred without a transform: the arrive animation owns transform */
   left: 0;
   right: 0;
   bottom: 32px;
@@ -167,7 +168,8 @@
   /* lifted by a soft shadow only: no ring */
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
   cursor: pointer;
-  animation: pop 0.16s ease both;
+  --rise-by: var(--arrive-by);
+  animation: var(--anim-arrive);
 }
 .tl-jump:hover {
   background: color-mix(in srgb, var(--accent) 85%, #fff);
@@ -188,12 +190,6 @@
 }
 .thread:focus {
   outline: none;
-}
-@media (prefers-reduced-motion: reduce) {
-  .tl-pin,
-  .tl-jump {
-    animation: none;
-  }
 }
 /* consecutive messages from the same side sit close; a new turn gets air */
 .row-user + .row-user,
@@ -415,7 +411,7 @@
 /* × drops the message: only while the pointer is on its row or a button there has focus */
 .sq-x {
   opacity: 0;
-  transition: opacity 0.12s ease;
+  transition: var(--tr-control);
 }
 .msg.u:hover .sq-x,
 .sq-w:focus-within .sq-x {
@@ -673,7 +669,7 @@
   margin-left: 4px;
   border-radius: 50%;
   background: var(--quiet);
-  animation: pulse 1s infinite;
+  animation: var(--anim-pulse);
 }
 
 /* plain one-line fallbacks (replaced by feature slots) */
@@ -768,7 +764,7 @@
   flex-direction: column;
   gap: 6px;
   padding: 7px;
-  transition: border-color 0.2s, background 0.2s;
+  transition: border-color var(--tr-hover), background-color var(--tr-hover);
 }
 .composer-row {
   display: flex;
@@ -803,7 +799,7 @@
   display: grid;
   place-items: center;
   flex: none;
-  transition: background 0.2s, color 0.2s;
+  transition: var(--tr-control);
 }
 .composer:not(.has) .send:not(.stop) {
   background: var(--raise2);
@@ -831,7 +827,8 @@
   padding: 6px 9px;
   font-size: 11.5px;
   color: var(--muted);
-  animation: pop 0.16s ease both;
+  --rise-by: var(--arrive-by);
+  animation: var(--anim-arrive);
 }
 .hint-k {
   font-family: var(--mono);
@@ -851,7 +848,7 @@
   background: var(--raise2);
   font-size: 11.5px;
   color: var(--body);
-  animation: pop 0.16s ease both;
+  animation: var(--anim-rise);
 }
 .reply-chip .rc-t {
   white-space: nowrap;
@@ -943,7 +940,8 @@
   /* a ring in the page colour, so the answer's edge reads over the faded quote in both themes */
   box-shadow: 0 0 0 2px var(--bg);
 }
-/* the message a quote pointed at, lit for a moment */
+/* the message a quote pointed at, lit for a moment (one of motionRule.test.ts's own moves: nothing takes .lit away, so
+   the keyframes end it; item 85b settles it on the board) */
 .row-user.lit .msg.u .b {
   animation: msg-lit 1.4s ease-out;
 }
@@ -954,11 +952,6 @@
   }
   100% {
     box-shadow: 0 0 0 2px transparent;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .row-user.lit .msg.u .b {
-    animation: none;
   }
 }
 .msg-reply {

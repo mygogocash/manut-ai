@@ -1,6 +1,6 @@
 // "Answer in progress" marks shared by the sidebar, the chat and away bubbles: a thin rotating ring in the
 // accent gradient around a face or a source mark, a three-dot typing indicator, and a one-line text ticker
-// that slides up like the activity line. All three go static under prefers-reduced-motion (ui.css).
+// that rolls up like the activity line. All three go still under prefers-reduced-motion (theme/motion.css).
 import { useState, type ReactNode } from "react";
 
 /** The ring's animation delay in seconds: the bot's own angle (`seed`, golden-ratio spread over one 1.2 s turn,
@@ -60,7 +60,7 @@ export function LiveRing({
   );
 }
 
-/** Three dots that bounce in turn (1s cycle). `size` is the dot diameter in px. */
+/** Three dots that pulse in turn (the board's Pulse). `size` is the dot diameter in px. */
 export function TypingDots({ size = 6, testId }: { size?: number; testId?: string }) {
   return (
     <span className="ui-typing" data-testid={testId} aria-hidden style={{ ["--dot" as string]: `${size}px` }}>
@@ -71,8 +71,9 @@ export function TypingDots({ size = 6, testId }: { size?: number; testId?: strin
   );
 }
 
-/** One line of text; a new text comes in from below while the old one leaves upward (220 ms). `text` keys the
- *  change; `children`, when given, is how that text renders (e.g. with the command in a code span). */
+/** One line of text; a new text rises in from below while the old one leaves upward, quicker (one step of the board's
+ *  Roll, ui.css). `text` keys the change; `children`, when given, is how that text renders (e.g. with the command in
+ *  a code span). */
 export function Ticker({ text, children }: { text: string; children?: ReactNode }) {
   const node = children ?? text;
   const [cur, setCur] = useState({ text, node, k: 0 });

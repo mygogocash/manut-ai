@@ -8,6 +8,14 @@
   align-items: flex-start;
   padding-top: 14vh;
   background: color-mix(in srgb, var(--bg, #000) 45%, transparent);
+  /* the backdrop fades in under the box (an overlay's Rise without the distance) and the whole palette fades out,
+     faster than it came (Palette.tsx, ui/leave.ts) */
+  --rise-by: 0px;
+  animation: var(--anim-arrive);
+}
+.pal-back[data-leaving] {
+  animation: var(--anim-leave);
+  pointer-events: none;
 }
 .pal {
   width: min(560px, 92vw);
@@ -18,7 +26,8 @@
   border: 1px solid var(--line);
   border-radius: 10px;
   box-shadow: var(--pop-shadow);
-  animation: pop 0.16s ease both;
+  --rise-by: var(--arrive-by);
+  animation: var(--anim-arrive);
   overflow: hidden;
 }
 .pal-in {
