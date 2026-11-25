@@ -33,6 +33,7 @@ describe("switched off", () => {
       await settle();
       expect(h.remote.snapshot().link).toBe("no_origin");
       expect(h.relay.urls).toEqual([]);
+      expect(h.keyring.doc()).toBeNull();
     }
   });
 });

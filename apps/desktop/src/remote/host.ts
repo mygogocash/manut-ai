@@ -146,6 +146,12 @@ export class RemoteMac {
     if (this.#on) return;
     this.#on = true;
     const generation = ++this.#generation;
+    // Where the page may not reach the relay (Practice, another host), nothing could connect, so no key is made either.
+    if (!this.#deps.origin || relaySocketUrl(this.#deps.origin, "A".repeat(43)) === null) {
+      this.#linkState = "no_origin";
+      this.#changed();
+      return;
+    }
     const vault = await RemoteVault.open(this.#deps.keyring, true).catch(() => null);
     if (generation !== this.#generation) return;
     if (!vault?.identity) {

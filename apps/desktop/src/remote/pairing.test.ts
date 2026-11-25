@@ -181,6 +181,39 @@ describe("pairing a phone", () => {
     expect(h.remote.snapshot().phones.map((p) => p.name)).toEqual(["First"]);
   });
 
+  it("pairs neither phone when someone who photographed the code races the real one", async () => {
+    const h = macHarness();
+    await turnOn(h);
+    await h.remote.startPairing();
+    const view = h.remote.snapshot().pairing;
+    if (view.phase !== "showing") throw new Error("no code");
+    const { forgetStartedPairings } = await import("../../../../packages/remote-channel/src/testing");
+    const { readPairingLink, startPairing, toBase64Url } = await import("@manut/remote-channel");
+    const dial = async () => {
+      const offer = readPairingLink(view.link);
+      const socket = h.relay.connectPhone(offer.hostId);
+      const frames: Uint8Array[] = [];
+      socket.onmessage = (event) => event.data instanceof ArrayBuffer && frames.push(new Uint8Array(event.data));
+      socket.send(JSON.stringify({ t: "hello", v: 1, device: offer.doorId, token: toBase64Url(offer.doorToken) }));
+      await settle();
+      forgetStartedPairings();
+      const { commit } = await startPairing(offer);
+      return { socket, frames, commit };
+    };
+    // The photographer commits first; the real phone, on the same door, commits after.
+    const thief = await dial();
+    thief.socket.send(thief.commit);
+    await waitFor(() => thief.frames.length === 1);
+    const real = await dial();
+    real.socket.send(real.commit);
+    await waitFor(() => h.remote.snapshot().pairing.phase === "failed");
+    // The real phone got no key, so it shows no digits; the code is spent and no phone is kept.
+    expect(real.frames).toEqual([]);
+    expect(h.remote.snapshot().pairing).toEqual({ phase: "failed", reason: "refused" });
+    expect(h.remote.snapshot().phones).toEqual([]);
+    await waitFor(() => h.relay.devices.size === 0);
+  });
+
   it("keeps no more phones than the relay has places for, beside the door", async () => {
     const h = macHarness();
     await turnOn(h);
