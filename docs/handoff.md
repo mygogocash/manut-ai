@@ -157,6 +157,9 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
 - Dev's API was redeployed on 25 Nov at 09:59 from `2692402`, with item 54's prune clearing the approval lookup (API
   `a9f869ba`, deployed whole; the pages are unchanged since `d4e5c73c`). Smoke-tested: the pages 200, `/ops` and
   `/v1/admin/prune` 302 to Access, and the session routes 401 with no session.
+- Dev's pages were redeployed on 25 Nov at 11:47 from `caa40c3`, with item 57's Routines page in the console (pages
+  `1258aef6`; the API is unchanged since 09:59). Only the pages Worker went; it has no route of its own, as the API's
+  custom domain hands it the pages.
 - The night build's queue gained shop-memory, books and routine-rules; one run was started by hand for
   slip-rules.
 
