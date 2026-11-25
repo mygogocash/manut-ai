@@ -485,16 +485,18 @@ its agent there, and everything that reads a lane reads it there: Kit's dial, th
 main-moved note and what keeps running (`workDir` in `code/laneBranch.ts`). Several lanes work at once, none touching
 another's files or the developer's folder.
 
-- **Where the folders live.** `~/.manut/lanes/<project>/<words>`: under the app's data folder, never inside the developer's
-  folder or its `.git`. `<project>` is the repository folder's name as one plain word, `<words>` the branch's words after
+- **Where the folders live.** `~/.manut/lanes/<project>/<words>`, or `<chosen folder>/<project>/<words>` when the person chose
+  a folder in Settings › Worktrees (last bullet of this list): never inside the developer's folder or its `.git`. `<project>` is the repository folder's name as one plain word, `<words>` the branch's words after
   `kit/` (`kit/promptpay-qr` works in `~/.manut/lanes/web-app/promptpay-qr`), with `-2`, `-3` … when that name is on disk
   already. A session started in a folder inside the repository (`apps/web`) works in the same folder inside its worktree.
   The folders the app makes there are for this account only. git keeps its own note of each worktree in the repository
   (`.git/worktrees/<name>`), as it does for any.
 - **Which are the app's.** Beside each folder the app makes, a record of it (`<words>.json`), written as a new file before
   git is asked: the folder, the repository, the developer's folder, the branch, the branch it was made from and the commit.
-  Only a folder with such a record, exactly two names below `~/.manut/lanes`, that git still lists as a worktree of the
-  recorded repository, is ever removed; a record that names any folder but the one beside it is no record. The app never
+  The record always stays under `~/.manut/lanes`, which only the app writes, even for a lane made under a chosen folder: its
+  `worktree` is then the chosen folder's, with the same last name as the record. Only a folder with such a record that git
+  still lists as a linked worktree of the recorded repository (never the repository's own, first one) is ever removed; a
+  record that names a folder with another last name, a relative path or one with `..` in it is no record. The app never
   runs `git worktree prune`, and `--force` only ever reaches a folder it made, after the person's yes. Nothing is written
   through a link: a link where a lanes' folder or a record would go is refused or passed over.
 - **What comes along.** The committed tree only. The developer's uncommitted changes stay in their folder, and nothing git
@@ -504,13 +506,49 @@ another's files or the developer's folder.
   install, a generated file) happens by itself. The chat says it as the lane starts: where Kit works, how many of the
   developer's changed files did not come along, and that nothing is installed there yet. The app installs nothing; Kit may,
   and the dial asks first, as for any install.
-- **When a folder goes.** When its session is closed, once its agent stopped, if git says nothing in it would be lost (no file
-  changed or new; what git ignores goes with it). The branch stays. A folder with changes is kept and listed under the lanes
+- **When a folder goes.** When its session is closed (the chat is deleted), once its agent stopped, and Settings › Worktrees'
+  "Remove the folder when its chat is deleted" is on (it is, by default), `lane_release` removes it only if nothing in it is
+  changed or new (what git ignores goes with it), git is not partway through a rebase, merge, cherry-pick, revert or bisect
+  there, and every commit on its branch is on a remote (`git rev-list --count refs/heads/<branch> --not --remotes` is 0).
+  The branch stays, and no force flag is ever passed: the removal is `git worktree remove <folder>`, which git itself refuses
+  for a locked worktree or one holding files it will not take. A folder kept for commits on no remote says so in the kept
+  list. With the switch off, every folder of a deleted chat is kept and listed. A folder with changes is kept and listed under the lanes
   as one of Kit's folders kept, for its project, which stays on the Code page for it even when no session is left there.
   Remove opens a panel that says how many changed files go with the folder; ticking Delete the branch too says how many
   commits on the branch are not on its base, or that it could not tell. The press is the yes to exactly those numbers: when
   what is there differs, nothing is done and the panel shows the numbers there are now. A folder removed by hand takes only
   git's note of it and the record with it.
+- **Settings › Worktrees** (item 73; `src/settings/WorktreesPage.tsx`, saved on this computer by `src/lib/worktrees.ts` and
+  handed to the shell on each call). Five rows:
+  - *Where lanes are made* (default: `~/.manut/lanes`). A folder picked with the system's chooser, checked by `lane_root_check`
+    (`check_lanes_root`) when it is chosen and again each time a lane is made: refused inside any repository's work tree (a `.git`
+    in it or above it, the home folder aside), when it is the disk's top, the home folder or `~/.manut`, when it is not an
+    absolute path without `..`, and when a file cannot be made in it. A refusal is a code the page words (`root_in_checkout`,
+    `root_too_broad`, `bad_root`, `root_unwritable`); a lane is then not made in another place, and the chat says so. Lanes
+    already made stay where they are and are listed and removed as before.
+  - *Start from the remote* (default off). On: the lane starts from the remote's latest commit of its base branch. The remote
+    is the one the base tracks (`branch.<base>.remote` and `.merge`), else `origin` with the same branch name; `git fetch
+    --no-tags --no-recurse-submodules --no-write-fetch-head --no-auto-maintenance <remote> +refs/heads/<b>:refs/remotes/<remote>/<b>`
+    reads that one branch, ends in 10 seconds, and sets `GIT_TERMINAL_PROMPT=0`, `GIT_ASKPASS=true`, `GCM_INTERACTIVE=never` and
+    (unless the person has their own ssh command) `ssh -o BatchMode=yes`, so nothing can wait for a password. The remote's
+    commit is used only when the local branch is that commit or behind it (`git merge-base --is-ancestor`): a local branch with
+    commits the remote lacks would lose them in the lane. The lane's first line says where it started: from `origin/main`, or why
+    from the local branch (no remote, the remote did not answer, the folder is detached, the local branch is ahead or both moved,
+    or the folder is not in the remote's commit). The fetch runs in the shell, off the page's thread, and only after the first
+    message; the chat is open meanwhile.
+  - *Branch prefix* (default `kit/`). Free text, checked on the page and in the shell: one or two lower case words of letters,
+    numbers and single hyphens, each followed by `/` (`kit/`, `team/ana/`), at most 24 characters. A lane made under an earlier
+    prefix keeps its name and is still listed and removed.
+  - *Remove the folder when its chat is deleted* (default on), as above.
+  - *Remove the folder when its pull request has merged* (default off). `lane_clean_merged` runs when the Code page opens a
+    project and when the window is looked at again, at most once an hour for a project, never on a timer; it does nothing (and
+    makes no call) when the project has no folder to look at. It needs `gh` or `glab` installed and signed in (`Tasks::status`);
+    otherwise it says it cannot tell and does nothing. Per folder it asks `gh pr list --repo <r> --head <branch> --state merged
+    --json headRefOid,mergedAt --limit 10` (GitLab: `glab mr list --repo <r> --source-branch <branch> --merged --output json
+    --per-page 10`), and removes the folder only when a merged request exists, the branch's tip is in the default branch on the
+    remote (fetched first, one branch) or, on GitHub, is exactly the commit that merged (what a squash merge leaves), and then
+    `lane_release`'s checks pass: nothing changed or new, git not busy there, and no session still works in it. The branch
+    stays. Each folder it leaves is listed with why (not merged, not in the default branch yet, changes of its own, ...).
 - **While the session is listed** the folder stays, through the agent's end, a Restart and a restart of the app: a lane's
   branch and folder are saved with its session, so Resume and Restart start its agent in its own folder again, never in the
   developer's. A lane whose folder is gone does not start, with the shell's words.
