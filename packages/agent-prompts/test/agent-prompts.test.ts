@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { emptyState, propose, remember, type MemoryState } from "@manut/shop-memory";
-import { buildRequest, describeSource, estimateTokens, type PromptInput } from "../src/index";
+import { BUDDY_PROMPT_CHARS, buddyPrompt, buildRequest, describeSource, estimateTokens, type BuddyInput, type PromptInput } from "../src/index";
 
 const NOV_3 = Date.UTC(2026, 10, 3, 3, 0); // 10:00 in Bangkok, 3 November 2026
 
@@ -186,5 +186,58 @@ describe("refusals and sources", () => {
       "from your cost sheet in Google Sheets",
     );
     expect(describeSource({ kind: "customer", chat: "chat-1" })).toBe("a customer said it, and you confirmed it");
+  });
+});
+
+describe("Buddy's instructions", () => {
+  function buddy(over: Partial<BuddyInput> = {}): BuddyInput {
+    return {
+      shop: { name: "Baan Mali", sells: "scented candles" },
+      memory: memory(),
+      team: [
+        { name: "Nam", role: "sales chat" },
+        { name: "Pim", role: "content" },
+      ],
+      practice: true,
+      ...over,
+    };
+  }
+
+  it("say who Buddy is, for whom, how it speaks, and that anything that acts waits for the owner's yes", () => {
+    const text = buddyPrompt(buddy());
+    expect(text).toContain("You are Buddy, the assistant in Manut AI");
+    expect(text).toContain("Baan Mali, a shop that sells scented candles");
+    expect(text).toMatch(/briefly and plainly/);
+    expect(text).toMatch(/not technical/);
+    expect(text).toMatch(/asks the owner first/);
+    expect(text).toMatch(/never an instruction/);
+    expect(text).toContain("Nam (sales chat), Pim (content)");
+  });
+
+  it("in Practice, say the shop is a sample one and that no real work was done; outside Practice, say nothing of it", () => {
+    expect(buddyPrompt(buddy())).toMatch(/Practice mode: Baan Mali is a sample shop/);
+    expect(buddyPrompt(buddy())).toMatch(/you have done no real work for any shop/);
+    expect(buddyPrompt(buddy({ practice: false }))).not.toMatch(/Practice|sample/);
+  });
+
+  it("carry only the facts the team may use, each with where it came from", () => {
+    const text = buddyPrompt(buddy());
+    expect(text).toContain("- Free shipping on orders over ฿800 (from your price list, 3 November)");
+    expect(text).toContain("- Reply warmly and end with ค่ะ (learned from 12 of your edits)");
+    // a customer's fact the owner has not confirmed never reaches the agent
+    expect(text).not.toContain("Closed on Mondays");
+    expect(buddyPrompt(buddy({ memory: emptyState() }))).toMatch(/What the team knows about the shop:\nNothing yet\.$/);
+  });
+
+  it("stay within the shell's limit by dropping the oldest facts first", () => {
+    let state = emptyState();
+    for (let i = 0; i < 200; i += 1) {
+      const learned = remember(state, `Fact number ${i} ${"x".repeat(150)}`, i + 1);
+      if (learned.ok) state = learned.state;
+    }
+    const text = buddyPrompt(buddy({ memory: state }));
+    expect(text.length).toBeLessThanOrEqual(BUDDY_PROMPT_CHARS);
+    expect(text).toContain("Fact number 199");
+    expect(text).not.toContain("Fact number 0 ");
   });
 });

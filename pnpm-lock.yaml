@@ -223,6 +223,9 @@ importers:
 
   apps/desktop:
     dependencies:
+      '@manut/agent-prompts':
+        specifier: workspace:*
+        version: link:../../packages/agent-prompts
       '@manut/approval-core':
         specifier: workspace:*
         version: link:../../packages/approval-core
