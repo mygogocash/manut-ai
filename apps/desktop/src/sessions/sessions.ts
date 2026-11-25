@@ -673,6 +673,12 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
           const key = keys.get(id);
           if (key) store().dispatch({ type: "system.note", bot: key, text: tr("ss.newConversation"), now: Date.now() });
         }
+        // a lane's MCP server whose entry is not the one the person approved was not started (acp_mcp.rs, item 89): its names
+        if (ev.kind === "mcp_differs" && Array.isArray(ev.names)) {
+          const key = keys.get(id);
+          const names = ev.names.filter((n): n is string => typeof n === "string").join(", ");
+          if (key && names) store().dispatch({ type: "system.note", bot: key, text: tr("ss.mcpDiffers", { names }), now: Date.now() });
+        }
         return;
       case "exit": {
         if (procs.get(id) === proc) procs.delete(id);

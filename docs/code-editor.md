@@ -954,7 +954,13 @@ still goes through the asks (How an ask is read, Kit's dial, Buddy's card).
   root being the developer's folder for a lane), the server approved by `enabledMcpjsonServers` or
   `enableAllProjectMcpServers` in the person's user settings, the root's `.claude/settings.local.json` while git does not
   track it, or the folder's entry, and not in `disabledMcpjsonServers`. A repository's committed settings never approve its
-  own servers, as in Claude Code. This one source because `.mcp.json` lives in the folder the agent already works in, so its
+  own servers, as in Claude Code. In a lane (item 89) the approval is of the entry, not the name: a server is handed on only
+  when its whole entry in the lane, as canonical JSON (keys sorted, `${VAR}`s as written), has the same SHA-256 digest as the
+  entry of that name in the developer's folder at the same place (`acp_mcp::entry_digest`), the one the person approved. A
+  lane's `.mcp.json` is the lane's own file, which its agent can change, so another command, argument, variable, address,
+  header or kind under an approved name, or a name the developer's folder does not have, starts nothing, and the chat says
+  "Not started in this lane: <names>" with why (`session.note` `mcp_differs`, names only). A session in the developer's own
+  folder is held to the entries there, as Claude Code is. This one source because `.mcp.json` lives in the folder the agent already works in, so its
   literal values are ones the agent can read anyway, and its `${VAR}` and `${VAR:-default}` are filled in from the environment
   the agent already runs with (a server with a variable that is not set is left out). The servers the person added to Claude
   Code or Codex themselves are not handed on: their secrets were given to those agents. Shapes from the protocol's Session

@@ -36,7 +36,7 @@ function setup(agent: "claude" | "codex" | "pi") {
   } as unknown as SessionHost;
   const store = createStore(bridge);
   const ss = createSessions(host, () => store);
-  return { ss, modes, inputs, sinks };
+  return { ss, store, modes, inputs, sinks };
 }
 
 beforeEach(() => {
@@ -72,4 +72,21 @@ test("a mode the person picked is named again when the chat restarts, and not se
   await t.ss.restart(id);
   expect(t.modes).toEqual([undefined, "plan"]);
   expect(t.inputs.map((i) => i.kind)).toEqual(["send", "mode"]);
+});
+
+test("a lane's MCP server the shell did not start because its entry differs is named in the chat, once", async () => {
+  const t = setup("claude");
+  await t.ss.loadAgents();
+  const id = t.ss.draft("claude");
+  t.ss.setDraft(id, { cwd: "/w/proj" });
+  await t.ss.start(id, "hi");
+  const key = t.ss.chatKey(id)!;
+  const notes = () => (t.store.getState().chats[key]?.items ?? []).flatMap((i) => (i.kind === "system" ? [i.text] : []));
+  const before = notes().length;
+  t.sinks.get(1)!({ event: "session.note", kind: "mcp_differs", names: ["github", "docs"] });
+  expect(notes().slice(before)).toEqual(["Not started in this lane: github, docs. The lane's .mcp.json entry differs from the one you approved in your project folder."]);
+  // a note with nothing it can name says nothing
+  t.sinks.get(1)!({ event: "session.note", kind: "mcp_differs", names: [7, null] });
+  t.sinks.get(1)!({ event: "session.note", kind: "mcp_differs" });
+  expect(notes().length).toBe(before + 1);
 });

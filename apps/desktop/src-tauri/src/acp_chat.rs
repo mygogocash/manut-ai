@@ -837,6 +837,11 @@ impl Acp {
 impl Adapter for Acp {
     fn start(&mut self) -> Step {
         let mut st = Step::default();
+        // the project's servers whose entry in this lane is not the one the person approved are not handed on: said once,
+        // by name (item 89)
+        if !self.mcp.differs().is_empty() {
+            emit(&mut st, ev("session.note", json!({"kind": "mcp_differs", "names": self.mcp.differs()})));
+        }
         self.call(
             &mut st,
             Call::Initialize,
@@ -1418,6 +1423,22 @@ fn decide_on(rules: &[(String, String, String)], tool: &str, input: &str, fold: 
         a.start();
         let w = written(&a.on_line(&init(json!({"loadSession": true}))));
         assert_eq!((w[0]["method"].as_str(), w[0]["params"]["mcpServers"].as_array().map(Vec::len)), (Some("session/load"), Some(1)));
+    }
+
+    /// Item 89: a lane's server whose entry is not the approved one is not handed on, and the chat is told its name, once,
+    /// as the conversation starts; the names never carry a value.
+    #[test]
+    fn a_lanes_server_that_differs_is_named_and_not_handed_on() {
+        let init = json!({"jsonrpc": "2.0", "id": 1, "result": {"protocolVersion": 1, "agentCapabilities": {}}}).to_string();
+        let mut a = Acp::new(opencode(), "/w/lane", None).with_mcp(crate::acp_mcp::Approved::differing(&["github"]));
+        let st = a.start();
+        let notes: Vec<&Value> = st.events.iter().filter(|e| e["event"] == "session.note").collect();
+        assert_eq!(notes, [&json!({"event": "session.note", "kind": "mcp_differs", "names": ["github"]})]);
+        let w = written(&a.on_line(&init));
+        assert_eq!(w[0]["params"]["mcpServers"], json!([]));
+        // nothing differs, nothing is said
+        let mut a = Acp::new(opencode(), "/w/lane", None);
+        assert!(a.start().events.iter().all(|e| e["event"] != "session.note"));
     }
 
     #[test]

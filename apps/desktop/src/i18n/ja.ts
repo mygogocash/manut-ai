@@ -1279,6 +1279,7 @@ export const ja: Record<Key, string> = {
   "ss.modelNotChanged": "モデルを変更できませんでした: {error}",
   "ss.noChatMode": "{agent} がチャットモードで応答しませんでした。古いバージョンかもしれません: {install}",
   "ss.newConversation": "以前の会話が見つからなかったため、ここで新しい会話を始めました。",
+  "ss.mcpDiffers": "このレーンでは起動しませんでした: {names}。レーンの .mcp.json の内容が、プロジェクトフォルダで承認したものと異なります。",
   "ss.modelNext": "次のターン: {model}",
   "ss.modelNextTip": "実行中のターンは {model} のまま進み、選んだモデルは次のターンから使われます",
 

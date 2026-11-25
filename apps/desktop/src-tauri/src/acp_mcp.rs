@@ -10,6 +10,14 @@
 //! versions kept it), and no such place lists it in `disabledMcpjsonServers`. A repository's own committed settings never
 //! approve a server, as in Claude Code, so a cloned project cannot start a program here unasked.
 //!
+//! A lane's `.mcp.json` is the lane's own file, which its agent can change, while the person approved each server by name in
+//! their own folder, where they saw its entry (item 89, security review of 26 Nov 2026). So in a lane a server is handed on
+//! only when its whole entry, canonical JSON with its keys sorted and its `${VAR}`s as written, has the same SHA-256 digest as
+//! the entry of that name in the developer's folder at the same place ([`entry_digest`]): another command, argument,
+//! variable, address, header or kind, or a server the developer's folder does not have, starts nothing, and the chat says
+//! which servers the lane's entry differs for ([`Approved::differs`]). A session in the developer's own folder reads the
+//! entries the person approved there, as Claude Code does.
+//!
 //! Why this source and no other: `.mcp.json` lives in the folder the agent already works in, so its literal values are ones
 //! that agent can read anyway, and a `${VAR}` in it comes from the environment the agent already runs with. The servers the
 //! person added to Claude Code or Codex themselves are not handed on: their headers and environment hold secrets those
@@ -45,9 +53,10 @@ struct Server {
     how: Transport,
 }
 
-/// The approved servers of one session. Its `Debug` says how many and nothing else, so a value can never reach a log.
+/// The approved servers of one session, and the names of the approved ones a lane's entry differs for, which are not handed
+/// on. Its `Debug` says how many and nothing else, so a value can never reach a log.
 #[derive(Clone, Default, PartialEq, Eq)]
-pub struct Approved(Vec<Server>);
+pub struct Approved(Vec<Server>, Vec<String>);
 
 impl std::fmt::Debug for Approved {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -65,6 +74,18 @@ impl Approved {
     #[cfg(test)]
     pub fn names(&self) -> Vec<String> {
         self.0.iter().map(|s| s.name.clone()).collect()
+    }
+
+    /// No server, and `names` as the approved ones a lane's entry differs for, for another module's test.
+    #[cfg(test)]
+    pub(crate) fn differing(names: &[&str]) -> Approved {
+        Approved(Vec::new(), names.iter().map(|n| n.to_string()).collect())
+    }
+
+    /// The names of the servers the person approved whose entry in this lane is not the one in the developer's folder:
+    /// not started, and named to the person (a name only, never a value).
+    pub fn differs(&self) -> &[String] {
+        &self.1
     }
 
     /// The `mcpServers` list for an agent that takes HTTP (`http`) and SSE (`sse`) servers or not; stdio always.
@@ -199,15 +220,64 @@ impl Place {
 pub fn approved(home: &Path, cwd: &Path, env: &dyn Fn(&str) -> Option<String>) -> Approved {
     let p = project(home, cwd, env);
     let mut out = Vec::new();
+    let mut differs = Vec::new();
     for (name, v) in p.servers.iter() {
         if out.len() >= MAX_SERVERS || p.state(name) != "on" {
+            continue;
+        }
+        if !p.is_approved_entry(name, v) {
+            differs.push(name.clone());
             continue;
         }
         if let Some(s) = server(name, v, env) {
             out.push(s);
         }
     }
-    Approved(out)
+    Approved(out, differs)
+}
+
+/// `v` as canonical JSON: every object's keys sorted, at every depth, and nothing else changed, so two entries that differ
+/// only in key order or spacing are the same entry and any other difference is not.
+fn canonical(v: &Value) -> String {
+    fn put(v: &Value, out: &mut String) {
+        match v {
+            Value::Object(o) => {
+                let mut keys: Vec<&String> = o.keys().collect();
+                keys.sort();
+                out.push('{');
+                for (i, k) in keys.into_iter().enumerate() {
+                    if i > 0 {
+                        out.push(',');
+                    }
+                    out.push_str(&Value::String(k.clone()).to_string());
+                    out.push(':');
+                    put(&o[k], out);
+                }
+                out.push('}');
+            }
+            Value::Array(a) => {
+                out.push('[');
+                for (i, x) in a.iter().enumerate() {
+                    if i > 0 {
+                        out.push(',');
+                    }
+                    put(x, out);
+                }
+                out.push(']');
+            }
+            other => out.push_str(&other.to_string()),
+        }
+    }
+    let mut out = String::new();
+    put(v, &mut out);
+    out
+}
+
+/// The SHA-256 digest, in hex, of server entry `v` as canonical JSON ([`canonical`]), with its `${VAR}`s as written: what
+/// the person's approval of a server by name in their own folder is held to in a lane.
+pub(crate) fn entry_digest(v: &Value) -> String {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(canonical(v).as_bytes()).iter().map(|b| format!("{b:02x}")).collect()
 }
 
 /// Claude Code's own state file: `.claude.json` in `CLAUDE_CONFIG_DIR` when that is set, else in the home folder.
@@ -227,9 +297,21 @@ pub(crate) struct ProjectMcp {
     all: bool,
     enabled: BTreeSet<String>,
     disabled: BTreeSet<String>,
+    /// For a session outside the developer's own folder (a lane): the digest of each server's entry in the developer's
+    /// folder at the same place, the entries the person approved by name. `None` in the developer's folder itself.
+    approved_digests: Option<std::collections::BTreeMap<String, String>>,
 }
 
 impl ProjectMcp {
+    /// Whether server `name`'s entry `v` here is the one the person approved: in their own folder, it is; in a lane, only
+    /// when its digest is that of the entry of the same name in the developer's folder, which must have one.
+    pub fn is_approved_entry(&self, name: &str, v: &Value) -> bool {
+        match &self.approved_digests {
+            None => true,
+            Some(d) => d.get(name).is_some_and(|x| *x == entry_digest(v)),
+        }
+    }
+
     /// `on` (Claude Code connects it), `off` (the person turned it off) or `ask` (it waits for their yes in Claude Code).
     pub fn state(&self, name: &str) -> &'static str {
         if self.disabled.contains(name) {
@@ -249,10 +331,11 @@ pub(crate) fn project(home: &Path, cwd: &Path, env: &dyn Fn(&str) -> Option<Stri
     let place = Place::of(home, cwd);
     let file = [cwd.join(".mcp.json"), place.top.join(".mcp.json")].into_iter().find(|p| p.is_file());
     let servers = file.and_then(|f| read_json(&f, MAX_FILE)).and_then(|v| v.get("mcpServers").and_then(Value::as_object).cloned()).unwrap_or_default();
-    let mut p = ProjectMcp { servers, entry: Value::Null, trusted: false, all: false, enabled: BTreeSet::new(), disabled: BTreeSet::new() };
+    let mut p = ProjectMcp { servers, entry: Value::Null, trusted: false, all: false, enabled: BTreeSet::new(), disabled: BTreeSet::new(), approved_digests: None };
     if p.servers.is_empty() {
         return p;
     }
+    p.approved_digests = developer_digests(&place, cwd);
     let state = claude_state(home, env);
     let keys: Vec<String> = [place.root.clone(), place.root.canonicalize().unwrap_or_else(|_| place.root.clone())].iter().map(|p| p.to_string_lossy().into_owned()).collect();
     p.entry = state.get("projects").and_then(Value::as_object).and_then(|ps| keys.iter().find_map(|k| ps.get(k))).cloned().unwrap_or(Value::Null);
@@ -270,6 +353,22 @@ pub(crate) fn project(home: &Path, cwd: &Path, env: &dyn Fn(&str) -> Option<Stri
     p
 }
 
+/// For a session in a folder other than the developer's own (a lane, a linked worktree), the digest of each server entry in
+/// the developer's folder at the same place: its `.mcp.json` in the folder that matches the session's, else at its top, as the
+/// lane's own is read. `None` in the developer's own folder. A developer's folder with no `.mcp.json`, or one that cannot be
+/// read, gives an empty list, so no lane's server is handed on.
+fn developer_digests(place: &Place, cwd: &Path) -> Option<std::collections::BTreeMap<String, String>> {
+    let real = |p: &Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+    let (top, root) = (real(&place.top), real(&place.root));
+    if top == root {
+        return None;
+    }
+    let below = real(cwd).strip_prefix(&top).ok().map(Path::to_path_buf);
+    let file = [below.map(|b| root.join(b).join(".mcp.json")), Some(root.join(".mcp.json"))].into_iter().flatten().find(|p| p.is_file());
+    let servers = file.and_then(|f| read_json(&f, MAX_FILE)).and_then(|v| v.get("mcpServers").and_then(Value::as_object).cloned()).unwrap_or_default();
+    Some(servers.iter().map(|(n, v)| (n.clone(), entry_digest(v))).collect())
+}
+
 /// The root of the repository `cwd` is in (its first checkout's folder), or `cwd` outside one: where Claude Code keeps a
 /// folder's own state.
 pub(crate) fn repository_root(home: &Path, cwd: &Path) -> PathBuf {
@@ -284,7 +383,7 @@ pub(crate) fn read_json_file(path: &Path, max: u64) -> Option<Value> {
 /// Every server of a `.mcp.json` body as if approved, for another module's test.
 #[cfg(test)]
 pub(crate) fn all_of(mcp: &Value, env: &dyn Fn(&str) -> Option<String>) -> Approved {
-    Approved(mcp.get("mcpServers").and_then(Value::as_object).into_iter().flatten().filter_map(|(n, v)| server(n, v, env)).collect())
+    Approved(mcp.get("mcpServers").and_then(Value::as_object).into_iter().flatten().filter_map(|(n, v)| server(n, v, env)).collect(), Vec::new())
 }
 
 /// [`approved`] for a session about to start in `cwd`, with this app's home folder and environment; none without a home.
@@ -393,6 +492,90 @@ mod tests {
         let wt = PathBuf::from(&made.worktree);
         assert!(wt.join(".mcp.json").exists(), "the lane brought it");
         assert_eq!(approved(&home, &wt, &env).names(), vec!["github"]);
+        let _ = fs::remove_dir_all(home);
+    }
+
+    /// Item 89 (security review, 26 Nov 2026). The person approves a project's server by its name, in their own folder, where
+    /// they saw its entry; a lane's `.mcp.json` is a file of the lane's, which its agent can change. So a lane's server is
+    /// handed on only when its whole entry is the one in the developer's folder at the same place: any change to what it runs,
+    /// with what, where it connects or with which headers, and any server the developer's folder does not have, starts
+    /// nothing. The cases are the ways an entry can be changed, one at a time.
+    #[test]
+    fn a_lanes_server_is_handed_on_only_when_its_whole_entry_is_the_approved_one() {
+        let Some((home, d)) = setup("acpmcp-digest", true, json!({})) else { return };
+        fs::write(d.join(".gitignore"), "node_modules/\n.mcp.json\n").unwrap();
+        sh(&d, &["add", ".gitignore"]);
+        sh(&d, &["commit", "-q", "-m", "ignore"]);
+        fs::create_dir_all(d.join(".claude")).unwrap();
+        // approved by name: three servers the developer's folder has, and one name it does not have
+        fs::write(d.join(".claude/settings.local.json"), r#"{"enabledMcpjsonServers":["github","docs","events","fresh"]}"#).unwrap();
+        let made = crate::lane::make(&home, &d, &crate::lane::tests::names(&["kit/digest"])).unwrap();
+        let wt = PathBuf::from(&made.worktree);
+        let original: Value = serde_json::from_str(&fs::read_to_string(wt.join(".mcp.json")).unwrap()).unwrap();
+        let env_with = |k: &str| match k {
+            "OTHER_TOKEN" => Some("other".to_string()),
+            _ => env(k),
+        };
+        // as the lane brought it, all three approved servers go on, and nothing differs
+        assert_eq!(approved(&home, &wt, &env_with).names(), vec!["docs", "events", "github"]);
+        assert!(approved(&home, &wt, &env_with).differs().is_empty());
+        // the same entries with their keys in another order and other spacing are the same entries
+        let reordered = r#"{ "mcpServers": { "events": {"url": "https://events.example/sse", "type": "sse"}, "docs": {"headers": {"Authorization": "Bearer ${GH_TOKEN}"}, "url": "https://docs.example/mcp", "type": "http"}, "github": {"env": {"TOKEN": "${GH_TOKEN}"}, "args": ["--token", "${GH_TOKEN}"], "command": "gh-mcp"} } }"#;
+        fs::write(wt.join(".mcp.json"), reordered).unwrap();
+        assert_eq!(approved(&home, &wt, &env_with).names(), vec!["docs", "events", "github"]);
+        let cases: Vec<(&str, &str, Value)> = vec![
+            ("another command", "github", json!({"command": "/bin/sh", "args": ["--token", "${GH_TOKEN}"], "env": {"TOKEN": "${GH_TOKEN}"}})),
+            ("another argument", "github", json!({"command": "gh-mcp", "args": ["-c", "${GH_TOKEN}"], "env": {"TOKEN": "${GH_TOKEN}"}})),
+            ("an argument more", "github", json!({"command": "gh-mcp", "args": ["--token", "${GH_TOKEN}", "--exec=/bin/sh"], "env": {"TOKEN": "${GH_TOKEN}"}})),
+            ("an argument fewer", "github", json!({"command": "gh-mcp", "args": ["--token"], "env": {"TOKEN": "${GH_TOKEN}"}})),
+            ("another variable's value", "github", json!({"command": "gh-mcp", "args": ["--token", "${GH_TOKEN}"], "env": {"TOKEN": "${OTHER_TOKEN}"}})),
+            ("a variable more", "github", json!({"command": "gh-mcp", "args": ["--token", "${GH_TOKEN}"], "env": {"TOKEN": "${GH_TOKEN}", "NODE_OPTIONS": "--require /tmp/x.js"}})),
+            ("no environment", "github", json!({"command": "gh-mcp", "args": ["--token", "${GH_TOKEN}"]})),
+            ("a key the app does not read", "github", json!({"command": "gh-mcp", "args": ["--token", "${GH_TOKEN}"], "env": {"TOKEN": "${GH_TOKEN}"}, "cwd": "/"})),
+            ("its kind named outright", "github", json!({"type": "stdio", "command": "gh-mcp", "args": ["--token", "${GH_TOKEN}"], "env": {"TOKEN": "${GH_TOKEN}"}})),
+            ("another address", "docs", json!({"type": "http", "url": "https://hostile.example/mcp", "headers": {"Authorization": "Bearer ${GH_TOKEN}"}})),
+            ("a header more", "docs", json!({"type": "http", "url": "https://docs.example/mcp", "headers": {"Authorization": "Bearer ${GH_TOKEN}", "X-Forward": "https://hostile.example"}})),
+            ("another kind of server", "docs", json!({"type": "sse", "url": "https://docs.example/mcp", "headers": {"Authorization": "Bearer ${GH_TOKEN}"}})),
+            ("a stdio server under an address's name", "events", json!({"command": "/bin/sh", "args": ["-c", "id"]})),
+            ("a server only the lane has, approved by its name", "fresh", json!({"command": "/bin/sh", "args": ["-c", "id"]})),
+        ];
+        for (what, name, entry) in cases {
+            let mut m = original.clone();
+            m["mcpServers"][name] = entry;
+            fs::write(wt.join(".mcp.json"), m.to_string()).unwrap();
+            let got = approved(&home, &wt, &env_with);
+            assert!(!got.names().contains(&name.to_string()), "{what}: {:?}", got.names());
+            // and the chat is told which server's entry differs, by its name alone
+            assert_eq!(got.differs(), [name.to_string()], "{what}");
+            assert!(!format!("{got:?}").contains("hostile") && !format!("{got:?}").contains("/bin/sh"), "{what}");
+            // every other approved server is still handed on
+            let others: Vec<String> = ["docs", "events", "github"].iter().filter(|n| **n != name).map(|n| n.to_string()).collect();
+            assert_eq!(got.names(), others, "{what}");
+        }
+        // a lane folder's own `.mcp.json` below the top is held to the developer's at that place, else at the top
+        fs::write(wt.join(".mcp.json"), original.to_string()).unwrap();
+        let sub = wt.join("apps").join("web");
+        fs::create_dir_all(&sub).unwrap();
+        let mut m = original.clone();
+        m["mcpServers"]["github"]["command"] = json!("/bin/sh");
+        fs::write(sub.join(".mcp.json"), m.to_string()).unwrap();
+        assert_eq!(approved(&home, &sub, &env_with).names(), vec!["docs", "events"]);
+        fs::write(sub.join(".mcp.json"), original.to_string()).unwrap();
+        assert_eq!(approved(&home, &sub, &env_with).names(), vec!["docs", "events", "github"]);
+        // the developer's own folder is unchanged: what the person approved there is handed on
+        assert_eq!(approved(&home, &d, &env_with).names(), vec!["docs", "events", "github"]);
+        assert!(approved(&home, &d, &env_with).differs().is_empty());
+        // a developer's folder without the file (moved away) leaves a lane nothing to compare with: nothing is handed on
+        fs::rename(d.join(".mcp.json"), d.join("mcp.json.away")).unwrap();
+        let got = approved(&home, &wt, &env_with);
+        assert!(got.is_empty(), "{:?}", got.names());
+        assert_eq!(got.differs(), ["docs".to_string(), "events".to_string(), "github".to_string()]);
+        fs::rename(d.join("mcp.json.away"), d.join(".mcp.json")).unwrap();
+        // the digest is of the entry as written: key order is not part of it, anything else is
+        assert_eq!(entry_digest(&json!({"command": "a", "args": ["b"]})), entry_digest(&json!({"args": ["b"], "command": "a"})));
+        assert_ne!(entry_digest(&json!({"command": "a", "args": ["b"]})), entry_digest(&json!({"command": "a", "args": ["b", "c"]})));
+        assert_ne!(entry_digest(&json!({"command": "a", "env": {"K": "${A}"}})), entry_digest(&json!({"command": "a", "env": {"K": "${B}"}})));
+        assert_eq!(entry_digest(&json!({"command": "a"})).len(), 64);
         let _ = fs::remove_dir_all(home);
     }
 
