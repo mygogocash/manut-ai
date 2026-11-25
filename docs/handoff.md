@@ -321,8 +321,8 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    at once swapped hard and reached the usage limit on 24 and 25 Nov):
    - running: item 61b (the live feed's one-use ticket, which item 61 merges with) and item 62 (the Runs layout
      tests made fast);
-   - next, for the desktop's first release (the owner has an Apple Developer account; on 25 Nov the owner said sign-in
-     is not needed for now): item 63 (release builds in CI, signed and notarized once the owner adds the secrets) and
+   - next, for the desktop's first release, which is Practice mode and the code editor (the owner, 25 Nov; the owner's
+     Apple Developer account is the business's, an organization; sign-in and a model key are not needed for now): item 63 (release builds in CI, signed and notarized once the owner adds the secrets) and
      item 65 (a Thai dictionary for the desktop). Item 64 (Apple sessions refused on the lifted routes, which turning
      Sign in with Apple on needs first) is parked until sign-in is wanted;
    - candidates that need no owner:
