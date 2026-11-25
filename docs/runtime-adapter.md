@@ -17,7 +17,9 @@ and activity log, and the owner's routine and pause writes. Customize › Memory
 list (below) is built and tested on `feat/task-list`, 24 Nov 2026 (December item 44): every read takes the newest tasks from
 `GET /v1/tasks`, a page at a time, and never the export, which carries every task's whole history. Older tasks (below) are built
 and tested on `feat/show-older`, 25 Nov 2026 (December item 52), the same way: a shop with more than its newest 50 says so on
-History and the activity log, and Show older reads the next page from the cursor the minute's read stopped at.
+History and the activity log, and Show older reads the next page from the cursor the minute's read stopped at. How a card closes
+when nobody here answered it (below) is built and tested on `feat/how-decided`, 25 Nov 2026 (December item 55), the same way: an ask
+that left the open approvals on its own closes saying whether it was approved or declined and by whom, taken back, ended or timed out.
 
 ## Choosing it
 
@@ -84,7 +86,9 @@ While anyone is connected the shop is read again every minute, and a list asked 
 last read is read again first. What changed between two reads becomes the events the store already follows: a new
 waiting request is an `approval.request` (one per revision); one that left is a `prompt.expired` (`timeout` when its
 action expired, `cancelled` when its task is gone or the request was asked again at a new revision, `resolved` when it
-was decided, with the API's own words in `note` when the person's answer here was refused); a new or vanished task is
+was decided, with the API's own words in `note` when the person's answer here was refused, and, when nobody here answered it, the
+words of how its request was settled from the shop's recent requests, read once for each shop that has such an ask: When nobody
+here answered it, below); a new or vanished task is
 `thread.added` or `thread.removed`; a
 new attention item is a `message` in Buddy's chat; a schedule or team routine change is `routines.update`; the team
 changing (a member starting or stopping work, Pause everyone, a member switched on or off) is `bots.update`. A task already listed changes its row only when the list is read again (after a reconnect or a
@@ -172,6 +176,79 @@ A time is "19:42" on its own day and "Nov 22 19:42" on another. A helper is name
 the listing has told this app (a note they passed on carries it); the session routes give no other way to a helper's
 name yet. A card closes in these words through the protocol's `prompt.expired`, which now carries an optional `note`
 the store keeps on the card (`expiredNote`).
+
+### When nobody here answered it
+
+Built on `feat/how-decided` (December item 55): `src/runtime/http/decided.ts` (the words), `host.ts` (`emitLeft`, `closeFromRecent`,
+`readRecent`, `settledClosings`) and `answer.ts` (`whoDecided`, `expiredWords` and `supersededWords`, which this and the answer path say
+alike). Before it, an ask decided anywhere but this app (the web app, the owner's link page, another device, a helper) closed as
+"Answered elsewhere": a shop session reads no tasks, so nothing here could tell a decision from a withdrawal, or say which way it went.
+
+- **One read.** When a read finds asks that left the open approvals and the person did not answer them here, the host asks the shop's
+  recent requests how each was settled: `GET /v1/approvals?state=recent`, with no `limit`, so the API's own newest 50 requests that
+  stopped waiting, newest asked first, each as approval-core's record and where it stands (`docs/pilot-api.md`, "Approvals for a
+  session"). It is read once for each shop that has such an ask, all at the same time, with that shop's own session, or with the
+  sign-in's for a person in no shop: at most one read for each shop for each of the minute's reads, and none when no ask left. It is
+  a read and nothing else. Nothing here decides, answers or passes on anything, so approval-core's rules (the decide route) stay the
+  only way round a request.
+- **When it is not made.** For an ask the person answered here: a refusal closes it in the API's own words, and an answer the API took
+  is now kept as a closing too, `resolved` (the store has marked the card answered, and `prompt.expired` leaves an answered card as it
+  is), so the read that finds the ask gone has nothing to look up. For a request asked again at another revision ("It changed since you
+  saw it. Answer the new version": it is still open, and its new version is an ask of its own). For a shop the person's place in ended
+  (its asks close in the words that say when, and its session is gone). And when no ask left.
+- **Held a few seconds.** The card stays open for the read for 4 seconds at most (`LEFT_READ_MS`). It then closes as it always did
+  (`resolved` when the action was decided, `timeout` when it ran out of time, `cancelled` when its task is gone, with no words of its
+  own) in every case the read does not speak for: it has not answered by then, fails, answers anything but that list (the open list,
+  or a body with no list in it), does not list the request, lists it at another revision than the card showed, says it still
+  waits, or says it stands in a way this build does not know. An answer that comes later is never used, and each card closes
+  once. One shop's slow read does not hold another shop's cards. A person who signs out, or an app that lets go of the runtime,
+  while a read is on its way, closes nothing. If saying how fails for any reason, the card closes as it did before.
+- **The words** (`rt.how.*` in en, ko, ja and zh; the others are the answer path's own):
+
+  | Where the record says the request stands | The card closes as | Words |
+  | --- | --- | --- |
+  | decided, by an option whose effect is approve | `resolved` | "Approved by you at 19:42", "Approved from your LINE link at 19:42", "Approved by Noi at 19:42", "Approved by Mint at 19:42", "Approved by a helper at 19:42", "Approved at 19:42" |
+  | decided, by an option whose effect is decline | `resolved` | the same, with "Declined" |
+  | decided, by an option the request does not offer, offers twice or whose effect this build does not know | `resolved` | "Already decided by you at 19:42" (the answer path's own words, with no verb) |
+  | decided, with no time | `resolved` | "Approved" or "Declined": who is not said either, as "Already decided" does not |
+  | withdrawn | `cancelled` | "Withdrawn: the team took it back" |
+  | superseded, its attempt or turn ended | `cancelled` | "No longer asked: the work it was for has stopped" |
+  | superseded, any other reason | `cancelled` | "No longer waiting for an answer" |
+  | expired | `timeout` | "Expired at 19:42", or "Timed out" when the API said no time |
+
+  A time is "19:42" on its own day and "Nov 22 19:42" on another, as everywhere else.
+- **Approved or declined is what the option does.** The request's one option with the decision's id says its effect (`approve` or
+  `decline`, approval-core's own), and that is read; never the option's id or its label, which can be any words in any language, and a
+  request can offer an option called "decline" that approves. The record's own decision is read when the standing is one this build
+  does not know, and the standing's when the record's status is one it does not know.
+- **Who.** From the decision's `role` and `decidedBy`, which the API takes from the session. The owner's own session or account is "you"
+  to the owner, and the owner's name to a helper reading it ("Approved by Noi"; to a helper the owner's decision is never "yours"); the
+  owner's link on LINE is "from your LINE link" to the owner. A helper is named by the name a note they passed on carries
+  (`passedOn`: in the shop's open list as the app held it, or in the recent list), the one place this app learns a helper's name; the
+  shop's people record is not read for it (`GET /v1/people` is the owner's alone, and a second request). Otherwise it is "a helper". A
+  role this build does not know is no one in particular, and the words say none. A helper reading another helper's decision may be
+  reading their own on another device, so "a helper" is all that can be said.
+- **The revision.** A record at another revision than the card showed says nothing, and the card closes as it did before: a request
+  revised after the card was shown and then decided was decided at other words than the card showed, and "Approved" on the old card
+  would say the exact words it showed were approved.
+- **Only what the API's list holds.** It lists the newest 50 requests that stopped waiting, by when they were asked. A request asked
+  before all of them (a busy shop, an ask that waited a long time) is not listed, and its card closes as it did before; `&limit=`
+  (up to 200) would reach further, at more reading on the API's side. A helper's name with a decision stays an ask of the API (Next
+  slices, 3), so a helper who decided a reply is "a helper" unless they passed something else on.
+- **Order.** A closing that waits for the read comes after the other changes the same read shows (a task gone, a new ask); every
+  other closing is as soon as the read is taken, as it was.
+- **What is kept.** Nothing. The read is not kept in the snapshot or the offline cache (version 5, as before), and the words are not
+  kept. An ask the kept read showed, and that is not waiting when the API answers again, closes in how it left by the same read, as
+  any other. Practice is unchanged: its demo settles its own asks and reaches no API.
+- **A helper's refused answer.** The same words now name the owner, where a helper's answer refused because the owner decided first
+  said "Already decided by you" or "from your LINE link" (`AnswerContext.owner`, set for a shop where the person is a helper).
+- **Tests.** `decided.test.ts` (every closing in the table, the option read by its effect, who, the revision, every record that does not
+  speak, the words in four languages) and `decided.host.test.ts` (the runtime end to end over a fake API that lists recent requests as
+  apps/api does: each closing under the app's own store, one read for several asks, one for each shop with that shop's session, no read
+  when none left or for an ask answered here or asked again or for a shop left, every way the read can say nothing, the wait cut at
+  4 seconds with a late answer unused, a sign-out or a stop while it is on the way, a failure in saying how, the person's place in a
+  shop ending in the read, and the file on disk the same whether or not the read said how); `e2e/google-sheets.spec.ts` (Connected
+  over a stubbed shell: Ton's request settled four ways elsewhere and one read that fails, the page's clock moved by hand).
 
 ### From a notification
 
@@ -763,6 +840,8 @@ instead of an empty screen, and says so (`src/runtime/http/cache.ts`, `host.ts`,
   showing stops showing when it reaches 7 days. A file that is damaged, from another version of the app, for another
   origin or tenant, or dated more than 5 minutes ahead of this computer's clock is ignored as if none were kept, and one
   bad entry ignores the whole file: half a shop is never shown as the whole one.
+- **Never how it left.** How a request that left the open approvals was settled (When nobody here answered it, above) is read when it
+  leaves and shown on the card; it is kept nowhere, so the file holds what it held before and the version is still 5.
 - **Forgotten.** Signing out in Settings, a session the API ends, a new sign-in over another session (this origin's or
   another's), and saving Practice or another origin in Settings › Developer all delete the file. A read that is on its
   way when the person signs out is not kept afterwards. After the saved choice moves away from the origin the page runs,
@@ -780,15 +859,23 @@ instead of an empty screen, and says so (`src/runtime/http/cache.ts`, `host.ts`,
    `GET /v1/approvals?state=open` still reads every task's requests on every read, as the export read every task before
    the task list (A shop the person owns, above); a way for Pause everyone to stop a job already running, and for a request to wait while the team is paused, if the owner wants
    the canvas's pause; a way to link an owner's identity to their shop; `APPLE_CLIENT_ID` on dev, or a LINE Login
-   provider; a tenant-wide event feed; a helper's name with a decision (so "Already decided by Mint" does not depend on
-   a note she passed on), and a way to say how a request that left on its own was decided (reading
-   `GET /v1/approvals?state=recent` when an ask leaves would do it, at one more request).
+   provider; a tenant-wide event feed; and a helper's name with a decision (so "Already decided by Mint" does not depend on
+   a note she passed on). A way to say how a request that left on its own was decided is built (When nobody here answered it, above:
+   `GET /v1/approvals?state=recent` read when an ask leaves, at one more request).
 4. **Asks of the desktop:** the Sign in with Apple button; keychain support on Windows and Linux; showing a schedule's
    time zone when it is not this computer's; showing a note a helper passed on with its request (it is read and kept
    already); a helper's own session on the desktop. (Older tasks than the newest 50, which a screen asks for with Show older, are
    built: Older tasks, above. What it leaves for later is at the end of that section.)
 
 ## Undoing it
+
+To take only how a card closes when nobody here answered it out: drop `closeFromRecent`, `readRecent`, `settledClosings`, `emitClosing`
+and `keepClosing` in `host.ts` (the answer paths set `closings` as they did: only for an answer the API refused with a closing), the
+`over` of `leftHow` and `leftShopHow` and the `Unsettled`, `Gone` and `Recent` types, `LEFT_READ_MS` and the `forgotten` counter,
+`decided.ts` with `decided.test.ts` and `decided.host.test.ts`, the `rt.how.*` words, and the `recent` list of the fake API in
+`testkit.ts` (`settledJson`, `approvalsListing`'s second list); `runtime.test.ts` then expects the closing before the changes again.
+`AnswerContext.owner` and `whoDecided`'s `owner` may stay: they are what makes a helper's refused answer name the owner, and `answerAtShop`
+gives it.
 
 To take only the answering out: make `approval.respond` `notYet` again in `host.ts` and remove `answer`, `refresh`,
 `closings` and `leftHow` there, `src/runtime/http/answer.ts` with its tests, `ApiSession.write` and the `removed` rule
