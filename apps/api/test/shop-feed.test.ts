@@ -483,6 +483,7 @@ describe("a ticket", () => {
       ["no dot", offering(base64url("pilot:feed-nobody"))],
       ["no secret", offering(`${base64url("pilot:feed-nobody")}.`)],
       ["no shop", offering(`.${secret}`)],
+      ["a secret with characters no mint writes", offering(`${base64url("pilot:feed-nobody")}.not/a+secret`)],
       // "YWJ" is a spelling of "ab" that base64url never writes: a shop is named one way only.
       ["a shop spelled two ways", offering(`YWJ.${secret}`)],
       ["a shop longer than a tenant may be", offering(`${base64url("s".repeat(257))}.${secret}`)],
