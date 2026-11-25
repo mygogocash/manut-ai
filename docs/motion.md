@@ -81,7 +81,7 @@ no dash on a run's edges). A held button still shows its 97%, as the kit's does,
 
 Its own short list of exceptions, each with why: `ui-ring-turn` (the live ring's period is also `Live.tsx`'s
 `ringDelay`), `bv-flow` (a dash on an SVG edge, the Shimmer's idea where a background shimmer cannot paint),
-`msg-lit` (a quote's message lit for a moment, left for item 85b), and the team faces' own moves as the kit draws them.
+and the team faces' own moves as the kit draws them.
 
 `e2e/motion-shots.spec.ts` shows the moves as a person sees them: a button's Hover and Press, the switch, the + menu,
 the model popover and the palette, held still at the start, the middle and the end of each move, in light and dark,
