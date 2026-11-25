@@ -360,9 +360,12 @@ Every switch that turns a built part on, and what each needs from the owner, is 
 - **From `docs/connectors.md`:** each approved reply is a LINE push, which counts against the shop's monthly
   quota (300 on the free plan). Shopee chat is closed to third parties. Lazada and Meta need applications started now.
 - **A look at the approval page on a real phone.**
-- **Model gateway (money):** an Anthropic API key from a paid account, as a Worker secret, only when models
-  should run; the exchange rate (default ฿35.00 a dollar) and each shop's monthly cap (default ฿200); a check of
-  the prices in `docs/model-gateway.md` against Anthropic's pricing page.
+- **Model gateway (money): not wanted yet.** On 25 Nov the owner said people bring their own model: on the desktop
+  each person signs in to their own coding agent with its CLI's login, or sets their own API key in that CLI, and
+  the app reads which (`src-tauri/src/accounts.rs`). The cloud team members (Nam, Pim and Ton) keep drafting with the
+  stand-in model until the owner wants them real. Then: an Anthropic API key from a paid account, as a Worker secret;
+  the exchange rate (default ฿35.00 a dollar) and each shop's monthly cap (default ฿200); a check of the prices in
+  `docs/model-gateway.md` against Anthropic's pricing page.
 - **The gate's rules:** shops that ask for deletion leave the cohort (keeping them needs a snapshot at deletion);
   subscription payments are deleted with the shop (whether Manut AI must keep its own billing records is a legal
   question); a payment before day 15 counts as paid.
@@ -378,7 +381,7 @@ Every switch that turns a built part on, and what each needs from the owner, is 
   practice mode early and whether 3 days is right.
 - **Routines' switches:** `officeRoutines` and `officeCloud` are off in every environment, so each routine run is
   written down as `skipped` (`routines_off`) until someone turns them on with `PUT /v1/admin/flags`. Real drafts
-  also need the model key; stock routines need a stock feed; "Send the books" only drafts until FlowAccount is
+  also need the model key, which the owner does not want yet; stock routines need a stock feed; "Send the books" only drafts until FlowAccount is
   connected. The console's new words (New shop, First week) need Thai copy.
 - **Night replies:** the canvas's routine "Every night after 21:00: Answer order-status questions" reads as Nam
   replying alone; the rules (and CLAUDE.md) make every reply to a customer ask first, so the desktop shows
