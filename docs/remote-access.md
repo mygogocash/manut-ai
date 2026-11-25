@@ -4,7 +4,7 @@ The design for the features the owner pointed at on 25 Nov 2026 in another app's
 settings: network access, a tunnel, new devices approved first, permissions, agent activity on a phone, guest links,
 linked environments, a preview tunnel, webhooks held while offline. It was written by a read-only design pass over
 this repository and GoSpark's remote access, which the relay in `apps/api` was lifted from. Nothing here is built yet
-except that relay. The plan's rows are 78a to 78d.
+except that relay. The plan's rows are 78a to 78f.
 
 ## The first version
 
@@ -28,8 +28,9 @@ What a person does:
    or stop the turn.
 
 Left out on purpose: sending messages, Always allow, Kit's dial, modes, diffs and files, Live Activities, guest links,
-linked environments, the preview, and a listener on the local network. The need is "something waits on me and I am not
-at the Mac", and this reuses the relay and the ask path as they are, and adds no server to the Mac.
+linked environments, the preview, and a listener on the local network (Tailscale is the second road, below). The need
+is "something waits on me and I am not at the Mac", and this reuses the relay and the ask path as they are, and adds
+no server to the Mac.
 
 ## The architecture
 
@@ -97,6 +98,66 @@ view clears 15 minutes after the Mac last confirmed it, and links in replies nev
 lifted, because no browser has it; its own fallback is the design above. Its command ledger can wait: approval-core
 already refuses a repeated decision as `already_decided`.
 
+## The second road: Tailscale (decided 26 Nov 2026)
+
+The owner asked for both roads, "the same as Orca": the relay, and Tailscale for a person who has it. A read of Orca
+at `stablyai/orca` commit `bc471d51` came first. Orca's Tailscale road is its local-network road pointed at a tailnet
+address: one unencrypted `ws://` listener that every pairing offer moves from 127.0.0.1 to every network, with the
+tailnet's address listed first, and no Tailscale command ever run. That works for Orca because its phone is a native
+app that allows unencrypted traffic. It cannot be copied here: the phone is a page served over HTTPS, and a browser
+refuses an unencrypted socket from a secure page. It also breaks two rules of this design, which stay: no port opened
+on every network, and no ask answered from a phone without a challenge for that one ask.
+
+So the same channel is carried over Tailscale's own HTTPS name instead.
+
+**On the Mac.** The page cannot listen, so this road is the first listener in the Rust shell, a new `remote_door.rs`:
+
+- It binds to 127.0.0.1 only. Tailscale reaches it through `tailscale serve --bg --https=<port>
+  http://127.0.0.1:<port>`, which gives the Mac a real certificate under its `ts.net` name and ends TLS there.
+- The port is never 443, 8443 or 10000. Those are the only ports Tailscale's Funnel can make public, and serve and
+  Funnel share one setting a port, so on any other port this road cannot become public by a slip.
+- It runs only while the main switch and this road's own switch are both on. Turning either off removes the serve
+  entry and closes the listener.
+- It speaks the phone's side of the relay's protocol (the hello, the token hash and the limits of `relay-object.ts`)
+  and hands the frames to the page over a Tauri channel, so `link.ts` gets a second door and the keys stay in the
+  page. The desktop's content policy does not change. It needs one new crate, `tokio-tungstenite`, with no TLS.
+- Every connection arrives from 127.0.0.1, so its limits count all connections together, never by address.
+
+**On the phone.** The same hosted `/app/` page, never a page the Mac serves: one origin, one installed app, one
+pairing and one passkey, checked the same way on both roads. A page the Mac served would be a second origin (a second
+Home Screen app, a second passkey) and code the Mac ships. The phone page's policy (`APP_POLICY` in
+`apps/api/src/app-policy.ts`) gains `wss://*.ts.net:<port>` and nothing wider.
+
+**Which road.** The QR code carries the Mac's tailnet name beside the relay's door, and the one-use pairing door opens
+on either. The Mac sends its current name again inside the encrypted channel at each session. A phone tries the
+tailnet first and starts the relay if the tailnet has not answered in 1.5 seconds; the first road to finish the
+handshake proved with K wins, and a phone has one session across both roads. With the relay switched off, a phone on
+the tailnet still pairs and works, so this road needs no server of ours.
+
+**What Settings says**, from a read-only `tailscale.rs` that only ever runs `tailscale status --json`:
+
+- "Tailscale isn't installed."
+- "Open Tailscale and sign in."
+- "An admin of your tailnet turns on MagicDNS and HTTPS Certificates (the DNS page of Tailscale's admin console). This
+  publishes this Mac's name in public certificate logs, for good."
+- "Ready: mac.tail1234.ts.net", with a switch that starts off and opens its own consent sheet.
+
+Manut never runs `serve` before HTTPS is on for the tailnet, because `serve` would send the person to a page that
+turns it on.
+
+**No shortcut for "the tailnet is already private".** Pairing, K and the decision challenge are the same on this road.
+A tailnet holds teammates' devices, shared devices and compromised ones; its access rules change; TLS ends in
+Tailscale, not in Manut; and a private network says nothing about Face ID for this one ask. The `Tailscale-User-Login`
+header is never read as who someone is.
+
+**Checked, and not.** On this Mac's Tailscale 1.104.7 the CLI's own help has `serve --bg`, `--https <port>`,
+`serve status --json` and `serve reset`, and `status --json` has `BackendState`, `Self.DNSName` (ending `.ts.net.`),
+`CertDomains` and `MagicDNSSuffix`; the help warns that the JSON changes between releases, so the reader accepts only
+what it understands and says "not ready" otherwise. Tailscale's pages say Funnel uses only 443, 8443 and 10000, that
+serve needs HTTPS turned on, and that `--bg` survives a restart. Not confirmed, and to be tried on a real tailnet
+before the door ships: that serve passes a WebSocket upgrade through, that it takes a port other than 443, that an
+installed iPhone web app opens the socket, what Android Chrome asks, and how fast a phone with Tailscale off gives up.
+
 ## The safety model
 
 - **An approval from the phone is as trustworthy as one on the Mac.** It goes through the same `settleApproval`, on the
@@ -116,6 +177,10 @@ already refuses a repeated decision as `already_decided`.
   site (only the site's own scripts run, and keys cannot be read out); the relay used as a free tunnel (limits, a daily
   budget, the off switch); a push address pointing somewhere else (only known push services) and push contents (there
   are none); misleading agent text shown on the phone.
+- **On the Tailscale road:** Tailscale's coordination server sees device names, addresses and when they are online,
+  and it hands out keys, so it could add a device to the tailnet; the handshake proved with K leaves such a device
+  only encrypted bytes. Every device on the tailnet can open the socket and take a waiting place, and gets nothing
+  without a token and K. The listener is new code that the tailnet and every program on the Mac can reach.
 - **What remains:** whoever deploys the page could ship script that misuses the keys while the page is open, which only
   a native app removes; and a passkey also accepts the phone's passcode and syncs through iCloud, which is weaker than
   GoSpark's key that needs Face ID alone.
@@ -128,6 +193,7 @@ already refuses a repeated decision as `already_decided`.
 | 78b | The Mac side and Settings, Sharing and access: consent, the QR code, the Allow card, the phone list, Unpair; tested against a fake socket, and through the real relay object in the API's tests, where no readable text may cross | Nothing |
 | 78c | The phone's Your Mac tab, with catch-up from the journal and the greyed view; two browsers against a local relay | The dev relay turned on, and a real iPhone check |
 | 78d | A push with no content ("Your Mac needs you") when an ask opens and no phone is connected | The relay on, and a push key made as a Wrangler secret |
+| 78f | The Tailscale road. First the read-only `tailscale.rs` and Settings' four states, tested with a stand-in CLI whose call log shows only `status --json`. Then `remote_door.rs`, the serve entry, the phone's second road and the 1.5 second race | The first part, nothing. The door: a tailnet, an iPhone and an Android phone |
 
 ## What the owner decides or provides
 
@@ -140,6 +206,9 @@ already refuses a repeated decision as `already_decided`.
   pricing pages. Not confirmed: whether a ping the relay answers by itself counts as a request (it was counted), how
   long each message keeps the object billed, real phone use, and that Apple's and Google's push services cost nothing.
   The design's advice: yes, and turn `RELAY_ENABLED` on in dev.
+- **The Tailscale road's words:** its consent sheet, the warning that turning on HTTPS publishes the Mac's name, and
+  what to say to a person whose tailnet belongs to a team. The person installs Tailscale and signs in themselves; an
+  admin of their tailnet turns on MagicDNS and HTTPS Certificates.
 - **Domain:** keep manut.xyz, and tie the passkey to the exact host, so a passkey made on dev never approves in
   production.
 - **Words:** the consent notice and the privacy policy's lines, naming the business that runs the relay. The relay
@@ -149,9 +218,10 @@ already refuses a repeated decision as `already_decided`.
 
 ## What should not be built
 
-- **Network access as a port on the local network, and Tailscale HTTPS.** The other app has them because it is a web
-  server. A page loaded over plain HTTP on the local network is not a secure context, so the browser blocks the
-  encryption and passkeys this design needs, and it would open a port on shop Wi-Fi that customers share.
+- **Network access as a port on the local network.** The other apps have it because one is a web server and the
+  other a native phone app. A page loaded over plain HTTP on the local network is not a secure context, so the browser
+  blocks the encryption and passkeys this design needs, and it would open a port on shop Wi-Fi that customers share.
+  Tailscale is built instead, under its HTTPS name (the second road, above).
 - **A hosted connect service with a count of tunnels.** That is the other app's paid tunnel for each machine. This
   relay has no slots to count.
 - **Webhooks held while offline.** LINE and Linear already arrive at the Worker (`/v1/inbound/`) and wait there.

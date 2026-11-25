@@ -213,17 +213,25 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
    Late on 25 Nov the owner said the account had credits to spare for the next 22 hours and to use them. Since then three
    builders run at once, their gates one at a time (`gate.sh` takes a lock), beside two read-only agents:
-   - item 69, a helper's own session on the connected desktop (`feat/helper-session`, Opus, `cc-item69-helper-session`);
    - item 83, artifacts shared by a link, built switched off (`feat/artifact-links`, Opus, `cc-item83-artifact-links`);
    - item 77b, workflows and coding work on a schedule, off by default (`feat/workflows`, Opus, `cc-item77b-workflows`);
-   - a security review of the twelve features merged on 25 Nov, findings only, whose report the lead turns into fixes;
+   - a security review of the twelve features merged on 25 Nov: done. Nine findings, one high (in merging a pull request
+     from a lane), four medium, four low, none in the published 0.1.1. Two helpers fix them before any more features
+     merge on those files: item 86 (`feat/fix-source-control`, Opus, `cc-item86-fix-git`) and item 87
+     (`feat/fix-computer-providers`, Opus, `cc-item87-fix-computer`), started 26 Nov at about 00:35. No build is cut
+     until both are merged. The findings are written into each fix's commits and tests, not into the public docs
+     before they are fixed. The reviewer's next places to look: MCP approvals keyed to the developer's folder but
+     applied to a lane's file, whether a preview starts a repository's script without a click, and other names for
+     the settings that skip an agent's asks.
    - a design for reaching the app from another device (item 78): done, `docs/remote-access.md`. Its first two phases
      need nothing from the owner, so item 78a, the channel both sides use (`feat/remote-channel`, Opus,
      `cc-item78a-remote-channel`), started 26 Nov at about 00:20.
    All started 25 Nov at about 23:45. Item 84 follows 83.
    The owner then set the session's goal: every feature highlighted on 25 Nov, then whatever needs nothing from the
    owner, and an app that feels premium and quiet, with motion on its states and details. The canvas's Motion board is
-   the rule for that (`BrandMotion.dc.html`; items 85a to 85d): 85a, the moves as a foundation and the controls
+   the rule for that (`BrandMotion.dc.html`; items 85a to 85i; the look at every page beside its board is done, 21
+   findings in `docs/design-audit.md`, whose fixes start once 85a has merged, since they touch the same stylesheets):
+   85a, the moves as a foundation and the controls
    (`feat/motion`, Opus, `cc-item85a-motion`), and a read-only look at every page beside its board, started 26 Nov at
    about 00:05.
    Next, as each finishes: item 80 (the chat box: model, effort, approval, add context, after 67), 72 (MCP and Skills
@@ -255,7 +263,9 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    The security review of 24 Nov (findings only) found no critical issue, two high and three medium ones that need
    `EMAIL_SIGN_IN` or `SELF_SERVE_SHOPS` on, and three low ones; its proofs are in the review thread's report, and
    `docs/turning-on.md` says to keep both switches off until items 41 and 42 merge.
-   Merged: 75 (Settings, Source control; a lane put up for review and its pull request merged, each one ask that shows
+   Merged: 69 (at a shop the person only helps at, every page that is the owner's says so by name and asks the API
+   nothing; a helper's session makes five kinds of request and no other; tests and browser specs only, as no sign-in
+   is on), 75 (Settings, Source control; a lane put up for review and its pull request merged, each one ask that shows
    exactly what is sent and runs once, through a ledger in the shell whose runner takes a proof only the settle step
    makes; a pull that only fast-forwards a clean default branch; agent credit lines taken out of a merge's message
    on request; never yet run against a real remote), 77a (Command-K opens a palette: where to go, what to do from a short list of actions the app already offers,

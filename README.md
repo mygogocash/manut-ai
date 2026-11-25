@@ -66,7 +66,12 @@ Settings › Source control (item 75): the page's shape and its words (Automatic
 when the checkout has no local changes or commits; Default merge method with the last one chosen; Remove agent credits when
 merging, keeping human co-authors), and `removeAgentCredits` with its tests and its list of agent addresses and names
 (`packages/source-control-core/src/server/mergeMessage.ts`), ported to Rust in `apps/desktop/src-tauri/src/credits.rs` and
-`apps/desktop/src/lib/agentCredits.json`. Orca
+`apps/desktop/src/lib/agentCredits.json`. T3 Code again (MIT, at `b61af8a`) for Settings › Workflows (item 77b): the
+Labs switch that is off by default and runs nothing in the workflows folder while off, "Skipped runs kept" with its bounds,
+a time missed while the app was down kept as skipped rather than made up, and "Run workflow" in the command palette
+(its `docs/user/workflows.md`, `apps/server/src/workflows/triggers.ts` and `packages/contracts/src/settings.ts`, read for
+behaviour and wording); `apps/desktop/src/workflows/` and `src-tauri/src/workflows.rs` are written here, with a JSON file of
+plain-text steps in place of its TypeScript workflows, no code copied. Orca
 (MIT, Copyright (c) 2026 Lovecast Inc., `stablyai/orca` at `a634526a1d0995af34a75cc4845e3eef17610085`) for computer use
 (`apps/desktop/src-tauri/src/computer/`, `docs/computer-use.md`): its command names as the MCP tools, its
 `orca-computer-use` skill adapted as `computer/SKILL.md`, the macOS shortcuts it never sends
