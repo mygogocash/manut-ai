@@ -781,7 +781,8 @@ export class HttpHost {
       throw new OpError(answered.departure.why, this.departedWords(part.shop.id) ?? t("rt.notFound"));
     }
     const names = new Map(part.approvals.flatMap((a) => (a.passedOn?.name ? [[a.passedOn.by, a.passedOn.name] as const] : [])));
-    const outcome = outcomeOf(answered, { kind: request.kind, names, now: this.now() });
+    // to a helper the owner's decision is the owner's, by name, and never "yours" or "from your LINE link"
+    const outcome = outcomeOf(answered, { kind: request.kind, names, now: this.now(), ...(part.shop.role === "helper" ? { owner: part.shop.owner } : {}) });
     this.keepClosing(askRef, outcome);
     void this.refresh().catch(() => undefined);
     if (!outcome.ok) throw new OpError(outcome.code, outcome.words);
