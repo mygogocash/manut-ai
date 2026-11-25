@@ -326,6 +326,28 @@ export interface ModelOptions {
   reasoning_levels: string[];
 }
 
+/** The chat box's choices for a chat that answers through the person's own coding agent (Buddy in Practice,
+ *  `agent.box`): the models and effort levels that agent itself listed, the approval levels it may run at, and what this
+ *  chat chose. Nothing here is a list of ours: an empty `models` means the agent has not listed any yet. */
+export interface AgentBox {
+  /** the agent that answers (`claude`), "" when none can */
+  agent: string;
+  /** its name as the model line says it ("Claude Code", "No coding agent") */
+  label: string;
+  /** the models it listed, as it named them */
+  models: { id: string; label: string; detail?: string }[];
+  /** this chat's model (an id of `models`), "" for the agent's own choice */
+  model: string;
+  /** the model the agent says it runs now, as it names it ("" while it does not run) */
+  running: string;
+  /** its effort levels, and this chat's ("" for the agent's own) */
+  efforts: string[];
+  effort: string;
+  /** the approval levels it may run at (its own permission modes), and this chat's */
+  approvals: string[];
+  approval: string;
+}
+
 // ---- requests -------------------------------------------------------------------------------
 
 export interface HelloResult {
@@ -458,6 +480,11 @@ export interface OpMap extends MissionOps, MemoryOps, RoutineOps, ConnectionOps,
   "peers.detach": { params: { peer: string }; result: Record<string, never> };
   "plugins.remove": { params: { bot: string; name: string }; result: { name: string } };
   "models.options": { params: { bot: string }; result: ModelOptions };
+  /** A chat's box when it answers through the person's own coding agent (Buddy in Practice), else null. */
+  "agent.box": { params: { bot: string; session?: string }; result: { box: AgentBox | null } };
+  /** A choice in that box: a model or effort level the agent listed, or one of its approval levels. Anything else is
+   *  refused, and the chat keeps what it had. */
+  "agent.set": { params: { bot: string; session?: string; model?: string; effort?: string; approval?: string }; result: { box: AgentBox } };
   /** Can the bot answer (read-only)? With `provider` (openai-codex, anthropic or nous) the strict check for it. */
   "bots.ready": { params: { bot: string; provider?: string }; result: BotReady };
   "chat.set_model": {
@@ -813,6 +840,8 @@ export type BridgeEvent =
   | (EventBase & { event: "bot.status"; status: BotStatus; running: boolean })
   | (EventBase & { event: "elsewhere.update" })
   | (EventBase & { event: "bots.update" })
+  /** What a bot's chat boxes offer, or one of them chose, may have changed (`agent.box` says how they stand now). */
+  | (EventBase & { event: "agent.box" })
   /** The person's shops changed: one was added, left, or is now the one viewed. `shops.list` says how they stand. */
   | (EventBase & { event: "shops.update" })
   /** A helper signed in on a new device at a shop the person owns (docs/people.md, "A helper's new device"): said once for

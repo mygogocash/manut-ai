@@ -1314,6 +1314,9 @@ export class HttpHost {
       // Buddy's readiness is the API's to say; until it can, the chat treats an unknown answer as ready.
       "bots.ready": (p) => (member(p), { ok: true, provider: "", model: "", error: "", unknown: true }),
       "models.options": (p) => (member(p), { providers: [], current: { model: "", provider: "", reasoning: "" }, reasoning_levels: [] }),
+      // nothing answers through the person's own coding agent here, so no chat box has its choices
+      "agent.box": (p) => (member(p), { box: null }),
+      "agent.set": notYet,
       "skills.list": (p) => (member(p), { skills: [] }),
       "commands.list": (p) => (member(p), { commands: [] }),
       "bots.avatar": (p) => (member(p), { rev: null, data: null }),

@@ -7,11 +7,15 @@ import { promptsOf } from "./parts/promptHistory";
 import { t } from "../i18n";
 import { can } from "../runtime";
 import { ThreadChat } from "../threads/ThreadChat";
+import { AgentBoxTools, pickFolder, teammates, useAgentBox } from "./box/AgentBox";
 
-/** The selected bot's one main chat: header, timeline, composer. */
+/** The selected bot's one main chat: header, timeline, composer. A chat that answers through the person's own coding
+ *  agent (Buddy in Practice) has the chat box's own choices (item 80): the model and its effort and the approval level
+ *  in the box, so the header has no model of its own, and Add context names a folder, a teammate or an action too. */
 export function Chat() {
   const s = useStore();
   const bot = s.bots.find((b) => b.name === s.selectedBot) ?? null;
+  const box = useAgentBox(bot && !s.ui.thread ? bot.name : null);
   if (!bot) {
     // no team member at all: one line that says so
     const none = s.conn === "open" && s.bots.length === 0;
@@ -35,7 +39,7 @@ export function Chat() {
   const away = s.conn !== "open";
   return (
     <>
-      <Header bot={bot} chat={chat} />
+      <Header bot={bot} chat={chat} noModel={!!box} />
       <div className="pane" data-pane={bot.name}>
         <Timeline bot={bot} />
         <Composer
@@ -55,6 +59,11 @@ export function Chat() {
           reply={s.replyTo[bot.name] ?? null}
           onClearReply={() => s.setReplyTo(null, bot.name)}
           onNewThread={bot.host || bot.status === "offline" ? undefined : (first) => void s.newThreadWith(bot.name, first)}
+          tools={box ? <AgentBoxTools bot={bot.name} box={box} /> : undefined}
+          onFolder={box ? pickFolder : undefined}
+          mentions={box ? teammates(s.bots, bot.name) : undefined}
+          actions={!!box}
+          rows={!!box}
         />
       </div>
     </>

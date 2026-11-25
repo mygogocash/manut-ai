@@ -11,8 +11,8 @@ import { PanelButton } from "./PanelButton";
 export { reasoningLabel };
 
 /** Header: avatar + name (toggles Details), the places chip slot, and on the right the model control plus the
- *  right panel's button. */
-export function Header({ bot, chat }: { bot: Bot; chat: Chat | undefined }) {
+ *  right panel's button. `noModel`: the chat box holds the model (a chat through the person's own agent, item 80). */
+export function Header({ bot, chat, noModel = false }: { bot: Bot; chat: Chat | undefined; noModel?: boolean }) {
   const s = useStore();
   const Places = slots.headerPlaces;
   const Picker = slots.modelPicker;
@@ -33,7 +33,7 @@ export function Header({ bot, chat }: { bot: Bot; chat: Chat | undefined }) {
       </button>
       {Places && <Places bot={bot} />}
       <div className="head-right" data-testid="head-right">
-        {Picker ? (
+        {noModel ? null : Picker ? (
           <Picker bot={bot} chat={chat} />
         ) : (
           <Pill as="span" className="model-pill">

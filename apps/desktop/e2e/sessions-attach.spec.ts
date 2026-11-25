@@ -81,9 +81,10 @@ async function drop(page: Page, target: string, files: { name: string; type: str
 }
 
 async function pick(page: Page, files: { name: string; mimeType: string; buffer: Buffer }[]) {
-  // a session's + has no plugins: it opens the file picker straight away
-  const chooser = page.waitForEvent("filechooser");
+  // a session's + is Add context (item 80): its first row is the file picker
   await page.getByTestId("attach").click();
+  const chooser = page.waitForEvent("filechooser");
+  await page.getByTestId("attach-files").click();
   await (await chooser).setFiles(files);
   await expect(page.getByTestId("attach-menu")).toHaveCount(0);
 }

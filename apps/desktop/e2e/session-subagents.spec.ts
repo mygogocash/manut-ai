@@ -178,9 +178,9 @@ test("the session header never overlaps or covers a control, 900 to 1440px, pane
       await expect(btn).toHaveAttribute("aria-pressed", String(open));
       const head = await settled(page, open, width);
       const where = `${width}px, panel ${open ? "open" : "closed"}`;
-      // left to right: the title, the path, the status, then the terminal toggle, the model control, the panel button
-      // (the path's box is the line holding the folder and the agent: it ellipsizes as one)
-      const ids = ["session-title", "session-path", "session-status", "session-terminal-toggle", "model-pill", "panel-button"];
+      // left to right: the title, the path, the status, then the terminal toggle and the panel button (the path's box is
+      // the line holding the folder and the agent: it ellipsizes as one). The model control is the chat box's (item 80).
+      const ids = ["session-title", "session-path", "session-status", "session-terminal-toggle", "panel-button"];
       const rects = await page.evaluate(
         (ids) => ids.map((id) => (id === "session-path" ? document.querySelector('[data-testid="session-cwd"]')!.parentElement! : document.querySelector(`[data-testid="${id}"]`)!).getBoundingClientRect().toJSON()),
         ids,
@@ -189,13 +189,14 @@ test("the session header never overlaps or covers a control, 900 to 1440px, pane
       // the controls are whole and inside the header (not under the panel), the model's name is not cut
       for (const r of rects.slice(3)) expect(r.right, where).toBeLessThanOrEqual(head.x + head.width + 0.5);
       expect(Math.round(rects[3].width), where).toBe(24);
-      expect(Math.round(rects[5].width), where).toBe(26);
+      expect(Math.round(rects[4].width), where).toBe(26);
+      // the model's name in the box is whole too
       for (const id of ["model-pill", "model-label"])
         expect(await page.getByTestId(id).evaluate((el) => el.scrollWidth <= el.clientWidth), `${id} whole at ${where}`).toBe(true);
       // what is at each control's centre is that control (under 1100px the open panel slides over the whole chat
       // column, header included, as for a bot's chat: nothing of the header is on screen to cover there)
       if (open && width < 1100) continue;
-      for (const [i, id] of [[3, "session-terminal-toggle"], [4, "model-pill"], [5, "panel-button"]] as const) {
+      for (const [i, id] of [[3, "session-terminal-toggle"], [4, "panel-button"]] as const) {
         const r = rects[i];
         const hit = await page.evaluate(([id, x, y]) => !!document.elementFromPoint(x as number, y as number)?.closest(`[data-testid="${id}"]`), [id, r.left + r.width / 2, r.top + r.height / 2] as const);
         expect(hit, `${id} at ${where}`).toBe(true);

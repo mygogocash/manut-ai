@@ -56,9 +56,40 @@ instructions (`buddyPrompt` in `packages/agent-prompts`: who Buddy is, that it s
 technical, that in Practice the shop is a sample one, and the facts the team may use), written by the shell to a file under
 `~/.manut/buddy/prompts` so no page text becomes an argument. It runs in `~/.manut/buddy/chat`, an empty folder of its own,
 never in a project. Buddy's chats are their own list in the shell (`buddy_start`, `buddy_input`, `buddy_close`,
-`buddy_close_all`): the page sends only a message, Stop or an answer, and a coding session's reset never stops one. Each
-conversation has its own process, at most two at once; a conversation that comes back starts a new one that is first told what
-was said.
+`buddy_close_all`, `buddy_file_save`): the page sends only a message, Stop, an answer and the chat box's three choices (below),
+and a coding session's reset never stops one. Each conversation has its own process, at most two at once; a conversation that
+comes back starts a new one that is first told what was said.
+
+The chat box (item 80): Buddy's box, in its main chat and each thread, is the coding chat's box (`src/chat/box/`), in two rows as
+the design canvas draws its ask box: the text, then a + for Add context, the model with its effort, the approval level and Send.
+
+- **Model and effort.** What the person's Claude Code itself listed (`session.models`, `session.efforts`), never a list of ours.
+  Before Claude Code has started once since the app opened there is none, and the button names the agent; after, the button
+  names the model the chat picked, else the one Claude Code says it runs. Each conversation keeps its own choice
+  (`AgentBuddy.box` and `set` in `src/runtime/mock/buddy.ts`, read through the runtime's `agent.box` and `agent.set`). A running
+  agent takes a choice at once; a new process is set to it before the conversation's next message, the model once that process
+  has listed its models.
+- **Approval.** Ask (Claude Code's `default`, where everything that acts asks first; every conversation starts there) or Plan
+  (`plan`: Claude Code says what it would do, changes nothing, and asks to start on its plan, whose card shows the plan whole).
+  Nothing else: never `acceptEdits`, which would change files unasked in a folder the person names, and never a mode that skips
+  the asks. A plan the person says yes to takes Claude Code back to Ask by itself, and the box follows. The menu's last line says
+  the person's own Claude Code settings can still let a tool run unasked, as Buddy's start always allowed.
+- **What the shell takes** (`buddy_chat::check`): an approval level of `BUDDY_MODES` (`default`, `plan`), an effort of Claude
+  Code's own levels (`CLAUDE_EFFORTS`), and a model only when that very process listed it at its start (`Adapter::models`, which
+  the Claude adapter keeps from its `initialize` answer); before it has listed any, no model is taken. Still refused: a picture as
+  the agent's image input, a rewind, a steer, and every mode outside the list (`acceptEdits`, `bypassPermissions`, `dontAsk`,
+  `auto`, and a flag such as `--dangerously-skip-permissions` in a mode's or a model's place).
+- **Add context.** Files: the shell keeps a copy under `~/.manut/buddy/files` (`buddy_file_save`, outside the folder the agent
+  runs in; a copy older than a day goes at the next save), and the message names it by its path (`Attached file (a copy Manut AI
+  saved; open it with your tools): <path>`), so Claude Code asks before it reads it; this was checked with one real message
+  through Claude Code 2.1.332 in Buddy's start. Threads take files too. Folder: the native picker; the folder is never copied and
+  never added to the agent's folders, the message names it on a line of its own ("Folder: <path>", in the person's language),
+  and Claude Code asks before each read there. Mention a teammate: the `@` menu of the team (also by typing `@` at a word's
+  start), written `@slug` as a bubble draws a mention. Actions and skills: the `/` menu, the demo's commands then the commands
+  and skills Claude Code listed, from an empty box or over text already typed (the action then goes first). No Browser or Drive
+  row: Manut AI has neither.
+
+Connected has no box of its own (`agent.box` answers none), and the WebSocket bridge, Hermes', is never asked.
 
 Asks: every permission the agent asks (a command, a file change, an MCP tool) is Buddy's card in its chat or thread, and in
 Needs you, offering Allow once and No. The runtime opens it in approval-core's `InMemoryApprovalStore`, stamped with the turn,
@@ -68,7 +99,8 @@ server and shows its whole input. A question the agent asks is a question card a
 When it cannot answer, Buddy says why in the person's language and the turn ends Failed: no agent that can answer (which one
 works, that its install line is under More agents in the Code page's + menu, and to sign in with `claude auth login`), not
 signed in, a Claude Code too old for Buddy's start, or the agent's own words. The model line says what answers: "Claude Code",
-or "No coding agent". In a plain browser the stand-in Claude Code of `src/sessions/host.ts` answers, saying it is one.
+or "No coding agent". In a plain browser the stand-in Claude Code of `src/sessions/host.ts` answers, saying it is one, and lists
+its stand-in models (`e2e/chat-box.spec.ts` walks the box on it).
 
 Practice therefore reaches the shell for Buddy (which agents are installed, and Buddy's chat) and for nothing else. Connected is
 unchanged: its `chat.send` is still refused, as below.
