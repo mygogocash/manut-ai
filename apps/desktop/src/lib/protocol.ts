@@ -168,6 +168,9 @@ export interface Routine {
   last_run_at: number | string | null;
   last_status: string | null;
   enabled: boolean;
+  /** The zone `schedule` is read in, when it is a routine of a shop's team or a schedule of its own (kept in a time zone of its
+   *  own). Left out for a job that runs on this computer's clock, which needs no zone said. */
+  time_zone?: string;
 }
 
 export type ApprovalChoice = "once" | "session" | "always" | "deny";

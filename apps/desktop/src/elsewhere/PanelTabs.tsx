@@ -6,6 +6,7 @@ import { getStore, useStore } from "../state/store";
 import { shortTime } from "../app/time";
 import { t, tx, type Key } from "../i18n";
 import { SourceIcon, Spinner } from "../ui";
+import { withZone } from "../lib/zone";
 import { cadence, isFailure, nextRun, sourceName, statusText } from "./format";
 import "./panel.css";
 
@@ -417,7 +418,7 @@ export function ScheduleTab({ bot }: { bot: Bot }) {
           <b>{r.name}</b>
           <span className="pn-r">{nextRun(r)}</span>
           <span className="pn-s">
-            {cadence(r.schedule)}
+            {withZone(cadence(r.schedule), r.time_zone)}
             {r.last_run_at ? t("pn.lastRan", { when: shortTime(toSec(r.last_run_at)) }) : ""}
           </span>
           <span className={`pn-st ${r.last_status && isFailure(r.last_status) ? "bad" : r.last_status ? "ok" : ""}`}>

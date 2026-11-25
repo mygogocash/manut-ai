@@ -2328,6 +2328,9 @@ export const ja: Record<Key, string> = {
   "routines.hint": "チームが決まった時間に自分で行うことです。",
   "routines.next": "次回：{when}",
   "routines.today": "今日",
+  // A time that is on another zone's clock than this computer's (src/lib/zone.ts)
+  "zone.city": "{place}時間",
+  "zone.with": "{words}（{zone}）",
   "routines.nameAsks": "{name}。先に確認します。",
   "routines.asksFirst": "先に確認します。",
   "routines.paused": "一時停止中",

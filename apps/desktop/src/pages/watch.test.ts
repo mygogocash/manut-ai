@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { Automation } from "../lib/protocol";
 import { setLang } from "../i18n";
+import { pinComputerZone } from "../lib/zone";
 import { statusOf } from "./Automations";
-import { notUsefulQuote, reasonWords, watchOf, watchSentence, whereOf, type WatchInfo } from "./watch";
+import { notUsefulQuote, reasonWords, scheduleLine, watchOf, watchSentence, whereOf, type WatchInfo } from "./watch";
 
 const W: WatchInfo = {
   name: "og-outage",
@@ -77,5 +78,24 @@ describe("Not useful quote", () => {
     const q = notUsefulQuote("x".repeat(400));
     expect(q).toHaveLength(300);
     expect(q.endsWith("…")).toBe(true);
+  });
+});
+
+describe("the schedule line's zone", () => {
+  const team = (over: Partial<Automation> = {}) => job(null, { schedule: "0 9 * * *", script: null, time_zone: "Asia/Bangkok", ...over });
+  afterEach(() => pinComputerZone("Asia/Bangkok"));
+
+  it("says nothing more on a computer in the routine's own zone", () => {
+    expect(scheduleLine(team())).toBe("every day at 09:00");
+  });
+
+  it("names the routine's zone when the computer is on another clock", () => {
+    pinComputerZone("Europe/London");
+    expect(scheduleLine(team())).toBe("every day at 09:00 (Bangkok time)");
+  });
+
+  it("names nothing for a job on this computer's own clock, which has no zone", () => {
+    pinComputerZone("Europe/London");
+    expect(scheduleLine(team({ time_zone: undefined }))).toBe("every day at 09:00");
   });
 });

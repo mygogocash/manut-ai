@@ -9,6 +9,7 @@ import { openExternal } from "../lib/openExternal";
 import { shortTime } from "../app/time";
 import { Avatar, CloseIcon, IconButton, SourceIcon } from "../ui";
 import logo from "../assets/manut-mark.svg";
+import { withZone } from "../lib/zone";
 import { awayTime, cadence, isFailure, nextRun, sourceList, sourceName, statusText } from "./format";
 import {
   DiffTab,
@@ -244,7 +245,7 @@ function DetailsTab({ bot, open, head }: { bot: Bot; open: boolean; head: JSXChi
                 <span className="t1">{r.name}</span>
                 <span className="st">{nextRun(r, now)}</span>
                 <span className="t2">
-                  <span className="ew-src">{cadence(r.schedule)}</span>
+                  <span className="ew-src">{withZone(cadence(r.schedule), r.time_zone)}</span>
                   {r.last_status && isFailure(r.last_status) && <span className="st bad">{tr("pn.lastRun", { status: statusText(r.last_status) })}</span>}
                 </span>
               </li>

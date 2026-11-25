@@ -205,7 +205,7 @@ describe("reading", () => {
       automations: [expect.objectContaining({ id: "sched-1", bot: "buddy", name: "Morning brief", schedule: "30 8 * * 1-5", paused: false, next_run_at: (T0 + 3600_000) / 1000 })],
     });
     expect(await rt.request("routines.list", { bot: "buddy" })).toEqual({
-      routines: [{ id: "sched-1", name: "Morning brief", schedule: "30 8 * * 1-5", next_run_at: (T0 + 3600_000) / 1000, last_run_at: null, last_status: null, enabled: true }],
+      routines: [{ id: "sched-1", name: "Morning brief", schedule: "30 8 * * 1-5", next_run_at: (T0 + 3600_000) / 1000, last_run_at: null, last_status: null, enabled: true, time_zone: "Asia/Bangkok" }],
     });
     expect(await rt.request("bots.info", { bot: "buddy" })).toEqual({ places: {}, first_active: T0 / 1000, last_active: (T0 + 120_000) / 1000, skills: 0, routines: 1 });
   });

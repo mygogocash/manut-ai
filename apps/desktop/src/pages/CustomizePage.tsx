@@ -37,6 +37,7 @@ import {
   formAsksFirst,
   formProblem,
   nameLine,
+  whenLine,
   nextLine,
   problemText,
   ROUTINES_START,
@@ -407,7 +408,7 @@ function RoutineLine({ row, p }: { row: RoutineRow; p: RoutinesPaneProps }) {
   return (
     <div key="row" className="tr" data-testid="routine" data-routine={row.id}>
       <div className="grow">
-        <div className="mut small">{row.when}</div>
+        <div className="mut small">{whenLine(row, p.nowMs)}</div>
         <div className="strong">{nameLine(row)}</div>
         {!row.enabled ? <div className="mut small">{t("routines.paused")}</div> : next && <div className="mut small">{next}</div>}
       </div>

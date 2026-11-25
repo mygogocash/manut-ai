@@ -1,6 +1,7 @@
 // Channel watches on the Automations page: a cron job whose script is the channel-watch collector. The bridge's
 // `read_automations` adds `watch` to such a job (what it watches, from the watch's config, and whether the bot could
 // read the channel on its last check, from Hermes' run records). Pure helpers here; the rows are in Automations.tsx.
+import { withZone } from "../lib/zone";
 import type { Automation } from "../lib/protocol";
 import { t } from "../i18n";
 import { scheduleWords } from "./schedule";
@@ -34,6 +35,11 @@ export const isBrief = (a: Automation): boolean => watchOf(a)?.kind === "brief" 
 
 /** The schedule line of a job: the briefing says when it speaks, not how often it checks. */
 export const scheduleOf = (a: Automation): string => (isBrief(a) ? t("brief.when") : scheduleWords(a.schedule));
+
+/** The schedule line as the Automations page shows it: with the zone it is on when that is not this computer's (a team routine
+ *  or a shop's schedule, kept in the shop's own zone), so "every day at 09:00" is never read as this computer's 09:00. A job that
+ *  runs on this computer's clock names no zone. The briefing says "when it speaks", at no clock time, so it gains none. */
+export const scheduleLine = (a: Automation): string => (isBrief(a) ? scheduleOf(a) : withZone(scheduleOf(a), a.time_zone));
 
 export const PLATFORM_NAME: Record<string, string> = { slack: "Slack", discord: "Discord" };
 

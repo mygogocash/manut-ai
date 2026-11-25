@@ -8,6 +8,7 @@ import { createRoutine, mustAskFirst, type RoutineRefusal, type Trigger } from "
 import { lang, locale, t } from "../i18n";
 import { MAX_ROUTINES, problemWords, type NewRoutine, type RoutineRow } from "../runtime/routines";
 import { unavailable } from "./load";
+import { withZone } from "../lib/zone";
 
 /** A routine put in its place after it changed: where it stood, or last when the list did not have it. */
 export function withRoutine(routines: readonly RoutineRow[], row: RoutineRow): RoutineRow[] {
@@ -38,7 +39,7 @@ const yearOf = (ms: number, timeZone: string | undefined) => new Intl.DateTimeFo
 
 /** "Next: Monday 08:00", said quietly under the routine. Today says Today; the days ahead say the day's name for six days, and
  *  after that the date, so that a weekday never means two different days. The clock is the 24-hour one, and the day is the
- *  routine's own, in its own zone. A routine that is off, or has no next run (an event such as stock), has no line. Nor has one
+ *  routine's own, in its own zone, which is named when it is not this computer's. A routine that is off, or has no next run (an event such as stock), has no line. Nor has one
  *  whose next run has already gone by: the connected runtime shows the last good read of the shop while the API cannot be
  *  reached, which can be days old, and "Next: Friday 08:30" would name a day that is over. */
 export function nextLine(row: Pick<RoutineRow, "next" | "enabled" | "timeZone">, nowMs: number): string | null {
@@ -56,7 +57,15 @@ export function nextLine(row: Pick<RoutineRow, "next" | "enabled" | "timeZone">,
       : ahead >= 1 && ahead <= 6
         ? say({ weekday: "long" })
         : say({ day: "numeric", month: "long", ...(yearOf(at, zone) === yearOf(nowMs, zone) ? {} : { year: "numeric" }) });
-  return t("routines.next", { when: `${day} ${say({ hour: "2-digit", minute: "2-digit", hourCycle: "h23" })}` });
+  return t("routines.next", { when: withZone(`${day} ${say({ hour: "2-digit", minute: "2-digit", hourCycle: "h23" })}`, row.timeZone, nowMs) });
+}
+
+/** When a routine runs, as the runtime says it, with the zone after it whenever that is not this computer's ("Every day at 09:00
+ *  (Bangkok time)"), so 09:00 is never read as this computer's time by mistake. */
+export function whenLine(row: Pick<RoutineRow, "when" | "timeZone">, nowMs: number): string {
+  // Only words that name a clock time have a clock to say: "When stock drops under 5" (an event) and "Not known" have none. The
+  // package writes every time as HH:MM, so a run of that shape is what tells them apart.
+  return /\d\d:\d\d/.test(row.when) ? withZone(row.when, row.timeZone, nowMs) : row.when;
 }
 
 /** What a routine does, in the owner's words, and that it asks first: "Send the books to FlowAccount. Asks first." Only a

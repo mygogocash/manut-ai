@@ -316,7 +316,7 @@ export function cronOf(s: ShopSchedule): string {
 }
 
 function routineOf(s: ShopSchedule): Routine {
-  return { id: s.id, name: s.name, schedule: cronOf(s), next_run_at: s.nextFire === null ? null : sec(s.nextFire), last_run_at: null, last_status: null, enabled: s.enabled };
+  return { id: s.id, name: s.name, schedule: cronOf(s), next_run_at: s.nextFire === null ? null : sec(s.nextFire), last_run_at: null, last_status: null, enabled: s.enabled, time_zone: s.timeZone };
 }
 
 const TIME = /^([01]\d|2[0-3]):([0-5]\d)$/;
@@ -341,7 +341,7 @@ export function routineSchedule(r: TeamRoutine): string {
 }
 
 function teamRoutineOf(r: TeamRoutine): Routine {
-  return { id: r.id, name: r.name || t("rt.untitled"), schedule: routineSchedule(r), next_run_at: r.next === null ? null : sec(r.next), last_run_at: null, last_status: null, enabled: !r.paused };
+  return { id: r.id, name: r.name || t("rt.untitled"), schedule: routineSchedule(r), next_run_at: r.next === null ? null : sec(r.next), last_run_at: null, last_status: null, enabled: !r.paused, time_zone: r.timeZone };
 }
 
 /** A member's Schedule tab: Buddy's are the shop's schedules, and each member's are the team's routines that start their

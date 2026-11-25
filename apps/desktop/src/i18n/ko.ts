@@ -2328,6 +2328,9 @@ export const ko: Record<Key, string> = {
   "routines.hint": "팀이 정해진 일정에 따라 스스로 하는 일이에요.",
   "routines.next": "다음: {when}",
   "routines.today": "오늘",
+  // A time that is on another zone's clock than this computer's (src/lib/zone.ts)
+  "zone.city": "{place} 시간",
+  "zone.with": "{words} ({zone})",
   "routines.nameAsks": "{name}. 먼저 물어봐요.",
   "routines.asksFirst": "먼저 물어봐요.",
   "routines.paused": "멈춤",
