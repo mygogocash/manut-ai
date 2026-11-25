@@ -224,6 +224,10 @@ The Code page's + menu (the Terminals header's +, the empty section's New sessio
   browser the stand-in agent answers (`sessions/host.ts`), and `e2e/kit-lanes.spec.ts` starts a lane from the menu.
 - **Asks.** A lane's asks arrive as cards and settle through `settleApproval`, with Kit's dial deciding first, as for every chat
   session. The menu adds no other path.
+- **Buddy is not a lane.** Buddy's chat on Home runs the same Claude Code through the same adapter, but as a list of its own in
+  the shell (`buddy_chat.rs`), in `~/.manut/buddy/chat` and never in a project, with no dial: each of its asks is a card the
+  person answers, settled through approval-core (`docs/runtime-adapter.md`, "Buddy in Practice mode"). An MCP tool's ask, in a
+  lane or in Buddy's chat, says the tool and its server and carries its whole input.
 
 `newMenu.test.ts` pins which agents each part lists, `ChatWay.test.tsx` draws the part and presses a row, `lanes.test.ts` takes a
 pick through to the lane, and `e2e/kit-lanes.spec.ts`, `terminals.spec.ts` and `integrate.spec.ts` walk the menu in a browser.

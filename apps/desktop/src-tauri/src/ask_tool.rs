@@ -10,7 +10,8 @@
 //! - `name`: the agent's own name for the tool (`Bash`, `Edit`, `write`);
 //! - `line`: a command's whole line as the agent runs it, never cut and with its line breaks;
 //! - `paths`: every path the step names, as the agent wrote it;
-//! - `cwd`: the folder the step runs in.
+//! - `cwd`: the folder the step runs in;
+//! - `server`: for an MCP tool, the server it belongs to (`mcp__<server>__<tool>`), shown only and never decided on.
 //!
 //! A part that cannot be read whole is left out, and the dial then asks the person, as every ask did before it. A
 //! command line can hold a key: this goes to the page and nowhere else, the page masks keys wherever it shows a
@@ -108,7 +109,12 @@ pub(crate) fn claude_tool(name: &str, input: &Value, blocked: &str, cwd: &str) -
         "WebFetch" => ("fetch", None, None),
         _ => ("other", None, None),
     };
-    ask_tool(kind, name, line, paths, cwd)
+    let mut t = ask_tool(kind, name, line, paths, cwd);
+    // an MCP tool (`mcp__<server>__<tool>`) also names its server, which the card and Needs you show beside the tool
+    if let Some((server, _)) = crate::agent_chat::mcp_parts(name) {
+        t["server"] = Value::String(server.chars().take(NAME_CHARS).collect());
+    }
+    t
 }
 
 /// A command line split into words the way a POSIX shell splits it, or `None` when it holds anything but plain
@@ -315,7 +321,8 @@ mod tests {
             ("Glob", json!({"pattern": "**/*.ts", "path": "/w/proj/src"}), json!({"kind": "read", "name": "Glob", "paths": ["/w/proj/src"], "cwd": "/w/proj"})),
             ("WebFetch", json!({"url": "https://example.com", "prompt": "read it"}), json!({"kind": "fetch", "name": "WebFetch", "cwd": "/w/proj"})),
             ("WebSearch", json!({"query": "qr"}), json!({"kind": "other", "name": "WebSearch", "cwd": "/w/proj"})),
-            ("mcp__shop__orders", json!({"status": "open"}), json!({"kind": "other", "name": "mcp__shop__orders", "cwd": "/w/proj"})),
+            // an MCP tool also names the server it belongs to, which the card shows beside the tool (item 67)
+            ("mcp__shop__orders", json!({"status": "open"}), json!({"kind": "other", "name": "mcp__shop__orders", "cwd": "/w/proj", "server": "shop"})),
         ];
         for (name, input, want) in cases {
             assert_eq!(claude_tool(name, &input, "", "/w/proj"), want, "{name}");

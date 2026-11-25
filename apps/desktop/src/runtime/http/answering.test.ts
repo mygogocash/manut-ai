@@ -335,7 +335,7 @@ describe("through the desktop shell", () => {
 });
 
 describe("Practice", () => {
-  it("answers as it always did: the demo settles it, and nothing reaches the shell or an API", async () => {
+  it("answers as it always did: the demo settles it, and nothing reaches an API or the shell but Buddy's look for a coding agent", async () => {
     const api = fakeApi();
     const shell = desktopShell(api, memoryCacheStore(), storedSession(NOW));
     const rt = createRuntime({ mode: "practice" });
@@ -352,7 +352,8 @@ describe("Practice", () => {
     rt.close();
     vi.useRealTimers();
     await vi.dynamicImportSettled();
-    expect(shell.calls).toEqual([]);
+    // the shell is asked one thing, which coding agents this computer has, for Buddy to answer through (buddy.ts)
+    expect(shell.calls.filter((c) => c.cmd !== "sessions_agents")).toEqual([]);
     expect(api.calls).toEqual([]);
   });
 });

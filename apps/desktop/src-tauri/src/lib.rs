@@ -6,6 +6,7 @@ mod agent_chat;
 mod app_menu;
 mod appimage;
 mod ask_tool;
+mod buddy_chat;
 mod claude_usage;
 mod custom_agents;
 mod disk;
@@ -54,6 +55,9 @@ struct Shell {
     logins: Arc<accounts::Logins>,
     sessions: Arc<Sessions>,
     chats: Arc<ChatSessions>,
+    /// Buddy's chats through the person's own coding agent (buddy_chat.rs), kept apart from the coding sessions' so a
+    /// coding session's reset never stops one and the page can send them only what a conversation needs.
+    buddy: Arc<ChatSessions>,
     /// The lanes' previews (preview.rs): each a project's dev server, started by the page in a lane's own folder.
     previews: Arc<preview::Previews>,
 }
@@ -919,6 +923,53 @@ async fn chat_close(shell: State<'_, Shell>, id: u32) -> Result<(), String> {
     Ok(())
 }
 
+/// Start Buddy's chat through `agent` (only Claude Code answers as Buddy, buddy_chat.rs) with Buddy's instructions
+/// `prompt`, which the shell writes to a file of Buddy's own and passes by its path. Events come on `on_event` as for
+/// `chat_start`, and once `{event:"exit", code, error}`. The chat runs as the account picked for new sessions of that
+/// agent, else the CLI's own, in `~/.manut/buddy/chat`.
+#[tauri::command]
+async fn buddy_start(shell: State<'_, Shell>, agent: String, prompt: String, on_event: Channel<serde_json::Value>) -> Result<u32, String> {
+    let buddy = shell.buddy.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let home = user_home()?;
+        let account_env = accounts::session_env_for(&home, &agent, None);
+        buddy_chat::start(&buddy, &home, &agent, &prompt, &account_env, move |out| {
+            let _ = on_event.send(match out {
+                ChatOut::Event(e) => e,
+                ChatOut::Exit(code, error) => serde_json::json!({"event": "exit", "code": code, "error": error}),
+            });
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// What the person did in Buddy's chat `id`: a message (text only), Stop, or the answer to an ask or a question
+/// (`buddy_chat::allowed`). Anything else is refused.
+#[tauri::command]
+async fn buddy_input(shell: State<'_, Shell>, id: u32, input: agent_chat::Input) -> Result<(), String> {
+    if !buddy_chat::allowed(&input) {
+        return Err("Buddy's chat takes a message, Stop or an answer only".into());
+    }
+    let buddy = shell.buddy.clone();
+    tauri::async_runtime::spawn_blocking(move || buddy.input(id, input)).await.map_err(|e| e.to_string())?
+}
+
+/// Stop Buddy's chat `id`.
+#[tauri::command]
+async fn buddy_close(shell: State<'_, Shell>, id: u32) -> Result<(), String> {
+    shell.buddy.close(id);
+    Ok(())
+}
+
+/// Stop every one of Buddy's chats: the page calls it before its first, since a reload keeps the shell and any chat
+/// the page before it started.
+#[tauri::command]
+async fn buddy_close_all(shell: State<'_, Shell>) -> Result<(), String> {
+    let buddy = shell.buddy.clone();
+    tauri::async_runtime::spawn_blocking(move || buddy.close_all()).await.map_err(|e| e.to_string())
+}
+
 /// Stop every chat (the UI calls this when it loads, like `session_close_all`).
 #[tauri::command]
 async fn chat_close_all(shell: State<'_, Shell>) -> Result<(), String> {
@@ -1141,6 +1192,7 @@ pub fn run() {
                 logins: accounts::Logins::new(),
                 sessions: Sessions::new(),
                 chats: ChatSessions::new(),
+                buddy: ChatSessions::new(),
                 previews: preview::Previews::new(),
             });
             Ok(())
@@ -1163,6 +1215,7 @@ pub fn run() {
             if let Some(shell) = handle.try_state::<Shell>() {
                 shell.sessions.close_all();
                 shell.chats.close_all();
+                shell.buddy.close_all();
                 shell.previews.close_all();
                 shell.logins.cancel_all();
             }
@@ -1237,6 +1290,10 @@ fn commands(invoke: tauri::ipc::Invoke) -> bool {
         lane_remove,
         session_main_moved,
         chat_close_all,
+        buddy_start,
+        buddy_input,
+        buddy_close,
+        buddy_close_all,
         session_reveal,
         session_open_terminal,
         past_chats_list,

@@ -65,9 +65,9 @@ describe("the in-process runtime", () => {
     await expect(rt.request("chat.open", { bot: "nobody" })).rejects.toMatchObject({ code: "unknown_bot" });
   });
 
-  it("plays a whole turn for a message: status, tools, streamed text, the answer, the end", async () => {
+  it("plays a whole turn for a member's message: status, tools, streamed text, the answer, the end", async () => {
     const { rt, names, events } = await open();
-    await rt.request("chat.send", { bot: "buddy", text: "what needs me today?" });
+    await rt.request("chat.send", { bot: "nam", text: "what needs me today?" });
     expect(names()).toEqual(["bot.status", "turn.start"]);
     await vi.advanceTimersByTimeAsync(2_000);
     expect(names()).toEqual([
@@ -79,7 +79,7 @@ describe("the in-process runtime", () => {
     expect(answer?.event === "message" && answer.text).toBe(streamed);
     expect(events.at(-2)).toMatchObject({ event: "turn.end", outcome: "done" });
     // the chat now holds both sides
-    const { messages } = await rt.request("chat.open", { bot: "buddy" });
+    const { messages } = await rt.request("chat.open", { bot: "nam" });
     expect(messages.slice(-2).map((m) => m.role)).toEqual(["user", "assistant"]);
   });
 
@@ -148,19 +148,19 @@ describe("the in-process runtime", () => {
 
   it("Stop ends the turn and drops what was queued behind it; a message sent meanwhile waits its turn", async () => {
     const { rt, names } = await open();
-    await rt.request("chat.send", { bot: "buddy", text: "first" });
-    expect(await rt.request("chat.steer", { bot: "buddy", text: "also this" })).toEqual({ status: "queued" });
-    await rt.request("chat.send", { bot: "buddy", text: "second" });
+    await rt.request("chat.send", { bot: "pim", text: "first" });
+    expect(await rt.request("chat.steer", { bot: "pim", text: "also this" })).toEqual({ status: "queued" });
+    await rt.request("chat.send", { bot: "pim", text: "second" });
     await vi.advanceTimersByTimeAsync(2_000);
     // the queued message started its own turn after the first one ended
     expect(names().filter((n) => n === "turn.start")).toHaveLength(2);
-    await rt.request("chat.send", { bot: "buddy", text: "third" });
-    await rt.request("chat.interrupt", { bot: "buddy" });
+    await rt.request("chat.send", { bot: "pim", text: "third" });
+    await rt.request("chat.interrupt", { bot: "pim" });
     await vi.advanceTimersByTimeAsync(5_000);
     expect(names().filter((n) => n === "turn.start")).toHaveLength(2);
     expect(names().filter((n) => n === "turn.end")).toHaveLength(2);
     // with no turn running a steer is refused, never sent another way
-    expect(await rt.request("chat.steer", { bot: "buddy", text: "late" })).toEqual({ status: "rejected" });
+    expect(await rt.request("chat.steer", { bot: "pim", text: "late" })).toEqual({ status: "rejected" });
   });
 
   it("two helpers outlive the turn that started them and report back on their own", async () => {
