@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use super::keys::Chord;
-use super::room::{App, Desk, Handle, Node, Place};
+use super::room::{App, Desk, Focus, Handle, Node, Place, Win};
 
 #[derive(Clone)]
 pub struct Facts {
@@ -124,6 +124,8 @@ pub struct Stand {
     /// Which window of each app has the keyboard, by its index; None for none that can be told. An app not here has
     /// its first window focused.
     focused: Mutex<HashMap<i32, Option<usize>>>,
+    /// The control that has the keyboard in each window, by its index; a window not here has the focus itself.
+    focused_control: Mutex<HashMap<(i32, usize), usize>>,
     calls: Mutex<Vec<String>>,
 }
 
@@ -179,6 +181,7 @@ impl Stand {
             windows: Mutex::new(windows),
             nodes: Mutex::new(nodes),
             focused: Mutex::new(HashMap::new()),
+            focused_control: Mutex::new(HashMap::new()),
             calls: Mutex::new(Vec::new()),
         }
     }
@@ -224,6 +227,15 @@ impl Stand {
     /// Window `w` of the app gets the keyboard, or with None no window the Mac can tell.
     pub fn focus_window(&self, pid: i32, w: Option<usize>) {
         self.focused.lock().unwrap().insert(pid, w);
+    }
+
+    /// Control `i` of window `w` of app `pid` has the keyboard there, or with None the window itself.
+    pub fn focus_control(&self, pid: i32, w: usize, i: Option<usize>) {
+        let mut f = self.focused_control.lock().unwrap();
+        match i {
+            Some(i) => f.insert((pid, w), i),
+            None => f.remove(&(pid, w)),
+        };
     }
 
     /// Another window for app `pid`, its controls laid out as the first window's are: the root, then one under another.
@@ -314,9 +326,19 @@ impl Desk for Stand {
         self.note(format!("snapshot {} {:?}", place.window.unwrap_or(0), place.frame.unwrap_or_default()));
         Ok(b"\x89PNG control".to_vec())
     }
-    fn focused_window(&self, pid: i32) -> Option<String> {
+    fn focus(&self, pid: i32) -> Option<Focus> {
         let w = self.focused.lock().unwrap().get(&pid).copied().unwrap_or(Some(0))?;
-        self.windows.lock().unwrap().get(&pid)?.get(w).cloned()
+        let title = self.windows.lock().unwrap().get(&pid)?.get(w).cloned()?;
+        let i = self.focused_control.lock().unwrap().get(&(pid, w)).copied();
+        let control = match i {
+            Some(i) => {
+                let n = self.node(pid, w, i)?;
+                let p = self.place(&n.handle)?;
+                Some((n, p))
+            }
+            None => None,
+        };
+        Some(Focus { window: Win { number: Some(window_number(pid, w)), title }, control })
     }
     fn press(&self, handle: &Handle) -> Result<(), String> {
         let (pid, w, i) = Stand::at(handle);

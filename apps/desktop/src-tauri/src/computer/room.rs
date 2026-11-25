@@ -88,6 +88,23 @@ pub struct Place {
     pub frame: Option<[i64; 4]>,
 }
 
+/// A window as the Mac says it is now.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Win {
+    /// Its number (`_AXUIElementGetWindow`), which stays the window's own while its title changes; None when the Mac
+    /// does not say it.
+    pub number: Option<u32>,
+    pub title: String,
+}
+
+/// Where an app's key presses go now, as the Mac says: the window that has the keyboard, and the control focused in
+/// it with its place, or None when the window itself has the focus.
+#[derive(Clone)]
+pub struct Focus {
+    pub window: Win,
+    pub control: Option<(Node, Place)>,
+}
+
 /// The ranges of Unicode's general category Cf (format characters: the bidi embeddings, overrides, marks and isolates,
 /// zero-width spaces and joiners, the byte order mark, tags and the rest), as Unicode 18.0 lists them (read from Node's
 /// ICU on 25 Nov 2026 with `/\p{Cf}/u`).
@@ -153,8 +170,9 @@ pub trait Desk: Send + Sync {
     fn place(&self, handle: &Handle) -> Option<Place>;
     /// A PNG picture of the part of window `place.window` that `place.frame` covers: the control as it looks.
     fn snapshot(&self, place: &Place) -> Result<Vec<u8>, String>;
-    /// The title of the app's focused window, where its keys go.
-    fn focused_window(&self, pid: i32) -> Option<String>;
+    /// Where the app's key presses go now: the window that has the keyboard and the control focused in it, or None when
+    /// that cannot be told.
+    fn focus(&self, pid: i32) -> Option<Focus>;
     fn press(&self, handle: &Handle) -> Result<(), String>;
     fn set_value(&self, handle: &Handle, text: &str) -> Result<(), String>;
     fn key(&self, pid: i32, chord: &Chord) -> Result<(), String>;
@@ -342,8 +360,24 @@ enum Target {
     /// A click, or with `value` the text put into a field and `held` exactly what the field held at the ask (empty for
     /// typing, else all that the text replaces); `place` is where the control was at the ask.
     Node { pid: i32, role: String, label: String, handle: Handle, value: Option<String>, held: Option<String>, place: Place },
-    Key { pid: i32, window: Option<String>, chord: Chord },
+    /// A key press, and where it was aimed at the ask.
+    Key { pid: i32, aim: Aim, chord: Chord },
     Menu { pid: i32, path: Vec<String> },
+}
+
+/// Where a key press was aimed at the ask: the window that had the keyboard, by its number and its title, and the
+/// control focused in it, by its role, name and place. A key goes only where all of these still hold.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Aim {
+    window: Option<u32>,
+    title: String,
+    control: Option<(String, String, Place)>,
+}
+
+impl Aim {
+    fn of(f: &Focus) -> Aim {
+        Aim { window: f.window.number, title: f.window.title.clone(), control: f.control.as_ref().map(|(n, p)| (n.role.clone(), n.label.clone(), p.clone())) }
+    }
 }
 
 /// One ask's card and what its yes would be for.
@@ -409,6 +443,8 @@ pub struct Room {
 }
 
 pub const NO_YES: &str = "Manut AI has no yes from the person for this action. Each action runs only right after the person allows it once on its card in the chat, and that yes is used once. If they said no, do not try again unless they ask.";
+/// Why a key press is not asked about or sent when the window that has the keyboard cannot be told.
+const NO_FOCUS: &str = "Computer use cannot tell which window of the app has the keyboard now, so it does not press a key there. Ask the person to click into the window, or use a control's own action instead.";
 const LOCKED: &str = "The Mac's screen is locked or asleep, or someone else's session is in front, so computer use does nothing now. Ask the person to unlock the Mac and say when.";
 const NO_ACCESSIBILITY: &str = "macOS has not given Manut AI Accessibility, so computer use cannot read or work any window. The person turns it on in Manut AI's Settings › Computer.";
 /// Why typing into a field whose content cannot be read is not asked about: it would replace what it holds, unseen.
@@ -495,9 +531,13 @@ impl Room {
         Ok(self.desk.windows(pid)?.iter().map(|t| clean(t)).collect())
     }
 
-    /// The title of an app's focused window, without invisible format characters.
-    fn focused_window(&self, pid: i32) -> Option<String> {
-        self.desk.focused_window(pid).map(|t| clean(&t))
+    /// Where an app's keys go now, its window's title and its control's name and value without invisible format
+    /// characters; None unless the window that has the keyboard has a number the Mac says, so it is that window and not
+    /// another with the same title.
+    fn focus(&self, pid: i32) -> Option<Focus> {
+        let f = self.desk.focus(pid)?;
+        f.window.number?;
+        Some(Focus { window: Win { title: clean(&f.window.title), ..f.window }, control: f.control.map(|(n, p)| (Room::tidy(n), p)) })
     }
 
     /// A control as the Mac reads it, its name and value without invisible format characters.
@@ -618,9 +658,14 @@ impl Room {
                 if let Some(effect) = chord.blocked() {
                     return Err(format!("{} would {effect}, so computer use never sends it. Reach the goal another way, such as the window's own button or menu item.", chord.shown()));
                 }
-                let window = self.focused_window(app.pid);
-                let s = Shown { window: window.clone(), keys: Some(chord.shown()), ..shown("key") };
-                Ok(Decision::Card(Ask { shown: s, target: Target::Key { pid: app.pid, window, chord } }))
+                // the key goes to the window that has the keyboard and the control focused there: the card names both,
+                // and the yes is bound to them, not to a title another window can share
+                let focus = self.focus(app.pid).ok_or(NO_FOCUS)?;
+                if focus.control.as_ref().is_some_and(|(n, _)| n.secure()) {
+                    return Err("The keyboard is in a password field, and computer use never types into one.".into());
+                }
+                let s = Shown { window: Some(focus.window.title.clone()), control: focus.control.as_ref().map(|(n, _)| control_name(n)), keys: Some(chord.shown()), ..shown("key") };
+                Ok(Decision::Card(Ask { shown: s, target: Target::Key { pid: app.pid, aim: Aim::of(&focus), chord } }))
             }
             MENU => {
                 let path: Vec<String> = args
@@ -802,13 +847,17 @@ impl Room {
                     }
                 }
             }
-            Target::Key { pid, window, chord } => {
+            Target::Key { pid, aim, chord } => {
                 let app = self.still_app(pid)?;
                 if chord.blocked().is_some() {
                     return Err("Computer use never sends that shortcut.".into());
                 }
-                if window.is_some() && self.focused_window(pid) != window {
-                    return Err(format!("A different window of {} is in front now, so the key was not pressed. Look again and ask again.", app.name));
+                let now = self.focus(pid).ok_or(NO_FOCUS)?;
+                if now.control.as_ref().is_some_and(|(n, _)| n.secure()) {
+                    return Err("The keyboard is in a password field, and computer use never types into one.".into());
+                }
+                if Aim::of(&now) != aim {
+                    return Err(format!("A different window or control of {} has the keyboard now, so the key was not pressed. Look again and ask again.", app.name));
                 }
                 self.desk.key(pid, &chord)?;
                 Ok(Reply::ok(format!("Pressed {} in {}. Call `get_app_state` to see what changed.", chord.shown(), app.name)))
@@ -1384,6 +1433,66 @@ mod tests {
         ] {
             assert!(super::refused(&app("com.example.app", path), 1).is_none(), "{path}");
         }
+    }
+
+    /// A key press goes to the window that had the keyboard at the ask, bound to that window itself and not to its
+    /// title: another window with the same title, an untitled one, or none the Mac can tell gets no key.
+    #[test]
+    fn a_key_goes_only_to_the_window_that_had_the_keyboard_at_the_ask() {
+        use crate::computer::stand::f;
+        let (s, r) = room();
+        // a second untitled document
+        s.add_window(TEXTEDIT, "Untitled", vec![f("AXWindow", "Untitled"), f("AXTextArea", "")]);
+        let args = json!({"app": "TextEdit", "key": "Return"});
+        let a = card(&r, KEY, &args);
+        r.answered(KEY, &args, &a);
+        s.focus_window(TEXTEDIT, Some(2));
+        let out = r.run(KEY, &args);
+        assert!(out.error, "{}", out.text);
+        // no window that can be told: no card, and a yes given before is not used
+        s.focus_window(TEXTEDIT, None);
+        assert!(matches!(r.ask(KEY, &args), Decision::Refuse(_)));
+        s.focus_window(TEXTEDIT, Some(0));
+        let a = card(&r, KEY, &args);
+        r.answered(KEY, &args, &a);
+        s.focus_window(TEXTEDIT, None);
+        assert!(r.run(KEY, &args).error);
+        // untitled windows: an empty title is no exemption
+        s.set_title(TEXTEDIT, 0, "");
+        s.set_title(TEXTEDIT, 2, "");
+        s.focus_window(TEXTEDIT, Some(0));
+        let a = card(&r, KEY, &args);
+        r.answered(KEY, &args, &a);
+        s.focus_window(TEXTEDIT, Some(2));
+        assert!(r.run(KEY, &args).error);
+        assert!(s.acts().is_empty());
+        // the same window, and the keyboard moved to another control, or the control moved: no key
+        s.set_title(TEXTEDIT, 0, "Untitled");
+        s.focus_window(TEXTEDIT, Some(0));
+        s.focus_control(TEXTEDIT, 0, Some(5));
+        let a = card(&r, KEY, &args);
+        assert_eq!(a.shown.lines(), "App: TextEdit\nWindow: Untitled\nControl: text field “Name”\nKeys: Return");
+        r.answered(KEY, &args, &a);
+        s.focus_control(TEXTEDIT, 0, Some(1));
+        assert!(r.run(KEY, &args).text.contains("different window or control"));
+        s.focus_control(TEXTEDIT, 0, Some(5));
+        let a = card(&r, KEY, &args);
+        r.answered(KEY, &args, &a);
+        s.change(TEXTEDIT, 0, 5, |x| x.frame[1] += 40);
+        assert!(r.run(KEY, &args).error);
+        // the keyboard in a password field: never a key there, asked or not
+        let a = card(&r, KEY, &args);
+        r.answered(KEY, &args, &a);
+        s.focus_control(TEXTEDIT, 0, Some(3));
+        assert!(r.run(KEY, &args).text.contains("password field"));
+        assert!(refused(&r, KEY, &args).contains("password field"));
+        assert!(s.acts().is_empty());
+        // where all of it still holds, the key is pressed
+        s.focus_control(TEXTEDIT, 0, Some(5));
+        let a = card(&r, KEY, &args);
+        r.answered(KEY, &args, &a);
+        assert!(!r.run(KEY, &args).error);
+        assert_eq!(s.acts(), [format!("key {TEXTEDIT} Return")]);
     }
 
     #[test]

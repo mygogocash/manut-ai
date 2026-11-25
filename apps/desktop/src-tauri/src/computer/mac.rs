@@ -28,7 +28,7 @@ use core_foundation::number::CFNumber;
 use core_foundation::string::{CFString, CFStringRef};
 
 use super::keys::Chord;
-use super::room::{clean, App, Desk, Handle, Node, Place, MAX_DEPTH, MAX_NODES, SECURE};
+use super::room::{clean, App, Desk, Focus, Handle, Node, Place, Win, MAX_DEPTH, MAX_NODES, SECURE};
 
 type AXUIElementRef = *const c_void;
 /// `AXError`: 0 is success (`AXError.h`).
@@ -515,8 +515,25 @@ impl Desk for Mac {
         out
     }
 
-    fn focused_window(&self, pid: i32) -> Option<String> {
-        Mac::app(pid)?.element("AXFocusedWindow")?.string("AXTitle")
+    fn focus(&self, pid: i32) -> Option<Focus> {
+        let app = Mac::app(pid)?;
+        let front = app.element("AXFocusedWindow");
+        // the control that has the keyboard, unless the window itself (or nothing in it) does
+        let el = app.element("AXFocusedUIElement").filter(|e| e.string("AXRole").is_some_and(|r| r != "AXWindow" && r != "AXApplication"));
+        let Some(el) = el else {
+            let win = front?;
+            return Some(Focus { window: Win { number: window_number(&win), title: win.string("AXTitle").unwrap_or_default() }, control: None });
+        };
+        let win = el.element("AXWindow")?;
+        let number = window_number(&win);
+        // the control's window must be the one macOS says has the keyboard; when the two disagree, where the key
+        // would go cannot be told
+        if front.is_some_and(|f| window_number(&f) != number) {
+            return None;
+        }
+        let node = Ax(el.0.clone()).node(0)?;
+        let place = self.place(&node.handle)?;
+        Some(Focus { window: Win { number, title: win.string("AXTitle").unwrap_or_default() }, control: Some((node, place)) })
     }
 
     fn press(&self, handle: &Handle) -> Result<(), String> {

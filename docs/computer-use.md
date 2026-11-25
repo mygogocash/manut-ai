@@ -166,6 +166,16 @@ Writes:
   - With Screen capture, the card shows a picture of just that part of the window (`CGWindowListCreateImage` with the
     control's frame), for a control up to 640 by 320 points and 256 KB; a larger one, such as a document's text area,
     has none (`a_card_shows_a_small_picture_of_the_control_with_screen_capture`, `computer.test.tsx`).
+- A key press is bound to where the keys go (second security review, 26 Nov 2026). It was bound only to the focused
+  window's title, and not at all when that title was empty, so a key allowed for one "Untitled" document could land in
+  another. Now the ask reads where the app's keys go (`AXFocusedWindow`, `AXFocusedUIElement`): the window's number
+  (`_AXUIElementGetWindow`) and title, and the focused control's role, name and place (`Place`, as a click's). The card
+  names the window and that control ("Control: text field “Name”"), and the yes holds only while all of them hold: a
+  different window (even with the same title or none), the keyboard in another control, or the control moved, and the
+  key is not pressed. When the window that has the keyboard cannot be told (no number, or the focused control is in
+  another window than the one macOS says has the keyboard), nothing is asked and nothing is sent. A key press into a
+  password field is refused like typing into one
+  (`a_key_goes_only_to_the_window_that_had_the_keyboard_at_the_ask`).
 - Typing says what it replaces (security review, 26 Nov 2026). The Mac puts typed text in place of a field's whole value
   (`AXUIElementSetAttributeValue` with `AXValue`), so a card that read "Type into the text area: Thanks!" turned a page
   of text into "Thanks!". Now what the field holds is read at the ask, as the Mac gives it:
