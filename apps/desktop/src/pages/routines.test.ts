@@ -5,6 +5,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createRoutine, type ActionKind } from "@manut/routine-rules";
 import { LANGS, setLang, t } from "../i18n";
+import { pinComputerZone } from "../lib/zone";
 import { MockHost, MockRuntime } from "../runtime/mock";
 import type { RoutineRow } from "../runtime/routines";
 import {
@@ -17,6 +18,7 @@ import {
   formTrigger,
   nameLine,
   nextLine,
+  whenLine,
   problemText,
   refusalText,
   ROUTINES_START,
@@ -51,6 +53,53 @@ const row = (over: Partial<RoutineRow> = {}): RoutineRow => ({
 beforeEach(() => setLang("en"));
 afterEach(() => setLang("en"));
 
+describe("whose clock a routine's time is on", () => {
+  afterEach(() => pinComputerZone("Asia/Bangkok"));
+
+  it("adds nothing when the computer is in the routine's zone, or on its clock under another name", () => {
+    expect(whenLine(row(), NOW)).toBe("Every day at 08:00");
+    expect(nextLine(row(), NOW)).toBe("Next: Monday 08:00");
+    pinComputerZone("Asia/Ho_Chi_Minh");
+    expect(whenLine(row(), NOW)).toBe("Every day at 08:00");
+    expect(nextLine(row(), NOW)).toBe("Next: Monday 08:00");
+  });
+
+  it("names the zone after the time and after the next run when the computer is elsewhere", () => {
+    pinComputerZone("Europe/London");
+    expect(whenLine(row(), NOW)).toBe("Every day at 08:00 (Bangkok time)");
+    // The next run stays on the routine's own calendar (Monday 08:00 there is Sunday 01:00 in London), and says so.
+    expect(nextLine(row(), NOW)).toBe("Next: Monday 08:00 (Bangkok time)");
+  });
+
+  it("keeps the routine's own day when that is the other side of midnight from the computer's", () => {
+    pinComputerZone("America/Los_Angeles");
+    const tomorrowThere = row({ next: bkk(23, 6), timeZone: "Asia/Bangkok" });
+    // 06:00 Monday in Bangkok is Sunday 15:00 in Los Angeles: the line says Monday and Bangkok, never Today.
+    expect(nextLine(tomorrowThere, NOW)).toBe("Next: Monday 06:00 (Bangkok time)");
+  });
+
+  it("says nothing of a zone for words that name no clock time", () => {
+    pinComputerZone("Europe/London");
+    expect(whenLine(row({ when: "When stock drops under 5", next: null }), NOW)).toBe("When stock drops under 5");
+    expect(whenLine(row({ when: t("rt.whenUnknown") }), NOW)).toBe(t("rt.whenUnknown"));
+  });
+
+  it("names an offset zone by its offset", () => {
+    pinComputerZone("Asia/Bangkok");
+    const india = row({ timeZone: "+05:30", next: Date.UTC(2026, 10, 23, 3, 30) / 1000 });
+    expect(whenLine(india, NOW)).toBe("Every day at 08:00 (GMT+5:30)");
+    expect(nextLine(india, NOW)).toBe("Next: Monday 09:00 (GMT+5:30)");
+  });
+
+  it("says the zone in each language", () => {
+    pinComputerZone("Europe/London");
+    for (const lang of LANGS) {
+      setLang(lang);
+      expect(whenLine(row({ when: "08:00" }), NOW), lang).toContain("Bangkok");
+    }
+  });
+});
+
 describe("when a routine next runs, said quietly", () => {
   const next = (over: Partial<RoutineRow>, now = NOW) => nextLine(row(over), now);
 
@@ -76,7 +125,7 @@ describe("when a routine next runs, said quietly", () => {
     // 03:00 on Monday in Bangkok is still Sunday evening in UTC.
     const now = Date.UTC(2026, 10, 22, 20, 0);
     expect(next({ next: bkk(23, 8) }, now)).toBe("Next: Today 08:00");
-    expect(next({ next: Date.UTC(2026, 10, 23, 1, 0) / 1000, timeZone: "UTC" }, now)).toBe("Next: Monday 01:00");
+    expect(next({ next: Date.UTC(2026, 10, 23, 1, 0) / 1000, timeZone: "UTC" }, now)).toBe("Next: Monday 01:00 (UTC)");
   });
 
   it("says nothing for a routine that is off, for an event that has no next run, or for one the runtime cannot time", () => {

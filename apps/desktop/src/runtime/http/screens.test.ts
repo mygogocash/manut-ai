@@ -137,7 +137,9 @@ async function screens(rt: HttpRuntime, events: BridgeEvent[]) {
   const schedule: Record<string, unknown> = {};
   for (const { name } of bots) {
     info[name] = await req("bots.info", { bot: name });
-    schedule[name] = (await req("routines.list", { bot: name })).routines;
+    // The export predates a routine's `time_zone` (the Automations page says it beside the time when it is not the computer's), so
+    // each row is read without it here; view.test.ts holds that field.
+    schedule[name] = (await req("routines.list", { bot: name })).routines.map(({ time_zone: _zone, ...rest }: { time_zone?: string }) => rest);
   }
   const { threads } = await req("thread.list", { bot: "buddy" });
   const notes: Record<string, unknown> = {};

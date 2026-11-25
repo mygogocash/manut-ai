@@ -36,15 +36,15 @@ import { CUE_PX, useEdgeFade } from "../sidebar/edgeFade";
 import { getHost, type PastChat } from "./host";
 import { getSessions, useSessions } from "./sessions";
 import { pickTitle } from "./titles";
-import { onOpenNewSessionMenu, useShells } from "./newMenu";
+import { onOpenNewSessionMenu, useShells, type NewMenuStart } from "./newMenu";
 import { onTermSettings, readTermSettings } from "./term/settings";
 import { TermLinkGone } from "./termLinkOpen";
-import type { Account, AccountCli, AccountGroup } from "../lib/protocol";
+import type { Account, AccountGroup } from "../lib/protocol";
+import { SESSION_CLI } from "./sessionCli";
+import { agentSignedOut, signedOutTip, signedOutWord } from "./signedOut";
 import { useAccounts } from "../settings/accounts/useAccounts";
 import { accountForNewSessions } from "../settings/accounts/rules";
 
-/** The Accounts CLI a new session of `agent` signs in as (mirrors `session_cli` in src-tauri/src/accounts.rs). */
-const SESSION_CLI: Partial<Record<AgentId, AccountCli>> = { claude: "claude", codex: "codex", grok: "grok" };
 
 /** `work@example.com` -> `work@…`. */
 const maskEmail = (email: string) => (email.includes("@") ? `${email.slice(0, email.indexOf("@"))}@…` : email);
@@ -83,8 +83,17 @@ export async function addTermFolder(): Promise<void> {
 
 export function SessionsHeader() {
   const [open, setOpen] = useState(false);
+  // how the menu was asked for: the + button asks for none, the Lanes band's New lane asks for the chat choice in its folder
+  const [start, setStart] = useState<NewMenuStart | undefined>(undefined);
   const plus = useRef<HTMLButtonElement>(null);
-  useEffect(() => onOpenNewSessionMenu(() => setOpen(true)), []);
+  useEffect(
+    () =>
+      onOpenNewSessionMenu((s) => {
+        setStart(s);
+        setOpen(true);
+      }),
+    [],
+  );
   return (
     <div className="side-sh side-sh-row">
       <span>{t("nav.terminals")}</span>
@@ -99,12 +108,15 @@ export function SessionsHeader() {
           title={t("sessions.new")}
           aria-haspopup="menu"
           aria-expanded={open}
-          onClick={() => setOpen((v) => !v)}
+          onClick={() => {
+            setStart(undefined);
+            setOpen((v) => !v);
+          }}
           data-testid="session-new"
         >
           <PlusIcon size={14} />
         </button>
-        {open && <NewSessionMenu onClose={() => setOpen(false)} trigger={plus} />}
+        {open && <NewSessionMenu onClose={() => setOpen(false)} trigger={plus} start={start} />}
       </span>
       <TermLinkGone />
     </div>
@@ -174,7 +186,9 @@ function useMenuFit(box: RefObject<HTMLDivElement | null>, ready: boolean, shape
       if (!menu || !pop || !list || !(anchor instanceof HTMLElement)) return;
       const side = anchor.closest(".side");
       const a = anchor.getBoundingClientRect();
-      const top = side?.querySelector(".side-top")?.getBoundingClientRect().bottom ?? 0;
+      // on the Code page the menu has no sidebar around it: the page's own header (header.top) is what it must not slide under.
+      // A Lanes band with its New lane link (item 68) lowers the + button, so an upward menu began to reach it
+      const top = Math.max(side?.querySelector(".side-top")?.getBoundingClientRect().bottom ?? 0, document.querySelector("header.top")?.getBoundingClientRect().bottom ?? 0);
       const foot = side?.querySelector(".side-foot")?.getBoundingClientRect().top ?? innerHeight;
       // the menu's own header, padding and border around the list, and the list's full height
       const chrome = pop.offsetHeight - list.clientHeight;
@@ -232,7 +246,7 @@ function useMoreBelow(el: RefObject<HTMLDivElement | null>, on: boolean, shape: 
  *  the focus, so ⌘N then Enter still starts a terminal), then one "More agents" row that opens the agents that are not
  *  installed, dimmed, each with its install line as text (picking one copies that line; manut installs nothing). Picking
  *  one of those starts it in its own terminal at once. Arrow keys move through both parts, Enter picks, Esc closes. */
-function NewSessionMenu({ onClose, trigger }: { onClose: () => void; trigger: RefObject<HTMLButtonElement | null> }) {
+function NewSessionMenu({ onClose, trigger, start }: { onClose: () => void; trigger: RefObject<HTMLButtonElement | null>; start?: NewMenuStart }) {
   const ss = useSessions();
   const accounts = useAccounts();
   const box = useRef<HTMLDivElement>(null);
@@ -251,7 +265,7 @@ function NewSessionMenu({ onClose, trigger }: { onClose: () => void; trigger: Re
   // the second step: one agent's past conversations (its own list: this menu is not measured while it shows)
   const [past, setPast] = useState<PastAgent | null>(null);
   // the folder it starts in: the chip at the top (the last folder used, else home)
-  const [folder, setFolder] = useState<string | null>(null);
+  const [folder, setFolder] = useState<string | null>(start?.folder ?? null);
   const [folders, setFolders] = useState(false);
   // measured again whenever its rows change (the folded agents, the folder list)
   const fit = useMenuFit(box, ready && !past, `${unfold ? "open" : "folded"}:${folders ? "folders" : ""}`);
@@ -262,6 +276,13 @@ function NewSessionMenu({ onClose, trigger }: { onClose: () => void; trigger: Re
   const first = parts ? menuFocus(parts.shown, ss.recent) : null;
   useEffect(() => {
     if (!placed) return;
+    // New lane in the Lanes band asks for the chat choice, so the first Chat with Kit row takes the focus; the + button, ⌘N
+    // and ⌘T keep the terminal row (decisions, 25 Nov 2026)
+    const chat = start?.chat ? box.current?.querySelector<HTMLButtonElement>('[data-testid^="session-chat-"][role="menuitem"]') : null;
+    if (chat) {
+      chat.focus({ preventScroll: true });
+      return;
+    }
     const row = first ? box.current?.querySelector<HTMLButtonElement>(`[data-testid="session-agent-${first}"]`) : null;
     (row ?? box.current?.querySelector<HTMLButtonElement>("[role=menuitem]"))?.focus({ preventScroll: true });
     // focus once, when the menu is placed
@@ -316,6 +337,8 @@ function NewSessionMenu({ onClose, trigger }: { onClose: () => void; trigger: Re
     const label = agentLabel(a.id, ss.agents);
     const account = sessionAccountSuffix(accounts.groups, a.id);
     const missing = !a.path;
+    // installed, and the app has read that it is not signed in: said before the first message, and still pickable
+    const signedOut = !missing && agentSignedOut(accounts, a.id);
     return (
       <button
         key={a.id}
@@ -323,7 +346,7 @@ function NewSessionMenu({ onClose, trigger }: { onClose: () => void; trigger: Re
         role="menuitem"
         className={`ss-item${missing ? " off" : ""}`}
         aria-disabled={missing || undefined}
-        title={a.path ?? missingNote(a.id)}
+        title={signedOut ? signedOutTip(a.id, label) : (a.path ?? missingNote(a.id))}
         onClick={() => (missing ? copyInstall(a.id) : pick(a.id))}
         data-testid={`session-agent-${a.id}`}
       >
@@ -336,6 +359,13 @@ function NewSessionMenu({ onClose, trigger }: { onClose: () => void; trigger: Re
             <span className="ss-head">
               <span className="ss-l">{label}</span>
               <span className="ss-missing">{copied === a.id ? t("ss.copiedInstall") : t("sessions.notInstalled")}</span>
+            </span>
+          ) : signedOut ? (
+            <span className="ss-head">
+              <span className="ss-l">{label}</span>
+              <span className="ss-missing" data-testid={`session-signedout-${a.id}`}>
+                {signedOutWord()}
+              </span>
             </span>
           ) : (
             <span className="ss-l">{label}</span>
@@ -443,7 +473,7 @@ function NewSessionMenu({ onClose, trigger }: { onClose: () => void; trigger: Re
         <div ref={list} className={`ss-scroll${more ? " more" : ""}`} style={fit ? { maxHeight: fit.max } : undefined} data-testid="session-menu-list">
         {ready && (
           <ChatWay
-            agents={chats.map((a) => ({ id: a.id, label: agentLabel(a.id, ss.agents), account: sessionAccountSuffix(accounts.groups, a.id) }))}
+            agents={chats.map((a) => ({ id: a.id, label: agentLabel(a.id, ss.agents), account: sessionAccountSuffix(accounts.groups, a.id), signedOut: agentSignedOut(accounts, a.id) }))}
             onPick={pickChat}
           />
         )}
@@ -537,6 +567,8 @@ export interface ChatWayAgent {
   id: AgentId;
   label: string;
   account: string;
+  /** The app has read that the agent is installed but not signed in (signedOut.ts): a quiet word and a tooltip, the row still pickable. */
+  signedOut?: boolean;
 }
 
 /** The + menu's first part, Chat with Kit (owner, 25 Nov 2026, item 66): a heading, then one row per agent, as the terminal
@@ -556,12 +588,21 @@ export function ChatWay({ agents, onPick }: { agents: ChatWayAgent[]; onPick: (i
         </div>
       )}
       {agents.map((a) => (
-        <button key={a.id} type="button" role="menuitem" className="ss-item" title={t("ss.way.chatTip", { agent: a.label })} onClick={() => onPick(a.id)} data-testid={`session-chat-${a.id}`}>
+        <button key={a.id} type="button" role="menuitem" className="ss-item" title={a.signedOut ? `${t("ss.way.chatTip", { agent: a.label })} ${signedOutTip(a.id, a.label)}` : t("ss.way.chatTip", { agent: a.label })} onClick={() => onPick(a.id)} data-testid={`session-chat-${a.id}`}>
           <span className="ss-ic">
             <AgentMark agent={a.id} />
           </span>
           <span className="ss-n ss-n-as">
-            <span className="ss-l">{a.label}</span>
+            {a.signedOut ? (
+              <span className="ss-head">
+                <span className="ss-l">{a.label}</span>
+                <span className="ss-missing" data-testid={`session-chat-signedout-${a.id}`}>
+                  {signedOutWord()}
+                </span>
+              </span>
+            ) : (
+              <span className="ss-l">{a.label}</span>
+            )}
             {a.account && (
               <span className="ss-as" data-testid={`session-chat-account-${a.id}`}>
                 {a.account}

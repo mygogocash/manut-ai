@@ -701,6 +701,20 @@ remove a routine).
   need not ask is `must_ask_first`, never quietly changed), and refuses an `asksFirst` that is not true or false as the API does
   (`invalid_request`). `POST /v1/routines/remove` is exactly `{ routineId }`, only for a routine the read lists for that shop, never
   for a schedule of the shop's own. A new routine is listed at once, switched on, and the shop is read again.
+- **Whose clock a routine's time is on** (item 70). A routine keeps a time zone of its own (the shop's, Asia/Bangkok unless the API
+  was told another), so "Every day at 09:00" is 09:00 there. Wherever the app writes a routine's time or next run it now names that
+  zone, "Every day at 09:00 (Bangkok time)", whenever the zone is not this computer's clock, and adds nothing otherwise, so a shop owner
+  in Thailand on a Mac set to Bangkok time sees what they saw before. `src/lib/zone.ts` is the one place: `zoneNote`, `withZone` and
+  `zoneName`. The computer's zone is read with `Intl` (`computerZone`), and a test pins it with `pinComputerZone` (`src/testSetup.ts`
+  pins Bangkok before every test, so no test depends on the machine). Two zones are the same when they show the same offset from UTC at
+  thirteen points across a year, so Asia/Calcutta equals Asia/Kolkata and a zone that only shares today's offset does not count. A zone is
+  named by its city and "time" ("New York time"), or by its offset ("GMT+5:30") when it has no city (an offset zone, UTC, Etc/GMT-7). A next
+  run stays on the routine's own calendar, with the zone named, so its day is the day there. The places: Customize's routines
+  (`whenLine` and `nextLine` in `src/pages/routines.ts`; Practice and Connected), and, for the Connected shop's routines and schedules,
+  the Automations page (`scheduleLine` in `src/pages/watch.ts`) and a member's Schedule tab and details panel (`cadence`), through
+  `Routine.time_zone`, which a job that runs on this computer's own clock does not have. Those two show a next run on the computer's
+  clock, which needs no zone. Words with no clock time ("When stock drops under 5") gain none. Tests: `src/lib/zone.test.ts`,
+  `routines.test.ts`, `watch.test.ts`, `CustomizePage.test.tsx`, and `view.test.ts` and `owned.test.ts` for the field.
 - **Refusals in words** (en, ko, ja and zh; Thai waits):
 
   | The API answered | Words |
@@ -1001,8 +1015,7 @@ instead of an empty screen, and says so (`src/runtime/http/cache.ts`, `host.ts`,
    this list asked for: the API's approval lookup (December item 48, `docs/pilot-api.md`, "How the shop's approvals are
    found"), so `GET /v1/approvals?state=open` reads only the tasks that may hold an open request, and `state=recent` costs a
    few more reads, not a walk of every task.
-4. **Asks of the desktop:** the Sign in with Apple button; keychain support on Windows and Linux; showing a schedule's
-   time zone when it is not this computer's; a helper's own session on the desktop. (A note a helper passed on with its
+4. **Asks of the desktop:** the Sign in with Apple button; keychain support on Windows and Linux; a helper's own session on the desktop. (A note a helper passed on with its
    request is drawn on the owner's card, "Passed on by Mint" and the note, and on the helper's as "Passed on to Noi":
    `shopAskLines` in `src/lib/shops.ts`, drawn by `chat/cards/Cards.slot.tsx`.) (Older tasks than the newest 50, which a screen asks for with Show older, are
    built: Older tasks, above. What it leaves for later is at the end of that section.)

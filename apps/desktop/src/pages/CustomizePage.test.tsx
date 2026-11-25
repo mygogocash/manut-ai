@@ -13,6 +13,7 @@ import type { RoutineRow } from "../runtime/routines";
 import { MockHost, MockRuntime } from "../runtime/mock";
 import { HELPED_SHOP, OWN_SHOP } from "../runtime/mock/shops";
 import { CustomizeView, type MemoryPaneProps, type RoutinesPaneProps } from "./CustomizePage";
+import { pinComputerZone } from "../lib/zone";
 import { LOADING, type Load } from "./load";
 import { createStore } from "../state/store";
 import { MEMORY_START, memoryCallsFor, memoryDo, memoryReduce, type MemoryUi } from "./memory";
@@ -153,6 +154,21 @@ describe("the board, as the canvas draws it, on the demo runtime", () => {
     expect(count(html, 'data-testid="routine"')).toBe(5);
     // only the two that send or reply say so
     expect(count(side, "Asks first.")).toBe(2);
+  });
+
+  it("names the shop's zone beside each routine's time and next run when the computer is on another clock, and not otherwise", async () => {
+    try {
+      pinComputerZone("Europe/London");
+      const side = words(between(await drawDemo(), "routines"));
+      expect(side).toContain("Every day at 08:00 (Bangkok time) Morning brief Next: Monday 08:00 (Bangkok time)");
+      expect(side).toContain("Every night after 21:00 (Bangkok time) Answer order-status questions. Asks first. Next: Today 21:00 (Bangkok time)");
+      // an event has no clock time, and the zone is not said of it
+      expect(side).toContain("When stock drops under 5 Tell me and draft a restock order");
+      pinComputerZone("Asia/Bangkok");
+      expect(words(between(await drawDemo(), "routines"))).not.toContain("Bangkok time");
+    } finally {
+      pinComputerZone("Asia/Bangkok");
+    }
   });
 
   it("says each routine's next run quietly, and none for the one that waits on stock", async () => {

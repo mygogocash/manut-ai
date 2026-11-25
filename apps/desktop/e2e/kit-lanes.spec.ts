@@ -97,6 +97,30 @@ test("the + menu's Chat with Kit starts a lane: a New session chat in the chip's
   await expect(page.getByTestId("lane-pane")).toBeVisible();
 });
 
+test("New lane in the Lanes band opens the + menu on Chat with Kit, in this project's folder, even before the project has a lane", async ({ page }) => {
+  // a session in its own terminal lists the project on the Code page, as the + menu does
+  await page.evaluate(async (root) => {
+    const s = (window as any).__manutSessions;
+    await s.loadAgents();
+    s.startTerminal("claude", root);
+  }, ROOT);
+  await openCode(page);
+  // a project with a terminal and no lane: the band is there with its link, and lists nothing
+  await expect(page.getByTestId("lanes-band")).toBeVisible();
+  await expect(page.getByTestId("lanes")).toHaveCount(0);
+  await page.getByTestId("lane-new").click();
+  const menu = page.getByTestId("session-menu");
+  await expect(menu).toBeVisible();
+  // the chip names the project's folder, and the first Chat with Kit row has the focus (the + button keeps the terminal row)
+  await expect(menu.getByTestId("session-folder")).toHaveAttribute("title", ROOT);
+  await expect(menu.locator('[data-testid^="session-chat-"][role="menuitem"]').first()).toBeFocused();
+  // the same choice the + menu gives: picking an agent opens its New session chat in that folder, with no second way to start
+  await menu.getByTestId("session-chat-claude").click();
+  await expect(menu).toHaveCount(0);
+  await expect(page.getByTestId("session-chat")).toHaveAttribute("data-draft", "true");
+  await expect(page.getByTestId("draft-note")).toHaveText("Claude Code starts in baanmali-preorder with your first message");
+});
+
 test("a lane gets a branch and a folder of its own, made from the branch the developer's folder is on, which stays on it", async ({ page }) => {
   const id = await startIn(page, "Add a PromptPay QR to the checkout.");
   const dir = `${LANES}/add-promptpay-qr-checkout`;

@@ -1,61 +1,68 @@
-// The shell says an Agent Client Protocol agent is not signed in with the command between backticks
-// (`signed_out` in acp_chat.rs). Wherever that sentence reaches a person as plain text (a failed turn's line, the
-// Ended line, the sidebar row's tooltip, a notification) it is said in their language with no backtick.
-import { readFileSync } from "node:fs";
-import { expect, test } from "vitest";
-import { createSessions, signedOutSaid } from "./sessions";
-import { createStore, type BridgeLike } from "../state/store";
-import { DICT, LANGS } from "../i18n";
-import type { ChatEvent, ChatInput, SessionHost } from "./host";
-import shellList from "./mockAcpAgents.json";
+// The + menu says, before the first message, that an agent is installed but not signed in, where the app can already tell
+// (item 68). What it can tell is pinned here: Claude Code and Codex by the CLI's own status, Grok by the bridge's state,
+// and nothing for any other agent or for a computer whose accounts the app has not read.
+import { afterEach, describe, expect, it } from "vitest";
+import { LANGS, setLang, t } from "../i18n";
+import type { Account, AccountCli, AccountGroup } from "../lib/protocol";
+import type { LoginStatus } from "../settings/accounts/native";
+import { agentSignedOut, signedOutTip, type SignInKnowledge } from "./signedOut";
 
-const GEMINI = shellList[0];
+const account = (over: Partial<Account> = {}): Account => ({ id: "default", label: "", email: "", state: "ready", ...over });
+const group = (cli: AccountCli, accounts: Account[], active: string | null = "default"): AccountGroup => ({ cli, installed: true, active, accounts });
+const status = (logged_in: boolean): LoginStatus => ({ logged_in, email: null, plan: null, method: null });
+const known = (groups: AccountGroup[] | null, st: Record<string, LoginStatus> = {}): SignInKnowledge => ({ groups, status: st });
 
-const SHELL = "Gemini CLI is not signed in. Run `gemini` in a terminal and sign in.";
-const SAID = "Gemini CLI is not signed in. Run gemini in a terminal and sign in.";
+afterEach(() => setLang("en"));
 
-test("the shell's sentence is the one this file reads", () => {
-  const rs = readFileSync(new URL("../../src-tauri/src/acp_chat.rs", import.meta.url), "utf8");
-  expect(rs).toContain('format!("{} is not signed in. Run `{}` in a terminal and sign in.", self.agent.label, self.agent.login)');
+describe("an agent the app can tell is not signed in", () => {
+  it("is Claude Code or Codex when the CLI's own status says it is not logged in", () => {
+    const groups = [group("claude", [account()]), group("codex", [account()])];
+    expect(agentSignedOut(known(groups, { "claude:default": status(false), "codex:default": status(true) }), "claude")).toBe(true);
+    expect(agentSignedOut(known(groups, { "claude:default": status(false), "codex:default": status(true) }), "codex")).toBe(false);
+  });
+
+  it("is read for the account a new session runs as, not another one the CLI holds", () => {
+    const groups = [group("claude", [account(), account({ id: "work" })], "work")];
+    expect(agentSignedOut(known(groups, { "claude:default": status(false), "claude:work": status(true) }), "claude")).toBe(false);
+    expect(agentSignedOut(known(groups, { "claude:default": status(true), "claude:work": status(false) }), "claude")).toBe(true);
+  });
+
+  it("falls back to the bridge's own state when the CLI could not be asked, as Settings › Accounts does", () => {
+    expect(agentSignedOut(known([group("claude", [account({ state: "login" })])]), "claude")).toBe(true);
+    expect(agentSignedOut(known([group("claude", [account({ state: "active" })])]), "claude")).toBe(false);
+    // Grok has no status command: only the bridge's state tells
+    expect(agentSignedOut(known([group("grok", [account({ state: "login" })])]), "grok")).toBe(true);
+  });
+
+  it("says nothing for a limited account, which is signed in", () => {
+    expect(agentSignedOut(known([group("codex", [account({ state: "limited" })])]), "codex")).toBe(false);
+  });
+
+  it("says nothing where the app cannot tell: accounts not read, no account for the CLI, or an agent with no account", () => {
+    expect(agentSignedOut(known(null), "claude")).toBe(false);
+    expect(agentSignedOut(known([group("codex", [account({ state: "login" })])]), "claude")).toBe(false);
+    expect(agentSignedOut(known([group("claude", [], null)]), "claude")).toBe(false);
+    const all = [group("claude", [account({ state: "login" })]), group("pi", [account({ state: "login" })]), group("omp", [account({ state: "login" })])];
+    for (const agent of ["pi", "omp", "opencode", "omo", "dsh", "omh", "cursor", "my-own"]) expect(agentSignedOut(known(all), agent), agent).toBe(false);
+  });
 });
 
-test("the not-signed-in sentence is said without backticks; other text is left alone", () => {
-  expect(signedOutSaid(SHELL)).toBe(SAID);
-  expect(signedOutSaid(`  ${SHELL}\n`)).toBe(SAID);
-  expect(signedOutSaid("Run `make test` first")).toBe("Run `make test` first");
-  for (const l of LANGS) expect(DICT[l]["ss.signedOut"], l).not.toContain("`");
-});
+describe("the tooltip", () => {
+  it("names the CLI's own sign-in command, to run in a terminal, and that the row still starts", () => {
+    expect(signedOutTip("claude", "Claude Code")).toBe("Claude Code is not signed in on this computer. To sign in, run claude auth login in a terminal. You can still start it.");
+    expect(signedOutTip("codex", "Codex")).toContain("codex login");
+  });
 
-test("a turn that fails because the agent is not signed in says so without backticks", async () => {
-  (globalThis as { localStorage?: unknown }).localStorage = { getItem: () => null, setItem: () => {}, removeItem: () => {} };
-  const bridge: BridgeLike = { connect: async () => undefined, onAny: () => () => {}, onStatus: () => () => {}, request: (async () => ({})) as BridgeLike["request"] };
-  let sink: (e: ChatEvent) => void = () => {};
-  const host = {
-    kind: "mock",
-    reset: async () => {},
-    agents: async () => [{ id: "gemini", label: "Gemini CLI", mode: "chat", path: "/bin/gemini", acp: GEMINI }],
-    home: async () => "/w",
-    pickFolder: async () => null,
-    chatStart: async (_a: string, _c: string, on: (e: ChatEvent) => void) => {
-      sink = on;
-      on({ event: "session.info", agent_session: "ses_1", model: "Auto Free" });
-      return 1;
-    },
-    // the agent answers a prompt to a model that needs its account: the shell ends the turn with its sentence
-    chatInput: async (_id: number, i: ChatInput) => {
-      if (i.kind !== "send") return;
-      sink({ event: "turn.start" });
-      sink({ event: "turn.end", outcome: "error", error: SHELL, signed_out: true, login: "gemini" });
-    },
-    chatClose: async () => {},
-  } as unknown as SessionHost;
-  const store = createStore(bridge);
-  const ss = createSessions(host, () => store);
-  await ss.loadAgents();
-  const id = ss.draft("gemini");
-  ss.setDraft(id, { cwd: "/w/proj" });
-  await ss.start(id, "hi");
-  const last = store.getState().chats[ss.chatKey(id)!]!.lastTurn!;
-  expect(last.outcome).toBe("error");
-  expect(last.error).toBe(SAID);
+  it("names no command for an agent whose sign-in the app does not know", () => {
+    expect(signedOutTip("grok", "Grok")).toBe("Grok is not signed in on this computer. Sign in with its own command in a terminal. You can still start it.");
+  });
+
+  it("reads in every language", () => {
+    for (const lang of LANGS) {
+      setLang(lang);
+      expect(signedOutTip("claude", "Claude Code"), lang).toContain("claude auth login");
+      expect(t("ss.notSignedIn"), lang).not.toBe("");
+      expect(signedOutTip("grok", "Grok"), lang).toContain("Grok");
+    }
+  });
 });

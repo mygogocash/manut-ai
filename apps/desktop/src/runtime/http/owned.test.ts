@@ -203,6 +203,8 @@ describe("the team's routines", () => {
       ["rt-0003-books", "On the last day of the month at 18:00", false],
     ]);
     expect((await req("routines.list", { bot: "pim" })).routines.map((r: { schedule: string }) => r.schedule)).toEqual(["0 10 * * 1"]);
+    // a team routine says the zone its time is in, which the Schedule tab and the Automations page name when it is not the computer's
+    expect((await req("routines.list", { bot: "pim" })).routines.map((r: { time_zone?: string }) => r.time_zone)).toEqual(["Asia/Bangkok"]);
     expect((await req("routines.list", { bot: "buddy" })).routines.map((r: { id: string }) => r.id)).toEqual(["sched-own"]);
     const automations = (await req("automations.list", {})).automations;
     expect(automations.map((a: { id: string; bot: string; paused: boolean }) => [a.id, a.bot, a.paused])).toEqual([

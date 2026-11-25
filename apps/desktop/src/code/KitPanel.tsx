@@ -18,6 +18,7 @@ import { ruleText, type Rule } from "./command";
 import { BringBack } from "./BringBack";
 import { projectName, sessionsWithKeys, useKeysVersion } from "./kitAsks";
 import { laneBase, LanesView, openLane, useLaneRows, type LaneRow, type LanesProps } from "./Lanes";
+import { openNewSessionMenu } from "../sessions/newMenu";
 import { KeptLanes, useLaneProjects } from "./KeptLanes";
 import { MainMoved } from "./MainMoved";
 import { PreviewSample } from "./PreviewSample";
@@ -41,6 +42,8 @@ export interface KitPanelProps {
   /** The time now (ms), for the time each working lane's turn has run. */
   now?: number;
   onOpenLane?: (id: string) => void;
+  /** New lane in the Lanes band (KitPanel fills it: the + menu's Chat with Kit for this project). Without it the band has no link. */
+  onNewLane?: () => void;
   /** The lane whose Bring it back is open, the link on its line that opens it, and what a lane's row shows under its line
    *  (KitPanel fills these: the panel under a Reverted lane reads the stores). */
   laneBack?: Pick<LanesProps, "backOpen" | "onBack" | "below">;
@@ -65,7 +68,7 @@ export function KitPanelView(p: KitPanelProps) {
   return (
     <section className="kitp" aria-labelledby="kit-dial-title" data-testid="kit-panel">
       {/* the project's lanes come first, as the canvas's Code board draws them: the work, then how much Kit does alone */}
-      <LanesView rows={p.lanes ?? []} now={p.now ?? 0} onOpen={p.onOpenLane ?? (() => undefined)} {...p.laneBack} />
+      <LanesView rows={p.lanes ?? []} now={p.now ?? 0} onOpen={p.onOpenLane ?? (() => undefined)} onNew={p.onNewLane} {...p.laneBack} />
       {p.kept}
       <div className="band">
         <span id="kit-dial-title">{t("kit.dial")}</span>
@@ -232,6 +235,7 @@ export function KitPanel() {
         lanes={lanes}
         now={now}
         onOpenLane={openLane}
+        onNewLane={() => openNewSessionMenu({ chat: true, folder: root })}
         laneBack={{
           backOpen: backFor,
           onBack: (id) => setBackFor((now) => (now === id ? null : id)),
