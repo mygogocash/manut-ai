@@ -88,6 +88,12 @@ the design canvas draws its ask box: the text, then a + for Add context, the mod
   start), written `@slug` as a bubble draws a mention. Actions and skills: the `/` menu, the demo's commands then the commands
   and skills Claude Code listed, from an empty box or over text already typed (the action then goes first). No Browser or Drive
   row: Manut AI has neither.
+- **Voice** (item 81, the Mac app). Between the controls and Send: the microphone, which puts the words heard into the text
+  for the person to correct and send, and voice mode, which sends what was said at a pause through this same chat, reads
+  Claude Code's answer aloud and listens again. An ask is never answered by voice: voice mode stops, says there is something
+  to approve, and waits for the card. The listening is the shell's (`src-tauri/src/voice.rs`, the Mac's Speech framework,
+  on the Mac or, for a language it cannot do by itself, through Apple's servers after the person's yes); nothing reaches
+  Claude Code but the message, as if typed. See `docs/voice.md`.
 
 Connected has no box of its own (`agent.box` answers none), and the WebSocket bridge, Hermes', is never asked.
 

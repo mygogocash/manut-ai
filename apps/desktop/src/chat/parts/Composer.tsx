@@ -16,6 +16,8 @@ import { composing as imeComposing } from "../../lib/ime";
 import { newer, older, onFirstLine, onLastLine, type Recall, type Step } from "./promptHistory";
 import { addAt, matchMembers, mentionAt, putMention, withAction, withFolders, type Member } from "../box/context";
 import { FolderChips, MentionPicker } from "../box/BoxParts";
+import { useBoxVoice } from "../box/Voice";
+import { voiceOffered } from "../../voice/engine";
 
 const MAX_H = 200;
 
@@ -31,7 +33,8 @@ const MAX_H = 200;
  * ArrowUp on the first line and ArrowDown on the last walk the person's earlier prompts of this chat (promptHistory.ts).
  * The + is Add context (item 80): files, a folder (named on its own line by its path when the message goes,
  * chat/box/context.ts), a teammate with `@` (`mentions`: typing `@` at a word's start opens the same menu) and the
- * agent's actions (`actions`: the `/` menu, which the + opens over text already typed, the action then going first). */
+ * agent's actions (`actions`: the `/` menu, which the + opens over text already typed, the action then going first).
+ * With `voice` (item 81, the Mac app), the microphone and voice mode sit before Send (chat/box/Voice.tsx). */
 export function Composer({
   bot,
   running,
@@ -56,6 +59,7 @@ export function Composer({
   mentions,
   actions,
   rows = false,
+  voice = false,
 }: {
   bot: Bot;
   running: boolean;
@@ -98,6 +102,9 @@ export function Composer({
   /** The text field on a row of its own, with the +, the controls and Send under it, as the design canvas draws its ask
    *  box: a chat whose box carries the model and the approval level (item 80) keeps a wide field however many there are. */
   rows?: boolean;
+  /** The microphone, which puts the words heard into the text, and voice mode, which talks with the agent of this chat
+   *  (item 81): a chat whose box carries the agent's controls, in the Mac app. */
+  voice?: boolean;
 }) {
   // unsent text survives switching chats and restarts (drafts.ts; the composer is keyed by its chat)
   const [text, setText] = useState(() => getDraft(bot.name));
@@ -128,6 +135,21 @@ export function Composer({
     setForced(false);
     setText(next);
   };
+
+  // the microphone's words land in the text with the caret after them; voice mode sends what was said as typed text would
+  const vc = useBoxVoice({
+    on: voice && voiceOffered(),
+    chatKey: bot.name,
+    text,
+    setText: (next) => {
+      placeCaret.current = next.length;
+      edit(next);
+    },
+    running,
+    asking,
+    offline,
+    send: (said) => onSend(said),
+  });
 
   const listPlugins = store.pluginsList;
   const readPlugins = useCallback(() => listPlugins(bot.name), [listPlugins, bot.name]);
@@ -387,6 +409,7 @@ export function Composer({
 
   const send = async () => {
     if (!has || offline || sending) return;
+    vc.sending();
     if (threadCmd && onNewThread) {
       if (good.length) return setErr(t("thread.cmdFiles"));
       edit("");
@@ -467,6 +490,7 @@ export function Composer({
         aria-label={t("cmp.message", { bot: bot.display_name })}
         data-testid="composer"
         onChange={(e) => {
+          vc.typed();
           edit(e.target.value);
           trackCaret(e.target);
         }}
@@ -608,7 +632,14 @@ export function Composer({
   );
 
   return (
-    <div className="cw" ref={wrap}>
+    <div
+      className="cw"
+      ref={wrap}
+      // Esc stops the microphone or voice mode before it stops a running answer (app/shortcuts.ts skips a key taken here)
+      onKeyDown={(e) => {
+        if (e.key === "Escape" && !e.defaultPrevented && !imeComposing(e) && vc.escape()) e.preventDefault();
+      }}
+    >
       {overlay}
       {threadPicking && <ThreadPicker bot={bot.display_name} active onPick={pickThread} popRef={tPop} />}
       {picking && <SkillPicker items={items} active={at} onPick={pick} onHover={setActive} popRef={pop} />}
@@ -622,6 +653,7 @@ export function Composer({
             : tx("cmp.skillHint", { example: <code>/plan</code>, bot: bot.display_name })}
         </div>
       )}
+      {vc.above}
       <div className={`composer${has ? " has" : ""}${rows ? " bx-rows" : ""}`} data-testid="composer-box">
         <Chips chips={chips} onRemove={remove} />
         <FolderChips folders={folders} onRemove={(f) => setFolders((cur) => cur.filter((x) => x !== f))} />
@@ -658,6 +690,7 @@ export function Composer({
               {attachEl}
               <span className="bx-gap" />
               {tools}
+              {vc.buttons}
               {buttonEl}
             </div>
           </>
@@ -666,6 +699,7 @@ export function Composer({
             {attachEl}
             {fieldEl}
             {tools}
+            {vc.buttons}
             {buttonEl}
           </div>
         )}

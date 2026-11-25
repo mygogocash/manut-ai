@@ -69,6 +69,7 @@ export function ThreadChat({ bot, thread }: { bot: Bot; thread: string }) {
           mentions={box ? teammates(s.bots, bot.name) : undefined}
           actions={!!box}
           rows={!!box}
+          voice={!!box}
         />
       </div>
     </>

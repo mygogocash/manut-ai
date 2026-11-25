@@ -64,6 +64,7 @@ export function Chat() {
           mentions={box ? teammates(s.bots, bot.name) : undefined}
           actions={!!box}
           rows={!!box}
+          voice={!!box}
         />
       </div>
     </>

@@ -72,7 +72,8 @@
     "shortDescription": "Chat, an AI team and a code editor for your shop",
     "copyright": "Manut AI. Portions (c) 2026 oh-my-hermes contributors, MIT License.",
     "macOS": {
-      "minimumSystemVersion": "11.0"
+      "minimumSystemVersion": "11.0",
+      "entitlements": "./Entitlements.plist"
     },
     "windows": {
       "nsis": {
