@@ -38,6 +38,41 @@ how the link stands ("Signed out · …", "Offline · …", "Not answering · �
 is kept, "Offline. Showing what was here at 14:05". Clicking it opens Settings › Developer.
 It is not drawn for a WebSocket runtime, which only the Playwright suite configures.
 
+## Buddy in Practice mode
+
+Practice's team is staged, but Buddy's answers are not (item 67, 25 Nov 2026). Manut AI has no model key of its own yet, so a
+message to Buddy, in its main chat or a thread, goes to the coding agent the person already has on this computer, signed in
+with their own account (`src/runtime/mock/buddy.ts`), and the agent's answer streams back as Buddy's, with the turn's usual
+working, done and failed states. Only Claude Code answers as Buddy for now; Codex and the others are not offered (see
+`docs/decisions.md`). The members (Nam, Pim, Ton, Kit) keep their scripted, labelled demo answers, and the demo's commands
+(`/approve`, `/clarify`, `/interview`, `/delegate`, `/shops`) stay scripted in Buddy's chat for the sample shop; any other
+slash command goes to the agent, so the person's own skills run by name.
+
+How Claude Code is started (`src-tauri/src/buddy_chat.rs`): in its chat mode on pipes, through the same Claude adapter the
+coding sessions use, with the person's normal configuration (their MCP servers, skills, plugins, `CLAUDE.md` and settings, read
+from their own home) and the account picked for new sessions. Buddy adds `--permission-mode default`, so everything that acts
+asks first whatever the person's settings say; `--no-session-persistence`; and `--append-system-prompt-file` with Buddy's
+instructions (`buddyPrompt` in `packages/agent-prompts`: who Buddy is, that it speaks briefly and plainly to an owner who is not
+technical, that in Practice the shop is a sample one, and the facts the team may use), written by the shell to a file under
+`~/.manut/buddy/prompts` so no page text becomes an argument. It runs in `~/.manut/buddy/chat`, an empty folder of its own,
+never in a project. Buddy's chats are their own list in the shell (`buddy_start`, `buddy_input`, `buddy_close`,
+`buddy_close_all`): the page sends only a message, Stop or an answer, and a coding session's reset never stops one. Each
+conversation has its own process, at most two at once; a conversation that comes back starts a new one that is first told what
+was said.
+
+Asks: every permission the agent asks (a command, a file change, an MCP tool) is Buddy's card in its chat or thread, and in
+Needs you, offering Allow once and No. The runtime opens it in approval-core's `InMemoryApprovalStore`, stamped with the turn,
+and sends the agent only an answer the store settled, once; an ask ends with its turn. An MCP tool's card says the tool and its
+server and shows its whole input. A question the agent asks is a question card and goes back the same way.
+
+When it cannot answer, Buddy says why in the person's language and the turn ends Failed: no agent that can answer (which one
+works, that its install line is under More agents in the Code page's + menu, and to sign in with `claude auth login`), not
+signed in, a Claude Code too old for Buddy's start, or the agent's own words. The model line says what answers: "Claude Code",
+or "No coding agent". In a plain browser the stand-in Claude Code of `src/sessions/host.ts` answers, saying it is one.
+
+Practice therefore reaches the shell for Buddy (which agents are installed, and Buddy's chat) and for nothing else. Connected is
+unchanged: its `chat.send` is still refused, as below.
+
 ## What it reads, and how each call maps to the API
 
 Each read first asks which shops the person is in (`GET /v1/shops`; Several shops, below). In none, as before shops, the
