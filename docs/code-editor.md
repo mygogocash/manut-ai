@@ -816,8 +816,18 @@ mr create --repo <r> --source-branch <branch> --target-branch <base> --title=<ti
 title and body in boxes, exactly as they will be sent, with how many uncommitted files stay behind. Push and open, or Not now.
 
 **Merge** (the same place, once the lane's pull request is open and not a draft). The method starts from the setting and can be
-changed; Ask has the shell read the pull request (`gh pr view --json ...`, `glab mr view --output json`) and ask only when it is
-open, not a draft, made from the lane's branch and can merge now: GitHub's `mergeable` is `MERGEABLE` and `mergeStateStatus` is
+changed; Ask has the shell read the pull request (`gh pr view --json ...` with `isCrossRepository`, `headRepository` and
+`headRepositoryOwner`, `glab mr view --output json`) and ask only when it is open, not a draft, made from the lane's branch in
+this very repository, its head commit is the lane's own tip, and it can merge now (item 86). A fork can open a pull request on a
+branch named like a lane's (`kit/<words>` is easy to guess and public once pushed), so the branch's name is never enough:
+GitHub's `isCrossRepository` must be false and its head repository (`nameWithOwner`, else the owner's login and the name) the
+repository the pull request's own address names; GitLab's `source_project_id` must equal its `target_project_id` (GitLab's API
+says they differ only for a fork; glab is not on the Mac this was built on, so its answer is read as the API's object, as
+before). A request from another repository is refused (`other_repo`). Its head commit must be the lane's branch tip on this Mac
+and the tip this Mac last pushed (`refs/remotes/<remote>/<branch>`): a lane with commits the request does not hold
+(`lane_ahead`), a request holding commits the lane does not (`pull_ahead`) and a tip this Mac has no record of pushing
+(`not_pushed`) each say why on the card and ask nothing. The ask shows where the request comes from (`<branch> of <owner/repo>
+into <base>`) and its head commit's short id beside its title. Then: GitHub's `mergeable` is `MERGEABLE` and `mergeStateStatus` is
 `CLEAN`, `HAS_HOOKS` or `UNSTABLE` (`BLOCKED` is refused, since gh would turn on auto-merge for it), GitLab's
 `detailed_merge_status` is `mergeable`. The ask names the pull request, the method and the message exactly as sent: GitHub's own
 defaults (`Merge pull request #<n> from <owner>/<branch>` with the title and description; `<title> (#<n>)` with each commit's
@@ -840,7 +850,9 @@ approval-core settled reaches `review_settle`, which sends the ask's id and the 
 out of waiting under its lock before anything runs, so a second answer is `already_decided`; an ask taken back (the panel closed,
 the draft or the method changed) is `withdrawn`; one older than fifteen minutes is `expired`; an id this run never made is
 `not_found`. A No runs nothing. A Yes runs the plan written at ask time, after reading again that the branch is still the commit
-shown (open) or that the pull request is still open, mergeable and at the head shown (merge); otherwise nothing runs (`changed`). The
+shown (open) or that the pull request is still this repository's own branch, open, mergeable, at the head shown and into the base
+shown, and the lane still at that commit (merge); otherwise nothing runs (`changed`). Neither `gh pr merge` nor `glab mr merge` can
+bind the base itself, so a retarget in the moment between that read and the merge is the one change the app cannot see. The
 function that runs a plan takes a proof only `settle` can make, and `lib.rs` names only the asks, `settle` and `withdraw`
 (`the_page_reaches_the_writes_only_through_a_settled_ask`). Tasks (`tasks.rs`) stays the read-only reader its tests say it is.
 

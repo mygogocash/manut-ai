@@ -8,7 +8,9 @@
 //!   developer's own (a `.env.local`, a local database: only what a project rebuilds and the agent settings the app copied in
 //!   may go) (`lane::release`, the same check as the one a deleted chat's folder goes through, so there is one rule for "work of
 //!   its own");
-//! - the person's own `gh` (GitHub) or `glab` (GitLab) lists a merged pull / merge request whose head branch is the lane's, and
+//! - the person's own `gh` (GitHub) or `glab` (GitLab) lists a merged pull / merge request whose head branch is the lane's in
+//!   this very repository (GitHub's `isCrossRepository` false, GitLab's `source_project_id` equal to its `target_project_id`:
+//!   a fork's request on a branch of the same name, which anyone can open, never counts), and
 //!   the lane's branch tip is already in the default branch on the remote, or (GitHub only) is exactly the commit that pull
 //!   request merged, which is what a squash merge leaves: the branch then holds nothing the pull request did not carry.
 //!
@@ -61,15 +63,25 @@ pub fn merged_argv(source: Source, repo: &str, branch: &str) -> Result<Vec<Strin
     }
     let s = |x: &str| x.to_string();
     Ok(match source {
-        Source::Github => vec![s("pr"), s("list"), s("--repo"), repo, s("--head"), s(branch), s("--state"), s("merged"), s("--json"), s("headRefOid,mergedAt"), s("--limit"), s("10")],
+        Source::Github => vec![s("pr"), s("list"), s("--repo"), repo, s("--head"), s(branch), s("--state"), s("merged"), s("--json"), s("headRefOid,mergedAt,isCrossRepository"), s("--limit"), s("10")],
         Source::Gitlab => vec![s("mr"), s("list"), s("--repo"), repo, s("--source-branch"), s(branch), s("--merged"), s("--output"), s("json"), s("--per-page"), s("10")],
     })
 }
 
-/// What a merged-request list says: whether any request merged, and the head commits GitHub gave (none for GitLab).
+/// What a merged-request list says: whether any request of this repository's own branch merged, and the head commits GitHub
+/// gave (none for GitLab). `gh pr list --head` and `glab mr list --source-branch` match the branch name alone, so a fork's
+/// request on a branch of the same name is listed too; only a row the host says is from this repository counts, and one that
+/// does not say is not.
 pub fn read_merged(source: Source, out: &str) -> Option<(bool, Vec<String>)> {
     let v: Value = serde_json::from_str(out.trim()).ok()?;
-    let rows = v.as_array()?;
+    let rows: Vec<&Value> = v
+        .as_array()?
+        .iter()
+        .filter(|r| match source {
+            Source::Github => r.get("isCrossRepository").and_then(Value::as_bool) == Some(false),
+            Source::Gitlab => tasks::gl_same_project(r),
+        })
+        .collect();
     let heads = match source {
         Source::Github => rows.iter().filter_map(|r| r.get("headRefOid").and_then(Value::as_str)).map(str::to_string).collect(),
         Source::Gitlab => Vec::new(),
@@ -219,7 +231,7 @@ mod tests {
     }
 
     fn said(tip: &str) -> String {
-        format!(r#"[{{"headRefOid":"{tip}","mergedAt":"2026-11-25T00:00:00Z"}}]"#)
+        format!(r#"[{{"headRefOid":"{tip}","mergedAt":"2026-11-25T00:00:00Z","isCrossRepository":false}}]"#)
     }
 
     #[test]
@@ -289,7 +301,7 @@ mod tests {
         assert!(!Path::new(&made.worktree).exists());
         // GitLab's list gives no head commit here, so the same lane is kept
         let (other, _) = lane(&home, &d, "sq2", false);
-        let out = run(&home, &d, Source::Gitlab, &|_| Some(r#"[{"state":"merged"}]"#.into()));
+        let out = run(&home, &d, Source::Gitlab, &|_| Some(r#"[{"state":"merged","source_project_id":3,"target_project_id":3}]"#.into()));
         assert_eq!(out.kept.iter().map(|k| k.why.as_str()).collect::<Vec<_>>(), vec!["not_in_default"]);
         assert!(Path::new(&other.worktree).join(".git").exists());
         let _ = fs::remove_dir_all(home);
@@ -307,6 +319,24 @@ mod tests {
         assert_eq!(out.removed, Vec::<String>::new(), "{out:?}");
         assert_eq!(out.kept, vec![CleanKept { branch: "kit/env".into(), why: "ignored".into() }]);
         assert_eq!(fs::read_to_string(Path::new(&made.worktree).join(".env.local")).unwrap(), "KEY=only-here\n");
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn a_stranger_s_merged_request_with_the_lane_s_branch_name_never_removes_its_folder() {
+        let Some((home, d)) = repo("clean-fork") else { return };
+        with_origin(&home, &d);
+        // the lane's commits are in main, but the only merged request named like its branch came from someone's fork
+        let (made, tip) = lane(&home, &d, "fork", true);
+        let fork = format!(r#"[{{"headRefOid":"{tip}","mergedAt":"2026-11-25T00:00:00Z","isCrossRepository":true}}]"#);
+        let out = run(&home, &d, Source::Github, &|_| Some(fork.clone()));
+        assert_eq!((out.removed.len(), out.kept.first().map(|k| k.why.as_str())), (0, Some("open")), "{out:?}");
+        assert!(Path::new(&made.worktree).join(".git").exists());
+        // GitLab: a merge request whose source project is not the target
+        let gl = r#"[{"state":"merged","source_project_id":2,"target_project_id":3}]"#;
+        let out = run(&home, &d, Source::Gitlab, &|_| Some(gl.into()));
+        assert_eq!((out.removed.len(), out.kept.first().map(|k| k.why.as_str())), (0, Some("open")), "{out:?}");
+        assert!(Path::new(&made.worktree).join(".git").exists());
         let _ = fs::remove_dir_all(home);
     }
 
@@ -366,7 +396,7 @@ mod tests {
     #[test]
     fn asks_for_merged_requests_of_one_head_branch_only() {
         let gh = merged_argv(Source::Github, "mygogocash/web-app", "kit/promptpay-qr").unwrap();
-        assert_eq!(gh.join(" "), "pr list --repo mygogocash/web-app --head kit/promptpay-qr --state merged --json headRefOid,mergedAt --limit 10");
+        assert_eq!(gh.join(" "), "pr list --repo mygogocash/web-app --head kit/promptpay-qr --state merged --json headRefOid,mergedAt,isCrossRepository --limit 10");
         let gl = merged_argv(Source::Gitlab, "group/sub/web-app", "kit/x").unwrap();
         assert_eq!(gl.join(" "), "mr list --repo group/sub/web-app --source-branch kit/x --merged --output json --per-page 10");
         // a name that is not a branch Kit makes, or a repository that is not one, reaches no argv
@@ -378,8 +408,11 @@ mod tests {
     #[test]
     fn reads_what_a_merged_list_says() {
         assert_eq!(read_merged(Source::Github, "[]"), Some((false, vec![])));
-        assert_eq!(read_merged(Source::Github, r#"[{"headRefOid":"abc","mergedAt":"2026-11-25T00:00:00Z"}]"#), Some((true, vec!["abc".to_string()])));
-        assert_eq!(read_merged(Source::Gitlab, r#"[{"state":"merged"}]"#), Some((true, vec![])));
+        assert_eq!(read_merged(Source::Github, r#"[{"headRefOid":"abc","mergedAt":"2026-11-25T00:00:00Z","isCrossRepository":false}]"#), Some((true, vec!["abc".to_string()])));
+        assert_eq!(read_merged(Source::Gitlab, r#"[{"state":"merged","source_project_id":3,"target_project_id":3}]"#), Some((true, vec![])));
+        // a fork's request, or a row that does not say whose branch it is, does not count
+        assert_eq!(read_merged(Source::Github, r#"[{"headRefOid":"abc","isCrossRepository":true},{"headRefOid":"def"}]"#), Some((false, vec![])));
+        assert_eq!(read_merged(Source::Gitlab, r#"[{"state":"merged","source_project_id":2,"target_project_id":3},{"state":"merged"}]"#), Some((false, vec![])));
         // not a list: not read, so nothing is removed
         for bad in ["", "null", "{}", "gh: not signed in"] {
             assert_eq!(read_merged(Source::Github, bad), None, "{bad:?}");

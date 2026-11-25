@@ -103,6 +103,9 @@ export interface ReviewAsk {
   source: "github" | "gitlab";
   repo: string;
   remote: string;
+  /** A merge's own: the repository the pull request's branch is in, as the host says it (the shell asks only for this
+   *  repository's own branch, never a fork's with the same name). */
+  from: string;
   branch: string;
   base: string;
   head: string;
@@ -126,7 +129,8 @@ export function readAsk(v: unknown): ReviewAsk | null {
   const source = v.source === "github" || v.source === "gitlab" ? v.source : null;
   if (!source || !str(v.repo) || !str(v.branch) || !str(v.base) || typeof v.title !== "string" || typeof v.body !== "string") return null;
   const method = MERGE_METHODS.find((m) => m === v.method) ?? "";
-  if (v.kind === "merge" && (!method || num(v.number) === 0)) return null;
+  // a merge's ask always says where the pull request comes from and at which commit; one that does not is not shown
+  if (v.kind === "merge" && (!method || num(v.number) === 0 || !str(v.from) || !/^[0-9a-f]{40,64}$/.test(str(v.head)))) return null;
   const url = str(v.url);
   return {
     id: str(v.id),
@@ -134,6 +138,7 @@ export function readAsk(v: unknown): ReviewAsk | null {
     source,
     repo: str(v.repo),
     remote: str(v.remote),
+    from: str(v.from),
     branch: str(v.branch),
     base: str(v.base),
     head: str(v.head),
