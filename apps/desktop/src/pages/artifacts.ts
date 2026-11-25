@@ -4,7 +4,9 @@
 import { dayText } from "../app/time";
 import { t } from "../i18n";
 import { kindOfFile, shareRefusal, titleOfFile, utf8Bytes, type ArtifactKind, type Publishing, type SharePlan } from "../runtime/artifacts";
-import { refusal } from "../runtime/http/artifacts";
+import { bundleWords, refusal } from "../runtime/http/artifacts";
+import { bundleBytes, isScript, MAX_SKILLS, secretFiles, skillsPlanRefusal, type ReadSkill, type SkillsPlan } from "../runtime/skillBundle";
+import type { AgentConfig } from "../settings/mcp/agentConfig";
 
 export { dayText };
 
@@ -21,7 +23,7 @@ export type ArtifactsState =
   | { kind: "signed_out" }
   | { kind: "reading" }
   | { kind: "failed"; code: string; message: string }
-  | { kind: "ready"; shop: string; publishing: Publishing };
+  | { kind: "ready"; shop: string; publishing: Publishing; skillPublishing?: Publishing };
 
 /** Why Share cannot be used now, in the person's words, or null when it can. Every reason is one nothing was sent for. */
 export function blockedReason(state: ArtifactsState): string | null {
@@ -41,8 +43,9 @@ export function blockedReason(state: ArtifactsState): string | null {
   }
 }
 
-/** "HTML page" or "Markdown page". */
-export const kindText = (kind: ArtifactKind): string => t(kind === "html" ? "art.kind.html" : "art.kind.markdown");
+/** "HTML page", "Markdown page" or "Skills". */
+export const kindText = (kind: ArtifactKind): string =>
+  t(kind === "html" ? "art.kind.html" : kind === "markdown" ? "art.kind.markdown" : "art.kind.skills");
 
 /** A page's size as a person reads it: whole bytes under a kilobyte, else kilobytes with one decimal under ten. */
 export function sizeText(bytes: number): string {
@@ -69,4 +72,49 @@ export async function planFromFile(file: { name: string; text(): Promise<string>
   const plan: SharePlan = { shop, title: titleOfFile(file.name) || t("art.untitled"), kind, text, bytes: utf8Bytes(text) };
   const refused = shareRefusal(plan);
   return refused ? { ok: false, message: refusal(refused).message } : { ok: true, plan };
+}
+
+// ---- sharing skills (item 84) ----------------------------------------------------------------------------------------------
+
+/** One of the person's own skills, as Settings › MCP and Skills reads them: the agent it is for, its folder and its name. */
+export interface OwnSkill {
+  agent: "claude" | "codex";
+  folder: string;
+  name: string;
+}
+
+export const ownSkillKey = (s: OwnSkill): string => `${s.agent}:${s.folder}`;
+
+/** The skills that may be shared: the person's own (`home`), never a plugin's or a project's, each with its folder. */
+export function ownSkills(configs: readonly AgentConfig[]): OwnSkill[] {
+  return configs.flatMap((a) => a.skills.flatMap((s) => (s.from === "home" && s.folder ? [{ agent: a.agent, folder: s.folder, name: s.name }] : [])));
+}
+
+/** A bundle's title from its skills' names: the names, or "N skills" when they do not fit on one line. */
+export function bundleTitle(names: readonly string[]): string {
+  const joined = names.join(", ");
+  return joined.length <= 120 ? joined : t("skl.titleMany", { n: names.length });
+}
+
+/** The skills chosen, as the ask will show them and the runtime will publish them, or every reason they cannot be, each naming its
+ *  file (a key is named, never shown). The dot-files left out are said either way. Reading sends nothing. */
+export function planFromReads(reads: readonly ReadSkill[], shop: string):
+  { ok: true; plan: SkillsPlan; leftOut: string[] } | { ok: false; lines: string[]; leftOut: string[] } {
+  const leftOut = reads.flatMap((r) => r.leftOut.map((p) => `${r.name}/${p}`));
+  if (reads.length === 0) return { ok: false, lines: [bundleWords({ reason: "no_skills" })], leftOut };
+  if (reads.length > MAX_SKILLS) return { ok: false, lines: [bundleWords({ reason: "too_many_skills" })], leftOut };
+  const lines = reads.flatMap((r) => r.refused.map((f) => bundleWords({ reason: f.why, skill: r.name, path: f.path })));
+  const skills = reads.map((r) => ({ name: r.name, files: r.files.map((f) => ({ path: f.path, text: f.text })) }));
+  // Every file with a key is named, not only the first.
+  lines.push(...secretFiles(skills).map((f) => bundleWords({ reason: "secret", ...f })));
+  if (lines.length) return { ok: false, lines, leftOut };
+  const plan: SkillsPlan = {
+    shop,
+    title: bundleTitle(skills.map((s) => s.name)),
+    skills,
+    bytes: bundleBytes(skills),
+    scripts: reads.flatMap((r) => r.files.filter((f) => isScript(f.path, f.text, f.exec)).map((f) => `${r.name}/${f.path}`)),
+  };
+  const refused = skillsPlanRefusal(plan);
+  return refused ? { ok: false, lines: [bundleWords(refused)], leftOut } : { ok: true, plan, leftOut };
 }

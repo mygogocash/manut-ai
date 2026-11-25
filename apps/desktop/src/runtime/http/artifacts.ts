@@ -15,6 +15,9 @@
 // - What the API answers is read field by field. A link this build cannot read whole makes the list unreadable, rather than leave
 //   it out. Nothing the person published is kept here: the page holds the list, and no text, title or link reaches the saved read
 //   of the shop, an event or a log.
+// - A bundle of skills (item 84) also needs Settings › Artifacts › Allow sharing skills by link (`skills_off` otherwise, nothing
+//   sent). It is held to the bundle rules again before it is sent, a key in any file included (src/runtime/skillBundle.ts), and
+//   sent as exactly `{ title, kind: "skills", skills }`.
 import { t } from "../../i18n";
 import { artifactSettings } from "../../lib/artifactLinks";
 import { takeSettled } from "../artifactAsks";
@@ -29,6 +32,7 @@ import {
   type Publishing,
 } from "../artifacts";
 import { OpError } from "../mock/host";
+import { MAX_SKILL_FILES, MAX_SKILLS, skillsBody, skillsPlanRefusal, type BundleRefusal } from "../skillBundle";
 import type { OwnerLink } from "./connections";
 import type { ShopAnswer } from "./shops";
 
@@ -56,11 +60,61 @@ export function decodeLink(v: unknown): ArtifactLink | null {
   return { id: v.id, title: v.title, kind: v.kind as ArtifactLink["kind"], bytes, createdAt: createdAt / 1000, url };
 }
 
-/** `GET /v1/artifacts`, or null when the answer is not one or any link in it cannot be read. */
-export function decodeList(json: unknown): { publishing: Publishing; links: ArtifactLink[] } | null {
+/** `GET /v1/artifacts`, or null when the answer is not one or any link in it cannot be read. An API from before skill links says
+ *  neither `skillPublishing` nor `origin`: skills are then off, and no link can be installed from. An origin is kept only when it is
+ *  an https origin and nothing more. */
+export function decodeList(json: unknown):
+  { publishing: Publishing; skillPublishing: Publishing; origin: string | null; links: ArtifactLink[] } | null {
   if (!isObj(json) || !PUBLISHING.includes(json.publishing as Publishing) || !Array.isArray(json.artifacts)) return null;
   const links = json.artifacts.map(decodeLink);
-  return links.every((l): l is ArtifactLink => l !== null) ? { publishing: json.publishing as Publishing, links } : null;
+  if (!links.every((l): l is ArtifactLink => l !== null)) return null;
+  const skillPublishing = PUBLISHING.includes(json.skillPublishing as Publishing) ? (json.skillPublishing as Publishing) : "feature_disabled";
+  const origin = typeof json.origin === "string" && /^https:\/\/[A-Za-z0-9.-]+(:\d{1,5})?$/.test(json.origin) ? json.origin : null;
+  return { publishing: json.publishing as Publishing, skillPublishing, origin, links };
+}
+
+/** A file named in a refusal: `skill/path`, or the skill alone. */
+const fileOf = (r: BundleRefusal): string => (r.path ? `${r.skill ?? ""}/${r.path}` : (r.skill ?? ""));
+
+/** What the page says when a bundle cannot be published or installed, naming the file or the skill and never what is in it. */
+export function bundleWords(r: BundleRefusal): string {
+  const file = fileOf(r);
+  switch (r.reason) {
+    case "secret":
+      return t("skl.err.secret", { file });
+    case "bad_path":
+      return t("skl.err.badPath", { file });
+    case "dot_file":
+      return t("skl.err.dotFile", { file });
+    case "binary_file":
+    case "binary":
+      return t("skl.err.binary", { file });
+    case "link":
+      return t("skl.err.link", { file });
+    case "special":
+    case "unreadable":
+    case "too_deep":
+      return t("skl.err.unreadable", { file });
+    case "too_large":
+      return r.path ? t("skl.err.fileTooLarge", { file }) : t("skl.err.tooLarge", { max: MAX_ARTIFACT_BYTES / 1024 });
+    case "too_many":
+    case "too_many_files":
+      return t("skl.err.tooManyFiles", { max: MAX_SKILL_FILES });
+    case "too_many_skills":
+      return t("skl.err.tooManySkills", { max: MAX_SKILLS });
+    case "no_skills":
+      return t("skl.err.none");
+    case "no_skill_md":
+      return t("skl.err.noSkillMd", { skill: r.skill ?? "" });
+    case "bad_name":
+      return t("skl.err.badName");
+    case "duplicate_name":
+      return t("skl.err.duplicateName", { skill: r.skill ?? "" });
+    case "duplicate_path":
+      return t("skl.err.duplicatePath", { file });
+    default:
+      return t("skl.err.invalid");
+  }
 }
 
 /** What the page says when a link op was refused, by its code. Any other refusal is "did not make this change". */
@@ -77,14 +131,17 @@ const REFUSED: Record<string, () => string> = {
   invalid_title: () => t("art.err.title"),
   invalid_kind: () => t("art.err.kind"),
   invalid_text: () => t("art.err.empty"),
+  skills_off: () => t("skl.err.switchedOff"),
+  invalid_skills: () => t("skl.err.invalid"),
 };
 
 export const refusal = (code: string): OpError => new OpError(code, (REFUSED[code] ?? (() => t("rt.change.refused")))());
 
 type Handlers = { [K in keyof ArtifactOps]: (p: ArtifactOps[K]["params"]) => Promise<ArtifactOps[K]["result"]> };
 
-/** The three artifact ops over `link`. `allowed` is the Settings switch (tests give their own). */
-export function artifactHandlers(link: OwnerLink, allowed: () => boolean = () => artifactSettings().publish): Handlers {
+/** The artifact ops over `link`. `allowed` is the Settings switch, `skills` its second switch (tests give their own). */
+export function artifactHandlers(link: OwnerLink, allowed: () => boolean = () => artifactSettings().publish,
+  skills: () => boolean = () => artifactSettings().skills): Handlers {
   const ok = (answer: ShopAnswer, shop: string, changing: boolean): unknown => {
     if (answer.kind === "ok") return answer.json;
     if (answer.kind === "left") throw link.departed(shop, answer.departure);
@@ -127,6 +184,29 @@ export function artifactHandlers(link: OwnerLink, allowed: () => boolean = () =>
       const refused = shareRefusal(plan);
       if (refused) throw refusal(refused);
       const json = ok(await link.write(shop, ARTIFACTS_PATH, shareBody(plan)), shop, true);
+      const made = isObj(json) ? decodeLink(json.artifact) : null;
+      if (!made) throw new OpError("unavailable", t("rt.change.unreadable"));
+      return { link: made };
+    },
+
+    "artifacts.publishSkills": async (p) => {
+      open();
+      if (!skills()) throw refusal("skills_off");
+      const plan = await takeSettled(p.ask, "skills");
+      if (!plan) throw refusal("not_settled");
+      const shop = target(plan.shop);
+      // The bundle's rules again, a key in any file included, before anything is sent.
+      const refused = skillsPlanRefusal(plan);
+      if (refused) throw new OpError(refused.reason, bundleWords(refused));
+      let json: unknown;
+      try {
+        json = ok(await link.write(shop, ARTIFACTS_PATH, skillsBody(plan)), shop, true);
+      } catch (e) {
+        // The API's own switch for skills is said as such: pages may be on while skills are not.
+        if (e instanceof OpError && e.code === "feature_disabled") throw new OpError("feature_disabled", t("skl.err.featureOff"));
+        if (e instanceof OpError && e.code === "too_large") throw new OpError("too_large", bundleWords({ reason: "too_large" }));
+        throw e;
+      }
       const made = isObj(json) ? decodeLink(json.artifact) : null;
       if (!made) throw new OpError("unavailable", t("rt.change.unreadable"));
       return { link: made };
