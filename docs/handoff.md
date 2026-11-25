@@ -211,8 +211,8 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    71 in `docs/plan.md`), and reported that Buddy "doesn't response" in Practice mode, where it gave a sample answer
    (item 67). Two helpers run at a time, each on its own branch from `pilot/week-1`; review each, merge it after the
    full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
-   - item 67, Buddy answering for real through the person's own coding agent (`feat/buddy-real-answers`, Opus, worktree
-     `cc-item67-buddy-real`), started 25 Nov at 17:25.
+   - item 80, the chat box for Buddy and Kit: model, effort, approval and added context (`feat/chat-box`, Opus, worktree
+     `cc-item80-chat-box`), started 25 Nov at 19:00.
    - item 73, worktree settings for lanes (`feat/worktree-settings`, Sonnet, worktree `cc-item73-worktrees`), started
      25 Nov at 18:25.
    Next, as each finishes: item 80 (the chat box: model, effort, approval, add context, after 67), 72 (MCP and Skills
@@ -244,7 +244,13 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    The security review of 24 Nov (findings only) found no critical issue, two high and three medium ones that need
    `EMAIL_SIGN_IN` or `SELF_SERVE_SHOPS` on, and three low ones; its proofs are in the review thread's report, and
    `docs/turning-on.md` says to keep both switches off until items 41 and 42 merge.
-   Merged: 68 (a New lane link in the Lanes band that opens the + menu on Chat with Kit, and "Not signed in" on the
+   Merged: 67 (Buddy answers through the person's own Claude Code, in Practice too: started in the lanes' chat mode with
+   `--permission-mode default` named on the command line, in the empty folder `~/.manut/buddy/chat`, with Buddy's
+   instructions appended to Claude Code's own, so the person's MCP servers, Skills and settings load and anything that
+   acts asks first as Buddy's card; with no agent or no sign-in Buddy says so; only Claude Code, since Codex still runs
+   commands it counts as safe unasked; the helper had compiled but not run the Rust tests, and the lead found two that
+   pinned the old ask for an MCP tool, so run `cargo test --locked` on any branch that touches Rust), 68 (a New lane
+   link in the Lanes band that opens the + menu on Chat with Kit, and "Not signed in" on the
    row of an agent the app has read as signed out: Claude Code, Codex and Grok), 70 (a schedule's time zone named beside a routine's time and next run whenever it is not this computer's,
    judged by the clock through a year and not by the zone's name; `apps/desktop/src/lib/zone.ts`), 66 (Kit as a chat from the + menu, beside the terminal: under the folder chip the menu has Chat with Kit,
    each installed agent that runs as the app's chat, then In a terminal as before; a pick opens the agent's New session
