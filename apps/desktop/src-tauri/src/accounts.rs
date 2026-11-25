@@ -122,6 +122,186 @@ pub fn session_env_for(home: &Path, agent: &str, account: Option<&str>) -> Vec<(
 }
 
 // ---------------------------------------------------------------------------------------------
+// What an added account shares with the person's own home (item 72)
+// ---------------------------------------------------------------------------------------------
+
+/// The entries of a CLI's home an added account shares with the person's own home of that CLI, as links: configuration
+/// only, each named in the CLI's own documentation or listed by the CLI itself. An allow-list rather than "all but the
+/// sign-in" (T3 Code's Codex shadow home shares every entry but `auth.json`): a CLI can add a credentials file at any time
+/// (Codex's MCP sign-ins can be a file in its home), and an allow-list never shares one it does not name.
+///
+/// - Claude Code (code.claude.com/docs/en/claude-directory): skills, commands, subagents, output styles, rules, workflows,
+///   plugins and the person's `CLAUDE.md`. Its `settings.json` is shared as a copy without the sign-in keys
+///   ([`CLAUDE_LOGIN_KEYS`]). Its `.claude.json` is not shared at all: it holds the account's own identity beside the
+///   person's user-scope MCP servers, and Claude Code rewrites it while it runs, so no part of it can be split off safely.
+/// - Codex (its config, AGENTS.md and custom prompts pages; `skills` and `plugins` are the skill roots `codex debug
+///   prompt-input` names): `config.toml` (settings and MCP servers), the instructions files, skills, prompts and plugins.
+pub fn shared_names(cli: &str) -> &'static [&'static str] {
+    match cli {
+        "claude" => &["skills", "commands", "agents", "output-styles", "rules", "workflows", "plugins", "CLAUDE.md"],
+        "codex" => &["config.toml", "AGENTS.md", "AGENTS.override.md", "skills", "prompts", "plugins"],
+        _ => &[],
+    }
+}
+
+/// What holds a sign-in in a CLI's home (Codex's `auth.json`; Claude Code's `.credentials.json` where there is no keychain,
+/// and its `.claude.json`, which holds the account's own details): never shared, whatever [`shared_names`] says.
+pub const NEVER_SHARED: [&str; 4] = ["auth.json", "auth.lock", ".credentials.json", ".claude.json"];
+
+/// The keys of Claude Code's `settings.json` an added account's copy leaves out: the ones its settings reference files under
+/// "Authentication and providers", which supply or pick a sign-in, and `env`, which can carry an API key or switch the
+/// provider. With any of them shared, the account would sign in as the person's own home does.
+pub const CLAUDE_LOGIN_KEYS: [&str; 11] = [
+    "env",
+    "apiKeyHelper",
+    "awsAuthRefresh",
+    "awsCredentialExport",
+    "gcpAuthRefresh",
+    "forceLoginMethod",
+    "forceLoginOrgUUID",
+    "forceLoginGatewayUrl",
+    "enforceAnthropicSignIn",
+    "allowedProviders",
+    "otelHeadersHelper",
+];
+
+/// The app's note, in an added Claude Code account's home, of the settings copy it last wrote (a sha256), so a copy the
+/// account changed since (a plugin it turned on, a model it picked) is the account's own and never written over.
+const SETTINGS_NOTE: &str = ".manut-settings-copy";
+/// The largest `settings.json` copied.
+const SETTINGS_MAX: u64 = 1 << 20;
+
+/// What [`share`] did for one account: the entries linked to the person's own home (new or already there), the ones the
+/// account keeps as its own (a file or folder of its own, or a link elsewhere), and for Claude Code whether its settings are
+/// the app's copy (`copied`), the account's own (`own`) or not there (`none`).
+#[derive(Debug, Default, Serialize, PartialEq, Eq)]
+pub struct Shared {
+    pub linked: Vec<String>,
+    pub own: Vec<String>,
+    pub settings: Option<String>,
+}
+
+/// Claude Code `settings.json` text without [`CLAUDE_LOGIN_KEYS`], or `None` when it is not one JSON object.
+pub fn claude_settings_copy(text: &str) -> Option<String> {
+    let mut v: serde_json::Value = serde_json::from_str(text).ok()?;
+    let o = v.as_object_mut()?;
+    for k in CLAUDE_LOGIN_KEYS {
+        o.remove(k);
+    }
+    serde_json::to_string_pretty(&v).ok()
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// Gives the added account `id` of `cli` the person's configuration from `own` (the CLI's own home on this computer): each of
+/// [`shared_names`] that exists there becomes a link in the account's home, unless the account has that entry already
+/// (then it is the account's own and stays). Claude Code's settings are a copy without the sign-in keys, written again on
+/// each start while the account has not changed it. Nothing is written in `own`, nothing of [`NEVER_SHARED`] is touched, and
+/// a link that is not the app's is never replaced. Unix only: elsewhere a link needs rights a person rarely has, so an
+/// added account there starts as it always did.
+pub fn share(home: &Path, cli: &str, id: &str, own: &Path) -> Result<Shared, String> {
+    let dir = account_dir(home, cli, id)?;
+    let manut = home.join(".manut");
+    for p in [manut.clone(), manut.join("accounts"), manut.join("accounts").join(cli), dir.clone()] {
+        if std::fs::symlink_metadata(&p).map(|m| m.file_type().is_symlink()).unwrap_or(false) {
+            return Err("the account folder is a link".into());
+        }
+    }
+    if !dir.is_dir() {
+        return Err("no such account folder".into());
+    }
+    let own = own.canonicalize().map_err(|_| "no home of its own".to_string())?;
+    if own == dir.canonicalize().map_err(|e| e.to_string())? || !own.is_dir() {
+        return Err("no home of its own".into());
+    }
+    let mut out = Shared::default();
+    if !cfg!(unix) {
+        return Ok(out);
+    }
+    for name in shared_names(cli).iter().filter(|n| !NEVER_SHARED.contains(n)) {
+        let target = own.join(name);
+        if std::fs::symlink_metadata(&target).is_err() {
+            continue;
+        }
+        let link = dir.join(name);
+        match std::fs::symlink_metadata(&link) {
+            Err(_) => {
+                #[cfg(unix)]
+                if std::os::unix::fs::symlink(&target, &link).is_ok() {
+                    out.linked.push((*name).to_string());
+                }
+            }
+            Ok(m) if m.file_type().is_symlink() && std::fs::read_link(&link).ok().as_deref() == Some(target.as_path()) => {
+                out.linked.push((*name).to_string());
+            }
+            Ok(_) => out.own.push((*name).to_string()),
+        }
+    }
+    if cli == "claude" {
+        out.settings = Some(share_claude_settings(&own, &dir));
+    }
+    Ok(out)
+}
+
+/// The Claude Code settings copy ([`share`]): `copied`, `own` or `none`.
+fn share_claude_settings(own: &Path, dir: &Path) -> String {
+    let src = own.join("settings.json");
+    let dst = dir.join("settings.json");
+    let note = dir.join(SETTINGS_NOTE);
+    let Some(text) = std::fs::symlink_metadata(&src)
+        .ok()
+        .filter(|m| m.is_file() && m.len() <= SETTINGS_MAX)
+        .and_then(|_| std::fs::read_to_string(&src).ok())
+        .and_then(|t| claude_settings_copy(&t))
+    else {
+        return "none".into();
+    };
+    let ours = match std::fs::symlink_metadata(&dst) {
+        Err(_) => true,
+        Ok(m) if m.is_file() && !m.file_type().is_symlink() => {
+            let now = std::fs::read(&dst).map(|b| sha256_hex(&b)).unwrap_or_default();
+            std::fs::read_to_string(&note).map(|n| n.trim() == now).unwrap_or(false)
+        }
+        Ok(_) => false,
+    };
+    if !ours {
+        return "own".into();
+    }
+    // written beside it and moved over it, so Claude Code never reads half a file
+    let tmp = dir.join(format!("{SETTINGS_NOTE}.tmp"));
+    let _ = std::fs::remove_file(&tmp);
+    let mut o = std::fs::OpenOptions::new();
+    o.write(true).create_new(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut o, 0o600);
+    let wrote = o.open(&tmp).and_then(|mut f| std::io::Write::write_all(&mut f, text.as_bytes())).and_then(|_| std::fs::rename(&tmp, &dst));
+    if wrote.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+        return "none".into();
+    }
+    let _ = std::fs::write(&note, sha256_hex(text.as_bytes()));
+    "copied".into()
+}
+
+/// Before a session of `agent` starts with `account_env` ([`session_env_for`]): when that names an added account, give it
+/// the person's configuration ([`share`]). Never in the way of the start: whatever cannot be shared stays as it was.
+pub fn prepare(home: &Path, agent: &str, account_env: &[(String, String)]) {
+    let Some(cli) = session_cli(agent) else { return };
+    let Some(var) = home_var(cli) else { return };
+    let Some((_, dir)) = account_env.iter().find(|(k, _)| k == var) else { return };
+    let Some(id) = Path::new(dir).file_name().and_then(|n| n.to_str()) else { return };
+    if account_dir(home, cli, id).ok().as_deref() != Some(Path::new(dir)) {
+        return;
+    }
+    if let Some(own) = crate::past_chats::cli_home(home, agent, &[], &host_env) {
+        let _ = share(home, cli, id, &own);
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
 // The fixed commands
 // ---------------------------------------------------------------------------------------------
 
@@ -887,6 +1067,136 @@ mod tests {
         };
         assert_eq!(exit, LoginEvent::Exit { code: None });
         assert_eq!(logins.count(), 0);
+    }
+
+    /// `<tmp>/<name>` as a person's home: their own Codex and Claude Code homes with made-up configuration and sign-ins, and
+    /// an added account of each.
+    fn shared_home(name: &str) -> PathBuf {
+        let home = std::env::temp_dir().join(format!("manut-acct-share-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        let put = |rel: &str, text: &str| {
+            let p = home.join(rel);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, text).unwrap();
+        };
+        put(".codex/config.toml", &format!("[mcp_servers.gh]\ncommand = \"gh-mcp\"\nenv = {{ TOKEN = \"{SECRET}\" }}\n"));
+        put(".codex/auth.json", &format!(r#"{{"OPENAI_API_KEY":"{SECRET}"}}"#));
+        put(".codex/skills/review/SKILL.md", "---\nname: review\n---\n");
+        put(".codex/sessions/2026/x.jsonl", "{}\n");
+        put(".claude/skills/promptpay/SKILL.md", "---\nname: promptpay\n---\n");
+        put(".claude/plugins/installed_plugins.json", "{}");
+        put(".claude/CLAUDE.md", "mine\n");
+        put(".claude/.credentials.json", &format!(r#"{{"claudeAiOauth":{{"accessToken":"{SECRET}"}}}}"#));
+        put(".claude/.claude.json", &format!(r#"{{"oauthAccount":{{"emailAddress":"me@example.com"}},"primaryApiKey":"{SECRET}","mcpServers":{{}}}}"#));
+        put(
+            ".claude/settings.json",
+            &format!(r#"{{"enabledPlugins":{{"x@y":true}},"permissions":{{"allow":["Bash(ls)"]}},"env":{{"ANTHROPIC_API_KEY":"{SECRET}"}},"apiKeyHelper":"echo {SECRET}","forceLoginMethod":"console"}}"#),
+        );
+        for cli in ["codex", "claude"] {
+            std::fs::create_dir_all(home.join(".manut/accounts").join(cli).join("work")).unwrap();
+        }
+        home
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_added_codex_account_shares_the_configuration_and_never_the_sign_in() {
+        let home = shared_home("codex");
+        let acct = home.join(".manut/accounts/codex/work");
+        // the account's own sign-in, made by `codex login` in its home
+        std::fs::write(acct.join("auth.json"), r#"{"auth_mode":"chatgpt"}"#).unwrap();
+        let own = home.join(".codex").canonicalize().unwrap();
+        let s = share(&home, "codex", "work", &own).unwrap();
+        assert_eq!(s.linked, vec!["config.toml", "skills"]);
+        assert_eq!(std::fs::read_link(acct.join("config.toml")).unwrap(), own.join("config.toml"));
+        assert!(acct.join("skills/review/SKILL.md").exists());
+        // its sign-in is its own and stays so; the person's sessions are not shared
+        assert_eq!(std::fs::read_to_string(acct.join("auth.json")).unwrap(), r#"{"auth_mode":"chatgpt"}"#);
+        assert!(!acct.join("sessions").exists());
+        // again: nothing changes, and an entry the account has of its own stays its own
+        std::fs::create_dir_all(home.join(".codex/prompts")).unwrap();
+        std::fs::create_dir_all(acct.join("prompts")).unwrap();
+        let again = share(&home, "codex", "work", &own).unwrap();
+        assert_eq!((again.linked, again.own), (vec!["config.toml".to_string(), "skills".into()], vec!["prompts".to_string()]));
+        assert!(!std::fs::symlink_metadata(acct.join("prompts")).unwrap().file_type().is_symlink());
+        // the person's home is never written: no link, no new file there
+        let names: Vec<String> = std::fs::read_dir(&own).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+        assert_eq!(names.len(), 5, "{names:?}");
+        let _ = std::fs::remove_dir_all(home);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_added_claude_account_gets_skills_plugins_and_settings_without_the_sign_in_keys() {
+        let home = shared_home("claude");
+        let acct = home.join(".manut/accounts/claude/work");
+        let own = home.join(".claude").canonicalize().unwrap();
+        let s = share(&home, "claude", "work", &own).unwrap();
+        assert_eq!(s.linked, vec!["skills", "plugins", "CLAUDE.md"]);
+        assert_eq!(s.settings.as_deref(), Some("copied"));
+        // neither sign-in file is linked or copied
+        for never in [".credentials.json", ".claude.json"] {
+            assert!(std::fs::symlink_metadata(acct.join(never)).is_err(), "{never}");
+        }
+        let copy = std::fs::read_to_string(acct.join("settings.json")).unwrap();
+        assert!(copy.contains("enabledPlugins") && copy.contains("Bash(ls)"));
+        for k in ["env", "ANTHROPIC_API_KEY", "apiKeyHelper", "forceLoginMethod", SECRET] {
+            assert!(!copy.contains(k), "{k} in the account's settings");
+        }
+        assert!(!std::fs::symlink_metadata(acct.join("settings.json")).unwrap().file_type().is_symlink());
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(std::fs::metadata(acct.join("settings.json")).unwrap().permissions().mode() & 0o777, 0o600);
+        }
+        // the person changes their settings: the app's unchanged copy follows on the next start
+        std::fs::write(own.join("settings.json"), r#"{"model":"opus","apiKeyHelper":"x"}"#).unwrap();
+        assert_eq!(share(&home, "claude", "work", &own).unwrap().settings.as_deref(), Some("copied"));
+        let copy = std::fs::read_to_string(acct.join("settings.json")).unwrap();
+        assert!(copy.contains("opus") && !copy.contains("apiKeyHelper"));
+        // the account changes its own (Claude Code saved a choice there): never written over again
+        std::fs::write(acct.join("settings.json"), r#"{"model":"sonnet"}"#).unwrap();
+        std::fs::write(own.join("settings.json"), r#"{"model":"haiku"}"#).unwrap();
+        assert_eq!(share(&home, "claude", "work", &own).unwrap().settings.as_deref(), Some("own"));
+        assert_eq!(std::fs::read_to_string(acct.join("settings.json")).unwrap(), r#"{"model":"sonnet"}"#);
+        let _ = std::fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn the_lists_share_configuration_only() {
+        for cli in ACCOUNT_CLIS {
+            for n in shared_names(cli) {
+                assert!(!NEVER_SHARED.contains(n), "{cli}: {n}");
+                assert!(!n.contains("auth") && !n.contains("credential") && !n.contains("token") && !n.contains(".env"), "{cli}: {n}");
+            }
+        }
+        // the CLIs whose home is not split stay as they are
+        for cli in ["grok", "pi", "omp", "gemini"] {
+            assert!(shared_names(cli).is_empty(), "{cli}");
+        }
+        assert_eq!(claude_settings_copy("[1]"), None);
+        assert_eq!(claude_settings_copy(r#"{"env":{"A":"1"},"model":"x"}"#).as_deref(), Some("{\n  \"model\": \"x\"\n}"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sharing_refuses_a_linked_account_folder_the_default_home_and_a_cli_without_a_list() {
+        let home = shared_home("refuse");
+        let own = home.join(".codex").canonicalize().unwrap();
+        assert_eq!(share(&home, "codex", "default", &own).unwrap_err(), "bad account id");
+        assert_eq!(share(&home, "codex", "gone", &own).unwrap_err(), "no such account folder");
+        assert_eq!(share(&home, "grok", "work", &own).unwrap_err(), "no such account folder");
+        // an account folder that is a link (to the person's own home, say) is never written through
+        let link = home.join(".manut/accounts/codex/linked");
+        std::os::unix::fs::symlink(&own, &link).unwrap();
+        assert_eq!(share(&home, "codex", "linked", &own).unwrap_err(), "the account folder is a link");
+        // the account folder is the person's own home: nothing to share
+        assert_eq!(share(&home, "codex", "work", &home.join(".manut/accounts/codex/work")).unwrap_err(), "no home of its own");
+        // prepare: only an added account's own home variable, for an agent that takes accounts
+        let work = home.join(".manut/accounts/codex/work");
+        prepare(&home, "codex", &[("CODEX_HOME".into(), "/elsewhere/work".into())]);
+        prepare(&home, "pi", &[("CODEX_HOME".into(), work.to_string_lossy().into())]);
+        assert!(std::fs::symlink_metadata(work.join("config.toml")).is_err());
+        let _ = std::fs::remove_dir_all(home);
     }
 
     /// Real check on a Mac with Claude Code: the fixed status command in a temp CLAUDE_CONFIG_DIR reads signed

@@ -320,8 +320,12 @@ async fn session_start(
     tauri::async_runtime::spawn_blocking(move || {
         // The account Settings › Accounts picked for new sessions of this agent's CLI (or, for a session started
         // again after a restart, the one it ran with): its home variable, or nothing ("This computer").
-        // chat_start passes the same.
+        // chat_start passes the same. An added account gets the person's MCP servers, skills and settings first, never
+        // their sign-in (`accounts::share`).
         let account_env = user_home().map(|h| accounts::session_env_for(&h, &agent, account.as_deref())).unwrap_or_default();
+        if let Ok(h) = user_home() {
+            accounts::prepare(&h, &agent, &account_env);
+        }
         sessions.start_agent(&agent, std::path::Path::new(&cwd), session_id.as_deref(), resume.as_deref(), link.as_deref(), &account_env, cols, rows, move |ev| match ev {
             Output::Data(b) => {
                 let _ = on_data.send(InvokeResponseBody::Raw(b));
@@ -554,8 +558,12 @@ async fn session_close_all(shell: State<'_, Shell>) -> Result<(), String> {
 async fn chat_start(shell: State<'_, Shell>, agent: String, cwd: String, resume: Option<String>, account: Option<String>, session: Option<String>, on_event: Channel<serde_json::Value>) -> Result<u32, String> {
     let chats = shell.chats.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        // The same account as a terminal session of this agent: its home variable, or nothing ("This computer").
+        // The same account as a terminal session of this agent: its home variable, or nothing ("This computer"), with the
+        // person's configuration shared into an added account's home first.
         let account_env = user_home().map(|h| accounts::session_env_for(&h, &agent, account.as_deref())).unwrap_or_default();
+        if let Ok(h) = user_home() {
+            accounts::prepare(&h, &agent, &account_env);
+        }
         // Claude Code: the session's attachment folder (`s<digits>` under ~/.manut/session-files), made now so its
         // copies are readable without a card; no folder (a bad id, a link) only means a card per read
         let files = match (agent.as_str(), session.as_deref()) {
@@ -962,6 +970,7 @@ async fn buddy_start(shell: State<'_, Shell>, agent: String, prompt: String, on_
     tauri::async_runtime::spawn_blocking(move || {
         let home = user_home()?;
         let account_env = accounts::session_env_for(&home, &agent, None);
+        accounts::prepare(&home, &agent, &account_env);
         buddy_chat::start(&buddy, &home, &agent, &prompt, &account_env, move |out| {
             let _ = on_event.send(match out {
                 ChatOut::Event(e) => e,
