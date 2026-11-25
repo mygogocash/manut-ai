@@ -17,7 +17,8 @@
 //   of the shop, an event or a log.
 // - A bundle of skills (item 84) also needs Settings › Artifacts › Allow sharing skills by link (`skills_off` otherwise, nothing
 //   sent). It is held to the bundle rules again before it is sent, a key in any file included (src/runtime/skillBundle.ts), and
-//   sent as exactly `{ title, kind: "skills", skills }`.
+//   sent as exactly `{ title, kind: "skills", skills }`. Publishing one is on the Artifacts page, so it needs both switches; the
+//   list alone is also read with only the skills switch on, since installing skills from a link needs the artifact origin it names.
 import { t } from "../../i18n";
 import { artifactSettings } from "../../lib/artifactLinks";
 import { takeSettled } from "../artifactAsks";
@@ -167,7 +168,9 @@ export function artifactHandlers(link: OwnerLink, allowed: () => boolean = () =>
 
   return {
     "artifacts.list": async () => {
-      open();
+      // Installing skills from a link needs the origin the list names, so the skills switch alone opens the read too.
+      if (!allowed() && !skills()) throw refusal("switched_off");
+      link.live();
       const viewed = await link.viewed();
       if (!viewed) throw refusal("no_shop");
       if (viewed.role !== "owner") throw refusal("owner_only");

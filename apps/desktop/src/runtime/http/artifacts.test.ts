@@ -199,6 +199,15 @@ describe("publishing a bundle of skills (item 84)", () => {
     return id;
   }
 
+  it("reads the list with only the skills switch on, for the origin, while a page publish stays refused", async () => {
+    setArtifactSettings({ publish: false, skills: true });
+    const { api, req } = await opened();
+    api.on("GET", "/v1/artifacts", { status: 200, json: { publishing: "on", skillPublishing: "on", origin: "https://links.example", artifacts: [] } });
+    expect((await req("artifacts.list", {})).origin).toBe("https://links.example");
+    expect((await refusal(req("artifacts.publish", { ask: await settledShare(plan()) })))?.code).toBe("switched_off");
+    expect(linkCalls(api)).toEqual([["GET", "/v1/artifacts", OWNER_A, undefined]]);
+  });
+
   it("sends nothing while sharing skills is off, even with pages on", async () => {
     const { api, req } = await opened();
     const ask = await settledSkills(bundle());
