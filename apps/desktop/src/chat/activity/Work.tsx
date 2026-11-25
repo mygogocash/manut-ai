@@ -9,9 +9,9 @@ import { ChevronRight } from "../../ui";
 import "./work.css";
 
 /** One file's change: path and counts, then its lines in mono, capped in height with their own scroll. */
-function DiffFileView({ f }: { f: DiffFile }) {
+function DiffFileView({ f, testId }: { f: DiffFile; testId: string }) {
   return (
-    <div className="dv-file" data-testid="diff-file">
+    <div className="dv-file" data-testid={`${testId}-file`}>
       <div className="dv-head">
         <span className="dv-path" title={f.path}>
           {f.path}
@@ -21,7 +21,7 @@ function DiffFileView({ f }: { f: DiffFile }) {
         {f.added > 0 && <span className="dv-add">+{f.added}</span>}
         {f.removed > 0 && <span className="dv-del">−{f.removed}</span>}
       </div>
-      <div className="dv-body" data-testid="diff-body">
+      <div className="dv-body" data-testid={`${testId}-body`}>
         {f.lines.map((l, i) => {
           const k = l.startsWith("@@") ? "hunk" : l[0] === "+" ? "add" : l[0] === "-" ? "del" : "ctx";
           // a key typed into the code is never shown, here or anywhere: the app's one masker hides it
@@ -38,18 +38,20 @@ function DiffFileView({ f }: { f: DiffFile }) {
 }
 
 /** A file edit's change, per file. Opened by a click, it scrolls itself into view (only then: never while an
- *  answer streams). */
-export function DiffView({ files }: { files: DiffFile[] }) {
+ *  answer streams). `testId` names its elements for a place that draws it beside the timeline's own (`diff-view`,
+ *  `diff-file`, `diff-body` for the timeline), so a count of the timeline's diffs is not changed by it; `scroll` off
+ *  for a place that shows it without being opened by a click (the pane beside a lane). */
+export function DiffView({ files, scroll = true, testId = "diff" }: { files: DiffFile[]; scroll?: boolean; testId?: string }) {
   const ref = useRef<HTMLDivElement>(null);
   // a block body: newer Chromium (WebView2) returns a Promise from scrollIntoView, which React would then call as
   // this effect's cleanup when the diff closes or its turn is taken back ("destroy is not a function", blank app)
   useLayoutEffect(() => {
-    ref.current?.scrollIntoView?.({ block: "nearest" });
-  }, []);
+    if (scroll) ref.current?.scrollIntoView?.({ block: "nearest" });
+  }, [scroll]);
   return (
-    <div className="dv" data-testid="diff-view" ref={ref}>
+    <div className="dv" data-testid={`${testId}-view`} ref={ref}>
       {files.map((f, i) => (
-        <DiffFileView key={`${f.path}-${i}`} f={f} />
+        <DiffFileView key={`${f.path}-${i}`} f={f} testId={testId} />
       ))}
     </div>
   );

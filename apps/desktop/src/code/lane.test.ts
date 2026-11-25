@@ -347,8 +347,9 @@ describe("the command a lane keeps beside its last finished run", () => {
   });
 
   it("hides a key before the command is cut, so a cut cannot leave the front of one that the masker does not know", () => {
-    // the key starts at character 146, and the cut falls inside it
-    const long = `${"a".repeat(145)} ${KEY} and a tail of more words`;
+    // the key starts at character 151, and the cut at 159 falls inside it, leaving `sk-FAKE0`: the masker needs 8 characters after
+    // `sk-` to know a key, so a command cut first and masked after would show it
+    const long = `${"a".repeat(150)} ${KEY} and a tail of more words`;
     const lane = feed(ran(`${long} && pnpm test`, true, out("vitest-pass")));
     expect(lane.run?.command).not.toContain("sk-FAKE");
     expect(lane.run?.command).toContain("••••");

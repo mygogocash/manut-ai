@@ -37,6 +37,17 @@ describe("a preview on a sample", () => {
     expect(out).toContain("Add the shop ID");
   });
 
+  it("leaves out the band that names it where the place says so itself, and keeps each row as it is", () => {
+    expect(html(props())).toContain('class="band"');
+    const bare = html(props({ bare: true }));
+    expect(bare).not.toContain('class="band"');
+    expect(bare).toContain("The preview has no shop ID yet, so the QR code is a sample.");
+    expect(bare).toContain("Add the shop ID");
+    expect(byId(props({ bare: true }), "kit-sample")).toHaveLength(1);
+    // nothing to show is nothing, bare or not
+    expect(html(props({ needs: [], bare: true }))).toBe("");
+  });
+
   it("names any other secret by the variable the code reads", () => {
     const out = html(props({ needs: [SHOP, STRIPE] }));
     expect(out).toContain("The preview has no value for STRIPE_SECRET_KEY yet, so what needs it is a sample.");

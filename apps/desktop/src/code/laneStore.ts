@@ -10,6 +10,10 @@ let version = 0;
 
 const NONE = Object.freeze(emptyLane()) as LaneRecord;
 
+/** Whether the chat with key `key` is a lane's: a coding session that runs as a chat in the app (`agent:<id>`). A session in its own
+ *  terminal has no chat to read a lane from, and a Hermes folder chat is not a coding agent's. */
+export const isLaneChat = (key: string | null | undefined): key is string => !!key && key.startsWith("agent:");
+
 const changed = () => {
   version++;
   listeners.forEach((l) => l());

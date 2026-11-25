@@ -13,15 +13,19 @@ export interface PreviewSampleProps {
   /** The secret whose Add was pressed: the vault's note shows under it. */
   asked: string | null;
   onAdd: (name: string) => void;
+  /** Without the band that names it, for a place that says so itself (the pane beside a lane, under its Preview). */
+  bare?: boolean;
 }
 
-export function PreviewSampleView({ needs, asked, onAdd }: PreviewSampleProps) {
+export function PreviewSampleView({ needs, asked, onAdd, bare = false }: PreviewSampleProps) {
   if (!needs.length) return null;
   return (
     <>
-      <div className="band">
-        <span>{t("kit.sample.title")}</span>
-      </div>
+      {!bare && (
+        <div className="band">
+          <span>{t("kit.sample.title")}</span>
+        </div>
+      )}
       {needs.map((n) => (
         <div key={n.name} data-testid="kit-sample">
           <div className="rowl">

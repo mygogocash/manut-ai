@@ -130,6 +130,9 @@ export function noteReads(chat: string, files: readonly DiffFile[]): void {
 export const sessionsWithNeeds = (): { chat: string; needs: Need[] }[] =>
   [...reads.entries()].map(([chat, r]) => ({ chat, needs: needsOf(r) })).filter((x) => x.needs.length);
 
+/** The secrets the changes of the one session whose chat key is `chat` read, once each, in name order. */
+export const needsOfChat = (chat: string): Need[] => needsOf(reads.get(chat) ?? {});
+
 /** The secrets the changes of project `root`'s sessions read, once each, in name order. A session is the project's when
  *  it started in that folder; its chat key is `agent:<id>`. */
 export function needsOfProject(root: string, found: readonly { chat: string; needs: readonly Need[] }[], list: readonly { id: string; cwd: string }[]): Need[] {
