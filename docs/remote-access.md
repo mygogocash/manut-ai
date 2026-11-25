@@ -21,8 +21,11 @@ What a person does:
 2. "Pair a phone" shows a QR code for two minutes.
 3. On the phone, in the installed web app (`/app/`), Your Mac, Scan, or paste the link copied on the Mac. On an iPhone
    a link opened in Safari lands outside the installed app's storage, so it pairs nothing.
-4. Both screens show the same four-digit check code. The Mac asks: "Allow 'iPhone, Safari' to watch your chats and
-   answer their asks?" The person presses Allow on the Mac, and the phone makes a passkey (Face ID).
+4. The phone shows a four-digit check code. The Mac asks: "To allow 'iPhone, Safari' to watch your chats and answer
+   their asks, type the four digits your phone shows." The person types them at the Mac, once (a wrong entry spends
+   the code, and the Mac shows a new one), and the phone makes a passkey (Face ID). The Mac never shows a code of its
+   own, so there is nothing to compare and press Allow on by habit: a phone that was raced by someone who photographed
+   the code is refused and shows no digits, so there is nothing to type.
 5. The phone lists the chats as Working, Needs you or Done. Opening one shows its messages, its current step and its
    asks, with the whole command as the card shows it. The person can Allow once (Face ID), say No, answer a question,
    or stop the turn.
@@ -64,8 +67,8 @@ which the repository does not have.
 
 - **Pairing.** The QR code holds the Mac's host id, a one-use door to the relay and a 256-bit secret. Over the relay,
   both sides exchange throwaway keys and prove they know the secret (GoSpark's `Shared/Remote/RemoteHandshake.swift`,
-  `proof`). The relay can neither read the exchange nor stand in the middle. After Allow, the Mac sends the phone its
-  own id, door token and key K, then closes the pairing door.
+  `proof`). The relay can neither read the exchange nor stand in the middle. Once the phone's code is typed at the
+  Mac, the Mac sends the phone its own id, door token and key K, then closes the pairing door.
 - **Each connection.** A fresh key exchange proved with K, so each session gets new keys. Every message is encrypted
   and numbered, and split to fit the relay's 65,532-byte limit.
 - **Each decision.** The Mac issues a challenge that can be used once, lasts 60 seconds, and is bound to the device,
@@ -77,12 +80,19 @@ which the repository does not have.
 **What building 78a added to the design** (`packages/remote-channel/README.md` has every byte):
 
 - The pairing exchange keeps the relay out only while the relay lacks the code's secret. Someone who photographed the
-  code within its two minutes and controls the relay can pair with each side separately; the matching check code is
-  what catches that, and only because the phone commits to its throwaway key before it sees the Mac's (ZRTP's hash
-  commitment). Without that order the check code could be steered and would prove nothing. Pairing is therefore four
-  messages, and the codes match by chance one time in ten thousand, once per code.
+  code within its two minutes and controls the relay can pair with each side separately; the check code typed from
+  the phone into the Mac is what catches that, and only because the phone commits to its throwaway key before it sees
+  the Mac's (ZRTP's hash commitment). Without that order the check code could be steered and would prove nothing.
+  Pairing is therefore four messages, and the codes match by chance one time in ten thousand.
+- A code is one try on both sides. On the Mac the first commit spends it, and so does a wrong or late typed code. On
+  the phone starting pairing spends it, and the phone never tries again on its own: a review on 25 Nov showed that a
+  phone that retried would let someone with the photographed code play the Mac to it until its code matched the
+  Mac's, about one chance in ten thousand per attempt. The typed code is taken only within the code's two minutes.
 - The code travels in the link's fragment (`#pair=`), which no browser sends to a server.
-- K is drawn by the Mac after Allow, so the code's secret, photographed or not, never opens a session.
+- K is drawn by the Mac once the code is typed, so the code's secret, photographed or not, never opens a session.
+- Unpair ends what is open on the Mac's own side: it closes that phone's sessions and drops its waiting decision
+  challenges, since the relay's `revoke` is not trusted to end anything and a phone that comes another way has no
+  relay.
 - The Mac cannot tell that the grant reached the phone, so 78b counts a phone as paired only once its passkey
   registration has come back over the pairing channel. The passkey's key is read from the authenticator's own data
   (WebAuthn Level 3, section 7.1), and every answer is also refused from another site's frame or with a counter that
@@ -170,8 +180,8 @@ installed iPhone web app opens the socket, what Android Chrome asks, and how fas
   only the relay's door, never the session.
 - **What the relay sees:** internet addresses (Cloudflare sees them; the relay object keeps only a digest), times, byte
   counts, the Mac's and phones' random ids, token hashes, and from phase 4 the push address. Never content.
-- **Approval of a new device checks:** the QR secret (two minutes, one try), the matching check code, and Allow pressed
-  at the Mac.
+- **Approval of a new device checks:** the QR secret (two minutes, one try on the Mac and one on the phone), and the
+  four digits the phone shows, typed at the Mac once within those two minutes.
 - **Attacks considered:** the relay reading or standing in the middle at pairing or later; a photographed QR code;
   replayed messages or decisions; a stolen relay token; a stolen phone that is unlocked; a script injected into the
   site (only the site's own scripts run, and keys cannot be read out); the relay used as a free tunnel (limits, a daily
