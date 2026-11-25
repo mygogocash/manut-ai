@@ -212,9 +212,9 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    (item 67). Two helpers run at a time, each on its own branch from `pilot/week-1`; review each, merge it after the
    full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
    - item 80, the chat box for Buddy and Kit: model, effort, approval and added context (`feat/chat-box`, Opus, worktree
-     `cc-item80-chat-box`), started 25 Nov at 19:00.
-   - item 73, worktree settings for lanes (`feat/worktree-settings`, Sonnet, worktree `cc-item73-worktrees`), started
-     25 Nov at 18:25.
+     `cc-item80-chat-box`), started 25 Nov at 18:35.
+   - item 72, MCP servers and Skills everywhere an agent runs, and a page that lists them (`feat/mcp-skills`, Opus,
+     worktree `cc-item72-mcp-skills`), started 25 Nov at 19:35.
    Next, as each finishes: item 80 (the chat box: model, effort, approval, add context, after 67), 72 (MCP and Skills
    everywhere), 81 (voice), 82 (computer use, lifted from Orca), 73 (worktree settings), then 71, 74, 75, 69, 76, 77, and 83 and 84
    (artifacts and skills shared by a link, from two more of Orca's pages: built switched off, as they need a sign-in, an
@@ -244,7 +244,11 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    The security review of 24 Nov (findings only) found no critical issue, two high and three medium ones that need
    `EMAIL_SIGN_IN` or `SELF_SERVE_SHOPS` on, and three low ones; its proofs are in the review thread's report, and
    `docs/turning-on.md` says to keep both switches off until items 41 and 42 merge.
-   Merged: 67 (Buddy answers through the person's own Claude Code, in Practice too: started in the lanes' chat mode with
+   Merged: 73 (Settings, Worktrees: where a lane's folder is made, starting from the remote's latest commit, the
+   branch's prefix, and clean-up for a deleted chat and a merged pull request that never forces and keeps any folder
+   with work of its own; after merging a branch that adds a dependency, run `pnpm install --frozen-lockfile` in the
+   other worktrees before their gate, or every desktop test fails on the missing package), 67 (Buddy answers through
+   the person's own Claude Code, in Practice too: started in the lanes' chat mode with
    `--permission-mode default` named on the command line, in the empty folder `~/.manut/buddy/chat`, with Buddy's
    instructions appended to Claude Code's own, so the person's MCP servers, Skills and settings load and anything that
    acts asks first as Buddy's card; with no agent or no sign-in Buddy says so; only Claude Code, since Codex still runs
