@@ -163,9 +163,9 @@ test("Plans is the sixth tab; the header holds the model control and the panel b
   expect(await tabs.evaluateAll((els) => els.map((e) => e.getAttribute("title")))).toEqual(["Details", "Terminal", "Schedule", "Worktrees", "Diff", "Plans"]);
   await expect(page.getByTestId("panel-tab-runs")).toHaveAttribute("aria-selected", "true");
   await expect(page.getByTestId("head-right").locator(":scope > *")).toHaveCount(2);
-  // what the window has beyond the 248px sidebar and a 480px chat, between 460 and 560
+  // what the window has beyond the 196px side menu and a 480px chat, between 460 and 560
   const width = async () => Math.round((await page.getByTestId("details").boundingBox())?.width ?? 0);
-  await expect.poll(width).toBe(552);
+  await expect.poll(width).toBe(560);
   await page.setViewportSize({ width: 1100, height: 760 });
   await expect.poll(width).toBe(460);
   await page.setViewportSize({ width: 1440, height: 900 });

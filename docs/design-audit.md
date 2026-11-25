@@ -39,7 +39,8 @@ The fixes are items 85e to 85i in `docs/plan.md`; the motion is items 85a to 85c
 5. **Code** opens on the old TERMINALS section with other companies' logos on an otherwise empty page. The Code board
    shows lanes, the conversation and a diff: at least a grey Lanes band and `StatesCode`'s empty state. Seen.
 6. **The foot of the side menu** shows three small squares for each coding tool's use, and "You". The board has the
-   budget pill and the person's name with their shop. Seen.
+   budget pill and the person's name with their shop. Seen. Fixed in item 85i (26 Nov): the foot is the pill (shown only with
+   the runtime's numbers, none yet) and the person with their shop; the coding tools' use is on the Code page.
 7. **The chat's header** shows a maker's logo with a model and effort, and "3 other places" with two other companies'
    logos. The board has Answer, Used and Steps, and a cost line. Seen.
 
@@ -62,7 +63,7 @@ The fixes are items 85e to 85i in `docs/plan.md`; the motion is items 85a to 85c
 13. **Text below the scale.** The commonest sizes on the pages are 11.5, 11, 12.5 and 10.5px; the board's smallest is
     12px for tags and 14px for body. Settings is worst (`settings/settings.css`: `.st-k b`, `.st-k span`, `.st-note`,
     and the uppercase 10.5px `.st-sh` and `.st-gh` labels, which should be grey bands in sentence case). Measured.
-14. **The side menu is 248px wide** where the board says 196 (`--side-w`). Seen.
+14. **The side menu is 248px wide** where the board says 196 (`--side-w`). Seen. Fixed in item 85i (26 Nov).
 15. **The command palette's** rows are 32px with no icons, and its groups are in capitals. The board's menu rows are
     34px with an icon and its word. Seen.
 16. **Needs you** has thin rows, a grey "Approve" tag that looks like a button, and two times. The board has one card a

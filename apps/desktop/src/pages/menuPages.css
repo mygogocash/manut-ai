@@ -496,3 +496,23 @@
   --rise-by: 0px;
   animation: var(--anim-arrive);
 }
+
+/* The Code page's coding plans (CodePage.tsx, item 85i): the usage marks the side menu's foot carried, under a grey band.
+   A ring near its limit is the colour of Needs you and a limited one the colour of failed, the two of the four meanings
+   it can have. The card opens over the marks at a reading width, not across the whole column. */
+.mpage .code-plans {
+  --usage-amber: var(--aui-warning);
+  --usage-red: var(--aui-danger);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.mpage .code-plans .usage {
+  margin: 0;
+  padding: 4px 6px;
+}
+.mpage .code-plans .usage-card {
+  left: 0;
+  right: auto;
+  width: 320px;
+}

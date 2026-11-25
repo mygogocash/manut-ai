@@ -127,7 +127,8 @@
   --r-lg: var(--rad-lg);
   --r-bubble: var(--rad-xl);
   --side-x: 8px;
-  --side-w: 248px;
+  /* The side menu's width, as the canvas's Main and KitNavigation boards draw it (`.sb`, 196px). */
+  --side-w: 196px;
   --panel-w: 300px;
   --thread-w: 920px;
   /* The interface stack of the tokens, with the CJK families the Korean, Japanese and Chinese translations need put

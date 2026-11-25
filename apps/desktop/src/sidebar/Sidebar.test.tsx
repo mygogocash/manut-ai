@@ -5,14 +5,14 @@ import { describe, expect, it } from "vitest";
 import { renderToString } from "react-dom/server";
 import { setLang } from "../i18n";
 import { getStore } from "../state/store";
-import { SideMenu, Sidebar, type RecentItem } from "./Sidebar";
+import { SideMenu, Sidebar, type Budget, type RecentItem } from "./Sidebar";
 import type { MenuRow } from "./menu";
 
 const words = (html: string) => html.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ");
 const count = (html: string, needle: string) => html.split(needle).length - 1;
 const noop = () => {};
 
-function menu(over: { current?: MenuRow | null; needs?: number; recent?: RecentItem[]; settings?: boolean; account?: { name: string; initial: string } } = {}) {
+function menu(over: { current?: MenuRow | null; needs?: number; recent?: RecentItem[]; settings?: boolean; account?: { name: string; initial: string }; budget?: Budget } = {}) {
   setLang("en");
   return renderToString(
     <SideMenu
@@ -21,6 +21,7 @@ function menu(over: { current?: MenuRow | null; needs?: number; recent?: RecentI
       recent={over.recent ?? []}
       settings={over.settings ?? false}
       account={over.account}
+      budget={over.budget}
       onRow={noop}
       onSearch={noop}
       onAccount={noop}
@@ -98,6 +99,17 @@ describe("the side menu", () => {
     const html = menu();
     expect(html).not.toContain("planp");
     expect(html).not.toContain("฿");
+    // an amount that is not whole satang draws nothing rather than a guess
+    expect(menu({ budget: { spentSatang: 186.5, capSatang: 30000 } })).not.toContain("planp");
+    expect(menu({ budget: { spentSatang: -1, capSatang: 30000 } })).not.toContain("planp");
+  });
+
+  it("ends as the canvas's foot does: the budget pill, then the person with their shop (item 85i)", () => {
+    const html = menu({ budget: { spentSatang: 18600, capSatang: 30000 }, account: { name: "Fon, Baan Mali", initial: "F" } });
+    expect(html).toMatch(/<span class="planp" role="img" aria-label="AI budget this month: ฿186 of ฿300" data-testid="menu-budget">฿186 of ฿300<\/span>/);
+    expect(words(html)).toMatch(/฿186 of ฿300 F Fon, Baan Mali , Settings/);
+    // the coding tools' marks are not in the menu's foot: they are on the Code page
+    expect(html).not.toContain('data-testid="usage"');
   });
 });
 
