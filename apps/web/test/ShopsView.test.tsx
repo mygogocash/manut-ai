@@ -139,6 +139,12 @@ describe("the Shops overview", () => {
     await screen.findByRole("list", { name: "Baan Mali's outposts" });
 
     await openOverview();
+    fireEvent.click(screen.getByRole("button", { name: "Routines for Baan Mali" }));
+    expect(await screen.findByRole("heading", { name: "Routines" })).toBeTruthy();
+    expect((screen.getByLabelText("Shop") as HTMLSelectElement).value).toBe("shop_baanmali");
+    await screen.findByRole("list", { name: "Baan Mali's routines" });
+
+    await openOverview();
     fireEvent.click(screen.getByRole("button", { name: "Messages for Sabai Tea" }));
     expect(await screen.findByRole("heading", { name: "Sabai Tea" })).toBeTruthy();
     expect(screen.getByRole("tab", { name: "Messages" }).getAttribute("aria-selected")).toBe("true");
@@ -299,7 +305,7 @@ describe("the Shops overview", () => {
   it("offers nothing that sends: the controls are Refresh and one link to each page of each shop", async () => {
     const { container } = renderWithApi(<ShopsView shops={SHOPS} onOpen={noop} onForget={noop} />, reads());
     await screen.findByRole("table", { name: "Every shop" });
-    const pages = ["Messages", "Drafts", "Audit", "Memory", "People", "Model spend", "Connections"];
+    const pages = ["Messages", "Drafts", "Audit", "Memory", "People", "Model spend", "Connections", "Routines"];
     expect(screen.getAllByRole("button").map((button) => button.textContent)).toEqual(["Refresh", ...pages, ...pages]);
     expect(screen.queryByRole("button", { name: /send|post|publish|approve|propose|reply/i })).toBeNull();
     expect(container.querySelector("form, textarea, input, select")).toBeNull();
@@ -316,7 +322,8 @@ describe("the Shops overview", () => {
     fireEvent.click(screen.getByRole("button", { name: "People for Sabai Tea" }));
     fireEvent.click(screen.getByRole("button", { name: "Model spend for Sabai Tea" }));
     fireEvent.click(screen.getByRole("button", { name: "Connections for Baan Mali" }));
+    fireEvent.click(screen.getByRole("button", { name: "Routines for Sabai Tea" }));
     expect(onOpen.mock.calls).toEqual([["t2", "audit"], ["t1", "shop"], ["t1", "drafts"], ["t2", "memory"], ["t2", "people"],
-      ["t2", "model"], ["t1", "connections"]]);
+      ["t2", "model"], ["t1", "connections"], ["t2", "routines"]]);
   });
 });

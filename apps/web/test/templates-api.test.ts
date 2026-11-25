@@ -88,8 +88,9 @@ describe("the fake's shop templates, kept as the API keeps them", () => {
     expect(await api.getQuestions(created.tenant)).toEqual({ tenant: created.tenant, template: "food",
       questions: food.questions.map((text, index) => ({ id: `q${index + 1}`, text, answer: null })) });
     const logged = await api.listAudit(created.tenant);
-    expect(logged.entries.map((entry) => entry.action)).toEqual(["template.applied", "shop.created"]);
-    expect(logged.entries[0]?.subject).toEqual({ templateId: "food" });
+    // Newest first: the template's four routines were made after it was applied, as the API logs them, one entry each.
+    expect(logged.entries.map((entry) => entry.action)).toEqual([...Array(4).fill("routine.created"), "template.applied", "shop.created"]);
+    expect(logged.entries[4]?.subject).toEqual({ templateId: "food" });
   });
 
   it("refuses a template that is not one and makes no shop; a shop with none has nothing to ask", async () => {

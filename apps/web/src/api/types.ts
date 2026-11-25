@@ -575,6 +575,76 @@ export type OutpostRemoval = { removed: true; outpostId: string; stepsRefused: n
 /// only its SHA-256, so a credential that is lost is given again.
 export type OutpostCredential = { outpost: Outpost; credential: string };
 
+/// A shop's routines as the operator reads and changes them (docs/pilot-api.md, "Routines"): what Buddy's team does on its own
+/// schedule. A run only ever makes a draft for the owner to read, and the console makes no routine: operators make one through
+/// `POST /v1/admin/routines`, and this app has no page for it yet.
+///
+/// When a routine starts: a time of day, some weekdays, a day of the month, a window of the day, or an event. `at`, `from` and
+/// `to` are "HH:MM" in the routine's own time zone, and weekdays count Sunday as 0.
+export type RoutineTrigger =
+  | { kind: "daily"; at: string }
+  | { kind: "weekly"; weekdays: number[]; at: string }
+  | { kind: "monthly"; day: number | "last"; at: string }
+  | { kind: "window"; from: string; to: string }
+  | { kind: "stockBelow"; threshold: number };
+
+/// What a routine does. A reply, a send, a payment and a deletion always ask the owner first.
+export type RoutineAction = "brief" | "draft" | "reply" | "send" | "pay" | "delete";
+
+/// How one run of a routine stands. `running` is a run that started and whose end was not written down. `reason` is a code
+/// (`routine_paused`, `team_paused`, `member_off`, `not_counted_in`, `routines_off`, `cloud_off`, `consent_required`,
+/// `nothing_to_answer`, or the job's own reason for failing), which this console puts in words and shows as it is when it does
+/// not know the code yet, so it is kept a string.
+export type RoutineRun = {
+  routineId: string;
+  /// The instant the run was meant for, never when its alarm came.
+  instant: string;
+  status: "running" | "done" | "failed" | "skipped" | "missed";
+  reason?: string;
+  member: WorkerMember;
+  /// The job's task, for a run that started one.
+  taskId?: string;
+  /// When the run was last written.
+  at: string;
+};
+
+/// One routine as the list shows it. `when` is the trigger in the API's words ("Every day at 08:00"). `next` is null while the
+/// routine or the whole team is paused, its member is off the team, or it waits on a stock feed (`waitsFor`), which Manut AI
+/// does not have yet. `lastRun` is the newest run kept, or null when none has been made.
+export type Routine = {
+  id: string;
+  name: string;
+  action: RoutineAction;
+  trigger: RoutineTrigger;
+  /// An IANA zone, "Asia/Bangkok" unless the routine was made with another.
+  timeZone: string;
+  asksFirst: boolean;
+  /// Whose job each run starts.
+  member: WorkerMember;
+  when: string;
+  paused: boolean;
+  next: string | null;
+  waitsFor?: "stock_feed";
+  /// The shop template it came from.
+  template?: string;
+  createdAt: string;
+  lastRun: RoutineRun | null;
+};
+
+/// The shop's team as the routines see it. `paused` is Pause everyone, since `since`; while it is on, nothing new starts, from a
+/// routine, an operator's job or the owner's ask for the books. `members` are the members on: all three, unless a shop template
+/// turned on fewer.
+export type Team = { paused: boolean; since: string | null; members: WorkerMember[] };
+
+/// `GET /v1/admin/routines`: the team and every routine of the shop, in the order they were made.
+export type RoutinesView = { tenant: string; team: Team; routines: Routine[] };
+
+/// One routine of one shop, for pausing, resuming or removing it.
+export type RoutineRef = { tenant: string; routineId: string };
+
+/// What removing a routine answers: the routine, its runs and its clock are gone.
+export type RoutineRemoval = { removed: string };
+
 /// Buddy's team members who run as workers, as the API names them (docs/pilot-api.md, "Workers' drafts").
 export type WorkerMember = "nam" | "pim" | "ton";
 
@@ -771,6 +841,25 @@ export interface PilotApi {
   /// request asks the browser to keep nothing). The old one stops working at once, and the outpost is `asleep` until the holder
   /// of the new one beats. Rejects with 404 `outpost_not_found`.
   replaceOutpostCredential(input: OutpostRef): Promise<OutpostCredential>;
+
+  /// The shop's routines (docs/pilot-api.md, "Routines"). The operator reads them and may pause, resume or remove a routine, and
+  /// pause or resume the whole team; there is no route here to make one. Each rejects with 400 `tenant_required` and 503
+  /// `routines_unavailable`, and each change with 404 `shop_not_found` for a tenant that is no pilot shop and 503
+  /// `shop_unavailable`. A routine change also rejects with 400 `invalid_request` for an id that is not a routine's.
+  /// `GET /v1/admin/routines?tenant=`: the team and every routine, each with its next run and its latest run.
+  getRoutines(tenant: string): Promise<RoutinesView>;
+  /// `POST /v1/admin/routines/pause`: the routine as it now stands, with no next run. Pausing a paused routine changes nothing and
+  /// logs nothing. Rejects with 404 `not_found` when the shop has no routine with that id.
+  pauseRoutine(input: RoutineRef): Promise<Routine>;
+  /// `POST /v1/admin/routines/resume`: the routine as it now stands, its next run worked out from now. A run it skipped while
+  /// paused is not made up. Rejects with 404 `not_found`.
+  resumeRoutine(input: RoutineRef): Promise<Routine>;
+  /// `POST /v1/admin/routines/remove`: the routine, its runs and its clock are gone. Rejects with 404 `not_found`.
+  removeRoutine(input: RoutineRef): Promise<RoutineRemoval>;
+  /// `POST /v1/admin/team/pause`: Pause everyone. Pausing a paused team changes nothing and keeps when it began.
+  pauseTeam(input: { tenant: string }): Promise<Team>;
+  /// `POST /v1/admin/team/resume`: the team starts work again. Resuming a team that is not paused changes nothing.
+  resumeTeam(input: { tenant: string }): Promise<Team>;
 
   /// `GET /v1/admin/workers/drafts`: one page of what Nam, Pim and Ton did for a shop, newest first, drafts and handovers
   /// included. It only reads: a draft in it has not been sent. Rejects with 400 `tenant_required`, 400 `invalid_request` for a

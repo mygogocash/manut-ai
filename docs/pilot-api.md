@@ -191,7 +191,7 @@ one request, never one per shop. Each row names the shop, says "At the cap" or "
 button opens that shop's month below, which says which thresholds its spend reached. Refresh and a cap change read the
 list again.
 
-The console's **Connections** page, last in its side menu, adds no route. For the shop chosen on the page it lists the
+The console's **Connections** page, next to last in its side menu (Routines follows it), adds no route. For the shop chosen on the page it lists the
 shop's site sign-ins (`GET /v1/admin/vault/sign-ins`: the site, its addresses, the account, who may use it, working or
 broken and who said so when, last used, and when its password was set) and its outposts (`GET /v1/admin/outposts`: name,
 kind, online or asleep, last heartbeat, registered). Each list is read by its own route and says its own failure, so one
@@ -203,13 +203,30 @@ once, with a Copy button, held only in the page's state, and its request asks th
 no password: it says in one line that adding a sign-in and giving one a new password are the owner's, from their own app
 ("Vault sign-ins and outposts", below).
 
+The console's **Routines** page, last in its side menu, adds no route. Until an owner's account is linked a pilot shop's routines
+are the operator's, since its tenant is never a session ("Routines", below), and this is where they are read. For the shop
+chosen on the page it reads `GET /v1/admin/routines` once, since the team and the routines come in one answer, so a failure to
+read them is said once, where the routines would be, with its own Try again. It shows the team (on, or paused since when, and
+which members are on) and each routine: its name, whose job each run is, `when` (the API's words), its next run in Bangkok time
+or why there is none (the routine is paused, everyone is paused, its member is off the team, or it waits for a stock feed; every
+reason that holds is said), whether it asks the owner first, the shop template it came from (named from `GET
+/v1/admin/templates`, and by its id when that cannot be read) and its latest run: when it was meant for and how it ended (`done`,
+`failed`, `skipped`, `missed` or `running`), with the reason in words. An operator may pause a routine (`/routines/pause`),
+resume one (`/routines/resume`), remove one (`/routines/remove`), Pause everyone (`/team/pause`) and Resume (`/team/resume`).
+Each asks first, in its row, in words that name what will happen (a removal says the routine, its runs and its clock go; Pause
+everyone says what stops, below), and one change runs at a time. A 404 `not_found` says the routine is already gone and reads the
+list again, as the Connections page does for a sign-in that moved on; 404 `shop_not_found` is said plainly (it is not one of the
+pilot's shops); a 503 `routines_unavailable` on a change says nothing may have changed. The page makes no routine: operators make
+one through `POST /v1/admin/routines`, and a page for making one is left for a later slice. Nothing on it sends, posts or pays
+anything, since a routine only makes a draft for the owner to read.
+
 The console's **Shops** page, first in its side menu, adds no route. It lists every pilot shop from routes in this table and
 reads them all at once, one request each: `GET /v1/admin/pilot/shops` for the rows, `GET /v1/admin/pilot/gate` for each
 shop's trial day, whether it has paid and whether it is active, `GET /v1/admin/model/usage` (this Bangkok month) for its
 spend against its cap, and `GET /v1/admin/audit?limit=1` for when its log last changed. A request that fails is said to
 have failed, in its cell and, with the shop's name, in a banner, and every other cell stays; the gate failing as a whole
-says so and leaves the rest. Each row links to the shop's Messages, Drafts, Audit, Memory, People, Model spend and
-Connections pages. A shop its
+says so and leaves the rest. Each row links to the shop's Messages, Drafts, Audit, Memory, People, Model spend,
+Connections and Routines pages. A shop its
 owner made in the app (`selfServe`, "Making a shop of your own", below) is marked "Made by its owner" under its name, so an
 operator sees where it came from; the Pilot gate page marks it the same way and says whether it is counted.
 
@@ -2121,8 +2138,18 @@ written: a routine made for it would set a clock that fires for nothing, every t
 never be a session, so its routines are the operator's until the operator links the owner's account: that account's
 owner session then has these routes for its shop ("Several shops", below), and the log names the account's id.
 
+The console reads a shop's routines and pauses, resumes and removes them from its Routines page (the paragraph beside the
+Connections page's, above). It makes none: an operator makes a routine with `POST /v1/admin/routines`, and a page for making one
+is left for later.
+
 Making, pausing, resuming or removing a routine needs neither a switch nor the owner's consent: nothing runs then. Every
 run reads both.
+
+Pause everyone stops every start of work in the shop, not only the routines' clocks: while the team is paused nothing new starts,
+whether from a routine's clock, an operator's `POST /v1/admin/workers/run` (409 `team_paused`) or the owner's ask for a month of
+the books (`POST /v1/google/books`, 409 `team_paused`, "Google Sheets for Ton's books", below). A job already started is not
+stopped, and a routine keeps its own setting, so Resume puts everything back as it was. The Routines page's question says all of
+this before it is answered.
 
 ```ts
 type Trigger =
@@ -2220,6 +2247,12 @@ A refusal answers `{ "error": code }`, and nothing is kept:
 - **Export and deletion.** The shop's export carries `routines`: the team, every routine, the first-week questions
   (below) and every run kept (the newest 30 of each routine). Deleting the shop removes them with its other records,
   and its clocks with its schedules.
+- **Practice mode.** The fake in `apps/web` keeps each shop's team, routines and runs, and says a routine's words and next run
+  by `@manut/routine-rules`' own `describeTrigger` and `nextRun`. Its read answers the empty state for any tenant that is one, as
+  the API's does (only a change looks for the shop), and its changes answer the API's refusals and write the same audit entries by
+  the routine's id, none for a change that changes nothing. A shop made from a template starts with the template's routines, each
+  paused, its members on and each logged as `routine.created`. Baan Mali starts with six routines that show every way a run can
+  stand. The world is saved as version 13, and one saved before routines is replaced.
 
 ## Shop templates
 

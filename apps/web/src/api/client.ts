@@ -38,6 +38,9 @@ import {
   type PilotGate,
   type ProposedReply,
   type ReplyAction,
+  type Routine,
+  type RoutineRemoval,
+  type RoutinesView,
   type Shop,
   type ShopDeletion,
   type ShopExport,
@@ -48,6 +51,7 @@ import {
   type SignIn,
   type SignInRemoval,
   type SubscriptionPayment,
+  type Team,
   type UnlinkedOwner,
   type WebAnswer,
   type WebSession,
@@ -368,6 +372,37 @@ export function createHttpApi(options: HttpApiOptions): PilotApi {
         admin: true,
         noStore: true,
       }),
+
+    // The shop's routines. A change is built field by field, as its route takes exactly these fields, so nothing a caller adds
+    // ever travels. A pause or a resume answers the routine as it now stands, and a team change answers the team, each unwrapped
+    // from its route's object; a removal answers the id it removed.
+    getRoutines: (tenant) =>
+      request<RoutinesView>({ method: "GET", path: "/v1/admin/routines", query: { tenant }, admin: true }),
+    pauseRoutine: async (input) =>
+      (await request<{ routine: Routine }>({
+        method: "POST",
+        path: "/v1/admin/routines/pause",
+        body: { tenant: input.tenant, routineId: input.routineId },
+        admin: true,
+      })).routine,
+    resumeRoutine: async (input) =>
+      (await request<{ routine: Routine }>({
+        method: "POST",
+        path: "/v1/admin/routines/resume",
+        body: { tenant: input.tenant, routineId: input.routineId },
+        admin: true,
+      })).routine,
+    removeRoutine: (input) =>
+      request<RoutineRemoval>({
+        method: "POST",
+        path: "/v1/admin/routines/remove",
+        body: { tenant: input.tenant, routineId: input.routineId },
+        admin: true,
+      }),
+    pauseTeam: async (input) =>
+      (await request<{ team: Team }>({ method: "POST", path: "/v1/admin/team/pause", body: { tenant: input.tenant }, admin: true })).team,
+    resumeTeam: async (input) =>
+      (await request<{ team: Team }>({ method: "POST", path: "/v1/admin/team/resume", body: { tenant: input.tenant }, admin: true })).team,
 
     // Only what the caller gave goes in the query, so the API's own defaults decide the rest.
     listWorkerJobs: (tenant, query = {}) =>

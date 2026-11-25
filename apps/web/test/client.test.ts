@@ -5,6 +5,7 @@ import { ApiError, type PilotApi } from "../src/api/types";
 // API's admin gate and handlers still have.
 import browserControlSource from "../../api/src/browser-control.ts?raw";
 import indexSource from "../../api/src/index.ts?raw";
+import routinesSource from "../../api/src/routines.ts?raw";
 
 type Call = {
   url: string;
@@ -824,6 +825,163 @@ describe("the API client, for a shop's sign-ins and outposts", () => {
       () => api.listOutposts("t1"),
       () => api.removeOutpost({ tenant: "t1", outpostId: "op-1" }),
       () => api.replaceOutpostCredential({ tenant: "t1", outpostId: "op-1" }),
+    ]) await expect(call()).rejects.toMatchObject({ code: "operator_key_missing" });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+});
+
+// A shop's routines (docs/pilot-api.md, "Routines"): the team and its routines are read, and the operator may pause, resume and remove a
+// routine and pause or resume the team. Each change sends the tenant and exactly what its route takes, and answers what the API answers,
+// unwrapped; no route here makes a routine.
+describe("the API client, for a shop's routines and team", () => {
+  const routine = {
+    id: "rt-0a1b2c3d4-000-0a1b2c3d", name: "Morning brief", action: "brief", trigger: { kind: "daily", at: "08:00" },
+    timeZone: "Asia/Bangkok", asksFirst: false, member: "ton", when: "Every day at 08:00", paused: false,
+    next: "2026-11-24T01:00:00.000Z", createdAt: "2026-11-14T03:00:00.000Z", lastRun: null,
+  };
+  const team = { paused: true, since: "2026-11-23T03:00:00.000Z", members: ["nam", "pim", "ton"] };
+  const answers: Record<string, unknown> = {
+    "GET /v1/admin/routines": { tenant: "pilot:1", team: { ...team, paused: false, since: null }, routines: [routine] },
+    "POST /v1/admin/routines/pause": { routine: { ...routine, paused: true, next: null } },
+    "POST /v1/admin/routines/resume": { routine },
+    "POST /v1/admin/routines/remove": { removed: routine.id },
+    "POST /v1/admin/team/pause": { team },
+    "POST /v1/admin/team/resume": { team: { ...team, paused: false, since: null } },
+  };
+  const answering = (url: string, method = "GET") => json(answers[`${method} ${new URL(url).pathname}`] ?? { error: "not_found" }, 200);
+
+  function harnessOf(key: string | null) {
+    const calls: Call[] = [];
+    const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({ url: String(input), method: init?.method ?? "GET", headers: new Headers(init?.headers),
+        body: typeof init?.body === "string" && init.body.startsWith("{") ? JSON.parse(init.body) : init?.body, raw: init?.body,
+        credentials: init?.credentials, cache: init?.cache });
+      return answering(String(input), init?.method);
+    });
+    return { api: createHttpApi({ origin: "https://api.example.test/", operatorKey: () => key, fetch }), calls, fetch };
+  }
+
+  async function everyRoutineRoute(api: PilotApi) {
+    await api.getRoutines("pilot:1");
+    await api.pauseRoutine({ tenant: "pilot:1", routineId: routine.id });
+    await api.resumeRoutine({ tenant: "pilot:1", routineId: routine.id });
+    await api.removeRoutine({ tenant: "pilot:1", routineId: routine.id });
+    await api.pauseTeam({ tenant: "pilot:1" });
+    await api.resumeTeam({ tenant: "pilot:1" });
+  }
+
+  it("sends the operator key to the contract's six paths, with the tenant and exactly what each route takes", async () => {
+    const { api, calls } = harnessOf("op-key-123");
+    await everyRoutineRoute(api);
+
+    expect(calls.map((c) => `${c.method} ${c.url}`)).toEqual([
+      "GET https://api.example.test/v1/admin/routines?tenant=pilot%3A1",
+      "POST https://api.example.test/v1/admin/routines/pause",
+      "POST https://api.example.test/v1/admin/routines/resume",
+      "POST https://api.example.test/v1/admin/routines/remove",
+      "POST https://api.example.test/v1/admin/team/pause",
+      "POST https://api.example.test/v1/admin/team/resume",
+    ]);
+    for (const call of calls) {
+      expect(call.headers.get("authorization")).toBe("Bearer op-key-123");
+      expect(call.credentials).toBe("include");
+    }
+    expect(calls[0]?.raw).toBeUndefined();
+    for (const change of [1, 2, 3]) expect(calls[change]?.body).toEqual({ tenant: "pilot:1", routineId: routine.id });
+    for (const change of [4, 5]) expect(calls[change]?.body).toEqual({ tenant: "pilot:1" });
+  });
+
+  it("calls only routes the API's admin gate and its routine handlers still have", () => {
+    for (const route of [
+      "GET /v1/admin/routines", "POST /v1/admin/routines/pause", "POST /v1/admin/routines/resume", "POST /v1/admin/routines/remove",
+      "POST /v1/admin/team/pause", "POST /v1/admin/team/resume",
+    ]) {
+      expect(indexSource, `${route} in the admin gate`).toContain(`"${route}"`);
+    }
+    // The handlers read the same paths as a session's, without `/admin`: a change is the same whoever makes it.
+    for (const route of ["GET /v1/admin/routines", "POST /v1/routines/pause", "POST /v1/routines/resume", "POST /v1/routines/remove",
+      "POST /v1/team/pause", "POST /v1/team/resume"]) {
+      expect(routinesSource, `${route} in the routine routes`).toContain(`"${route}"`);
+    }
+  });
+
+  it("never sends a field its route does not take, and sends no body on the read", async () => {
+    const { api, calls } = harnessOf("op-key-123");
+    const extra = { name: "Stolen", action: "pay", asksFirst: false, member: "pim", trigger: { kind: "daily", at: "01:00" }, paused: false,
+      password: "hunter2" };
+    await api.pauseRoutine({ tenant: "t1", routineId: "rt-1", ...extra } as never);
+    await api.resumeRoutine({ tenant: "t1", routineId: "rt-1", ...extra } as never);
+    await api.removeRoutine({ tenant: "t1", routineId: "rt-1", ...extra } as never);
+    await api.pauseTeam({ tenant: "t1", ...extra } as never);
+    await api.resumeTeam({ tenant: "t1", ...extra } as never);
+
+    expect(calls.map((c) => c.raw)).toEqual([
+      '{"tenant":"t1","routineId":"rt-1"}',
+      '{"tenant":"t1","routineId":"rt-1"}',
+      '{"tenant":"t1","routineId":"rt-1"}',
+      '{"tenant":"t1"}',
+      '{"tenant":"t1"}',
+    ]);
+  });
+
+  it("answers what the API answers: the view whole, each routine and the team unwrapped, and the id that was removed", async () => {
+    const { api } = harnessOf("op-key-123");
+    expect(await api.getRoutines("pilot:1")).toEqual(answers["GET /v1/admin/routines"]);
+    expect(await api.pauseRoutine({ tenant: "pilot:1", routineId: routine.id })).toEqual({ ...routine, paused: true, next: null });
+    expect(await api.resumeRoutine({ tenant: "pilot:1", routineId: routine.id })).toEqual(routine);
+    expect(await api.removeRoutine({ tenant: "pilot:1", routineId: routine.id })).toEqual({ removed: routine.id });
+    expect(await api.pauseTeam({ tenant: "pilot:1" })).toEqual(team);
+    expect(await api.resumeTeam({ tenant: "pilot:1" })).toEqual({ ...team, paused: false, since: null });
+  });
+
+  it("sets no-store on none of the routine routes, since no routine answer holds a secret", async () => {
+    const { api, calls } = harnessOf("op-key-123");
+    await everyRoutineRoute(api);
+    expect(calls.map((c) => c.cache)).toEqual([undefined, undefined, undefined, undefined, undefined, undefined]);
+  });
+
+  it("turns every refusal of the routine routes into an ApiError with the API's status and code", async () => {
+    const calls: [(api: PilotApi) => Promise<unknown>, number, string][] = [
+      [(api) => api.getRoutines(""), 400, "tenant_required"],
+      [(api) => api.getRoutines("t1"), 503, "routines_unavailable"],
+      [(api) => api.pauseRoutine({ tenant: "t1", routineId: "rt-9" }), 404, "shop_not_found"],
+      [(api) => api.pauseRoutine({ tenant: "t1", routineId: "rt-9" }), 404, "not_found"],
+      [(api) => api.pauseRoutine({ tenant: "t1", routineId: "nope" }), 400, "invalid_request"],
+      [(api) => api.pauseRoutine({ tenant: "t1", routineId: "rt-1" }), 503, "routines_unavailable"],
+      [(api) => api.resumeRoutine({ tenant: "t1", routineId: "rt-9" }), 404, "not_found"],
+      [(api) => api.resumeRoutine({ tenant: "t1", routineId: "rt-1" }), 503, "shop_unavailable"],
+      [(api) => api.removeRoutine({ tenant: "t1", routineId: "rt-9" }), 404, "not_found"],
+      [(api) => api.removeRoutine({ tenant: "t1", routineId: "rt-9" }), 404, "shop_not_found"],
+      [(api) => api.pauseTeam({ tenant: "t1" }), 404, "shop_not_found"],
+      [(api) => api.pauseTeam({ tenant: "t1" }), 503, "routines_unavailable"],
+      [(api) => api.resumeTeam({ tenant: "t1" }), 400, "tenant_required"],
+      [(api) => api.getRoutines("t1"), 401, "unauthorized"],
+    ];
+    for (const [call, status, code] of calls) {
+      const { api } = harness("op-key-123", () => json({ error: code }, status));
+      const failed = await call(api).catch((e: unknown) => e);
+      expect(failed).toBeInstanceOf(ApiError);
+      expect(failed).toMatchObject({ status, code });
+    }
+  });
+
+  it("reports a request that never got an answer as status 0, so the page can say it could not reach the API", async () => {
+    const api = createHttpApi({ origin: "https://api.example.test", operatorKey: () => "op-key-123",
+      fetch: () => Promise.reject(new TypeError("offline")) });
+    await expect(api.getRoutines("t1")).rejects.toMatchObject({ status: 0, code: "network" });
+    await expect(api.pauseTeam({ tenant: "t1" })).rejects.toMatchObject({ status: 0, code: "network" });
+  });
+
+  it("refuses every routine route with no key and sends nothing", async () => {
+    const { api, fetch } = harnessOf(null);
+    await expect(everyRoutineRoute(api)).rejects.toMatchObject({ code: "operator_key_missing" });
+    for (const call of [
+      () => api.getRoutines("t1"),
+      () => api.pauseRoutine({ tenant: "t1", routineId: "rt-1" }),
+      () => api.resumeRoutine({ tenant: "t1", routineId: "rt-1" }),
+      () => api.removeRoutine({ tenant: "t1", routineId: "rt-1" }),
+      () => api.pauseTeam({ tenant: "t1" }),
+      () => api.resumeTeam({ tenant: "t1" }),
     ]) await expect(call()).rejects.toMatchObject({ code: "operator_key_missing" });
     expect(fetch).not.toHaveBeenCalled();
   });

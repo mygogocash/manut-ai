@@ -11,7 +11,9 @@ import {
   type ModelUsage,
   type People,
   type PilotGate,
+  type Routine,
   type Shop,
+  type Team,
 } from "../src/api";
 import {
   auditActorText,
@@ -50,20 +52,34 @@ import {
   moneyText,
   monthName,
   monthsBack,
+  nextRunText,
+  noNextReasons,
   outpostTag,
   peopleChangedBy,
   peopleChangesOf,
   peopleErrorText,
   peopleWords,
   percentUsed,
+  routineReasonText,
+  routinesErrorText,
+  routinesWords,
+  routineTag,
+  ROUTINES_MOVED_ON,
+  runTag,
+  runText,
   shopsWords,
   signInTag,
   spendLevel,
   subscriptionErrorText,
+  teamTag,
   unfinishedText,
 } from "../src/ops/words";
 // The vault's own list of how an outpost may say a step failed, read as text for the reason apiAuditLog.ts gives.
 import signInVaultSource from "../../api/src/sign-in-vault.ts?raw";
+// The API's own sources for why a routine's run did not start or did not finish, read as text for the words the Routines page has for them.
+import routinesSource from "../../api/src/routines.ts?raw";
+import routineStoreSource from "../../api/src/routine-store.ts?raw";
+import shopWaitsSource from "../../api/src/shop-waits.ts?raw";
 
 /// The codes of the API's `STEP_FAILURES`, as its source writes them.
 function stepFailures(): string[] {
@@ -1305,7 +1321,7 @@ describe("the shops overview's words", () => {
     expect(shopsWords.spendOf(0, 20000)).toBe("฿0 of ฿200");
     expect(shopsWords.spendOf(5, 20000)).toBe("฿0.05 of ฿200");
     expect(shopsWords.openLabel("Audit", "Baan Mali")).toBe("Audit for Baan Mali");
-    expect(Object.values(shopsWords.open)).toEqual(["Messages", "Drafts", "Audit", "Memory", "People", "Model spend", "Connections"]);
+    expect(Object.values(shopsWords.open)).toEqual(["Messages", "Drafts", "Audit", "Memory", "People", "Model spend", "Connections", "Routines"]);
   });
 
   it("says why nothing is shown for the trial, payment and activity when the gate could not be read", () => {
@@ -1487,5 +1503,195 @@ describe("the Connections page's words", () => {
 
   it("treats exactly the two refusals that say a record is gone as the list having moved on", () => {
     expect([...CONNECTIONS_MOVED_ON].sort()).toEqual(["outpost_not_found", "sign_in_not_found"]);
+  });
+});
+
+
+// The Routines page's words (docs/pilot-api.md, "Routines"): the team, each routine's timing and next run, and how its last run ended.
+describe("the Routines page's words", () => {
+  const W = routinesWords;
+  // 10:00 on Monday 23 November in Bangkok.
+  const NOW = Date.parse("2026-11-23T03:00:00Z");
+  const TEAM: Team = { paused: false, since: null, members: ["nam", "pim", "ton"] };
+  const routine = (overrides: Partial<Routine> = {}): Routine => ({
+    id: "rt-1", name: "Morning brief", action: "brief", trigger: { kind: "daily", at: "08:00" }, timeZone: "Asia/Bangkok", asksFirst: false,
+    member: "ton", when: "Every day at 08:00", paused: false, next: "2026-11-24T01:00:00.000Z", createdAt: "2026-11-10T03:00:00.000Z",
+    lastRun: null, ...overrides,
+  });
+
+  it("names the page and says what it cannot do: it makes no routine, and a routine only drafts", () => {
+    expect(W.nav).toBe("Routines");
+    expect(W.title).toBe("Routines");
+    expect(W.intro).toContain("only makes a draft for the owner to read");
+    expect(W.intro).toContain("Bangkok time");
+    expect(W.makeNote).toBe("This console does not make routines yet. An operator makes one with POST /v1/admin/routines, and a shop made from a template starts with the template's.");
+    expect(W.routinesEmpty).toContain("POST /v1/admin/routines");
+  });
+
+  it("says since when everyone is paused, today with the time and another day with the date, and leaves out a time that is not one", () => {
+    expect(W.teamPaused("2026-11-23T01:30:00.000Z", NOW)).toBe("Everyone is paused since 08:30 today.");
+    expect(W.teamPaused("2026-11-21T10:15:00.000Z", NOW)).toBe("Everyone is paused since 21 November at 17:15.");
+    expect(W.teamPaused(null, NOW)).toBe("Everyone is paused.");
+    expect(W.teamPaused("recently", NOW)).toBe("Everyone is paused.");
+    expect(W.teamOn).toBe("Everyone is on.");
+  });
+
+  it("says who is on, and who is off and why that matters, for every size of team", () => {
+    expect(W.membersOn(["nam", "pim", "ton"])).toBe("Nam, Pim and Ton are on.");
+    expect(W.membersOn(["nam", "ton"])).toBe("Nam and Ton are on. Pim is off, because the shop's template turned on fewer members, so a routine that is their job does not run.");
+    expect(W.membersOn(["ton"])).toBe("Ton is on. Nam and Pim are off, because the shop's template turned on fewer members, so a routine that is their job does not run.");
+    expect(W.membersOn([])).toBe("Nobody is on. Nam, Pim and Ton are off, because the shop's template turned on fewer members, so a routine that is their job does not run.");
+    expect(W.membersOn(["nam", "kit"])).toBe("Nam and kit are on. Pim and Ton are off, because the shop's template turned on fewer members, so a routine that is their job does not run.");
+  });
+
+  it("says a routine's trigger in the API's words, and the zone only when it is not the shop's", () => {
+    expect(W.when({ when: "Every day at 08:00", timeZone: "Asia/Bangkok" })).toBe("Every day at 08:00");
+    expect(W.when({ when: "Every day at 08:00", timeZone: "Asia/Tokyo" })).toBe("Every day at 08:00 (Asia/Tokyo)");
+    expect(W.when({ when: "", timeZone: "Asia/Bangkok" })).toBe("Its timing could not be read.");
+  });
+
+  it("says whether a routine asks the owner first, and why one that does not need to", () => {
+    expect(W.asksFirst(true)).toBe("Asks the owner first.");
+    expect(W.asksFirst(false)).toBe("Does not ask first: it only makes a draft for the owner to read.");
+    expect(W.fromTemplate("Handmade and gifts")).toBe("Made from the Handmade and gifts template.");
+    expect(W.jobOf("pim")).toBe("Pim's job.");
+    expect(W.jobOf("kit")).toBe("kit's job.");
+  });
+
+  it("says when the last run was meant for, today or on another day, and tolerates a time that is not one", () => {
+    expect(W.lastRun("2026-11-23T01:00:00.000Z", NOW)).toBe("Last run was meant for 08:00 today.");
+    expect(W.lastRun("2026-11-22T05:00:00.000Z", NOW)).toBe("Last run was meant for 22 November at 12:00.");
+    expect(W.lastRun("yesterday", NOW)).toBe("Last run.");
+    expect(W.neverRan).toBe("Has not run yet.");
+  });
+
+  it("counts routines and the paused among them", () => {
+    expect(W.routinesCount(0, 0)).toBe("0 routines");
+    expect(W.routinesCount(1, 0)).toBe("1 routine");
+    expect(W.routinesCount(6, 1)).toBe("6 routines, 1 paused");
+    expect(W.routinesCount(2, 2)).toBe("2 routines, 2 paused");
+  });
+
+  it("says why a routine has no next run, every reason that holds, in the order the API decides them", () => {
+    expect(noNextReasons({ paused: false, member: "ton" }, TEAM)).toEqual([]);
+    expect(noNextReasons({ paused: true, member: "ton" }, TEAM)).toEqual(["this routine is paused"]);
+    expect(noNextReasons({ paused: false, member: "ton" }, { ...TEAM, paused: true })).toEqual(["everyone is paused"]);
+    expect(noNextReasons({ paused: false, member: "pim" }, { ...TEAM, members: ["nam", "ton"] })).toEqual(["Pim is not on this shop's team"]);
+    expect(noNextReasons({ paused: false, member: "ton", waitsFor: "stock_feed" }, TEAM))
+      .toEqual(["it waits for a stock feed, which Manut AI does not have yet"]);
+    expect(noNextReasons({ paused: true, member: "pim", waitsFor: "stock_feed" }, { paused: true, since: null, members: ["nam"] })).toEqual([
+      "this routine is paused", "everyone is paused", "Pim is not on this shop's team", "it waits for a stock feed, which Manut AI does not have yet"]);
+  });
+
+  it("says the next run in Bangkok time when there is one, why there is none when there is not, and never a blank", () => {
+    expect(nextRunText(routine({ next: "2026-11-23T05:00:00.000Z" }), TEAM, NOW)).toBe("Next run at 12:00.");
+    expect(nextRunText(routine(), TEAM, NOW)).toBe("Next run on 24 November at 08:00.");
+    // A time that falls just after midnight in Bangkok is the next day's, whatever the date in UTC is.
+    expect(nextRunText(routine({ next: "2026-11-23T17:30:00.000Z" }), TEAM, NOW)).toBe("Next run on 24 November at 00:30.");
+    expect(nextRunText(routine({ next: null, paused: true }), TEAM, NOW)).toBe("No next run: this routine is paused.");
+    expect(nextRunText(routine({ next: null }), TEAM, NOW)).toBe("No next run is set.");
+    expect(nextRunText(routine({ next: "soon" }), TEAM, NOW)).toBe("No next run is set.");
+    expect(nextRunText(routine({ next: "soon" }), { ...TEAM, paused: true }, NOW)).toBe("No next run: everyone is paused.");
+  });
+
+  it("says what pausing a routine does, leaving out the skipped runs for one that has no clock", () => {
+    expect(W.pauseEffect({ name: "Morning brief" })).toBe("Morning brief stops running at once, and nothing else about it changes. Each time it would have run, a skipped run is written down, saying the routine was paused.");
+    expect(W.pauseEffect({ name: "Low stock", waitsFor: "stock_feed" })).toBe("Low stock stops running at once, and nothing else about it changes.");
+    expect(W.pauseTitle("Morning brief")).toBe("Pause Morning brief?");
+    expect(W.paused("Morning brief")).toBe("Paused Morning brief. It will not run until it is resumed.");
+  });
+
+  it("says what resuming does and what will still keep the routine from running, before anything is sent", () => {
+    expect(W.resumeEffect({ name: "Morning brief", member: "ton" }, TEAM))
+      .toBe("Morning brief runs again from its next time, which is worked out from now. A run it skipped while it was paused is not made up.");
+    expect(W.resumeEffect({ name: "Morning brief", member: "pim", waitsFor: "stock_feed" }, { paused: true, since: null, members: ["nam", "ton"] }))
+      .toBe("Morning brief runs again from its next time, which is worked out from now. A run it skipped while it was paused is not made up. It will still not run: everyone is paused, Pim is not on this shop's team and it waits for a stock feed, which Manut AI does not have yet.");
+    expect(W.resumeTitle("Morning brief")).toBe("Turn Morning brief back on?");
+    expect(W.resumed(routine(), TEAM, NOW)).toBe("Resumed Morning brief. Next run on 24 November at 08:00.");
+    expect(W.resumed(routine({ next: null }), { ...TEAM, paused: true }, NOW)).toBe("Resumed Morning brief. No next run: everyone is paused.");
+  });
+
+  it("says what removing a routine takes with it, and that it cannot be undone", () => {
+    expect(W.removeTitle("Morning brief")).toBe("Remove Morning brief?");
+    expect(W.removeEffect("Morning brief")).toBe("Morning brief, its runs and its clock go at once, and it will not run again. The audit log keeps how each of its runs ended.");
+    expect(W.removeNote).toBe("This cannot be undone. To have it again, an operator makes it again with POST /v1/admin/routines.");
+    expect(W.removed("Morning brief")).toBe("Removed Morning brief. Its runs and its clock are gone.");
+  });
+
+  it("names the one team change by what it stops, and each routine change in a label that says which routine", () => {
+    expect(W.pauseTeamTitle("Baan Mali")).toBe("Pause everyone for Baan Mali?");
+    expect(W.pauseTeamEffect).toContain("no routine runs");
+    expect(W.pauseTeamEffect).toContain("the owner's ask for a month of the books, is refused");
+    expect(W.pauseTeamEffect).toContain("A job already started is not stopped.");
+    expect(W.resumeTeamTitle("Baan Mali")).toBe("Resume the team for Baan Mali?");
+    expect(W.pauseLabel("Morning brief")).toBe("Pause the routine Morning brief");
+    expect(W.resumeLabel("Morning brief")).toBe("Resume the routine Morning brief");
+    expect(W.removeLabel("Morning brief")).toBe("Remove the routine Morning brief");
+    expect(W.pauseTeamLabel("Baan Mali")).toBe("Pause everyone for Baan Mali");
+    expect(W.resumeTeamLabel("Baan Mali")).toBe("Resume the team for Baan Mali");
+  });
+
+  it("tags a routine and a team as on or paused, and a run by how it ended, with a status it does not know shown as it is", () => {
+    expect(routineTag(false)).toEqual({ label: "On", className: "tag ok" });
+    expect(routineTag(true)).toEqual({ label: "Paused", className: "tag warn" });
+    expect(teamTag(false)).toEqual({ label: "On", className: "tag ok" });
+    expect(teamTag(true)).toEqual({ label: "Paused", className: "tag warn" });
+    expect(runTag("done")).toEqual({ label: "Done", className: "tag ok" });
+    expect(runTag("failed")).toEqual({ label: "Failed", className: "tag err" });
+    expect(runTag("skipped")).toEqual({ label: "Skipped", className: "tag" });
+    expect(runTag("missed")).toEqual({ label: "Missed", className: "tag warn" });
+    expect(runTag("running")).toEqual({ label: "Running", className: "tag run" });
+    expect(runTag("novel")).toEqual({ label: "novel", className: "tag" });
+  });
+
+  it("says what a run's reason means, and falls back to what the status alone says", () => {
+    expect(runText({ status: "skipped", reason: "routines_off" })).toBe("Routines were switched off.");
+    expect(runText({ status: "failed", reason: "not_configured" })).toBe("No model is set up yet.");
+    // The reason wins over the status; a status with no reason says what that status means.
+    expect(runText({ status: "done", reason: "nothing_to_answer" })).toBe("No customer message was waiting.");
+    expect(runText({ status: "done" })).toBe("It made a draft for the owner to read, on the Drafts page.");
+    expect(runText({ status: "missed" })).toBe("Its alarm came more than 15 minutes late, so it was not run.");
+    expect(runText({ status: "running" })).toBe("It started and has not said how it ended.");
+    expect(runText({ status: "failed" })).toBe("It ended without saying why.");
+    expect(runText({ status: "skipped" })).toBe("It was not run.");
+    expect(runText({ status: "novel" as never })).toBe("");
+    expect(runText({ status: "failed", reason: "" })).toBe("It ended without saying why.");
+  });
+
+  it("has words for every reason the API's routines give a run, and shows one it does not know as it is", () => {
+    // Read from the API's own sources: a reason the claim or the runner can write down is in plain words here, never the code.
+    const sources = `${routinesSource}\n${routineStoreSource}\n${shopWaitsSource}`;
+    for (const code of ["routine_paused", "team_paused", "member_off", "not_counted_in", "routines_off", "cloud_off", "consent_required",
+      "nothing_to_answer", "messages_unavailable", "job_error", "failed"]) {
+      expect(sources, `${code} in the API`).toContain(`"${code}"`);
+      expect(routineReasonText(code), code).not.toBe(`Reason: ${code}.`);
+    }
+    expect(routineReasonText("routines_off")).toBe("Routines were switched off.");
+    expect(routineReasonText("messages_unavailable")).toBe("The shop's customer messages could not be read.");
+    expect(routineReasonText("something_new")).toBe("Reason: something_new.");
+  });
+
+  it("puts the API's refusals in the page's words, the console's usual words for the rest, and what moved on as the list moving on", () => {
+    const text = routinesErrorText;
+    expect(text(new ApiError(503, "routines_unavailable"), "read")).toBe(W.readUnavailable);
+    expect(text(new ApiError(503, "routines_unavailable"), "change")).toBe(W.changeUnavailable);
+    expect(W.readUnavailable).toBe("The API could not read this shop's routines, so they are not shown. Try again.");
+    expect(W.changeUnavailable).toBe("The API could not reach this shop's routines, so nothing may have changed. Press Refresh to check, then try again.");
+    expect(text(new ApiError(503, "shop_unavailable"), "change")).toBe("The API could not read this shop's record, so it cannot say whether it is a pilot shop. Nothing was changed. Try again.");
+    expect(text(new ApiError(404, "shop_not_found"), "read")).toBe("This is not one of the pilot's shops, so it has no routines. It may have been deleted.");
+    expect(text(new ApiError(404, "shop_not_found"), "change")).toBe(W.notAShop);
+    expect(text(new ApiError(404, "not_found"), "change")).toBe("That routine is already gone. The list was refreshed.");
+    // The rest is the console's own: a refused key, an API out of reach, a code it has no words for, and something that is no error.
+    expect(text(new ApiError(403, "forbidden"), "change")).toBe(errorText(new ApiError(403, "forbidden")));
+    expect(text(new ApiError(401, "routines_unavailable"), "read")).toBe(errorText(new ApiError(401, "routines_unavailable")));
+    expect(text(new ApiError(0, "network"), "read")).toBe("Could not reach the API. Check the connection and try again.");
+    expect(text(new ApiError(400, "invalid_request"), "change")).toBe("The API did not accept this (invalid_request).");
+    expect(text(new ApiError(400, "tenant_required"), "read")).toBe("The API did not accept this (tenant_required).");
+    expect(text(new ApiError(500, "boom"), "change")).toBe("The API answered with an error (boom).");
+    expect(text(new Error("x"), "change")).toBe("Something unexpected went wrong. Try again.");
+  });
+
+  it("treats exactly the one refusal that says the routine is gone as the list having moved on", () => {
+    expect([...ROUTINES_MOVED_ON]).toEqual(["not_found"]);
   });
 });

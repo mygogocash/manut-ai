@@ -1,9 +1,15 @@
 import { describe, expect, it } from "vitest";
+import { checkRoutine, describeTrigger, nextRun } from "@manut/routine-rules";
 import { isAwaitingOwner, type AuditEntry, type AwaitingOwner, type DeletedShop } from "../src/api";
 import { auditReasonText, auditSentence } from "../src/ops/words";
 // The API's own words for what a credential looks like, read as text: it cannot be imported (it runs in the Worker), and a
 // credential the console's practice world makes must be one the API would accept.
 import browserControlSource from "../../api/src/browser-control.ts?raw";
+// The API's routines, read as text (they run in the Worker): the practice world's routine ids, and what each shop template's routines
+// are made of, must be what the API makes. The templates themselves are the package's own, which this test can import.
+import routineSetupSource from "../../api/src/routine-setup.ts?raw";
+import routineStoreSource from "../../api/src/routine-store.ts?raw";
+import { templates as packageTemplates } from "../../../packages/shop-templates/src/index";
 import { apiList } from "./apiAuditLog";
 import {
   createFakeApi, DEMO_DELETION_TOKENS, DEMO_TOKENS, lineSignature, PRACTICE_CHANNEL_SECRET, PRACTICE_OWNER_CODES,
@@ -1857,7 +1863,7 @@ describe("the fake's sample audit log, for what the API added this week", () => 
     const first = createFakeApi({ now: () => NOW, storage });
     await first.listShops();
     const world = JSON.parse(saved.get("manut.pilot.fake.v1")!) as Record<string, unknown>;
-    expect(world.version).toBe(12);
+    expect(world.version).toBe(13);
     saved.set("manut.pilot.fake.v1", JSON.stringify({ ...world, version: 9, audit: [] }));
     const api = createFakeApi({ now: () => NOW, storage });
     const log = (await api.listAudit(BAAN_MALI, { limit: 200 })).entries;
@@ -2133,7 +2139,7 @@ describe("the fake's vault, kept as the API keeps it", () => {
     expect((await reloaded.listOutposts(BAAN_MALI)).map((one) => one.id)).toEqual([MAC]);
     reloaded.reset();
     expect((await reloaded.listSignIns(BAAN_MALI)).map((one) => one.id)).toEqual([SHOPEE, CARRIER]);
-    // Version 11 is a world saved with no vault; one that says it is version 12 but lacks the vault is read as the half it holds.
+    // Version 11 is a world saved with no vault; one that says it is version 13 but lacks the vault is read as the half it holds.
     for (const change of [{ version: 11, vault: undefined }, { vault: undefined }]) {
       const world = JSON.parse(saved.get("manut.pilot.fake.v1")!) as Record<string, unknown>;
       saved.set("manut.pilot.fake.v1", JSON.stringify({ ...world, ...change }));
@@ -2164,5 +2170,358 @@ describe("the fake's vault, kept as the API keeps it", () => {
       () => api.removeSignIn({ tenant: 7 as never, signInId: SHOPEE }),
     ];
     for (const call of nobody) await expect(call()).rejects.toMatchObject({ status: 400, code: "tenant_required" });
+  });
+});
+
+describe("the fake's routines, kept as the API keeps them", () => {
+  const NOW = Date.parse("2026-11-23T03:00:00Z"); // 10:00 on Monday 23 November in Bangkok
+  const BAAN_MALI = "shop_baanmali";
+  const SABAI_TEA = "shop_sabaitea";
+  const MORNING = "rt-sample-morning-brief";
+  const GROWTH = "rt-sample-growth-brief";
+  const REPLIES = "rt-sample-answer-messages";
+  const POST = "rt-sample-friday-post";
+  const BOOKS = "rt-sample-month-books";
+  const STOCK = "rt-sample-low-stock";
+  const operator = { kind: "operator", email: null };
+  type Api = ReturnType<typeof createFakeApi>;
+  const fresh = (now = () => NOW) => createFakeApi({ now, webOrigin: "https://web.test" });
+
+  /// A browser's storage for the saved world, with the saved text where a test can reach it.
+  function kept() {
+    const saved = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => saved.get(key) ?? null,
+      setItem: (key: string, value: string) => void saved.set(key, value),
+      removeItem: (key: string) => void saved.delete(key),
+    };
+    return { saved, storage };
+  }
+
+  async function newest(api: Api, tenant: string) {
+    const { id: _id, at: _at, ...said } = (await api.listAudit(tenant, { limit: 1 })).entries[0]!;
+    return said;
+  }
+  const logLength = async (api: Api, tenant: string) => (await api.listAudit(tenant, { limit: 200 })).entries.length;
+  const routineOf = async (api: Api, id: string, tenant = BAAN_MALI) => (await api.getRoutines(tenant)).routines.find((one) => one.id === id)!;
+
+  it("starts Baan Mali with six routines in the order they were made, and Sabai Tea with none and its team on", async () => {
+    const api = fresh();
+    const view = await api.getRoutines(BAAN_MALI);
+    expect(view.tenant).toBe(BAAN_MALI);
+    expect(view.team).toEqual({ paused: false, since: null, members: ["nam", "pim", "ton"] });
+    expect(view.routines.map((routine) => [routine.id, routine.name, routine.member, routine.asksFirst, routine.paused])).toEqual([
+      [MORNING, "Morning brief", "ton", false, false],
+      [GROWTH, "Weekly growth brief", "ton", false, false],
+      [REPLIES, "Answer new customer messages", "nam", true, false],
+      [POST, "Draft the Friday post", "pim", true, true],
+      [BOOKS, "Month-end books", "ton", true, false],
+      [STOCK, "Tell me when candles run low", "ton", false, false],
+    ]);
+    expect(await api.getRoutines(SABAI_TEA)).toEqual({ tenant: SABAI_TEA,
+      team: { paused: false, since: null, members: ["nam", "pim", "ton"] }, routines: [] });
+  });
+
+  it("answers a read for any tenant that is one, as the API's read does, and a change only for a pilot shop", async () => {
+    const api = fresh();
+    // The API's list does not look for the shop: its object answers the empty state for a tenant it has nothing for.
+    expect(await api.getRoutines("shop_nobody")).toEqual({ tenant: "shop_nobody",
+      team: { paused: false, since: null, members: ["nam", "pim", "ton"] }, routines: [] });
+    const before = await logLength(api, BAAN_MALI);
+    for (const call of [
+      () => api.pauseRoutine({ tenant: "shop_nobody", routineId: MORNING }),
+      () => api.resumeRoutine({ tenant: "shop_nobody", routineId: MORNING }),
+      () => api.removeRoutine({ tenant: "shop_nobody", routineId: MORNING }),
+      () => api.pauseTeam({ tenant: "shop_nobody" }),
+      () => api.resumeTeam({ tenant: "shop_nobody" }),
+      // The shop is looked for before the id's form, so a bad id for a shop that is not one is the shop's refusal.
+      () => api.pauseRoutine({ tenant: "shop_nobody", routineId: "nope" }),
+    ]) await expect(call()).rejects.toMatchObject({ status: 404, code: "shop_not_found" });
+    expect(await logLength(api, BAAN_MALI)).toBe(before);
+    expect((await api.getRoutines("shop_nobody")).team.paused).toBe(false);
+  });
+
+  it("says each routine's trigger and next run as @manut/routine-rules does, from the clock, in Bangkok's zone", async () => {
+    const api = fresh();
+    const [morning, growth, replies, post, books, stock] = (await api.getRoutines(BAAN_MALI)).routines;
+    expect([morning, growth, replies, post, books, stock].map((routine) => [routine!.when, routine!.next])).toEqual([
+      ["Every day at 08:00", "2026-11-24T01:00:00.000Z"],
+      ["Every Monday at 08:00", "2026-11-30T01:00:00.000Z"],
+      ["Every day at 12:00", "2026-11-23T05:00:00.000Z"],
+      // Paused, so it has no next run, whatever its trigger.
+      ["Every Friday at 10:00", null],
+      ["On the last day of the month at 18:00", "2026-11-30T11:00:00.000Z"],
+      // A stock routine has no clock: it waits for a stock feed, which does not exist yet.
+      ["When stock drops under 5", null],
+    ]);
+    expect(stock!.waitsFor).toBe("stock_feed");
+    expect(morning).not.toHaveProperty("waitsFor");
+    // The words and the times are the package's, not the fake's own.
+    for (const routine of (await api.getRoutines(BAAN_MALI)).routines) {
+      const rules = { id: routine.id, name: routine.name, action: routine.action, timeZone: routine.timeZone, trigger: routine.trigger,
+        asksFirst: routine.asksFirst };
+      expect(routine.when).toBe(describeTrigger(rules));
+      if (!routine.paused && routine.trigger.kind !== "stockBelow") expect(routine.next).toBe(new Date(nextRun(rules, NOW)!).toISOString());
+      expect(checkRoutine(rules), routine.name).toBeNull();
+    }
+    // The clock moves the next run on: at 09:00 on Tuesday the morning brief is due the next morning, not that one.
+    const later = fresh(() => Date.parse("2026-11-24T02:00:00Z"));
+    expect((await later.getRoutines(BAAN_MALI)).routines[0]!.next).toBe("2026-11-25T01:00:00.000Z");
+  });
+
+  it("keeps each routine's newest run, placed at the latest start of its clock, with the reason the API would give", async () => {
+    const api = fresh();
+    const runs = Object.fromEntries((await api.getRoutines(BAAN_MALI)).routines.map((routine) => [routine.id, routine.lastRun]));
+    expect(runs[MORNING]).toEqual({ routineId: MORNING, instant: "2026-11-23T01:00:00.000Z", status: "done", member: "ton",
+      taskId: "worker-task-6a7c1f00-0000-4000-8000-000000000001", at: "2026-11-23T01:02:00.000Z" });
+    expect(runs[GROWTH]).toMatchObject({ instant: "2026-11-23T01:00:00.000Z", status: "failed", reason: "payments_unavailable",
+      taskId: "worker-task-6a7c1f00-0000-4000-8000-000000000004", member: "ton" });
+    expect(runs[REPLIES]).toMatchObject({ instant: "2026-11-22T05:00:00.000Z", status: "skipped", reason: "nothing_to_answer", member: "nam" });
+    expect(runs[POST]).toMatchObject({ instant: "2026-11-20T03:00:00.000Z", status: "skipped", reason: "routine_paused", member: "pim" });
+    // A run that came too late has no reason: it was not held, it was late.
+    expect(runs[BOOKS]).toEqual({ routineId: BOOKS, instant: "2026-10-31T11:00:00.000Z", status: "missed", member: "ton",
+      at: "2026-10-31T11:02:00.000Z" });
+    expect(runs[STOCK]).toBeNull();
+    // Only a run that started a job names its task.
+    expect(runs[REPLIES]).not.toHaveProperty("taskId");
+    // The runs are placed the same whatever hour the world is made at: the latest start is always at or before now.
+    const early = fresh(() => Date.parse("2026-11-23T00:30:00Z")); // 07:30, before the morning brief's start
+    expect((await early.getRoutines(BAAN_MALI)).routines[0]!.lastRun!.instant).toBe("2026-11-22T01:00:00.000Z");
+  });
+
+  it("reads a routine's newest run by the instant it was meant for, whatever order the runs are kept in", async () => {
+    const { saved, storage } = kept();
+    await createFakeApi({ now: () => NOW, storage }).listShops();
+    const world = JSON.parse(saved.get("manut.pilot.fake.v1")!) as { routines: Record<string, { runs: unknown[] }> };
+    const run = (instant: string, status: string) => ({ routineId: MORNING, instant, status, member: "ton", at: instant });
+    // The sample's own run for the routine is at 23 November; one is kept after it that is newer and one that is older still.
+    world.routines[BAAN_MALI]!.runs.push(run("2026-11-24T01:00:00.000Z", "failed"), run("2026-11-21T01:00:00.000Z", "missed"));
+    saved.set("manut.pilot.fake.v1", JSON.stringify(world));
+    const api = createFakeApi({ now: () => NOW, storage });
+    expect((await routineOf(api, MORNING)).lastRun).toMatchObject({ instant: "2026-11-24T01:00:00.000Z", status: "failed" });
+    // Another routine's runs are not its own.
+    expect((await routineOf(api, GROWTH)).lastRun).toMatchObject({ routineId: GROWTH, status: "failed", instant: "2026-11-23T01:00:00.000Z" });
+  });
+
+  it("pauses a routine: it has no next run, its other routines are untouched, and only its id is logged, once", async () => {
+    const api = fresh();
+    const before = await logLength(api, BAAN_MALI);
+    const answer = await api.pauseRoutine({ tenant: BAAN_MALI, routineId: MORNING });
+    expect(answer).toMatchObject({ id: MORNING, paused: true, next: null, when: "Every day at 08:00" });
+    expect(await routineOf(api, MORNING)).toEqual(answer);
+    expect(await logLength(api, BAAN_MALI)).toBe(before + 1);
+    expect(await newest(api, BAAN_MALI)).toEqual({ actor: operator, action: "routine.paused", subject: { routineId: MORNING }, outcome: "ok" });
+    expect((await routineOf(api, GROWTH)).paused).toBe(false);
+    // Pausing a paused routine changes nothing and logs nothing; so does pausing the sample's own paused one.
+    expect(await api.pauseRoutine({ tenant: BAAN_MALI, routineId: MORNING })).toEqual(answer);
+    await api.pauseRoutine({ tenant: BAAN_MALI, routineId: POST });
+    expect(await logLength(api, BAAN_MALI)).toBe(before + 1);
+  });
+
+  it("resumes a routine: its next run is worked out from now, and resuming one that is on changes nothing and logs nothing", async () => {
+    const api = fresh();
+    const before = await logLength(api, BAAN_MALI);
+    const answer = await api.resumeRoutine({ tenant: BAAN_MALI, routineId: POST });
+    expect(answer).toMatchObject({ id: POST, paused: false, next: "2026-11-27T03:00:00.000Z", when: "Every Friday at 10:00" });
+    // Its newest run is still the one it skipped while it was paused: nothing is made up.
+    expect(answer.lastRun).toMatchObject({ status: "skipped", reason: "routine_paused" });
+    expect(await newest(api, BAAN_MALI)).toEqual({ actor: operator, action: "routine.resumed", subject: { routineId: POST }, outcome: "ok" });
+    expect(await logLength(api, BAAN_MALI)).toBe(before + 1);
+    expect(await api.resumeRoutine({ tenant: BAAN_MALI, routineId: POST })).toEqual(answer);
+    await api.resumeRoutine({ tenant: BAAN_MALI, routineId: MORNING });
+    expect(await logLength(api, BAAN_MALI)).toBe(before + 1);
+  });
+
+  it("removes a routine with its runs, logs only its id, and says not_found when it is removed twice or belongs to another shop", async () => {
+    const api = fresh();
+    expect(await api.removeRoutine({ tenant: BAAN_MALI, routineId: GROWTH })).toEqual({ removed: GROWTH });
+    expect((await api.getRoutines(BAAN_MALI)).routines.map((routine) => routine.id)).toEqual([MORNING, REPLIES, POST, BOOKS, STOCK]);
+    expect(await newest(api, BAAN_MALI)).toEqual({ actor: operator, action: "routine.removed", subject: { routineId: GROWTH }, outcome: "ok" });
+    const after = await logLength(api, BAAN_MALI);
+    for (const call of [
+      () => api.removeRoutine({ tenant: BAAN_MALI, routineId: GROWTH }),
+      () => api.pauseRoutine({ tenant: BAAN_MALI, routineId: GROWTH }),
+      () => api.resumeRoutine({ tenant: BAAN_MALI, routineId: GROWTH }),
+      // Another shop's routine is not this shop's, even for a shop that has none at all.
+      () => api.removeRoutine({ tenant: SABAI_TEA, routineId: MORNING }),
+      () => api.pauseRoutine({ tenant: SABAI_TEA, routineId: MORNING }),
+    ]) await expect(call()).rejects.toMatchObject({ status: 404, code: "not_found" });
+    expect(await logLength(api, BAAN_MALI)).toBe(after);
+    // Its runs went with it: the export holds none of them.
+    const exported = (await api.exportShop(BAAN_MALI)) as unknown as { routines: { runs: { routineId: string }[] } };
+    expect(exported.routines.runs.map((run) => run.routineId).sort()).toEqual([BOOKS, MORNING, POST, REPLIES].sort());
+  });
+
+  it("pauses everyone since now and keeps when it began, and resuming puts the team back; each change is logged once, with no id", async () => {
+    let now = NOW;
+    const api = fresh(() => now);
+    const before = await logLength(api, BAAN_MALI);
+    expect(await api.pauseTeam({ tenant: BAAN_MALI })).toEqual({ paused: true, since: "2026-11-23T03:00:00.000Z",
+      members: ["nam", "pim", "ton"] });
+    expect(await newest(api, BAAN_MALI)).toEqual({ actor: operator, action: "team.paused", subject: {}, outcome: "ok" });
+    // While everyone is paused no routine has a next run, and the team's own routine settings are as they were.
+    const paused = (await api.getRoutines(BAAN_MALI)).routines;
+    expect(paused.map((routine) => routine.next)).toEqual([null, null, null, null, null, null]);
+    expect(paused.map((routine) => routine.paused)).toEqual([false, false, false, true, false, false]);
+    // Pausing a paused team changes nothing, logs nothing, and keeps when it began.
+    now += 3_600_000;
+    expect(await api.pauseTeam({ tenant: BAAN_MALI })).toMatchObject({ paused: true, since: "2026-11-23T03:00:00.000Z" });
+    expect(await logLength(api, BAAN_MALI)).toBe(before + 1);
+
+    expect(await api.resumeTeam({ tenant: BAAN_MALI })).toEqual({ paused: false, since: null, members: ["nam", "pim", "ton"] });
+    expect(await newest(api, BAAN_MALI)).toEqual({ actor: operator, action: "team.resumed", subject: {}, outcome: "ok" });
+    expect((await routineOf(api, MORNING)).next).toBe("2026-11-24T01:00:00.000Z");
+    await api.resumeTeam({ tenant: BAAN_MALI });
+    expect(await logLength(api, BAAN_MALI)).toBe(before + 2);
+  });
+
+  it("makes a team on the first change for a shop that has no routines, and a member who is off leaves that member's routines with no next run", async () => {
+    const api = fresh();
+    expect(await api.pauseTeam({ tenant: SABAI_TEA })).toMatchObject({ paused: true });
+    expect((await api.getRoutines(SABAI_TEA)).team.paused).toBe(true);
+    expect(await newest(api, SABAI_TEA)).toEqual({ actor: operator, action: "team.paused", subject: {}, outcome: "ok" });
+
+    // A shop whose template turned on fewer members: only Nam is on here, so Ton's and Pim's routines wait, and Nam's runs.
+    const { saved, storage } = kept();
+    await createFakeApi({ now: () => NOW, storage }).listShops();
+    const world = JSON.parse(saved.get("manut.pilot.fake.v1")!) as { routines: Record<string, { team: { members: string[] | null } }> };
+    world.routines[BAAN_MALI]!.team.members = ["nam"];
+    saved.set("manut.pilot.fake.v1", JSON.stringify(world));
+    const fewer = await createFakeApi({ now: () => NOW, storage }).getRoutines(BAAN_MALI);
+    expect(fewer.team.members).toEqual(["nam"]);
+    expect(fewer.routines.map((routine) => [routine.member, routine.next !== null])).toEqual([
+      ["ton", false], ["ton", false], ["nam", true], ["pim", false], ["ton", false], ["ton", false]]);
+  });
+
+  it("refuses every routine route without an operator key, and without a tenant, and an id that is not a routine's, as the API does", async () => {
+    const locked = createFakeApi({ operatorKey: () => null });
+    const calls: [string, (api: Api) => Promise<unknown>][] = [
+      ["getRoutines", (api) => api.getRoutines(BAAN_MALI)],
+      ["pauseRoutine", (api) => api.pauseRoutine({ tenant: BAAN_MALI, routineId: MORNING })],
+      ["resumeRoutine", (api) => api.resumeRoutine({ tenant: BAAN_MALI, routineId: MORNING })],
+      ["removeRoutine", (api) => api.removeRoutine({ tenant: BAAN_MALI, routineId: MORNING })],
+      ["pauseTeam", (api) => api.pauseTeam({ tenant: BAAN_MALI })],
+      ["resumeTeam", (api) => api.resumeTeam({ tenant: BAAN_MALI })],
+    ];
+    for (const [name, call] of calls) await expect(call(locked), name).rejects.toMatchObject({ status: 403, code: "forbidden" });
+    const api = fresh();
+    for (const call of [
+      () => api.getRoutines(""), () => api.getRoutines("x".repeat(257)),
+      () => api.pauseRoutine({ tenant: "", routineId: MORNING }), () => api.resumeRoutine({ tenant: "", routineId: MORNING }),
+      () => api.removeRoutine({ tenant: "", routineId: MORNING }), () => api.pauseTeam({ tenant: "" }),
+      () => api.resumeTeam({ tenant: 7 as never }),
+    ]) await expect(call()).rejects.toMatchObject({ status: 400, code: "tenant_required" });
+    const before = await logLength(api, BAAN_MALI);
+    for (const routineId of ["", "nope", "rt-", "RT-upper", "rt-has space", "rt-colon:1", `rt-${"a".repeat(65)}`, 7, null, ["rt-1"]]) {
+      const input = { tenant: BAAN_MALI, routineId: routineId as never };
+      for (const call of [() => api.pauseRoutine(input), () => api.resumeRoutine(input), () => api.removeRoutine(input)]) {
+        await expect(call(), String(routineId)).rejects.toMatchObject({ status: 400, code: "invalid_request" });
+      }
+    }
+    expect(await logLength(api, BAAN_MALI)).toBe(before);
+    expect((await api.getRoutines(BAAN_MALI)).routines).toHaveLength(6);
+  });
+
+  it("makes a shop from a template with the template's routines, each paused, its members on, and logs each one made", async () => {
+    const api = fresh();
+    for (const template of packageTemplates()) {
+      const { tenant } = await api.createShop({ name: `Shop ${template.id}`, ownerName: "Owner", template: template.id });
+      const view = await api.getRoutines(tenant);
+      expect(view.team).toEqual({ paused: false, since: null, members: [...template.team] });
+      expect(view.routines).toHaveLength(template.routines.length);
+      view.routines.forEach((routine, index) => {
+        const words = template.routines[index]!;
+        // The name, whether it asks first and its template are the template's; every routine starts paused with nothing run. Its timing is
+        // said as routine-rules says it, which is the template's own words but for one: the API reads "When a size drops under 3" as stock
+        // below 3, as it reads "When stock drops under 5" (`triggerOf`), and says it "When stock drops under 3". The name keeps what it is for.
+        expect(routine, `${template.id} ${routine.name}`).toMatchObject({ name: words.does,
+          when: words.trigger.replace("When a size drops under", "When stock drops under"), asksFirst: words.asksFirst, paused: true,
+          next: null, template: template.id, timeZone: "Asia/Bangkok", lastRun: null });
+        expect(routine.id).toMatch(/^rt-[0-9a-z-]{1,64}$/);
+        expect(checkRoutine({ ...routine }), routine.name).toBeNull();
+      });
+      // Made in the template's order, with ids that sort in it, so the list reads in the order they were made.
+      expect(view.routines.map((routine) => routine.id)).toEqual([...view.routines.map((routine) => routine.id)].sort());
+      const log = (await api.listAudit(tenant, { limit: 200 })).entries;
+      expect(log.map((entry) => entry.action)).toEqual([...Array(template.routines.length).fill("routine.created"), "template.applied", "shop.created"]);
+      expect(log.slice(0, template.routines.length).map((entry) => entry.subject.routineId).reverse()).toEqual(view.routines.map((routine) => routine.id));
+    }
+    // A shop made with no template has none.
+    const plain = await api.createShop({ name: "Plain", ownerName: "Owner" });
+    expect((await api.getRoutines(plain.tenant)).routines).toEqual([]);
+  });
+
+  it("works out a template's routines as the API does: the kind of work and the member whose job it is", async () => {
+    // The API turns a template's kinds into routine-rules' (`ACTION_OF`) and picks the member (`memberOf`); the practice world writes the
+    // result down, so this reads the API's own text for both and works them out here for every template.
+    expect(routineSetupSource).toContain(`brief: "brief", draft: "draft", remind: "brief", reply: "reply", send: "send", post: "send", pay: "pay",`);
+    expect(routineSetupSource).toContain(`return kind === "post" || /\\bpost\\b/i.test(does) ? "pim" : "ton";`);
+    const action = { brief: "brief", draft: "draft", remind: "brief", reply: "reply", send: "send", post: "send", pay: "pay", delete: "delete" } as const;
+    const api = fresh();
+    for (const template of packageTemplates()) {
+      const { tenant } = await api.createShop({ name: `Shop ${template.id}`, ownerName: "Owner", template: template.id });
+      const made = (await api.getRoutines(tenant)).routines;
+      template.routines.forEach((words, index) => {
+        const member = words.kind === "reply" ? "nam" : words.kind === "post" || /\bpost\b/i.test(words.does) ? "pim" : "ton";
+        expect([made[index]!.action, made[index]!.member], `${template.id}: ${words.does}`).toEqual([action[words.kind], member]);
+      });
+    }
+  });
+
+  it("keeps the practice templates' words the package's, so the routines made from them say what the API's would", async () => {
+    const offered = await fresh().listTemplates();
+    expect(offered.map((template) => template.id)).toEqual(packageTemplates().map((template) => template.id));
+    for (const template of packageTemplates()) {
+      const copy = offered.find((candidate) => candidate.id === template.id)!;
+      expect(copy.team).toEqual([...template.team]);
+      expect(copy.routines).toEqual(template.routines.map((words) => ({ when: words.trigger, does: words.does, asksFirst: words.asksFirst })));
+    }
+  });
+
+  it("makes ids of the shape the API's store checks a routine's id against, read from the API's own source", async () => {
+    expect(routineStoreSource).toContain("export const ROUTINE_ID = /^rt-[0-9a-z-]{1,64}$/;");
+    const api = fresh();
+    for (const routine of (await api.getRoutines(BAAN_MALI)).routines) expect(routine.id).toMatch(/^rt-[0-9a-z-]{1,64}$/);
+  });
+
+  it("carries the team, the routines, the questions and the runs in the shop's export, and deletes them with the shop", async () => {
+    const api = fresh();
+    const exported = (await api.exportShop(BAAN_MALI)) as unknown as {
+      routines: { team: unknown; routines: { id: string }[]; questions: unknown[]; runs: unknown[] } };
+    expect(exported.routines.team).toEqual({ paused: false, since: null, members: null });
+    expect(exported.routines.routines.map((routine) => routine.id)).toEqual([MORNING, GROWTH, REPLIES, POST, BOOKS, STOCK]);
+    expect(exported.routines.questions).toEqual([]);
+    expect(exported.routines.runs).toHaveLength(5);
+    // What the API stores for a routine has no words, no next run and no latest run: those are worked out when it is listed.
+    expect(Object.keys(exported.routines.routines[0]!).sort()).toEqual(
+      ["action", "asksFirst", "createdAt", "id", "member", "name", "paused", "timeZone", "trigger"]);
+    expect((await api.exportShop(SABAI_TEA)).routines).toEqual({ team: { paused: false, since: null, members: null }, routines: [], questions: [], runs: [] });
+    const link = asked(await api.deleteShop({ tenant: BAAN_MALI, confirmName: "Baan Mali" }));
+    await api.decideDeletion(deletionTokenOf(link.confirmUrl), true);
+    expect((await api.getRoutines(BAAN_MALI)).routines).toEqual([]);
+  });
+
+  it("keeps a change across a reload, starts again on reset, and replaces a world saved before shops had routines", async () => {
+    const { saved, storage } = kept();
+    const first = createFakeApi({ now: () => NOW, storage });
+    await first.pauseRoutine({ tenant: BAAN_MALI, routineId: MORNING });
+    await first.removeRoutine({ tenant: BAAN_MALI, routineId: STOCK });
+    await first.pauseTeam({ tenant: BAAN_MALI });
+    const reloaded = createFakeApi({ now: () => NOW, storage });
+    const view = await reloaded.getRoutines(BAAN_MALI);
+    expect(view.team.paused).toBe(true);
+    expect(view.routines.map((routine) => routine.id)).toEqual([MORNING, GROWTH, REPLIES, POST, BOOKS]);
+    expect(view.routines[0]!.paused).toBe(true);
+    reloaded.reset();
+    expect((await reloaded.getRoutines(BAAN_MALI)).routines).toHaveLength(6);
+    expect((await reloaded.getRoutines(BAAN_MALI)).team.paused).toBe(false);
+    // Version 12 is a world saved with no routines; one that says it is version 13 but lacks them is read as the half it holds.
+    for (const change of [{ version: 12, routines: undefined }, { routines: undefined }]) {
+      const world = JSON.parse(saved.get("manut.pilot.fake.v1")!) as Record<string, unknown>;
+      saved.set("manut.pilot.fake.v1", JSON.stringify({ ...world, ...change }));
+      const api = createFakeApi({ now: () => NOW, storage });
+      expect((await api.getRoutines(BAAN_MALI)).routines.map((routine) => routine.id)).toEqual([MORNING, GROWTH, REPLIES, POST, BOOKS, STOCK]);
+      expect((await api.listShops()).map((shop) => shop.name)).toEqual(["Baan Mali", "Sabai Tea"]);
+    }
   });
 });
