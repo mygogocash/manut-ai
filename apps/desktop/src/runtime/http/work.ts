@@ -12,6 +12,7 @@
 import { t } from "../../i18n";
 import type { ActivityEvent, ActivityKind, Job, JobRow, JobStage, JobStep, TeamState, TraceStep } from "../mission";
 import { isAsk } from "./approvals";
+import { shownTasks } from "./older";
 import type { ShopAction, ShopAttempt, ShopSnapshot, ShopTask } from "./shop";
 import { actionText, attemptLive, memberName, memberOf, taskRunning, titleOf } from "./view";
 
@@ -109,10 +110,11 @@ function jobRowOf(task: ShopTask, s: ShopSnapshot, waiting: Set<string>): JobRow
   return { id: task.id, title: titleOf(task), bot: memberOf(task), stage, at: steps.at(-1)?.at ?? sec(s.readAt), steps };
 }
 
-/** Every task as a job, newest moved first (`jobs.list`). */
+/** Every task as a job, newest moved first (`jobs.list`): the newest read and, once Show older has read them, the older tasks
+ *  (older.ts). What is live (who is working, what runs now) is only ever the newest read's. */
 export function jobRows(s: ShopSnapshot): JobRow[] {
   const waiting = waitingTasks(s);
-  return s.tasks
+  return shownTasks(s)
     .map((task) => jobRowOf(task, s, waiting))
     .map(({ id, title, bot, stage, at }) => ({ id, title, bot, stage, at }))
     .sort((a, b) => b.at - a.at);
@@ -139,7 +141,7 @@ function traceStep(a: ShopAttempt, nowMs: number): TraceStep {
  *  draft a member wrote, when one did. The cost is what the runs reported, in whole satang; how long it took counts each
  *  run from its claim to its end, and is null while one still runs or a time is missing. */
 export function jobOf(s: ShopSnapshot, id: string): Job | null {
-  const task = s.tasks.find((x) => x.id === id);
+  const task = shownTasks(s).find((x) => x.id === id);
   if (!task) return null;
   const row = jobRowOf(task, s, waitingTasks(s));
   const live = task.attempts.some((a) => attemptLive(a, s.readAt));
@@ -237,11 +239,11 @@ function draftEvent(task: ShopTask): ActivityEvent | null {
 }
 
 /** The activity log (`activity.list`), newest first: every draft a member wrote, every action waiting for the owner and
- *  every action that went out. */
+ *  every action that went out, of the newest tasks and, once Show older has read them, of the older ones. */
 export function activityOf(s: ShopSnapshot): ActivityEvent[] {
   const waiting = waitingTasks(s);
   const kinds = new Map(s.approvals.map((a) => [a.record.request.id, typeof a.record.request.kind === "string" ? a.record.request.kind : ""] as const));
-  return s.tasks
+  return shownTasks(s)
     .flatMap((task) => [draftEvent(task), ...task.actions.map((a) => actionEvent(task, a, waiting.has(task.id), kinds))])
     .filter((e): e is ActivityEvent => !!e)
     .sort((a, b) => b.at - a.at);

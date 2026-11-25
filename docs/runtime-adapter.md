@@ -15,7 +15,9 @@ built and tested on `feat/connected-whole-shop`, 24 Nov 2026, the same way: its 
 and activity log, and the owner's routine and pause writes. Customize › Memory and routines (below) is built and tested on
 `feat/connected-memory-routines`, 24 Nov 2026, the same way: what the team knows, and making and removing a routine. The task
 list (below) is built and tested on `feat/task-list`, 24 Nov 2026 (December item 44): every read takes the newest tasks from
-`GET /v1/tasks`, a page at a time, and never the export, which carries every task's whole history.
+`GET /v1/tasks`, a page at a time, and never the export, which carries every task's whole history. Older tasks (below) are built
+and tested on `feat/show-older`, 25 Nov 2026 (December item 52), the same way: a shop with more than its newest 50 says so on
+History and the activity log, and Show older reads the next page from the cursor the minute's read stopped at.
 
 ## Choosing it
 
@@ -40,7 +42,7 @@ read is the signed-in tenant's, four reads made together through the session, th
 
 | Request | Gives | Notes |
 | --- | --- | --- |
-| `GET /v1/tasks?limit=25`, then `&cursor=` | the newest 50 tasks, each with its exact-action proposals, its runs, its newest draft and the entries of its log the screens read | The task list (`docs/pilot-api.md`, "The shop's tasks, a page at a time"): two pages at most, each from the cursor the page before gave, so no task is read twice or skipped while tasks are made. The screens keep the tasks oldest first, as the export listed them, so a sort with ties shows as before. A shop with more than 50 shows its newest 50 (Next slices, below). Until 24 Nov 2026 this was `GET /v1/tenant/export`, every task with its whole history, read whole every minute; nothing reads the export now. `404 tenant_deleted` reads as no tasks, as the export's did. |
+| `GET /v1/tasks?limit=25`, then `&cursor=` | the newest 50 tasks, each with its exact-action proposals, its runs, its newest draft and the entries of its log the screens read | The task list (`docs/pilot-api.md`, "The shop's tasks, a page at a time"): two pages at most, each from the cursor the page before gave, so no task is read twice or skipped while tasks are made. The screens keep the tasks oldest first, as the export listed them, so a sort with ties shows as before. A shop with more than 50 shows its newest 50, keeps the cursor the read stopped at, and says there is more; Show older reads the pages after it (Older tasks, below). Until 24 Nov 2026 this was `GET /v1/tenant/export`, every task with its whole history, read whole every minute; nothing reads the export now. `404 tenant_deleted` reads as no tasks, as the export's did. |
 | `GET /v1/approvals?state=open` | approval-core's requests still waiting for an answer, each with where it stands and any note a helper passed on | Read with `@manut/approval-core`'s own decoders (Answering approvals, below). These are the asks. Any refusal fails the read: the API answers 503 rather than leave one out, and a missing ask would read as nobody having asked. |
 | `GET /v1/schedules` | the schedules | |
 | `GET /v1/inbound/attention` | the inbound attention items | `403 feature_disabled` (the API's inbound flag is off) reads as "no feed", not as a failure. |
@@ -61,7 +63,8 @@ The protocol ops are answered from the latest read (`src/runtime/http/host.ts`, 
 | `chat.open` (Buddy) | the attention items as notes ("A Linear issue was changed (ISS-9)"), then, as a runtime replays asks, one approval ask per request still open, oldest first, naming the exact action ("Send on LINE: “…”"). The answers offered are yes once and no. Needs you and Home show them. |
 | `routines.list`, `automations.list` | the schedules, under Buddy, their days and time as cron and their next run exact; a schedule that is off shows as paused. For a shop the person owns, also each team routine under its member |
 | `bots.info` | counts from the read |
-| `jobs.list`, `jobs.get`, `activity.list`, `team.state` | Mission Control from the read (A shop the person owns, below): every task as a job, the activity log, and for a shop the person owns its team's state |
+| `jobs.list`, `jobs.get`, `activity.list`, `team.state` | Mission Control from the read (A shop the person owns, below): every task as a job, the activity log, and for a shop the person owns its team's state. `jobs.list` and `activity.list` also say `older: "more"` while the shop has older tasks than they hold and `older: "end"` once Show older has read the last page, and say nothing for a shop whose newest read held every task (Older tasks, below) |
+| `jobs.older` | Show older: reads the next page of the shop's older tasks and adds it to what `jobs.list` and `activity.list` list; answers `{ older: "more" \| "end" }` (Older tasks, below) |
 | every other read the screens make | empty (`elsewhere.list`, `plugins.list`, `runs.*`, …), or `not_found` for one thing asked by name |
 | `approval.respond` | the person's answer, through the decide route (Answering approvals, below) |
 | `routine.list` | the shop's team routines, then its other schedules as routines, for the shop the switcher shows, with the shop they were read for (`shop`). A shop the person only helps at is refused `owner_only` (Customize › Memory and routines, below) |
@@ -86,7 +89,8 @@ was decided, with the API's own words in `note` when the person's answer here wa
 new attention item is a `message` in Buddy's chat; a schedule or team routine change is `routines.update`; the team
 changing (a member starting or stopping work, Pause everyone, a member switched on or off) is `bots.update`. A task already listed changes its row only when the list is read again (after a reconnect or a
 restart); following tasks live is the streaming slice below. A task that falls out of the newest 50 as newer ones are made
-is `thread.removed`, as a task that is gone.
+is `thread.removed`, as a task that is gone; it is no thread of Buddy's, but once Show older has read older tasks it stays a job and
+in the activity log (Older tasks, below).
 
 Not read in this slice: `/v1/consent/cloud`, `/v1/tasks/:id` and its events and actions one by one, `/v1/companies/*`,
 `/v1/health`, and since the task list `/v1/tenant/export`, which the desktop has no page to ask for. A shop the person owns
@@ -106,8 +110,8 @@ The API side is `apps/api/src/approvals.ts` (docs/pilot-api.md, "Approvals for a
   notes, "waiting for you").
 - **The exact action.** A reply's ask says the reply's own words from its request ("Send on LINE: “…”"). A worker's
   request carries no words, so its ask says its action's, from its task in the task list ("Create a Linear issue: “…”"),
-  as it said them from the export before. Otherwise, a task older than the newest 50 among them, it says the operation and
-  where it goes, as the API wrote them. A request's `detail` is cut down to the words the card
+  as it said them from the export before. Otherwise, a task older than the newest 50 among them (also one Show older has read: an ask's words
+  come from the newest read's tasks), it says the operation and where it goes, as the API wrote them. A request's `detail` is cut down to the words the card
   shows (the action id, the operation, where it goes, the customer it goes to, the text) before anything keeps it.
 - **The revision the person saw.** An ask's id is `<requestId>@<revision>`. The store keeps one card per id, so a
   request revised since is a new card, and the old one closes with "It changed since you saw it. Answer the new
@@ -321,8 +325,8 @@ asks, Mission Control showed Buddy alone, and every write but an answer was "not
   tasks or fewer (`screens.test.ts` pins each one as the export showed it): Mission Control's team and jobs, the job view,
   History's rows and chips, each task's notes, the activity log and Needs you's words. A job view shows each run's claim,
   handoff, model, tokens and cost, which the list carries from the log, so opening it reads nothing more; the log itself
-  stays in the task. The activity log is the listed tasks' drafts and actions, so its span is the newest 50 tasks; it reads
-  nothing of its own.
+  stays in the task. The activity log is the listed tasks' drafts and actions, so its span is the newest 50 tasks, and the older ones once Show older
+  has read them (Older tasks, below); it reads nothing of its own.
 - **Its pages.** The shop being viewed shows its tasks as Buddy's threads in History and Recent, as the signed-in tenant's
   are; opening one shows Buddy's notes, now with the draft a member wrote on it ("Nam's draft, for you to read. Nothing was
   sent."). Buddy's chat shows its attention items and every shop's asks.
@@ -376,7 +380,71 @@ asks, Mission Control showed Buddy alone, and every write but an answer was "not
   `screens.export.json`, now from the list), `shop.test.ts` (the list's pages and cursor, the newest 50, a page that fails),
   `cache.test.ts` (version 5, and every earlier version read as nothing kept), and `serveShops` and `serveShop` in
   `testkit.ts`, which answer the task list as apps/api does (`listedJson`, `taskPage`), an owner's schedules, attention
-  items, routines and team writes, and a helper's 403. The API's side is `apps/api/test/task-list.test.ts`.
+  items, routines and team writes, and a helper's 403. The API's side is `apps/api/test/task-list.test.ts`. Show older's own tests are in Older tasks, below.
+
+## Older tasks
+
+Built on `feat/show-older` (December item 52): `src/runtime/http/older.ts` (the rules), `shop.ts`, `shops.ts`, `host.ts`, `work.ts`,
+and on the pages `src/pages/older.ts`, `ShowOlder.tsx`, `HistoryPage.tsx` and `ActivityPage.tsx`. Before it, a shop with more than its
+newest 50 tasks showed only those, and an owner could not reach older ones.
+
+- **Knowing there are more.** The minute's read keeps the cursor it stopped at (`more`, on the shop's work and on the signed-in
+  tenant's read): the cursor the second page gave, which is the id of the last task the list looked at, and none when the list ended
+  within the 50. A shop of 50 tasks or fewer has none, so nothing is said of older work. `jobs.list` and `activity.list` say
+  `older: "more"` while the shop has older tasks than they hold, and `older: "end"` once Show older has read the last page. A list that
+  says nothing (Practice's, a shop of 50 tasks or fewer, a read kept from an earlier run) draws nothing.
+- **Reading them.** `jobs.older` reads the next page of 25 (`GET /v1/tasks?limit=25&cursor=`) from that cursor with the shop's own owner
+  session, or with the sign-in for a person in no shop, as the minute's read does, and adds those tasks to what the lists show, below
+  the newest. Pressed again it reads the page after, from the cursor the last page gave. When a page gives none, the lists say `end`,
+  and a press after that asks nothing. Two presses at once are one request. A shop the person only helps at lists no tasks, so Show
+  older is refused `owner_only` there, with nothing sent.
+- **Keeping them** (`older.ts` holds the rules; each is tested alone, and a random walk of making tasks, reading the shop and pressing
+  checks that the list stays whole). The pages are kept in memory for each shop while the app runs, so switching shops loses none,
+  and they are never written to disk. The cursor is a task's id, so a task made while a person pages moves no cursor. But each
+  minute's read holds the newest 50 as of that minute, so a task made pushes the 50th newest out of it, and that task now lies between
+  the new read and the older pages. The minute's read takes the tasks it pushes out into the older list (they are already read, so it
+  asks the API for nothing), and no task is skipped. A task in both lists shows once, as the newer read has it. A task the shop deleted
+  from the newest read is gone, and is not carried. If the new read holds none of the tasks the last one held (50 or more tasks were
+  made in between, after a long sleep above all), the tasks between are unread, so the older pages are let go and Show older starts
+  again from the new read's cursor: this is the only way the minute's read drops them. A press notes itself before it is sent, so a
+  read that lands while its page is on its way carries into the same list, and the page is added only if it starts where the list's
+  older tasks end.
+- **What is live is only the newest read's.** An older task shows as it was when it was read. It is a job and has its events in the
+  activity log, and `jobs.get` opens it. But it makes no member work, it is no job running now (`bots.list`, `team.state`), and it is no
+  thread of Buddy's: `thread.list`, `thread.added` and `thread.removed` follow the newest 50 as before, and an ask's words still come
+  from the newest read's tasks.
+- **When a page cannot be read.** What is shown stays as it was, and the press fails with words that Try again follows: `offline` for
+  no network ("Show older needs a connection."), and `unavailable` for a 5xx, an answer that is not JSON, and a 200 that is not a page
+  (a `tasks` list and a `next` that is a cursor or null; it is never read as an empty page, or as the end of the list). Any answer that
+  is not a page is handled as the minute's read handles it. A 401 gets one new shop session and one resend. A 401 `removed` or
+  `unlinked` ends the person's place in the shop (`depart`: the shop leaves, and its asks close in words that say when). A refused
+  sign-in signs the person out. Any other refusal, and a 200 that is not a page, has the shop read again, so what changed shows as the
+  minute's read shows it. A 400 `invalid_cursor` (the task the cursor named was deleted) also lets the older pages go, so the next
+  press starts from the newest read's cursor.
+- **Offline.** While only a kept read is shown, Show older is refused `offline` ("Show older needs a connection.") with nothing sent.
+  The read shown while the API cannot be reached is this run's last good read, so the older pages already read stay shown, with Show
+  older still offered, and are still there when the API answers. The kept read on disk is as it was: the newest 50, cache version 5,
+  with no cursor and no older task. After a restart with no network the lists therefore say nothing of older work.
+- **The screens.** History and the activity log draw one line under their list ("Only the newest work is shown here. There is older
+  work.") with a Show older button. Pressing it reads the page and has the page read its list again, so the filters, the search, the
+  event picked and the messages shown stay. A press while one is on its way does nothing, and the button keeps its focus. A page that
+  could not be read says why in the runtime's own words (as an alert) and offers Try again. Once the list has no more, the line says
+  "That is everything. There is no older work." and there is no button. The activity log still draws it when its newest events are
+  none, or the filters leave none, since older work may hold some. The words are in en, ko, ja and zh (`older.*`). The activity log's
+  date filter (the last 7 days unless changed) applies to older events too, so a person may need to widen it to see them. Mission
+  Control's jobs are listed in History (a job for each task, with the threads that are not jobs); Home's and a member's Recent work
+  show the newest three by design and say nothing of more.
+- **Practice.** The demo's lists never say there is more (its sample shop has 6 jobs), so no screen draws Show older there. Its
+  `jobs.older` answers `end`, and its sample data is as it was.
+- **Tests.** `older.test.ts` (the rules, and the random walk), `older.host.test.ts` (the runtime end to end over a fake API that pages
+  as apps/api does: knowing there are more, the next page and the end, one request for two presses, each shop's own session, the pages
+  kept through the minute's read, tasks made, deleted, or 50 and more made, a page on its way while a read lands, what is live, every
+  way a page can fail, offline, the cache file, and the app's own store), `shop.test.ts` (the cursor, `readTaskPage`),
+  `src/pages/older.test.tsx` (the words in four languages, the line and button under History's and the log's lists, each state of the
+  press) and `e2e/show-older.spec.ts` (Connected over a stubbed shell: three pages, a walk to the end, a page that fails, the log,
+  four languages). `screens.test.ts` and `screens.export.json` are unchanged: a shop of 50 tasks or fewer shows what it showed.
+- **Not in this slice.** Older tasks are not Buddy's threads. An older task is not read again until the app restarts or its pages are
+  let go. Nothing follows tasks live (the streaming slice). Older pages are never kept for offline use.
 
 ## Customize › Connections
 
@@ -660,7 +728,8 @@ instead of an empty screen, and says so (`src/runtime/http/cache.ts`, `host.ts`,
   waiting for an answer (so what waits for the owner; approval-core's wire JSON, since version 2 of the file), the schedules,
   the inbound attention items, whether that feed is off, and the time of the read, copied field by field as the runtime
   already decodes them. The API's whole objects and the entries it could not read are left
-  out. Never a token, a refresh token, the device id or anything else from the keychain, and not the origin or the tenant
+  out. Never an older task or the cursor Show older reads from (Older tasks, below): the file keeps the newest 50 as it did.
+  Never a token, a refresh token, the device id or anything else from the keychain, and not the origin or the tenant
   either: the file's name is the only link to them. It does hold the shop's own words in plain text: task titles, the
   exact words of replies waiting for the owner and the LINE ids they go to, and schedule prompts. The file is the owner's
   alone (0600), so it is as private as the rest of the app's folder, and no more; it is not encrypted.
@@ -716,9 +785,8 @@ instead of an empty screen, and says so (`src/runtime/http/cache.ts`, `host.ts`,
    `GET /v1/approvals?state=recent` when an ask leaves would do it, at one more request).
 4. **Asks of the desktop:** the Sign in with Apple button; keychain support on Windows and Linux; showing a schedule's
    time zone when it is not this computer's; showing a note a helper passed on with its request (it is read and kept
-   already); a helper's own session on the desktop; older tasks than the newest 50 when a screen asks for them (History,
-   Mission Control and the activity log saying there are more, and reading the list's next page from the cursor the
-   minute's read stopped at).
+   already); a helper's own session on the desktop. (Older tasks than the newest 50, which a screen asks for with Show older, are
+   built: Older tasks, above. What it leaves for later is at the end of that section.)
 
 ## Undoing it
 
@@ -764,6 +832,15 @@ the order `decodeTasks` restores; put version 4 of the cache back with each task
 export again in `testkit.ts`; and move `screens.test.ts` back onto it, where it must still pass. The API's list
 (`apps/api/src/task-list.ts`, `task-listing.ts`, the task object's `/listing`) and the owner's schedules and attention
 reads in `shops.ts` can stay or go on their own.
+
+To take only Show older out (December item 52): remove `jobs.older` from `MissionOps`, with the `older` of `jobs.list` and
+`activity.list` there, the host's `showOlder`, `readOlder`, `listOf`, `editOlder`, `keepingOlder`, `pressing` and the `more` and `older`
+that `atShops` copies, the mock host's `jobs.older` and the store's `missionOlder`; `src/runtime/http/older.ts`, `readTaskPage` and the
+`more` and `older` of `ShopWork` and `ShopSnapshot` (`decodeWork`, `readShop`, `workOf` in `shops.ts`) and the `next` of
+`TaskListRead`; `shownTasks` in `work.ts` (jobs and the log read `s.tasks` again); `src/pages/older.ts`, `ShowOlder.tsx`, the `older` of
+`HistoryView` and `ActivityView`, `useJobList` (`useJobs` alone again) and the `.older` rules in `menuPages.css`; the `older.*` keys; and
+the tests `older.test.ts`, `older.host.test.ts`, `src/pages/older.test.tsx`, `e2e/show-older.spec.ts` and the cursor tests in
+`shop.test.ts`. The offline cache needs nothing: it never held any of it.
 
 To take only the buttons out of notifications: pass no `approve` handler in `notifySessionEvent` (`store.ts`) and remove
 `approveFromNotification`, `src/chat/cards/askNote.ts` and its use in `Cards.slot.tsx`; notifications then carry Look first and

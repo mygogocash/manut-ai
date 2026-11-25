@@ -5,7 +5,7 @@
 import { useEffect, useState } from "react";
 import "./mission.css";
 import { t } from "../i18n";
-import type { JobRow } from "../runtime/mission";
+import type { JobRow, OlderState } from "../runtime/mission";
 import { getStore, useStore } from "../state/store";
 import { stageTag, whenText } from "./job";
 import { load } from "./load";
@@ -88,22 +88,30 @@ export function MemberWorkView({ rows }: { rows: readonly RecentRow[] }) {
   );
 }
 
-/** The runtime's jobs, newest first; none while they load or when the runtime cannot say (the connected one answers "not
- *  yet"). Read again when a member is paused or resumed, which moves a running job to paused and back. */
-export function useJobs(): JobRow[] {
+/** The runtime's jobs, newest first, with what it says of older work than they hold (`more`, or `end` once Show older read the last
+ *  page), and a way to read them again (after Show older read a page: the jobs on show stay while they are read). None while they
+ *  load or when the runtime cannot say (the connected runtime answers "not yet" for a team it is not told of). Read again when a
+ *  member is paused or resumed, which moves a running job to paused and back. */
+export function useJobList(): { jobs: JobRow[]; older: OlderState | undefined; reload: () => void } {
   const s = useStore();
-  const [jobs, setJobs] = useState<JobRow[]>([]);
+  const [list, setList] = useState<{ jobs: JobRow[]; older?: OlderState }>({ jobs: [] });
+  const [reads, setReads] = useState(0);
   const held = s.bots.map((b) => (b.paused ? b.name : "")).join();
   useEffect(() => {
     let live = true;
     void load(() => getStore().actions.missionJobs()).then((r) => {
-      if (live) setJobs(r.kind === "ready" ? r.value.jobs : []);
+      if (live) setList(r.kind === "ready" ? r.value : { jobs: [] });
     });
     return () => {
       live = false;
     };
-  }, [held]);
-  return jobs;
+  }, [held, reads]);
+  return { jobs: list.jobs, older: list.older, reload: () => setReads((n) => n + 1) };
+}
+
+/** The runtime's jobs, newest first. */
+export function useJobs(): JobRow[] {
+  return useJobList().jobs;
 }
 
 export function MemberWork({ bot }: { bot: string }) {

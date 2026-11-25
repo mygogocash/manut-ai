@@ -59,12 +59,13 @@ import { googleHandlers } from "./google";
 import { shopRoutines, teamRoutineRow } from "./customize";
 import { DeviceWatch, readDevices } from "./devices";
 import { memoryHandlers } from "./memory";
+import { addPage, askOlder, dropOlder, forgetAsk, keepOlder, nextCursor, olderOf, type TaskList } from "./older";
 import { peopleHandlers } from "./people";
 import { isShopTemplateId, MADE_SHOPS_LIMIT, shopNameOf, type MakeShopRefusal } from "../makeShop";
-import type { TeamState } from "../mission";
+import type { OlderState, TeamState } from "../mission";
 import { MAX_ROUTINES, newRoutineRefusal, problemWords, triggerBody, type RoutineRow } from "../routines";
 import type { ApiSession, SignInState } from "./session";
-import { decodeTeam, decodeTeamRoutines, readShop, type ReadFailure, type ShopPart, type ShopRead, type ShopSnapshot, type ShopTeam, type ShopWork, type TeamRoutine } from "./shop";
+import { decodeTeam, decodeTeamRoutines, readShop, readTaskPage, type ReadFailure, type ShopPart, type ShopRead, type ShopSnapshot, type ShopTeam, type ShopWork, type TeamRoutine } from "./shop";
 import { departureOf, listShops, ShopSessions, type Departure, type Left, type ShopAnswer } from "./shops";
 import { attentionRows, automationRows, memberName, onTeam, pendingAsks, routineRows, taskOpen, team, TEAM, threadRows } from "./view";
 import { activityOf, jobOf, jobRows, teamStateOf } from "./work";
@@ -226,6 +227,9 @@ export class HttpHost {
   /** How the card of an ask the person answered here closes, in the API's words, kept until the ask leaves the shop's
    *  open approvals (`emitLeft`). By ask id. */
   private closings = new Map<string, Closing>();
+  /** Show older's requests on their way, by the shop whose list they read ("" for the signed-in tenant's own), so a second press
+   *  while one is on its way is answered by it. */
+  private readonly pressing = new Map<string, Promise<{ older: OlderState }>>();
 
   constructor(opts: HostOptions) {
     this.session = opts.session;
@@ -359,8 +363,24 @@ export class HttpHost {
     } finally {
       this.reading = null;
     }
+    // In the step that takes the read, so no page Show older adds in between can be missed: what it read stays, and what the new
+    // read pushed out of the newest tasks joins it (older.ts).
+    if (r.ok) r = { ok: true, snapshot: this.keepingOlder(this.snapshot, r.snapshot) };
     this.apply(r, standIn, ticket);
     return r;
+  }
+
+  /** `now`, a good read, with the older tasks Show older read carried over from `was`, the read it replaces: for the signed-in
+   *  tenant's own list, and for each shop the person owns (older.ts). */
+  private keepingOlder(was: ShopSnapshot | null, now: ShopSnapshot): ShopSnapshot {
+    if (!was) return now;
+    if (!now.shops) return keepOlder(was.shops ? undefined : was, now);
+    const shops = now.shops;
+    const parts = shops.map((p) => {
+      const work = p.work && keepOlder(partOf(was, p.shop.id)?.work, p.work);
+      return p.work && work !== p.work ? { ...p, work } : p;
+    });
+    return parts.every((p, i) => p === shops[i]) ? now : this.atShops(parts, now.unreadable, now.readAt);
   }
 
   /** One read of what the screens show: the person's shops first. In none, the signed-in tenant as before shops; in
@@ -385,6 +405,8 @@ export class HttpHost {
     const work = viewed.work;
     return {
       tasks: work?.tasks ?? [],
+      ...(work?.more === undefined ? {} : { more: work.more }),
+      ...(work?.older ? { older: work.older } : {}),
       approvals: viewed.approvals,
       schedules: work?.schedules ?? [],
       attention: work?.attention ?? [],
@@ -750,6 +772,94 @@ export class HttpHost {
     }, 0);
   }
 
+  // ---- Show older -------------------------------------------------------------------------------------------------
+
+  /** The task list `shop` holds in the latest read: that shop's work, or, with "", the signed-in tenant's own read (whose list
+   *  it is only while the person is in no shop). Null when the read holds none. */
+  private listOf(shop: string): TaskList | null {
+    const s = this.snapshot;
+    if (!s) return null;
+    return shop === "" ? (s.shops ? null : s) : (partOf(s, shop)?.work ?? null);
+  }
+
+  /** Changes what Show older holds of `shop`'s list (older.ts), as `edit` says, leaving the rest of the read as it is. `edit` gives
+   *  the list as it should be, or null to change nothing. Whether the list was changed. */
+  private editOlder(shop: string, edit: (list: TaskList) => TaskList | null): boolean {
+    const was = this.snapshot;
+    const list = this.listOf(shop);
+    const next = list && edit(list);
+    if (!was || !list || !next) return false;
+    const withOlder = <T extends TaskList>(target: T): T => {
+      const { older: _gone, ...rest } = target;
+      return (next.older ? { ...rest, older: next.older } : rest) as T;
+    };
+    if (shop === "") this.snapshot = withOlder(was);
+    else {
+      const part = partOf(was, shop);
+      this.snapshot = this.atShops((was.shops ?? []).map((p) => (p === part && p.work ? { ...p, work: withOlder(p.work) } : p)), was.unreadable, was.readAt);
+    }
+    return true;
+  }
+
+  /** Show older: reads the next page of the viewed shop's tasks (25 of them), from where the newest read stopped or the last older
+   *  page ended, with that shop's own session as the minute's read does, and adds it to what the screens show (older.ts). Pressed
+   *  again, it reads the page after. Answers where that leaves the list: `more`, or `end` when the API says the list has no more.
+   *
+   *  Refused here, with nothing sent, while only a kept read is shown (the kept read has no older tasks and the API cannot be reached),
+   *  and for a shop the person only helps at, which lists no tasks. A page that cannot be read leaves what is shown as it was, whichever
+   *  way: `offline` and `unavailable` say so, and so does any answer that is not a page. A 401 that ends the person's place in the shop
+   *  ends it here as it does for the minute's read (`depart`), and one that signs them out is the session's to say. Any other refusal also
+   *  reads the shop again, so what changed (the role there, a shop that was deleted) shows as the minute's read shows it. Two presses at
+   *  once are one request. */
+  private async showOlder(): Promise<{ older: OlderState }> {
+    if (this.cache.kind === "showing") throw new OpError("offline", t("older.offline"));
+    const snapshot = this.snapshot ?? (await this.current());
+    const viewed = snapshot.shops ? partOf(snapshot, snapshot.viewing ?? "") : undefined;
+    if (snapshot.shops && !viewed) throw notFound();
+    if (viewed && viewed.shop.role !== "owner") throw ownerOnly(viewed.shop);
+    const shop = viewed?.shop.id ?? "";
+    const running = this.pressing.get(shop);
+    if (running) return running;
+    const press = this.readOlder(shop).finally(() => this.pressing.delete(shop));
+    this.pressing.set(shop, press);
+    return press;
+  }
+
+  private async readOlder(shop: string): Promise<{ older: OlderState }> {
+    const list = this.listOf(shop);
+    if (!list) throw notFound();
+    const from = nextCursor(list);
+    if (from === null) return { older: olderOf(list) ?? "end" };
+    // Noted before the request goes out, so a read that lands meanwhile carries what it pushes out of the newest tasks into the
+    // list this page will join.
+    this.editOlder(shop, askOlder);
+    const page = await readTaskPage<ShopAnswer>((path) => (shop === "" ? this.session.read(path) : this.shopSessions.read(shop, path)), from);
+    if (page.kind === "ok") {
+      // The page is added only if it starts where the list's older tasks now end. When a read let the older pages go while it was on
+      // its way (50 or more tasks were made since the last read), it would leave tasks out, so nothing is added and the next press
+      // reads from the newest read's cursor again.
+      this.editOlder(shop, (l) => addPage(l, from, page));
+      const after = this.listOf(shop);
+      if (!this.running || !after) throw notFound();
+      // an entry it could not read is kept as the newest read keeps its own, never dropped
+      if (page.unreadable.length && this.snapshot) this.snapshot = { ...this.snapshot, unreadable: [...this.snapshot.unreadable, ...page.unreadable] };
+      return { older: olderOf(after) ?? "end" };
+    }
+    this.editOlder(shop, (l) => forgetAsk(l, from));
+    if (page.kind === "left") {
+      this.depart([{ shop, departure: page.departure }]);
+      throw new OpError(page.departure.why, this.departedWords(shop) ?? t("rt.notFound"));
+    }
+    if (page.kind === "signed_out") throw new OpError("signed_out", t("rt.signedOut"));
+    if (page.kind === "offline") throw new OpError("offline", t("older.offline"));
+    if (page.kind === "refused" || page.kind === "unreadable") {
+      // A cursor the API no longer knows (the task it named was deleted) can never read: the next press starts afresh.
+      if (page.kind === "refused" && page.status === 400 && page.code === "invalid_cursor") this.editOlder(shop, dropOlder);
+      void this.refresh().catch(() => undefined);
+    }
+    throw new OpError("unavailable", t("older.failed"));
+  }
+
   // ---- the owner's changes to the team ---------------------------------------------------------------------------
 
   /** The shop a change to the team is for, when the person owns it and its team was read: the shop the op names (the shop its list
@@ -1049,13 +1159,23 @@ export class HttpHost {
       // asked for (work.ts). The log has no fixed span: the tasks are kept until the shop deletes them. The team's state
       // and Pause everyone are a shop the person owns; the signed-in tenant has no team the API knows, and a helper's
       // shop's team is its owner's.
-      "jobs.list": async () => ({ jobs: jobRows(await this.current()) }),
+      "jobs.list": async () => {
+        const snapshot = await this.current();
+        const older = olderOf(snapshot);
+        return { jobs: jobRows(snapshot), ...(older ? { older } : {}) };
+      },
+      // Show older: the next page of the viewed shop's older tasks, which `jobs.list` and `activity.list` then list (older.ts).
+      "jobs.older": () => this.showOlder(),
       "jobs.get": async (p) => {
         const job = jobOf(await this.current(), String(p.job));
         if (!job) throw notFound();
         return job;
       },
-      "activity.list": async () => ({ events: activityOf(await this.current()), keptMonths: null }),
+      "activity.list": async () => {
+        const snapshot = await this.current();
+        const older = olderOf(snapshot);
+        return { events: activityOf(snapshot), keptMonths: null, ...(older ? { older } : {}) };
+      },
       "team.state": async () => {
         const snapshot = await this.current();
         const state = teamStateOf(snapshot);

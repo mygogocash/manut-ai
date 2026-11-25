@@ -10,7 +10,7 @@ import { useEffect, useReducer, useState, type ReactNode } from "react";
 import "./mission.css";
 import { hhmm, monthDay } from "../app/time";
 import { t, type Key } from "../i18n";
-import { OWNER, ACTIVITY_KINDS, type ActivityEvent, type ActivityKind } from "../runtime/mission";
+import { OWNER, ACTIVITY_KINDS, type ActivityEvent, type ActivityKind, type OlderState } from "../runtime/mission";
 import { selectSidebarBots, getStore, useStore } from "../state/store";
 import { MenuIcon, SearchGlyph } from "../sidebar/menuIcons";
 import { Avatar } from "../ui";
@@ -40,14 +40,16 @@ import {
 import { dayBand } from "./history";
 import { LOADING, load, type Load } from "./load";
 import { Empty, MenuPageFrame } from "./MenuPage";
+import { useShowOlder, type OlderView } from "./older";
 import { saveCsv, type SaveResult } from "./saveFile";
+import { ShowOlder } from "./ShowOlder";
 
 export interface Person {
   id: string;
   label: string;
 }
 
-type Log = { events: ActivityEvent[]; keptMonths: number | null };
+type Log = { events: ActivityEvent[]; keptMonths: number | null; older?: OlderState };
 
 export interface ActivityViewProps {
   load: Load<Log>;
@@ -72,6 +74,8 @@ export interface ActivityViewProps {
   /** the "Jobs and chats" tab: back to History */
   onBack: () => void;
   onOpenJob: (id: string) => void;
+  /** the runtime has older events than the log holds, or Show older has shown all of them (older.ts): the line and the button under the list */
+  older?: OlderView;
 }
 
 const KIND_KEY: Record<ActivityKind, Key> = {
@@ -430,7 +434,13 @@ export function ActivityView(p: ActivityViewProps) {
         <p>{p.load.message}</p>
       </div>,
     );
-  if (!full || !log) return frame(<Empty icon={<MenuIcon row="history" />} title={t("act.emptyTitle")} text={t("act.emptyText")} testId="act-empty" />);
+  if (!full || !log)
+    return frame(
+      <>
+        <Empty icon={<MenuIcon row="history" />} title={t("act.emptyTitle")} text={t("act.emptyText")} testId="act-empty" />
+        {p.older && <ShowOlder view={p.older} />}
+      </>,
+    );
 
   const person = (id: string, label: string) => (
     <Chip key={id} on={f.who === id} onClick={() => p.onFilter({ type: "who", who: id })} id={`act-who-${id}`}>
@@ -552,6 +562,7 @@ export function ActivityView(p: ActivityViewProps) {
               </button>
             </div>
           )}
+          {p.older && <ShowOlder view={p.older} />}
         </div>
         <aside className="side2" id="act-detail" aria-label={t("act.details")} data-testid="act-details">
           {sel ? <Details e={sel} p={p} /> : <p className="hint">{t("act.pick")}</p>}
@@ -564,6 +575,9 @@ export function ActivityView(p: ActivityViewProps) {
 export function ActivityPage() {
   const s = useStore();
   const [state, setState] = useState<Load<Log>>(LOADING);
+  // Show older has the log read again, which leaves what the page holds (the filters, the event picked, the messages shown) as it is
+  const [reads, setReads] = useState(0);
+  const more = useShowOlder(() => setReads((n) => n + 1));
   const [filters, onFilter] = useReducer(filterReduce, NO_FILTERS);
   const [exporting, onExport] = useReducer(exportReduce, EXPORT_START);
   const [picked, setPicked] = useState<string | null>(null);
@@ -577,7 +591,7 @@ export function ActivityPage() {
     return () => {
       live = false;
     };
-  }, []);
+  }, [reads]);
 
   const listed = selectSidebarBots(s);
   const nameOf = (who: string) => (who === OWNER ? t("act.you") : (s.bots.find((b) => b.name === who)?.display_name ?? who));
@@ -615,6 +629,7 @@ export function ActivityPage() {
       }}
       onBack={() => s.closeSettings()}
       onOpenJob={(id) => s.openJob(id)}
+      older={state.kind === "ready" && state.value.older ? { state: state.value.older, ui: more.ui, onShow: more.show } : undefined}
     />
   );
 }
