@@ -3,7 +3,7 @@
 import { createElement, isValidElement, type ReactElement, type ReactNode } from "react";
 import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { setLang } from "../i18n";
+import { LANGS, setLang, t } from "../i18n";
 import { emptyLane, noteLane, type LaneRecord } from "./lane";
 import { LanesView, laneBase, laneRowOf, type LaneRow, type LaneRowInput } from "./Lanes";
 
@@ -132,6 +132,41 @@ afterEach(() => setLang("en"));
 describe("the Lanes band", () => {
   it("draws nothing when the project has no lane", () => {
     expect(html([])).toBe("");
+  });
+
+  it("draws New lane in the band, with the lanes under it, and presses it", () => {
+    const onNew = vi.fn();
+    const els = drawn(LanesView({ rows: canvas(), now: 100_000, onOpen: vi.fn(), onNew }));
+    const link = els.filter((e) => e.props["data-testid"] === "lane-new");
+    expect(link).toHaveLength(1);
+    expect(link[0].type).toBe("button");
+    expect(link[0].props.className).toBe("lk");
+    expect(link[0].props.title).toBe("Start a lane: choose an agent and a folder. It starts with your first message.");
+    (link[0].props.onClick as () => void)();
+    expect(onNew).toHaveBeenCalledTimes(1);
+    const out = renderToString(createElement(LanesView, { rows: canvas(), now: 100_000, onOpen: vi.fn(), onNew }));
+    expect(out).toContain("New lane");
+    expect(out.indexOf("New lane")).toBeLessThan(out.indexOf('data-testid="lanes"'));
+  });
+
+  it("draws the band with only New lane while the project has no lane, since a person with none needs it most", () => {
+    const out = renderToString(createElement(LanesView, { rows: [], now: 100_000, onOpen: vi.fn(), onNew: vi.fn() }));
+    expect(out).toContain("Lanes");
+    expect(out).toContain("New lane");
+    expect(out).not.toContain('data-testid="lanes"');
+  });
+
+  it("has no link, and no band for no lane, where the page gives it nothing to open", () => {
+    expect(drawn(LanesView({ rows: canvas(), now: 100_000, onOpen: vi.fn() })).filter((e) => e.props["data-testid"] === "lane-new")).toHaveLength(0);
+  });
+
+  it("names New lane in every language", () => {
+    for (const lang of LANGS) {
+      setLang(lang);
+      const out = renderToString(createElement(LanesView, { rows: [], now: 100_000, onOpen: vi.fn(), onNew: vi.fn() }));
+      expect(out, lang).toContain(t("lane.new"));
+      expect(out, lang).toContain(t("lane.newTip"));
+    }
   });
 
   it("draws the canvas's three lanes: Checked, Working with its step and time, and Needs you with Answer Kit", () => {

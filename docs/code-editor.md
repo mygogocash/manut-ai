@@ -16,7 +16,7 @@ state that needs the owner: a real GitHub account, money, a real sign-in or real
 
 | State | Desktop | Where |
 | --- | --- | --- |
-| Lanes: a band with New lane, a row per lane with its title, "Kit, Careful" and a status tag | Part (this branch): the Kit panel opens with a Lanes band, a row for each coding session that runs as a chat, with its title, "Kit · Claude Code", its branch and a state tag. Terminals stay in their folder groups below. Under the lanes, Kit's folders kept: a lane's folder that outlived its session, with Show folder and Remove. A lane is started from the + menu's Chat with Kit (item 66; see [Starting a lane](#starting-a-lane)). No New lane in the band and no effort word | `code/Lanes.tsx`, `code/KeptLanes.tsx`, `code/KitPanel.tsx`, `sessions/SessionsSection.tsx` (`ChatWay`) |
+| Lanes: a band with New lane, a row per lane with its title, "Kit, Careful" and a status tag | Part (this branch): the Kit panel opens with a Lanes band with a quiet New lane link (drawn even while the project has no lane), a row for each coding session that runs as a chat, with its title, "Kit · Claude Code", its branch and a state tag. Terminals stay in their folder groups below. Under the lanes, Kit's folders kept: a lane's folder that outlived its session, with Show folder and Remove. A lane is started from the + menu's Chat with Kit (item 66), or from New lane in the band, which opens that menu (item 68; see [Starting a lane](#starting-a-lane)). No effort word | `code/Lanes.tsx`, `code/KeptLanes.tsx`, `code/KitPanel.tsx`, `sessions/SessionsSection.tsx` (`ChatWay`) |
 | The lane's own branch (`kit/promptpay-qr`): "Kit works on a separate branch. Nothing is live." | Has (this branch): a chat session gets a branch of its own as it starts, named from its first message and made from the branch the developer's folder is on, checked out in a folder of its own (a git worktree under `~/.manut/lanes`), where its agent works. Several lanes work at once, none touching another's files or the developer's folder, whose branch, index, stash and HEAD never change because of a lane. The row and the composer's foot show the branch. Nothing is pushed or merged from here. See [Where a lane works](#where-a-lane-works) | `code/laneBranch.ts`, `src-tauri/src/lane.rs`, `sessions/sessions.ts` (`startLane`) |
 | "Checked: 14 tests passed" | Has (this branch): read from the test run's output (vitest, jest, node's own runner, pytest, `go test`, `cargo test`, mocha, Playwright Test and Python's `unittest`). A run that cannot be read is Not confirmed, never Checked | `code/testRun.ts`, `code/lane.ts` |
 | Revert this turn | Has: Rewind, on the line under the box beside the branch, puts back the files and the chat of a kept turn; the newest is picked first. Claude Code and Codex only. The agent's own Edit on the last message still takes back the chat only, and then the lane says the files stay as they are | `sessions/RewindPanel.tsx`, `sessions/rewind.ts`, `src-tauri/src/turn_files.rs`, `code/lane.ts` |
@@ -121,7 +121,8 @@ The states whose rules are pure functions, with their tests, then the screens th
   them, and their removal (see [Where a lane works](#where-a-lane-works)). `code/KeptLanes.tsx` draws the folders kept after
   their sessions closed, with Remove's panel.
 - `apps/desktop/src/sessions/SessionsSection.tsx` (`ChatWay`), `sessions/agents.ts` (`chatAgents`) and `sessions/sessions.ts`
-  (`draftChat`): the + menu's Chat with Kit, which starts a lane (see [Starting a lane](#starting-a-lane)).
+  (`draftChat`): the + menu's Chat with Kit, which starts a lane (see [Starting a lane](#starting-a-lane)); `sessions/signedOut.ts`: which
+  agents the menu marks Not signed in; `sessions/newMenu.ts` (`NewMenuStart`): how New lane opens the menu.
 - `apps/desktop/src/code/lane.ts`, `laneStore.ts`: what a lane's events showed, the state the owner reads from it, and
   the line under the row. `Lanes.tsx` draws the band in the Kit panel, and gives each row a slot under its line (`below`)
   that the Code page fills with Bring it back's panel and the main-moved note. A lane keeps, beside its last finished
@@ -202,8 +203,20 @@ The Code page's + menu (the Terminals header's +, the empty section's New sessio
   install lines. The first focus is still the last agent's terminal row, so ⌘N then Enter starts a terminal.
 - **Not installed.** Not in Chat with Kit: More agents names it with its install line, and once it is installed it shows in both
   parts. With no agent that can chat installed, Chat with Kit says so in one line.
-- **Not signed in.** The row is offered as usual: in Practice mode the app reads no sign-in (Settings › Accounts needs a runtime
-  that has accounts). The chat starts and says what the agent answers: an ACP agent's "is not signed in. Run … in a terminal and
+- **New lane.** The Lanes band of Kit's panel has a quiet New lane link (the canvas's), drawn while the project has lanes and
+  also while it has none (a person with none has the most need of it; the band is then only its heading and the link). It is not
+  a second way to start a lane: it opens this same + menu (`openNewSessionMenu({ chat: true, folder })`), with the folder chip on
+  the project the band shows and the first Chat with Kit row focused, so which agent and which folder are chosen where they
+  always were, and `draftChat` and `ChatWay` are the only code that starts one. The + button, ⌘N and ⌘T still focus the terminal
+  row. With no project at all there is no Kit panel, so no link; the + button is the way in.
+- **Not signed in, said before the first message.** Where the app already reads a sign-in, the row (in both parts of the menu)
+  says "Not signed in" beside the name, and its tooltip says to sign in with the agent's own command in a terminal
+  (`claude auth login`, `codex login`) and that it can still start. The row stays pickable: signing in is the person's own
+  step, and what the app read can be a minute old. The app reads it only for the account a new session runs as (the Accounts
+  watcher's copy, `signedOut.ts`): Claude Code and Codex by the CLI's own status command, Grok (a terminal row only) by the
+  bridge's state, as Settings › Accounts words it. No agent is run to find out. For every other agent, and in Practice mode or
+  a browser where Settings › Accounts has no accounts, the app cannot tell and shows nothing new.
+- **Not signed in, said after.** Where it could not tell, the row is offered as usual. The chat starts and says what the agent answers: an ACP agent's "is not signed in. Run … in a terminal and
   sign in." with Open in Terminal, and Claude Code's or Codex's own refusal (not tried with a signed-out CLI); the lane's row says
   Failed with those words. Signing in stays the CLI's own, in a terminal.
 - **Practice mode and a browser.** A session always runs on this Mac's shell, whatever Settings › Developer says about the shop's
@@ -746,12 +759,10 @@ rewind.
   confirmed. More runners than the nine: Cypress, ava, `deno test` and `cargo nextest` are recognised as test runs and always
   Not confirmed, since no reader takes their output yet. A mocha run whose counts the shell's 8 KiB tail cut off is Not
   confirmed (mocha prints its counts before its failures); the shell could hand on more of a long output.
-- Open pull request and Ask Kit to fix it on a lane, the effort word and New lane in the Lanes band. A pull request needs a
-  push, which asks. The + menu's Chat with Kit starts a lane today; the band's New lane could open that menu, but the band is
-  not drawn while a project has no lane, so the menu is the one way in for the first one.
-- Chat with Kit for an agent that is not signed in: the menu offers it as usual, since Practice mode has no Settings ›
-  Accounts to read a sign-in from. Reading the CLI's own status (`claude auth status --json`, `codex login status`, which
-  `src-tauri/src/accounts.rs` already parses) for the row would say it before the first message.
+- Open pull request and Ask Kit to fix it on a lane, and the effort word. A pull request needs a push, which asks.
+- A sign-in the app cannot read (pi, oh-my-pi, OpenCode, OmO, DeepSeek Harness, the ACP agents): no mark before the first
+  message, only the chat's own words after it. A status command for each would need the shell's fixed list in
+  `src-tauri/src/accounts.rs` to grow.
 - The pane beside a lane: a way to hide it (it is always there for a lane); a subagent's own edits in its Diff (they come as
   `subagent` events, not `tool.diff`); the files that stay on disk after the agent's own rewind of the last message (its Diff
   holds what the chat holds); the lane's own folder's real changes read from git, so a restart does not start the pane empty;

@@ -4,9 +4,12 @@
 // failed, that the turn was reverted. The state comes from lane.ts, which reads it from what the session's events showed.
 // `LanesView` takes everything it shows as props and uses no hooks, so a test can draw it; `useLaneRows` reads the stores.
 //
-// The canvas's Open pull request, Revert this turn and New lane are not here. A lane cannot push or open a pull request from
+// The canvas's New lane is the band's quiet link (item 68). It is not a second way to start a lane: it opens the + menu on its
+// Chat with Kit choice, with the folder chip on this project, so which agent and which folder are chosen where they always
+// were. The band shows with that link while the project has no lane, since a person with none has the most need of it.
+// The canvas's Open pull request and Revert this turn are not here. A lane cannot push or open a pull request from
 // the app (going live always asks, and Tasks is where pull requests are), Rewind (the session's line under the box) is the way
-// to take a turn back, and a lane is started from the Code page's + menu, Chat with Kit (item 66, docs/code-editor.md). A lane that
+// to take a turn back, and a lane is started from the Code page's + menu, Chat with Kit (item 66, docs/code-editor.md), which New lane opens. A lane that
 // was rewound says Reverted, and offers Bring it back while the shell still keeps the files from before the rewind (until the
 // next turn starts): its panel (BringBack.tsx) opens under the row, filled in by `below`.
 import { useSyncExternalStore, type ReactNode } from "react";
@@ -149,6 +152,8 @@ export interface LanesProps {
   /** The time now (ms), for the time a turn has run. */
   now: number;
   onOpen: (id: string) => void;
+  /** New lane: opens the + menu's Chat with Kit choice for this project. Without it the band has no link, and none draws no band. */
+  onNew?: () => void;
   /** The lane whose Bring it back is open, and the link on its line that opens or closes it. */
   backOpen?: string | null;
   onBack?: (id: string) => void;
@@ -225,18 +230,25 @@ function LaneItem({ row, now, onOpen, backOpen, onBack, below }: { row: LaneRow;
   );
 }
 
-export function LanesView({ rows, now, onOpen, backOpen = null, onBack, below }: LanesProps) {
-  if (rows.length === 0) return null;
+export function LanesView({ rows, now, onOpen, onNew, backOpen = null, onBack, below }: LanesProps) {
+  if (rows.length === 0 && !onNew) return null;
   return (
     <>
-      <div className="band">
+      <div className="band" data-testid="lanes-band">
         <span>{t("lane.title")}</span>
+        {onNew && (
+          <button type="button" className="lk" onClick={onNew} title={t("lane.newTip")} data-testid="lane-new">
+            {t("lane.new")}
+          </button>
+        )}
       </div>
-      <div className="lanes" data-testid="lanes">
-        {rows.map((r) => (
-          <LaneItem key={r.id} row={r} now={now} onOpen={onOpen} backOpen={backOpen === r.id} onBack={onBack} below={below} />
-        ))}
-      </div>
+      {rows.length > 0 && (
+        <div className="lanes" data-testid="lanes">
+          {rows.map((r) => (
+            <LaneItem key={r.id} row={r} now={now} onOpen={onOpen} backOpen={backOpen === r.id} onBack={onBack} below={below} />
+          ))}
+        </div>
+      )}
     </>
   );
 }

@@ -4,7 +4,7 @@
 // The menu offers each coding agent two ways (owner, 25 Nov 2026, item 66): first as a chat with Kit, a lane of its own
 // (`chatAgents`), then in its own terminal, as since 16 Nov (`terminalAgents`). Which agents each part lists is pinned here.
 import { describe, expect, it } from "vitest";
-import { onOpenNewSessionMenu, openNewSessionMenu } from "./newMenu";
+import { onOpenNewSessionMenu, openNewSessionMenu, type NewMenuStart } from "./newMenu";
 import { AGENTS, chatAgents, offeredAgents, registerAcp, terminalAgents, type AcpRow, type AgentInfo } from "./agents";
 import shellList from "./mockAcpAgents.json";
 
@@ -26,6 +26,28 @@ describe("the + menu's opener", () => {
     // The press is used up, so a menu mounted later does not open by itself.
     const off2 = onOpenNewSessionMenu(() => seen.push("second"));
     expect(seen).toEqual(["first"]);
+    off2();
+  });
+});
+
+describe("the + menu's opener from the Lanes band", () => {
+  it("hands the menu how it was asked for: the chat choice, in the project's folder", () => {
+    const seen: (NewMenuStart | undefined)[] = [];
+    const off = onOpenNewSessionMenu((s) => seen.push(s));
+    openNewSessionMenu();
+    openNewSessionMenu({ chat: true, folder: "/home/you/baanmali-preorder" });
+    expect(seen).toEqual([undefined, { chat: true, folder: "/home/you/baanmali-preorder" }]);
+    off();
+  });
+
+  it("keeps how a press was asked for while no menu is on screen, and uses it once", () => {
+    const seen: (NewMenuStart | undefined)[] = [];
+    openNewSessionMenu({ chat: true, folder: "/p" });
+    const off = onOpenNewSessionMenu((s) => seen.push(s));
+    expect(seen).toEqual([{ chat: true, folder: "/p" }]);
+    off();
+    const off2 = onOpenNewSessionMenu((s) => seen.push(s));
+    expect(seen).toHaveLength(1);
     off2();
   });
 });
