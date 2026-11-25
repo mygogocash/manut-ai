@@ -230,7 +230,9 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    All started 25 Nov at about 23:45. Item 84 follows 83.
    The owner then set the session's goal: every feature highlighted on 25 Nov, then whatever needs nothing from the
    owner, and an app that feels premium and quiet, with motion on its states and details. The canvas's Motion board is
-   the rule for that (`BrandMotion.dc.html`; items 85a to 85d): 85a, the moves as a foundation and the controls
+   the rule for that (`BrandMotion.dc.html`; items 85a to 85i; the look at every page beside its board is done, 21
+   findings in `docs/design-audit.md`, whose fixes start once 85a has merged, since they touch the same stylesheets):
+   85a, the moves as a foundation and the controls
    (`feat/motion`, Opus, `cc-item85a-motion`), and a read-only look at every page beside its board, started 26 Nov at
    about 00:05.
    Next, as each finishes: item 80 (the chat box: model, effort, approval, add context, after 67), 72 (MCP and Skills
