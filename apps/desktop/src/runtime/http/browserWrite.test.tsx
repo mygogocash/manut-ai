@@ -211,7 +211,8 @@ describe("every surface that can approve a browser write shows its whole text", 
     for (const [file, selector] of [
       ["../../chat/cards/cards.css", ".card-cmd.whole"],
       ["../../pages/home.css", ".home .act.whole"],
-      ["../../pages/menuPages.css", ".mpage .need code.act.whole"],
+      // Needs you's card has a stylesheet of its own since item 85g
+      ["../../pages/needs.css", ".mpage .need code.act.whole"],
     ]) {
       const body = rules(file, selector);
       expect(body, selector).toMatch(/max-height:\s*none/);
