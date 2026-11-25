@@ -11,9 +11,10 @@ release is Mac only (`docs/decisions.md`, 25 Nov 2026).
    - Push a tag that is exactly `desktop-v` and the version, for example `desktop-v0.1.0`. The run refuses a tag that
      does not equal `tauri.conf.json`'s version.
    - Or, on GitHub, Actions, "Release desktop", Run workflow, on the branch to build.
-3. The run builds Apple silicon and Intel, and makes one draft release `desktop-v<version>` holding a `.dmg` for each, the
-   updater bundles, their `.sig` files and `latest.json`. Open the run's summary: it says "signed and notarized" or
-   "UNSIGNED build" for each chip. Look that there is one draft only (the two builds start together).
+3. The run builds Apple silicon and then Intel, one after the other, and makes one draft release `desktop-v<version>`
+   holding a `.dmg` for each, the updater bundles, their `.sig` files and `latest.json`. Open the run's summary: it says
+   "signed and notarized" or "UNSIGNED build" for each chip. The second build adds its files to the draft the first
+   one made, and its chip to that draft's `latest.json`; that is why they do not run side by side.
 4. Download a `.dmg` from the draft and check it (below).
 5. Publish the draft (Edit, Publish release). Nothing else publishes. From that moment `latest.json` is what installed
    apps are told, so Publish is the switch that sends an update to everyone.
@@ -105,5 +106,6 @@ without it add `--config '{"bundle":{"createUpdaterArtifacts":false}}'`.
 
 The workflow has never run: it is checked by `actionlint`, by its test, and against the documentation of Tauri's
 GitHub guide, macOS signing guide, updater guide and `tauri-apps/tauri-action` (pinned at action-v1.0.0). The first run
-should confirm that the draft holds `latest.json` and both `.dmg` files, that the two chips made one release, and that
-the signed path passes its own check.
+should confirm that the draft holds both `.dmg` files and a `latest.json` that names both chips (`darwin-aarch64` and
+`darwin-x86_64`), and that the signed path passes its own check. How the action finds the draft and adds to
+`latest.json` was read in its own source at the pinned commit (`src/create-release.ts`, `src/upload-version-json.ts`).

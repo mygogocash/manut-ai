@@ -30,6 +30,12 @@ jobs:
     name: Mac (${{ matrix.label }})
     strategy:
       fail-fast: false
+      # One chip at a time. The action builds first, then looks for a draft with this tag and makes one only if it finds
+      # none, then reads the draft's latest.json, adds its own chip and uploads it again (its create-release.ts and
+      # upload-version-json.ts at the pinned commit). Two builds finishing together could each make a draft, or each
+      # write a latest.json that names only its own chip. The second build finds the first one's draft and its
+      # latest.json. It costs no more macOS minutes, only a longer wait.
+      max-parallel: 1
       matrix:
         include:
           # Two builds and not one universal build: each download is half the size, and the updater's latest.json names

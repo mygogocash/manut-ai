@@ -74,6 +74,14 @@ describe("Release desktop: the release", () => {
     assert.match(mac, /target: aarch64-apple-darwin/);
     assert.match(mac, /target: x86_64-apple-darwin/);
   });
+
+  it("builds the two chips one after the other, so they share one draft and one latest.json", () => {
+    // The action makes a draft when it finds none for the tag, and rewrites latest.json from the one it reads: two
+    // builds finishing together could make two drafts, or leave a latest.json that names one chip only.
+    const mac = job("mac");
+    assert.match(mac, /strategy:\n(?: {6}.*\n)*? {6}max-parallel: 1\n/);
+    assert.equal([...mac.matchAll(/tagName: (\S+)/g)].map((m) => m[1]).join(), "desktop-v__VERSION__,desktop-v__VERSION__");
+  });
 });
 
 describe("Release desktop: secrets", () => {
