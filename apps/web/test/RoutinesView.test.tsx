@@ -165,7 +165,7 @@ describe("the Routines page, reading a shop's routines", () => {
     await screen.findByRole("list", { name: LIST });
     const row = rowWith("Morning brief");
     expect(within(row).getByText("Morning brief")).toBeTruthy();
-    expect(within(row).getByText("Done by Ton.")).toBeTruthy();
+    expect(within(row).getByText("Ton's job.")).toBeTruthy();
     expect(within(row).getByText("Every day at 08:00")).toBeTruthy();
     expect(within(row).getByText("Next run on 24 November at 08:00.")).toBeTruthy();
     expect(within(row).getByText("Does not ask first: it only makes a draft for the owner to read.")).toBeTruthy();
@@ -202,7 +202,7 @@ describe("the Routines page, reading a shop's routines", () => {
     const row = rowWith("Draft the Friday post");
     expect(within(row).getByText("Paused")).toBeTruthy();
     expect(within(row).getByText("No next run: this routine is paused.")).toBeTruthy();
-    expect(within(row).getByText("Done by Pim.")).toBeTruthy();
+    expect(within(row).getByText("Pim's job.")).toBeTruthy();
     expect(within(row).queryByRole("button", { name: /^Pause the routine/ })).toBeNull();
     expect(within(row).getByRole("button", { name: RESUME_POST })).toBeTruthy();
     expect(within(rowWith("Morning brief")).queryByRole("button", { name: /^Resume/ })).toBeNull();
@@ -306,7 +306,7 @@ describe("the Routines page, reading a shop's routines", () => {
       { paused: false, since: null, members: ["kit" as never] }) });
     await screen.findByRole("list", { name: LIST });
     const row = rowWith("Morning brief");
-    expect(within(row).getByText("Done by kit.")).toBeTruthy();
+    expect(within(row).getByText("kit's job.")).toBeTruthy();
     expect(within(row).getByText("paused")).toBeTruthy();
     expect(within(row).getByText("Reason: novel.")).toBeTruthy();
     expect(screen.getByText(/^kit is on\./)).toBeTruthy();

@@ -1554,8 +1554,8 @@ describe("the Routines page's words", () => {
     expect(W.asksFirst(true)).toBe("Asks the owner first.");
     expect(W.asksFirst(false)).toBe("Does not ask first: it only makes a draft for the owner to read.");
     expect(W.fromTemplate("Handmade and gifts")).toBe("Made from the Handmade and gifts template.");
-    expect(W.doneBy("pim")).toBe("Done by Pim.");
-    expect(W.doneBy("kit")).toBe("Done by kit.");
+    expect(W.jobOf("pim")).toBe("Pim's job.");
+    expect(W.jobOf("kit")).toBe("kit's job.");
   });
 
   it("says when the last run was meant for, today or on another day, and tolerates a time that is not one", () => {

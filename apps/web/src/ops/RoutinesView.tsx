@@ -414,7 +414,7 @@ function RoutineRow({ routine, team, now, asking, locked, busy, templateName, on
     <li className="rowl" style={rowStyle}>
       <span className="grow" style={lines}>
         <span style={{ fontWeight: 500 }}>{routine.name}</span>
-        <span className="mut" style={quiet}>{W.doneBy(routine.member)}</span>
+        <span className="mut" style={quiet}>{W.jobOf(routine.member)}</span>
         <span className="mut" style={quiet}>{W.when(routine)}</span>
         <span style={quiet}>{nextRunText(routine, team, now)}</span>
         <span className="mut" style={quiet}>{W.asksFirst(routine.asksFirst)}</span>

@@ -1954,7 +1954,8 @@ export const routinesWords = {
   routinesLoading: "Loading the shop's routines",
   routinesEmpty:
     "No routines yet. A shop made from a template starts with the template's routines, each paused. Any other is made by an operator with POST /v1/admin/routines.",
-  doneBy: (member: string) => `Done by ${memberName(member)}.`,
+  /// Whose job each run is. Not "done by", which beside a Failed tag reads as if the job had been done.
+  jobOf: (member: string) => `${memberName(member)}'s job.`,
   /// The trigger in the API's own words. A routine that runs in another zone than the shop's says which, since its times are that zone's.
   when: (routine: Pick<Routine, "when" | "timeZone">) => {
     const words = routine.when || "Its timing could not be read.";
