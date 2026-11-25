@@ -9,8 +9,27 @@
 // never changes because of a lane. A lane with no folder of its own (the folder is not a repository, git refused, or the lane
 // was made before lanes had folders) works in the session's folder, as every session did before.
 
-/** The folder every branch Kit makes is in, so the developer sees at once which branches are Kit's. */
+/** The prefix every branch Kit makes has unless the person chose another in Settings › Worktrees, so the developer sees at
+ *  once which branches are Kit's. */
 export const LANE_FOLDER = "kit/";
+
+const WORD = /^[a-z0-9]+(-[a-z0-9]+)*$/;
+
+/** Whether `prefix` is one Kit makes names with: one or two lower case words (letters, numbers, single hyphens) each ending in
+ *  `/`, at most 24 characters (`kit/`, `team/ana/`). The same rule as `valid_prefix` in src-tauri/src/lane.rs. It is the
+ *  free text's check, so nothing git would refuse, and nothing a shell or an option could read as more, is ever kept. */
+export function validPrefix(prefix: string): boolean {
+  if (!prefix.endsWith("/") || prefix.length > 24) return false;
+  const words = prefix.slice(0, -1).split("/");
+  return words.length >= 1 && words.length <= 2 && words[0] !== "refs" && words.every((w) => WORD.test(w));
+}
+
+/** Whether `name` is a branch Kit made, under any prefix (a lane keeps the name it was made with): a valid prefix and one
+ *  word run. Same as `valid_name` in lane.rs. */
+export function isLaneBranch(name: string): boolean {
+  const i = name.lastIndexOf("/");
+  return i > 0 && name.length <= 64 && validPrefix(name.slice(0, i + 1)) && WORD.test(name.slice(i + 1));
+}
 
 /** What a lane knows of its branch: the one it works on, the branch it was made from, and its own working folder: `dir`, where
  *  its agent works (the worktree, or the folder inside it that matches the session's), and `worktree`, the worktree itself,
@@ -29,6 +48,11 @@ export interface LaneMade {
   dir: string;
   worktree: string;
   left: number;
+  /** The remote branch the lane started from (`origin/main`) when Start from the remote was on and worked; "" otherwise. */
+  from: string;
+  /** Why it started from the local branch though Start from the remote was on (`no_remote`, `fetch_failed`, `detached`,
+   *  `ahead`, `diverged`, `not_in_remote`); "" when it was off or the remote was used. */
+  local: string;
 }
 
 /** A lane's working folder the app made, as the shell lists it (`lane_list`): still there or not, how many of its files are
@@ -43,6 +67,8 @@ export interface KeptLane {
   exists: boolean;
   changed: number | null;
   ahead: number | null;
+  /** How many commits on its branch are on no remote (null: not read): why a clean-up leaves a clean folder. */
+  unpushed: number | null;
 }
 
 /** What the person said yes to when a lane's folder goes (`lane_remove`): the changed files they saw counted and the commits
@@ -96,8 +122,8 @@ function slug(title: string): string {
 
 /** The names to try for a lane called `title`, in order: `kit/promptpay-qr`, then the same with `-2`, `-3` … for a
  *  branch that is taken. The shell makes the first that no branch has. */
-export function laneBranchNames(title: string, tries = 9): string[] {
-  const base = `${LANE_FOLDER}${slug(title)}`;
+export function laneBranchNames(title: string, tries = 9, prefix: string = LANE_FOLDER): string[] {
+  const base = `${validPrefix(prefix) ? prefix : LANE_FOLDER}${slug(title)}`;
   return Array.from({ length: Math.max(1, tries) }, (_, i) => (i === 0 ? base : `${base}-${i + 1}`));
 }
 
@@ -110,10 +136,10 @@ export type LanePlan =
 
 /** `current`: the branch the developer's folder is on now (a short commit when it is detached, "" outside a repository).
  *  Every lane is made from it, whatever other lanes of the folder are doing: each works in a folder of its own. */
-export function planLaneBranch(input: { title: string; current: string }): LanePlan {
+export function planLaneBranch(input: { title: string; current: string; prefix?: string }): LanePlan {
   const { title, current } = input;
   if (!current) return { kind: "none", why: "no_repository" };
-  return { kind: "make", names: laneBranchNames(title), base: current };
+  return { kind: "make", names: laneBranchNames(title, 9, input.prefix), base: current };
 }
 
 const str = (v: unknown): string => (typeof v === "string" ? v : "");
@@ -124,9 +150,9 @@ const count = (v: unknown): number | null => (typeof v === "number" && Number.is
 export function readMade(raw: unknown): LaneMade | null {
   if (!raw || typeof raw !== "object") return null;
   const r = raw as Record<string, unknown>;
-  const made = { branch: str(r.branch), base: str(r.base), dir: str(r.dir), worktree: str(r.worktree), left: count(r.left) ?? 0 };
+  const made = { branch: str(r.branch), base: str(r.base), dir: str(r.dir), worktree: str(r.worktree), left: count(r.left) ?? 0, from: str(r.from), local: str(r.local) };
   const abs = (p: string) => p.startsWith("/") || /^[A-Za-z]:[\\/]/.test(p);
-  return made.branch.startsWith(LANE_FOLDER) && made.base && abs(made.dir) && abs(made.worktree) ? made : null;
+  return isLaneBranch(made.branch) && made.base && abs(made.dir) && abs(made.worktree) ? made : null;
 }
 
 /** The shell's list (`lane_list`), with every entry that is not one left out. */
@@ -135,8 +161,8 @@ export function readKept(raw: unknown): KeptLane[] {
   return raw.flatMap((x) => {
     if (!x || typeof x !== "object") return [];
     const r = x as Record<string, unknown>;
-    const k: KeptLane = { worktree: str(r.worktree), dir: str(r.dir), branch: str(r.branch), base: str(r.base), made: count(r.made) ?? 0, exists: r.exists === true, changed: count(r.changed), ahead: count(r.ahead) };
-    return k.worktree && k.branch.startsWith(LANE_FOLDER) ? [k] : [];
+    const k: KeptLane = { worktree: str(r.worktree), dir: str(r.dir), branch: str(r.branch), base: str(r.base), made: count(r.made) ?? 0, exists: r.exists === true, changed: count(r.changed), ahead: count(r.ahead), unpushed: count(r.unpushed) };
+    return k.worktree && isLaneBranch(k.branch) ? [k] : [];
   });
 }
 
@@ -144,4 +170,40 @@ export function readKept(raw: unknown): KeptLane[] {
 export function readRemoved(raw: unknown): LaneRemoved {
   const r = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
   return { removed: r.removed === true, deleted: r.deleted === true, changed: count(r.changed), ahead: count(r.ahead), error: typeof r.error === "string" && r.error ? r.error : null };
+}
+
+/** What a clean-up of a deleted chat's folder did (`lane_release`): removed, or why it was kept (`changes`, `unpushed`, `busy`,
+ *  `unread`, `changed`) with the numbers. */
+export interface LaneReleased {
+  removed: boolean;
+  kept: string | null;
+  changed: number | null;
+  unpushed: number | null;
+}
+
+/** The shell's answer to `lane_release`. Nothing is taken as removed unless the shell said so. */
+export function readReleased(raw: unknown): LaneReleased {
+  const r = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  return { removed: r.removed === true, kept: typeof r.kept === "string" && r.kept ? r.kept : null, changed: count(r.changed), unpushed: count(r.unpushed) };
+}
+
+/** What a clean-up of merged lanes did (`lane_clean_merged`): the branches whose folders went, each folder left with why, and
+ *  why it could not tell at all (`no_remote`, `not_installed`, `not_signed_in`). */
+export interface LaneCleaned {
+  removed: string[];
+  kept: { branch: string; why: string }[];
+  cannot: string | null;
+}
+
+/** The shell's answer to `lane_clean_merged`, with anything that is not a name and a reason left out. */
+export function readCleaned(raw: unknown): LaneCleaned {
+  const r = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  const removed = Array.isArray(r.removed) ? r.removed.filter((b): b is string => typeof b === "string" && isLaneBranch(b)) : [];
+  const kept = Array.isArray(r.kept)
+    ? r.kept.flatMap((k) => {
+        const o = k && typeof k === "object" ? (k as Record<string, unknown>) : {};
+        return isLaneBranch(str(o.branch)) && str(o.why) ? [{ branch: str(o.branch), why: str(o.why) }] : [];
+      })
+    : [];
+  return { removed, kept, cannot: typeof r.cannot === "string" && r.cannot ? r.cannot : null };
 }

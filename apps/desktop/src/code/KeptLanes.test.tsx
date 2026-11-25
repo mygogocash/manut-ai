@@ -17,6 +17,7 @@ const kept = (over: Partial<KeptLane> = {}): KeptLane => ({
   exists: true,
   changed: 3,
   ahead: 2,
+  unpushed: 0,
   ...over,
 });
 const opened = (over: Partial<KeptOpen> = {}): KeptOpen => ({ worktree: kept().worktree, changed: 3, ahead: 2, branch: false, busy: false, why: null, ...over });
@@ -115,3 +116,35 @@ describe("Kit's folders kept", () => {
     }
   });
 });
+
+describe("what a clean-up left, said where the kept folders are listed", () => {
+  const text = (p: KeptLanesProps) => byId(p, "kept-clean").map((e) => e.props.children);
+
+  it("says a clean folder is kept for commits on no remote", () => {
+    expect(text(props({ rows: [kept({ changed: 0, unpushed: 1 })] }))).toEqual(["1 commit on its branch is on no remote, so a clean-up leaves it."]);
+    expect(text(props({ rows: [kept({ changed: 0, unpushed: 4 })] }))).toEqual(["4 commits on its branch are on no remote, so a clean-up leaves it."]);
+    // nothing to say of a folder with changes (its own line says it) or one with nothing unpushed
+    expect(text(props({ rows: [kept({ changed: 2, unpushed: 4 }), kept({ worktree: "/x/1", branch: "kit/a", changed: 0, unpushed: 0 })] }))).toEqual([]);
+  });
+
+  it("gives the reason the clean-up left each folder, by branch", () => {
+    const p = props({ rows: [kept(), kept({ worktree: "/x/1", branch: "kit/a", changed: 0 }), kept({ worktree: "/x/2", branch: "kit/b", changed: 0 })], why: { "kit/promptpay-qr": "changes", "kit/a": "not_in_default", "kit/b": "open" } });
+    expect(text(p)).toEqual(["It has changes of its own, so the clean-up left it.", "Its pull request merged, but its commits are not in the default branch yet.", "Its pull request has not merged."]);
+  });
+
+  it("says it could not tell, and why, even with no folder to list", () => {
+    for (const [code, words] of [["no_remote", "remote is not on GitHub or GitLab"], ["not_installed", "gh or glab is not installed"], ["not_signed_in", "gh or glab is not signed in"]]) {
+      const p = props({ rows: [kept()], cannot: code });
+      expect(String(byId(p, "kept-cannot")[0].props.children)).toContain(words);
+    }
+    expect(byId(props({ rows: [], cannot: "not_signed_in" }), "kept-cannot")).toHaveLength(1);
+  });
+
+  it("is written in every language", () => {
+    for (const l of ["ko", "ja", "zh"] as const) {
+      setLang(l);
+      expect(html(props({ rows: [kept({ changed: 0, unpushed: 2 })], why: { "kit/promptpay-qr": "busy" }, cannot: "no_remote" }))).not.toContain("clean-up");
+    }
+  });
+});
+

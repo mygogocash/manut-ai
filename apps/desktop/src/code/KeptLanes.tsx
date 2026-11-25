@@ -8,11 +8,12 @@
 // it is ticked. `KeptLanesView` takes everything it shows as props and uses no hooks, so a test can draw it; `KeptLanes` reads
 // the shell and the sessions.
 import "./kit.css";
-import { useCallback, useEffect, useState } from "react";
-import { t } from "../i18n";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { t, type Key } from "../i18n";
 import { getHost } from "../sessions/host";
 import { useSessions } from "../sessions/sessions";
 import { keptLanesChanged, useKeptLanesVersion } from "./laneStore";
+import { cleanupDue, lastCleanup, markCleanup, worktreeSettings } from "../lib/worktrees";
 import type { KeptLane, LaneRemoveAsk } from "./laneBranch";
 
 /** How often the kept folders are read again while the page stays open: what is in a folder changes only by hand. */
@@ -37,6 +38,9 @@ export interface KeptLanesProps {
   open: KeptOpen | null;
   /** A line under the band after a removal that left the branch: git's words. */
   notice: string | null;
+  /** Why a clean-up left a folder, by branch (a code from the shell), and why it could not tell at all. */
+  why?: Record<string, string>;
+  cannot?: string | null;
   onShow: (lane: KeptLane) => void;
   onRemove: (lane: KeptLane) => void;
   onBranch: (on: boolean) => void;
@@ -62,8 +66,16 @@ function aheadLine(ahead: number | null, base: string): string {
   return ahead === 1 ? t("lane.kept.aheadOne", { base }) : t("lane.kept.aheadMany", { n: ahead, base });
 }
 
+/** What a kept folder says of the clean-up: the reason it left it, or that its branch has commits on no remote. */
+function cleanLine(k: KeptLane, why: string | undefined): string | null {
+  if (why && why !== "open") return t(`lane.kept.why.${why}` as Key);
+  if (k.exists && k.changed === 0 && k.unpushed) return k.unpushed === 1 ? t("lane.kept.unpushedOne") : t("lane.kept.unpushedMany", { n: k.unpushed });
+  if (why === "open") return t("lane.kept.why.open");
+  return null;
+}
+
 export function KeptLanesView(p: KeptLanesProps) {
-  if (p.rows.length === 0 && !p.notice) return null;
+  if (p.rows.length === 0 && !p.notice && !p.cannot) return null;
   return (
     <>
       <div className="band">
@@ -74,7 +86,13 @@ export function KeptLanesView(p: KeptLanesProps) {
           {p.notice}
         </p>
       )}
+      {p.cannot && (
+        <p className="mut lline" role="status" data-testid="kept-cannot">
+          {t(`lane.kept.cannot.${p.cannot}` as Key)}
+        </p>
+      )}
       {p.rows.map((k) => {
+        const clean = cleanLine(k, p.why?.[k.branch]);
         const open = p.open?.worktree === k.worktree ? p.open : null;
         return (
           <div key={k.worktree} className="lane kept" data-testid="kept-lane">
@@ -94,6 +112,11 @@ export function KeptLanesView(p: KeptLanesProps) {
                 {t("lane.kept.remove")}
               </button>
             </div>
+            {clean && (
+              <p className="mut lline" data-testid="kept-clean">
+                {clean}
+              </p>
+            )}
             {open && (
               <div className="banner warn kept-confirm" role="group" aria-label={t("lane.kept.confirm", { branch: k.branch })} data-testid="kept-confirm">
                 <p>{t("lane.kept.confirm", { branch: k.branch })}</p>
@@ -170,12 +193,49 @@ export function KeptLanes({ root }: { root: string }) {
   const [rows, setRows] = useState<KeptLane[]>([]);
   const [open, setOpen] = useState<KeptOpen | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [why, setWhy] = useState<Record<string, string>>({});
+  const [cannot, setCannot] = useState<string | null>(null);
 
   // another project: nothing of the last one's stays on the page
   useEffect(() => {
     setRows([]);
     setOpen(null);
     setNotice(null);
+    setWhy({});
+    setCannot(null);
+  }, [root]);
+  // Settings › Worktrees: remove the folders of lanes whose pull request merged. Asked when the project opens and when the
+  // window is looked at again, never on a timer, and at most once an hour for a project; the shell removes nothing with work
+  // of its own in it and names every folder it left. `held` are the folders a session still works in.
+  const heldNow = ss.list.map((r) => r.lane?.worktree).filter((w): w is string => !!w);
+  const heldRef = useRef(heldNow);
+  heldRef.current = heldNow;
+  useEffect(() => {
+    const host = getHost();
+    if (!host.laneCleanMerged || !root) return;
+    let live = true;
+    const run = () => {
+      if (!worktreeSettings().cleanMerged || !cleanupDue(Date.now(), lastCleanup(root))) return;
+      markCleanup(root, Date.now());
+      void host.laneCleanMerged!(root, heldRef.current).then(
+        (got) => {
+          if (!live) return;
+          setCannot(got.cannot);
+          setWhy(Object.fromEntries(got.kept.map((k) => [k.branch, k.why])));
+          if (got.removed.length > 0) {
+            setNotice(got.removed.length === 1 ? t("lane.kept.cleanedOne") : t("lane.kept.cleanedMany", { n: got.removed.length }));
+            keptLanesChanged();
+          }
+        },
+        () => undefined,
+      );
+    };
+    run();
+    window.addEventListener("focus", run);
+    return () => {
+      live = false;
+      window.removeEventListener("focus", run);
+    };
   }, [root]);
   // read when the project opens, when a folder was kept or removed, when the window is looked at again, and once a minute; a
   // read keeps what was said after a removal (the branch that stayed) until the project changes
@@ -227,6 +287,8 @@ export function KeptLanes({ root }: { root: string }) {
       home={ss.home}
       open={open}
       notice={notice}
+      why={why}
+      cannot={cannot}
       onShow={(k) => void getHost().reveal(k.worktree).catch(() => undefined)}
       onRemove={(k) => setOpen({ worktree: k.worktree, changed: k.exists ? (k.changed ?? 0) : 0, ahead: k.ahead, branch: false, busy: false, why: null })}
       onBranch={(on) => open && setOpen({ ...open, branch: on, why: null })}
