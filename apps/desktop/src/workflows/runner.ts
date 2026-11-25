@@ -215,7 +215,8 @@ export function createWorkflows(deps: WorkflowDeps) {
       );
   };
 
-  /** A run's lane closed, failed to start or ended: its run ends with it. */
+  /** A run's lane closed, failed to start or ended, or the person turned it into its agent's terminal (which stops the chat's
+   *  turn, so no step would ever end): its run ends with it. */
   const check = () => {
     const list = deps.sessions().getState().list;
     for (const l of Object.values(state.live)) {
@@ -224,6 +225,7 @@ export function createWorkflows(deps: WorkflowDeps) {
       if (!r) endRun(l.run, "stopped", "closed_lane");
       else if (r.status === "failed") endRun(l.run, "failed", "start", r.error);
       else if (r.status === "exited") endRun(l.run, "failed", "ended", r.error);
+      else if (r.view === "terminal") endRun(l.run, "stopped", "interrupted");
     }
   };
 
