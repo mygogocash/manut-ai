@@ -132,10 +132,12 @@ describe("a face's size", () => {
 });
 
 describe("face.css", () => {
-  it("is the kit's face section word for word, with the app's tokens for the kit's short names", () => {
+  it("is the kit's face section word for word, with the app's tokens for the kit's short names, on span.face", () => {
     const section = KIT.slice(KIT.indexOf(".face{position"), KIT.indexOf("/* movement setting */"));
     const asApp = (css: string) =>
       css
+        // a selector's .face is span.face here (face.css says why); declarations are left as they are
+        .replace(/(^|[,}])\.face\b/gm, "$1span.face")
         .replace(/var\(--blue\)/g, "var(--aui-blue)")
         .replace(/var\(--ok\)/g, "var(--aui-green)")
         .replace(/var\(--band\)/g, "var(--aui-subtle)")
@@ -150,8 +152,8 @@ describe("face.css", () => {
     // the busy button's spinner is not a face's, and the think dots' delays sit in the shorthand (face.css says why)
     const skip = (l: string) => /fspin/.test(l) || /o-dots circle:nth-child\([23]\)\{animation-delay/.test(l);
     expect(rules(asApp(section)).filter((l) => !skip(l) && !ours.has(l))).toEqual([]);
-    expect(ours).toContain('.face[data-st="think"] .o-dots circle:nth-child(2){animation:fdot 1.5s .2s ease-in-out infinite}');
-    expect(ours).toContain('.face[data-st="think"] .o-dots circle:nth-child(3){animation:fdot 1.5s .4s ease-in-out infinite}');
+    expect(ours).toContain('span.face[data-st="think"] .o-dots circle:nth-child(2){animation:fdot 1.5s .2s ease-in-out infinite}');
+    expect(ours).toContain('span.face[data-st="think"] .o-dots circle:nth-child(3){animation:fdot 1.5s .4s ease-in-out infinite}');
     // no keyframes of its own beyond the kit's face moves
     const kitMoves = new Set([...section.matchAll(/@keyframes\s+([\w-]+)/g)].map((m) => m[1]));
     for (const m of FACE_CSS.matchAll(/@keyframes\s+([\w-]+)/g)) expect(kitMoves, m[1]).toContain(m[1]);
