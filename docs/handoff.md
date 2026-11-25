@@ -313,10 +313,18 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
 2. The night build's queue is empty: `env-example` (`9fa8151`), `dev-url` (PR #19) and `preview-command` (PR #20) were
    merged on 25 Nov, all three for the code editor's preview itself (item 53), which is the first to import them. Add pure
    packages to `docs/plan.md` as the phases need them; a run that finds the queue empty stops and says so.
-3. Next, from the December list in `docs/plan.md`, as slots free (at most four helpers on this Mac):
-   - item 17 (an installable web app) waits for owners' sign-in, as there is no owner home page yet;
-   - the cloud outpost, once the owner approves its cost (`docs/browser-control.md`).
-   - the code editor's remaining states are running; item 30 (Kit's dial in a terminal) waits for the owner's chat-or-terminal call.
+3. Next, from the December list in `docs/plan.md`, as slots free (two heavy helpers at a time on this Mac; three or four
+   at once swapped hard and reached the usage limit on 24 and 25 Nov):
+   - running: item 61 (a shop's live feed, built and switched off) and item 62 (the Runs layout tests made fast);
+   - candidates that need no owner:
+     - a helper's own session on the desktop (`docs/runtime-adapter.md`, "Next slices" 4);
+     - a schedule's time zone shown when it is not this computer's (the same list);
+     - the lane pane's Diff read from the lane folder's own git, so a restart does not start it empty, and a subagent's
+       own edits in it (`docs/code-editor.md`, "Left for later");
+     - keychain support on Windows and Linux, for the session and the sealed cache: CI has no Windows runner, so it
+       would be built untested there;
+   - the cloud outpost, once the owner approves its cost (`docs/browser-control.md`);
+   - item 30 (Kit's dial in a terminal) waits for the owner's chat-or-terminal call.
    - Checked 24 Nov: the rate limiters' namespace ids in `apps/api/wrangler.jsonc` (2026112301 to 2026112332) clash
      with no other Worker in the Cloudflare account, whose other limiters use only 1001 and 1002. Items 31 to 42 took
      2026112333 to 2026112352 (four each: dev, staging, production and the top level); pick the next limiter's ids
