@@ -228,19 +228,20 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    script without a click, other names for the settings that skip an agent's asks, and whether an agent can write a
    file into `~/.manut/workflows` without an ask that says what that folder is.
    Running on 26 Nov at 03:00, each a subagent of the lead's session in its own worktree:
-   - item 78a, the channel for reaching the Mac from a phone (`feat/remote-channel`, Opus,
-     `cc-item78a-remote-channel`): built, read by a second reviewer, and now tightening the seven things that review
-     found (`docs/decisions.md`, 25 Nov);
+   - item 78b, the Mac's side of reaching it from a phone and Settings, Sharing and access, built switched off
+     (`feat/remote-mac`, Opus, `cc-item78b-remote-mac`), on item 78a's package, which merged at 03:40 with 85b;
    - item 78f part 1, reading Tailscale's state, read only (`feat/tailscale-state`, Opus,
      `cc-item78f1-tailscale-state`);
    - item 84, skills shared by a link, built switched off (`feat/skill-links`, Opus, `cc-item84-skill-links`);
-   - item 85b, motion in the chats (`feat/motion-chat`, Sonnet, `cc-item85b-motion-chat`), and 85c, motion in the
-     lists and pages (`feat/motion-lists`, Sonnet, `cc-item85c-motion-lists`);
+   - item 85c, motion in the lists and pages (`feat/motion-lists`, Sonnet, `cc-item85c-motion-lists`);
+   - item 85f, the chat's type (`feat/chat-type`, Opus, `cc-item85f-chat-type`), and 85g, an approval's card and Needs
+     you (`feat/ask-card`, Opus, `cc-item85g-ask-card`);
    - item 85e, the brand's faces (`feat/brand-faces`, Opus, `cc-item85e-faces`), and 85h, Settings as one column
      (`feat/settings-column`, Opus, `cc-item85h-settings-column`).
-   Next: 78b (the Mac side and Settings, Sharing and access) once 78a merges, 85f (the chat's type) after 85b, 85g (an
-   approval's card and Needs you), then 85i. The briefs the helpers were given are not kept in the repository; each
-   item's row in `docs/plan.md` says what it is.
+   Next: 85i once 85e to 85h have merged, 78c and 78f part 2 (they need the owner's relay, a tailnet and phones to
+   try), and seven browser specs that items 85a and 85b left failing in `live`, `runs` and `wire` (they assert the old
+   mechanics of reduced motion, or the app regressed: not yet read; CI's Playwright shards do not fail a run). The
+   briefs the helpers were given are not kept in the repository; each item's row in `docs/plan.md` says what it is.
    At 23:55 on 25 Nov the account reached its five-hour limit and six helpers stopped mid-work; the limit reset at
    02:50 and each was sent on in its own thread, with its uncommitted work intact. From about 22:50 the Mac had also
    been sleeping fifteen minutes in every seventeen once the owner was away, which timed tests out and failed two
