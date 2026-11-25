@@ -1,7 +1,7 @@
 {
   "name": "@manut/desktop",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Manut AI desktop app (Tauri 2 + React 19). A fork of Oh My Hermes's manut at 77b8646 (MIT); see NOTICE.md.",
   "type": "module",
   "scripts": {

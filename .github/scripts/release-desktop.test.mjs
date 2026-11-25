@@ -69,6 +69,13 @@ describe("Release desktop: the release", () => {
     assert.doesNotMatch(code, /windows-latest[\s\S]*tauri-apps\/tauri-action/);
   });
 
+  it("builds the Windows installer only when a run started by hand asks for it, never for a release's tag", () => {
+    const on = code.slice(code.indexOf("\non:"), code.indexOf("\nconcurrency:"));
+    assert.match(on, /workflow_dispatch:\n {4}inputs:\n {6}windows:\n(?: {8}.*\n)*? {8}default: false\n/);
+    assert.match(job("windows"), /\n {4}if: \$\{\{ github\.event_name == 'workflow_dispatch' && inputs\.windows \}\}\n/);
+    assert.doesNotMatch(job("mac"), /inputs\.windows/);
+  });
+
   it("builds both Mac chips", () => {
     const mac = job("mac");
     assert.match(mac, /target: aarch64-apple-darwin/);

@@ -64,7 +64,8 @@ developer to sign it in: do not ship this build to an owner.
   false. Turning it on needs our own key and endpoint (the steps are in that file).
 - **Their packaging.** The site preview (`preview/`), benchmarks (`bench/`), the AppImage smoke test and CI runner
   scripts, the product screenshots, and their app icon and logo. The icon and `src/assets/manut-mark.svg` here are
-  placeholders (an "M" in the brand mark's token colours); regenerate the icons with `pnpm tauri icon <png>`.
+  Manut AI's own mark (the design canvas's Logo board), drawn by `node scripts/app-icons.mjs`, which writes every
+  file in `src-tauri/icons` at its own size; change the drawing there and run it again on a Mac.
 
 Kept whole: the terminal (`src-tauri/src/sessions.rs`, `src/sessions/term/`), the coding-agent adapters
 (`agent_chat.rs`, `acp_chat.rs`, `acp_agents.rs`, `dsh_chat.rs`), tasks through `gh` and `glab`, the tray,

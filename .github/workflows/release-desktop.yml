@@ -5,8 +5,8 @@
 #
 # The Mac app is built twice (Apple silicon and Intel) and put into a DRAFT release. Nothing here publishes it: the owner
 # does, and the in-app updater's latest.json lives in that release, so updates reach people only when the owner
-# publishes. The first release is Mac only (docs/decisions.md, 25 Nov 2026), so the Windows installer is built as a
-# workflow artifact to test with and is never attached to the release.
+# publishes. The first release is Mac only (docs/decisions.md, 25 Nov 2026), so the Windows installer is built only
+# when a run started by hand asks for it, as a workflow artifact to test with, and is never attached to the release.
 #
 # Lifted in outline from Oh My Hermes' omher-release.yml (MIT): the tag check and the matrix of targets.
 name: Release desktop
@@ -15,6 +15,11 @@ on:
   push:
     tags: ["desktop-v*"]
   workflow_dispatch:
+    inputs:
+      windows:
+        description: Also build the Windows installer, as a workflow artifact only (it is never released)
+        type: boolean
+        default: false
 
 # One release run at a time per ref, and a started build is never cancelled half way through a notarization.
 concurrency:
@@ -181,8 +186,11 @@ jobs:
 
   windows:
     # CI files only: the first release is Mac only. The installer is kept as a workflow artifact and never uploaded to
-    # the release, so this job has no write permission and cannot attach anything.
+    # the release, so this job has no write permission and cannot attach anything. Nobody uses it yet, so it is built
+    # only when a person starting the run by hand ticks the box (the owner, 25 Nov 2026: skip what is not used). A
+    # release's tag builds the Mac files alone.
     name: Windows installer (not released)
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.windows }}
     runs-on: windows-latest
     timeout-minutes: 60
     steps:
