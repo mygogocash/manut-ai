@@ -4,9 +4,11 @@
 name: CodeQL
 
 on:
+  # A branch with a pull request is scanned by the pull request's run, which is also where an alert is annotated, so a
+  # push to a pilot branch is not scanned a second time (the owner, 25 Nov 2026: skip what is not used).
   pull_request:
   push:
-    branches: [main, "pilot/**"]
+    branches: [main]
   # Weekly, so new queries also reach code nobody has touched. GitHub runs schedules from the default branch only.
   schedule:
     - cron: "17 2 * * 1" # Mondays 02:17 UTC, 09:17 in Bangkok

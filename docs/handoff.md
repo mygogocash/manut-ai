@@ -509,6 +509,11 @@ Every switch that turns a built part on, and what each needs from the owner, is 
   `wrangler whoami` lists the accounts by name: the dev Workers are in the one named GoGoCash). Run
   `node ../../.github/scripts/check-dev-deploys.mjs wrangler.web.jsonc wrangler.jsonc` first: it refuses any
   Worker whose name does not end in `-dev`.
+- CI runs only what a push needs since 25 Nov (`docs/decisions.md`; `.github/scripts/changed-areas.mjs`): its first job,
+  What changed, says in the run's summary which jobs run and why, measured from the last commit CI passed on. A docs
+  push runs two short jobs. A pull request's own run of a `pilot/*` commit skips everything, as the push's run checks
+  it. A skipped job shows as skipped and counts as passed; start CI by hand (Actions, CI, Run workflow) to run every
+  job on a branch.
 - GitHub: `git push` works as it is. For `gh`, prefix commands with
   `GH_TOKEN="$(gh auth token --user KunanonJ)"`; the default `gh` account cannot see the organisation.
 - Secrets never go into source, logs, tests or chat. A secret the owner gives arrives through T3 Code's secure

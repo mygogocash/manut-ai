@@ -1,6 +1,12 @@
 # Every check a change has to pass, run on GitHub's machines so a developer's Mac stays free. The repository is
 # public, so GitHub-hosted standard runners (Linux, Windows and macOS) cost nothing. The jobs run side by side and
 # fail separately, so a red check names the part that broke.
+#
+# A run does only what its change needs (the owner, 25 Nov 2026: skip what is not used, so CI is faster). The first job
+# works out which parts changed since the last commit CI passed on, and each other job runs only when its part did: a
+# change to the docs runs two short jobs, and only a change to the shell's Rust runs the Rust jobs. A pull request
+# whose branch already runs CI on its pushes skips every job, since that run checks the same commit. A skipped job
+# counts as passed. Whenever what changed is not certain, every job runs (.github/scripts/changed-areas.mjs).
 name: CI
 
 on:
@@ -19,8 +25,49 @@ permissions:
   contents: read
 
 jobs:
+  changes:
+    # Which jobs this run needs. It also runs the tests of the script that decides, on every run, because a wrong
+    # answer there would skip a check without anyone seeing. If this job fails, nothing else runs and the run is red.
+    name: What changed
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read # reads this workflow's earlier runs, to find the last commit CI passed on
+    outputs:
+      typecheck: ${{ steps.areas.outputs.typecheck }}
+      api: ${{ steps.areas.outputs.api }}
+      web: ${{ steps.areas.outputs.web }}
+      phones: ${{ steps.areas.outputs.phones }}
+      desktop: ${{ steps.areas.outputs.desktop }}
+      e2e: ${{ steps.areas.outputs.e2e }}
+      rust: ${{ steps.areas.outputs.rust }}
+      packages: ${{ steps.areas.outputs.packages }}
+    steps:
+      # Only the scripts and the workflows: the decision needs nothing else, and the job stays a few seconds long.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            .github/scripts
+            .github/workflows
+      - name: Check the script that decides
+        run: node --test .github/scripts/changed-areas.test.mjs
+      # The answer goes to the job's outputs, and why goes to the log and the run's summary.
+      - name: Decide which jobs run
+        id: areas
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node .github/scripts/changed-areas.mjs > "$RUNNER_TEMP/areas" 2> "$RUNNER_TEMP/why"
+          cat "$RUNNER_TEMP/areas" >> "$GITHUB_OUTPUT"
+          cat "$RUNNER_TEMP/why" "$RUNNER_TEMP/areas"
+          { echo "### What this run checks"; echo; cat "$RUNNER_TEMP/why"; } >> "$GITHUB_STEP_SUMMARY"
+
   typecheck:
     name: Typecheck
+    needs: changes
+    if: needs.changes.outputs.typecheck == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -35,6 +82,8 @@ jobs:
     # wrangler starts (apps/api/package.json). Nothing reaches Cloudflare: both contracts refuse every outbound
     # call, and no account or secret is used.
     name: API tests
+    needs: changes
+    if: needs.changes.outputs.api == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -53,6 +102,8 @@ jobs:
 
   web:
     name: Web tests
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -70,6 +121,8 @@ jobs:
     # (apps/web/e2e). Unlike the desktop's Playwright jobs it is a check: a state that does not fit a phone fails the run.
     # docs/phone-pass.md says what it covers, and what only a real phone and LINE's own browser can.
     name: Web on phones
+    needs: changes
+    if: needs.changes.outputs.phones == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -116,6 +169,8 @@ jobs:
 
   desktop:
     name: Desktop tests
+    needs: changes
+    if: needs.changes.outputs.desktop == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -124,9 +179,14 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup-workspace
       - run: pnpm --filter @manut/desktop test
+      # The release workflow's rules (it never publishes, and the app's updater is tied to it) and the Playwright
+      # summary's counts: they read the workflows and the desktop's config, so they run where a change to either does.
+      - run: node --test .github/scripts/release-desktop.test.mjs .github/scripts/playwright-summary.test.mjs
 
   packages:
     name: Package tests
+    needs: changes
+    if: needs.changes.outputs.packages == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -142,6 +202,8 @@ jobs:
     # it needs. Neither needs the front end built: without the custom-protocol feature, Tauri compiles in dev
     # mode and points at devUrl instead of embedding ../dist.
     name: Desktop Rust (${{ matrix.os }})
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -182,6 +244,8 @@ jobs:
     # and failing tests to its job summary, and the job below adds them up. None of them is one of the checks main
     # will require.
     name: Desktop Playwright (shard ${{ matrix.shard }} of ${{ strategy.job-total }})
+    needs: changes
+    if: needs.changes.outputs.e2e == 'true'
     runs-on: ubuntu-latest
     continue-on-error: true
     timeout-minutes: 45
@@ -224,8 +288,8 @@ jobs:
     # The shards' counts added up in one summary, with the failing tests of every shard in one list. It does not run
     # the suite, so it needs no workspace: only the script and Node, which the runner has.
     name: Desktop Playwright (all shards)
-    needs: e2e
-    if: ${{ !cancelled() }}
+    needs: [changes, e2e]
+    if: ${{ !cancelled() && needs.changes.outputs.e2e == 'true' }}
     runs-on: ubuntu-latest
     continue-on-error: true
     timeout-minutes: 5
