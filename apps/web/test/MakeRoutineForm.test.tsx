@@ -702,6 +702,54 @@ describe("the Make a routine form, once the routine is made", () => {
     expect(rowsOf()).toHaveLength(2);
   });
 
+  it("lists the routine once when a read that already has it lands while it is being made, and again after the answer", async () => {
+    // Refresh is never locked, so an operator can read the list while a routine is on its way: the shop's object may have written it by then.
+    const made3 = deferred<RoutinesRead>();
+    const answer = deferred<Routine>();
+    const evening = routine({ id: "rt-answered", name: "Evening brief", when: "Every day at 17:00", next: "2026-11-23T10:00:00.000Z" });
+    const reads = [Promise.resolve(view([MORNING])), Promise.resolve(view([MORNING, evening])), made3.promise];
+    const getRoutines = vi.fn(() => reads.shift() ?? made3.promise);
+    renderPage({ getRoutines, createRoutine: () => answer.promise });
+    await ready();
+    fillDaily("Evening brief", "17:00");
+    saysYes(openQuestion("Evening brief"), "Evening brief");
+    await waitFor(() => expect(screen.getByRole("button", { name: "Making" })).toBeTruthy());
+    press("Refresh");
+    await waitFor(() => expect(rowsOf()).toHaveLength(2));
+
+    answer.resolve(evening);
+    await screen.findByRole("status");
+    await waitFor(() => expect(getRoutines).toHaveBeenCalledTimes(3));
+    // The third read has not answered: the routine is listed once, from the read that has it, and not again from the answer.
+    expect(rowsOf()).toHaveLength(2);
+    expect(within(screen.getByRole("region", { name: "Routines for Baan Mali" })).getByText("2 routines")).toBeTruthy();
+    made3.resolve(view([MORNING, evening]));
+    await waitFor(() => expect(getRoutines).toHaveBeenCalledTimes(3));
+    expect(rowsOf()).toHaveLength(2);
+  });
+
+  it("lists the routine after the read that is current when the answer comes, so a read that does not have it yet does not hide it", async () => {
+    const third = deferred<RoutinesRead>();
+    const answer = deferred<Routine>();
+    const evening = routine({ id: "rt-answered", name: "Evening brief", when: "Every day at 17:00", next: "2026-11-23T10:00:00.000Z" });
+    const reads = [Promise.resolve(view([MORNING])), Promise.resolve(view([MORNING])), third.promise];
+    const getRoutines = vi.fn(() => reads.shift() ?? third.promise);
+    renderPage({ getRoutines, createRoutine: () => answer.promise });
+    await ready();
+    fillDaily("Evening brief", "17:00");
+    saysYes(openQuestion("Evening brief"), "Evening brief");
+    await waitFor(() => expect(screen.getByRole("button", { name: "Making" })).toBeTruthy());
+    // A read lands that was asked for before the shop wrote the routine: it lists the one routine.
+    press("Refresh");
+    await waitFor(() => expect(getRoutines).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(rowsOf()).toHaveLength(1));
+    answer.resolve(evening);
+    await screen.findByRole("status");
+    // The routine is listed from the answer, after that read, while the next one is on its way.
+    await waitFor(() => expect(rowsOf()).toHaveLength(2));
+    expect(within(rowsOf()[1]!).getByText("Evening brief")).toBeTruthy();
+  });
+
   it("keeps the routine in the list when the read after it fails, and says that the read failed", async () => {
     let reads = 0;
     const getRoutines = vi.fn(async () => {

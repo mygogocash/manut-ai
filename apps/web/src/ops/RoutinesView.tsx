@@ -137,13 +137,16 @@ function RoutinesBoard({ shop, routines, onForget }: {
   const running = useRef(false);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [errors, setErrors] = useState<Record<Place, Problem | null>>({ team: null, routines: null, make: null });
-  // The routines this page has made since the list it holds was read, as the API answered each, with the list they were made after. They
-  // are listed after it at once, so a routine that was made is never missing while the page reads again, or when that read fails. The next
-  // read says what the API now keeps, so it replaces them, whether it lists them or not.
+  // The routines this page has made since the list it holds was read, as the API answered each, with the list that was held when it
+  // answered. They are listed after it at once, so a routine that was made is never missing while the page reads again, or when that read
+  // fails. The next read says what the API now keeps, so it replaces them, whether it lists them or not. A routine is listed once: a read
+  // that landed while it was being made (Refresh is never locked) may already list it.
   const [made, setMade] = useState<{ after: RoutinesRead; routines: Routine[] } | null>(null);
   const locked = busy !== null;
   const now = Date.now();
   const view = routines.data;
+  const latest = useRef(view);
+  latest.current = view;
   const joined = view !== null && made !== null && made.after === view
     ? made.routines.filter((one) => !view.routines.some((known) => known.id === one.id))
     : [];
@@ -222,7 +225,9 @@ function RoutinesBoard({ shop, routines, onForget }: {
   const makeRoutine = (review: Review, handlers: { refused: (error: unknown) => boolean; made: () => void }) =>
     change("make", "make", async () => {
       const answer = await api.createRoutine(review.body);
-      if (view) setMade((current) => ({ after: view, routines: [...(current?.after === view ? current.routines : []), answer] }));
+      // After the list the page holds now, which is not the one it held when yes was pressed if a read landed in between.
+      const after = latest.current;
+      if (after) setMade((current) => ({ after, routines: [...(current?.after === after ? current.routines : []), answer] }));
       handlers.made();
       return M.made(answer, team ?? { paused: false, since: null, members: ["nam", "pim", "ton"] }, Date.now());
     }, { refused: handlers.refused, say: (error) => makeErrorText(error, shop.name) });
