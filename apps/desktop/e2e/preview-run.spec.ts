@@ -68,6 +68,8 @@ test.beforeEach(async ({ page }) => {
     (window as any).__manutMockPreview = { projects: {}, mode: "serve", delay: 1_200, readError: null, startWait: 60_000 };
   }, ROOT);
   await page.goto("/");
+  // the app is up once its menu answers: a session started before that can miss its start (running.spec.ts waits the same way)
+  await openCode(page);
 });
 
 test("names the command first; Start runs it in the lane's own folder on samples; it is Running at its address with Open and Stop", async ({ page }) => {
@@ -211,6 +213,7 @@ for (const theme of ["light", "dark"] as const) {
   test(`in the ${theme} theme, wide and narrow, it is drawn whole and nothing is wider than the window`, async ({ page }) => {
     await page.evaluate((t) => localStorage.setItem("manut.theme", t), theme);
     await page.reload();
+    await openCode(page);
     await previewOf(page);
     await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
     await fits(page);
@@ -244,6 +247,7 @@ for (const [lang, start, running, stopped] of [
   test(`speaks ${lang}`, async ({ page }) => {
     await page.evaluate((l) => localStorage.setItem("manut.lang", l), lang);
     await page.reload();
+    await openCode(page);
     await previewOf(page);
     await expect(page.getByTestId("lane-preview-start")).toHaveText(start);
     await page.getByTestId("lane-preview-start").click();
