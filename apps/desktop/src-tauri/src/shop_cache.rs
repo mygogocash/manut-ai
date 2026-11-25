@@ -6,8 +6,10 @@
 //! renamed over the old one so a crash never leaves half a file, and is never followed through a link. Writing a shop's
 //! file removes any other shop's, so at most one is ever kept; [`clear`] removes it (signing out, a session the API
 //! ended, switching to Practice or to another origin). Nothing else is written there and nothing else is read or
-//! removed. The text is not looked at here: it holds no token and nothing from the keychain (the page copies only the
-//! fields its screens read), and the page decides what it means and whether it is too old to show.
+//! removed. The text is not looked at here. It comes sealed: the page copies only the fields its screens read, then seals
+//! them with AES-GCM (src/runtime/http/seal.ts) under a key only the keychain holds (shop_cache_key.rs), so what reaches
+//! the disk cannot be read without that key, and the page alone opens it and decides what it means and whether it is too
+//! old to show.
 
 use std::fs;
 use std::io::{Read, Write};
@@ -15,8 +17,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 /// Bytes kept of one shop. What the page keeps is the decoded tasks, the actions waiting for the owner, schedules and
-/// attention items, never the API's whole objects, so this is far above any shop's read; a read over it is not kept.
-pub const MAX_BYTES: usize = 8 * 1024 * 1024;
+/// attention items, never the API's whole objects, so 8 MiB of that is far above any shop's read; a read over it is not
+/// kept. The file holds the read sealed, written as base64, which is a third longer, with the seal's nonce and tag and
+/// a line of JSON around it: 11 MiB holds 8 MiB of read with room to spare.
+pub const MAX_BYTES: usize = 11 * 1024 * 1024;
 
 /// Every call takes this lock, so a clear cannot run between a write's temporary file and its rename and leave the file
 /// behind, and two writes never share the temporary file.
@@ -244,6 +248,16 @@ mod tests {
         write(&h, A, &"y".repeat(MAX_BYTES)).unwrap();
         assert_eq!(read(&h, A).unwrap().map(|t| t.len()), Some(MAX_BYTES));
         let _ = fs::remove_dir_all(&h);
+    }
+
+    #[test]
+    fn holds_a_read_of_eight_mib_once_the_page_has_sealed_it() {
+        // What the page writes for a read of `n` bytes (src/runtime/http/seal.ts): GCM's 16-byte tag after it, all of it as
+        // base64url without padding, in a line of JSON with the version and the nonce's 16 characters.
+        let sealed = |n: usize| (4 * (n + 16)).div_ceil(3) + r#"{"v":6,"iv":"","sealed":""}"#.len() + 16;
+        assert!(sealed(8 * 1024 * 1024) <= MAX_BYTES, "{} > {MAX_BYTES}", sealed(8 * 1024 * 1024));
+        // and the cap is not far above it: a file is read whole into memory
+        assert!(MAX_BYTES - sealed(8 * 1024 * 1024) < 1024 * 1024, "{MAX_BYTES}");
     }
 
     #[test]

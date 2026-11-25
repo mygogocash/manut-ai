@@ -27,6 +27,7 @@ mod running;
 mod session_files;
 mod sessions;
 mod shop_cache;
+mod shop_cache_key;
 mod tasks;
 mod term_history;
 mod term_import;
@@ -465,7 +466,8 @@ async fn api_session_clear() -> Result<(), String> {
 
 /// The connected runtime's last good read of the shop, kept for when the API cannot be reached (shop_cache.rs,
 /// src/runtime/http/cache.ts): `~/.manut/shop-cache/<key>.json`, owner-only, written through a temporary file and renamed,
-/// and only ever one shop's. `key` is the 64 hex digits the page makes of the shop; the shell takes no path.
+/// and only ever one shop's. `key` is the 64 hex digits the page makes of the shop; the shell takes no path. `text` comes
+/// sealed (src/runtime/http/seal.ts), with the key `shop_cache_seal_key` gives.
 #[tauri::command]
 async fn shop_cache_write(key: String, text: String) -> Result<(), String> {
     let home = user_home()?;
@@ -484,6 +486,22 @@ async fn shop_cache_read(key: String) -> Result<Option<String>, String> {
 async fn shop_cache_clear() -> Result<(), String> {
     let home = user_home()?;
     tauri::async_runtime::spawn_blocking(move || shop_cache::clear(&home)).await.map_err(|e| e.to_string())?
+}
+
+/// The key the saved read is sealed with, as 64 hex digits, from the keychain (shop_cache_key.rs): made and kept first when
+/// `make` is set and none is held, else null when none is held. `unavailable` on a computer with no keychain support, where
+/// the page keeps no copy. Off the main thread: a locked keychain asks the person first.
+#[tauri::command]
+async fn shop_cache_seal_key(make: bool) -> Result<Option<String>, String> {
+    let key = tauri::async_runtime::spawn_blocking(move || shop_cache_key::get(make)).await.map_err(|_| "keychain".to_string())??;
+    Ok(key.map(|k| k.as_str().to_owned()))
+}
+
+/// Deletes the key the saved read is sealed with, as the page forgets the read, so a copy of the file that outlived the
+/// forgetting can never be opened.
+#[tauri::command]
+async fn shop_cache_seal_key_clear() -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(shop_cache_key::clear).await.map_err(|_| "keychain".to_string())?
 }
 
 /// Keystrokes (and pastes) from the terminal view into session `id`.
@@ -1251,6 +1269,8 @@ fn commands(invoke: tauri::ipc::Invoke) -> bool {
         shop_cache_write,
         shop_cache_read,
         shop_cache_clear,
+        shop_cache_seal_key,
+        shop_cache_seal_key_clear,
         term_link::term_link_take,
         disk::disk_watch,
         turn_files::turn_files_take,
