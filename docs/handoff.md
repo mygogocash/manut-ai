@@ -175,8 +175,6 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    helper that ends its turn while its own gate runs in the background is marked finished without a report: send it on
    to wait with `t3_background_wait`. They run, each on its own branch from `pilot/week-1`; review each, merge it after
    the full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
-   - item 58, the preview drawn in the pane: a sandboxed frame of the lane's running preview, the CSP widened for
-     loopback frames only (`feat/preview-frame`, Opus), started 25 Nov when item 53 merged.
    - item 59, making a routine from the console: a form over `POST /v1/admin/routines`, previewed in the API's words
      and asked first (`feat/console-make-routine`, Sonnet), started 25 Nov when item 57 merged.
    A helper's run can also fail when the API sends nothing for 10 minutes; that is not a usage limit and nothing sends
@@ -192,7 +190,12 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    The security review of 24 Nov (findings only) found no critical issue, two high and three medium ones that need
    `EMAIL_SIGN_IN` or `SELF_SERVE_SHOPS` on, and three low ones; its proofs are in the review thread's report, and
    `docs/turning-on.md` says to keep both switches off until items 41 and 42 merge.
-   Merged: 57 (the console's Routines page: a shop's routines, whose job, when, the next run or why none, the last run,
+   Merged: 58 (the preview drawn in the pane: a sandboxed frame, `allow-scripts allow-same-origin allow-forms`, of the
+   lane's own running preview at a localhost address; `frame-src` widened to localhost only; a navigation hook keeps
+   the app's window to its own pages and this computer's addresses; a framed page was shown to reach no command or
+   plugin in a scratch Tauri program on this Mac and in a Rust test through Tauri's own check; `[::1]` and Windows
+   keep Open in browser only; macOS 11 itself and the real app binary not run; desktop only, Rust changed),
+   57 (the console's Routines page: a shop's routines, whose job, when, the next run or why none, the last run,
    and its team, with pause, resume, remove and Pause everyone each asked first in its row; no making of routines yet;
    practice world v13; only the pages Worker is redeployed),
    53 (the preview itself, first slice: Start in a lane's Preview view runs the command `preview-command`
