@@ -9,6 +9,7 @@ import {
   acceptSession,
   startSession,
 } from "../src/index";
+import ephemeralKeys from "./fixtures/ephemeral-keys.json";
 
 /// Shared fixtures. The host id is the relay vectors' test-only host id
 /// (`apps/api/test/fixtures/relay-v1-vectors.json`), so these tests name a Mac the relay would
@@ -63,6 +64,17 @@ export async function openSession(
   const { finish, channel: phone } = await started.phone.receiveWelcome(accepted.welcome);
   const mac = await accepted.mac.receiveFinish(finish);
   return { phone, mac };
+}
+
+/// One of the fixed throwaway key pairs in `fixtures/ephemeral-keys.json`, so a handshake can be
+/// run twice with the same bytes.
+export async function fixedKeyPair(name: keyof typeof ephemeralKeys.keys): Promise<CryptoKeyPair> {
+  const jwk = ephemeralKeys.keys[name];
+  const params = { name: "ECDH", namedCurve: "P-256" };
+  const privateKey = await crypto.subtle.importKey("jwk", jwk, params, false, ["deriveBits"]);
+  const { d: _private, ...publicJwk } = jwk;
+  const publicKey = await crypto.subtle.importKey("jwk", publicJwk, params, true, []);
+  return { privateKey, publicKey };
 }
 
 export const text = (value: string): Bytes => new TextEncoder().encode(value) as Bytes;

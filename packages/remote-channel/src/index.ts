@@ -38,6 +38,18 @@ export {
   RECORD_LIMIT,
 } from "./channel";
 export {
+  type PairingOffer,
+  DOOR_TOKEN_BYTES,
+  PAIRING_TTL_MS,
+  decodePairingOffer,
+  encodePairingOffer,
+  newPairingOffer,
+  pairingLink,
+  readPairingLink,
+} from "./offer";
+export { type MacPairing, type PairingOptions, type PhonePairing, macPairing, startPairing } from "./pairing";
+export { type PairingGrant, decodePairingGrant, doorTokenHash, encodePairingGrant, newPairingGrant } from "./grant";
+export {
   type MacSessionHandshake,
   type PhoneSessionHandshake,
   type SessionHandshakeOptions,
