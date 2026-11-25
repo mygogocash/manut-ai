@@ -1,6 +1,7 @@
 // The one activity line per turn (design rule 6). Tool/skill calls never get their own timeline rows:
 // while the turn runs, this line's text slides up in place; when it ends it collapses to
 // "Worked for 2m 41s · 6 steps" and a click opens one detail row per step.
+import { useLanded } from "../parts/arrival";
 import { useState, type KeyboardEvent } from "react";
 import type { SlotProps } from "../../features";
 import { activityText, getStore, liveLabel, subagentEnded, THINKING, WORKING, type Step, type Turn } from "../../state/store";
@@ -69,7 +70,8 @@ function LabelView({ label }: { label: Label }) {
   );
 }
 
-/** Old text moves up and fades, new text comes from below (220 ms; none under reduced motion). */
+/** Old text moves up and fades, new text rises from below (one step of the board's Roll, activity.css; still under
+ *  reduced motion). */
 function Ticker({ label }: { label: Label }) {
   const text = labelText(label);
   const [cur, setCur] = useState({ label, text, k: 0 });
@@ -79,7 +81,7 @@ function Ticker({ label }: { label: Label }) {
     setCur({ label, text, k: cur.k + 1 });
   }
   return (
-    <span className="act-tick">
+    <span className="act-tick mo-shimmer">
       {prev && (
         <span key={`p${prev.k}`} className="act-tick-t out" aria-hidden onAnimationEnd={() => setPrev(null)}>
           <LabelView label={prev.label} />
@@ -215,6 +217,8 @@ export default function Activity({ bot, item, live }: SlotProps["activity"]) {
   const n = t.steps.reduce((k, st) => k + (st.name === "delegate_task" && st.dag?.length ? st.dag.length : 1), 0);
   const state = live ? "live" : t.outcome === "interrupted" || t.outcome === "ended" || t.outcome === "error" ? t.outcome : "done";
   const canOpen = n > 0;
+  // the done mark settles only when the turn ended while the person watched, never on a line opened from history
+  const landed = useLanded(state === "done");
 
   let summary = "";
   if (state === "done") summary = n === 0 ? tr("act.worked0", { t: total }) : n === 1 ? tr("act.worked1", { t: total }) : tr("act.worked", { t: total, n });
@@ -235,7 +239,7 @@ export default function Activity({ bot, item, live }: SlotProps["activity"]) {
         {state === "live" ? (
           <Spinner size={11} label={tr("ui.working")} />
         ) : (
-          <span className={`act-ic ${state}`} aria-hidden>
+          <span className={`act-ic ${state}${landed ? " mo-settle" : ""}`} aria-hidden>
             {state === "done" ? "✓" : state === "error" ? "!" : "■"}
           </span>
         )}

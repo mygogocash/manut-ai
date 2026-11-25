@@ -22,7 +22,9 @@ and `apps/desktop/src/chat/cards/computerCard.ts`.
   app, the agent lists the apps, and its first look at an app is a card ("Let your agent look at TextEdit in this
   chat?"). After Allow once it reads that app's windows freely in this chat. Each click, typing, key press or menu choice
   is a card in the person's language that names the app, the window, the control and the exact text, keys or menu
-  item, with No and Allow once only.
+  item, with No and Allow once only. A click or typing card also says that the control's name is the one the app gives
+  it (a web page names its own controls) and, with Screen capture on, shows a small picture of the control as it is at
+  the ask.
 
 ## What the platform gives
 
@@ -43,6 +45,8 @@ headers and the Mac's own files. Nothing was read from another app's window, no 
 | Windows, trees, actions | `AXUIElementCreateApplication`, `AXUIElementCopyAttributeValue` (`AXWindows`, `AXChildren`, `AXRole`, `AXSubrole`, `AXTitle`, `AXDescription`, `AXPlaceholderValue`, `AXValue`, `AXEnabled`, `AXFocusedWindow`, `AXMenuBar`), `AXUIElementPerformAction` (`AXPress`), `AXUIElementSetAttributeValue` (`AXValue`), a password field's role `AXSecureTextField`; `CGEventCreateKeyboardEvent`, `CGEventSetFlags`, `CGEventPostToPid`; key codes from `HIToolbox/Events.h` | the SDK's headers |
 | Pictures | `CGWindowListCreateImage` with the window alone, its frame left out, one pixel a point, made a PNG by ImageIO; deprecated for ScreenCaptureKit and still Orca's default engine | `CGWindow.h`, Orca `main.swift` `captureImage` |
 | Sensitive apps | Bundle identifiers read from this Mac's own `Info.plist` files: System Settings `com.apple.systempreferences`, Keychain Access `com.apple.keychainaccess`, Passwords `com.apple.Passwords`, the login window, SecurityAgent, Touch ID's prompt, TCC's prompt service, the Accessibility prompt and the others in `room.rs` `REFUSED` | `/System/...` |
+| A program's bundle identifier | `NSRunningApplication`'s `runningApplicationWithProcessIdentifier:` and `bundleIdentifier` ("the `CFBundleIdentifier` of the application, or nil if the application does not have an `Info.plist`"); it tracks "only user applications", so the `Info.plist` of the bundle a program runs from (`<name>.<kind>/Contents/MacOS/`) is read when it has none. SecurityAgent runs from `SecurityAgent.bundle` (`com.apple.SecurityAgent`) and the Touch ID and password prompt from `coreautha.bundle` (`com.apple.LocalAuthentication.UIAgent`) | AppKit's `NSRunningApplication.h`, the two bundles' `Info.plist` on this Mac |
+| Who a program runs as | `proc_pidinfo` with `PROC_PIDTBSDINFO`: `pbi_uid` and `pbi_ruid` | `sys/proc_info.h`, `libproc.h` |
 
 ## What was lifted from Orca
 
@@ -64,11 +68,38 @@ rule of what may be looked at and done (`room.rs`), the card (`tap.rs`), the Set
 
 ## How it reaches the agent
 
-A Claude Code chat that starts while Accessibility is on is given `--mcp-config ~/.manut/computer/chats/<token>.json`
-(0600, in a 0700 folder) and `--plugin-dir ~/.manut/computer/plugin` (the skill, for that session only; nothing is
-written in the person's Claude Code folders). The configuration starts this same program as `manut --computer-mcp`,
-which relays each call over the socket `~/.manut/computer/app-<pid>.sock` with the chat's token. The shell does the
-looking and acting, so a server started any other way, or for a chat that ended, can do nothing.
+A Claude Code chat that starts while Accessibility is on is given `--mcp-config '<JSON>'` (the server's configuration as
+a string: Claude Code's `--mcp-config` takes "JSON files or strings", and 2.1.332 parses each value as JSON before it
+tries it as a file) and `--plugin-dir ~/.manut/computer/plugin` (the skill, for that session only; nothing is written in
+the person's Claude Code folders). The configuration starts this same program as `manut --computer-mcp`, which relays
+each call over the socket `~/.manut/computer/app-<pid>.sock` (in a 0700 folder) with the chat's token. The shell does
+the looking and acting, so a server started any other way, or for a chat that ended, can do nothing.
+
+### Who may call (security review, 25 Nov 2026)
+
+Until then a chat's token was written to `~/.manut/computer/chats/<token>.json`, and the socket served any connection
+that held a live token. Every program running as the person could read that file (a repository's dev script, another
+chat's agent through its shell tool, a terminal session) and connect with it: it could read the windows of every app the
+person had let that chat look at, without a card and through Manut AI's Accessibility and Screen capture grants, so
+macOS never asked, and it could spend a yes the person gave for that chat's own call. Now (`hub.rs`, tests
+`only_the_server_claude_code_started_for_the_chat_is_served`, `a_program_the_chat_did_not_start_is_refused_even_with_its_token`):
+
+- No file holds a token. The token is still in Claude Code's arguments and its server's environment, which any program
+  of the same user can read from the process list; so it only names the chat, and it opens nothing by itself.
+- The shell names the process it started for the chat once it runs (`agent_chat.rs` `bind_computer`), and a call is
+  served only when the kernel says the program at the other end of the connection (`LOCAL_PEERPID` and
+  `LOCAL_PEERTOKEN` from `sys/un.h`) has that process among its parents (`proc_pidinfo`, at most 16 steps up) and runs
+  Manut AI's own program (`proc_pidpath_audittoken` from `libproc.h`, read before and after the walk). Before the
+  process is named, nothing is served.
+- Parents, not "the parent": a `claude` on the person's `PATH` can be a wrapper that stays Claude Code's parent instead
+  of replacing itself (one on this Mac does), and then the process the shell started is the server's grandparent.
+- What is still let in, and why that is the same chat: a program that chat's own Claude Code started (its shell
+  commands, its hooks) can run Manut AI's program with the token. It reaches only that chat's room: the apps the person
+  let that chat look at and the yeses they gave on that chat's cards, each for exactly one call. Another chat, a
+  terminal or anything started outside the chat is refused whatever it holds.
+- Checked on this Mac with the real kernel (`the_kernel_names_the_caller_and_a_token_read_before_an_exec_names_nothing`):
+  the peer's process and parent read right, and the kernel gives a peer's audit token as the process is when asked, so
+  a token read before an exec names nothing after it. Starting Claude Code for real is a step for the owner (below).
 
 ## The bounds, and their tests
 
@@ -82,6 +113,13 @@ Reads (`room.rs` tests unless named):
 - Never Manut AI's own windows (so an agent cannot read or press its own asks), System Settings, Keychain Access,
   Passwords or the prompts (`manut_ai_system_settings_and_the_keychain_are_refused_before_any_card`; in the chat,
   `tap.rs` `a_refused_target_is_denied_with_its_reason_and_never_shown_as_a_card`).
+- The prompts that are not `.app`s (security review, 25 Nov 2026). The bundle identifier used to be read only for a
+  program under `.app/Contents/MacOS/`, so SecurityAgent (`SecurityAgent.bundle`) and the Touch ID and password prompt
+  (`coreautha.bundle`) read as having none and missed the list. Now it is the system's own (`NSRunningApplication`),
+  else the `Info.plist` of any kind of bundle (`mac.rs` `a_prompt_in_any_kind_of_bundle_reads_its_bundle_identifier`),
+  and besides the list, any window of a program that does not run as this person, and of one with no bundle identifier
+  that is under `/System/` or whose program cannot be read, is refused
+  (`macos_prompts_are_refused_whatever_kind_of_bundle_they_are`).
 - At most 400 elements and 30 levels a look; a picture only with Screen capture
   (`a_picture_comes_only_with_screen_capture`).
 
@@ -97,6 +135,24 @@ Writes:
 - The action touches the very control the card named, checked again: changed, gone, the app quit, or another window in
   front, and nothing is done (`an_action_touches_only_the_control_the_card_named`,
   `a_key_is_pressed_in_the_window_the_card_named_and_never_a_blocked_shortcut`).
+- A card's words are the app's own, made safe to read (security review, 25 Nov 2026). Before, a control's name on the
+  card was its accessibility label, which a web page in an allowed browser sets itself, and the check just before acting
+  compared only the role and that label, which the page can keep while it changes what the control does; and Unicode's
+  invisible format characters were kept, so a right-to-left override could make a card read otherwise than what was
+  typed or pressed. Now:
+  - Every name, title and value shown or compared is stripped of Unicode's format characters (general category Cf, the
+    bidi isolates among them; Unicode 18.0's list in `room.rs` `FORMAT`), and text to type or a menu path that holds
+    any is refused, so the person reads exactly what is typed (`invisible_format_characters_are_never_shown_and_never_typed`;
+    the page strips them again, `computer.test.ts`). An emoji joined with a zero-width joiner, and Persian text with a
+    zero-width non-joiner, are refused too; Thai types as written.
+  - The card says, in the person's language, that the control's name is the one the app gives it.
+  - The control is read again at the moment of the ask, and the yes is bound to its window's number, its place in that
+    window's tree and its position and size on screen (`Place`): a control that moved, changed place or window since
+    the ask is refused and the agent asks again (`a_yes_is_bound_to_where_the_control_was_at_the_ask`). A page that keeps
+    all of these and changes only what a click does is not seen; that is why the card says whose name it is.
+  - With Screen capture, the card shows a picture of just that part of the window (`CGWindowListCreateImage` with the
+    control's frame), for a control up to 640 by 320 points and 256 KB; a larger one, such as a document's text area,
+    has none (`a_card_shows_a_small_picture_of_the_control_with_screen_capture`, `computer.test.tsx`).
 - Nothing while the screen is locked, and a yes waiting then is spent (`nothing_runs_while_the_screen_is_locked`).
 - Never the Apple menu (`a_menu_item_is_chosen_by_its_path_and_never_from_the_apple_menu`), never a blocked shortcut
   (`keys.rs`).
@@ -120,9 +176,15 @@ On the Mac app built from this branch:
    Do the same for Screen capture ("Screen & System Audio Recording"); macOS may ask to quit and reopen Manut AI.
 3. The line reads "Computer use is ready". The note about the Developer ID shows on 0.1.1.
 4. Start a new Buddy chat and say "Open TextEdit's front window and tell me what it says" with a TextEdit document
-   open. A card asks to look at TextEdit; Allow once. The answer quotes the document.
-5. Ask "Type Hello into the TextEdit document": a card names TextEdit, the window, the text area and "Hello". Press No:
-   nothing is typed, and the agent does not ask again by itself. Ask again and Allow once: Hello appears once.
+   open. A card asks to look at TextEdit; Allow once. The answer quotes the document. (This is the first run of the
+   socket's caller check with a real Claude Code: if every call says it did not come from the chat's server, the
+   chat's server is not under the process Manut AI started, and that is a bug to report.) Then, from Terminal, run
+   `ls ~/.manut/computer`: there is no `chats` folder.
+5. Ask "Type Hello into the TextEdit document": a card names TextEdit, the window, the text area and "Hello", and says the
+   control's name is the one TextEdit gives it. Press No: nothing is typed, and the agent does not ask again by itself.
+   Ask again and Allow once: Hello appears once. Ask it to click a button in a small dialog: with Screen capture on, the
+   card shows a small picture of that button. Move the window after the card shows and before Allow once: the click is
+   refused as moved, and the agent asks again.
 6. Ask for Cmd+S in TextEdit: a card says "Press Cmd+S in TextEdit?"; Allow once saves. Ask for Cmd+Q: refused, no card.
 7. Ask it to look at System Settings, Keychain Access, or Manut AI itself: refused, no card.
 8. With a login form open in Safari, ask it to read the password field: the tree says the field's content is never read.

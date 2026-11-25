@@ -159,7 +159,6 @@
   font-size: 13px;
   font-weight: 500;
   white-space: nowrap;
-  transition: background 0.15s;
 }
 .lpane .btn:hover {
   background: var(--hov);

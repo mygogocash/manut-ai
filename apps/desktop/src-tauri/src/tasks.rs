@@ -131,7 +131,7 @@ pub fn auth_argv(_source: Source) -> Vec<String> {
 }
 
 const GH_ISSUE_FIELDS: &str = "number,title,state,url,labels,author,createdAt,updatedAt";
-const GH_PR_FIELDS: &str = "number,title,state,url,labels,author,createdAt,updatedAt,isDraft,headRefName,statusCheckRollup";
+const GH_PR_FIELDS: &str = "number,title,state,url,labels,author,createdAt,updatedAt,isDraft,headRefName,statusCheckRollup,isCrossRepository,headRepository,headRepositoryOwner";
 const GH_ISSUE_VIEW: &str = "number,title,state,url,body,author,createdAt,updatedAt,labels,comments";
 const GH_PR_VIEW: &str = "number,title,state,url,body,author,createdAt,updatedAt,labels,comments,isDraft,headRefName,statusCheckRollup";
 
@@ -277,6 +277,12 @@ pub struct Item {
     /// The branch a pull / merge request is made from ("" for an issue, and when the source did not say): what the Code page's lane
     /// rows match to show their pull request (item 76), read from the list the page already asks for, never from a call of its own.
     pub head: String,
+    /// Whether the host says that branch is in this very repository (GitHub's `isCrossRepository` false with its head repository
+    /// the one listed, GitLab's `source_project_id` its `target_project_id`): false for a fork's request, which anyone can open
+    /// on a branch named like a lane's, and when the host did not say. A lane's row only ever shows a request with this true.
+    pub same: bool,
+    /// The repository the branch is in, `owner/repo`, as GitHub names it ("" when it did not say, and for GitLab).
+    pub from: String,
 }
 
 #[derive(Clone, Debug, Default, Serialize, PartialEq)]
@@ -480,6 +486,30 @@ pub(crate) fn web_url(u: &str) -> String {
     if u.starts_with("https://") && !u.chars().any(|c| c.is_whitespace() || c.is_control()) { u.to_string() } else { String::new() }
 }
 
+/// The repository a GitHub pull request's branch is in, and whether the host says it is the one the pull request is in: only
+/// when `isCrossRepository` is false and the head repository (`headRepository.nameWithOwner`, else its owner's login and its
+/// name) is the base repository its own address names. Anything the host did not say reads as another repository's.
+pub(crate) fn gh_from(v: &Value, url: &str) -> (String, bool) {
+    let owner = v.get("headRepositoryOwner").map(|o| text(o, "login")).unwrap_or_default();
+    let repo = v.get("headRepository").filter(|r| r.is_object());
+    let named = repo.map(|r| text(r, "nameWithOwner")).unwrap_or_default();
+    let name = repo.map(|r| text(r, "name")).unwrap_or_default();
+    let from = if !named.is_empty() { named } else if !owner.is_empty() && !name.is_empty() { format!("{owner}/{name}") } else { String::new() };
+    let from = if from.split('/').count() == 2 && from.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/')) { from } else { String::new() };
+    // `https://<host>/<owner>/<repo>/pull/<n>`: the repository the pull request is in, as the host itself names it
+    let base = url.strip_prefix("https://").and_then(|rest| rest.split_once('/')).and_then(|(_, path)| path.split_once("/pull/")).map(|(r, _)| r.to_string()).unwrap_or_default();
+    let cross = v.get("isCrossRepository").and_then(Value::as_bool);
+    let same = cross == Some(false) && !from.is_empty() && from.eq_ignore_ascii_case(&base);
+    (from, same)
+}
+
+/// Whether a GitLab merge request's branch is in its own project: `source_project_id` and `target_project_id` both given and
+/// equal ("Equal to `target_project_id`, unless the merge request originates from a fork", GitLab's merge requests API).
+pub(crate) fn gl_same_project(v: &Value) -> bool {
+    let id = |k: &str| v.get(k).and_then(Value::as_u64);
+    matches!((id("source_project_id"), id("target_project_id")), (Some(a), Some(b)) if a == b)
+}
+
 fn gh_item(v: &Value, change: bool) -> Item {
     let draft = v.get("isDraft").and_then(Value::as_bool).unwrap_or(false);
     let state = match text(v, "state").to_ascii_uppercase().as_str() {
@@ -499,6 +529,8 @@ fn gh_item(v: &Value, change: bool) -> Item {
         updated: epoch(&text(v, "updatedAt")),
         checks: if change { Some(gh_checks(v).map(|c| c.0).unwrap_or_default()) } else { None },
         head: if change { one_line(text(v, "headRefName"), 250) } else { String::new() },
+        same: change && gh_from(v, &web_url(&text(v, "url"))).1,
+        from: if change { gh_from(v, &web_url(&text(v, "url"))).0 } else { String::new() },
     }
 }
 
@@ -543,6 +575,8 @@ fn gl_item(v: &Value, change: bool) -> Item {
         updated: epoch(&text(v, "updated_at")),
         checks,
         head: if change { one_line(text(v, "source_branch"), 250) } else { String::new() },
+        same: change && gl_same_project(v),
+        from: String::new(),
     }
 }
 
@@ -973,8 +1007,8 @@ mod tests {
             (Source::Github, Kind::Issues, Filter::Assigned, 1, Some("issue list --repo rlaope/oh-my-hermes --state open --json number,title,state,url,labels,author,createdAt,updatedAt --limit 28 --assignee @me --search sort:created-desc created:<=2026-11-15T18:19:59Z")),
             (Source::Github, Kind::Issues, Filter::Created, 0, Some("issue list --repo rlaope/oh-my-hermes --state open --json number,title,state,url,labels,author,createdAt,updatedAt --limit 26 --author @me --search sort:created-desc")),
             (Source::Github, Kind::Issues, Filter::Mentioned, 0, Some("issue list --repo rlaope/oh-my-hermes --state open --json number,title,state,url,labels,author,createdAt,updatedAt --limit 26 --mention @me --search sort:created-desc")),
-            (Source::Github, Kind::Changes, Filter::Mentioned, 7, Some("pr list --repo rlaope/oh-my-hermes --state open --json number,title,state,url,labels,author,createdAt,updatedAt,isDraft,headRefName,statusCheckRollup --limit 28 --search mentions:@me sort:created-desc created:<=2026-11-15T18:19:59Z")),
-            (Source::Github, Kind::Changes, Filter::Assigned, 0, Some("pr list --repo rlaope/oh-my-hermes --state open --json number,title,state,url,labels,author,createdAt,updatedAt,isDraft,headRefName,statusCheckRollup --limit 26 --assignee @me --search sort:created-desc")),
+            (Source::Github, Kind::Changes, Filter::Mentioned, 7, Some("pr list --repo rlaope/oh-my-hermes --state open --json number,title,state,url,labels,author,createdAt,updatedAt,isDraft,headRefName,statusCheckRollup,isCrossRepository,headRepository,headRepositoryOwner --limit 28 --search mentions:@me sort:created-desc created:<=2026-11-15T18:19:59Z")),
+            (Source::Github, Kind::Changes, Filter::Assigned, 0, Some("pr list --repo rlaope/oh-my-hermes --state open --json number,title,state,url,labels,author,createdAt,updatedAt,isDraft,headRefName,statusCheckRollup,isCrossRepository,headRepository,headRepositoryOwner --limit 26 --assignee @me --search sort:created-desc")),
             (Source::Gitlab, Kind::Issues, Filter::Open, 2, Some("issue list --repo rlaope/oh-my-hermes --output json --per-page 25 --page 3")),
             (Source::Gitlab, Kind::Changes, Filter::Created, 0, Some("mr list --repo rlaope/oh-my-hermes --output json --per-page 25 --page 1 --author=@me")),
             (Source::Gitlab, Kind::Changes, Filter::Assigned, 0, Some("mr list --repo rlaope/oh-my-hermes --output json --per-page 25 --page 1 --assignee=@me")),
@@ -1108,6 +1142,23 @@ mod tests {
         let gl = r#"[{"iid":4,"title":"x","state":"opened","source_branch":"kit/fix-sso","web_url":"https://gitlab.com/g/p/-/merge_requests/4"}]"#;
         let (p, _) = parse_list(Source::Gitlab, Kind::Changes, 0, None, gl).unwrap();
         assert_eq!(p.items[0].head, "kit/fix-sso");
+    }
+
+    #[test]
+    fn a_change_says_whether_its_branch_is_in_this_repository_or_another_s() {
+        // item 86: a fork's request on a branch named like a lane's must never stand for the lane's
+        let own = r#"[{"number":8,"title":"x","state":"OPEN","headRefName":"kit/qr","url":"https://github.com/o/r/pull/8","isCrossRepository":false,"headRepositoryOwner":{"login":"o"},"headRepository":{"name":"r","nameWithOwner":"o/r"}}]"#;
+        let it = &parse_list(Source::Github, Kind::Changes, 0, None, own).unwrap().0.items[0];
+        assert_eq!((it.same, it.from.as_str()), (true, "o/r"));
+        let fork = r#"[{"number":9,"title":"x","state":"OPEN","headRefName":"kit/qr","url":"https://github.com/o/r/pull/9","isCrossRepository":true,"headRepositoryOwner":{"login":"stranger"},"headRepository":{"name":"r","nameWithOwner":"stranger/r"}}]"#;
+        let it = &parse_list(Source::Github, Kind::Changes, 0, None, fork).unwrap().0.items[0];
+        assert_eq!((it.same, it.from.as_str()), (false, "stranger/r"));
+        // an answer that does not say (an older gh) is not taken as this repository's
+        let old = r#"[{"number":9,"title":"x","state":"OPEN","headRefName":"kit/qr","url":"https://github.com/o/r/pull/9"}]"#;
+        assert!(!parse_list(Source::Github, Kind::Changes, 0, None, old).unwrap().0.items[0].same);
+        let gl = |src: u64, dst: u64| format!(r#"[{{"iid":4,"title":"x","state":"opened","source_branch":"kit/qr","source_project_id":{src},"target_project_id":{dst}}}]"#);
+        assert!(parse_list(Source::Gitlab, Kind::Changes, 0, None, &gl(5, 5)).unwrap().0.items[0].same);
+        assert!(!parse_list(Source::Gitlab, Kind::Changes, 0, None, &gl(6, 5)).unwrap().0.items[0].same);
     }
 
     #[test]

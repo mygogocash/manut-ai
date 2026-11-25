@@ -44,6 +44,11 @@ export interface TaskItem {
   checks: TaskChecks | null;
   /** The branch a pull / merge request is made from ("" or absent for an issue and for a shell older than this field). */
   head?: string;
+  /** Whether the host says that branch is in this very repository: false or absent for a fork's request (anyone can open one on
+   *  a branch named like a lane's) and when it did not say. Only a request with this true can stand for a lane's. */
+  same?: boolean;
+  /** The repository the branch is in, `owner/repo`, when the host named it. */
+  from?: string;
 }
 
 export interface TaskComment {

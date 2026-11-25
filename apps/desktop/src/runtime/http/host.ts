@@ -75,6 +75,7 @@ import { FEED_DEBOUNCE_MS, FEED_TICKET_PATH, feedUrl, ShopFeeds, ticketOf, type 
 import { memoryHandlers } from "./memory";
 import { addPage, askOlder, dropOlder, forgetAsk, keepOlder, nextCursor, olderOf, type TaskList } from "./older";
 import { peopleHandlers } from "./people";
+import { artifactHandlers } from "./artifacts";
 import { isShopTemplateId, MADE_SHOPS_LIMIT, shopNameOf, type MakeShopRefusal } from "../makeShop";
 import type { OlderState, TeamState } from "../mission";
 import { MAX_ROUTINES, newRoutineRefusal, problemWords, triggerBody, type RoutineRow } from "../routines";
@@ -1440,6 +1441,9 @@ export class HttpHost {
       ...googleHandlers(this.ownerLink(), { asked: () => this.refresh() }),
       // Settings › People: who can use Manut AI for the shop, invites, removal and cover, with the owner's session (people.ts).
       ...peopleHandlers(this.ownerLink()),
+      // The Artifacts page: the shop's public links, each publish and removal only after its ask settled with a yes, and nothing
+      // at all while Settings › Artifacts is off (artifacts.ts).
+      ...artifactHandlers(this.ownerLink()),
     };
   })();
 }

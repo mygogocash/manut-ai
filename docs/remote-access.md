@@ -108,7 +108,7 @@ view clears 15 minutes after the Mac last confirmed it, and links in replies nev
 lifted, because no browser has it; its own fallback is the design above. Its command ledger can wait: approval-core
 already refuses a repeated decision as `already_decided`.
 
-## The second road: Tailscale (decided 26 Nov 2026)
+## The second road: Tailscale (decided 25 Nov 2026)
 
 The owner asked for both roads, "the same as Orca": the relay, and Tailscale for a person who has it. A read of Orca
 at `stablyai/orca` commit `bc471d51` came first. Orca's Tailscale road is its local-network road pointed at a tailnet

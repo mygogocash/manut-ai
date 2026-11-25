@@ -13,6 +13,7 @@ import { historyDays } from "../pages/HistoryPage";
 import { useJobList } from "../pages/RecentWork";
 import { openNewSessionMenu } from "../sessions/newMenu";
 import { closePalette, usePaletteOpen } from "./state";
+import { useLeaving } from "../ui/leave";
 import { getWorkflows, useWorkflows } from "../workflows/runner";
 import { useWorkflowSettings } from "../workflows/settings";
 import { usePlaces } from "./places";
@@ -33,13 +34,20 @@ export interface PaletteViewProps {
   onKeyDown: (e: ReactKeyboardEvent<HTMLElement>) => void;
   onBackdrop: () => void;
   inputRef?: RefObject<HTMLInputElement | null>;
+  /** Closed and fading out (ui/leave.ts): drawn inert, so nothing in it takes a key or a press. */
+  leaving?: boolean;
 }
 
 export function PaletteView(p: PaletteViewProps) {
   let at = -1;
   const total = flat(p.groups).length;
   return (
-    <div className="pal-back" onMouseDown={(e) => e.target === e.currentTarget && p.onBackdrop()} data-testid="palette-backdrop">
+    <div
+      className="pal-back"
+      onMouseDown={(e) => e.target === e.currentTarget && p.onBackdrop()}
+      data-testid="palette-backdrop"
+      {...(p.leaving ? { "data-leaving": "", inert: true, "aria-hidden": true } : {})}
+    >
       <div className="pal" role="dialog" aria-modal="true" aria-label={t("pal.title")} onKeyDown={p.onKeyDown} data-testid="palette">
         <input
           ref={p.inputRef}
@@ -98,7 +106,7 @@ export function PaletteView(p: PaletteViewProps) {
   );
 }
 
-function OpenPalette() {
+function OpenPalette({ leaving }: { leaving: boolean }) {
   const s = useStore();
   const places = usePlaces();
   const { jobs } = useJobList();
@@ -172,6 +180,7 @@ function OpenPalette() {
       onHover={setCursor}
       onBackdrop={() => closePalette()}
       inputRef={input}
+      leaving={leaving}
       onKeyDown={(e) => {
         if (e.key === "Tab") {
           // the palette is a modal: the focus stays in its field
@@ -192,7 +201,9 @@ function OpenPalette() {
   );
 }
 
-/** Mounted once by the app: draws nothing until ⌘K or the menu's Search opens it. */
+/** Mounted once by the app: draws nothing until ⌘K or the menu's Search opens it. Once closed it fades out where it
+ *  stands, faster than it came (ui/leave.ts); opened again meanwhile, it starts afresh. */
 export function Palette() {
-  return usePaletteOpen() ? <OpenPalette /> : null;
+  const { drawn, leaving, opened } = useLeaving(usePaletteOpen());
+  return drawn ? <OpenPalette key={opened} leaving={leaving} /> : null;
 }

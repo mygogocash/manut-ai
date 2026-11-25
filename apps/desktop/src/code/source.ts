@@ -62,10 +62,12 @@ export interface Pulled {
   from: string;
   to: string;
   count: number;
+  /** `config`'s own: the setting of the project's own git config that stopped it, as git names it. */
+  setting: string;
 }
 
 /** The codes `source_pull` answers, each with words of its own (`pull.why.<code>`). */
-export const PULL_CODES = ["pulled", "current", "not_a_repository", "lane", "git_missing", "busy", "detached", "no_upstream", "not_default", "unread", "changes", "ahead", "fetch_failed", "diverged", "failed"] as const;
+export const PULL_CODES = ["pulled", "current", "not_a_repository", "lane", "git_missing", "config", "busy", "detached", "no_upstream", "not_default", "unread", "changes", "ahead", "fetch_failed", "diverged", "failed"] as const;
 export type PullCode = (typeof PULL_CODES)[number];
 
 /** The shell's answer, or null for one that is not a pull's. */
@@ -73,7 +75,7 @@ export function readPulled(v: unknown): Pulled | null {
   if (!isObj(v)) return null;
   const why = PULL_CODES.find((c) => c === v.why);
   if (!why) return null;
-  return { done: v.done === true && why === "pulled", why, branch: str(v.branch), remote: str(v.remote), from: str(v.from), to: str(v.to), count: num(v.count) };
+  return { done: v.done === true && why === "pulled", why, branch: str(v.branch), remote: str(v.remote), from: str(v.from), to: str(v.to), count: num(v.count), setting: str(v.setting) };
 }
 
 /** What a lane would be put up with (`review_draft`): its branch, base, and its commits' subjects, newest first. */
@@ -101,6 +103,9 @@ export interface ReviewAsk {
   source: "github" | "gitlab";
   repo: string;
   remote: string;
+  /** A merge's own: the repository the pull request's branch is in, as the host says it (the shell asks only for this
+   *  repository's own branch, never a fork's with the same name). */
+  from: string;
   branch: string;
   base: string;
   head: string;
@@ -124,7 +129,8 @@ export function readAsk(v: unknown): ReviewAsk | null {
   const source = v.source === "github" || v.source === "gitlab" ? v.source : null;
   if (!source || !str(v.repo) || !str(v.branch) || !str(v.base) || typeof v.title !== "string" || typeof v.body !== "string") return null;
   const method = MERGE_METHODS.find((m) => m === v.method) ?? "";
-  if (v.kind === "merge" && (!method || num(v.number) === 0)) return null;
+  // a merge's ask always says where the pull request comes from and at which commit; one that does not is not shown
+  if (v.kind === "merge" && (!method || num(v.number) === 0 || !str(v.from) || !/^[0-9a-f]{40,64}$/.test(str(v.head)))) return null;
   const url = str(v.url);
   return {
     id: str(v.id),
@@ -132,6 +138,7 @@ export function readAsk(v: unknown): ReviewAsk | null {
     source,
     repo: str(v.repo),
     remote: str(v.remote),
+    from: str(v.from),
     branch: str(v.branch),
     base: str(v.base),
     head: str(v.head),

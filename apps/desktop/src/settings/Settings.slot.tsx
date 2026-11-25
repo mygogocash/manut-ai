@@ -29,6 +29,7 @@ import { PeoplePage, peopleOffered } from "../pages/PeoplePane";
 import { DeveloperPage } from "./DeveloperPage";
 import { WorktreesPage } from "./WorktreesPage";
 import { SourceControlPage } from "./SourceControlPage";
+import { ArtifactLinksPage } from "./ArtifactLinksPage";
 import { setSuggestOn, useSuggestOn } from "../lib/suggest";
 import { VoicePage } from "./VoicePage";
 import { ComputerPage } from "./ComputerPage";
@@ -102,6 +103,8 @@ export default function Settings({ page }: SlotProps["settings"]) {
           <WorktreesPage />
         ) : current === "source" ? (
           <SourceControlPage />
+        ) : current === "artifacts" ? (
+          <ArtifactLinksPage />
         ) : current === "mcp" ? (
           <McpSkillsPage />
         ) : current === "workflows" ? (

@@ -10,7 +10,7 @@ a.lk-text {
   border-radius: 4px;
   padding: 0 2px;
   margin: 0 -2px;
-  transition: color 0.12s ease, background-color 0.12s ease;
+  transition: color var(--tr-hover), background-color var(--tr-hover);
 }
 /* chips sit in markdown (.md a is underlined) and in plain sent text */
 .md a.lk,
@@ -160,13 +160,6 @@ span.lk.lk-term.gone:hover {
 .lk-term .lk-term-dot.ended {
   background: var(--quiet);
 }
-@media (prefers-reduced-motion: no-preference) {
-  .lk-term .lk-term-dot.working {
-    animation: lk-term-pulse 1.4s ease-in-out infinite;
-  }
-}
-@keyframes lk-term-pulse {
-  50% {
-    opacity: 0.45;
-  }
+.lk-term .lk-term-dot.working {
+  animation: var(--anim-pulse);
 }

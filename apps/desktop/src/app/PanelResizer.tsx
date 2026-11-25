@@ -37,7 +37,7 @@ export function PanelResizer({ open, tab, max = false }: { open: boolean; tab: s
     win.classList.toggle("panel-dragging", drag !== null);
   }, [width, open, drag, winW, max]);
 
-  // maximise and restore ease in 180ms (app.css .panel-maxing); a window resize while maximised follows at once
+  // maximise and restore slide in the Press's 0.2 s (app.css .panel-maxing); a window resize while maximised follows at once
   const first = useRef(true);
   useEffect(() => {
     if (first.current) {

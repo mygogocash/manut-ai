@@ -44,8 +44,13 @@ Read its report for what it did NOT do or could not check, then:
    Read any other conflict yourself. Two functions added at one place share the closing brace after the marker; a
    sentence both sides extended is joined by hand.
 3. Gate the merged branch: `.claude/skills/lead-merge/scripts/gate.sh <item worktree>`. It installs, runs every
-   package's tests, type checks and the whole Rust suite, one cargo at a time. Fix what fails on the item's branch and
+   package's tests, type checks and the whole Rust suite, one cargo at a time (a second time by itself when the first
+   run fails). This is the item's only whole gate: helpers run just what they touched. Fix what fails on the item's branch and
    gate again. A test that fails only under load is in `docs/handoff.md`, "Known flaky tests": run it alone first.
+   When several items are ready together, stack them: merge the first item's branch into the second's, the second's
+   into the third's, and gate only the top. Then finish them in order; before each `finish-item.sh` after the first,
+   merge the lead's branch into the item's and check its tree did not change (`git rev-parse 'HEAD^{tree}'` before
+   and after), so the tree that is pushed is the tree that was gated.
 4. If the item changed a menu, a Settings page, a lane's life or the chat box, run the Playwright specs for that area
    (`apps/desktop`, `pnpm exec playwright test e2e/<spec>`): CI's shards may fail without failing a run.
 
@@ -61,6 +66,13 @@ Read its report for what it did NOT do or could not check, then:
    `git push origin HEAD:pilot/week-1` from the lead's worktree. One push, so CI runs once: a second push cancels the
    run in progress, and CI measures what changed from its last green run.
 4. Start the next item.
+
+## When the Mac or the account stops
+
+- Gates that time out after about 925 seconds mean the Mac slept (`pmset -g log`): it sleeps fifteen minutes in
+  seventeen once the owner is away. `caffeinate -i -s -t <seconds>` holds it awake without changing a setting.
+- A helper that ends with a usage-limit error keeps its work: when the limit resets, send it on in its own thread
+  (SendMessage) rather than starting a new one.
 
 ## Never
 

@@ -94,17 +94,8 @@
   inset: -3px;
   border-radius: 50%;
   border: 1.5px solid rgba(var(--rn-pink), 0.55);
-  animation: rn-pulse 1.8s ease-out infinite;
-}
-@keyframes rn-pulse {
-  from {
-    transform: scale(0.6);
-    opacity: 0.9;
-  }
-  to {
-    transform: scale(1.5);
-    opacity: 0;
-  }
+  /* the working dot's Pulse */
+  animation: var(--anim-pulse);
 }
 .rn-dot.done {
   background: rgba(var(--rn-green), 0.75);
@@ -262,13 +253,13 @@
   border: 2px solid rgba(var(--rn-pink), 0.2);
   border-top-color: rgb(var(--rn-pink));
   border-right-color: rgb(var(--rn-pink));
-  animation: spin 0.9s linear infinite;
+  animation: var(--anim-spin);
 }
 /* a node at work: the arc of its status icon turns around the dot */
 .bx-ic[data-icon="dot"] .bx-spin {
   transform-box: view-box;
   transform-origin: 12px 12px;
-  animation: spin 0.9s linear infinite;
+  animation: var(--anim-spin);
 }
 /* the ticking time keeps its width per digit, so the line does not jitter every second */
 .ph-time,
@@ -281,12 +272,6 @@
 }
 .ph-dot.failed {
   background: var(--danger);
-}
-@media (prefers-reduced-motion: reduce) {
-  .ph-dot.running,
-  .bx-ic[data-icon="dot"] .bx-spin {
-    animation: none;
-  }
 }
 .ph-w.running {
   color: rgb(var(--rn-pink));
@@ -424,10 +409,11 @@
   color: var(--body);
   overflow: hidden;
   cursor: pointer;
+  /* the outline and shadow fade in under the pointer; a dragged box lifts as a press answers a hand */
   transition:
-    border-color 120ms ease,
-    box-shadow 120ms ease,
-    transform 120ms ease;
+    border-color var(--tr-hover),
+    box-shadow var(--tr-hover),
+    transform var(--tr-press);
 }
 .bx::before {
   content: "";
@@ -640,7 +626,8 @@
   stroke-width: 1.25;
   stroke-linecap: round;
   stroke-dasharray: 4 10;
-  animation: bv-flow 1.6s linear infinite;
+  /* one of motionRule.test.ts's own moves: the Shimmer's idea on a drawn line, at the Shimmer's time */
+  animation: bv-flow var(--move-shimmer) linear infinite;
 }
 @keyframes bv-flow {
   to {
@@ -810,16 +797,15 @@
 .bv-card .bx-ic {
   color: var(--bx-tone, var(--muted));
 }
-/* entrance: the boxes one by one, each line once the boxes it joins are in */
+/* entrance: the boxes one by one (Rise, each at the delay RunGraph.tsx gives it), each line once the boxes it joins
+   are in; a line fades where it is drawn, so it never leaves the boxes it joins */
 .bx.enter,
 .bv-line.enter,
 .bv-head.enter {
-  animation: bv-in 0.2s ease-out both;
+  animation: var(--anim-rise);
 }
-@keyframes bv-in {
-  from {
-    opacity: 0;
-  }
+.bv-line.enter {
+  --rise-by: 0px;
 }
 .bv.still .bx,
 .bv.still .bv-line,
@@ -830,17 +816,10 @@
 .bv.still .bv-flow {
   display: none;
 }
+/* still (motion.css turns the moves off): no dash rides the edges */
 @media (prefers-reduced-motion: reduce) {
-  .bx,
-  .bv-line,
-  .bv-head,
-  .rn-live::after {
-    animation: none !important;
-    transition: none !important;
-  }
   .bv-flow {
     display: none;
-    animation: none;
   }
 }
 

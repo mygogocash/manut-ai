@@ -57,7 +57,8 @@
   border: 1px solid var(--line);
   border-radius: var(--r);
   box-shadow: var(--pop-shadow);
-  animation: pop 0.14s ease both;
+  --rise-by: var(--arrive-by);
+  animation: var(--anim-arrive);
 }
 .sk-row {
   display: flex;

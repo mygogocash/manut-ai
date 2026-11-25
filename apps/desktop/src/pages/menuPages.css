@@ -224,6 +224,8 @@
   border: 1px solid var(--line);
   border-radius: var(--rad);
   box-shadow: var(--pop-shadow);
+  --rise-by: calc(var(--arrive-by) * -1);
+  animation: var(--anim-arrive);
 }
 .mpage .tmenu-i {
   display: flex;
@@ -371,7 +373,7 @@
   height: 6px;
   border-radius: var(--rad-pill);
   background: currentColor;
-  animation: pulse 1.6s ease-in-out infinite;
+  animation: var(--anim-pulse);
 }
 .mpage .tag.warn {
   background: var(--warnbg);

@@ -89,22 +89,35 @@ export function statusLine(s: ComputerStatus): Key {
 /** What a computer use card can be about: a first look at an app, or one of the four actions. */
 const ACTS: readonly ComputerAsk["act"][] = ["look", "click", "set", "key", "menu"];
 
+/** Invisible format characters (Unicode's general category Cf: bidi overrides and isolates, zero-width spaces). The
+ *  shell takes them out of what an app says and refuses text to type that holds any (room.rs `clean`); the page takes
+ *  them out again, so a card can never read otherwise than what it names. */
+const FORMAT = /\p{Cf}/gu;
+const clean = (t: string) => t.replace(FORMAT, "");
+
+/** The largest picture of a control a card draws (base64 of the shell's 256 KB cap), and the shape of base64. */
+const PICTURE_CHARS = 350_000;
+const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/;
+
 /** `v` as a computer use card's fields, or null when it is not one this page can draw whole. */
 export function computerAsk(v: unknown): ComputerAsk | null {
   if (!v || typeof v !== "object" || Array.isArray(v)) return null;
   const c = v as Record<string, unknown>;
-  const text = (x: unknown) => (typeof x === "string" ? x : undefined);
-  if (!ACTS.includes(c.act as ComputerAsk["act"]) || typeof c.app !== "string" || !c.app) return null;
-  const menu = Array.isArray(c.menu) && c.menu.every((m) => typeof m === "string") ? (c.menu as string[]) : undefined;
+  const text = (x: unknown) => (typeof x === "string" ? clean(x) : undefined);
+  if (!ACTS.includes(c.act as ComputerAsk["act"]) || typeof c.app !== "string" || !clean(c.app)) return null;
+  const menu = Array.isArray(c.menu) && c.menu.every((m) => typeof m === "string") ? (c.menu as string[]).map(clean) : undefined;
   if (c.menu !== undefined && !menu) return null;
   for (const k of ["window", "control", "text", "keys"]) if (c[k] !== undefined && text(c[k]) === undefined) return null;
+  // a picture that is not a small base64 PNG is left out: the card is whole without it
+  const picture = typeof c.picture === "string" && c.picture.length <= PICTURE_CHARS && BASE64.test(c.picture) ? c.picture : undefined;
   return {
     act: c.act as ComputerAsk["act"],
-    app: c.app,
+    app: clean(c.app),
     ...(text(c.window) !== undefined ? { window: text(c.window) } : {}),
     ...(text(c.control) !== undefined ? { control: text(c.control) } : {}),
     ...(text(c.text) !== undefined ? { text: text(c.text) } : {}),
     ...(text(c.keys) !== undefined ? { keys: text(c.keys) } : {}),
     ...(menu ? { menu } : {}),
+    ...(picture ? { picture } : {}),
   };
 }
