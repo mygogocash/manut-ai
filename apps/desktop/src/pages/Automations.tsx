@@ -12,7 +12,7 @@ import { Avatar, PlusIcon, SourceIcon } from "../ui";
 import { Seg } from "../chat/model/Seg";
 import { AskBox, BotChip, errorLine, PageHead, Toggle, atWords, dateWords, nextWords, toSec } from "./kit";
 import { scheduleWords } from "./schedule";
-import { isBrief, PLATFORM_NAME, reasonWords, scheduleOf, watchOf, watchSentence, whereOf, WATCH_EVERY, type WatchInfo } from "./watch";
+import { isBrief, PLATFORM_NAME, reasonWords, scheduleLine, watchOf, watchSentence, whereOf, WATCH_EVERY, type WatchInfo } from "./watch";
 
 const OK = new Set(["ok", "success", "done", "completed", "delivered"]);
 type Status = "ok" | "failed" | "never" | "paused";
@@ -280,7 +280,7 @@ function Row({ a, on, busy, onOpen, onToggle }: { a: Automation; on: boolean; bu
       </button>
       <span className="au-when">
         <span className="au-sched" title={a.schedule} data-testid={`auto-sched-${a.id}`}>
-          {scheduleOf(a)}
+          {scheduleLine(a)}
         </span>
         <small>{t("auto.next", { when: !a.paused && next ? nextWords(next) : t("auto.nextNone") })}</small>
       </span>
@@ -329,7 +329,7 @@ function Detail({
       </div>
       <div className="au-k">{t("auto.when")}</div>
       <div className="au-v">
-        <span title={a.schedule}>{scheduleOf(a)}</span>
+        <span title={a.schedule}>{scheduleLine(a)}</span>
         {!a.paused && next && <span className="au-quiet"> · {t("auto.next", { when: nextWords(next) })}</span>}
       </div>
       {w ? (

@@ -2342,6 +2342,9 @@ export const en = {
   "routines.hint": "What your team does on its own schedule.",
   "routines.next": "Next: {when}",
   "routines.today": "Today",
+  // A time that is on another zone's clock than this computer's (src/lib/zone.ts)
+  "zone.city": "{place} time",
+  "zone.with": "{words} ({zone})",
   "routines.nameAsks": "{name}. Asks first.",
   "routines.asksFirst": "Asks first.",
   "routines.paused": "Paused",

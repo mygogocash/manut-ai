@@ -2328,6 +2328,9 @@ export const zh: Record<Key, string> = {
   "routines.hint": "团队按自己的计划自动做的事。",
   "routines.next": "下次：{when}",
   "routines.today": "今天",
+  // A time that is on another zone's clock than this computer's (src/lib/zone.ts)
+  "zone.city": "{place}时间",
+  "zone.with": "{words}（{zone}）",
   "routines.nameAsks": "{name}。会先问你。",
   "routines.asksFirst": "会先问你。",
   "routines.paused": "已暂停",

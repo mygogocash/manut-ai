@@ -240,6 +240,7 @@ describe("schedules as automations", () => {
         last_run_at: null,
         last_status: null,
         enabled: true,
+        time_zone: "Asia/Bangkok",
         bot: TEAM,
         paused: false,
         prompt: "Tell me what came in overnight",
