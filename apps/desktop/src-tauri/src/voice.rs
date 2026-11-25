@@ -394,15 +394,18 @@ mod mac {
             let tap = RcBlock::new(move |buffer: NonNull<AVAudioPCMBuffer>, _when: NonNull<AVAudioTime>| {
                 feed.appendAudioPCMBuffer(buffer.as_ref());
             });
-            let tapped = objc2::exception::catch(std::panic::AssertUnwindSafe(|| {
+            // An input the system refuses raises an Objective-C exception rather than returning an error, which would end
+            // the app if it unwound into Rust: it is caught here and read as no usable microphone.
+            let started = objc2::exception::catch(std::panic::AssertUnwindSafe(|| {
                 input.installTapOnBus_bufferSize_format_block(0, 1024, Some(&format), RcBlock::as_ptr(&tap));
+                engine.prepare();
+                engine.startAndReturnError().is_ok()
             }));
-            if tapped.is_err() {
-                return Err("input".into());
-            }
-            engine.prepare();
-            if engine.startAndReturnError().is_err() {
-                input.removeTapOnBus(0);
+            if !matches!(started, Ok(true)) {
+                let _ = objc2::exception::catch(std::panic::AssertUnwindSafe(|| {
+                    engine.stop();
+                    input.removeTapOnBus(0);
+                }));
                 return Err("input".into());
             }
 
