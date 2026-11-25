@@ -852,7 +852,8 @@ pub fn remove(home: &Path, worktree: &str, ask: &RemoveAsk) -> Result<Removed, S
 
 /// The folder `worktree` and its record, when it is one the app made: a record under [`lanes_dir`] (two names below it, none a
 /// link) that names exactly this folder, which is not a link and has no link for a parent. `not_a_lane` for anything else.
-fn own_lane(home: &Path, worktree: &str) -> Result<(PathBuf, PathBuf, Record), String> {
+/// review.rs reads a lane the same way before it asks to put it up for review.
+pub(crate) fn own_lane(home: &Path, worktree: &str) -> Result<(PathBuf, PathBuf, Record), String> {
     let wt = PathBuf::from(worktree);
     if !wt.is_absolute() || wt.components().any(|c| !matches!(c, Component::RootDir | Component::Prefix(_) | Component::Normal(_))) {
         return Err("not_a_lane".into());

@@ -75,3 +75,59 @@ export function readPulled(v: unknown): Pulled | null {
   if (!why) return null;
   return { done: v.done === true && why === "pulled", why, branch: str(v.branch), remote: str(v.remote), from: str(v.from), to: str(v.to), count: num(v.count) };
 }
+
+/** What a lane would be put up with (`review_draft`): its branch, base, and its commits' subjects, newest first. */
+export interface ReviewDraft {
+  branch: string;
+  base: string;
+  commits: string[];
+  count: number;
+}
+
+export function readDraft(v: unknown): ReviewDraft | null {
+  if (!isObj(v) || !str(v.branch)) return null;
+  return { branch: str(v.branch), base: str(v.base), commits: Array.isArray(v.commits) ? v.commits.filter((c): c is string => typeof c === "string") : [], count: num(v.count) };
+}
+
+/** The shell's ask (src-tauri/src/review.rs `Ask`): to push a lane's branch and open its pull request (`open`). Every text in it
+ *  is what will be sent; the page shows it as it is. */
+export interface ReviewAsk {
+  id: string;
+  kind: "open";
+  source: "github" | "gitlab";
+  repo: string;
+  remote: string;
+  branch: string;
+  base: string;
+  head: string;
+  commits: number;
+  uncommitted: number;
+  title: string;
+  body: string;
+}
+
+export function readAsk(v: unknown): ReviewAsk | null {
+  if (!isObj(v) || !/^[0-9a-f]{32}$/.test(str(v.id)) || v.kind !== "open") return null;
+  const source = v.source === "github" || v.source === "gitlab" ? v.source : null;
+  if (!source || !str(v.repo) || !str(v.branch) || !str(v.base) || typeof v.title !== "string" || typeof v.body !== "string") return null;
+  return { id: str(v.id), kind: "open", source, repo: str(v.repo), remote: str(v.remote), branch: str(v.branch), base: str(v.base), head: str(v.head), commits: num(v.commits), uncommitted: num(v.uncommitted), title: v.title, body: v.body };
+}
+
+/** What a settled ask did (`review_settle`): `declined` (nothing ran), `opened`, or `failed` at `step` (`check`, `push`,
+ *  `create`) with the CLI's own line. `pushed`: the branch reached the remote. */
+export interface ReviewDone {
+  outcome: "declined" | "opened" | "failed";
+  pushed: boolean;
+  url: string;
+  number: number;
+  step: string;
+  error: string;
+}
+
+export function readDone(v: unknown): ReviewDone | null {
+  if (!isObj(v)) return null;
+  const outcome = v.outcome === "declined" || v.outcome === "opened" || v.outcome === "failed" ? v.outcome : null;
+  if (!outcome) return null;
+  const url = str(v.url);
+  return { outcome, pushed: v.pushed === true, url: /^https:\/\/\S+$/.test(url) ? url : "", number: num(v.number), step: str(v.step), error: str(v.error) };
+}

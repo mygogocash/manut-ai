@@ -92,7 +92,8 @@ pub(crate) fn default_branch(git: &Git, cwd: &Path, remote: &str) -> Option<(Str
 }
 
 /// The remote a folder's pull requests are read from: `origin`, else the first remote, as `tasks::folder_remote` reads it.
-fn remote_name(git: &Git, cwd: &Path) -> Option<String> {
+/// review.rs pushes a lane's branch to this same remote.
+pub(crate) fn remote_name(git: &Git, cwd: &Path) -> Option<String> {
     let ran = git.run(cwd, &["remote"]).ok().filter(|r| r.code == Some(0))?;
     let all: Vec<&str> = ran.out.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
     all.iter().find(|r| **r == "origin").or(all.first()).map(|r| r.to_string()).filter(|r| safe_rev(r))

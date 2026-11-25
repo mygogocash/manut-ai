@@ -27,6 +27,7 @@ mod past_chats;
 mod platform;
 mod outpost;
 mod power;
+mod review;
 mod preview;
 #[cfg(all(test, unix))]
 mod pty_bench;
@@ -813,6 +814,39 @@ async fn source_pull(cwd: String) -> Result<git_pull::Pulled, String> {
     tauri::async_runtime::spawn_blocking(move || git_pull::pull(&home, std::path::Path::new(&cwd))).await.map_err(|e| e.to_string())
 }
 
+/// A lane put up for review (item 75): what it would go up with, its branch, base and commits' subjects (review.rs `draft`).
+/// Only reads.
+#[tauri::command]
+async fn review_draft(asks: State<'_, Arc<review::Ledger>>, worktree: String) -> Result<review::Draft, String> {
+    let home = user_home()?;
+    let l = Arc::clone(&asks);
+    tauri::async_runtime::spawn_blocking(move || l.draft(&home, &worktree)).await.map_err(|e| e.to_string())?
+}
+
+/// The ask to push the lane at `worktree` and open its pull request with `title` and `body` (review.rs `ask_open`): the exact
+/// repository, branch, base, title and body, or why it cannot go up. Writes nothing.
+#[tauri::command]
+async fn review_ask_open(asks: State<'_, Arc<review::Ledger>>, worktree: String, title: String, body: String) -> Result<review::Ask, String> {
+    let home = user_home()?;
+    let l = Arc::clone(&asks);
+    tauri::async_runtime::spawn_blocking(move || l.ask_open(&home, &worktree, &title, &body)).await.map_err(|e| e.to_string())?
+}
+
+/// The person's answer to ask `id`, once approval-core settled it on the page (review.rs `settle`): a No runs nothing, a Yes runs
+/// what the ask named, once. Only the id and the answer cross; never an argv, a branch or a text.
+#[tauri::command]
+async fn review_settle(asks: State<'_, Arc<review::Ledger>>, id: String, yes: bool) -> Result<review::Done, String> {
+    let l = Arc::clone(&asks);
+    tauri::async_runtime::spawn_blocking(move || l.settle(&id, yes)).await.map_err(|e| e.to_string())?
+}
+
+/// Takes a waiting ask back, so a later answer to it runs nothing (review.rs `withdraw`).
+#[tauri::command]
+async fn review_withdraw(asks: State<'_, Arc<review::Ledger>>, id: String) -> Result<(), String> {
+    asks.withdraw(&id);
+    Ok(())
+}
+
 /// The lanes' working folders the app made for the repository `cwd` is in, with what is in each (lane.rs). Only reads.
 #[tauri::command]
 async fn lane_list(cwd: String) -> Result<Vec<lane::Kept>, String> {
@@ -1264,6 +1298,8 @@ pub fn run() {
             app.manage(outpost::Outposts::new(app.handle().clone()));
             app.manage(Arc::new(tasks::Tasks::default()));
             app.manage(Arc::new(gh_me::Me::default()));
+            // the asks that push a lane and open or merge its pull request, each settled once (review.rs)
+            app.manage(Arc::new(review::Ledger::default()));
             // free space on the home folder's volume, read once a minute (disk.rs)
             app.manage(disk::Disk::start(app.handle().clone(), user_home().ok()));
             // close = hide to the tray / menu bar, and the keep-awake assertion's worker (tray.rs, power.rs)
@@ -1404,6 +1440,10 @@ fn commands(invoke: tauri::ipc::Invoke) -> bool {
         lane_release,
         lane_clean_merged,
         source_pull,
+        review_draft,
+        review_ask_open,
+        review_settle,
+        review_withdraw,
         session_main_moved,
         chat_close_all,
         buddy_start,
