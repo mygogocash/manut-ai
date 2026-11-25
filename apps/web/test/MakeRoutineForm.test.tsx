@@ -1200,6 +1200,30 @@ describe("the Make a routine form, one change at a time", () => {
     expect(text("Name").disabled).toBe(false);
   });
 
+  it("asks nothing when the form is submitted by other means while a change is on its way, or while its own question is open", async () => {
+    const pending = deferred<Routine>();
+    renderPage({ pauseRoutine: () => pending.promise });
+    await ready();
+    fillDaily();
+    const form = screen.getByRole("form", { name: FORM });
+    press("Pause the routine Morning brief");
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Pause Morning brief?" })).getByRole("button", { name: "Pause Morning brief" }));
+    await waitFor(() => expect(text("Name").disabled).toBe(true));
+    // Enter in a field, or a script, submits a form without its button: the form is locked, so nothing is asked.
+    fireEvent.submit(form);
+    expect(screen.queryByRole("dialog", { name: /^Make / })).toBeNull();
+    pending.resolve({ ...MORNING, paused: true, next: null });
+    await screen.findByRole("status");
+
+    // With its own question open, a submit asks nothing again: the question says what it said when it was read, not what is true now.
+    const dialog = openQuestion();
+    expect(within(dialog).getByText("Next run on 24 November at 08:00.")).toBeTruthy();
+    vi.setSystemTime(Date.parse("2026-11-23T20:00:00Z"));
+    fireEvent.submit(form);
+    expect(screen.getAllByRole("dialog")).toHaveLength(1);
+    expect(within(screen.getByRole("dialog")).getByText("Next run on 24 November at 08:00.")).toBeTruthy();
+  });
+
   it("locks the form while a row's change is on its way, and nothing the form does reaches a row's question", async () => {
     const pending = deferred<Routine>();
     renderPage({ pauseRoutine: () => pending.promise });

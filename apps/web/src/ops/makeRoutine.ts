@@ -117,9 +117,10 @@ export function fieldOfRefusal(code: string, kind: TriggerKind): Field | null {
 }
 
 /// A refusal of the API that is about one field, as that field's problem; null for any other, which is said above the form. Only a 400 is
-/// one: the API refuses a field before it writes anything, so nothing was made.
+/// one: the API refuses a field before it writes anything, so nothing was made. `fieldOfRefusal` knows exactly the codes that
+/// `MAKE_REFUSALS` has words for (a test holds both to the API's own lists), so a code with a field always has its words.
 export function problemOfRefusal(error: unknown, about: Pick<FormValues, "kind" | "member" | "action">): Problems | null {
-  if (!(error instanceof ApiError) || error.status !== 400 || !Object.hasOwn(MAKE_REFUSALS, error.code)) return null;
+  if (!(error instanceof ApiError) || error.status !== 400) return null;
   const field = fieldOfRefusal(error.code, about.kind);
   return field === null ? null : { [field]: MAKE_REFUSALS[error.code]!({ member: about.member, action: about.action }) };
 }
