@@ -18,6 +18,7 @@ import {
   iso,
   memoryCacheStore,
   memoryVault,
+  openedFile,
   ORIGIN,
   replyDetail,
   routineJson,
@@ -28,6 +29,7 @@ import {
   shopToken,
   storedSession,
   T0,
+  useMicrotaskCrypto,
   workerTaskJson,
   type ShopWorkJson,
 } from "./testkit";
@@ -93,6 +95,8 @@ beforeEach(() => {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] });
   vi.setSystemTime(NOW);
   setLang("en");
+  // the kept read is sealed, and Node's Web Crypto finishes on its thread pool, which the fake clock never waits for
+  useMicrotaskCrypto();
 });
 afterEach(() => {
   vi.useRealTimers();
@@ -363,7 +367,9 @@ describe("reading an owned shop's work", () => {
 
   it("keeps each owned shop's work under its own id, and shows it while the API cannot be reached", async () => {
     const { api, disk, host, req } = await opened();
-    const [text] = [...disk.files.values()];
+    // sealing takes a few turns more than writing did
+    await vi.waitFor(() => expect(disk.files.size).toBe(1));
+    const text = await openedFile([...disk.files.values()][0]);
     const file = JSON.parse(text);
     const [a, b] = file.snapshot.shops;
     expect(a.id).toBe(SHOP_A.id);

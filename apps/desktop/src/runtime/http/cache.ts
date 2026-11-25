@@ -8,6 +8,10 @@
 //   whole objects (`raw`) and the entries it could not read are left out: the screens do not need them, and copying by
 //   name means nothing the API happened to carry beyond the decoded fields reaches the file. Nothing from the session is
 //   ever passed in here: no token, no refresh token, no keychain value.
+// - The file is sealed (seal.ts): AES-GCM under a 256-bit key that only the keychain holds (src-tauri/src/shop_cache_key.rs),
+//   made the first time a read is kept, with this version, the origin and the tenant bound in. Without that key the file
+//   says nothing of the shop, and the key is deleted with the file whenever the read is forgotten, so a copy of the file
+//   that outlived it can never be opened. On a computer with no keychain nothing is kept at all, rather than kept plain.
 // - The file is named by a hash of the origin and the signed-in tenant, so each sign-in has its own and the name says
 //   neither, and the desktop shell keeps only the one file of the one sign-in (src-tauri/src/shop_cache.rs). With several
 //   shops (docs/several-shops.md), every shop's record in it is kept under that shop's id, with that shop's own read (for a
@@ -16,40 +20,62 @@
 //   file is written. Writing the one file for all of them needs no change to the shell, which removes any other file when
 //   it writes one.
 // - A kept read is shown for 7 days from the moment it was read and never after. One that is damaged, from another
-//   version of the app or dated ahead of this computer's clock is not believed: it reads as nothing kept. Half a shop
-//   is never shown as the whole one, so a single bad entry ignores the whole file.
+//   version of the app or dated ahead of this computer's clock is not believed: it reads as nothing kept. A file that
+//   does not open (changed, cut short, of another version, sealed with another key or for another shop) is deleted as
+//   well, and with no key in the keychain whatever is on disk is deleted without being read, so an earlier version's
+//   plain file goes the first time the app looks. Half a shop is never shown as the whole one, so a single bad entry
+//   ignores the whole file.
 // - Nothing here raises. A disk that refuses is a cache that is empty, and a write that fails is a read that was not
 //   kept; the app is no worse off than before it had a cache.
 // - Calls to the disk run one at a time in the order they were made, and `clear` is final for any read that started
 //   before it (`ticket`): a read of the shop that finishes after the person signed out leaves no file behind.
 import { encodeRecord, encodeStanding } from "@manut/approval-core";
 import { decodeApprovals, shownRecord, type ShopApproval } from "./approvals";
+import { importSealKey, open, seal } from "./seal";
 import { sha256Hex } from "./sha256";
 import type { Attention, ShopAction, ShopAttempt, ShopDraft, ShopPart, ShopSchedule, ShopSnapshot, ShopTask, ShopTeam, ShopWork, TeamRoutine } from "./shop";
 
-/** 5 since the tasks come from the task list (`GET /v1/tasks`), which carries only the entries of a task's log the screens
- *  read, so a task no longer keeps how many entries its log holds. A file of any earlier version reads as nothing kept: it
- *  is shown no more, never half read, and the next good read writes this version over it. 4 kept each shop the person
- *  owns with its own work (tasks with their runs and drafts, schedules, attention items, team and routines) under its id,
- *  and each action when it was approved and sent; 3 several shops' asks; 2 the signed-in tenant's own read; 1 no requests. */
-export const CACHE_VERSION = 5;
+/** 6 since the file is sealed (seal.ts); what it keeps is 5's. A file of any earlier version, which kept the read in
+ *  plain text, is deleted unread, never shown, and the next good read writes this version in its place. 5 came from the
+ *  task list (`GET /v1/tasks`), which carries only the entries of a task's log the screens read, so a task no longer kept
+ *  how many entries its log holds; 4 kept each shop the person owns with its own work (tasks with their runs and drafts,
+ *  schedules, attention items, team and routines) under its id, and each action when it was approved and sent; 3 several
+ *  shops' asks; 2 the signed-in tenant's own read; 1 no requests. */
+export const CACHE_VERSION = 6;
 /** A kept read is shown for this long after it was read. */
 export const CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 /** A read dated this far ahead of the clock is not believed (a clock that is a little behind is only a clock). */
 const CLOCK_SLACK_MS = 5 * 60 * 1000;
 
-/** What a look at the saved file found: a read to show, one too old to show (and when it was read), or nothing usable
- *  (none kept, damaged, from another version, or dated in the future). */
-export type CachedRead = { kind: "usable"; snapshot: ShopSnapshot } | { kind: "too_old"; at: number } | { kind: "none" };
+/** What a look at the saved file found: a read to show, one too old to show (and when it was read), nothing usable (none
+ *  kept, damaged, not opened, from another version, or dated in the future), or nothing because this computer has no
+ *  keychain to keep the key in, so no copy is ever kept (`unkept`). */
+export type CachedRead = { kind: "usable"; snapshot: ShopSnapshot } | { kind: "too_old"; at: number } | { kind: "none" } | { kind: "unkept" };
 
 const NONE: CachedRead = { kind: "none" };
+const UNKEPT: CachedRead = { kind: "unkept" };
 
-/** The desktop shell's three file commands (src/runtime/http/shell.ts `shellCacheStore`), or a fake in the tests. */
+/** The desktop shell's three file commands and two for the key the file is sealed with (src/runtime/http/shell.ts
+ *  `shellCacheStore`), or a fake in the tests. */
 export interface CacheStore {
   write(key: string, text: string): Promise<void>;
   read(key: string): Promise<string | null>;
   /** Removes whatever is kept. */
   clear(): Promise<void>;
+  /** The key the file is sealed with, as 64 lowercase hex digits from the keychain: made and kept first when `make` is
+   *  set and none is held, else null when none is held. Raises `NoKeychain` on a computer with no keychain, and any other
+   *  error when the keychain refused. */
+  sealKey(make: boolean): Promise<string | null>;
+  /** Deletes the key from the keychain. */
+  dropSealKey(): Promise<void>;
+}
+
+/** This computer has no keychain to keep the key in (anything but macOS today), so no copy of the shop is kept. */
+export class NoKeychain extends Error {
+  constructor() {
+    super("no keychain");
+    this.name = "NoKeychain";
+  }
 }
 
 // ---- the file ---------------------------------------------------------------------------------------------------------
@@ -361,11 +387,23 @@ export function cacheKey(origin: string, tenant: string): string {
   return sha256Hex(JSON.stringify([origin, tenant]));
 }
 
+// ---- the seal ---------------------------------------------------------------------------------------------------------
+
+/** `text` (encodeSnapshot's) sealed as the file holds it for this version, `origin` and `tenant`. */
+export const sealFile = (text: string, key: CryptoKey, origin: string, tenant: string): Promise<string> => seal(text, key, CACHE_VERSION, origin, tenant);
+
+/** What a file holds when it opens with `key` as this version's file for `origin` and `tenant`; else null. */
+export const openFile = (text: string, key: CryptoKey, origin: string, tenant: string): Promise<string | null> => open(text, key, CACHE_VERSION, origin, tenant);
+
 // ---- the saved file ---------------------------------------------------------------------------------------------------
 
 export class ShopCache {
   private epoch = 0;
   private tail: Promise<unknown> = Promise.resolve();
+  /** The key the file is sealed with, once the keychain gave it, as Web Crypto holds it: script can use it but never read
+   *  it back. It is set and dropped only inside a call to the disk, and those run one at a time, so a `clear` that deleted
+   *  the key from the keychain has dropped it here too before any later call runs. */
+  private sealing: CryptoKey | null = null;
 
   constructor(
     private readonly store: CacheStore,
@@ -378,24 +416,80 @@ export class ShopCache {
     return this.epoch;
   }
 
-  /** Keeps `snapshot` as the shop's last good read, unless the cache was cleared since `ticket` was taken. */
+  /** Keeps `snapshot` as the shop's last good read, sealed, unless the cache was cleared since `ticket` was taken. When
+   *  the keychain refuses the key nothing is kept this time; on a computer with no keychain nothing is ever kept, and a
+   *  file found there is deleted rather than left as it is. */
   keep(origin: string, tenant: string, snapshot: ShopSnapshot, ticket: number): Promise<void> {
     return this.enqueue(async () => {
       if (ticket !== this.epoch) return;
-      await this.store.write(cacheKey(origin, tenant), encodeSnapshot(snapshot));
+      const key = await this.key(true);
+      if (key === "unkept") return this.store.clear();
+      if (!key) return;
+      await this.store.write(cacheKey(origin, tenant), await sealFile(encodeSnapshot(snapshot), key, origin, tenant));
     }, undefined);
   }
 
-  /** The shop's kept read, if one is kept for this origin and tenant and is neither damaged nor too old to show. */
+  /** The shop's kept read, if one is kept for this origin and tenant, opens, and is neither damaged nor too old to show. */
   load(origin: string, tenant: string): Promise<CachedRead> {
-    return this.enqueue(async () => decodeCached(await this.store.read(cacheKey(origin, tenant)), this.now()), NONE);
+    return this.enqueue(async () => {
+      const key = await this.key(false);
+      if (key === "unkept") {
+        await this.store.clear().catch(() => undefined);
+        return UNKEPT;
+      }
+      // With no key nothing on disk can be opened, so whatever is there goes without being read: above all a file an
+      // earlier version kept in plain text, the first time this version looks.
+      if (!key) {
+        await this.store.clear();
+        return NONE;
+      }
+      const text = await this.store.read(cacheKey(origin, tenant));
+      if (text === null) return NONE;
+      const plain = await openFile(text, key, origin, tenant);
+      // A file that does not open (changed, cut short, of another version, sealed with another key or for another shop)
+      // is not believed, as a damaged file never was, and goes.
+      if (plain === null) {
+        await this.store.clear();
+        return NONE;
+      }
+      return decodeCached(plain, this.now());
+    }, NONE);
   }
 
-  /** Forgets whatever is kept. Final for every read that started before it: the epoch moves at once, not when the
-   *  removal gets its turn, so a write still waiting behind another call is dropped. */
+  /** Forgets whatever is kept, and the key it was sealed with. Final for every read that started before it: the epoch
+   *  moves at once, not when the removal gets its turn, so a write still waiting behind another call is dropped. */
   clear(): Promise<void> {
     this.epoch += 1;
-    return this.enqueue(() => this.store.clear(), undefined);
+    return this.enqueue(async () => {
+      this.sealing = null;
+      // The key goes with the file, even when the disk refuses the removal, so a copy of the file that outlived it (a
+      // backup, a sync folder, a removal that failed) can never be opened. The next read kept makes a new key.
+      try {
+        await this.store.clear();
+      } finally {
+        await this.store.dropSealKey();
+      }
+    }, undefined);
+  }
+
+  /** The key the file is sealed with: the one this run already has, else the keychain's, made first when `make` is set
+   *  and it holds none. Null when it holds none, and `unkept` on a computer with no keychain. A keychain that refused,
+   *  or an answer that is not a key, raises, so the call that asked keeps or deletes nothing. */
+  private async key(make: boolean): Promise<CryptoKey | null | "unkept"> {
+    if (this.sealing) return this.sealing;
+    let hex: string | null;
+    try {
+      hex = await this.store.sealKey(make);
+    } catch (e) {
+      if (e instanceof NoKeychain) return "unkept";
+      throw e;
+    }
+    // Only the shell's null says none is held; any other answer that is not a key is a failure, so no file goes for it.
+    if (hex === null) return null;
+    const key = await importSealKey(hex);
+    if (!key) throw new Error("not a key");
+    this.sealing = key;
+    return key;
   }
 
   /** One call at a time, in order. A call that fails is `fallback`, and never stops the ones behind it. */

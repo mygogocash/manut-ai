@@ -24,6 +24,8 @@ import {
   shopToken,
   storedSession,
   T0,
+  keptPlain,
+  useMicrotaskCrypto,
   type FakeAnswer,
   type FakeApi,
   type Recorded,
@@ -177,10 +179,13 @@ beforeEach(() => {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] });
   vi.setSystemTime(NOW);
   setLang("en");
+  // the kept read is sealed, and Node's Web Crypto finishes on its thread pool, which the fake clock never waits for
+  useMicrotaskCrypto();
 });
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.unstubAllGlobals();
 });
 
 describe("reading the people", () => {
@@ -423,7 +428,9 @@ describe("inviting a helper", () => {
     const link = made.invite.link!;
     const sent = api.to("POST", INVITE_PATH)[0];
     for (const call of api.calls.filter((c) => c !== sent)) expect(JSON.stringify(call).includes(link) && call.method === "POST", `${call.method} ${call.path}`).toBe(false);
-    expect(JSON.stringify([...disk.files.values()])).not.toContain(link);
+    // what the saved read of the shop holds, opened: sealed, its text would hide a link it held
+    expect(disk.files.size).toBe(1);
+    expect(JSON.stringify(await keptPlain(disk))).not.toContain(link);
     expect(JSON.stringify(host)).not.toContain(link);
     expect(JSON.stringify(host)).not.toContain("tum@example.com");
   });

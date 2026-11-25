@@ -15,7 +15,8 @@
 //! so macOS lets this app read it without asking and asks the person before any other program reads it. macOS only
 //! for now: elsewhere the commands answer `unavailable` and Connected cannot sign in. One more item sits beside it,
 //! account `outpost`: this Mac's outpost and its credential (outpost/item.rs). The shell alone reads that one, and no
-//! command hands it to the page.
+//! command hands it to the page. A third, account `shop-cache-key`, holds the key the kept read of the shop is sealed
+//! with (shop_cache_key.rs); the page is handed that one, as it is the session, since it seals and opens the file.
 //!
 //! An answer that holds a secret (an outpost redeeming a sign-in's password) is read with `request_sealed`, into a
 //! buffer sized up front and wiped when it is dropped.
@@ -437,8 +438,8 @@ pub(crate) mod mac {
         clear_item(keychain, KEYCHAIN_ACCOUNT)
     }
 
-    /// One of this app's items by its account: `session`, or `outpost` (outpost/item.rs). What it holds comes back in a
-    /// buffer that is wiped when dropped.
+    /// One of this app's items by its account: `session`, `outpost` (outpost/item.rs) or `shop-cache-key`
+    /// (shop_cache_key.rs). What it holds comes back in a buffer that is wiped when dropped.
     pub fn read_item(keychain: &SecKeychain, account: &str) -> Result<Option<Zeroizing<String>>, &'static str> {
         match keychain.find_generic_password(KEYCHAIN_SERVICE, account) {
             Ok((password, _item)) => {

@@ -20,6 +20,7 @@ import {
   fakeApi,
   iso,
   memoryCacheStore,
+  openedFile,
   memoryVault,
   ORIGIN,
   replyDetail,
@@ -33,6 +34,7 @@ import {
   T0,
   taskJson,
   tokens,
+  useMicrotaskCrypto,
   type FakeApi,
   type Recent,
   type ServedShops,
@@ -130,6 +132,8 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(NOW);
   setLang("en");
+  // the kept read is sealed, and Node's Web Crypto finishes on its thread pool, which the fake clock never waits for
+  useMicrotaskCrypto();
 });
 
 afterEach(() => {
@@ -615,7 +619,8 @@ describe("what is kept", () => {
       const { api, disk, store } = await opened();
       await minuteLater(api, recent);
       expect(cardOf(store, "action-1@1")?.expired).toBe("resolved");
-      return [...disk.files.values()];
+      // what each file holds: sealed, the same read is never the same file twice
+      return Promise.all([...disk.files.values()].map((text) => openedFile(text)));
     };
     const said = await kept([settledJson("decided", { at: AT, by: "helper-9", role: "helper" })]);
     const quiet = await kept([]);

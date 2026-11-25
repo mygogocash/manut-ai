@@ -242,8 +242,8 @@ alike). Before it, an ask decided anywhere but this app (the web app, the owner'
   slices, 3), so a helper who decided a reply is "a helper" unless they passed something else on.
 - **Order.** A closing that waits for the read comes after the other changes the same read shows (a task gone, a new ask); every
   other closing is as soon as the read is taken, as it was.
-- **What is kept.** Nothing. The read is not kept in the snapshot or the offline cache (version 5, as before), and the words are not
-  kept. An ask the kept read showed, and that is not waiting when the API answers again, closes in how it left by the same read, as
+- **What is kept.** Nothing. The read is not kept in the snapshot or the offline cache (whose version did not change for it), and the
+  words are not kept. An ask the kept read showed, and that is not waiting when the API answers again, closes in how it left by the same read, as
   any other. Practice is unchanged: its demo settles its own asks and reaches no API.
 - **A helper's refused answer.** The same words now name the owner, where a helper's answer refused because the owner decided first
   said "Already decided by you" or "from your LINE link" (`AnswerContext.owner`, set for a shop where the person is a helper).
@@ -295,7 +295,7 @@ badge and Look first need `core:window:allow-set-badge-count`, `allow-show`, `al
 As before: an ask from the kept read is shown with its exact action, cannot be answered ("Connect to answer this"),
 and nothing is queued or sent later. The cache keeps the open requests as approval-core's wire JSON, their detail cut to
 the card's words, with any note passed on, and reads them back with the same decoders as the live read; every version of
-the file since 2 keeps them, and the current one is 5 (The offline cache, below). An ask this build cannot answer says
+the file since 2 keeps them, and the current one is 6 (The offline cache, below). An ask this build cannot answer says
 "Update the app to answer this" offline too.
 
 ### What a real owner needs
@@ -453,15 +453,15 @@ asks, Mission Control showed Buddy alone, and every write but an answer was "not
   Needs you keep waiting until they expire." for the API's (`pause.ts` `pauseWords`). Practice keeps the canvas's.
 - **Offline.** Each shop's record in the kept read holds that shop's own read under its id: its asks, and for a shop the
   person owns its tasks (with each run and the newest draft), schedules, attention items, team and routines, copied field
-  by field (version 5 of the file, since the task list: a task no longer keeps how many entries its log holds, which the
-  list does not carry. A file of 4 or earlier reads as nothing kept, never half read, and the next good read writes over
-  it). The viewed shop's work is its record's alone. A record of a shop the person helps at that claims any work, or
+  by field (since version 5 of the file, from the task list: a task no longer keeps how many entries its log holds, which
+  the list does not carry. Version 6 seals the same read. A file of any other version is not read, and the next good read
+  writes over it). The viewed shop's work is its record's alone. A record of a shop the person helps at that claims any work, or
   work that is not whole, makes the whole file ignored.
 - **Tests.** `owned.test.ts` (the shop whole, its team, its routines, Mission Control, the writes and their refusals, a
   helper's view, offline, and under the app's own store), `work.test.ts` (how a task reads as a job), `mission.test.ts`
   (the signed-in tenant's Mission Control), `screens.test.ts` (every screen as the export showed it, kept in
   `screens.export.json`, now from the list), `shop.test.ts` (the list's pages and cursor, the newest 50, a page that fails),
-  `cache.test.ts` (version 5, and every earlier version read as nothing kept), and `serveShops` and `serveShop` in
+  `cache.test.ts` (version 6, and every earlier version read as nothing kept), and `serveShops` and `serveShop` in
   `testkit.ts`, which answer the task list as apps/api does (`listedJson`, `taskPage`), an owner's schedules, attention
   items, routines and team writes, and a helper's 403. The API's side is `apps/api/test/task-list.test.ts`. Show older's own tests are in Older tasks, below.
 
@@ -506,8 +506,8 @@ newest 50 tasks showed only those, and an owner could not reach older ones.
   press starts from the newest read's cursor.
 - **Offline.** While only a kept read is shown, Show older is refused `offline` ("Show older needs a connection.") with nothing sent.
   The read shown while the API cannot be reached is this run's last good read, so the older pages already read stay shown, with Show
-  older still offered, and are still there when the API answers. The kept read on disk is as it was: the newest 50, cache version 5,
-  with no cursor and no older task. After a restart with no network the lists therefore say nothing of older work.
+  older still offered, and are still there when the API answers. The kept read on disk is as it was: the newest 50 (cache version 5,
+  6 now that it is sealed), with no cursor and no older task. After a restart with no network the lists therefore say nothing of older work.
 - **The screens.** History and the activity log draw one line under their list ("Only the newest work is shown here. There is older
   work.") with a Show older button. Pressing it reads the page and has the page read its list again, so the filters, the search, the
   event picked and the messages shown stay. A press while one is on its way does nothing, and the button keeps its focus. A page that
@@ -764,14 +764,16 @@ desktop cannot read a pilot shop's work until the API links an owner's identity 
   signature on each build, so macOS may ask once after a rebuild. A second item beside it (account `outpost`) holds this
   Mac's outpost and its credential (`docs/browser-control.md`); only the shell reads it, and no command gives it to the
   page. The page does not even learn which shop it is for: it tells the shell which shops it acts for as owner, and the
-  shell decides (Several shops, above). It learns only the outpost's id, for the shop it asks about.
+  shell decides (Several shops, above). It learns only the outpost's id, for the shop it asks about. A third item (account
+  `shop-cache-key`) holds the key the offline cache is sealed with (The offline cache, below), 64 hex digits; the page is
+  handed it, as it is handed the session, and imports it at once as a key script cannot read back.
 - In memory, in the page's one `ApiSession` per origin, while the app runs.
 - Never in localStorage (which holds only `manut.runtime`), a log, an address, or a command line. A session is never
   sent to any origin but its own.
-- Never in the offline cache's file either: it holds what the screens read of the shop and nothing from the session (see
-  Offline).
+- Never in the offline cache's file either: it holds what the screens read of the shop and nothing from the session, and
+  that sealed (see Offline).
 - macOS only for now. On Windows and Linux the keychain commands answer `unavailable`, Settings says "This computer
-  cannot keep a session yet", and Connected cannot sign in. The crates either would use are already in the build
+  cannot keep a session yet", and Connected cannot sign in; nor is any offline copy kept there. The crates either would use are already in the build
   (`windows-sys` for Windows' Credential Manager, `zbus` for Linux's Secret Service); the code is not written.
 
 ## How requests reach the API
@@ -815,20 +817,39 @@ instead of an empty screen, and says so (`src/runtime/http/cache.ts`, `host.ts`,
   already decodes them. The API's whole objects and the entries it could not read are left
   out. Never an older task or the cursor Show older reads from (Older tasks, below): the file keeps the newest 50 as it did.
   Never a token, a refresh token, the device id or anything else from the keychain, and not the origin or the tenant
-  either: the file's name is the only link to them. It does hold the shop's own words in plain text: task titles, the
-  exact words of replies waiting for the owner and the LINE ids they go to, and schedule prompts. The file is the owner's
-  alone (0600), so it is as private as the rest of the app's folder, and no more; it is not encrypted.
+  either: the file's name is the only link to them. It does hold the shop's own words: task titles, the exact words of
+  replies waiting for the owner and the LINE ids they go to, and schedule prompts. So the file is sealed (below), and the
+  owner's alone (0600) as well.
+- **Sealed.** Since version 6 the page writes the read sealed with AES-GCM (`src/runtime/http/seal.ts`), under a random
+  256-bit key that only the keychain holds: one more item beside the session (account `shop-cache-key`), made by the
+  shell from the system's random source (`SecRandomCopyBytes`) the first time a read is kept (`shop_cache_key.rs`,
+  `shop_cache_seal_key`), never on a look, and never in a file or a log. Every write has a fresh random 96-bit nonce and
+  GCM's 128-bit tag; the version, the origin and the tenant are bound in as associated data, so a file opens only as the
+  version and the shop it was written for, even with the key. The file is one line that says its version before anything
+  is opened: `{"v":6,"iv":"<16 base64url>","sealed":"<base64url>"}`; its shape is checked whole, with no JSON parser, so a
+  file that is not one is never parsed. The page seals with the webview's Web Crypto, a public standard, where
+  CommonCrypto's AES-GCM is private interface; it is handed the key as it is handed the session, imports it at once as a
+  key script cannot read back, and asks for it once a run. The packaged page (`tauri://localhost`) is a secure context
+  with `crypto.subtle`, checked on this Mac in a throwaway Tauri program on the app's Tauri and CSP; so is the development
+  server's `http://localhost`. A file that does not open (changed, cut short, of another version, sealed with another key
+  or for another shop) is deleted at the look that found it, and with no key in the keychain whatever is on disk is
+  deleted without being read: version 5's plain file goes the first time the upgraded app looks during an outage, or is
+  written over by the first good read. A keychain that refuses (locked, a denied prompt) keeps and deletes nothing that
+  time. On a computer with no keychain (Windows and Linux today) no copy is kept at all, a file found is deleted, and while
+  the API cannot be reached the line says "Offline. This computer cannot keep a saved copy yet, so none is shown"
+  ("Not answering. …"); during an outage the run's last read in memory still stands in.
 - **Where.** `~/.manut/shop-cache/<key>.json`, one file for the one sign-in. With several shops (since version 3 of the
   file), every shop's record in it is under that shop's id, with its name, owner and the person's role, so a shop's asks
   are only ever read back as that shop's (each owned shop's work too, A shop the person owns, above); the shell needs no
-  change, since it keeps one file per sign-in and removes any other. The current version is 5, and a file of any other is
-  read as nothing kept. A file written while the person was in no shop is the signed-in tenant's own. The key is the SHA-256, in hex, of the
+  change, since it keeps one file per sign-in and removes any other. The current version is 6 (5's read, sealed), and a file of
+  any other is not opened: it is deleted (Sealed, above). A file written while the person was in no shop is the signed-in tenant's own. The key is the SHA-256, in hex, of the
   origin and the tenant, made by the page (`cacheKey`, with a small synchronous SHA-256 in `sha256.ts`, because the Web
   Crypto digest is asynchronous and exists only in a secure context); the shell accepts nothing but 64 hex digits as a
-  name, never a path. It is written to a temporary file and renamed, so a crash never leaves half a file; at most 8 MiB;
-  never through a link; and writing one shop's file removes any other's. Three shell commands do it (`shop_cache_write`,
-  `shop_cache_read`, `shop_cache_clear`), reached only through `shellCacheStore` in `shell.ts`, and nothing there ever
-  raises: a disk that refuses is a cache that is empty. Calls to it run one at a time, in order.
+  name, never a path. It is written to a temporary file and renamed, so a crash never leaves half a file; at most 11 MiB of
+  sealed text, which holds a read of up to 8 MiB; never through a link; and writing one shop's file removes any other's.
+  Three shell commands do it (`shop_cache_write`, `shop_cache_read`, `shop_cache_clear`) and two more give and delete the
+  key (`shop_cache_seal_key`, `shop_cache_seal_key_clear`), reached only through `shellCacheStore` in `shell.ts`, and nothing
+  there ever raises: a disk that refuses is a cache that is empty. Calls to it run one at a time, in order.
 - **When it is shown.** On a failed read (offline or unavailable) the host answers every screen from the last good read of
   this run, else from the file an earlier run kept, looked at once for the outage (an app that starts with no network).
   The runtime stays open, so the screens show it; no request is made per screen, and the host keeps trying as above. The
@@ -847,11 +868,21 @@ instead of an empty screen, and says so (`src/runtime/http/cache.ts`, `host.ts`,
   copy is more than 7 days old, so it is not shown" and the runtime is closed, as with nothing kept. A read that was
   showing stops showing when it reaches 7 days. A file that is damaged, from another version of the app, for another
   origin or tenant, or dated more than 5 minutes ahead of this computer's clock is ignored as if none were kept, and one
-  bad entry ignores the whole file: half a shop is never shown as the whole one.
+  bad entry ignores the whole file: half a shop is never shown as the whole one. Such a file stays until the next good read
+  writes over it; one that does not open goes at once (Sealed, above).
 - **Never how it left.** How a request that left the open approvals was settled (When nobody here answered it, above) is read when it
-  leaves and shown on the card; it is kept nowhere, so the file holds what it held before and the version is still 5.
+  leaves and shown on the card; it is kept nowhere, so the file holds what it held before and its version did not change for it.
 - **Forgotten.** Signing out in Settings, a session the API ends, a new sign-in over another session (this origin's or
-  another's), and saving Practice or another origin in Settings › Developer all delete the file. A read that is on its
+  another's), and saving Practice or another origin in Settings › Developer all delete the file, and then the key it was
+  sealed with, even when the disk refuses to remove the file: a copy of it that outlived the forgetting (a backup, a sync
+  folder) can never be opened. The next read kept makes a new key.
+- **Tests.** `seal.test.ts` (the format, a fresh nonce for every write, a changed byte, a file cut short, another key,
+  another version, origin or tenant, no word of the shop in the file, the key that cannot be read back, and the clock-driven
+  tests' stand-in held to Web Crypto byte for byte), `cache.test.ts` (what is kept, and the key's life: made at the first read
+  kept, deleted with the file, a file that does not open deleted, version 5's deleted unread, no keychain, a keychain that
+  refuses), `offline.test.ts` (the runtime over all of it), `shell.test.ts` (the five commands), `shop_cache_key.rs`'s tests
+  on a throwaway keychain, and `e2e/cache-sealed.ts` in Chromium and in WebKit (the browser's own Web Crypto, and a restart
+  with no network). A read that is on its
   way when the person signs out is not kept afterwards. After the saved choice moves away from the origin the page runs,
   it goes on reading until the next start but keeps nothing more, so the deletion is not undone. Practice never reads the
   cache: its runtime reaches no command of the shell.
@@ -886,6 +917,16 @@ and `keepClosing` in `host.ts` (the answer paths set `closings` as they did: onl
 `testkit.ts` (`settledJson`, `approvalsListing`'s second list); `runtime.test.ts` then expects the closing before the changes again.
 `AnswerContext.owner` and `whoDecided`'s `owner` may stay: they are what makes a helper's refused answer name the owner, and `answerAtShop`
 gives it.
+
+To take only the seal on the offline cache out (December item 60): remove `src/runtime/http/seal.ts` with `seal.test.ts`;
+in `cache.ts` make `keep` write `encodeSnapshot` and `load` read `decodeCached` straight from the store again, and drop
+`sealFile`, `openFile`, `key`, `sealing`, `NoKeychain`, `sealKey`, `dropSealKey` and the `unkept` read, with `CACHE_VERSION` 5
+again (every sealed file then reads as another version's and the next good read writes a plain one); drop the same two calls
+from `shellCacheStore` (`shell.ts`), `UNKEPT` from `host.ts`, the `unkept` line from `modeLine` (`link.ts`) and the
+`mode.unkept*` keys; in the shell remove `shop_cache_key.rs` and the `shop_cache_seal_key` and `shop_cache_seal_key_clear`
+commands in `lib.rs`, and give `MAX_BYTES` its 8 MiB; in the tests, remove `microtaskCrypto`, `useMicrotaskCrypto`,
+`sealedFile`, `openedFile` and `keptPlain` from `testkit.ts` and look at the files' text as it is. A key the keychain
+already holds stays there, unused, until someone deletes the item.
 
 To take only the answering out: make `approval.respond` `notYet` again in `host.ts` and remove `answer`, `refresh`,
 `closings` and `leftHow` there, `src/runtime/http/answer.ts` with its tests, `ApiSession.write` and the `removed` rule

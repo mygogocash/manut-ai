@@ -2760,6 +2760,9 @@ export const en = {
   "mode.cachedUnavailable": "Not answering. Showing what was here at {time}",
   "mode.oldOffline": "Offline. The saved copy is more than 7 days old, so it is not shown",
   "mode.oldUnavailable": "Not answering. The saved copy is more than 7 days old, so it is not shown",
+  // no keychain to keep the saved copy's key in (anything but macOS today), so no copy is kept at all
+  "mode.unkeptOffline": "Offline. This computer cannot keep a saved copy yet, so none is shown",
+  "mode.unkeptUnavailable": "Not answering. This computer cannot keep a saved copy yet, so none is shown",
   "mode.open": "Runtime settings",
   // Mission Control: the job view, the activity log and Pause everyone (src/pages/Job*, Activity*, Pause*)
   "rt.notYetShow": "Not yet: Connected mode cannot show this for now. It comes in a later version.",
