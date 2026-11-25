@@ -3569,4 +3569,13 @@ export const zh: Record<Key, string> = {
   "wf.disallow": "取消允许",
   "wf.why.not_allowed": "它尚未被允许运行。",
   "wf.why.changed": "这个工作流的文件已更改。请再看一遍。",
+  "wf.why.missing": "它的项目文件夹不存在，或者不是文件夹。",
+  "wf.why.link": "它的项目路径经过了链接，或者没有写成文件夹的真实路径。请写文件夹的真实路径。",
+  "wf.why.too_broad": "它的项目是主文件夹、磁盘的最顶层，或包含主文件夹或本应用文件夹的文件夹。请指定一个仓库自己的文件夹。",
+  "wf.why.app_folder": "它的项目在本应用自己的文件夹或某条泳道的文件夹里。请指定你的某个仓库自己的文件夹。",
+  "wf.why.not_repo": "它的项目不是 git 仓库的顶层文件夹。",
+  "wf.why.no_git": "没有安装 git，所以无法为它建立泳道。",
+  "wf.why.unchecked": "无法检查它的项目文件夹。",
+  "wf.why.moved": "它的项目文件夹不是你允许的那个。请再看一遍。",
+  "wf.why.no_lane": "无法在它的项目中建立它自己的泳道，所以什么都没有运行。",
 };

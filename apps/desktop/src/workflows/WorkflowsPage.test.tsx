@@ -166,6 +166,17 @@ describe("Settings › Workflows", () => {
       expect(twice).not.toContain("It was not allowed to run yet.");
     });
 
+    it("says why its project was refused, at Allow or before a run, and why a run had no lane", () => {
+      const said = (why: string) => words(card(draw({ settings: on, refused: { "nightly.json": why as never } })));
+      expect(said("too_broad")).toContain("Its project is the home folder, the top of a disk, or a folder that holds the home folder or this app's folder.");
+      expect(said("not_repo")).toContain("Its project is not the top folder of a git repository.");
+      expect(said("link")).toContain("Its project's path goes through a link");
+      expect(said("app_folder")).toContain("Its project is inside this app's own folder");
+      expect(said("unchecked")).toContain("Its project folder could not be checked.");
+      expect(words(card(draw({ settings: on, allowed, refused: { "nightly.json": "no_lane" } })))).toContain("A lane of its own could not be made in its project, so nothing ran.");
+      expect(words(card(draw({ settings: on, allowed, refused: { "nightly.json": "moved" } })))).toContain("Its project folder is not the one you allowed. Look at it again.");
+    });
+
     it("has its words in every language", () => {
       for (const l of LANGS) {
         setLang(l);

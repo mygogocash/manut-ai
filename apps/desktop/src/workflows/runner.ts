@@ -12,7 +12,10 @@
 // Item 91: a run starts only from what the person allowed (allow.ts). Every way a run starts (the clock, Run now, the palette,
 // which presses Run now) goes through `begin`, which reads the folder's file as it is now and starts nothing unless its exact
 // text is the one the person allowed. The steps the run sends are the ones parsed from that same text. When it is not, the run
-// is kept as skipped with why, and the card says it.
+// is kept as skipped with why, and the card says it. The project is asked of the shell at Allow and again before every run
+// (host.ts `project`): the top folder of a git repository, written as its real path, never the home folder, a disk's top or a
+// folder that holds them or the app's own. The lane is started in that real path, and a run whose lane could not have a branch
+// and folder of its own does not start (`startWorkflowLane` answers `no_lane`, having started no agent).
 import { useSyncExternalStore } from "react";
 import { chatAgents, offeredAgents, type AgentId } from "../sessions/agents";
 import { getSessions, type SessionsStore } from "../sessions/sessions";
@@ -23,7 +26,7 @@ import { clockStep, TICK_MS } from "./schedule";
 import { readAllowances, saveAllowances, standingOf, type Allowances } from "./allow";
 import { detailOf, keepRuns, parseRuns, settleLeftovers, type BlockWhy, type EndWhy, type RunRec, type RunState } from "./history";
 import { setWorkflowSettings, workflowSettings } from "./settings";
-import { getWorkflowsHost, type FolderState, type WorkflowsHost } from "./host";
+import { getWorkflowsHost, readProjectCheck, type FolderState, type ProjectCheck, type ProjectWhy, type WorkflowsHost } from "./host";
 
 /** What a run needs of the sessions store: the very calls a person's own lane goes through. */
 export type WorkflowSessions = Pick<SessionsStore, "getState" | "subscribe" | "loadAgents" | "startWorkflowLane" | "send" | "chatKey" | "onChatEvent">;
@@ -38,6 +41,8 @@ export interface LiveRun {
   steps: string[];
   /** stop when this step's turn ends: the person asked, or Workflows was turned off */
   stopAfter?: "person" | "off";
+  /** its project is being checked or its lane made: a session that goes meanwhile is the start's to settle, not a closed lane */
+  starting?: boolean;
 }
 
 export interface WorkflowsState {
@@ -56,8 +61,9 @@ export interface WorkflowsState {
 /** Why a run did not start. `off`, `running` and `unreadable` are Run now's own; the rest are kept in the history too. */
 export type RunRefusal = "off" | "running" | "unreadable" | BlockWhy;
 
-/** Why Allow did not record an allowance: the file is not the text the page showed. */
-export type AllowRefusal = "changed";
+/** Why Allow did not record an allowance: the file is not the text the page showed, or its project is not one a run may start
+ *  in. */
+export type AllowRefusal = "changed" | ProjectWhy;
 
 const RUNS_KEY = "manut.workflows.runs";
 const CLOCK_KEY = "manut.workflows.clock";
@@ -155,14 +161,23 @@ export function createWorkflows(deps: WorkflowDeps) {
 
   // ---- a run --------------------------------------------------------------------------------
 
-  /** Run `runId` ended (once: a later end of the same run changes nothing). */
-  const endRun = (runId: string, end: Exclude<RunState, "running" | "skipped">, why?: EndWhy, detail?: string) => {
+  /** Run `runId` ended (once: a later end of the same run changes nothing). Skipped: it started nothing after all. */
+  const endRun = (runId: string, end: Exclude<RunState, "running">, why?: EndWhy | BlockWhy, detail?: string) => {
     const hit = Object.entries(state.live).find(([, l]) => l.run === runId);
     if (!hit) return;
     const live = { ...state.live };
     delete live[hit[0]];
     set({ live });
-    patchRun(runId, { state: end, ...(why ? { why } : {}), ...(detail ? { detail: detailOf(detail) } : {}), ended: now() });
+    patchRun(runId, { state: end, ...(why ? { why } : {}), ...(detail ? { detail: detailOf(detail) } : {}), ...(end === "skipped" ? { reached: 0 } : {}), ended: now() });
+  };
+
+  /** The shell's word on `project` now; no answer, or one this page does not know, allows nothing. */
+  const checkProject = async (project: string): Promise<ProjectCheck> => {
+    try {
+      return readProjectCheck(await host.project(project));
+    } catch {
+      return { why: "unchecked" };
+    }
   };
 
   const setLive = (file: string, l: LiveRun) => set({ live: { ...state.live, [file]: l } });
@@ -192,11 +207,32 @@ export function createWorkflows(deps: WorkflowDeps) {
       return "running";
     }
     // only the exact text the person allowed: the allowances are read again here, so a record that cannot be read allows nothing
-    const standing = standingOf(wf, readAllowances());
+    const allowances = readAllowances();
+    const standing = standingOf(wf, allowances);
     if (standing !== "allowed") return skip(wf, by, standing, due);
-    setRefused(wf.file, null);
+    const allowedProject = allowances[wf.file].project;
     const id = newId();
-    setLive(wf.file, { run: id, session: null, step: -1, steps: [...wf.steps] });
+    // the run holds its place before anything is awaited, so a second press or time meanwhile is "running", never a second run
+    setLive(wf.file, { run: id, session: null, step: -1, steps: [...wf.steps], starting: true });
+    // the project as the disk has it now: still a repository's own top folder, and the very folder allowed
+    const project = await checkProject(wf.project);
+    const block: BlockWhy | null = "why" in project ? project.why : project.real !== allowedProject ? "moved" : null;
+    const free = () => {
+      if (state.live[wf.file]?.run !== id) return;
+      const live = { ...state.live };
+      delete live[wf.file];
+      set({ live });
+    };
+    // Workflows turned off while the shell looked: nothing starts
+    if (!workflowSettings().on) {
+      free();
+      return "off";
+    }
+    if (block || !("real" in project) || state.live[wf.file]?.run !== id) {
+      free();
+      return skip(wf, by, block ?? "unchecked", due);
+    }
+    setRefused(wf.file, null);
     addRun({ id, file: wf.file, name: wf.name, by, at: now(), ...(due !== undefined ? { due } : {}), steps: wf.steps.length, reached: 0, state: "running" });
     const ss = deps.sessions();
     if (ss.getState().agents === null) await ss.loadAgents().catch(() => undefined);
@@ -211,14 +247,22 @@ export function createWorkflows(deps: WorkflowDeps) {
       setLive(wf.file, { ...l, session: sid, step: 0 });
       patchRun(id, { session: sid, reached: 1 });
     };
+    let refusal: RunRefusal | null = null;
     try {
-      const started = await ss.startWorkflowLane({ agent: wf.agent as AgentId, cwd: wf.project, workflow: wf.name, first: wf.steps[0], made });
-      if (!started) endRun(id, "failed", "start");
+      // in the folder the shell just checked, by its real path
+      const started = await ss.startWorkflowLane({ agent: wf.agent as AgentId, cwd: project.real, workflow: wf.name, first: wf.steps[0], made });
+      if (started === "no_lane") {
+        endRun(id, "skipped", "no_lane");
+        setRefused(wf.file, "no_lane");
+        refusal = "no_lane";
+      } else if (started !== "started") endRun(id, "failed", "start");
     } catch (e) {
       endRun(id, "failed", "start", errText(e));
     }
+    const l = state.live[wf.file];
+    if (l?.run === id && l.starting) setLive(wf.file, { ...l, starting: false });
     check();
-    return null;
+    return refusal;
   };
 
   /** A turn of a run's lane ended, or its agent did. */
@@ -255,7 +299,7 @@ export function createWorkflows(deps: WorkflowDeps) {
   const check = () => {
     const list = deps.sessions().getState().list;
     for (const l of Object.values(state.live)) {
-      if (!l.session) continue;
+      if (!l.session || l.starting) continue;
       const r = list.find((x) => x.id === l.session);
       if (!r) endRun(l.run, "stopped", "closed_lane");
       else if (r.status === "failed") endRun(l.run, "failed", "start", r.error);
@@ -323,7 +367,14 @@ export function createWorkflows(deps: WorkflowDeps) {
     async allow(file: string, digest: string): Promise<AllowRefusal | null> {
       const wf = workflowOf(file);
       if (!wf || wf.digest !== digest) return "changed";
-      saveAllowances({ ...readAllowances(), [file]: { digest, project: wf.project, at: now() } });
+      const project = await checkProject(wf.project);
+      // the folder may have been read again while the shell looked: still the text the page showed
+      if (workflowOf(file)?.digest !== digest) return "changed";
+      if ("why" in project) {
+        setRefused(file, project.why);
+        return project.why;
+      }
+      saveAllowances({ ...readAllowances(), [file]: { digest, project: project.real, at: now() } });
       // read back, so the page never shows an allowance the storage did not keep
       set({ allowed: readAllowances() });
       if (standingOf(wf, state.allowed) === "allowed") setRefused(file, null);

@@ -3603,4 +3603,13 @@ export const en = {
   "wf.disallow": "Stop allowing",
   "wf.why.not_allowed": "It was not allowed to run yet.",
   "wf.why.changed": "This workflow's file changed. Look at it again.",
+  "wf.why.missing": "Its project folder is not there, or is not a folder.",
+  "wf.why.link": "Its project's path goes through a link, or is not written as the folder's real path. Write the folder's real path.",
+  "wf.why.too_broad": "Its project is the home folder, the top of a disk, or a folder that holds the home folder or this app's folder. Name one repository's own folder.",
+  "wf.why.app_folder": "Its project is inside this app's own folder or a lane's folder. Name one of your repositories' own folders.",
+  "wf.why.not_repo": "Its project is not the top folder of a git repository.",
+  "wf.why.no_git": "git is not installed, so its lane cannot be made.",
+  "wf.why.unchecked": "Its project folder could not be checked.",
+  "wf.why.moved": "Its project folder is not the one you allowed. Look at it again.",
+  "wf.why.no_lane": "A lane of its own could not be made in its project, so nothing ran.",
 };

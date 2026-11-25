@@ -42,7 +42,13 @@ function memory() {
 /** A workflow file's text as `nightly` with `over` laid on it. */
 const text = (over: Record<string, unknown> = {}) => JSON.stringify({ ...nightly, ...over });
 
-async function setup(o: { files?: ShellFile[]; agents?: { id: string; path?: string; off?: boolean }[]; on?: boolean; now?: number; lanes?: boolean; allowed?: boolean } = {}) {
+/** What the stand-in shell says of each project folder (src-tauri/src/workflows.rs `project`): its real path, or why it is not a
+ *  project a run may start in. A folder it does not list is not a repository. */
+type Projects = Record<string, { real: string } | { why: string } | "throws">;
+
+async function setup(
+  o: { files?: ShellFile[]; agents?: { id: string; path?: string; off?: boolean }[]; on?: boolean; now?: number; lanes?: boolean | "throws"; allowed?: boolean; projects?: Projects } = {},
+) {
   const storage = memory();
   if (o.on !== false) storage.set("manut.workflows", JSON.stringify({ on: true, skippedKept: 50 }));
   const sinks = new Map<string, (e: ChatEvent) => void>();
@@ -70,15 +76,29 @@ async function setup(o: { files?: ShellFile[]; agents?: { id: string; path?: str
     ...(o.lanes === false
       ? {}
       : {
-          laneWorktree: async (_cwd: string, names: string[]) =>
-            ({ branch: names[0], base: "main", dir: LANE, worktree: LANE, left: 0, from: "", local: "", config: 0, stayed: 0 }) satisfies LaneMade,
+          laneWorktree: async (_cwd: string, names: string[]) => {
+            if (o.lanes === "throws") throw new Error("no_commit");
+            return { branch: names[0], base: "main", dir: LANE, worktree: LANE, left: 0, from: "", local: "", config: 0, stayed: 0 } satisfies LaneMade;
+          },
         }),
   } as unknown as SessionHost;
   const store = createStore(bridge);
   const ss = createSessions(host, () => store);
   let clock = o.now ?? DUE - 60_000;
   const files = o.files ?? [{ name: "nightly.json", text: JSON.stringify(nightly) }];
-  const folder: WorkflowsHost = { kind: "mock", read: async () => ({ path: "/w/.manut/workflows", state: "ok", files, more: 0 }), folder: async () => "/w/.manut/workflows" };
+  const projects: Projects = o.projects ?? { [DEV]: { real: DEV } };
+  const checked: string[] = [];
+  const folder: WorkflowsHost = {
+    kind: "mock",
+    read: async () => ({ path: "/w/.manut/workflows", state: "ok", files, more: 0 }),
+    folder: async () => "/w/.manut/workflows",
+    project: async (p: string) => {
+      checked.push(p);
+      const a = projects[p] ?? { why: "not_repo" };
+      if (a === "throws") throw new Error("an older shell");
+      return a as never;
+    },
+  };
   const wf = createWorkflows({ sessions: () => ss, store: () => store, host: folder, now: () => clock });
   wf.start();
   const settle = async () => {
@@ -103,7 +123,7 @@ async function setup(o: { files?: ShellFile[]; agents?: { id: string; path?: str
     await emit(sid, { event: "turn.start" });
     await emit(sid, { event: "turn.end", outcome, ...(error ? { error } : {}) });
   };
-  return { ss, store, wf, sent, inputs, started, live, runs, emit, turn, settle, storage, files, allow, at: (t: number) => (clock = t) };
+  return { ss, store, wf, sent, inputs, started, live, runs, emit, turn, settle, storage, files, allow, projects, checked, at: (t: number) => (clock = t) };
 }
 
 beforeEach(() => {
@@ -248,14 +268,15 @@ describe("a run", () => {
   });
 });
 
+/** Nothing ran: no lane, no agent, no message. */
+const nothingRan = (t: Awaited<ReturnType<typeof setup>>) => {
+  expect(t.started).toEqual([]);
+  expect(t.sent).toEqual([]);
+  expect(t.ss.getState().list).toEqual([]);
+  expect(t.wf.getState().live).toEqual({});
+};
+
 describe("a run starts only from what the person allowed (item 91)", () => {
-  /** Nothing ran: no lane, no agent, no message. */
-  const nothingRan = (t: Awaited<ReturnType<typeof setup>>) => {
-    expect(t.started).toEqual([]);
-    expect(t.sent).toEqual([]);
-    expect(t.ss.getState().list).toEqual([]);
-    expect(t.wf.getState().live).toEqual({});
-  };
 
   it("a workflow never allowed starts nothing, by Run now or by the clock, and each skipped run says why", async () => {
     const t = await setup({ allowed: false });
@@ -385,6 +406,82 @@ describe("a run starts only from what the person allowed (item 91)", () => {
   });
 });
 
+describe("a run starts only in a repository's own lane, never in a folder too broad (item 91)", () => {
+  // Each row is a workflow whose `project` the shell refuses, with the shell's reason (src-tauri/src/workflows.rs holds the
+  // rule and its own table). The page asks at Allow and again before every run; an answer it does not know, or no answer,
+  // allows nothing.
+  const refused: [string, string, Projects[string], string][] = [
+    ["the home folder", "/w", { why: "too_broad" }, "too_broad"],
+    ["an ancestor of the home folder", "/Users", { why: "too_broad" }, "too_broad"],
+    ["the disk's top or another disk's", "/Volumes/Data", { why: "too_broad" }, "too_broad"],
+    ["a folder inside the app's own folder", "/w/.manut/lanes/shop-site/nightly-tests", { why: "app_folder" }, "app_folder"],
+    ["a folder with no repository", "/w/notes", { why: "not_repo" }, "not_repo"],
+    ["a folder inside a repository, not its top", "/w/shop-site/src", { why: "not_repo" }, "not_repo"],
+    ["a link to a repository", "/w/shop-link", { why: "link" }, "link"],
+    ["a folder that is not there", "/w/gone", { why: "missing" }, "missing"],
+    ["a computer with no git", "/w/shop-site-2", { why: "no_git" }, "no_git"],
+    ["an answer the page does not know", "/w/odd", { why: "something_new" }, "unchecked"],
+    ["a shell that cannot say", "/w/older", "throws", "unchecked"],
+  ];
+  it.each(refused)("%s: Allow records nothing and says why", async (_, project, answer, why) => {
+    const t = await setup({ allowed: false, files: [{ name: "nightly.json", text: text({ project }) }], projects: { [project]: answer } });
+    expect(await t.allow()).toBe(why);
+    expect(t.checked).toEqual([project]);
+    expect(t.storage.get("manut.workflows.allowed") ?? "{}").toBe("{}");
+    expect(t.wf.getState().refused["nightly.json"]).toBe(why);
+    expect(await t.wf.runNow("nightly.json")).toBe("not_allowed");
+    nothingRan(t);
+  });
+
+  it.each(refused)("%s at run time (the folder changed after Allow): starts nothing, by Run now or by the clock, and says why", async (_, project, answer, why) => {
+    const t = await setup({ files: [{ name: "nightly.json", text: text({ project }) }], projects: { [project]: { real: project } } });
+    expect(t.wf.getState().allowed["nightly.json"]).toBeDefined();
+    t.projects[project] = answer;
+    expect(await t.wf.runNow("nightly.json")).toBe(why);
+    t.at(DUE + 10_000);
+    await t.wf.tick();
+    nothingRan(t);
+    expect(t.runs().map((r) => [r.by, r.state, r.why, r.reached])).toEqual([
+      ["schedule", "skipped", why, 0],
+      ["person", "skipped", why, 0],
+    ]);
+  });
+
+  it("a project whose real path is not the one allowed starts nothing", async () => {
+    const t = await setup();
+    t.projects[DEV] = { real: "/w/elsewhere" };
+    expect(await t.wf.runNow("nightly.json")).toBe("moved");
+    nothingRan(t);
+    expect(t.runs()[0]).toMatchObject({ state: "skipped", why: "moved" });
+  });
+
+  it("records the project's real path, and starts the lane there", async () => {
+    const t = await setup();
+    expect(t.wf.getState().allowed["nightly.json"].project).toBe(DEV);
+    await t.wf.runNow("nightly.json");
+    await t.settle();
+    expect(t.checked).toEqual([DEV, DEV]);
+    expect(t.ss.getState().list[0]).toMatchObject({ cwd: DEV });
+  });
+
+  for (const lanes of [false, "throws"] as const) {
+    it(`a run that would have no lane of its own starts nothing (${lanes === false ? "a shell that makes none" : "git refused"}), and says why`, async () => {
+      const t = await setup({ lanes });
+      expect(await t.wf.runNow("nightly.json")).toBe("no_lane");
+      await t.settle();
+      nothingRan(t);
+      expect(t.runs()[0]).toMatchObject({ by: "person", state: "skipped", why: "no_lane", reached: 0 });
+      expect(t.wf.getState().refused["nightly.json"]).toBe("no_lane");
+      // by the clock too
+      t.at(DUE + 10_000);
+      await t.wf.tick();
+      await t.settle();
+      nothingRan(t);
+      expect(t.runs()[0]).toMatchObject({ by: "schedule", state: "skipped", why: "no_lane" });
+    });
+  }
+});
+
 describe("the switch", () => {
   it("is off at first: nothing runs and nothing is scheduled", async () => {
     const t = await setup({ on: false });
@@ -454,7 +551,7 @@ describe("the clock", () => {
     m.set("manut.workflows.runs", JSON.stringify([{ id: "w1", file: "nightly.json", name: "Nightly tests", by: "schedule", at: DUE, steps: 3, reached: 2, state: "running" }]));
     const store = createStore(bridge);
     const ss = createSessions({ kind: "mock", reset: async () => {}, agents: async () => [], home: async () => "/w" } as unknown as SessionHost, () => store);
-    const wf = createWorkflows({ sessions: () => ss, store: () => store, host: { kind: "mock", read: async () => ({ path: "", state: "missing", files: [], more: 0 }), folder: async () => "" }, now: () => DUE + 1000 });
+    const wf = createWorkflows({ sessions: () => ss, store: () => store, host: { kind: "mock", read: async () => ({ path: "", state: "missing", files: [], more: 0 }), folder: async () => "", project: async () => ({ why: "not_repo" }) }, now: () => DUE + 1000 });
     expect(wf.getState().runs[0]).toMatchObject({ state: "stopped", why: "app_closed", reached: 2 });
   });
 });
@@ -462,11 +559,12 @@ describe("the clock", () => {
 describe("Kit's dial in a workflow's lane", () => {
   it("asks before a change whatever the project's dial and kept rules say, while a person's own lane goes alone", async () => {
     updateKitProjects((p) => addRule(setLevel(p, DEV, "everything_in_project"), DEV, { words: ["pnpm", "add"] }));
-    const t = await setup({ lanes: false });
+    // each lane works in a folder of its own (a workflow's always does), where its asks come from
+    const t = await setup();
     await t.wf.runNow("nightly.json");
     await t.settle();
     const sid = t.live()!.session!;
-    const ask = (request_id: string, command: string) => ({ event: "approval.request", request_id, title: "Run this command?", command, cwd: DEV, choices: ["deny", "once", "session"] });
+    const ask = (request_id: string, command: string) => ({ event: "approval.request", request_id, title: "Run this command?", command, cwd: LANE, choices: ["deny", "once", "session"] });
     await t.emit(sid, { event: "turn.start" });
     await t.emit(sid, ask("w1", "pnpm add qrcode"));
     // reading and the tests still go alone

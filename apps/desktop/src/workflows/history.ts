@@ -3,6 +3,7 @@
 // RUNS_KEPT runs that did something, and its newest skipped runs up to Settings › Workflows' "Skipped runs kept" (T3 Code's
 // Labs setting of the same name). A run still going is never dropped. A record that cannot be read is left out, never an error.
 import { maskSecrets } from "../lib/secrets";
+import type { ProjectWhy } from "./host";
 import type { SkipWhy } from "./schedule";
 
 /** How many runs that did something each workflow keeps. */
@@ -38,7 +39,13 @@ export type BlockWhy =
   /** the person never allowed this file: a new file, a renamed one, or one that took over another workflow's name */
   | "not_allowed"
   /** the file is not the text the person allowed */
-  | "changed";
+  | "changed"
+  /** the project is not a folder a run may start in now (host.ts, src-tauri/src/workflows.rs `project`) */
+  | ProjectWhy
+  /** the project's real path is not the one allowed */
+  | "moved"
+  /** no lane of its own could be made in the project (no branch and folder), so the agent was never started */
+  | "no_lane";
 
 export type RunState = "running" | "done" | "failed" | "stopped" | "skipped";
 
@@ -67,7 +74,7 @@ export interface RunRec {
 }
 
 const STATES: readonly RunState[] = ["running", "done", "failed", "stopped", "skipped"];
-const WHYS: readonly string[] = ["agent", "start", "send", "turn", "ended", "interrupted", "person", "off", "closed_lane", "app_closed", "closed", "asleep", "busy", "not_allowed", "changed"];
+const WHYS: readonly string[] = ["agent", "start", "send", "turn", "ended", "interrupted", "person", "off", "closed_lane", "app_closed", "closed", "asleep", "busy", "not_allowed", "changed", "missing", "link", "too_broad", "app_folder", "not_repo", "no_git", "unchecked", "moved", "no_lane"];
 const num = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
 const short = (v: unknown, max: number): string | undefined => (typeof v === "string" && v && v.length <= max ? v : undefined);
 
