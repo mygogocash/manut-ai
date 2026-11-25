@@ -117,9 +117,16 @@
   --src-telegram: #2aabee;
   --src-cron: var(--quiet);
 
-  /* text size (Settings > Appearance): messages and the composer only */
-  --fs-msg: 13px;
-  --lh-msg: 1.55;
+  /* text size (Settings > Appearance), the Chat and Type boards' sizes as the default ("medium"). The person's own
+     message and the box: the board's "Ask and message" (15px / 1.5). An answer: its "Reading" (the serif, 17px /
+     1.65), with its headings one step up the scale (20px) and its inline code a step under it (14px). The other two
+     sizes move every one of them one step down or up the scale (small, large below). */
+  --fs-msg: 15px;
+  --lh-msg: 1.5;
+  --fs-read: 17px;
+  --lh-read: 1.65;
+  --fs-read-h: 20px;
+  --fs-read-code: 14px;
 
   /* shape + type */
   --r: var(--rad);
@@ -129,7 +136,9 @@
   --side-x: 8px;
   --side-w: 248px;
   --panel-w: 300px;
-  --thread-w: 920px;
+  /* the conversation's column and its box: the Chat board's (`.col` less its padding, and `.ask`), so no line of an
+     answer is ever wider than 696px */
+  --thread-w: 696px;
   /* The interface stack of the tokens, with the CJK families the Korean, Japanese and Chinese translations need put
      before the last generic name: Simplified Chinese (PingFang SC on macOS, Microsoft YaHei on Windows, Noto on
      Linux), Japanese and Korean. `<html lang>` (zh-CN / ja / ko) picks the right glyphs for the shared Han
@@ -257,10 +266,17 @@
   --bub-me: #f8dce6;
 }
 
-[data-text="medium"] {
+/* each a step of the Type board's scale (12, 12.5, 13, 14, 15, 17, 20); "medium" is the default above. Large keeps its
+   headings at 20px and lets weight carry them, as the next step (28px) is a figure's size, not a heading's. */
+[data-text="small"] {
   --fs-msg: 14px;
+  --fs-read: 15px;
+  --fs-read-h: 17px;
+  --fs-read-code: 13px;
 }
 [data-text="large"] {
-  --fs-msg: 15px;
-  --lh-msg: 1.6;
+  --fs-msg: 17px;
+  --fs-read: 20px;
+  --fs-read-h: 20px;
+  --fs-read-code: 15px;
 }

@@ -8,10 +8,12 @@ import { t } from "../i18n";
 import { can } from "../runtime";
 import { ThreadChat } from "../threads/ThreadChat";
 import { AgentBoxTools, pickFolder, teammates, useAgentBox } from "./box/AgentBox";
+import { slots } from "../features";
 
 /** The selected bot's one main chat: header, timeline, composer. A chat that answers through the person's own coding
  *  agent (Buddy in Practice) has the chat box's own choices (item 80): the model and its effort and the approval level
- *  in the box, so the header has no model of its own, and Add context names a folder, a teammate or an action too. */
+ *  in the box, and Add context names a folder, a teammate or an action too. Any other member's model and reasoning are
+ *  in the box as well (item 85f): the header names no model, as the Chat board's does not. */
 export function Chat() {
   const s = useStore();
   const bot = s.bots.find((b) => b.name === s.selectedBot) ?? null;
@@ -37,9 +39,10 @@ export function Chat() {
   const asking = selectAsks(s).some((a) => a.bot === bot.name);
   // the runtime is away (its adapter reconnects by itself): the composer says so and waits, like a bot that is offline
   const away = s.conn !== "open";
+  const Picker = slots.modelPicker;
   return (
     <>
-      <Header bot={bot} chat={chat} noModel={!!box} />
+      <Header bot={bot} />
       <div className="pane" data-pane={bot.name}>
         <Timeline bot={bot} />
         <Composer
@@ -59,7 +62,7 @@ export function Chat() {
           reply={s.replyTo[bot.name] ?? null}
           onClearReply={() => s.setReplyTo(null, bot.name)}
           onNewThread={bot.host || bot.status === "offline" ? undefined : (first) => void s.newThreadWith(bot.name, first)}
-          tools={box ? <AgentBoxTools bot={bot.name} box={box} /> : undefined}
+          tools={box ? <AgentBoxTools bot={bot.name} box={box} /> : Picker ? <Picker bot={bot} chat={chat} inBox /> : undefined}
           onFolder={box ? pickFolder : undefined}
           mentions={box ? teammates(s.bots, bot.name) : undefined}
           actions={!!box}

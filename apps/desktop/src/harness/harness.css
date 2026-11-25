@@ -97,6 +97,16 @@ button.ac-crumb:hover {
   gap: 8px;
   min-width: 0;
 }
+/* a helper's words in the side panel are its steps, read under the hood: the interface face at the panel's size, not
+   the chat's serif (item 85f). The answer's own rules (chat.css) read these. */
+.ac-tl {
+  --font-read: var(--font);
+  --fs-read: 12.5px;
+  --fs-read-h: 13px;
+  --fs-read-code: 12px;
+  --lh-read: 1.55;
+  --read-gap: 8px;
+}
 .ac-tl .msg .b {
   font-size: 12.5px;
 }
