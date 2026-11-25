@@ -1918,7 +1918,9 @@ body.split-dragging .xterm {
 .ss-idle > .tshare-cards .tshare-card {
   max-width: none;
   box-shadow: 0 6px 22px rgba(0, 0, 0, 0.28);
-  /* an ask: it appears and stays still (the board: approvals do not bounce) */
+  /* an ask: it fades in where it is and stays still (the board: approvals do not bounce) */
+  --rise-by: 0px;
+  animation: var(--anim-arrive);
 }
 [data-theme="light"] .term-wrap .tshare-card,
 [data-theme="light"] .ss-idle > .tshare-cards .tshare-card {

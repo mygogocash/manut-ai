@@ -552,7 +552,7 @@ button.upd:hover {
   display: grid;
   place-items: center;
   background: rgba(4, 3, 6, 0.7);
-  /* the veil fades in (an overlay's Rise without the distance) and the card rises a little over it */
+  /* the veil and its card fade in (an overlay's Rise without the distance): the card is an ask, so it never moves */
   --rise-by: 0px;
   animation: var(--anim-arrive);
 }
@@ -569,7 +569,6 @@ button.upd:hover {
   color: var(--body);
   font-size: 12.5px;
   line-height: 1.5;
-  --rise-by: var(--arrive-by);
   animation: var(--anim-arrive);
 }
 .upd-dlg-t {
