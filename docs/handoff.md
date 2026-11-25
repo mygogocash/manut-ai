@@ -190,8 +190,6 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    commits that were never pushed before starting anything again.
    They run, each on its own branch from `pilot/week-1`; review each, merge it after
    the full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
-   - item 63, the desktop's release builds in CI and the updater turned on (`feat/release-builds`, Sonnet, worktree
-     `cc-item63-release`), started 25 Nov at 16:13.
    - item 66, Kit as a chat from the + menu, beside the terminal (`feat/kit-chat-lane`, Opus, worktree
      `cc-item66-kit-chat`), started 25 Nov at 16:13.
    A helper's run can also fail when the API sends nothing for 10 minutes; that is not a usage limit and nothing sends
@@ -207,7 +205,13 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    The security review of 24 Nov (findings only) found no critical issue, two high and three medium ones that need
    `EMAIL_SIGN_IN` or `SELF_SERVE_SHOPS` on, and three low ones; its proofs are in the review thread's report, and
    `docs/turning-on.md` says to keep both switches off until items 41 and 42 merge.
-   Merged: 61 with 61b (a shop's live feed, switched off: a hibernating WebSocket per shop session that says only
+   Merged: 63 (the desktop's release builds and the updater: `.github/workflows/release-desktop.yml` runs only by hand
+   or on a `desktop-vX.Y.Z` tag, builds the Mac app for both chips one after the other into a draft release only the
+   owner publishes, signed and notarized once the five Apple secrets are added and unsigned with a plain warning
+   until then, keeps the Windows installer as a workflow artifact, and the app's updater is on with Manut AI's own key
+   pinned and asks GitHub's latest release, which skips drafts; `docs/releasing.md`. The workflow has never run: it
+   cannot be started by hand until its file is on `main`, and a `desktop-v` tag would make a public tag, so its first
+   run is the owner's to start), 61 with 61b (a shop's live feed, switched off: a hibernating WebSocket per shop session that says only
    that something changed, opened with a one-use ticket of 30 seconds that the session mints in `Authorization`,
    so no session reaches a header Cloudflare's logs keep; the helper's last uncommitted edit was a probe that took
    out the mint's refusal of a body with fields, a test fails with it out, and the lead put the line back), 62
@@ -337,9 +341,8 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    at once swapped hard and reached the usage limit on 24 and 25 Nov):
    - running, for the desktop's first release, which is Practice mode and the code editor on the Mac (the owner, 25 Nov;
      the owner's Apple Developer account is the business's, an organization; sign-in and a model key are not needed for
-     now): item 63 (release builds in CI, signed and notarized once the owner adds the secrets, Mac only in the draft
-     release, and the updater on with the key made on 25 Nov, whose owner's copy is in `~/manut-ai-updater-key`), item
-     66 (Kit as a chat from the + menu, beside the terminal, the owner's choice). Item 65 (a Thai dictionary for the
+     now): item 66 (Kit as a chat from the + menu, beside the terminal, the owner's choice). Item 63 (the release
+     builds and the updater, whose key's owner's copy is in `~/manut-ai-updater-key`) merged on 25 Nov. Item 65 (a Thai dictionary for the
      desktop) is parked: on 25 Nov the owner said Thai is not needed yet. Item 64 (Apple sessions refused on the lifted routes, which turning
      Sign in with Apple on needs first) is parked until sign-in is wanted;
    - candidates that need no owner:
@@ -372,8 +375,15 @@ Every switch that turns a built part on, and what each needs from the owner, is 
 - **Confirm the console behind Access:** open https://dev.manut.xyz/ops, log in with the emailed code, and
   paste the operator key (`security find-generic-password -s manut-dev-operator-key -w | pbcopy`). The shop
   list should load. That proves the admin gate gets `ctx.access` on the deployed front door.
-- **Merge pull request #1 into `main`** when happy. That also switches on Dependabot, the weekly CodeQL scan and
-  the Deploy dev button, because GitHub reads those from the default branch.
+- **Merge pull request #1 into `main`** when happy. That also switches on Dependabot, the weekly CodeQL scan, the
+  Deploy dev button and the Release desktop button, because GitHub reads those from the default branch.
+- **The Mac release (item 63, `docs/releasing.md`):** add five GitHub Actions secrets from the business's Apple
+  Developer account (`APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID`;
+  the doc says where each comes from), then start Release desktop once and read its summary. Without them the run
+  still builds, unsigned, into a draft titled UNSIGNED that must not be published. The workflow has never run, so its
+  first run is also its test: the draft should hold a `.dmg` for each chip and a `latest.json` naming both. Publishing
+  the draft is what sends an update to installed apps. Any other release made in this repository must be marked a
+  prerelease, or the updater finds no `latest.json`.
 - **A test LINE Official Account** for the dry run (later, by the owner's choice).
 - **Staging and production in a separate Cloudflare account** before they exist. A Cloudflare token cannot be
   limited to one Worker.
