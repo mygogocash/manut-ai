@@ -162,6 +162,12 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
   custom domain hands it the pages.
 - Dev's pages were redeployed on 25 Nov at 13:05 from `8f77e43`, with item 59's Make a routine form (pages `e64ce7e6`;
   the API is unchanged since 09:59).
+- Dev's API was redeployed on 25 Nov at 16:20 from `6325080`, with items 61 and 61b's live feed, switched off (API
+  `19001525`, deployed whole; the pages are unchanged since `e64ce7e6`). Smoke-tested: `/v1/health` 200,
+  `POST /v1/feed/ticket` 401 without a session and 415 for `text/plain`, `GET /v1/feed` 401 with no ticket and with
+  one that names no shop, the approvals list 401 without a session, the pages 200 and `/ops` 302 to Access. The
+  Deploy dev workflow cannot be started from `pilot/week-1` (GitHub starts a workflow by hand only when its file is
+  on the default branch, and `main` does not have it yet), so dev is deployed from this Mac until the owner merges.
 - The night build's queue gained shop-memory, books and routine-rules; one run was started by hand for
   slip-rules.
 
@@ -480,7 +486,8 @@ Every switch that turns a built part on, and what each needs from the owner, is 
 - `pnpm --filter @manut/api dev` runs both Workers on one origin at localhost:8787.
 - Deploy dev from `apps/api`: `wrangler deploy -c wrangler.web.jsonc --env dev`, then `wrangler deploy --env dev`.
   Wrangler on this Mac is signed in with the owner's Cloudflare login, which sees more than one account, so set
-  `CLOUDFLARE_ACCOUNT_ID` for the command (the value is in the GitHub `dev` environment's secrets). Run
+  `CLOUDFLARE_ACCOUNT_ID` for the command (the value is in the GitHub `dev` environment's secrets, and
+  `wrangler whoami` lists the accounts by name: the dev Workers are in the one named GoGoCash). Run
   `node ../../.github/scripts/check-dev-deploys.mjs wrangler.web.jsonc wrangler.jsonc` first: it refuses any
   Worker whose name does not end in `-dev`.
 - GitHub: `git push` works as it is. For `gh`, prefix commands with
