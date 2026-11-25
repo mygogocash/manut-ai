@@ -50,6 +50,7 @@ import { settleApproval } from "../chat/cards/respond";
 import { kitAnswer, noteChange } from "../code/kitAsks";
 import { planLaneBranch, workDir, type LaneBranch } from "../code/laneBranch";
 import { forgetLane, keptLanesChanged, noteLaneEvent } from "../code/laneStore";
+import { forgetPreview } from "../code/previewStore";
 import { continuesItself, type SavedSession } from "../app/resume";
 import { accountGroups } from "../settings/accounts/useAccounts";
 import { modesOf, steersOf } from "./controls";
@@ -2445,6 +2446,8 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
       setChatRoute(key, null);
       store().dispatch({ type: "chat.forget", bot: key }); // its asks leave the Needs-you strip with it
       forgetLane(key);
+      // the lane's preview stops with its session, so no dev server of a closed lane runs on unseen
+      forgetPreview(key);
     }
     keys.delete(id);
     const was = state.list;

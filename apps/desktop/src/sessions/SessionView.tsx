@@ -213,8 +213,9 @@ function LaneSplit({ rec, chatKey, chat }: { rec: SessionRec; chatKey: string; c
     <div className="ss-lane" data-testid="session-lane">
       <div className="ss-lane-body">
         <ChatPane rec={rec} chatKey={chatKey} />
-        {/* a new key for each lane, so each opens on Diff and keeps its own question about a secret */}
-        <LanePane key={chatKey} chatKey={chatKey} chat={chat} />
+        {/* a new key for each lane, so each opens on Diff and keeps its own question about a secret; a preview runs only in the
+            lane's own folder */}
+        <LanePane key={chatKey} chatKey={chatKey} chat={chat} laneDir={rec.lane?.dir || null} />
       </div>
     </div>
   );

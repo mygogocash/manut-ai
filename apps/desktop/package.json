@@ -14,9 +14,12 @@
   },
   "dependencies": {
     "@manut/approval-core": "workspace:*",
+    "@manut/dev-url": "workspace:*",
+    "@manut/env-example": "workspace:*",
     "@manut/member-grants": "workspace:*",
     "@manut/notify-rules": "workspace:*",
     "@manut/people-rules": "workspace:*",
+    "@manut/preview-command": "workspace:*",
     "@manut/routine-rules": "workspace:*",
     "@manut/shop-memory": "workspace:*",
     "@tauri-apps/api": "^2",

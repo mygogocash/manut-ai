@@ -226,6 +226,12 @@ importers:
       '@manut/approval-core':
         specifier: workspace:*
         version: link:../../packages/approval-core
+      '@manut/dev-url':
+        specifier: workspace:*
+        version: link:../../packages/dev-url
+      '@manut/env-example':
+        specifier: workspace:*
+        version: link:../../packages/env-example
       '@manut/member-grants':
         specifier: workspace:*
         version: link:../../packages/member-grants
@@ -235,6 +241,9 @@ importers:
       '@manut/people-rules':
         specifier: workspace:*
         version: link:../../packages/people-rules
+      '@manut/preview-command':
+        specifier: workspace:*
+        version: link:../../packages/preview-command
       '@manut/routine-rules':
         specifier: workspace:*
         version: link:../../packages/routine-rules

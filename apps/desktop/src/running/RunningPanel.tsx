@@ -10,6 +10,7 @@ import { t } from "../i18n";
 import { folderName, termFallbackName, type SessionRec } from "../sessions/agents";
 import { pathKey } from "../sessions/folders";
 import { getSessions, useSessions, type SessionsState } from "../sessions/sessions";
+import { chatOfPreview, usePreviewsVersion } from "../code/previewStore";
 import { pickTitle } from "../sessions/titles";
 import { getStore } from "../state/store";
 import { POLL_MS, getRunningFeed, type RunningFeed, type RunningState } from "./feed";
@@ -28,6 +29,8 @@ export interface RunningItem {
   /** The terminal it runs in, when the page has a row for it, and what opens that row. */
   lane: string | null;
   open: (() => void) | null;
+  /** A lane's preview (its tag says Preview), not a command a session ran. */
+  preview: boolean;
   /** The folder's name, when the list reaches more than one project: the rows then say whose they are. */
   project: string | null;
   /** Stop was pressed and the command is still there. */
@@ -64,6 +67,7 @@ export function runningItems(s: Pick<RunningState, "rows" | "seen" | "stopping" 
       ports: portsText(row.ports),
       lane: lane?.name ?? null,
       open: lane?.open ?? null,
+      preview: row.kind === "preview",
       project: several ? folderName(projectOf(row)) : null,
       stopping: s.stopping[key] !== undefined,
       failed: s.failed[key] === true,
@@ -96,7 +100,9 @@ export function RunningPanelView({ items, onStop, others = 0 }: { items: Running
             const meta = [it.ran, it.ports].filter(Boolean).join(" · ");
             return (
               <li key={it.key} className="rowl" data-testid="running-row">
-                <span className="tag run">{t("run.tag")}</span>
+                <span className="tag run" data-testid="running-tag">
+                  {it.preview ? t("run.tag.preview") : t("run.tag")}
+                </span>
                 <span className="grow">
                   <span className="l1 mono" title={label} data-testid="running-command">
                     {label}
@@ -152,14 +158,19 @@ function useFeed(feed: RunningFeed): RunningState {
   return useSyncExternalStore(feed.subscribe, feed.getState, feed.getState);
 }
 
-/** The session the shell's id names (a terminal's pty, or a chat's), when the page has one (none: a shell of the bottom panel). */
+/** The session the shell's id names (a terminal's pty, or a chat's), when the page has one (none: a shell of the bottom panel). A
+ *  preview's is the lane whose preview it is (previewStore.ts). */
 function sessionOf(ss: SessionsState, r: RunningRow): SessionRec | undefined {
   const sessions = getSessions();
+  if (r.kind === "preview") {
+    const key = chatOfPreview(r.session);
+    return key ? (sessions.byKey(key) ?? undefined) : undefined;
+  }
   return ss.list.find((x) => (r.kind === "pty" ? sessions.ptyOf(x.id) : sessions.chatIdOf(x.id)) === r.session);
 }
 
-/** The session the shell's id names, as the page names it, with what opens it: a terminal as its row is named, a chat, which is
- *  a lane, as its lane is. None when the page has no session for it (a shell of the bottom panel). */
+/** The session the shell's id names, as the page names it, with what opens it: a terminal as its row is named, a chat or a
+ *  preview, which are a lane's, as its lane is. None when the page has no session for it (a shell of the bottom panel). */
 function laneOf(ss: SessionsState, r: RunningRow): { name: string; open: () => void } | null {
   const rec = sessionOf(ss, r);
   if (!rec) return null;
@@ -174,6 +185,8 @@ export function RunningPanel({ project }: { project?: string }) {
   const feed = getRunningFeed();
   const s = useFeed(feed);
   const ss = useSessions();
+  // a preview's row names its lane once the lane's run knows the shell's id for it
+  usePreviewsVersion();
   // the ages move between looks
   const now = useNow(true, POLL_MS);
   if (!s.supported || !s.loaded) return null;

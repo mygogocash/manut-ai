@@ -22,6 +22,14 @@ const ESCAPES = new RegExp(
   "g",
 );
 
+/**
+ * `text` without the colours, cursor moves and window titles a server prints around its words, as a person reads it. The
+ * desktop's preview shows a server's last lines this way.
+ */
+export function withoutEscapes(text: string): string {
+  return text.replace(ESCAPES, "");
+}
+
 // The part of a word that follows the scheme, up to where an address ends in prose or in a URL.
 const ADDRESS = /\bhttps?:\/\/[^\s/?#)"'<>]+/gi;
 
@@ -78,7 +86,7 @@ function readAddress(word: string): { url: string; port: number } | null {
  */
 export function findDevUrl(lines: readonly string[]): DevUrl | null {
   for (let i = 0; i < lines.length; i += 1) {
-    const text = (lines[i] ?? "").replace(ESCAPES, "");
+    const text = withoutEscapes(lines[i] ?? "");
     for (const match of text.matchAll(ADDRESS)) {
       const found = readAddress(match[0]);
       if (found) return { url: found.url, port: found.port, line: i + 1 };

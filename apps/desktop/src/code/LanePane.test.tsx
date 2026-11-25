@@ -9,7 +9,10 @@ import { setLang } from "../i18n";
 import type { DiffFile } from "../lib/protocol";
 import { emptyLane, laneTests, noteLane, type LaneRecord } from "./lane";
 import { isLaneChat } from "./laneStore";
+import type { LanePreviewProps } from "./LanePreview";
 import type { Need } from "./preview";
+import { NOT_STARTED, SHOWN, type PreviewRun } from "./previewRun";
+import type { PreviewRecord } from "./previewStore";
 
 // A diff scrolls itself into view when it opens, by an effect that no server render runs: the two hooks it uses are stood in for, a ref
 // whose element records the scroll and a layout effect that runs at once, so the pane can be seen not to scroll (it is not opened by a click).
@@ -45,6 +48,23 @@ const ran = (command: string, ok: boolean, output?: string): Ev[] => [
 const PASS14 = " Test Files  2 passed (2)\n      Tests  14 passed (14)\n";
 const FAIL1 = " FAIL  tests/promptpay.test.ts > locks the amount into the QR\n      Tests  1 failed | 13 passed (14)\n";
 
+/** The lane's own folder, and the canvas's project in it: a Vite app whose `dev` script pnpm runs. */
+const DIR = "/home/you/.manut/lanes/baanmali-preorder/promptpay-qr";
+const PACKAGE = JSON.stringify({ scripts: { dev: "vite" } });
+const record = (over: Partial<PreviewRecord> = {}): PreviewRecord => ({
+  dir: DIR,
+  reading: false,
+  project: { packageJson: PACKAGE, files: ["package.json", "pnpm-lock.yaml"], envExample: null },
+  plan: { argv: ["pnpm", "run", "dev"], label: "pnpm run dev" },
+  readWhy: null,
+  run: NOT_STARTED,
+  openFailed: false,
+  token: 0,
+  ...over,
+});
+const run = (over: Partial<PreviewRun>): PreviewRun => ({ ...NOT_STARTED, label: "pnpm run dev", since: 1, ...over });
+const previewOf = (over: Partial<LanePreviewProps> = {}): LanePreviewProps => ({ dir: DIR, record: record(), samples: [], onStart: vi.fn(), onStop: vi.fn(), onOpen: vi.fn(), ...over });
+
 const props = (over: Partial<LanePaneProps> = {}): LanePaneProps => ({
   view: "diff",
   onView: vi.fn(),
@@ -52,6 +72,7 @@ const props = (over: Partial<LanePaneProps> = {}): LanePaneProps => ({
   needs: [],
   asked: null,
   onAdd: vi.fn(),
+  preview: previewOf(),
   tests: laneTests(emptyLane()),
   time: (ms) => `${new Date(ms).getHours()}:${String(new Date(ms).getMinutes()).padStart(2, "0")}`,
   ...over,
@@ -113,7 +134,7 @@ describe("the pane's three chips", () => {
 
   it("show one view at a time, and say which in the pane's own mark", () => {
     // what each view says when it has nothing to show: said by that view alone
-    const says = { diff: "lane-diff-none", preview: "lane-preview-note", tests: "lane-tests-none" } as const;
+    const says = { diff: "lane-diff-none", preview: "lane-preview", tests: "lane-tests-none" } as const;
     for (const view of ["diff", "preview", "tests"] as const) {
       const out = html(props({ view }));
       expect(out).toContain(`data-view="${view}"`);
@@ -181,11 +202,144 @@ describe("Diff", () => {
 
 describe("Preview", () => {
   const preview = (over: Partial<LanePaneProps> = {}) => props({ view: "preview", ...over });
+  const withRun = (r: Partial<PreviewRun>, over: Partial<PreviewRecord> = {}) => preview({ preview: previewOf({ record: record({ run: run(r), ...over }) }) });
+  const press = (p: LanePaneProps, id: string) => (byId(p, id)[0].props.onClick as () => void)();
+  const ids = (p: LanePaneProps) => drawn(LanePaneView(p)).map((e) => e.props["data-testid"]).filter(Boolean);
 
-  it("says the preview does not run in the app yet, with or without a secret to show", () => {
-    expect(words(preview())).toContain("The preview does not run in the app yet.");
-    expect(words(preview({ needs: [SHOP] }))).toContain("The preview does not run in the app yet.");
-    expect(byId(preview(), "lane-preview-note")).toHaveLength(1);
+  it("names the exact command before anything runs, with Start, which is what starts it", () => {
+    const p = preview();
+    const out = words(p);
+    expect(out).toContain("Start runs this in the lane's own folder, with a sample for each secret:");
+    expect(byId(p, "lane-preview-command")[0].props.children).toEqual(["$ ", "pnpm run dev"]);
+    expect(byId(p, "lane-preview-start")).toHaveLength(1);
+    expect(words(p)).toContain(" Start ");
+    press(p, "lane-preview-start");
+    expect(p.preview.onStart).toHaveBeenCalledTimes(1);
+    expect(byId(p, "lane-preview")[0].props["data-phase"]).toBe("idle");
+  });
+
+  it("offers no Start in the developer's own folder, and says the preview runs only in a lane's own folder", () => {
+    const p = preview({ preview: previewOf({ dir: null }) });
+    expect(words(p)).toContain("The preview runs only in a lane's own folder. This session works in your own folder, which can hold your real .env.local, so nothing is started here.");
+    expect(byId(p, "lane-preview-start")).toHaveLength(0);
+    expect(byId(p, "lane-preview-command")).toHaveLength(0);
+  });
+
+  it("says why there is no command in plain words, and offers no Start", () => {
+    const said = {
+      no_package_json: "This folder has no package.json, so there is nothing to start.",
+      unreadable: "Its package.json could not be read, so there is nothing to start.",
+      no_script: "Its package.json has no dev, start, preview or serve script to start.",
+      refused: "Its start scripts look like they publish or deploy, so the app does not run them.",
+    } as const;
+    for (const [why, line] of Object.entries(said)) {
+      const p = preview({ preview: previewOf({ record: record({ plan: { none: why as keyof typeof said } }) }) });
+      expect(words(p), why).toContain(line);
+      expect(byId(p, "lane-preview-start"), why).toHaveLength(0);
+      expect(byId(p, "lane-preview-command"), why).toHaveLength(0);
+    }
+  });
+
+  it("says it is reading the folder until it has, and why it could not", () => {
+    expect(words(preview({ preview: previewOf({ record: record({ plan: null, project: null, reading: true }) }) }))).toContain("Reading the project…");
+    const unread = preview({ preview: previewOf({ record: record({ plan: null, project: null, readWhy: "not_a_lane" }) }) });
+    expect(byId(unread, "lane-preview-unread")[0].props.children).toBe("this is not a lane's own folder.");
+    expect(byId(unread, "lane-preview-start")).toHaveLength(0);
+  });
+
+  it("while it starts, says so with its command and Stop, and offers no second Start", () => {
+    const p = withRun({ phase: "starting", id: 3 });
+    expect(byId(p, "lane-preview-state")[0].props.children).toBe("Starting…");
+    expect(byId(p, "lane-preview-command")[0].props.children).toEqual(["$ ", "pnpm run dev"]);
+    expect(byId(p, "lane-preview-start")).toHaveLength(0);
+    press(p, "lane-preview-stop");
+    expect(p.preview.onStop).toHaveBeenCalledTimes(1);
+  });
+
+  it("running, says where with Open and Stop, and draws no page of the project in the app", () => {
+    const p = withRun({ phase: "running", id: 3, url: "http://localhost:5173/" });
+    expect(byId(p, "lane-preview-state")[0].props.children).toBe("Running at http://localhost:5173/");
+    press(p, "lane-preview-open");
+    expect(p.preview.onOpen).toHaveBeenCalledTimes(1);
+    press(p, "lane-preview-stop");
+    expect(p.preview.onStop).toHaveBeenCalledTimes(1);
+    expect(html(p)).not.toMatch(/<(iframe|webview|object|embed|form|a )/);
+    expect(byId(p, "lane-preview-open-failed")).toHaveLength(0);
+    const failed = withRun({ phase: "running", id: 3, url: "http://localhost:5173/" }, { openFailed: true });
+    expect(byId(failed, "lane-preview-open-failed")[0].props.children).toBe("The browser could not be opened.");
+  });
+
+  it("stopping, its Stop is busy and pressing it again does nothing", () => {
+    const p = withRun({ phase: "stopping", id: 3 });
+    const stop = byId(p, "lane-preview-stop")[0];
+    expect(stop.props["aria-busy"]).toBe(true);
+    expect(stop.props.children).toBe("Stopping");
+    press(p, "lane-preview-stop");
+    expect(p.preview.onStop).not.toHaveBeenCalled();
+    expect(byId(p, "lane-preview-start")).toHaveLength(0);
+  });
+
+  it("stopped, says so and offers Start again with the command it would run", () => {
+    const p = withRun({ phase: "stopped" });
+    expect(byId(p, "lane-preview-state")[0].props.children).toBe("Stopped.");
+    expect(byId(p, "lane-preview-start")[0].props.children).toBe("Start again");
+    press(p, "lane-preview-start");
+    expect(p.preview.onStart).toHaveBeenCalledTimes(1);
+  });
+
+  it("ended by itself, says its exit code and its last few lines with any key hidden, and offers Start again", () => {
+    const lines = [...Array.from({ length: 10 }, (_, i) => `line ${i}`), "Error: Cannot find module 'vite'", `- loaded with STRIPE_SECRET_KEY ${KEY}`];
+    const p = withRun({ phase: "ended", code: 1, lines });
+    expect(byId(p, "lane-preview-state")[0].props.children).toBe("It ended by itself (exit 1).");
+    const shown = byId(p, "lane-preview-lines")[0].props.children as string;
+    expect(shown.split("\n")).toHaveLength(SHOWN);
+    expect(shown).toContain("Error: Cannot find module 'vite'");
+    expect(shown).not.toContain(KEY);
+    expect(shown).toContain("••••");
+    expect(shown).not.toContain("line 0");
+    expect(html(p)).not.toContain(KEY);
+    expect(byId(p, "lane-preview-start")[0].props.children).toBe("Start again");
+    expect(byId(withRun({ phase: "ended", code: null }), "lane-preview-state")[0].props.children).toBe("It ended by itself.");
+  });
+
+  it("that could not start, says why in words, and offers Start again", () => {
+    const said: [string, string][] = [
+      ["missing:pnpm", "Could not start: pnpm is not installed on this computer."],
+      ["changed", "Could not start: package.json changed after it was read. Look at the command again and press Start."],
+      ["running", "Could not start: a preview of this lane is running already."],
+      ["unsupported", "Could not start: the preview runs on macOS and Linux for now."],
+      [`spawn: Permission denied ${KEY}`, "Could not start: spawn: Permission denied ••••"],
+    ];
+    for (const [why, line] of said) {
+      const p = withRun({ phase: "failed", why });
+      expect(byId(p, "lane-preview-state")[0].props.children, why).toBe(line);
+      expect(byId(p, "lane-preview-start")[0].props.children, why).toBe("Start again");
+    }
+  });
+
+  it("that printed no address in its first minute, says so with its last lines and Stop", () => {
+    const p = withRun({ phase: "quiet", id: 3, lines: ["Compiling the first build…"] });
+    expect(byId(p, "lane-preview-state")[0].props.children).toBe("It is running, but has not printed an address the app can open.");
+    expect(byId(p, "lane-preview-lines")[0].props.children).toBe("Compiling the first build…");
+    expect(byId(p, "lane-preview-stop")).toHaveLength(1);
+    expect(byId(p, "lane-preview-open")).toHaveLength(0);
+  });
+
+  it("offers no Start again once the folder has no command, and says why instead", () => {
+    const p = withRun({ phase: "stopped" }, { plan: { none: "no_script" } });
+    expect(byId(p, "lane-preview-start")).toHaveLength(0);
+    expect(words(p)).toContain("Its package.json has no dev, start, preview or serve script to start.");
+  });
+
+  it("names the secrets it runs on samples, and never a value", () => {
+    const p = preview({ preview: previewOf({ samples: ["PROMPTPAY_SHOP_ID", "STRIPE_SECRET_KEY"] }), needs: [SHOP, STRIPE] });
+    expect(byId(p, "lane-preview-samples")[0].props.children).toBe("Secrets run on samples: PROMPTPAY_SHOP_ID and STRIPE_SECRET_KEY.");
+    const out = html(p);
+    expect(out).not.toContain("0000000000");
+    expect(out).not.toContain("sample-value");
+    expect(out).not.toContain("sample-stripe_secret_key");
+    // none to name: no line
+    expect(byId(preview(), "lane-preview-samples")).toHaveLength(0);
   });
 
   it("shows a Sample row for each secret Kit's changed code reads, as the Code page does", () => {
@@ -210,12 +364,13 @@ describe("Preview", () => {
     const asked = words(preview({ needs: [SHOP, STRIPE], asked: "PROMPTPAY_SHOP_ID" }));
     expect(asked).toContain("The vault for a project's secrets comes later.");
     expect(html(preview({ needs: [SHOP, STRIPE], asked: "PROMPTPAY_SHOP_ID" })).match(/data-testid="kit-sample-vault"/g)).toHaveLength(1);
+    expect(p.preview.onStart).not.toHaveBeenCalled();
   });
 
-  it("starts nothing: the only buttons are the chips and Add", () => {
+  it("has Start as its only button that runs anything: the rest are the chips and Add", () => {
     const buttons = drawn(LanePaneView(preview({ needs: [SHOP, STRIPE] }))).filter((e) => e.type === "button");
-    expect(buttons.map((b) => b.props["data-testid"])).toEqual(["lane-chip-diff", "lane-chip-preview", "lane-chip-tests", "kit-sample-add", "kit-sample-add"]);
-    expect(html(preview({ needs: [SHOP] }))).not.toMatch(/<(iframe|webview|form|a )/);
+    expect(buttons.map((b) => b.props["data-testid"])).toEqual(["lane-chip-diff", "lane-chip-preview", "lane-chip-tests", "lane-preview-start", "kit-sample-add", "kit-sample-add"]);
+    expect(ids(preview())).toContain("lane-preview");
   });
 
   it("never shows a sample value or a secret's value: only the name", () => {
@@ -334,7 +489,10 @@ describe("the pane's words", () => {
       for (const chip of chips) expect(out, `${lang} ${chip}`).toContain(chip);
       expect(out, lang).toContain(line);
       expect(html(props()), lang).not.toContain("Kit has not changed any file yet.");
-      expect(html(props({ view: "preview" })), lang).not.toContain("The preview does not run in the app yet.");
+      expect(html(props({ view: "preview" })), lang).not.toContain("Start runs this in the lane's own folder");
+      const running = props({ view: "preview", preview: previewOf({ record: record({ run: run({ phase: "running", id: 3, url: "http://localhost:5173/" }) }) }) });
+      expect(html(running), lang).toContain("http://localhost:5173/");
+      expect(html(running), lang).not.toContain("Running at");
     }
   });
 });

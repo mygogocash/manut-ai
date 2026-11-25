@@ -1,8 +1,9 @@
 // The pane beside a lane (src/code/LanePane.tsx, the design canvas's Code board, "What to look at"), walked in a browser: Diff, Preview
-// and Tests beside the session's chat. The stand-in coding agent (src/sessions/host.ts) edits a file and runs the tests when told
-// `/kit pass`, `fail`, `unread` or `slow`, and reads the shop ID from the environment when told `/kit shop`. The lane runs as a chat,
-// as the canvas's Code board draws it; the + menu starts agents in their own terminal only (docs/code-editor.md), so the spec starts
-// it through the sessions store, as kit-lanes.spec.ts does, and opens it as a notification would.
+// and Tests beside the session's chat (the preview's run itself is walked by e2e/preview-run.spec.ts). The stand-in coding agent
+// (src/sessions/host.ts) edits a file and runs the tests when told `/kit pass`, `fail`, `unread` or `slow`, and reads the shop ID from
+// the environment when told `/kit shop`. The lane runs as a chat, as the canvas's Code board draws it; the + menu starts agents in their
+// own terminal only (docs/code-editor.md), so the spec starts it through the sessions store, as kit-lanes.spec.ts does, and opens it as
+// a notification would.
 import { expect, test, type Page } from "@playwright/test";
 
 const ROOT = "/home/you/code/baanmali-preorder";
@@ -105,13 +106,15 @@ test("Diff lists each file Kit changed with its counts, drawn as the timeline dr
   await expect(files.first()).toContainText("src/checkout.tsx");
 });
 
-test("Preview says the app has no preview yet, and shows a Sample for the secret the code reads, and starts nothing", async ({ page }) => {
+test("Preview names the command with Start, shows a Sample for the secret the code reads, and starts nothing by itself", async ({ page }) => {
   const id = await startIn(page, "Add a PromptPay QR to the checkout.");
   await openSession(page, id);
   await chip(page, "preview").click();
   await expect(chip(page, "preview")).toHaveAttribute("aria-pressed", "true");
   await expect(chip(page, "diff")).toHaveAttribute("aria-pressed", "false");
-  await expect(page.getByTestId("lane-preview-note")).toHaveText("The preview does not run in the app yet.");
+  // the lane's own folder holds the canvas's project: its command, and Start (e2e/preview-run.spec.ts walks the run)
+  await expect(page.getByTestId("lane-preview-command")).toHaveText("$ pnpm run dev");
+  await expect(page.getByTestId("lane-preview-start")).toHaveText("Start");
   // the code reads no secret yet: no Sample
   await expect(page.getByTestId("kit-sample")).toHaveCount(0);
 
@@ -121,12 +124,14 @@ test("Preview says the app has no preview yet, and shows a Sample for the secret
   await expect(sample).toHaveCount(1);
   await expect(sample).toContainText("Sample");
   await expect(sample).toContainText("The preview has no shop ID yet, so the QR code is a sample.");
-  await expect(page.getByTestId("lane-preview-note")).toBeVisible();
+  await expect(page.getByTestId("lane-preview")).toBeVisible();
   const before = await calls(page);
   await page.getByTestId("kit-sample-add").click();
   await expect(page.getByTestId("kit-sample-vault")).toContainText("The vault for a project's secrets comes later.");
-  // pressing Add changed nothing and started nothing: the shell was asked for no more than before
+  // pressing Add changed nothing and started nothing: the shell was asked for no more than before, and no preview runs
   expect(await calls(page)).toEqual(before);
+  const preview = await page.evaluate(() => ((window as unknown as { __manutPreviewCalls?: Call[] }).__manutPreviewCalls ?? []).map((c) => c.op));
+  expect(preview).not.toContain("start");
   // no value of the secret is on the page, nor the sample the preview would run with
   expect(await page.evaluate(() => document.body.innerText.includes("0000000000"))).toBe(false);
   await ready(page);
