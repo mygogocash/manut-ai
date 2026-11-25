@@ -321,9 +321,12 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    at once swapped hard and reached the usage limit on 24 and 25 Nov):
    - running: item 61b (the live feed's one-use ticket, which item 61 merges with) and item 62 (the Runs layout
      tests made fast);
-   - next, for the desktop's first release, which is Practice mode and the code editor (the owner, 25 Nov; the owner's
-     Apple Developer account is the business's, an organization; sign-in and a model key are not needed for now): item 63 (release builds in CI, signed and notarized once the owner adds the secrets) and
-     item 65 (a Thai dictionary for the desktop). Item 64 (Apple sessions refused on the lifted routes, which turning
+   - next, for the desktop's first release, which is Practice mode and the code editor on the Mac (the owner, 25 Nov;
+     the owner's Apple Developer account is the business's, an organization; sign-in and a model key are not needed for
+     now): item 63 (release builds in CI, signed and notarized once the owner adds the secrets, Mac only in the draft
+     release, and the updater on with the key made on 25 Nov, whose owner's copy is in `~/manut-ai-updater-key`), item
+     66 (Kit as a chat from the + menu, beside the terminal, the owner's choice) and item 65 (a Thai dictionary for the
+     desktop). Item 64 (Apple sessions refused on the lifted routes, which turning
      Sign in with Apple on needs first) is parked until sign-in is wanted;
    - candidates that need no owner:
      - a helper's own session on the desktop (`docs/runtime-adapter.md`, "Next slices" 4);
@@ -333,7 +336,8 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
      - keychain support on Windows and Linux, for the session and the sealed cache: CI has no Windows runner, so it
        would be built untested there;
    - the cloud outpost, once the owner approves its cost (`docs/browser-control.md`);
-   - item 30 (Kit's dial in a terminal) waits for the owner's chat-or-terminal call.
+   - item 30 (Kit's dial in a terminal): the owner chose both on 25 Nov, so Kit's chat lanes come from the + menu
+     (item 66) and the dial in a terminal stays a later idea.
    - Checked 24 Nov: the rate limiters' namespace ids in `apps/api/wrangler.jsonc` (2026112301 to 2026112332) clash
      with no other Worker in the Cloudflare account, whose other limiters use only 1001 and 1002. Items 31 to 42 took
      2026112333 to 2026112352 (four each: dev, staging, production and the top level); pick the next limiter's ids
