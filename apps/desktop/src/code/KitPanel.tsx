@@ -17,6 +17,7 @@ import { RunningPanel } from "../running/RunningPanel";
 import { ruleText, type Rule } from "./command";
 import { BringBack } from "./BringBack";
 import { projectName, sessionsWithKeys, useKeysVersion } from "./kitAsks";
+import { showPull } from "../tasks/state";
 import { useRowMarks } from "../sidebar/rows";
 import { laneBase, LanesView, openLane, useLaneRows, type LaneRow, type LanesProps } from "./Lanes";
 import { openNewSessionMenu } from "../sessions/newMenu";
@@ -47,6 +48,8 @@ export interface KitPanelProps {
   onNewLane?: () => void;
   /** The lane whose Bring it back is open, the link on its line that opens it, and what a lane's row shows under its line
    *  (KitPanel fills these: the panel under a Reverted lane reads the stores). */
+  /** The pull request on a lane's row was pressed: Tasks opens on it (tasks/state.ts `showPull`). */
+  onOpenPull?: LanesProps["onPull"];
   laneBack?: Pick<LanesProps, "backOpen" | "onBack" | "below" | "marks" | "away" | "onAway">;
   onProject: (root: string) => void;
   onLevel: (level: KitLevel) => void;
@@ -69,7 +72,7 @@ export function KitPanelView(p: KitPanelProps) {
   return (
     <section className="kitp" aria-labelledby="kit-dial-title" data-testid="kit-panel">
       {/* the project's lanes come first, as the canvas's Code board draws them: the work, then how much Kit does alone */}
-      <LanesView rows={p.lanes ?? []} now={p.now ?? 0} onOpen={p.onOpenLane ?? (() => undefined)} onNew={p.onNewLane} {...p.laneBack} />
+      <LanesView rows={p.lanes ?? []} now={p.now ?? 0} onOpen={p.onOpenLane ?? (() => undefined)} onPull={p.onOpenPull} onNew={p.onNewLane} {...p.laneBack} />
       {p.kept}
       <div className="band">
         <span id="kit-dial-title">{t("kit.dial")}</span>
@@ -240,6 +243,10 @@ export function KitPanel() {
         now={now}
         onOpenLane={openLane}
         onNewLane={() => openNewSessionMenu({ chat: true, folder: root })}
+        onOpenPull={(pull) => {
+          // the same place Tasks opens a request: its list for that repository, with the request selected
+          if (showPull(pull.source, pull.repo, pull.number, root)) getStore().actions.openTasks();
+        }}
         laneBack={{
           backOpen: backFor,
           onBack: (id) => setBackFor((now) => (now === id ? null : id)),

@@ -3109,4 +3109,6 @@ export const en = {
   "row.restore": "Bring back from the archive",
   "row.archived": "Archived",
   "lane.away": "Snoozed and archived ({n})",
+  "lane.pr": "Pull request #{n} ({state})",
+  "lane.prTip": "Open it in Tasks",
 };

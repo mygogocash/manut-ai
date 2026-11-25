@@ -25,6 +25,7 @@ import { askText, getStore, selectAsks, useStore } from "../state/store";
 import { failedNames, laneLine, laneStatus, laneTag, testState, type LaneRecord, type LaneStatus } from "./lane";
 import { isLaneChat, laneOf, useLanesVersion } from "./laneStore";
 import type { Say } from "./command";
+import { usePullRequests, type LanePull } from "../tasks/pulls";
 import { MoreButton, useRowMenu } from "../sidebar/RowMenu";
 import { arrange, sessionRowKey, type RowMark, type RowMarks, type RowPlace } from "../sidebar/rows";
 
@@ -54,6 +55,8 @@ export interface LaneRow {
   testing: boolean;
   /** The session's own words for how it ended in an error. */
   error: string;
+  /** The open pull request made from the lane's branch, when the app has read one (tasks/pulls.ts); set by `useLaneRows`. */
+  pull?: LanePull;
   /** The lane is Reverted by a rewind that put the files back, and the shell still keeps the files from before it: the row
    *  offers Bring it back. */
   canBringBack: boolean;
@@ -123,11 +126,10 @@ export function useLaneRows(root: string): LaneRow[] {
   // the sessions whose last rewind's files the shell still keeps (the turn book): a lane offers Bring it back for those
   const book = sessions.turns;
   const { backs } = useSyncExternalStore(book.subscribe, book.getState, book.getState);
-  if (!root) return [];
   const here = pathKey(root);
   const asks = selectAsks(app);
-  return ss.list.flatMap((rec) => {
-    if (rec.status === "draft" || pathKey(rec.cwd) !== here) return [];
+  const rows = ss.list.flatMap((rec) => {
+    if (!root || rec.status === "draft" || pathKey(rec.cwd) !== here) return [];
     // a session in its own terminal has no chat to read a lane from, and a Hermes folder chat is not a coding agent's
     const key = sessions.chatKey(rec.id);
     if (!isLaneChat(key)) return [];
@@ -145,6 +147,15 @@ export function useLaneRows(root: string): LaneRow[] {
       }),
     ];
   });
+  // each lane with a branch of its own gets the open pull request made from it, when the app has read one (tasks/pulls.ts)
+  const pulls = usePullRequests(
+    root,
+    rows.flatMap((r) => (r.branch?.kind === "own" ? [r.branch.name] : [])),
+  );
+  return rows.map((r) => {
+    const pull = r.branch?.kind === "own" ? pulls.get(r.branch.name) : undefined;
+    return pull ? { ...r, pull } : r;
+  });
 }
 
 /** Opens the session of a lane in the main column, as a notification would. */
@@ -155,6 +166,8 @@ export interface LanesProps {
   /** The time now (ms), for the time a turn has run. */
   now: number;
   onOpen: (id: string) => void;
+  /** The pull request on a lane's row was pressed: Tasks opens on it. Without it the chip is shown and does nothing. */
+  onPull?: (pull: LanePull, id: string) => void;
   /** New lane: opens the + menu's Chat with Kit choice for this project. Without it the band has no link, and none draws no band. */
   onNew?: () => void;
   /** The lane whose Bring it back is open, and the link on its line that opens or closes it. */
@@ -180,7 +193,7 @@ function branchTitle(b: LaneBranchTag): string {
   }
 }
 
-function LaneItem({ row, now, onOpen, backOpen, onBack, below, place, mark }: { row: LaneRow; now: number; onOpen: (id: string) => void; place: RowPlace; mark: RowMark | undefined } & Pick<LanesProps, "onBack" | "below"> & { backOpen: boolean }) {
+function LaneItem({ row, now, onOpen, onPull, backOpen, onBack, below, place, mark }: { row: LaneRow; now: number; onOpen: (id: string) => void; onPull?: LanesProps["onPull"]; place: RowPlace; mark: RowMark | undefined } & Pick<LanesProps, "onBack" | "below"> & { backOpen: boolean }) {
   const tag = laneTag(row.status);
   const line = row.status === "failed" ? row.error : row.line ? t(row.line.key, row.line.vars) : "";
   return (
@@ -209,6 +222,13 @@ function LaneItem({ row, now, onOpen, backOpen, onBack, below, place, mark }: { 
           )}
         </span>
       </button>
+      {row.pull && (
+        <p className="mut lline lpull" data-testid="lane-pull-line">
+          <button type="button" className="lk" title={t("lane.prTip")} onClick={() => row.pull && onPull?.(row.pull, row.id)} data-testid="lane-pr" data-state={row.pull.state}>
+            {t("lane.pr", { n: row.pull.number, state: t(row.pull.state === "draft" ? "tasks.st.draft" : "tasks.st.open") })}
+          </button>
+        </p>
+      )}
       {line && (
         <p className="mut lline" data-testid="lane-line">
           {line}
@@ -281,7 +301,7 @@ function elapsedUntil(at: number, now: number): string {
   return same ? hhmm(d) : `${d.toLocaleDateString(undefined, { weekday: "short" })} ${hhmm(d)}`;
 }
 
-export function LanesView({ rows, now, onOpen, onNew, backOpen = null, onBack, below, marks = {}, away = false, onAway }: LanesProps) {
+export function LanesView({ rows, now, onOpen, onPull, onNew, backOpen = null, onBack, below, marks = {}, away = false, onAway }: LanesProps) {
   if (rows.length === 0 && !onNew) return null;
   // pinned on top, in the order pinned, then the rest, then the settled ones, small and quiet. Snoozed and archived lanes are put
   // away: a line under the list counts them and opens them. A lane that asks something is never put away (rows.ts `placeOf`).
@@ -296,7 +316,7 @@ export function LanesView({ rows, now, onOpen, onNew, backOpen = null, onBack, b
     ...places.settled.map((x) => ({ r: x.r, place: "settled" as const })),
   ];
   const hidden = [...places.snoozed, ...places.archived];
-  const item = (r: LaneRow, place: RowPlace) => <LaneItem key={r.id} row={r} now={now} onOpen={onOpen} backOpen={backOpen === r.id} onBack={onBack} below={below} place={place} mark={marks[sessionRowKey(r.id)]} />;
+  const item = (r: LaneRow, place: RowPlace) => <LaneItem key={r.id} row={r} now={now} onOpen={onOpen} onPull={onPull} backOpen={backOpen === r.id} onBack={onBack} below={below} place={place} mark={marks[sessionRowKey(r.id)]} />;
   return (
     <>
       <div className="band" data-testid="lanes-band">

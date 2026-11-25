@@ -361,3 +361,25 @@ describe("pinned, settled, snoozed and archived lanes (item 76)", () => {
     expect(out).toMatch(/class="lane settled"[^>]*data-testid="lane-s2"/);
   });
 });
+
+describe("the pull request on a lane's row (item 76)", () => {
+  const withPull = (): LaneRow[] => canvas().map((r, i) => (i === 0 ? { ...r, pull: { source: "github", repo: "o/r", number: 12, state: "open", title: "PromptPay QR" } } : r));
+
+  it("shows its number and state quietly, as a link to Tasks, on the lane that has one only", () => {
+    const out = renderToString(createElement(LanesView, { rows: withPull(), now: 100_000, onOpen: vi.fn() }));
+    expect(out).toContain("Pull request #12 (Open)");
+    expect(out.split('data-testid="lane-pr"').length - 1).toBe(1);
+    expect(renderToString(createElement(LanesView, { rows: canvas(), now: 100_000, onOpen: vi.fn() }))).not.toContain("lane-pr");
+  });
+
+  it("calls the Code page with the request when it is pressed, and says Draft for a draft", () => {
+    const onPull = vi.fn();
+    const els = drawn(LanesView({ rows: withPull(), now: 100_000, onOpen: vi.fn(), onPull })).filter((e) => e.props["data-testid"] === "lane-pr");
+    expect(els).toHaveLength(1);
+    (els[0].props.onClick as () => void)();
+    expect(onPull).toHaveBeenCalledWith({ source: "github", repo: "o/r", number: 12, state: "open", title: "PromptPay QR" }, "s1");
+    const draft = withPull();
+    draft[0] = { ...draft[0], pull: { source: "github", repo: "o/r", number: 12, state: "draft", title: "x" } };
+    expect(renderToString(createElement(LanesView, { rows: draft, now: 100_000, onOpen: vi.fn() }))).toContain("Pull request #12 (Draft)");
+  });
+});

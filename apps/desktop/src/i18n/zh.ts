@@ -3078,4 +3078,6 @@ export const zh: Record<Key, string> = {
   "row.restore": "从归档中恢复",
   "row.archived": "已归档",
   "lane.away": "已稍后提醒和已归档 ({n})",
+  "lane.pr": "拉取请求 #{n}（{state}）",
+  "lane.prTip": "在任务中打开",
 };

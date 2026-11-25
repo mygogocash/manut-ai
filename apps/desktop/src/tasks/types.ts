@@ -42,6 +42,8 @@ export interface TaskItem {
   created: number;
   updated: number;
   checks: TaskChecks | null;
+  /** The branch a pull / merge request is made from ("" or absent for an issue and for a shell older than this field). */
+  head?: string;
 }
 
 export interface TaskComment {

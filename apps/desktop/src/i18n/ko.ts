@@ -3078,4 +3078,6 @@ export const ko: Record<Key, string> = {
   "row.restore": "보관함에서 꺼내기",
   "row.archived": "보관됨",
   "lane.away": "다시 알림과 보관됨 ({n})",
+  "lane.pr": "풀 리퀘스트 #{n} ({state})",
+  "lane.prTip": "작업에서 열기",
 };

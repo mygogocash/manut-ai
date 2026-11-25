@@ -3078,4 +3078,6 @@ export const ja: Record<Key, string> = {
   "row.restore": "アーカイブから戻す",
   "row.archived": "アーカイブ済み",
   "lane.away": "スヌーズ中とアーカイブ ({n})",
+  "lane.pr": "プルリクエスト #{n}（{state}）",
+  "lane.prTip": "タスクで開く",
 };
