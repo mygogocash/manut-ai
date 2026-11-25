@@ -19,6 +19,7 @@ mod folder_open;
 mod gh_me;
 mod git_branch;
 mod git_moved;
+mod git_pull;
 mod lane;
 mod lane_clean;
 mod lane_config;
@@ -803,6 +804,15 @@ async fn lane_clean_merged(tasks: State<'_, Arc<tasks::Tasks>>, cwd: String, hel
     tauri::async_runtime::spawn_blocking(move || lane_clean::merged(&home, std::path::Path::new(&cwd), &held, &tasks)).await.map_err(|e| e.to_string())?
 }
 
+/// Settings › Source control › Automatically pull (item 75): bring the default branch checked out in the project folder `cwd`
+/// up to date with its remote, only when nothing in it is changed, new, unpushed or in progress and only by a fast-forward
+/// (git_pull.rs). Never a lane's folder. The answer says what happened or why nothing was done.
+#[tauri::command]
+async fn source_pull(cwd: String) -> Result<git_pull::Pulled, String> {
+    let home = user_home()?;
+    tauri::async_runtime::spawn_blocking(move || git_pull::pull(&home, std::path::Path::new(&cwd))).await.map_err(|e| e.to_string())
+}
+
 /// The lanes' working folders the app made for the repository `cwd` is in, with what is in each (lane.rs). Only reads.
 #[tauri::command]
 async fn lane_list(cwd: String) -> Result<Vec<lane::Kept>, String> {
@@ -1393,6 +1403,7 @@ fn commands(invoke: tauri::ipc::Invoke) -> bool {
         agent_config_list,
         lane_release,
         lane_clean_merged,
+        source_pull,
         session_main_moved,
         chat_close_all,
         buddy_start,

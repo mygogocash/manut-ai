@@ -48,3 +48,30 @@ export function readTools(v: unknown): SourceTools {
   const o = isObj(v) ? v : {};
   return { git: readTool(o.git, false), github: readTool(o.github, true), gitlab: readTool(o.gitlab, true) };
 }
+
+const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.floor(v) : 0);
+
+/** What a pull of a project's default branch did (`source_pull`, src-tauri/src/git_pull.rs). `why` is the shell's code: `pulled`
+ *  and `current` mean it is up to date; every other one says why nothing was done. */
+export interface Pulled {
+  done: boolean;
+  why: PullCode;
+  branch: string;
+  remote: string;
+  /** Short commit ids before and after, and how many commits came. */
+  from: string;
+  to: string;
+  count: number;
+}
+
+/** The codes `source_pull` answers, each with words of its own (`pull.why.<code>`). */
+export const PULL_CODES = ["pulled", "current", "not_a_repository", "lane", "git_missing", "busy", "detached", "no_upstream", "not_default", "unread", "changes", "ahead", "fetch_failed", "diverged", "failed"] as const;
+export type PullCode = (typeof PULL_CODES)[number];
+
+/** The shell's answer, or null for one that is not a pull's. */
+export function readPulled(v: unknown): Pulled | null {
+  if (!isObj(v)) return null;
+  const why = PULL_CODES.find((c) => c === v.why);
+  if (!why) return null;
+  return { done: v.done === true && why === "pulled", why, branch: str(v.branch), remote: str(v.remote), from: str(v.from), to: str(v.to), count: num(v.count) };
+}

@@ -32,6 +32,11 @@ describe("Settings › Source control", () => {
     expect(text).toContain("gh version 2.104.0, signed in as octocat, ana (ghe.shop.co).");
     // signed out: how to sign in, in the CLI's own words, in a terminal
     expect(text).toContain("glab version 1.52.0 is here but not signed in. Sign in with glab auth login in a terminal.");
+    // Automatically pull: off until the person turns it on, with what it does and never does
+    const html = draw(ALL);
+    expect(html).toMatch(/aria-checked="false"[^>]*data-testid="src-auto-pull"|data-testid="src-auto-pull"[^>]*aria-checked="false"/);
+    expect(text).toContain(t("src.pull.hint"));
+    expect(t("src.pull.hint")).toMatch(/never a merge, a rebase or a stash, and never in a lane's folder/);
   });
 
   it("says where to get a missing program and never offers to install or sign in from here", () => {
@@ -42,9 +47,9 @@ describe("Settings › Source control", () => {
     expect(text).toContain("gh is not on this computer. Install it from cli.github.com, then sign in with gh auth login in a terminal.");
     expect(text).toContain("glab is not on this computer.");
     expect(html).toContain('data-testid="src-git-state" data-ok="false"');
-    // the only button reads again
-    expect(html.match(/<button/g)).toHaveLength(1);
-    expect(html).toContain('data-testid="src-check"');
+    // the buttons read again or are the page's own switches: none installs or signs in
+    expect(html.match(/data-testid="src-[a-z-]+"/g)?.filter((m) => !m.endsWith('-state"'))).toEqual(['data-testid="src-providers"', 'data-testid="src-auto-pull"', 'data-testid="src-check"']);
+    expect(html.match(/<button/g)).toHaveLength(2);
   });
 
   it("reads the shell's answer field by field: anything else is not shown", () => {

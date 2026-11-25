@@ -74,8 +74,9 @@ pub fn read_merged(source: Source, out: &str) -> Option<(bool, Vec<String>)> {
 }
 
 /// The remote-tracking branch of the default branch on `remote`: where `origin/HEAD` points, else `main`, else `master`; the
-/// branch name on the remote and its local ref.
-fn default_branch(git: &Git, cwd: &Path, remote: &str) -> Option<(String, String)> {
+/// branch name on the remote and its local ref. git_pull.rs reads the default branch by the same rule, so the clean-up and the
+/// pull never disagree about which branch it is.
+pub(crate) fn default_branch(git: &Git, cwd: &Path, remote: &str) -> Option<(String, String)> {
     let head = format!("refs/remotes/{remote}/HEAD");
     let pointed = git.line(cwd, &["symbolic-ref", "--short", &head]).and_then(|s| s.strip_prefix(&format!("{remote}/")).map(str::to_string));
     for name in pointed.into_iter().chain(["main".to_string(), "master".to_string()]) {

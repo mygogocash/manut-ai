@@ -23,6 +23,7 @@ import { laneBase, LanesView, openLane, useLaneRows, type LaneRow, type LanesPro
 import { openNewSessionMenu } from "../sessions/newMenu";
 import { KeptLanes, useLaneProjects } from "./KeptLanes";
 import { MainMoved } from "./MainMoved";
+import { AutoPull } from "./AutoPull";
 import { PreviewSample } from "./PreviewSample";
 import { allowFolder, dropRule, mayAllow, removeFolder, setLevel, updateKitProjects, useKitProject, type KitProject } from "./project";
 
@@ -263,6 +264,8 @@ export function KitPanel() {
         onOpenSession={(id) => getStore().actions.openSession(id)}
         kept={<KeptLanes root={root} />}
       >
+        {/* Settings › Source control › Automatically pull: what the last pull of this project's default branch did, or why not */}
+        <AutoPull root={root} />
         <PreviewSample root={root} />
         {/* a lane's row carries its own note, read in its own folder. The developer's folder keeps one here while Kit works in it:
             a session with no folder of its own (a terminal, a lane that could not have one), or no session yet; with every

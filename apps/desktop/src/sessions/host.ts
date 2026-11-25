@@ -17,7 +17,7 @@ import { readView, type GitView } from "../code/moved";
 import { MOCK_MOVED, MOCK_MOVED_ROOT } from "../code/mockMoved";
 import { readCleaned, readKept, readMade, readReleased, readRemoved, type KeptLane, type LaneCleaned, type LaneMade, type LaneReleased, type LaneRemoveAsk, type LaneRemoved } from "../code/laneBranch";
 import { readAgentConfig, type AgentConfig } from "../settings/mcp/agentConfig";
-import { readTools, type SourceTools } from "../code/source";
+import { readPulled, readTools, type Pulled, type SourceTools } from "../code/source";
 
 /** What the person did in a chat. Mirrors `Input` in src-tauri/src/agent_chat.rs. `images`: saved copies
  *  (`saveFile`) of attached pictures, for the agent's own image input. */
@@ -162,6 +162,10 @@ export interface SessionHost extends HistoryHost {
   /** Settings › Source control: git, gh and glab, each on this computer or not, its version, and for the two CLIs whether it is
    *  signed in and as whom (names only; src-tauri/src/source_tools.rs). `fresh` asks the CLIs again. Only reads. */
   sourceTools?(fresh?: boolean): Promise<SourceTools>;
+  /** Settings › Source control › Automatically pull: bring the default branch checked out in project folder `cwd` up to date,
+   *  only when nothing in it is changed, new, unpushed or in progress and only by a fast-forward (src-tauri/src/git_pull.rs).
+   *  Never a lane's folder. Null for an answer that is not one. */
+  sourcePull?(cwd: string): Promise<Pulled | null>;
   /** A clean-up removes a deleted chat's folder only when nothing in it is changed, new or unpushed; the branch stays. */
   laneRelease?(worktree: string): Promise<LaneReleased>;
   /** A clean-up of the lanes of `cwd`'s repository whose pull request merged, through the person's own `gh` or `glab`;
@@ -363,6 +367,10 @@ export class TauriHost implements SessionHost, BuddyHost {
     const { invoke } = await this.core();
     return readTools(await invoke<unknown>("source_tools", { fresh }));
   }
+  async sourcePull(cwd: string) {
+    const { invoke } = await this.core();
+    return readPulled(await invoke<unknown>("source_pull", { cwd }));
+  }
   async laneRelease(worktree: string) {
     const { invoke } = await this.core();
     return readReleased(await invoke<unknown>("lane_release", { worktree }));
@@ -538,6 +546,7 @@ export interface MockCall {
     | "lane.release"
     | "lane.clean"
     | "source.tools"
+    | "source.pull"
     | "buddy.start"
     | "buddy.input"
     | "buddy.close"
@@ -664,6 +673,8 @@ export type MockGlobals = MockTurnGlobals & {
   __manutRemoteFrom?: Record<string, string>;
   /** e2e: what the shell says of git, gh and glab for Settings › Source control (its `source_tools` answer) */
   __manutSourceTools?: unknown;
+  /** e2e: what a pull of each project's default branch answers, by folder (the shell's `source_pull` answer) */
+  __manutPulled?: Record<string, unknown>;
   /** e2e: what a merged clean-up of each project's lanes finds */
   __manutCleanMerged?: Record<string, { removed: string[]; kept: { branch: string; why: string }[]; cannot: string | null }>;
   /** e2e: how many changed files the developer's folders have, by folder: they do not come along into a lane's */
@@ -1201,6 +1212,11 @@ export class MockHost implements SessionHost, BuddyHost {
   async sourceTools(fresh = false): Promise<SourceTools> {
     this.log({ op: "source.tools", ...(fresh ? { fresh } : {}) });
     return readTools(this.g.__manutSourceTools ?? { git: { installed: true, version: "2.54.0" }, github: { installed: true, version: "2.104.0", signed_in: false, accounts: [] }, gitlab: { installed: false } });
+  }
+  /** What e2e says a pull of each project finds (`__manutPulled`, the shell's answer); none: the branch is up to date. */
+  async sourcePull(cwd: string): Promise<Pulled | null> {
+    this.log({ op: "source.pull", cwd });
+    return readPulled(this.g.__manutPulled?.[cwd] ?? { done: false, why: "current", branch: this.g.__manutBranches?.[cwd] ?? "main", remote: "origin", from: "", to: "", count: 0 });
   }
   /** As the shell: a folder with changed files, or commits on no remote, is kept; the branch always stays. */
   async laneRelease(worktree: string): Promise<LaneReleased> {

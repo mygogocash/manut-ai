@@ -4,12 +4,16 @@
 // - Source control providers: GitHub's CLI (gh) and GitLab's (glab), each with whether it is here, its version, and who is signed
 //   in (names only), read through the runners Tasks already uses (src-tauri/src/source_tools.rs). Nothing is installed or signed
 //   in from here: a CLI that is missing or signed out says how, in the CLI's own words, in a terminal (`gh auth login`).
+// - Repositories: Automatically pull (off by default; lib/sourceControl.ts says why), which keeps a project's default branch
+//   current only when its checkout is clean, by a fast-forward (src-tauri/src/git_pull.rs, code/AutoPull.tsx).
 //
 // `SourceControlView` draws a given state so a test can draw each one; `SourceControlPage` reads the shell and acts.
 import { useCallback, useEffect, useState } from "react";
 import { t, type Key } from "../i18n";
 import { getHost } from "../sessions/host";
 import type { SourceTool, SourceTools } from "../code/source";
+import { setSourceSettings, SOURCE_DEFAULTS, useSourceSettings, type SourceSettings } from "../lib/sourceControl";
+import { Toggle } from "../pages/kit";
 import { Row } from "./DevRow";
 
 export interface SourceControlViewProps {
@@ -18,6 +22,9 @@ export interface SourceControlViewProps {
   /** The read failed. */
   failed?: boolean;
   onCheck: () => void;
+  /** The page's own choices, saved on this computer. */
+  saved?: SourceSettings;
+  onAutoPull?: (on: boolean) => void;
 }
 
 /** The two CLIs, with the words each one's rows use. */
@@ -53,6 +60,7 @@ function stateWord(tool: SourceTool, cli: boolean): Key {
 
 export function SourceControlView(p: SourceControlViewProps) {
   const tools = p.tools;
+  const saved = p.saved ?? SOURCE_DEFAULTS;
   const reading = !tools;
   const value = (tool: SourceTool | undefined, cli: boolean, id: string) => (
     <span className="st-val" data-testid={`src-${id}-state`} data-ok={tool ? String(tool.installed && (!cli || !!tool.signedIn)) : ""}>
@@ -91,6 +99,12 @@ export function SourceControlView(p: SourceControlViewProps) {
           );
         })}
       </div>
+      <div className="st-gh">{t("src.repos")}</div>
+      <div className="st-grp">
+        <Row title={t("src.pull.title")} hint={t("src.pull.hint")}>
+          <Toggle on={saved.autoPull} label={t("src.pull.title")} onChange={(on) => p.onAutoPull?.(on)} testId="src-auto-pull" />
+        </Row>
+      </div>
       <div className="st-note">
         <button type="button" className="st-btn" onClick={p.onCheck} disabled={reading && !p.failed} data-testid="src-check">
           {t("src.check")}
@@ -128,5 +142,6 @@ export function SourceControlPage() {
     window.addEventListener("focus", again);
     return () => window.removeEventListener("focus", again);
   }, [read]);
-  return <SourceControlView tools={tools} failed={failed} onCheck={() => read(true)} />;
+  const saved = useSourceSettings();
+  return <SourceControlView tools={tools} failed={failed} onCheck={() => read(true)} saved={saved} onAutoPull={(autoPull) => setSourceSettings({ autoPull })} />;
 }
