@@ -39,12 +39,12 @@ import { pickTitle } from "./titles";
 import { onOpenNewSessionMenu, useShells } from "./newMenu";
 import { onTermSettings, readTermSettings } from "./term/settings";
 import { TermLinkGone } from "./termLinkOpen";
-import type { Account, AccountCli, AccountGroup } from "../lib/protocol";
+import type { Account, AccountGroup } from "../lib/protocol";
+import { SESSION_CLI } from "./sessionCli";
+import { agentSignedOut, signedOutTip, signedOutWord } from "./signedOut";
 import { useAccounts } from "../settings/accounts/useAccounts";
 import { accountForNewSessions } from "../settings/accounts/rules";
 
-/** The Accounts CLI a new session of `agent` signs in as (mirrors `session_cli` in src-tauri/src/accounts.rs). */
-const SESSION_CLI: Partial<Record<AgentId, AccountCli>> = { claude: "claude", codex: "codex", grok: "grok" };
 
 /** `work@example.com` -> `work@…`. */
 const maskEmail = (email: string) => (email.includes("@") ? `${email.slice(0, email.indexOf("@"))}@…` : email);
@@ -316,6 +316,8 @@ function NewSessionMenu({ onClose, trigger }: { onClose: () => void; trigger: Re
     const label = agentLabel(a.id, ss.agents);
     const account = sessionAccountSuffix(accounts.groups, a.id);
     const missing = !a.path;
+    // installed, and the app has read that it is not signed in: said before the first message, and still pickable
+    const signedOut = !missing && agentSignedOut(accounts, a.id);
     return (
       <button
         key={a.id}
@@ -323,7 +325,7 @@ function NewSessionMenu({ onClose, trigger }: { onClose: () => void; trigger: Re
         role="menuitem"
         className={`ss-item${missing ? " off" : ""}`}
         aria-disabled={missing || undefined}
-        title={a.path ?? missingNote(a.id)}
+        title={signedOut ? signedOutTip(a.id, label) : (a.path ?? missingNote(a.id))}
         onClick={() => (missing ? copyInstall(a.id) : pick(a.id))}
         data-testid={`session-agent-${a.id}`}
       >
@@ -336,6 +338,13 @@ function NewSessionMenu({ onClose, trigger }: { onClose: () => void; trigger: Re
             <span className="ss-head">
               <span className="ss-l">{label}</span>
               <span className="ss-missing">{copied === a.id ? t("ss.copiedInstall") : t("sessions.notInstalled")}</span>
+            </span>
+          ) : signedOut ? (
+            <span className="ss-head">
+              <span className="ss-l">{label}</span>
+              <span className="ss-missing" data-testid={`session-signedout-${a.id}`}>
+                {signedOutWord()}
+              </span>
             </span>
           ) : (
             <span className="ss-l">{label}</span>
@@ -443,7 +452,7 @@ function NewSessionMenu({ onClose, trigger }: { onClose: () => void; trigger: Re
         <div ref={list} className={`ss-scroll${more ? " more" : ""}`} style={fit ? { maxHeight: fit.max } : undefined} data-testid="session-menu-list">
         {ready && (
           <ChatWay
-            agents={chats.map((a) => ({ id: a.id, label: agentLabel(a.id, ss.agents), account: sessionAccountSuffix(accounts.groups, a.id) }))}
+            agents={chats.map((a) => ({ id: a.id, label: agentLabel(a.id, ss.agents), account: sessionAccountSuffix(accounts.groups, a.id), signedOut: agentSignedOut(accounts, a.id) }))}
             onPick={pickChat}
           />
         )}
@@ -537,6 +546,8 @@ export interface ChatWayAgent {
   id: AgentId;
   label: string;
   account: string;
+  /** The app has read that the agent is installed but not signed in (signedOut.ts): a quiet word and a tooltip, the row still pickable. */
+  signedOut?: boolean;
 }
 
 /** The + menu's first part, Chat with Kit (owner, 25 Nov 2026, item 66): a heading, then one row per agent, as the terminal
@@ -556,12 +567,21 @@ export function ChatWay({ agents, onPick }: { agents: ChatWayAgent[]; onPick: (i
         </div>
       )}
       {agents.map((a) => (
-        <button key={a.id} type="button" role="menuitem" className="ss-item" title={t("ss.way.chatTip", { agent: a.label })} onClick={() => onPick(a.id)} data-testid={`session-chat-${a.id}`}>
+        <button key={a.id} type="button" role="menuitem" className="ss-item" title={a.signedOut ? `${t("ss.way.chatTip", { agent: a.label })} ${signedOutTip(a.id, a.label)}` : t("ss.way.chatTip", { agent: a.label })} onClick={() => onPick(a.id)} data-testid={`session-chat-${a.id}`}>
           <span className="ss-ic">
             <AgentMark agent={a.id} />
           </span>
           <span className="ss-n ss-n-as">
-            <span className="ss-l">{a.label}</span>
+            {a.signedOut ? (
+              <span className="ss-head">
+                <span className="ss-l">{a.label}</span>
+                <span className="ss-missing" data-testid={`session-chat-signedout-${a.id}`}>
+                  {signedOutWord()}
+                </span>
+              </span>
+            ) : (
+              <span className="ss-l">{a.label}</span>
+            )}
             {a.account && (
               <span className="ss-as" data-testid={`session-chat-account-${a.id}`}>
                 {a.account}

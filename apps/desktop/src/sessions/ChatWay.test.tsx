@@ -40,6 +40,27 @@ describe("the + menu's Chat with Kit", () => {
     expect(rows(AGENTS)[0].props.title).toBe("Claude Code in a chat with Kit, on a branch and in a folder of its own. It starts with your first message.");
   });
 
+  it("marks an agent the app has read as not signed in with a quiet word and a tooltip, and leaves the row pickable", () => {
+    const agents: ChatWayAgent[] = [{ id: "claude", label: "Claude Code", account: "", signedOut: true }, AGENTS[1]];
+    const out = html(agents);
+    expect(out).toContain('data-testid="session-chat-signedout-claude"');
+    expect(out).toContain("Not signed in");
+    expect(out).not.toContain('data-testid="session-chat-signedout-codex"');
+    const [claude, codex] = rows(agents);
+    expect(claude.props.title).toBe(`${t("ss.way.chatTip", { agent: "Claude Code" })} Claude Code is not signed in on this computer. To sign in, run claude auth login in a terminal. You can still start it.`);
+    // the signed-in row keeps its tooltip, and the marked one is not disabled
+    expect(codex.props.title).toBe(t("ss.way.chatTip", { agent: "Codex" }));
+    expect(claude.props["aria-disabled"]).toBeUndefined();
+    const onPick = vi.fn();
+    (rows(agents, onPick)[0].props.onClick as () => void)();
+    expect(onPick).toHaveBeenCalledWith("claude");
+  });
+
+  it("shows nothing new for an agent whose sign-in the app cannot tell", () => {
+    expect(html(AGENTS)).not.toContain("signedout");
+    expect(html(AGENTS)).not.toContain("Not signed in");
+  });
+
   it("hands the agent picked to the menu, which opens its New session chat", () => {
     const onPick = vi.fn();
     const [, codex] = rows(AGENTS, onPick);
