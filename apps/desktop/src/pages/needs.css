@@ -98,6 +98,7 @@
   max-height: none;
   overflow-y: visible;
 }
+/* The buttons sit above the card's reach; the space beside them still opens the ask. */
 .mpage .need-acts {
   position: relative;
   z-index: 1;
@@ -105,4 +106,8 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
+  pointer-events: none;
+}
+.mpage .need-acts > * {
+  pointer-events: auto;
 }

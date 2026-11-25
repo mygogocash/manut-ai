@@ -191,7 +191,6 @@
 }
 .card-in:focus {
   border-color: var(--ink);
-  box-shadow: 0 0 0 1px var(--ink);
 }
 .card-in::placeholder {
   color: var(--aui-placeholder);
@@ -338,12 +337,12 @@
   font-size: 13px;
   font-weight: 400;
 }
-/* "Recommended": the kit's quiet .tag */
+/* "Recommended": the kit's quiet .tag, on the hover grey so it reads on a row in both themes */
 .iv-badge {
   margin-left: 8px;
   padding: 2px 8px;
   border-radius: var(--rad-pill);
-  background: var(--aui-subtle);
+  background: var(--hov);
   color: var(--ink);
   font-size: 12px;
   font-weight: 500;
