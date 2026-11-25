@@ -215,8 +215,9 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
      `cc-item67-buddy-real`), started 25 Nov at 17:25.
    - item 68, a New lane link in the Lanes band and a signed-out agent marked in the + menu (`feat/new-lane-link`,
      Sonnet, worktree `cc-item68-new-lane`), started 25 Nov at 17:45.
-   Next, as each finishes: item 72 (MCP and Skills everywhere, after 67), 73 (worktree settings), then 71, 74, 75, 69,
-   76 and 77. On 25 Nov the owner sent five screenshots of T3 Code's settings (Providers, Worktrees, Source control and
+   Next, as each finishes: item 80 (the chat box: model, effort, approval, add context, after 67), 72 (MCP and Skills
+   everywhere), 81 (voice), 73 (worktree settings), then 71, 74, 75, 69, 76 and 77. Items 80 and 81 are from four more
+   screenshots the owner sent that day, of another app's chat box. On 25 Nov the owner sent five screenshots of T3 Code's settings (Providers, Worktrees, Source control and
    issues, Labs, Sharing and access) with "support these features as well", and asked that the person's own MCP
    servers and Skills work seamlessly. A survey of the desktop that day is what items 72 to 79 in `docs/plan.md` are
    built from: MCP and Skills already load for Claude Code and Codex in lanes and terminals (their own home, nothing
