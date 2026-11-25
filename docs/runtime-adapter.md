@@ -549,18 +549,22 @@ turning it on is the owner's (`docs/turning-on.md`).
   it. Before the first read and during an outage a ping changes nothing: the host's own retries decide.
 - **What a ping carries.** Nothing but that something changed: `{ "v": 1, "seq": n }`. Any other message is ignored, and nothing of
   a message reaches the screens.
-- **Asking first.** Each shop's follower asks `GET /v1/feed` with the shop's own session, through the shell's request command like
-  every read, which opens the session again when it has ended. 200 `{ feed: "on" }` opens the socket with the session that answer
-  was given for. 403 `feature_disabled`, and the 404 of an API from before the feed, are off, and asked again an hour later
+- **Asking first.** Before each socket it opens, each shop's follower mints a ticket: `POST /v1/feed/ticket` with exactly `{}` and
+  the shop's own session, sent through `shopSessions.write` like every write of the shop's, which opens the session again when it
+  has ended. 200 `{ feed: "on", ticket }` opens the socket with that ticket (`ticketOf` takes it only as characters a protocol
+  entry may hold). 403 `feature_disabled`, and the 404 of an API from before the feed, are off, and asked again an hour later
   (`FEED_OFF_MS`): a running app takes up a switch turned on within the hour, and at its next start at once. A 401 that ends the
   person's place in the shop ends it as the minute's read does (`depart`). Anything else, a 200 this build cannot read among
   them, is tried again later.
 - **The socket.** The page's own `WebSocket`, the only socket the desktop has: macOS's curl (8.7.1) speaks no WebSocket, and the
-  shell has no WebSocket crate. A page's WebSocket can send no `Authorization` header, so the shop session goes as one of the
-  handshake's protocol entries, `manut-bearer.<token>`, beside `manut-feed.v1`, the one protocol the API answers; never in the
-  address. The packaged app's CSP lets the page connect to `wss://manut.xyz` and `wss://*.manut.xyz` and no other outside origin
-  (`connect-src` in `src-tauri/tauri.conf.json`, `csp` and `devCsp` alike), so a runtime connected to any other origin, a local
-  API among them, has no feed and asks nothing about it (`feedUrl`); `feed.test.ts` keeps the rule and the CSP in step.
+  shell has no WebSocket crate. A page's WebSocket can send no `Authorization` header, so the ticket goes as one of the
+  handshake's protocol entries, `manut-ticket.<ticket>`, beside `manut-feed.v1`, the one protocol the API answers; never in the
+  address. A session never goes there: the API's host writes that header into its logs as it is, and a ticket there was spent
+  by the socket it opened and is dead 30 seconds after it was minted, so every socket mints its own, a renewal or a try after a
+  drop as much as the first. The packaged app's CSP lets the page connect to `wss://manut.xyz` and `wss://*.manut.xyz` and no
+  other outside origin (`connect-src` in `src-tauri/tauri.conf.json`, `csp` and `devCsp` alike), so a runtime connected to any
+  other origin, a local API among them, has no feed and asks nothing about it (`feedUrl`); `feed.test.ts` keeps the rule and
+  the CSP in step.
 - **When it drops.** A drop backs off: 2 seconds, doubling each time, up to an hour (`FEED_RETRY_MIN_MS`, `FEED_RETRY_MAX_MS`), so a
   socket that a network or a proxy keeps refusing costs one look an hour. A socket that stayed open a minute (`FEED_STEADY_MS`)
   starts the backoff over. The API closes each socket after its hour (4000), and the next one opens at once after a good run;
@@ -575,14 +579,17 @@ turning it on is the owner's (`docs/turning-on.md`).
 - **Unchanged.** Practice, which reaches no network; the offline cache, which keeps nothing of the feed; and every screen's words.
   The feed brings forward the reads the minute's read made and the events they emit, no more: a row of a task already listed still
   changes when its screen reads its list again.
-- **Tests.** `feed.test.ts` (each shop's follower over a fake socket and fake timers: the address and the protocols, a ping and
-  nothing else, off, the backoff and its cap, a good run starting it over, 4000 and 4503, the keepalive, letting shops go,
-  `feedUrl` and the CSP), `feed.host.test.ts` (the host over a fake API: a socket for each shop with its own session, when a ping's
-  read comes, one read for several pings, one more after a read on its way, the session opened again, off and missing, a 200 it
-  cannot read, a drop, an origin with no feed, a person in no shop, a ping offline, sign-out, the host stopping, a departure found
-  by a read, by an answer and by a look, and a look that ends after the host stopped). The CSP's other directives stay pinned in
-  `src/code/previewFrame.test.ts`. The Connected Playwright specs read the feed's look as an API from before the feed (their fake
-  answers 404) and pass unchanged.
+- **Tests.** `feed.test.ts` (each shop's follower over a fake socket and fake timers: the address and the protocols, a fresh
+  ticket for every socket, a ping and nothing else, off, the backoff and its cap, a good run starting it over, 4000 and 4503, the
+  keepalive, letting shops go, `feedUrl` and the CSP, and what a mint's answer must hold to be a ticket), `feed.host.test.ts`
+  (the host over a fake API: a socket for each shop with a ticket its own session minted as a JSON write, no session token in
+  any protocol entry, when a ping's read comes, one read for several pings, one more after a read on its way, the session opened
+  again, off and missing, a 200 it cannot read, a drop, an origin with no feed, a person in no shop, a ping offline, sign-out,
+  the host stopping, a departure found by a read, by an answer and by a look, and a look that ends after the host stopped),
+  and `feed.protocols.test.ts` (no file in the repository names the protocol entry that once carried a session). The CSP's
+  other directives stay pinned in `src/code/previewFrame.test.ts`. The Connected Playwright specs read the feed's mint as an
+  API from before the feed (their fake answers 404); `e2e/memory-routines.spec.ts` leaves it out of the owner's changes it
+  lists.
 
 ## Customize › Connections
 

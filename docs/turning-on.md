@@ -34,7 +34,7 @@ waits on the review any more: each waits only for what its row below needs from 
 | Routines running, and the team's cloud work | `PUT /v1/admin/flags` with `officeRoutines` and `officeCloud` (the console's operator key) | The owner's go. Each shop also gives its own consent to cloud work, from the owner's app or link | `docs/handoff.md`; `docs/pilot-api.md` |
 | Any write that leaves the app (a reply sent, a form submitted, a sheet appended) | `PUT /v1/admin/flags` with `officeExternalWrites`, as well as each write's own approval | The owner's go-ahead, and for the first browser write on a real site (a Shopee chat reply, say) a supervised trial | `docs/browser-control.md` |
 | LINE messages coming in | `PUT /v1/admin/flags` with `officeInbound` | LINE is parked by the owner; it needs a LINE Official Account for a test shop first | `docs/connectors.md`, 1 |
-| The live feed: a connected desktop shows a change at a shop within seconds instead of at its next one-minute read | `PUT /v1/admin/flags` with `shopFeed` (the console's operator key); var `SHOP_FEED` is its default, and no environment sets it | The owner's go, and a desktop build from `feat/live-feed` or later, whose CSP lets the page reach Manut AI's own API hosts. Running apps take it up within an hour, or at their next start. What it costs is below | `docs/pilot-api.md`, "The shop's live feed"; `docs/runtime-adapter.md`, "The live feed" |
+| The live feed: a connected desktop shows a change at a shop within seconds instead of at its next one-minute read | `PUT /v1/admin/flags` with `shopFeed` (the console's operator key); var `SHOP_FEED` is its default, and no environment sets it | The owner's go, and a desktop build from `feat/live-feed` or later, whose CSP lets the page reach Manut AI's own API hosts and which opens each socket with a one-use ticket, so no session reaches Cloudflare's request logs. Running apps take it up within an hour, or at their next start. What it costs is below | `docs/pilot-api.md`, "The shop's live feed"; `docs/runtime-adapter.md`, "The live feed" |
 
 ### What the live feed costs on Cloudflare
 
@@ -51,7 +51,7 @@ What that makes for the feed, counted from the code (the pilot's figure is an es
 
 | What | Durable Object requests | Duration |
 | --- | --- | --- |
-| A socket opening, once an hour and after a drop: the desktop's look and its upgrade | 5: the session checked twice, the switch read twice, and the connection itself; and 2 Worker requests | Milliseconds |
+| A socket opening, once an hour and after a drop: the desktop's ticket and its upgrade | 4: at the mint, the session checked, the switch read and the ticket kept; at the upgrade, the connection itself, where the shop's object checks the ticket and the session from what it holds. The mint adds the ticket's request, and the upgrade no longer checks the session or reads the switch in the Worker; and 2 Worker requests | Milliseconds |
 | The alarm that ends a socket's hour | 1 | Milliseconds |
 | A socket's keepalive, every 50 seconds | About 86 a day (1,728 messages, at 20 to 1) | None: the runtime answers it without the object |
 | A socket that sits open | None | None: the object hibernates |
@@ -61,8 +61,8 @@ What that makes for the feed, counted from the code (the pilot's figure is an es
 | The switch, read while a shop pings | At most 1 a minute for each shop with sockets | Milliseconds |
 | A ping | None: an outgoing message | None more |
 
-So one socket costs about 6,900 requests a month (6 an hour to keep it open, and about 86 a day for its keepalive), and no
-duration while it is idle. The pilot's ten shops with two desktops each, twenty sockets, come to about 140,000 requests a month,
+So one socket costs about 6,200 requests a month (5 an hour to keep it open, and about 86 a day for its keepalive), and no
+duration while it is idle. The pilot's ten shops with two desktops each, twenty sockets, come to about 124,000 requests a month,
 inside the Paid plan's million. What a busy shop adds is reads: each ping makes every desktop that follows the shop read it
 again, at most once in 15 seconds each, so a desktop reads a busy shop up to four times a minute instead of once, each read the
 same requests the minute's read makes now. A quiet shop is read once a minute, as now.
