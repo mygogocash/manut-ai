@@ -1,0 +1,15 @@
+{
+  "name": "@manut/remote-channel",
+  "private": true,
+  "type": "module",
+  "description": "The paired phone's channel to the Mac: pairing, an encrypted session the relay cannot read or change, and the one-use challenge a passkey signs for one decision. Pure functions over bytes with Web Crypto.",
+  "exports": { ".": "./src/index.ts" },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "7.0.2",
+    "vitest": "5.1.0"
+  }
+}

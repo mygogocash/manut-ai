@@ -40,6 +40,8 @@ mod sessions;
 mod source_tools;
 mod shop_cache;
 mod shop_cache_key;
+mod skill_links;
+mod tailscale;
 mod tasks;
 mod term_history;
 mod term_import;
@@ -853,6 +855,69 @@ async fn agent_config_list(cwd: Option<String>) -> Result<Vec<agent_config::Agen
     .map_err(|e| e.to_string())
 }
 
+/// Sharing skills by a link (item 84, skill_links.rs): the person's own skill folders `folders` of `agent` (`claude` or `codex`,
+/// by folder name as Settings › MCP and Skills lists them), read so the page can show every file before anything is asked. Only
+/// reads, and nothing is followed through a link. Rejects `bad_agent`, `no_skills`, or `<why>:<folder>`.
+#[tauri::command]
+async fn skill_bundle_read(agent: String, folders: Vec<String>) -> Result<Vec<skill_links::ReadSkill>, String> {
+    let home = user_home()?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let roots = agent_config::home_skill_roots(&home, &agent, &|k| std::env::var(k).ok());
+        if roots.is_empty() {
+            return Err("bad_agent".to_string());
+        }
+        if folders.is_empty() || folders.len() > skill_links::MAX_SKILLS {
+            return Err("no_skills".to_string());
+        }
+        folders.iter().map(|f| skill_links::read_skill(&roots, f).map_err(|e| format!("{e}:{f}"))).collect()
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Installing skills from a link (skill_links.rs): the bundle at `link`, fetched only when it is on `origin`, the artifact origin
+/// the API named (`other_host` before anything is fetched otherwise), held to the bundle rules again and kept here by id.
+#[tauri::command]
+async fn skill_link_read(installs: State<'_, Arc<skill_links::Installs>>, link: String, origin: String) -> Result<skill_links::LinkRead, String> {
+    let l = Arc::clone(&installs);
+    tauri::async_runtime::spawn_blocking(move || {
+        let bundle = skill_links::read_link(&link, &origin, &api_link::fetch_link)?;
+        let read = l.keep_read(bundle.clone());
+        Ok(skill_links::LinkRead { read, title: bundle.title, skills: bundle.skills })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// The ask to install skills `names` of kept bundle `read` for `agent`, into that agent's own skills folder. Writes nothing;
+/// rejects `exists:<name>` for a skill it has, `link_root`, `bad_bundle:<why>`, `not_found` or `expired`.
+#[tauri::command]
+async fn skill_install_ask(installs: State<'_, Arc<skill_links::Installs>>, read: String, names: Vec<String>, agent: String) -> Result<skill_links::InstallAsk, String> {
+    let home = user_home()?;
+    let l = Arc::clone(&installs);
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = agent_config::install_root(&home, &agent, &|k| std::env::var(k).ok()).ok_or("bad_agent")?;
+        l.ask(&home, &agent, &root, &read, &names)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// The person's answer to install ask `id`, once approval-core settled it on the page: a No writes nothing, a Yes writes what the
+/// ask named, once, with no executable bit, running nothing. Only the id and the answer cross.
+#[tauri::command]
+async fn skill_install_settle(installs: State<'_, Arc<skill_links::Installs>>, id: String, yes: bool) -> Result<skill_links::InstallDone, String> {
+    let l = Arc::clone(&installs);
+    tauri::async_runtime::spawn_blocking(move || l.settle(&id, yes)).await.map_err(|e| e.to_string())?
+}
+
+/// Takes a waiting install ask back, so a later answer to it writes nothing.
+#[tauri::command]
+async fn skill_install_withdraw(installs: State<'_, Arc<skill_links::Installs>>, id: String) -> Result<(), String> {
+    installs.withdraw(&id);
+    Ok(())
+}
+
 /// Settings › Workflows (item 77b): the workflow files in `~/.manut/workflows/`, read now (workflows.rs). Only reads: a file
 /// the shell cannot read is listed with why, never changed.
 #[tauri::command]
@@ -1407,6 +1472,7 @@ pub fn run() {
             app.manage(Arc::new(gh_me::Me::default()));
             // the asks that push a lane and open or merge its pull request, each settled once (review.rs)
             app.manage(Arc::new(review::Ledger::default()));
+            app.manage(Arc::new(skill_links::Installs::default()));
             // free space on the home folder's volume, read once a minute (disk.rs)
             app.manage(disk::Disk::start(app.handle().clone(), user_home().ok()));
             // close = hide to the tray / menu bar, and the keep-awake assertion's worker (tray.rs, power.rs)
@@ -1555,6 +1621,11 @@ fn commands(invoke: tauri::ipc::Invoke) -> bool {
         workflows_read,
         workflows_folder,
         agent_config_list,
+        skill_bundle_read,
+        skill_link_read,
+        skill_install_ask,
+        skill_install_settle,
+        skill_install_withdraw,
         lane_release,
         lane_clean_merged,
         source_pull,
@@ -1626,7 +1697,8 @@ fn commands(invoke: tauri::ipc::Invoke) -> bool {
         voice::voice_listen,
         voice::voice_stop,
         computer::computer_status,
-        computer::computer_open
+        computer::computer_open,
+        tailscale::tailscale_state
     ];
     answer(invoke)
 }

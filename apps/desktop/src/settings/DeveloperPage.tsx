@@ -13,7 +13,7 @@
 // Settings.
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { usePlace } from "../palette/places";
-import { Seg } from "../chat/model/Seg";
+import { Modes } from "../ui/Modes";
 import { t, type Key } from "../i18n";
 import { runtimeKind } from "../runtime";
 import { sessionFor } from "../runtime/http";
@@ -137,8 +137,7 @@ export function DeveloperView(p: DeveloperViewProps) {
       <div className="st-gh st-gh0">{t("dev.runtime")}</div>
       <div className="st-grp">
         <Row title={t("dev.runtime")} hint={t("dev.runtimeHint")}>
-          <Seg
-            small
+          <Modes
             label={t("dev.runtime")}
             value={p.mode}
             options={[

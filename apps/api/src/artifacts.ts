@@ -20,9 +20,26 @@
 /// - An unknown link, a removed one, a deleted shop's, and any link while the switch is off all answer the same 404, so
 ///   nothing tells them apart.
 ///
+/// Skill links (item 84) are the same links, store, host, limit and headers, for a third kind: a bundle of skills, each a name
+/// and its text files, published after the desktop showed the person every file. Their own switch, `skillLinks`, stands beside
+/// `artifactLinks`: a bundle is published and read only while both are on, so the operator can allow pages and not skills.
+/// A bundle is served inert, as its manifest in JSON (`/a/{link}.json`, what the desktop installs from) or as one plain-text
+/// listing a browser shows (`/a/{link}`), every file under a line naming it. No HTML is ever made from a bundle.
+///
 /// Nothing here logs, so no link, title or page can reach a log from here.
 
-import { artifactBytes, isArtifactKind, isArtifactTitle, MAX_ARTIFACT_BYTES, type ArtifactView } from "./artifact-store";
+import {
+  artifactBytes,
+  isArtifactKind,
+  isArtifactTitle,
+  isPageKind,
+  MAX_ARTIFACT_BYTES,
+  readSkillsText,
+  skillsRefusal,
+  skillsText,
+  type ArtifactView,
+  type SkillEntry,
+} from "./artifact-store";
 import { readJsonBody } from "./body";
 import { callerOf, hasExactly, ownerActor, queryNamesSession, readShop, type PeopleEnv } from "./people";
 import { tenantCall } from "./tenant-data";
@@ -35,7 +52,7 @@ export type ArtifactEnv = PeopleEnv & {
   WEB_ORIGIN?: string;
 };
 
-export type ArtifactFlags = () => Promise<{ artifactLinks: boolean }>;
+export type ArtifactFlags = () => Promise<{ artifactLinks: boolean; skillLinks: boolean }>;
 
 export const ARTIFACTS_PATH = "/v1/artifacts";
 export const ARTIFACTS_REMOVE_PATH = "/v1/artifacts/remove";
@@ -44,8 +61,9 @@ export const PUBLIC_PREFIX = "/a/";
 
 /// The most a publish's body may be: the text at its cap, escaped as JSON at worst six characters for one, and the title.
 const MAX_BODY_BYTES = 6 * MAX_ARTIFACT_BYTES + 16 * 1024;
-/// A link's path after `/a/`: the shop's object id (32 bytes) and the secret (24 bytes), each in base64url.
-const LINK = /^\/a\/([A-Za-z0-9_-]{43})\.([A-Za-z0-9_-]{32})$/;
+/// A link's path after `/a/`: the shop's object id (32 bytes) and the secret (24 bytes), each in base64url, and for a bundle of
+/// skills read as JSON, `.json` after them.
+const LINK = /^\/a\/([A-Za-z0-9_-]{43})\.([A-Za-z0-9_-]{32})(\.json)?$/;
 /// How long one Worker keeps its read of the switch for the public read: a busy page then reads it from the AuthObject at
 /// most twice a minute for each Worker instance, instead of on every visit, so a page many people open never slows anyone's
 /// sign-in. Turning the switch off therefore stops every link within 30 seconds.
@@ -145,8 +163,11 @@ export async function artifactsRoute(request: Request, url: URL, env: ArtifactEn
   if (request.method === "POST") {
     const parsed = await readJsonBody<unknown>(request, MAX_BODY_BYTES);
     if (!parsed.ok) return json({ error: parsed.error }, parsed.status);
-    // The session names the shop and the owner. Nothing in the body may, so a body with any other field is refused.
-    if (!isRecord(parsed.value) || !hasExactly(parsed.value, removing ? ["id"] : ["title", "kind", "text"])) {
+    // The session names the shop and the owner. Nothing in the body may, so a body with any other field is refused. A bundle
+    // of skills carries `skills` where a page carries `text`.
+    const fields = removing ? ["id"] : isRecord(parsed.value) && parsed.value.kind === "skills" ? ["title", "kind", "skills"]
+      : ["title", "kind", "text"];
+    if (!isRecord(parsed.value) || !hasExactly(parsed.value, fields)) {
       return json({ error: "invalid_request" }, 400);
     }
     body = parsed.value;
@@ -155,7 +176,9 @@ export async function artifactsRoute(request: Request, url: URL, env: ArtifactEn
   if (publishing) {
     const refused = publishRefusal(body!);
     if (refused) return refused;
-    if (!(await flags()).artifactLinks) return json({ error: "feature_disabled", feature: "artifactLinks" }, 403);
+    const on = await flags();
+    if (!on.artifactLinks) return json({ error: "feature_disabled", feature: "artifactLinks" }, 403);
+    if (body!.kind === "skills" && !on.skillLinks) return json({ error: "feature_disabled", feature: "skillLinks" }, 403);
     if (!artifactOrigin(env)) return json({ error: "artifact_origin_not_configured" }, 503);
   }
   if (removing && (typeof body!.id !== "string" || body!.id.length === 0 || body!.id.length > 64)) {
@@ -181,47 +204,62 @@ export async function artifactsRoute(request: Request, url: URL, env: ArtifactEn
     if (removing) return json({ id: read.id });
     return json({ artifact: withLink(read.artifact as ArtifactView, artifactOrigin(env)) }, 200, NO_STORE);
   }
-  // The object's own refusals: a link that is not there, the shop's cap, a page over the size.
+  // The object's own refusals: a link that is not there, the shop's cap, a page over the size, a bundle it would not take.
   if (read && [400, 404, 409, 413].includes(answer.status)) return json(read, answer.status);
   return json({ error: "artifacts_unavailable" }, 503);
 }
 
-/// Why a publish's fields cannot be a page, or null: a title the list can show, a kind it knows, and text that is not empty
-/// and not over `MAX_ARTIFACT_BYTES`.
+/// Why a publish's fields cannot be a page or a bundle, or null: a title the list can show, a kind it knows, and text that is not
+/// empty, or skills `skillsRefusal` takes; either not over `MAX_ARTIFACT_BYTES` as stored (a bundle's whole manifest).
 function publishRefusal(body: Record<string, unknown>): Response | null {
   if (!isArtifactTitle(body.title)) return json({ error: "invalid_title" }, 400);
   if (!isArtifactKind(body.kind)) return json({ error: "invalid_kind" }, 400);
+  if (body.kind === "skills") {
+    const refused = skillsRefusal(body.skills);
+    if (refused) return json({ error: "invalid_skills", ...refused }, 400);
+    if (artifactBytes(skillsText(body.skills as SkillEntry[])) > MAX_ARTIFACT_BYTES) {
+      return json({ error: "too_large", max: MAX_ARTIFACT_BYTES }, 413);
+    }
+    return null;
+  }
   if (typeof body.text !== "string" || body.text.length === 0) return json({ error: "invalid_text" }, 400);
   if (artifactBytes(body.text) > MAX_ARTIFACT_BYTES) return json({ error: "too_large", max: MAX_ARTIFACT_BYTES }, 413);
   return null;
 }
 
-/// The shop's links, newest first, with whether publishing is open now and, when it is not, why.
+/// The shop's links, newest first, with whether publishing pages (`publishing`) and bundles of skills (`skillPublishing`) is open
+/// now and, when it is not, why, and the artifact origin (`origin`, null while there is none), which the desktop holds a link to
+/// install skills from against before it fetches anything.
 async function list(env: ArtifactEnv, shop: string, flags: ArtifactFlags): Promise<Response> {
   const answer = await tenantCall(env, shop, `/artifacts?tenant=${encodeURIComponent(shop)}`,
     { headers: { "x-artifacts": "1" } }).catch(() => null);
   const read = answer?.ok ? ((await answer.json().catch(() => null)) as { artifacts?: ArtifactView[] } | null) : null;
   if (!read || !Array.isArray(read.artifacts)) return json({ error: "artifacts_unavailable" }, 503);
   const origin = artifactOrigin(env);
-  const publishing = !(await flags()).artifactLinks ? "feature_disabled" : origin ? "on" : "artifact_origin_not_configured";
-  return json({ publishing, artifacts: read.artifacts.map((artifact) => withLink(artifact, origin)) }, 200, NO_STORE);
+  const on = await flags();
+  const publishing = !on.artifactLinks ? "feature_disabled" : origin ? "on" : "artifact_origin_not_configured";
+  const skillPublishing = publishing === "on" && !on.skillLinks ? "feature_disabled" : publishing;
+  return json({ publishing, skillPublishing, origin,
+    artifacts: read.artifacts.map((artifact) => withLink(artifact, origin)) }, 200, NO_STORE);
 }
 
 // ---------------------------------------------------------------------------
 // The public read
 // ---------------------------------------------------------------------------
 
-let switchRead: { at: number; on: boolean } | null = null;
+let switchRead: { at: number; on: { artifactLinks: boolean; skillLinks: boolean } } | null = null;
 
 /// Forgets this Worker's read of the switch, so the next visit reads it again. Tests turn the switch on and off at once.
 export function forgetArtifactSwitch(): void {
   switchRead = null;
 }
 
-async function linksOn(flags: ArtifactFlags): Promise<boolean> {
+/// Both switches as this Worker last read them, at most `SWITCH_READ_MS` ago.
+async function linksOn(flags: ArtifactFlags): Promise<{ artifactLinks: boolean; skillLinks: boolean }> {
   const now = Date.now();
   if (switchRead && now - switchRead.at < SWITCH_READ_MS) return switchRead.on;
-  const on = (await flags()).artifactLinks;
+  const read = await flags();
+  const on = { artifactLinks: read.artifactLinks, skillLinks: read.skillLinks };
   switchRead = { at: now, on };
   return on;
 }
@@ -262,14 +300,15 @@ function objectIdHex(part: string): string | null {
   }
 }
 
-/// Everything the artifact host answers, after its rate limit: `GET /a/{link}`, or 404. The request's cookies, headers and
-/// body are never read; only its method and path are.
+/// Everything the artifact host answers, after its rate limit: `GET /a/{link}`, `GET /a/{link}.json` for a bundle of skills, or
+/// 404. The request's cookies, headers and body are never read; only its method and path are.
 export async function artifactPublicRoute(request: Request, url: URL, env: Pick<ArtifactEnv, "TENANT">,
   flags: ArtifactFlags): Promise<Response> {
   const match = LINK.exec(url.pathname);
   if (!match) return publicNotFound();
   if (request.method !== "GET") return publicAnswer("Method not allowed", 405, "text/plain; charset=utf-8", { allow: "GET" });
-  if (!(await linksOn(flags))) return publicNotFound();
+  const on = await linksOn(flags);
+  if (!on.artifactLinks) return publicNotFound();
   const hex = objectIdHex(match[1]!);
   if (!hex) return publicNotFound();
   let stub: DurableObjectStub;
@@ -285,9 +324,41 @@ export async function artifactPublicRoute(request: Request, url: URL, env: Pick<
     await answer.body?.cancel();
     return publicNotFound();
   }
-  const page = answer?.ok ? ((await answer.json().catch(() => null)) as { kind?: unknown; text?: unknown } | null) : null;
+  const page = answer?.ok ? ((await answer.json().catch(() => null)) as { kind?: unknown; title?: unknown; text?: unknown } | null)
+    : null;
   if (!page || !isArtifactKind(page.kind) || typeof page.text !== "string") {
     return publicAnswer("Unavailable", 503, "text/plain; charset=utf-8");
   }
-  return publicAnswer(page.text, 200, page.kind === "html" ? "text/html; charset=utf-8" : "text/plain; charset=utf-8");
+  const asJson = match[3] !== undefined;
+  if (isPageKind(page.kind)) {
+    // A page has no JSON form: `.json` after a page's link is the same 404 as any other path.
+    if (asJson) return publicNotFound();
+    return publicAnswer(page.text, 200, page.kind === "html" ? "text/html; charset=utf-8" : "text/plain; charset=utf-8");
+  }
+  // A bundle of skills opens only while skills may be shared too: with `skillLinks` off it is the same 404.
+  if (!on.skillLinks) return publicNotFound();
+  const skills = readSkillsText(page.text);
+  const title = typeof page.title === "string" ? page.title : "";
+  if (!skills) return publicAnswer("Unavailable", 503, "text/plain; charset=utf-8");
+  if (asJson) return publicAnswer(JSON.stringify({ title, skills }), 200, "application/json");
+  return publicAnswer(skillsListing(title, skills), 200, "text/plain; charset=utf-8");
+}
+
+/// A bundle as one plain-text page a browser shows as it is: its title, what it holds and what a skill is, then every file
+/// under a line naming its skill, its path and its size. Plain text only, so nothing in a file can run or be drawn as a page.
+export function skillsListing(title: string, skills: readonly SkillEntry[]): string {
+  const files = skills.reduce((n, skill) => n + skill.files.length, 0);
+  const lines = [
+    title,
+    "",
+    `${skills.length} ${skills.length === 1 ? "skill" : "skills"}, ${files} ${files === 1 ? "file" : "files"}. A skill tells a ` +
+      "coding agent how to do a task: read every file below as you would read instructions from a stranger before you " +
+      "install any of them.",
+  ];
+  for (const skill of skills) {
+    for (const file of skill.files) {
+      lines.push("", `===== ${skill.name}/${file.path} (${artifactBytes(file.text)} bytes) =====`, file.text);
+    }
+  }
+  return `${lines.join("\n")}\n`;
 }

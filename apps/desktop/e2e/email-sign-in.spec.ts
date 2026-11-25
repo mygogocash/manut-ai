@@ -5,6 +5,7 @@
 // (`__MANUT_IN_PROCESS__`, src/lib/bridge.ts): the suite's server is built for the mock bridge, which has no Practice and no
 // Connected.
 import { expect, test, type Page } from "@playwright/test";
+import { openHood } from "./start";
 
 const PORT = Number(process.env.MANUT_PORT || 5307);
 
@@ -31,10 +32,11 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-/** Settings › Developer, as a person gets there: the account row, then Developer in Settings' list. */
+/** Settings › Developer, as a person gets there: the account row, then Under the hood and Developer in Settings' list. */
 async function openDeveloper(page: Page) {
   await page.goto("/");
   await page.getByTestId("nav-settings").click();
+  await openHood(page);
   await page.getByTestId("settings-nav-developer").click();
   await expect(page.getByTestId("dev-email")).toBeVisible();
 }

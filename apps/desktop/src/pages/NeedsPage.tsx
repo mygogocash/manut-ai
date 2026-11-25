@@ -63,7 +63,7 @@ export function needRows(s: AppState & Actions, nowMs: number): NeedRow[] {
       kind: a.item.kind,
       text: askText(a.item),
       age: age(a.ts, nowMs),
-      face: isSessionChat(a.bot) ? <SessionFace chatKey={a.bot} size={32} /> : <Avatar bot={a.bot} size={32} />,
+      face: isSessionChat(a.bot) ? <SessionFace chatKey={a.bot} size={32} /> : <Avatar bot={a.bot} size={32} live />,
       open: () => void s.jumpToAsk(a.bot, a.item.id),
       ...(role ? { role } : {}),
       ...(a.item.kind === "approval" && a.item.shop ? { shop: shopName(s, a.item.shop) } : {}),
@@ -85,9 +85,9 @@ export function NeedsView({ rows }: { rows: NeedRow[] }) {
     <MenuPageFrame page="needs" title={t("menu.needs")}>
       <div className="col">
         {rows.length ? (
-          <ul className="needs" aria-label={t("needs.list")}>
+          <ul className="needs" aria-label={t("needs.list")} data-arrive="needs" data-arrive-rows=":scope > li">
             {rows.map((r, i) => (
-              <li key={r.key}>
+              <li key={r.key} data-ask>
                 <article className="need" data-testid="needs-row">
                   {/* The card opens the ask, as the row did: this button reaches over the whole card (needs.css). */}
                   <button type="button" className="need-open" onClick={r.open} aria-describedby={`needs-ask-${i}`} data-testid="needs-open">

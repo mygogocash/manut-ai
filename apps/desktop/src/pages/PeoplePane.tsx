@@ -17,6 +17,7 @@ import type { Op, OpParams, OpResult, ShopRow } from "../lib/protocol";
 import { MAX_HELPER_NAME, type ShopHelper, type ShopInvite, type ShopPeople } from "../runtime/people";
 import { formKeys } from "./formKeys";
 import { LOADING, load, type Load } from "./load";
+import { Loading } from "./Loading";
 import {
   canText,
   contactKind,
@@ -513,7 +514,7 @@ export function PeopleView({ p }: { p: PeopleProps }) {
   const { state, ui } = p;
   const ready = state.kind === "ready";
   return (
-    <div className="st-page st-wide people" data-testid="people" aria-busy={(state.kind === "loading" && !p.only) || undefined}>
+    <div className="st-page st-wide people" data-arrive="people" data-arrive-rows=".rowl" data-testid="people" aria-busy={(state.kind === "loading" && !p.only) || undefined}>
       <div className="phead">
         <h1 className="ph1">{t("set.people")}</h1>
         {ready && !p.only && ui.ask?.kind !== "invite" && (
@@ -528,9 +529,7 @@ export function PeopleView({ p }: { p: PeopleProps }) {
         </p>
       )}
       {!p.only && state.kind === "loading" && (
-        <p className="none" data-testid="people-loading">
-          {t("people.loading")}
-        </p>
+        <Loading label={t("people.loading")} testId="people-loading" strip={false} />
       )}
       {!p.only && state.kind === "unavailable" && (
         <div data-testid="people-unavailable">

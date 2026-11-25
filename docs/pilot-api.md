@@ -3123,3 +3123,50 @@ The tenant wipe removes every record, text and way in, so no link of a deleted s
 
 **Not built yet.** Rendering Markdown on the server; a way for someone who is not the owner to report a link (the owner must
 decide how a link is taken down on a complaint); and a way to see how often a link was opened.
+
+## Skill links
+
+A bundle of the shop owner's own coding agent skills, published as an artifact link (item 84; `apps/api/src/artifacts.ts`,
+`artifact-store.ts`). It is item 83's link in every way (the store, the link's form, the artifact origin, the rate limit, the
+headers, removal, export and deletion), with a kind of its own, `skills`, and a switch of its own, `skillLinks` (default the var
+`SKILL_LINKS`, which no environment sets): a bundle is published and read only while `skillLinks` and `artifactLinks` are both on,
+so the operator can allow pages and not skills.
+
+**The bundle.** `POST /v1/artifacts` with exactly `{ title, kind: "skills", skills }`, where `skills` is 1 to 20 skills, each
+exactly `{ name, files }`, and each file exactly `{ path, text }`:
+
+- `name` is the folder the skill is installed as: 1 to 64 of `A-Z a-z 0-9 . _ -`, starting with a letter or digit, never `..`.
+  No two names of a bundle are equal in any letter case.
+- `path` is plain and relative inside the skill: at most 200 characters, no empty, `.` or `..` step, no leading `/`, no
+  backslash, colon, control or line-separator character (`bad_path`), and no step that starts with a dot (`dot_file`). No two
+  paths of a skill are equal in any letter case, and no file has the name of a folder another file is in (`duplicate_path`).
+- `text` is the file's text. A NUL or a lone surrogate means the file is not text (`binary_file`). Every skill has `SKILL.md`
+  at its top (`no_skill_md`).
+- At most 200 files a bundle (`too_many_files`). The whole manifest as stored, `{"skills":[...]}` in UTF-8, is at most 128 KiB,
+  the pages' cap (413 `too_large`); the shell's 256 KiB request carries that with room for JSON's escaping.
+
+A bundle the rules refuse answers 400 `{ error: "invalid_skills", reason, skill?, path? }` before anything is stored, then the
+switches answer as for a page, with 403 `{ error: "feature_disabled", feature: "skillLinks" }` while only skills are off.
+`GET /v1/artifacts` also answers `skillPublishing` (as `publishing`, and `feature_disabled` while `skillLinks` is off) and
+`origin`, the artifact origin or null, which the desktop holds a link to install from against. A bundle is listed, removed,
+exported (its `text` is the manifest) and wiped as a page is, and audited as `artifact.published` and `artifact.removed`.
+
+**The public read**, on the artifact host only, inert. `GET /a/{link}` answers the bundle as one `text/plain; charset=utf-8`
+listing a browser shows: its title, what it holds and what a skill is, then every file under a line
+`===== <skill>/<path> (<n> bytes) =====`. `GET /a/{link}.json` answers `{ title, skills }` as `application/json`, which is what
+the desktop installs from. No HTML is ever made from a bundle. Every answer carries 83's `PUBLIC_HEADERS` and cache rules;
+`.json` after a page's link, every bundle while either switch is off, and every unknown or removed link answer the same 404.
+
+**The desktop.** Publishing: the Artifacts page's Share skills as a link, behind Settings › Artifacts › Allow sharing skills by
+link (off by default). The person picks their own skills (never a plugin's or a project's); the shell reads each folder without
+following any link; a link, a binary file or a file in which the app's key masker finds a key stops the publish, named and never
+shown; the ask (`public_post`) shows every file with its size and each script marked, and its Yes is refused until every file
+was opened or "I have looked at every file" is ticked. Installing: Settings › MCP and Skills › Install skills from a link, behind
+the same switch. A link on any host but `origin` is refused before anything is fetched, by the page and again by the shell; the
+shell fetches the JSON, holds it to these rules again and keeps it; the ask (`command`) says what a skill is and that nothing
+runs now; on a Yes the shell writes each skill as a new folder in the agent's own skills folder, never through a link, never over
+an existing skill, with no executable bit, running nothing (`docs/runtime-adapter.md`, "Skills shared by a link").
+
+**Not built yet.** A way for someone who is not the owner to report a link; installing for an agent other than Claude Code and
+Codex; installing from a link while signed out or as a helper (the origin comes with the owner's list); and sharing a project's
+skills.

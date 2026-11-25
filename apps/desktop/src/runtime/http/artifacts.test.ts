@@ -6,8 +6,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setLang, t } from "../../i18n";
 import type { BridgeError } from "../../lib/protocol";
 import { setArtifactSettings } from "../../lib/artifactLinks";
-import { answerArtifactAsk, askToRemove, askToShare, resetArtifactAsks } from "../artifactAsks";
+import { answerArtifactAsk, askToRemove, askToShare, askToShareSkills, resetArtifactAsks, reviewOf } from "../artifactAsks";
 import type { SharePlan } from "../artifacts";
+import type { SkillsPlan } from "../skillBundle";
 import { ShopCache } from "./cache";
 import { decodeLink, decodeList } from "./artifacts";
 import { HttpHost } from "./host";
@@ -86,7 +87,8 @@ describe("the shop's links", () => {
     api.on("GET", "/v1/artifacts", { status: 200, json: { publishing: "feature_disabled", artifacts: [ARTIFACT] } });
     const listed = await req("artifacts.list", {});
     expect(linkCalls(api)).toEqual([["GET", "/v1/artifacts", OWNER_A, undefined]]);
-    expect(listed).toEqual({ shop: SHOP_A.id, publishing: "feature_disabled",
+    // An API from before skill links says neither skillPublishing nor origin: skills are off, and there is no origin.
+    expect(listed).toEqual({ shop: SHOP_A.id, publishing: "feature_disabled", skillPublishing: "feature_disabled", origin: null,
       links: [{ ...ARTIFACT, createdAt: (NOW - 60_000) / 1000 }] });
   });
 
@@ -180,5 +182,82 @@ describe("reading the API's answers", () => {
     expect(decodeLink({ ...ARTIFACT, bytes: "12" })).toBeNull();
     expect(decodeList({ publishing: "maybe", artifacts: [] })).toBeNull();
     expect(decodeList({ publishing: "on", artifacts: [ARTIFACT, { id: "x" }] })).toBeNull();
+  });
+});
+
+describe("publishing a bundle of skills (item 84)", () => {
+  const SKILLS = [{ name: "promptpay", files: [{ path: "SKILL.md", text: "Make a PromptPay QR." }, { path: "qr.sh", text: "#!/bin/sh\necho qr\n" }] }];
+  const KEY = "ghp_" + "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8";
+  const bundle = (over: Partial<SkillsPlan> = {}): SkillsPlan => ({ shop: SHOP_A.id, title: "promptpay", skills: SKILLS, bytes: 120, scripts: ["promptpay/qr.sh"], ...over });
+  const SKILL_LINK = { ...ARTIFACT, id: "art-2", title: "promptpay", kind: "skills" };
+
+  /** An ask to publish `p`, every file looked at, answered as the person answers it. */
+  async function settledSkills(p: SkillsPlan, yes = true): Promise<string> {
+    const id = await askToShareSkills(p);
+    reviewOf(id)!.tick(true);
+    expect(await answerArtifactAsk(id, yes)).toEqual({ ok: true, yes });
+    return id;
+  }
+
+  it("reads the list with only the skills switch on, for the origin, while a page publish stays refused", async () => {
+    setArtifactSettings({ publish: false, skills: true });
+    const { api, req } = await opened();
+    api.on("GET", "/v1/artifacts", { status: 200, json: { publishing: "on", skillPublishing: "on", origin: "https://links.example", artifacts: [] } });
+    expect((await req("artifacts.list", {})).origin).toBe("https://links.example");
+    expect((await refusal(req("artifacts.publish", { ask: await settledShare(plan()) })))?.code).toBe("switched_off");
+    expect(linkCalls(api)).toEqual([["GET", "/v1/artifacts", OWNER_A, undefined]]);
+  });
+
+  it("sends nothing while sharing skills is off, even with pages on", async () => {
+    const { api, req } = await opened();
+    const ask = await settledSkills(bundle());
+    expect(await refusal(req("artifacts.publishSkills", { ask }))).toEqual({ code: "skills_off", message: t("skl.err.switchedOff") });
+    expect(linkCalls(api)).toEqual([]);
+  });
+
+  it("sends exactly the bundle its settled ask showed, with that shop's session, once", async () => {
+    setArtifactSettings({ skills: true });
+    const { api, req } = await opened();
+    api.on("POST", "/v1/artifacts", { status: 200, json: { artifact: SKILL_LINK } });
+    const ask = await settledSkills(bundle({ title: " promptpay " }));
+    expect((await req("artifacts.publishSkills", { ask })).link).toEqual({ ...SKILL_LINK, createdAt: (NOW - 60_000) / 1000 });
+    expect(linkCalls(api)).toEqual([["POST", "/v1/artifacts", OWNER_A, { title: "promptpay", kind: "skills", skills: SKILLS }]]);
+    expect((await refusal(req("artifacts.publishSkills", { ask })))?.code).toBe("not_settled");
+    expect(linkCalls(api)).toHaveLength(1);
+  });
+
+  it("publishes nothing for an unreviewed bundle, a key in any file, or a path out of the skill", async () => {
+    setArtifactSettings({ skills: true });
+    const { api, req } = await opened();
+    // no file looked at: the yes is refused, so the ask was never settled
+    const unreviewed = await askToShareSkills(bundle());
+    expect(await answerArtifactAsk(unreviewed, true)).toEqual({ ok: false, refused: "not_reviewed" });
+    expect((await refusal(req("artifacts.publishSkills", { ask: unreviewed })))?.code).toBe("not_settled");
+    // a key in a file is named, never shown, and nothing is sent
+    const leaky = bundle({ skills: [{ name: "deploy", files: [{ path: "SKILL.md", text: "Deploy." }, { path: "notes.md", text: `token ${KEY}` }] }] });
+    const refused = await refusal(req("artifacts.publishSkills", { ask: await settledSkills(leaky) }));
+    expect(refused).toEqual({ code: "secret", message: t("skl.err.secret", { file: "deploy/notes.md" }) });
+    expect(JSON.stringify(refused)).not.toContain(KEY);
+    for (const [path, code] of [["../../.zshrc", "bad_path"], ["/etc/hosts", "bad_path"], [".env", "dot_file"]]) {
+      const out = bundle({ skills: [{ name: "x", files: [{ path: "SKILL.md", text: "x" }, { path, text: "x" }] }] });
+      expect((await refusal(req("artifacts.publishSkills", { ask: await settledSkills(out) })))?.code, path).toBe(code);
+    }
+    expect(linkCalls(api)).toEqual([]);
+  });
+
+  it("says the API's own switch for skills as such, and reads skillPublishing and the origin from the list", async () => {
+    setArtifactSettings({ skills: true });
+    const { api, req } = await opened();
+    api.on("POST", "/v1/artifacts", { status: 403, json: { error: "feature_disabled", feature: "skillLinks" } });
+    expect(await refusal(req("artifacts.publishSkills", { ask: await settledSkills(bundle()) })))
+      .toEqual({ code: "feature_disabled", message: t("skl.err.featureOff") });
+    api.on("GET", "/v1/artifacts", { status: 200, json: { publishing: "on", skillPublishing: "on", origin: "https://links.example", artifacts: [SKILL_LINK] } });
+    const listed = await req("artifacts.list", {});
+    expect(listed).toMatchObject({ publishing: "on", skillPublishing: "on", origin: "https://links.example" });
+    expect(listed.links[0].kind).toBe("skills");
+    // an origin that is not an https origin alone is no origin
+    for (const origin of ["http://links.example", "https://links.example/a", "javascript:alert(1)"]) {
+      expect(decodeList({ publishing: "on", skillPublishing: "on", origin, artifacts: [] })?.origin, origin).toBeNull();
+    }
   });
 });

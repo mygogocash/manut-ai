@@ -455,3 +455,44 @@
 .mpage .archive .band .lk {
   font: inherit;
 }
+
+/* Loading, in the shape of what is coming (StatesSystem.dc.html): the shimmer itself is the Motion board's, named in
+   markup as .mo-loading; here only its sizes. */
+.mpage .skels {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 8px 10px;
+}
+.mpage .skel.wide {
+  width: 100%;
+  height: 32px;
+}
+.mpage .skel-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.mpage .skel.dot {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--rad-pill);
+}
+.mpage .skel-lines {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.mpage .skel-lines .skel {
+  width: var(--w, 60%);
+  height: 12px;
+}
+
+/* A page's body comes in quietly the first time it opens in a session (the header stays still, an anchor for the eye):
+   a short fade where it stands, the Arrive of the Motion board with no distance. Its rows rise on top, each in turn. */
+.mpage-body.arriving {
+  --rise-by: 0px;
+  animation: var(--anim-arrive);
+}
