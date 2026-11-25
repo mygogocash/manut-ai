@@ -169,13 +169,17 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    helper that ends its turn while its own gate runs in the background is marked finished without a report: send it on
    to wait with `t3_background_wait`. They run, each on its own branch from `pilot/week-1`; review each, merge it after
    the full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
-   - none: Claude access for helpers was turned off on 25 Nov (see below), so the lead builds the next items itself.
+   - item 53, the preview itself, first slice: Start, Open in the system browser and Stop in the pane's Preview view,
+     run in the lane's own folder with sample secrets (`feat/preview-run`, Opus), started 25 Nov at 09:50.
+   - item 54, the retention prune clearing the approval lookup's entries of the requests it removes: the lead's.
    A helper's run can also fail when the API sends nothing for 10 minutes; that is not a usage limit and nothing sends
    it on. Item 50 failed so at 00:39 on 25 Nov, after its page, tests and visual check: its last commit was local only.
    Push such a commit from the helper's worktree, review it and finish what is left as the lead.
    On 25 Nov item 51's run failed with "Your organization has disabled Claude subscription access for Claude Code":
-   helpers on Claude cannot start or go on until the owner turns that access back on or gives an API key. Nothing
-   resumes such a run either; item 51's commits were all made, so the lead pushed its branch from its worktree.
+   it did not last, since a new helper started at 09:50 runs. Nothing resumes such a run; item 51's commits were all made, so the
+   lead pushed its branch from its worktree. If it happens again, build as the lead and don't switch providers unasked.
+   Merged at the same time: the night build's `dev-url` (PR #19) and `preview-command` (PR #20), with the lead's fix
+   that also refuses a script whose `pre` or `post` script publishes.
    The security review of 24 Nov (findings only) found no critical issue, two high and three medium ones that need
    `EMAIL_SIGN_IN` or `SELF_SERVE_SHOPS` on, and three low ones; its proofs are in the review thread's report, and
    `docs/turning-on.md` says to keep both switches off until items 41 and 42 merge.
@@ -265,9 +269,9 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    device as an alert), 11 (the Playwright follow-up, #17: every spec runs, in six
    CI shards), 14 (the owner's link page naming the helper who decided), the Playwright revival (#15) and
    `notify-rules` (#16).
-2. The night build's queue has two tasks, `dev-url` and `preview-command` (added 25 Nov, for the code editor's preview
-   itself, with `env-example`, which landed on `cloud/env-example` and was merged on 25 Nov, `9fa8151`; nothing
-   imports it yet). Add pure packages to `docs/plan.md` as the phases need them.
+2. The night build's queue is empty: `env-example` (`9fa8151`), `dev-url` (PR #19) and `preview-command` (PR #20) were
+   merged on 25 Nov, all three for the code editor's preview itself (item 53), which is the first to import them. Add pure
+   packages to `docs/plan.md` as the phases need them; a run that finds the queue empty stops and says so.
 3. Next, from the December list in `docs/plan.md`, as slots free (at most four helpers on this Mac):
    - item 17 (an installable web app) waits for owners' sign-in, as there is no owner home page yet;
    - the cloud outpost, once the owner approves its cost (`docs/browser-control.md`).
