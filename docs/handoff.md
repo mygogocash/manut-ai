@@ -211,8 +211,9 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    71 in `docs/plan.md`), and reported that Buddy "doesn't response" in Practice mode, where it gave a sample answer
    (item 67). Two helpers run at a time, each on its own branch from `pilot/week-1`; review each, merge it after the
    full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
-   - item 81, voice in the chat box: a microphone and a voice mode, with the Mac's own speech and voices first
-     (`feat/voice`, Opus, worktree `cc-item81-voice`), started 25 Nov at 20:05.
+   - item 82, computer use, lifted from Orca: the Settings page for the two macOS permissions, and the skill and helper
+     that read and work a window, each change asked first (`feat/computer-use`, Opus, worktree `cc-item82-computer`),
+     started 25 Nov at 21:25.
    - item 76, the sidebar and threads: pin, snooze, archive and a suggested next message (`feat/sidebar-threads`,
      Sonnet, worktree `cc-item76-sidebar`), started 25 Nov at 20:50.
    Next, as each finishes: item 80 (the chat box: model, effort, approval, add context, after 67), 72 (MCP and Skills
@@ -244,7 +245,10 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    The security review of 24 Nov (findings only) found no critical issue, two high and three medium ones that need
    `EMAIL_SIGN_IN` or `SELF_SERVE_SHOPS` on, and three low ones; its proofs are in the review thread's report, and
    `docs/turning-on.md` says to keep both switches off until items 41 and 42 merge.
-   Merged: 72 (the person's own MCP servers and Skills wherever an agent runs: a lane's untracked agent settings copied
+   Merged: 81 (a microphone and a voice mode in the chat box, with Apple's Speech framework from the shell and the Mac's
+   own voices: English on the Mac, Thai through Apple after a yes, nothing recorded, an ask never answered by voice;
+   `docs/voice.md` has the steps only a person with a microphone can check, and nobody has done them yet), 72 (the
+   person's own MCP servers and Skills wherever an agent runs: a lane's untracked agent settings copied
    in and kept out of commits, an added account's home linked to the person's configuration and never their sign-in,
    ACP agents handed the project's approved `.mcp.json` servers, and Settings, MCP and Skills, names only; a helper's
    `CARGO_TARGET_DIR` with an unexpanded `~` once put a 3.3 GB build cache inside its worktree and a commit, rewritten
@@ -447,6 +451,10 @@ Every switch that turns a built part on, and what each needs from the owner, is 
   publish it as a full release: that is what offers the update to every installed 0.1.1. The signed path of the
   workflow has not run yet. Any other release made in this repository must be marked a pre-release, or the updater
   finds no `latest.json`.
+- **Voice (item 81, `docs/voice.md`):** try the microphone and voice mode in a built app and say whether Thai is good
+  enough: recognition for Thai goes through Apple's servers on this Mac (the app asks first), and the only Thai voice
+  here is Kanya. Adding Thai to the Mac's Dictation might let it run on the Mac alone. macOS asks for the microphone
+  and speech recognition again after every update until builds are signed.
 - **The 0.1.0 draft:** an unpublished draft release and the tag `desktop-v0.1.0` are left from the first build, which had
   the placeholder icon. Nothing uses them; delete both on GitHub, or say so and the lead does.
 - **A test LINE Official Account** for the dry run (later, by the owner's choice).
