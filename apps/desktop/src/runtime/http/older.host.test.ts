@@ -15,6 +15,7 @@ import { LinkDown, type FetchLike } from "./shell";
 import {
   fakeApi,
   iso,
+  listedJson,
   memoryCacheStore,
   memoryVault,
   ORIGIN,
@@ -433,6 +434,15 @@ describe("when a page cannot be read", () => {
     net.force = null;
     expect(await req("jobs.older", {})).toEqual({ older: "more" });
     expect(nums((await req("jobs.list", {})).jobs)).toEqual(range(6, 80));
+  });
+
+  it("keeps an entry of an older page that it cannot read where the newest read keeps its own, and lists the rest", async () => {
+    const { net, req, host } = await opened(80);
+    const page = { tasks: [listedJson(shopTask(30)), { task: { title: "No id" } }], next: null };
+    net.force = (cursor) => (cursor === "t31" ? { status: 200, json: page } : undefined);
+    expect(await req("jobs.older", {})).toEqual({ older: "end" });
+    expect(nums((await req("jobs.list", {})).jobs)).toEqual([30, ...range(31, 80)]);
+    expect((host as unknown as { snapshot: { unreadable: unknown[] } }).snapshot.unreadable).toEqual([{ task: { title: "No id" } }]);
   });
 
   it("leaves the pages already read as they were when the page after them cannot be read", async () => {

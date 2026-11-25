@@ -835,12 +835,13 @@ export class HttpHost {
     this.editOlder(shop, askOlder);
     const page = await readTaskPage<ShopAnswer>((path) => (shop === "" ? this.session.read(path) : this.shopSessions.read(shop, path)), from);
     if (page.kind === "ok") {
-      const joined = this.editOlder(shop, (l) => addPage(l, from, page));
+      // The page is added only if it starts where the list's older tasks now end. When a read let the older pages go while it was on
+      // its way (50 or more tasks were made since the last read), it would leave tasks out, so nothing is added and the next press
+      // reads from the newest read's cursor again.
+      this.editOlder(shop, (l) => addPage(l, from, page));
       const after = this.listOf(shop);
       if (!this.running || !after) throw notFound();
-      // Not joined: a read let the older pages go while this one was on its way (50 or more tasks were made since the last read),
-      // and the page would leave tasks out. Nothing was added; the next press reads from the newest read's cursor again.
-      if (!joined) return { older: olderOf(after) ?? "more" };
+      // an entry it could not read is kept as the newest read keeps its own, never dropped
       if (page.unreadable.length && this.snapshot) this.snapshot = { ...this.snapshot, unreadable: [...this.snapshot.unreadable, ...page.unreadable] };
       return { older: olderOf(after) ?? "end" };
     }
