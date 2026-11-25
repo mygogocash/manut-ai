@@ -102,9 +102,12 @@ test("picture: choose a file, it is cropped square and shows on every avatar; re
   await page.getByTestId("avatar-file").setInputFiles({ name: "me.png", mimeType: "image/png", buffer: PNG });
 
   // Settings' own list draws the member's avatar beside the page (the sidebar's row did before)
-  const own = page.getByTestId("settings-nav-bot-kami").locator("img.ui-av");
+  const own = page.getByTestId("settings-nav-bot-kami").locator(".ui-av");
   await expect(own).toHaveAttribute("data-own", "1");
-  await expect(page.getByTestId("avatar-edit").locator("img")).toHaveAttribute("data-own", "1");
+  await expect(page.getByTestId("avatar-edit").locator(".ui-av")).toHaveAttribute("data-own", "1");
+  // the picture sits on the member's tile, so the face's frame and badge still work around it (the kit's "Your picture")
+  await expect(own.locator("svg image")).toHaveAttribute("href", /^data:image\/png;base64,/);
+  await expect(own.locator("svg path.fs")).toHaveCount(0);
   const sent = (await callsOf("bots.set_avatar"))[0].params as { bot: string; data: string };
   expect(sent.bot).toBe("kami");
   expect(sent.data.startsWith("data:image/png;base64,")).toBe(true);
@@ -119,6 +122,7 @@ test("picture: choose a file, it is cropped square and shows on every avatar; re
 
   await page.getByTestId("avatar-reset").click();
   await expect(own).not.toHaveAttribute("data-own", "1");
+  await expect(own.locator("svg path.fs")).toHaveCount(1);
   await expect(page.getByTestId("avatar-reset")).toHaveCount(0);
   expect((await callsOf("bots.set_avatar")).at(-1)!.params).toEqual({ bot: "kami", clear: true });
 });
@@ -192,7 +196,7 @@ test("screenshots: All bots and a bot page with its own picture, dark and light"
   // any square-able PNG: the app's mark is an SVG since the fork
   const picture = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "fixtures", "media", "chart.png"));
   await page.getByTestId("avatar-file").setInputFiles({ name: "me.png", mimeType: "image/png", buffer: picture });
-  await expect(page.getByTestId("settings-nav-bot-kami").locator("img.ui-av")).toHaveAttribute("data-own", "1");
+  await expect(page.getByTestId("settings-nav-bot-kami").locator(".ui-av")).toHaveAttribute("data-own", "1");
   await page.screenshot({ path: join(SHOTS, "bots-page-dark.png") });
   await page.getByTestId("settings-nav-bots").click();
   await expect(page.getByTestId("bot-card-kami").locator(".bc-place")).toHaveCount(3);

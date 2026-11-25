@@ -103,6 +103,17 @@ Its own short list of exceptions, each with why: `ui-ring-turn` (the live ring's
 `ringDelay`), `bv-flow` (a dash on an SVG edge, the Shimmer's idea where a background shimmer cannot paint),
 and the team faces' own moves as the kit draws them.
 
+## Team faces
+
+A team member's face (`src/ui/Avatar.tsx`, `face.ts`, `face.css`; the canvas's KitFaces and States: team faces boards)
+moves by the kit's own keyframes, under the kit's names and numbers (`fblink`, `ftrace`, `fbreath`, `flean`...), which
+the rule test reads from the kit. A face shows a state only where the status word is written beside it (Team, Home's
+Working now and Needs you, the Needs you page and list), so these are the faces that move: Idle blinks every 6 s,
+Working runs a blue line round the frame, and Needs you leans in once, then its amber frame breathes, the one loop for
+something that waits for the person. Could not finish and Paused appear and stay still. With reduced motion every face
+stands on its still frame: the frame's colour, the badge and the word still say the state. `e2e/faces.spec.ts` checks
+that, and with `FACES_SHOTS` pictures every state beside the board.
+
 `e2e/motion-shots.spec.ts` shows the moves as a person sees them: a button's Hover and Press, the switch, the + menu,
 the model popover and the palette, held still at the start, the middle and the end of each move, in light and dark,
 and with reduced motion, where the first frame is already the last. `MOTION_SHOTS=<dir>` keeps the frames as PNGs.

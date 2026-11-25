@@ -307,7 +307,7 @@ export function TeamView({
           <li key={m.name} className="tli" data-flip={m.name} data-testid={`team-row-${m.name}`}>
             <div className="rowl trow">
               <button type="button" className="rowmain" onClick={m.open} data-testid={`team-${m.name}`}>
-                <Avatar bot={m.name} size={40} />
+                <Avatar bot={m.name} size={40} live />
                 <span className="grow">
                   <span className="l1">
                     {m.displayName}
