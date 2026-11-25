@@ -64,6 +64,25 @@ export interface PastMsg {
   ts: number;
 }
 
+/** What Buddy's chat may be sent (`buddy_chat::allowed` in src-tauri): a message, text only, Stop, or an answer. */
+export type BuddyChatInput =
+  | { kind: "send"; text: string }
+  | { kind: "interrupt" }
+  | { kind: "approve"; request_id: string; choice: ApprovalChoice }
+  | { kind: "clarify"; request_id: string; answer: string | ClarifyAnswers };
+
+/** Buddy's chat through the person's own coding agent (src-tauri/src/buddy_chat.rs): Claude Code with their own account
+ *  and configuration, in `~/.manut/buddy/chat`, kept apart from the coding sessions so their reset never stops it. Only
+ *  an agent id and Buddy's instructions cross to the shell, which writes the instructions to a file of its own. */
+export interface BuddyHost {
+  agents(): Promise<AgentInfo[]>;
+  buddyStart(agent: AgentId, prompt: string, onEvent: (ev: ChatEvent) => void): Promise<number>;
+  buddyInput(id: number, input: BuddyChatInput): Promise<void>;
+  buddyClose(id: number): Promise<void>;
+  /** Stop every one of Buddy's chats, those a page before this one started included. */
+  buddyCloseAll(): Promise<void>;
+}
+
 export interface SessionHost extends HistoryHost {
   readonly kind: "tauri" | "mock";
   /** Stop anything an earlier page load left running (a webview reload keeps the shell alive). */
@@ -191,7 +210,7 @@ export interface SessionHost extends HistoryHost {
 
 // ---- Tauri ----------------------------------------------------------------------------------
 
-export class TauriHost implements SessionHost {
+export class TauriHost implements SessionHost, BuddyHost {
   readonly kind = "tauri" as const;
   readonly turnFiles: TurnFilesHost = tauriTurnFiles(async () => (await this.core()).invoke);
   /** The shell's command bridge (a test stands in for it by overriding this). */
@@ -239,6 +258,24 @@ export class TauriHost implements SessionHost {
   async chatClose(id: number) {
     const { invoke } = await this.core();
     await invoke("chat_close", { id });
+  }
+  async buddyStart(agent: AgentId, prompt: string, onEvent: (ev: ChatEvent) => void) {
+    const { invoke, Channel } = await this.core();
+    const ch = new Channel<ChatEvent>();
+    ch.onmessage = (ev) => onEvent(ev);
+    return invoke<number>("buddy_start", { agent, prompt, onEvent: ch });
+  }
+  async buddyInput(id: number, input: BuddyChatInput) {
+    const { invoke } = await this.core();
+    await invoke("buddy_input", { id, input });
+  }
+  async buddyClose(id: number) {
+    const { invoke } = await this.core();
+    await invoke("buddy_close", { id });
+  }
+  async buddyCloseAll() {
+    const { invoke } = await this.core();
+    await invoke("buddy_close_all");
   }
   async saveFile(session: string, name: string, data: Uint8Array) {
     const { invoke } = await this.core();
@@ -467,7 +504,11 @@ export interface MockCall {
     | "lane.remove"
     | "lane.root"
     | "lane.release"
-    | "lane.clean";
+    | "lane.clean"
+    | "buddy.start"
+    | "buddy.input"
+    | "buddy.close"
+    | "buddy.closeAll";
   id?: number;
   /** power.busy: the edge, and whether the shell lets go at once (the setting went off) */
   busy?: boolean;
@@ -483,7 +524,9 @@ export interface MockCall {
   /** start: the id manut made for a new Claude Code conversation (`--session-id`) */
   sessionId?: string;
   account?: string;
-  input?: ChatInput;
+  input?: ChatInput | BuddyChatInput;
+  /** buddy.start: Buddy's instructions as the page handed them over */
+  prompt?: string;
   session?: string;
   name?: string;
   size?: number;
@@ -552,7 +595,7 @@ export interface MockLane {
   made: number;
 }
 
-type MockGlobals = MockTurnGlobals & {
+export type MockGlobals = MockTurnGlobals & {
   /** Free bytes the mock's disk watch reads (src/lib/disk.ts); unset = 100 GB. */
   __manutDiskFree?: number;
   __manutPickFolder?: string | null;
@@ -594,6 +637,8 @@ type MockGlobals = MockTurnGlobals & {
   __manutMockNoChat?: AgentId[];
   /** ACP agents the mock host treats as signed in (the others of MOCK_SIGNED_OUT answer -32000). */
   __manutMockSignedIn?: AgentId[];
+  /** Buddy's stand-in Claude Code answers that it is not signed in. */
+  __manutMockBuddySignedOut?: boolean;
   /** e2e: the Codex thread a chat resumes is gone (deleted or archived): the shell starts a new one */
   __manutMockGoneThreads?: boolean;
   /** e2e: Codex's own config runs without approvals and with full disk access (its thread reports
@@ -648,7 +693,7 @@ const MOCK_PAST_MSGS: Record<string, PastMsg[]> = {
 };
 
 /** Echoes typing, answers each line, ends on `exit` or Ctrl+D. Installed: claude, codex, omh. */
-export class MockHost implements SessionHost {
+export class MockHost implements SessionHost, BuddyHost {
   readonly kind = "mock" as const;
   private next = 0;
   private live = new Map<number, { agent: string; line: string; out: (d: string) => void; exit: (c: number | null) => void; conv?: string }>();
@@ -938,6 +983,36 @@ export class MockHost implements SessionHost {
     this.log({ op: "chat.close", id });
     this.chats.get(id)?.stop();
     this.chats.delete(id);
+  }
+
+  // ---- Buddy's chat: the same stand-in agent, on a list of its own, as the shell keeps Buddy's chats apart --------
+  private buddies = new Map<number, MockChat>();
+  async buddyStart(agent: AgentId, prompt: string, onEvent: (ev: ChatEvent) => void) {
+    // as the shell refuses it (buddy_chat::may_answer), and only once the agent is there
+    if (agent !== "claude") throw new Error(`${agent} cannot answer as Buddy`);
+    if (!(this.g.__manutMockAgents ?? ["claude", "codex", "omh"]).includes(agent)) throw new Error(`${agentDef(agent).label} is not installed (no \`${agentDef(agent).program}\` found)`);
+    const id = ++this.next;
+    this.log({ op: "buddy.start", id, agent, prompt });
+    const c = new MockChat(agent, onEvent, undefined, "/home/you/.manut/buddy/chat", { signedOut: !!this.g.__manutMockBuddySignedOut });
+    this.buddies.set(id, c);
+    c.boot();
+    return id;
+  }
+  async buddyInput(id: number, input: BuddyChatInput) {
+    this.log({ op: "buddy.input", id, input });
+    const c = this.buddies.get(id);
+    if (!c) throw new Error("no such session");
+    c.input(input);
+  }
+  async buddyClose(id: number) {
+    this.log({ op: "buddy.close", id });
+    this.buddies.get(id)?.stop();
+    this.buddies.delete(id);
+  }
+  async buddyCloseAll() {
+    this.log({ op: "buddy.closeAll" });
+    for (const c of this.buddies.values()) c.stop();
+    this.buddies.clear();
   }
 
   // ---- files: kept in memory under the same paths the shell would use ------------------------
@@ -1971,7 +2046,7 @@ const MOCK_IMPORT: Partial<Record<ImportApp, ImportProfile[]>> = {
 
 const inTauri = () => typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
-let host: SessionHost | null = null;
-export function getHost(): SessionHost {
+let host: (SessionHost & BuddyHost) | null = null;
+export function getHost(): SessionHost & BuddyHost {
   return (host ??= inTauri() ? new TauriHost() : new MockHost());
 }

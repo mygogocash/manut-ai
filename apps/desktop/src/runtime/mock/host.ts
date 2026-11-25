@@ -6,6 +6,8 @@
 // The handler table is typed against the protocol's own op map, so an op added to the protocol does not compile
 // until this runtime answers it. Features the runtime does not have (see `RuntimeCapabilities`) still answer: a read
 // comes back empty and a write is refused with `unsupported`, so a stray call can never hang a screen.
+import { buddyPrompt } from "@manut/agent-prompts";
+import { InMemoryApprovalStore } from "@manut/approval-core";
 import { createRoutine, describeTrigger, nextRun, type Routine } from "@manut/routine-rules";
 import {
   MAX_FACTS,
@@ -60,6 +62,9 @@ import { PracticePeople, type PeopleResult } from "./people";
 import { PracticeGoogle, readPracticeGoogleStart, type GoogleResult } from "./google";
 import { isShopTemplateId, MADE_SHOPS_LIMIT, shopNameOf } from "../makeShop";
 import { PracticeVault, type VaultResult } from "./vault";
+import { AgentBuddy, NO_AGENTS, type BuddyLine, type BuddyMind, type BuddyOut } from "./buddy";
+import { getHost } from "../../sessions/host";
+import { t } from "../../i18n";
 
 /** A refusal, as the protocol's reply frame carries it. */
 export class OpError extends Error {
@@ -83,8 +88,13 @@ export type MockEvent = BridgeEvent | ThreadEvent;
 
 type Timer = ReturnType<typeof setTimeout>;
 interface Turn {
+  /** The turn's own id: an ask of Buddy's agent is stamped with it, and approval-core refuses an answer once another
+   *  turn runs. */
+  id: string;
   timers: Timer[];
   text: string;
+  /** Answered by Buddy's coding agent rather than a script: Stop goes to the agent too. */
+  agent?: boolean;
 }
 interface Wait {
   /** The chat that asked: a bot's name, or `turnKey(bot, session)`. */
@@ -92,6 +102,8 @@ interface Wait {
   kind: "approval" | "clarify";
   /** An interview's question ids. */
   qids?: string[];
+  /** Asked by the coding agent Buddy answers through: the agent's own request id, which the answer goes back to. */
+  agent?: string;
 }
 interface Folder {
   bot: string;
@@ -107,6 +119,12 @@ interface Folder {
 }
 
 const CHOICES: readonly ApprovalChoice[] = ["once", "session", "always", "deny"];
+/** What an ask of Buddy's agent offers: yes this once, or no. approval-core has no standing yes, so neither does the card,
+ *  and everything the agent does that acts asks again each time. */
+const AGENT_CHOICES: readonly ("once" | "deny")[] = ["once", "deny"];
+/** The demo's scripted turns, by their first word: the sample shop's asks, which stay as they were. Any other message to
+ *  Buddy goes to the agent, the person's own skills (`/name`) included. */
+const DEMO_COMMANDS = ["/approve", "/clarify", "/interview", "/delegate", "/shops"] as const;
 const UNSUPPORTED = "The demo runtime does not do this yet.";
 const PAUSED = "The team is paused. Resume everyone first.";
 
@@ -164,6 +182,8 @@ export interface MockHostOptions {
   now?: () => number;
   /** Scales every scripted wait (1 = as written, 0 = the next timer tick). */
   pace?: number;
+  /** What answers Buddy (buddy.ts). None: a computer with no coding agent, where Buddy says what to install. */
+  buddy?: BuddyMind;
 }
 
 export class MockHost {
@@ -205,23 +225,47 @@ export class MockHost {
   /** The person's own shop's sample Google Sheet, for Customize › Connections (google.ts). */
   private google = new PracticeGoogle(0);
 
+  /** What answers Buddy: the person's own coding agent (buddy.ts). */
+  private readonly mind: BuddyMind;
+  /** Where the asks of Buddy's agent wait and settle, once each (approval-core's own store and rules). */
+  private agentAsks = new InMemoryApprovalStore();
+
   constructor(opts: MockHostOptions = {}) {
     this.now = opts.now ?? (() => Date.now() / 1000);
     this.pace = opts.pace ?? 1;
+    this.mind = opts.buddy ?? new AgentBuddy(() => NO_AGENTS);
     this.reset();
+    // what answers Buddy changed (an agent installed or removed): the model line says so at the next read of the team
+    this.mind.onWho(() => {
+      if (!this.models.buddy) return;
+      this.models.buddy = { ...this.models.buddy, ...this.mind.who() };
+      this.broadcast({ event: "bots.update", bot: "buddy" });
+    });
+  }
+
+  /** Settles once the first look for a coding agent has, so the first read of the team names what answers Buddy. */
+  ready(): Promise<void> {
+    return this.mind.ready();
   }
 
   /** Back to the staged start: every turn stops, every ask is forgotten. */
   reset(): void {
+    this.mind?.closeAll();
+    this.agentAsks = new InMemoryApprovalStore();
     for (const t of Object.values(this.turns)) t.timers.forEach(clearTimeout);
     for (const h of this.late) clearTimeout(h);
     this.late.clear();
     const boot = this.now();
     this.bots = Object.fromEntries(BOT_SEED.map((b) => [b.name, { ...b, running: false }]));
+    // Buddy's welcome is said in the person's language, and says how Buddy answers
+    const seeded = (name: string): readonly (readonly ["user" | "assistant", string, number])[] => (name === "buddy" ? [["assistant", t("buddy.hello"), 3600]] : (HISTORY_SEED[name] ?? []));
     this.history = Object.fromEntries(
-      BOT_SEED.map((b) => [b.name, (HISTORY_SEED[b.name] ?? []).map(([role, text, ago], i) => ({ id: `seed-${b.name}-${i}`, role, text, ts: boot - ago }))]),
+      BOT_SEED.map((b) => [b.name, seeded(b.name).map(([role, text, ago], i) => ({ id: `seed-${b.name}-${i}`, role, text, ts: boot - ago }))]),
     );
-    this.models = Object.fromEntries(BOT_SEED.map((b) => [b.name, { model: b.model, provider: b.provider, reasoning: b.reasoning }]));
+    // Buddy's model is whatever answers it, the person's own coding agent; it has no reasoning level of the demo's
+    this.models = Object.fromEntries(
+      BOT_SEED.map((b) => [b.name, b.name === "buddy" ? { ...this.mind.who(), reasoning: "" } : { model: b.model, provider: b.provider, reasoning: b.reasoning }]),
+    );
     this.avatars = {};
     this.turns = {};
     this.queues = {};
@@ -282,6 +326,10 @@ export class MockHost {
     if (this.shop === HELPED_SHOP) {
       const shown = this.helpedView(op, params);
       if (shown !== undefined) return shown;
+    }
+    if (op === "approval.respond" || op === "clarify.respond") {
+      const answered = this.answerAgent(op, params);
+      if (answered !== undefined) return answered;
     }
     return (this.ops[op as keyof AllOps] as (p: unknown) => unknown)(params);
   }
@@ -574,23 +622,123 @@ export class MockHost {
 
   private startTurn(key: string, text: string): void {
     const [bot, session] = splitKey(key);
-    this.turns[key] = { timers: [], text };
+    this.turns[key] = { id: this.nextId("turn"), timers: [], text };
     if (session === undefined) this.bots[bot].running = true;
     this.ev(key, "bot.status", { status: this.bots[bot].status, running: true });
     this.ev(key, "turn.start");
-    if (text.startsWith("/approve")) return this.scriptApproval(key);
-    if (text.startsWith("/clarify")) return this.scriptClarify(key);
-    if (text.startsWith("/interview")) return this.scriptInterview(key);
-    if (text.startsWith("/delegate")) return this.scriptDelegate(key);
-    if (text.startsWith("/shops")) return this.scriptShops(key);
+    const demo = DEMO_COMMANDS.find((c) => text === c || text.startsWith(`${c} `));
+    if (demo === "/approve") return this.scriptApproval(key);
+    if (demo === "/clarify") return this.scriptClarify(key);
+    if (demo === "/interview") return this.scriptInterview(key);
+    if (demo === "/delegate") return this.scriptDelegate(key);
+    if (demo === "/shops") return this.scriptShops(key);
+    if (bot === "buddy") return this.answerThroughAgent(key, text);
     if (session !== undefined) return this.scriptThread(key, text);
     this.scriptNormal(key);
   }
 
-  private endTurn(key: string, outcome: "done" | "interrupted", { drop = false } = {}): void {
+  // ---- Buddy, through the person's own coding agent (buddy.ts) ------------------------------------------------
+
+  /** What was said in chat `key` before its newest message `text`, oldest first. */
+  private before(key: string, text: string): BuddyLine[] {
+    const [bot, session] = splitKey(key);
+    const rows = (session === undefined ? this.history[bot] : this.threadHistory.get(session)) ?? [];
+    let last = rows.length - 1;
+    while (last >= 0 && !(rows[last].role === "user" && rows[last].text === text)) last -= 1;
+    // the staged welcome is no part of what was said
+    return rows.slice(0, Math.max(last, 0)).flatMap((m) => ((m.role === "user" || m.role === "assistant") && !m.id.startsWith("seed-") ? [{ role: m.role, text: m.text }] : []));
+  }
+
+  /** Buddy's instructions for the shop the person views: the sample shop, what its team knows, and its members. */
+  private buddyInstructions(): string {
+    return buddyPrompt({
+      shop: { name: "the sample shop", sells: "scented candles and gift sets" },
+      memory: this.memory,
+      team: BOT_SEED.filter((b) => !b.is_default).map((b) => ({ name: this.bots[b.name]?.display_name || b.display_name, role: b.description.toLowerCase() })),
+      practice: true,
+    });
+  }
+
+  /** Buddy's message `text` in chat `key` goes to the agent, and what the agent does comes back as this turn's. Anything
+   *  that arrives after the turn ended (Stop, a reset) is dropped. */
+  private answerThroughAgent(key: string, text: string): void {
+    const turn = this.turns[key];
+    turn.agent = true;
+    const live = () => this.turns[key] === turn;
+    const out: BuddyOut = {
+      step: (event, fields) => live() && this.ev(key, event, fields),
+      say: (said) => live() && this.say(key, said),
+      ask: (a) => {
+        if (!live()) return;
+        const request_id = this.nextId("buddy-ask");
+        void this.agentAsks.open({
+          id: request_id,
+          kind: "command",
+          options: AGENT_CHOICES.map((c) => ({ id: c, label: c, effect: c === "once" ? ("approve" as const) : ("decline" as const) })),
+          turnId: turn.id,
+          detail: { title: a.title, command: a.command },
+        });
+        this.pending.set(request_id, { key, kind: "approval", agent: a.id });
+        this.ev(key, "approval.request", { request_id, title: a.title, command: a.command, choices: [...AGENT_CHOICES], ...(a.whole ? { whole: true } : {}), ...(a.tool ? { tool: a.tool } : {}) });
+      },
+      question: (q) => {
+        if (!live()) return;
+        const request_id = this.nextId("buddy-question");
+        this.pending.set(request_id, { key, kind: "clarify", agent: q.id, ...(q.questions ? { qids: q.questions.map((x) => x.qid) } : {}) });
+        const { id: _agentId, ...asked } = q;
+        this.ev(key, "clarify.request", { request_id, ...asked });
+      },
+      withdrawn: (agentId) => {
+        for (const [id, w] of this.pending) if (w.key === key && w.agent === agentId) this.dropAgentAsk(id, w);
+      },
+      end: (outcome) => live() && this.endTurn(key, outcome),
+    };
+    this.mind.send({ key, text, before: this.before(key, text), prompt: this.buddyInstructions() }, out);
+  }
+
+  /** An ask of Buddy's agent that will not be answered here: taken back in approval-core, and gone from the card. */
+  private dropAgentAsk(id: string, w: Wait): void {
+    this.pending.delete(id);
+    if (w.kind === "approval") void this.agentAsks.withdraw(id);
+    this.ev(w.key, "prompt.expired", { request_id: id, reason: "cancelled" });
+  }
+
+  /** The person's answer to an ask of Buddy's agent, or undefined for any other request. approval-core settles it, once:
+   *  only a yes or no the store took goes on to the agent, and a second answer, from a second window say, is refused. */
+  private answerAgent(op: string, p: Record<string, unknown>): Promise<Record<string, never>> | Record<string, never> | undefined {
+    const id = typeof p.request_id === "string" ? p.request_id : "";
+    const wait = this.pending.get(id);
+    if (!wait?.agent) return undefined;
+    const key = this.target(p as { bot?: unknown; session?: unknown });
+    if (wait.key !== key) return undefined;
+    if (op === "clarify.respond") {
+      if (wait.kind !== "clarify") return undefined;
+      const answer = p.answers !== undefined ? p.answers : p.answer;
+      if (typeof answer !== "string" && (!answer || typeof answer !== "object" || Array.isArray(answer))) throw new OpError("bad_request", "missing answer");
+      this.pending.delete(id);
+      this.mind.answer(key, wait.agent, answer as string | Record<string, string | null>);
+      return {};
+    }
+    if (wait.kind !== "approval") return undefined;
+    const choice = p.choice;
+    if (choice !== "once" && choice !== "deny") throw new OpError("bad_request", "This ask takes yes once or no.");
+    const agentId = wait.agent;
+    return this.agentAsks
+      .decide({ requestId: id, optionId: choice, seenRevision: 1, decidedBy: "practice:owner", role: "owner" }, { running: { turnId: this.turns[key]?.id ?? null } })
+      .then((r) => {
+        if (!r.ok) throw new OpError(r.refused === "already_decided" ? "not_found" : r.refused, `no pending approval ${id}`);
+        this.pending.delete(id);
+        this.mind.approve(key, agentId, choice);
+        return {};
+      });
+  }
+
+  private endTurn(key: string, outcome: "done" | "interrupted" | "error", { drop = false } = {}): void {
     const t = this.turns[key];
     if (!t) return;
     t.timers.forEach(clearTimeout);
+    // an ask of Buddy's agent ends with its turn, as the agent drops it: its card says it is no longer waiting
+    for (const [id, w] of this.pending) if (w.key === key && w.agent) this.dropAgentAsk(id, w);
     for (const [id, w] of this.pending) if (w.key === key) this.pending.delete(id);
     delete this.turns[key];
     const [bot, session] = splitKey(key);
@@ -771,14 +919,16 @@ export class MockHost {
       else this.startTurn(b.name, text);
       return { input_id };
     },
-    // taken while that chat's turn runs, else rejected; never sent another way
+    // taken while that chat's turn runs, else rejected; never sent another way. A turn of Buddy's agent takes no steer:
+    // refused, the app sends the message as the next one once the answer is done, so the agent never misses it
     "chat.steer": (p) => {
       const key = this.target(p);
       this.needText(p.text, "text");
-      return { status: this.turns[key] ? "queued" : "rejected" };
+      return { status: this.turns[key] && !this.turns[key].agent ? "queued" : "rejected" };
     },
     "chat.interrupt": (p) => {
       const key = this.target(p);
+      if (this.turns[key]?.agent) this.mind.interrupt(key);
       if (this.turns[key]) this.endTurn(key, "interrupted", { drop: true });
       return {};
     },
@@ -913,6 +1063,7 @@ export class MockHost {
         this.ev(key, "prompt.expired", { request_id: id, reason: "cancelled" });
       }
       if (this.turns[key]) this.endTurn(key, "interrupted", { drop: true });
+      if (b.name === "buddy") this.mind.close(key);
       f.archived = true;
       f.open = false;
       const thread = p.thread;
@@ -955,11 +1106,21 @@ export class MockHost {
     },
     "models.options": (p) => {
       const b = this.needBot(p);
+      // Buddy has one model: the coding agent that answers it, whose own model is chosen in that agent
+      if (b.name === "buddy") {
+        const cur = this.models.buddy;
+        return { providers: [{ slug: cur.provider || "none", name: cur.model, models: [cur.model] }], current: { ...cur }, reasoning_levels: [] };
+      }
       return { providers: PROVIDERS.map((x) => ({ ...x, models: [...x.models] })), current: { ...this.models[b.name] }, reasoning_levels: [...REASONING_LEVELS] };
     },
     "chat.set_model": (p) => {
       const b = this.needBot(p);
       const cur = this.models[b.name];
+      if (b.name === "buddy") {
+        const same = (p.model === undefined || p.model === cur.model) && (p.provider === undefined || p.provider === cur.provider || (!cur.provider && p.provider === "none")) && (p.reasoning === undefined || p.reasoning === cur.reasoning);
+        if (!same) throw new OpError("bad_request", "Buddy answers through your coding agent; its model is chosen in that agent.");
+        return { ...cur };
+      }
       if (p.provider !== undefined && !PROVIDERS.some((x) => x.slug === p.provider)) throw new OpError("bad_request", `unknown provider ${p.provider}`);
       if (p.reasoning !== undefined && !REASONING_LEVELS.includes(p.reasoning)) throw new OpError("bad_request", `unknown reasoning level ${p.reasoning}`);
       if (p.model !== undefined && typeof p.model !== "string") throw new OpError("bad_request", "model must be a string");
@@ -1270,5 +1431,7 @@ const MADE_IN_PRACTICE = "A shop you made in Practice has no sample helpers or s
 let shared: MockHost | null = null;
 /** The one runtime every adapter in this page talks to, as every client of a real runtime would. */
 export function sharedHost(): MockHost {
-  return (shared ??= new MockHost());
+  // Buddy answers through the coding agent on this computer: the shell's Buddy chat in the app, the stand-in agent in a
+  // plain browser (src/sessions/host.ts)
+  return (shared ??= new MockHost({ buddy: new AgentBuddy(() => getHost()) }));
 }
