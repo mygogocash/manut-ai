@@ -29,7 +29,10 @@ The fixes are items 85e to 85i in `docs/plan.md`; the motion is items 85a to 85c
    silhouettes on team-colour grounds (the Colour board's team colours, `KitFaces`). `src/ui/Avatar.tsx`. Seen.
 2. **The chat.** Replies are 13px sans in grey bubbles on both sides. The Chat board sets Buddy's answer in 17px serif
    with no bubble, and only the person's message has one. The serif is not bundled (`theme/fonts.css`), `--font-read`
-   is used only in `pages/mission.css`, and `--fs-msg` starts at 13px. Seen, and code.
+   is used only in `pages/mission.css`, and `--fs-msg` starts at 13px. Seen, and code. *Item 85f (26 Nov):* the answer
+   is on the page in `--font-read` at 17px / 1.65 in a 696px column, the person's message alone in a bubble at 15px,
+   and Settings › Appearance's text size moves both a step along the scale. The serif's files are still to be bundled
+   (`docs/decisions.md`), so it reads in Georgia until then.
 3. **Languages.** Settings and the palette offer English, Korean, Japanese and Chinese, and no Thai. The Type board
    treats Thai as a first language. Not changed: the owner said on 25 Nov that the first release speaks those four and
    Thai waits.
@@ -41,7 +44,9 @@ The fixes are items 85e to 85i in `docs/plan.md`; the motion is items 85a to 85c
 6. **The foot of the side menu** shows three small squares for each coding tool's use, and "You". The board has the
    budget pill and the person's name with their shop. Seen.
 7. **The chat's header** shows a maker's logo with a model and effort, and "3 other places" with two other companies'
-   logos. The board has Answer, Used and Steps, and a cost line. Seen.
+   logos. The board has Answer, Used and Steps, and a cost line. Seen. *Item 85f (26 Nov):* the header holds the
+   member's name, the places in words and the panel button; the model and its effort are in the chat box. The Answer,
+   Used and Steps tabs and the cost line wait for runtimes that say what an answer used and what a chat cost.
 
 ### The same thing drawn two ways
 

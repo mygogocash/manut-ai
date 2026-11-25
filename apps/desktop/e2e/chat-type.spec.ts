@@ -75,7 +75,7 @@ async function start(page: Page, theme: "dark" | "light", width: number) {
 async function shot(page: Page, name: string) {
   if (!SHOTS) return;
   mkdirSync(SHOTS, { recursive: true });
-  await page.getByTestId("composer").blur();
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
   await page.screenshot({ path: join(SHOTS, `${name}.png`), caret: "hide" });
 }
 
@@ -161,6 +161,42 @@ test.describe("screens", () => {
         await shot(page, `error-${theme}-${width}`);
       });
     }
+  }
+});
+
+// A coding lane (Kit's chat) as the Code board draws it: the agent's answer is `.prose` there too, so the serif.
+test.describe("a coding lane", () => {
+  test.skip(!SHOTS, "pictures only: CHAT_SHOTS=<dir>");
+  const ROOT = "/home/you/code/baanmali-preorder";
+  for (const theme of ["light", "dark"] as const) {
+    test(`a lane's answer (${theme})`, async ({ page }) => {
+      await page.setViewportSize({ width: 1280, height: 820 });
+      await page.emulateMedia({ reducedMotion: "reduce" });
+      await page.addInitScript(
+        ([root, t]) => {
+          localStorage.setItem("manut.theme", t);
+          localStorage.removeItem("manut.kit.projects");
+          (window as any).__manutBranches = { [root]: "main" };
+        },
+        [ROOT, theme] as const,
+      );
+      await page.goto("/");
+      const id = await page.evaluate(async (root) => {
+        const s = (window as any).__manutSessions;
+        await s.loadAgents();
+        const id = s.draft("claude");
+        s.setDraft(id, { cwd: root });
+        await s.start(id, "Add a PromptPay QR to the checkout.");
+        return id as string;
+      }, ROOT);
+      await page.evaluate(async (i) => {
+        const store = (await import(/* @vite-ignore */ "/src/state/store.ts" as string)) as { getStore(): { actions: { openSession(id: string): void } } };
+        store.getStore().actions.openSession(i);
+      }, id);
+      await expect(page.getByTestId("bubble-bot").last()).toBeVisible({ timeout: 15_000 });
+      expect(await page.getByTestId("bubble-bot").last().locator(".b").evaluate((e) => getComputedStyle(e).fontFamily)).toContain("Source Serif 4");
+      await shot(page, `lane-${theme}-1280`);
+    });
   }
 });
 

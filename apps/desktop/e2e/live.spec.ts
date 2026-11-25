@@ -281,10 +281,13 @@ test("chat: a typing bubble with the ringed face waits for the first delta, whic
     tl.getByTestId("bubble-bot").first().locator(".b").evaluate((e) => getComputedStyle(e).backgroundColor),
   ]);
   expect(bg).toBe(botBg);
-  // as tall as the one-line bubble that replaces it
+  // as tall as one line of the answer that replaces it (item 85f: the answer stands on the page, one serif line)
   const [th, bh] = await Promise.all([
     typing.getByTestId("typing-bubble").evaluate((e) => e.getBoundingClientRect().height),
-    tl.getByTestId("bubble-user").last().locator(".b").evaluate((e) => e.getBoundingClientRect().height),
+    tl.getByTestId("bubble-bot").first().locator(".b").evaluate((e) => {
+      const cs = getComputedStyle(e);
+      return parseFloat(cs.lineHeight) + parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
+    }),
   ]);
   expect(Math.abs(th - bh)).toBeLessThan(1.5);
   // the face is centred on the bubble
