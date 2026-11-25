@@ -7,6 +7,9 @@
 //! the first that fails ends the call with its code and nothing done:
 //!
 //! - the folder is a repository's work tree, and not a lane's folder (`lane`): a lane's branch is the lane's;
+//! - the repository's own config names no program git would run and no other address to fetch from (`config`, with the
+//!   setting in `setting`; `lane::Git::config_risk`): a `.git/config` that came from someone else (a zip a freelancer sent) must
+//!   not run their clean filter, ssh command or credential helper, or bring in their commits, when the project opens;
 //! - git is not partway through a rebase, merge, cherry-pick, revert or bisect, and holds no index lock (`busy`);
 //! - the checkout is on a branch (`detached`), that branch tracks a remote branch (`no_upstream`), and both are the remote's
 //!   default branch by name, read as the merged clean-up reads it (`not_default`);
@@ -39,8 +42,10 @@ const CHECKOUT_LIMIT: Duration = Duration::from_secs(120);
 /// The one write, before the commit it moves to: a fast-forward, which git refuses when the branch has anything the commit does
 /// not. `--no-overwrite-ignore` because git's default replaces an ignored file (a person's `.env`) with a tracked one an incoming
 /// commit adds at the same path, `--no-autostash` because a `merge.autoStash` setting would stash (the checkout was just read
-/// clean, so there is nothing to stash, and a stash must never be made), `--no-stat` because nothing reads the summary.
-pub const FAST_FORWARD: [&str; 5] = ["merge", "--ff-only", "--no-overwrite-ignore", "--no-autostash", "--no-stat"];
+/// clean, so there is nothing to stash, and a stash must never be made), `--no-verify-signatures` because a
+/// `merge.verifySignatures` setting would run the `gpg.program` a repository names, `--no-stat` because nothing reads the
+/// summary.
+pub const FAST_FORWARD: [&str; 6] = ["merge", "--ff-only", "--no-overwrite-ignore", "--no-autostash", "--no-verify-signatures", "--no-stat"];
 
 /// What a pull did. `done`: the branch moved. `why`: `pulled`, `current` (it already was the remote's commit), or the code of the
 /// condition that stopped it (see the module). `from` and `to` are short commit ids, `count` how many commits came.
@@ -53,6 +58,8 @@ pub struct Pulled {
     pub from: String,
     pub to: String,
     pub count: u32,
+    /// `config`'s own: the setting that stopped it, as git names it (an address in it shown as `*`).
+    pub setting: String,
 }
 
 fn short(id: &str) -> String {
@@ -79,12 +86,16 @@ fn pull_into(home: &Path, cwd: &Path, out: &mut Pulled) -> &'static str {
     if lane::in_a_lane(home, &real(cwd)) || lane::in_a_lane(home, cwd) {
         return "lane";
     }
-    let Ok(git) = Git::new(home) else { return "git_missing" };
+    let Ok(git) = Git::automatic(home) else { return "git_missing" };
     let Some(top) = git.line(cwd, &["rev-parse", "--show-toplevel"]).map(PathBuf::from).filter(|p| p.is_absolute()) else {
         return "not_a_repository";
     };
     if lane::in_a_lane(home, &real(&top)) {
         return "lane";
+    }
+    if let Some(setting) = git.config_risk(&top) {
+        out.setting = setting;
+        return "config";
     }
     if git.busy(&top) {
         return "busy";
@@ -190,7 +201,7 @@ mod tests {
             fs::set_permissions(d.join(".git/hooks/post-merge"), fs::Permissions::from_mode(0o755)).unwrap();
         }
         let got = pull(&home, &d);
-        assert_eq!(got, Pulled { done: true, why: "pulled".into(), branch: "main".into(), remote: "origin".into(), from: mine[..7].into(), to: theirs[..7].into(), count: 2 });
+        assert_eq!(got, Pulled { done: true, why: "pulled".into(), branch: "main".into(), remote: "origin".into(), from: mine[..7].into(), to: theirs[..7].into(), count: 2, ..Pulled::default() });
         assert_eq!(sh(&d, &["rev-parse", "HEAD"]), theirs);
         assert_eq!(fs::read_to_string(d.join("r1.txt")).unwrap(), "from the remote\n");
         // a fast-forward: no merge commit, no stash, the reflog says so
@@ -199,7 +210,7 @@ mod tests {
         assert!(sh(&d, &["reflog", "-1", "--format=%gs"]).contains("Fast-forward"), "{}", sh(&d, &["reflog", "-1", "--format=%gs"]));
         assert!(!d.join("hooked").exists());
         // again: nothing to do
-        assert_eq!(pull(&home, &d), Pulled { done: false, why: "current".into(), branch: "main".into(), remote: "origin".into(), from: theirs[..7].into(), to: theirs[..7].into(), count: 0 });
+        assert_eq!(pull(&home, &d), Pulled { done: false, why: "current".into(), branch: "main".into(), remote: "origin".into(), from: theirs[..7].into(), to: theirs[..7].into(), count: 0, ..Pulled::default() });
         let _ = fs::remove_dir_all(home);
     }
 
@@ -347,9 +358,60 @@ mod tests {
     }
 
     #[test]
+    fn a_pull_runs_no_program_the_repository_s_own_config_names_and_fetches_from_nowhere_it_redirects_to() {
+        // a clean filter, which `git status` runs to compare a file
+        let Some((home, d, _, _)) = behind("pull-filter") else { return };
+        let marker = crate::lane::tests::filter_in(&home, &d, &d);
+        let before = state_quiet(&d);
+        let got = pull(&home, &d);
+        assert_eq!((got.done, got.why.as_str(), got.setting.as_str()), (false, "config", "filter.spy.clean"), "{got:?}");
+        assert!(!marker.exists(), "a program ran: {}", fs::read_to_string(&marker).unwrap_or_default());
+        assert_eq!(state_quiet(&d), before);
+        let _ = fs::remove_dir_all(home);
+
+        // an ssh command of the repository's own, which a fetch over ssh runs
+        let Some((home, d, _, _)) = behind("pull-ssh") else { return };
+        let (ssh, marker) = crate::lane::tests::spy(&home, "ssh", true);
+        sh(&d, &["config", "core.sshCommand", &ssh]);
+        sh(&d, &["remote", "set-url", "origin", "ssh://git@example.invalid/o/r.git"]);
+        assert_eq!(pull(&home, &d).setting, "core.sshcommand");
+        assert!(!marker.exists(), "a program ran: {}", fs::read_to_string(&marker).unwrap_or_default());
+        let _ = fs::remove_dir_all(home);
+
+        // a credential helper of the repository's own, and a remote that is a program (`ext::`)
+        for (key, value) in [("credential.helper", "!evil"), ("remote.origin.url", "ext::sh -c evil")] {
+            let Some((home, d, _, _)) = behind("pull-cred") else { return };
+            sh(&d, &["config", key, value]);
+            assert_eq!(pull(&home, &d).why, "config", "{key}");
+            let _ = fs::remove_dir_all(home);
+        }
+
+        // a fetch sent to another repository than the remote names: its commits must never come in
+        let Some((home, d, bare, _)) = behind("pull-redirect") else { return };
+        let evil = home.join("evil.git");
+        sh(&home, &["clone", "-q", "--bare", bare.to_str().unwrap(), evil.to_str().unwrap()]);
+        let other = home.join("evil-work");
+        sh(&home, &["clone", "-q", evil.to_str().unwrap(), other.to_str().unwrap()]);
+        commit_in(&other, "planted.txt", "not from the remote\n");
+        sh(&other, &["push", "-q", "origin", "main"]);
+        sh(&d, &["config", &format!("url.{}.insteadOf", evil.display()), bare.to_str().unwrap()]);
+        let mine = sh(&d, &["rev-parse", "HEAD"]);
+        let got = pull(&home, &d);
+        assert_eq!((got.why.as_str(), got.setting.as_str()), ("config", "url.*.insteadof"));
+        assert_eq!(sh(&d, &["rev-parse", "HEAD"]), mine);
+        assert!(!d.join("planted.txt").exists());
+        let _ = fs::remove_dir_all(home);
+    }
+
+    /// Where HEAD is, the remote-tracking branch and the stash, read without refreshing the index (which would run a filter).
+    fn state_quiet(d: &Path) -> (String, String, String) {
+        (sh(d, &["rev-parse", "HEAD"]), sh(d, &["rev-parse", "refs/remotes/origin/main"]), sh(d, &["stash", "list"]))
+    }
+
+    #[test]
     fn the_one_write_is_a_fast_forward_and_never_a_merge_rebase_stash_or_force() {
         assert_eq!(FAST_FORWARD[0], "merge");
-        assert!(FAST_FORWARD.contains(&"--ff-only") && FAST_FORWARD.contains(&"--no-overwrite-ignore"));
+        assert!(FAST_FORWARD.contains(&"--ff-only") && FAST_FORWARD.contains(&"--no-overwrite-ignore") && FAST_FORWARD.contains(&"--no-verify-signatures"));
         for w in ["--no-ff", "--ff", "--squash", "--rebase", "rebase", "stash", "--autostash", "reset", "--hard", "--force", "-f", "pull", "-X", "-s", "--allow-unrelated-histories", "--no-verify", "--overwrite-ignore"] {
             assert!(!FAST_FORWARD.contains(&w), "{w}");
         }

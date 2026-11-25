@@ -153,5 +153,6 @@ describe("the shell's answers to a clean-up", () => {
     expect(readReleased({ removed: true, kept: null, changed: null, unpushed: null, ignored: [] })).not.toHaveProperty("ignored");
     expect(readCleaned({ removed: ["kit/a", "main", 3], kept: [{ branch: "kit/b", why: "changes" }, { branch: "kit/c" }, null], cannot: "not_signed_in" })).toEqual({ removed: ["kit/a"], kept: [{ branch: "kit/b", why: "changes" }], cannot: "not_signed_in" });
     expect(readCleaned("x")).toEqual({ removed: [], kept: [], cannot: null });
+    expect(readCleaned({ removed: [], kept: [], cannot: "config", setting: "filter.lfs.smudge" })).toEqual({ removed: [], kept: [], cannot: "config", setting: "filter.lfs.smudge" });
   });
 });

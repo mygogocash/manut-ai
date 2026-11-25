@@ -38,9 +38,11 @@ export interface KeptLanesProps {
   open: KeptOpen | null;
   /** A line under the band after a removal that left the branch: git's words. */
   notice: string | null;
-  /** Why a clean-up left a folder, by branch (a code from the shell), and why it could not tell at all. */
+  /** Why a clean-up left a folder, by branch (a code from the shell), and why it could not tell at all, with the setting of the
+   *  project's own git config that stopped it (`config`). */
   why?: Record<string, string>;
   cannot?: string | null;
+  setting?: string | null;
   onShow: (lane: KeptLane) => void;
   onRemove: (lane: KeptLane) => void;
   onBranch: (on: boolean) => void;
@@ -95,7 +97,7 @@ export function KeptLanesView(p: KeptLanesProps) {
       )}
       {p.cannot && (
         <p className="mut lline" role="status" data-testid="kept-cannot">
-          {t(`lane.kept.cannot.${p.cannot}` as Key)}
+          {t(`lane.kept.cannot.${p.cannot}` as Key, { setting: p.setting || "?" })}
         </p>
       )}
       {p.rows.map((k) => {
@@ -203,6 +205,7 @@ export function KeptLanes({ root }: { root: string }) {
   const [notice, setNotice] = useState<string | null>(null);
   const [why, setWhy] = useState<Record<string, string>>({});
   const [cannot, setCannot] = useState<string | null>(null);
+  const [setting, setSetting] = useState<string | null>(null);
 
   // another project: nothing of the last one's stays on the page
   useEffect(() => {
@@ -211,6 +214,7 @@ export function KeptLanes({ root }: { root: string }) {
     setNotice(null);
     setWhy({});
     setCannot(null);
+    setSetting(null);
   }, [root]);
   // Settings › Worktrees: remove the folders of lanes whose pull request merged. Asked when the project opens and when the
   // window is looked at again, never on a timer, and at most once an hour for a project; the shell removes nothing with work
@@ -229,6 +233,7 @@ export function KeptLanes({ root }: { root: string }) {
         (got) => {
           if (!live) return;
           setCannot(got.cannot);
+          setSetting(got.setting ?? null);
           setWhy(Object.fromEntries(got.kept.map((k) => [k.branch, k.why])));
           if (got.removed.length > 0) {
             setNotice(got.removed.length === 1 ? t("lane.kept.cleanedOne") : t("lane.kept.cleanedMany", { n: got.removed.length }));
@@ -297,6 +302,7 @@ export function KeptLanes({ root }: { root: string }) {
       notice={notice}
       why={why}
       cannot={cannot}
+      setting={setting}
       onShow={(k) => void getHost().reveal(k.worktree).catch(() => undefined)}
       onRemove={(k) => setOpen({ worktree: k.worktree, changed: k.exists ? (k.changed ?? 0) : 0, ahead: k.ahead, branch: false, busy: false, why: null })}
       onBranch={(on) => open && setOpen({ ...open, branch: on, why: null })}

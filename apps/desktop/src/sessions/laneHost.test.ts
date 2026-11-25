@@ -176,7 +176,7 @@ describe("Settings › Source control through the hosts", () => {
 
   it("TauriHost asks the shell to pull a project's default branch with the folder only, and reads only a pull's answer", async () => {
     const h = new Host(() => ({ done: true, why: "pulled", branch: "main", remote: "origin", from: "a1b2c3d", to: "e4f5a6b", count: 2 }));
-    expect(await h.sourcePull("/Users/fon/web-app")).toEqual({ done: true, why: "pulled", branch: "main", remote: "origin", from: "a1b2c3d", to: "e4f5a6b", count: 2 });
+    expect(await h.sourcePull("/Users/fon/web-app")).toEqual({ done: true, why: "pulled", branch: "main", remote: "origin", from: "a1b2c3d", to: "e4f5a6b", count: 2, setting: "" });
     expect(h.sent).toEqual([{ cmd: "source_pull", args: { cwd: "/Users/fon/web-app" } }]);
     expect(await new Host(() => ({ why: "rebased" })).sourcePull("/w")).toBeNull();
   });

@@ -765,13 +765,14 @@ its choices kept on this computer by `src/lib/sourceControl.ts`). The page has t
   as coming back to the window does.
 - **Automatically pull** (default off). When on, the Code page asks `source_pull` for the project it opens and when the window is
   looked at again, at most every fifteen minutes for a project, never on a timer. `git_pull.rs` brings the default branch up to
-  date only when the folder is not a lane's; git is not partway through a rebase, merge, cherry-pick, revert or bisect and holds
+  date only when the folder is not a lane's; the repository's own config names no program for git to run and no other address to
+  fetch from (see "Git the app runs by itself" below); git is not partway through a rebase, merge, cherry-pick, revert or bisect and holds
   no index lock; the checkout is on a branch that tracks a remote branch and both are, by name, the remote's default branch (where
   `<remote>/HEAD` points, else `main`, else `master`, as the merged clean-up reads it); `git status --porcelain=v1
   --untracked-files=all --ignore-submodules=none` lists nothing (ignored files do not count); and `git rev-list --count HEAD --not
   --remotes` is 0. Then it fetches that one branch exactly as Start from the remote does (`lane::fetch_branch`, ten seconds, no
   password) and moves the checkout only when its commit is an ancestor of the fetched one, with `git merge --ff-only
-  --no-overwrite-ignore --no-autostash --no-stat <commit>`: a fast-forward git refuses otherwise, never a merge commit, a rebase,
+  --no-overwrite-ignore --no-autostash --no-verify-signatures --no-stat <commit>`: a fast-forward git refuses otherwise, never a merge commit, a rebase,
   a stash or a force; no hook runs. An ignored file does not count as a change, but it is never written over: git's default
   (`--overwrite-ignore`) would replace a person's ignored `.env` or `.mcp.json` with a tracked file an incoming commit adds at
   the same path, so the pull passes `--no-overwrite-ignore` and git's refusal is said as the folder having changes (item 86).
@@ -781,6 +782,27 @@ its choices kept on this computer by `src/lib/sourceControl.ts`). The page has t
   fetch, both moved).
 - **Default merge method** (default "The last one I chose", which starts as a merge commit) and **Remove agent credits when
   merging** (default off), for the asks below. The recognised credit lines are listed on the page as the code holds them.
+
+**Git the app runs by itself** (item 86). A repository's `.git/config` can come from someone else (a zip a freelancer sent), and
+git runs programs it names without asking: clean and smudge filters while it reads or checks out files, an ssh command, a
+credential helper, a remote of the `ext::` kind, and `url.<base>.insteadOf` sends a fetch elsewhere. The work the app starts by
+itself, never on a press (the automatic pull, the merged clean-up, a deleted chat's folder, the kept list's counts, the lane's
+Diff and the main-moved note), first reads `git config --list --show-scope --includes -z` (or `--local` on a git before 2.26)
+and does nothing while the repository's own scopes (`local`, `worktree`, and the files they include) name any of
+`filter.<driver>.clean`, `.smudge` or `.process`, `core.sshCommand`, `core.gitProxy`, `core.askPass`,
+`core.alternateRefsCommand`, `credential.helper` or `credential.<url>.helper`, `remote.<name>.uploadpack`, `.receivepack` or
+`.vcs`, a `remote.<name>.url` or `.pushurl` of the `<transport>::<address>` form, or `url.<base>.insteadOf` or
+`.pushInsteadOf` (`lane::risky_setting`). The pull says it in its one line with the setting's name (an address in it shown as
+`*`), the clean-up says it where it says it could not tell, a folder of a deleted chat is kept with that reason, the kept list
+reads no counts, and the Diff and the main-moved note fall back to what they show when they cannot read. The person's own global
+and system settings are theirs and stay as they are. What the app's runs switch off instead, so it is not refused: hooks
+(`core.hooksPath` pointed at a folder never made), `core.fsmonitor=false`, `--no-ext-diff --no-textconv` on every diff
+(`diff.external`, `diff.<driver>.command` and `.textconv`), `--no-verify-signatures` on the pull's write (`merge.verifySignatures`
+would run `gpg.program`), `protocol.ext.allow=never` on every automatic run, and a pager or an editor, which git starts only for a
+terminal (`GIT_PAGER=cat` too on the Diff). Work the person asked for by pressing something (a lane started, its fetch, a push
+and a pull request after a Yes, Remove) runs git with their settings and the repository's, as the same git in a terminal would,
+hooks and the file monitor aside: they chose to act on that project, and a refusal there would break a repository-local LFS or
+deploy-key ssh setup the person relies on.
 
 **Put up for review** (`code/Review.tsx`, under a lane's row and at the top of its pane, for a lane with a folder and a branch of
 its own and no open pull request yet). The link opens a draft: a title (the one commit's subject, else the lane's title) and a

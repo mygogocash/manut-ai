@@ -205,11 +205,13 @@ export function readReleased(raw: unknown): LaneReleased {
 }
 
 /** What a clean-up of merged lanes did (`lane_clean_merged`): the branches whose folders went, each folder left with why, and
- *  why it could not tell at all (`no_remote`, `not_installed`, `not_signed_in`). */
+ *  why it could not tell at all (`no_remote`, `not_installed`, `not_signed_in`, `config`: the project's own git config names a
+ *  program git would run, the setting in `setting`). */
 export interface LaneCleaned {
   removed: string[];
   kept: { branch: string; why: string }[];
   cannot: string | null;
+  setting?: string;
 }
 
 /** The shell's answer to `lane_clean_merged`, with anything that is not a name and a reason left out. */
@@ -222,5 +224,7 @@ export function readCleaned(raw: unknown): LaneCleaned {
         return isLaneBranch(str(o.branch)) && str(o.why) ? [{ branch: str(o.branch), why: str(o.why) }] : [];
       })
     : [];
-  return { removed, kept, cannot: typeof r.cannot === "string" && r.cannot ? r.cannot : null };
+  const out: LaneCleaned = { removed, kept, cannot: typeof r.cannot === "string" && r.cannot ? r.cannot : null };
+  if (typeof r.setting === "string" && r.setting) out.setting = r.setting;
+  return out;
 }

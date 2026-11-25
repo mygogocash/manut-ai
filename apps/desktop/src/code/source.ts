@@ -62,10 +62,12 @@ export interface Pulled {
   from: string;
   to: string;
   count: number;
+  /** `config`'s own: the setting of the project's own git config that stopped it, as git names it. */
+  setting: string;
 }
 
 /** The codes `source_pull` answers, each with words of its own (`pull.why.<code>`). */
-export const PULL_CODES = ["pulled", "current", "not_a_repository", "lane", "git_missing", "busy", "detached", "no_upstream", "not_default", "unread", "changes", "ahead", "fetch_failed", "diverged", "failed"] as const;
+export const PULL_CODES = ["pulled", "current", "not_a_repository", "lane", "git_missing", "config", "busy", "detached", "no_upstream", "not_default", "unread", "changes", "ahead", "fetch_failed", "diverged", "failed"] as const;
 export type PullCode = (typeof PULL_CODES)[number];
 
 /** The shell's answer, or null for one that is not a pull's. */
@@ -73,7 +75,7 @@ export function readPulled(v: unknown): Pulled | null {
   if (!isObj(v)) return null;
   const why = PULL_CODES.find((c) => c === v.why);
   if (!why) return null;
-  return { done: v.done === true && why === "pulled", why, branch: str(v.branch), remote: str(v.remote), from: str(v.from), to: str(v.to), count: num(v.count) };
+  return { done: v.done === true && why === "pulled", why, branch: str(v.branch), remote: str(v.remote), from: str(v.from), to: str(v.to), count: num(v.count), setting: str(v.setting) };
 }
 
 /** What a lane would be put up with (`review_draft`): its branch, base, and its commits' subjects, newest first. */

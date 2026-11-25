@@ -151,6 +151,11 @@ describe("what a clean-up left, said where the kept folders are listed", () => {
       expect(String(byId(p, "kept-cannot")[0].props.children)).toContain(words);
     }
     expect(byId(props({ rows: [], cannot: "not_signed_in" }), "kept-cannot")).toHaveLength(1);
+    // the project's own git config names a program: which setting, and that the app runs none of it by itself
+    expect(String(byId(props({ rows: [kept()], cannot: "config", setting: "credential.helper" }), "kept-cannot")[0].props.children)).toBe(
+      "Did not clean up: this project's own git settings name a program for git to run, or another address to fetch from (credential.helper). The app does not run those by itself.",
+    );
+    expect(text(props({ rows: [kept({ changed: null })], why: { "kit/promptpay-qr": "config" } }))).toEqual(["This project's own git settings name a program for git to run, so the clean-up did nothing here."]);
   });
 
   it("is written in every language", () => {

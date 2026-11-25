@@ -42,12 +42,14 @@ pub struct CleanKept {
 }
 
 /// What a clean-up did: the branches whose folders went, the folders left with why, and, when it could not tell at all, why
-/// (`no_remote`: the folder has no GitHub or GitLab remote, `not_installed`, `not_signed_in`).
+/// (`no_remote`: the folder has no GitHub or GitLab remote, `not_installed`, `not_signed_in`, `config`: the repository's own
+/// config names a program git would run or another address to fetch from, named in `setting`).
 #[derive(Debug, Serialize, PartialEq, Default)]
 pub struct Cleaned {
     pub removed: Vec<String>,
     pub kept: Vec<CleanKept>,
     pub cannot: Option<String>,
+    pub setting: Option<String>,
 }
 
 /// The `gh` or `glab` argv (after the program) that lists merged requests whose head branch is `branch`. `fields` are the
@@ -108,7 +110,7 @@ pub fn merged(home: &Path, cwd: &Path, held: &[String], tasks: &Tasks) -> Result
     if !cwd.is_absolute() || !cwd.is_dir() || crate::git_branch::git_dir(cwd).is_none() {
         return Ok(out);
     }
-    let git = Git::new(home)?;
+    let git = Git::automatic(home)?;
     let Some(repo) = git.common_dir(cwd) else { return Ok(out) };
     let mut mine: Vec<_> = records(home).into_iter().map(|(_, r)| r).filter(|r| real(Path::new(&r.repo)) == repo && Path::new(&r.worktree).is_dir() && !held.iter().any(|h| h == &r.worktree)).collect();
     // nothing to look at: nothing reaches the network
@@ -116,6 +118,13 @@ pub fn merged(home: &Path, cwd: &Path, held: &[String], tasks: &Tasks) -> Result
         return Ok(out);
     }
     mine.sort_by(|a, b| b.made.cmp(&a.made).then_with(|| a.worktree.cmp(&b.worktree)));
+    // the clean-up is the app's own doing: nothing is fetched or removed in a repository whose config names a program git
+    // would run (a credential helper, an ssh command, a clean filter) or another address to fetch from
+    if let Some(setting) = git.config_risk(cwd) {
+        out.cannot = Some("config".into());
+        out.setting = Some(setting);
+        return Ok(out);
+    }
     let Some(remote) = tasks::folder_remote(cwd) else {
         out.cannot = Some("no_remote".into());
         return Ok(out);
@@ -325,6 +334,20 @@ mod tests {
         assert_eq!(out, Cleaned::default());
         assert!(Path::new(&made.worktree).join(".git").exists());
         let _ = tip;
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn does_nothing_by_itself_in_a_repository_whose_own_config_names_a_program() {
+        let Some((home, d)) = repo("clean-config") else { return };
+        with_origin(&home, &d);
+        let (made, _) = lane(&home, &d, "c", true);
+        let (helper, marker) = crate::lane::tests::spy(&home, "helper", true);
+        sh(&d, &["config", "credential.helper", &helper]);
+        let out = merged(&home, &d, &[], &Tasks::default()).unwrap();
+        assert_eq!((out.cannot.as_deref(), out.setting.as_deref(), out.removed.len()), (Some("config"), Some("credential.helper"), 0), "{out:?}");
+        assert!(Path::new(&made.worktree).join(".git").exists());
+        assert!(!marker.exists());
         let _ = fs::remove_dir_all(home);
     }
 
