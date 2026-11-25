@@ -12,5 +12,6 @@
   color: var(--bg);
   font-size: 12px;
   pointer-events: none;
-  animation: pop 0.14s ease both;
+  --rise-by: calc(var(--arrive-by) * -1);
+  animation: var(--anim-arrive);
 }

@@ -2148,6 +2148,11 @@ export interface Actions {
   routinePause(shop: string | null, routine: string): Promise<{ routine: RoutineRow }>;
   routineResume(shop: string | null, routine: string): Promise<{ routine: RoutineRow }>;
   routineRemove(shop: string | null, routine: string): Promise<{ routine: string }>;
+  /** The Artifacts page (item 83): the shop's public links, and a publish or a removal of one by the id of the ask the person
+   *  settled with a yes (src/runtime/artifactAsks.ts). Nothing else can publish or remove a link. */
+  artifactsList(): Promise<OpMap["artifacts.list"]["result"]>;
+  artifactsPublish(ask: string): Promise<OpMap["artifacts.publish"]["result"]>;
+  artifactsRemove(ask: string): Promise<OpMap["artifacts.remove"]["result"]>;
   /** Tasks › Linear: whether `bot`'s config names a Linear MCP server (bridge `tasks.linear`, config only). */
   tasksLinear(bot: string): Promise<{ configured: boolean; server: string }>;
   /** Tasks › Start in thread: a new thread under `bot` titled `title`, opened, whose first message is `text`. */
@@ -3126,6 +3131,9 @@ export function createStore(bridge: BridgeLike, opts: StoreOptions = {}): Store 
     routinePause: (shop, routine) => bridge.request("routine.pause", { shop, routine }),
     routineResume: (shop, routine) => bridge.request("routine.resume", { shop, routine }),
     routineRemove: (shop, routine) => bridge.request("routine.remove", { shop, routine }),
+    artifactsList: () => bridge.request("artifacts.list", {}),
+    artifactsPublish: (ask) => bridge.request("artifacts.publish", { ask }),
+    artifactsRemove: (ask) => bridge.request("artifacts.remove", { ask }),
     tasksLinear: (bot) => (bridge.request as unknown as (op: string, p: unknown) => Promise<{ configured: boolean; server: string }>)("tasks.linear", { bot }),
     async startTaskThread(bot, title, text) {
       try {

@@ -247,7 +247,7 @@
   color: #fff;
   background: rgba(10, 8, 12, 0.55);
   opacity: 0;
-  transition: opacity 0.15s;
+  transition: opacity var(--tr-hover);
 }
 .be-av:hover .be-av-cover,
 .be-av:focus-visible .be-av-cover,
@@ -606,7 +606,6 @@
   border-radius: var(--r);
   background: var(--grp-bg);
   min-width: 0;
-  transition: border-color 0.12s, background 0.12s;
 }
 .bot-card:hover {
   border-color: var(--line-strong);
@@ -909,7 +908,7 @@
   flex: none;
   display: inline-flex;
   color: var(--muted);
-  transition: transform 0.15s ease;
+  transition: transform var(--tr-switch);
 }
 .pv-item.open .pv-chev {
   transform: rotate(90deg);

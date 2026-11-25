@@ -113,7 +113,6 @@
   font-size: 13px;
   font-weight: 500;
   color: var(--aui-muted);
-  transition: background 0.15s;
 }
 .home .mode[aria-pressed="true"] {
   background: var(--aui-surface);
@@ -130,12 +129,8 @@
   border-radius: var(--rad-pill);
   background: var(--aui-primary);
   color: var(--aui-on-primary);
-  transition: transform 0.2s;
   /* The desktop's own: on the canvas, Careful pushes Send to the right; Careful is left out, so Send does it itself. */
   margin-left: auto;
-}
-.home .send:active {
-  transform: scale(0.94);
 }
 
 /* The suggestions under the box. */
@@ -171,7 +166,6 @@
   color: var(--ink);
   font-size: 13px;
   white-space: nowrap;
-  transition: background 0.15s;
 }
 .home .chip:hover {
   background: var(--hov);
@@ -193,7 +187,6 @@
   font-size: 13px;
   font-weight: 500;
   white-space: nowrap;
-  transition: background 0.15s;
 }
 .mpage .btn:hover {
   background: var(--hov);
@@ -328,5 +321,5 @@
 .home .dotst.run {
   background: var(--aui-blue);
   /* The desktop's own: the dot pulses as the canvas's working tag does, so the row reads as live. */
-  animation: pulse 1.6s ease-in-out infinite;
+  animation: var(--anim-pulse);
 }

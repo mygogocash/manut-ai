@@ -121,8 +121,8 @@ for (const width of [1280, 900]) {
     await openZh(page);
     await page.getByTestId("nav-settings").click();
     await expect(page.locator(".head-title")).toHaveText("设置");
-    // Providers (item 74: the coding agents, your own agents and the accounts), the bots, General and Computer
-    const pages = ["providers", "bots", "bot-kami", "general", "computer"];
+    // Providers (item 74: the coding agents, your own agents and the accounts), the bots, General, Computer and Artifacts (item 83)
+    const pages = ["providers", "bots", "bot-kami", "general", "computer", "artifacts"];
     for (const id of pages) {
       await page.getByTestId(`settings-nav-${id}`).click();
       await expect(page.getByTestId(`settings-page-${id}`)).toBeVisible();

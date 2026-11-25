@@ -289,7 +289,6 @@
   border-radius: var(--rad);
   font-size: 14px;
   text-align: left;
-  transition: background 0.15s;
 }
 .frun .rad:hover {
   background: var(--hov);
@@ -303,7 +302,8 @@
   border-radius: var(--rad-pill);
   border: 1.5px solid var(--aui-border-strong);
   background: var(--aui-surface);
-  transition: box-shadow 0.2s;
+  /* the kit's radio: its dot answers a press on the curve */
+  transition: box-shadow var(--tr-press);
 }
 .frun .rad[aria-checked="true"]::before {
   border-color: var(--aui-primary);
@@ -394,13 +394,9 @@
   font-size: 13px;
   font-weight: 500;
   white-space: nowrap;
-  transition: background 0.15s, transform 0.2s;
 }
 .frun .btn:hover {
   background: var(--hov);
-}
-.frun .btn:active {
-  transform: scale(0.97);
 }
 .frun .btn.dark {
   border-color: var(--aui-primary);

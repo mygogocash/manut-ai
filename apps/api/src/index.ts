@@ -1,5 +1,13 @@
 import { auditAdminRoute } from "./audit-log";
 import { approvalsRoute } from "./approvals";
+import {
+  artifactPublicRoute,
+  artifactsRoute,
+  isArtifactHost,
+  isPublicArtifactPath,
+  publicFromJson,
+  publicNotFound,
+} from "./artifacts";
 import { feedRoute } from "./feed";
 import { AuthObject } from "./auth-object";
 import { hasAppleTokenShape } from "./auth";
@@ -108,6 +116,13 @@ export interface Env {
   PILOT_APPROVAL_LIMITER?: RateLimit;
   /// The outposts' own routes (browser-control.ts), which take an outpost's credential: one bucket per address.
   OUTPOST_LIMITER?: RateLimit;
+  /// Artifact links (artifacts.ts; docs/pilot-api.md, "Artifact links"; docs/turning-on.md). Built and off: ARTIFACT_LINKS is
+  /// the switch's default, which the operator's dynamic record overrides, and ARTIFACT_ORIGIN the links' own web address,
+  /// which must be a host of its own, never the app's. No environment sets either, so publishing answers feature_disabled
+  /// and no page is served anywhere. ARTIFACT_READ_LIMITER counts every request on the artifact host, per source address.
+  ARTIFACT_LINKS?: string;
+  ARTIFACT_ORIGIN?: string;
+  ARTIFACT_READ_LIMITER?: RateLimit;
   /// Making a shop of one's own (self-serve.ts; docs/pilot-api.md, "Making a shop of your own"). Built and off: the route
   /// answers `sign_ups_closed` until SELF_SERVE_SHOPS is exactly "on", which no environment sets: opening sign-ups is the
   /// owner's call. While it is on, every try counts against SELF_SERVE_SHOP_LIMITER, per source address.
@@ -180,11 +195,15 @@ function jsonBodyRefusal(request: Request, pathname: string): Response | null {
 /// an IPv6 /64 and never a whole IPv6 address, because one subscriber holds a whole
 /// /64 and rotating addresses inside it would otherwise give a fresh bucket each
 /// time. A source that cannot be read is refused, never given a bucket of its own.
-async function ingressRateGate(request: Request, pathname: string, env: Env): Promise<Response | null> {
+async function ingressRateGate(request: Request, pathname: string, env: Env, artifactHost = false):
+  Promise<Response | null> {
   let binding: RateLimit | undefined;
   const key = relaySourceGroup(request.headers.get("cf-connecting-ip"));
   const relay = relayPath(pathname);
-  if (request.method === "POST" && pathname === "/v1/auth/exchange") binding = env.AUTH_EXCHANGE_LIMITER;
+  // The artifact origin's host serves other people's pages to anyone with a link, so every request there counts, any
+  // method and any path, before a switch or an object is read (artifacts.ts).
+  if (artifactHost) binding = env.ARTIFACT_READ_LIMITER;
+  else if (request.method === "POST" && pathname === "/v1/auth/exchange") binding = env.AUTH_EXCHANGE_LIMITER;
   // Asking for a sign-in code sends an email, so it counts in a bucket of its own, keyed by the source group as the
   // exchange's is. The limits per email address and per source are the auth object's (email-code.ts).
   else if (request.method === "POST" && pathname === "/v1/auth/email/code") binding = env.AUTH_CODE_LIMITER;
@@ -387,9 +406,13 @@ export type FeatureFlags = {
   /// The shop's live feed (feed.ts, docs/pilot-api.md "The shop's live feed"): `GET /v1/feed` answers 403
   /// `feature_disabled` until it is on, and a TenantObject closes its feed's sockets once it reads off.
   shopFeed: boolean;
+  /// Artifact links (artifacts.ts, docs/pilot-api.md "Artifact links"): `POST /v1/artifacts` answers 403
+  /// `feature_disabled` and every link answers 404 until it is on.
+  artifactLinks: boolean;
 };
 
-const FLAG_KEYS = ["officeCloud", "officeRoutines", "officeExternalWrites", "officeInbound", "officeSharing", "shopFeed"] as const;
+const FLAG_KEYS = ["officeCloud", "officeRoutines", "officeExternalWrites", "officeInbound", "officeSharing", "shopFeed",
+  "artifactLinks"] as const;
 
 async function featureFlags(env: Env): Promise<FeatureFlags> {
   const defaults: FeatureFlags = {
@@ -399,6 +422,7 @@ async function featureFlags(env: Env): Promise<FeatureFlags> {
     officeInbound: env.OFFICE_INBOUND === "1",
     officeSharing: env.OFFICE_SHARING === "1",
     shopFeed: env.SHOP_FEED === "1",
+    artifactLinks: env.ARTIFACT_LINKS === "1",
   };
   try {
     const response = await authCall(env, "/flags");
@@ -417,6 +441,7 @@ async function featureFlags(env: Env): Promise<FeatureFlags> {
       officeSharing:
         typeof dynamic.officeSharing === "boolean" ? dynamic.officeSharing : defaults.officeSharing,
       shopFeed: typeof dynamic.shopFeed === "boolean" ? dynamic.shopFeed : defaults.shopFeed,
+      artifactLinks: typeof dynamic.artifactLinks === "boolean" ? dynamic.artifactLinks : defaults.artifactLinks,
     };
   } catch {
     return defaults;
@@ -664,6 +689,16 @@ async function taskWriteAssertions(
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
+    // Artifact links' public read (artifacts.ts): only on the artifact origin's host, where every request counts against its
+    // own limit first and every answer carries the page headers. A path under /a/ on any other host, the app's own above
+    // all, is the same 404 and reaches nothing, so another person's page never runs on Manut AI's origin.
+    const artifactHost = isArtifactHost(url, env);
+    if (artifactHost || isPublicArtifactPath(url.pathname)) {
+      if (!artifactHost) return publicNotFound();
+      const limited = await ingressRateGate(request, url.pathname, env, true);
+      if (limited) return publicFromJson(limited);
+      return artifactPublicRoute(request, url, env, () => featureFlags(env));
+    }
     // One origin (docs/pilot-api.md): this Worker is the front door, and every path outside the API goes to the
     // pages Worker. This Worker keeps no static assets of its own: Cloudflare runs a Worker with assets behind a
     // router that does not pass ctx.access, and the admin gate below needs it (pages.ts).
@@ -1223,6 +1258,11 @@ export default {
     // `shopFeed` is turned on.
     const feed = await feedRoute(request, url, env, () => featureFlags(env));
     if (feed) return feed;
+
+    // Artifact links (artifacts.ts): the owner's list, a publish after the desktop's ask, and a removal, with the shop's
+    // session. Publishing is off until `artifactLinks` is on and ARTIFACT_ORIGIN is set.
+    const artifacts = await artifactsRoute(request, url, env, () => featureFlags(env));
+    if (artifacts) return artifacts;
 
     // Exact-action approvals. Proposals and decisions pass through to the
     // task's ledger; dispatch runs the broker, which re-verifies everything

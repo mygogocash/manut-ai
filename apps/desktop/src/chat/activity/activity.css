@@ -62,7 +62,7 @@
   background: var(--g-accent);
   flex: none;
   white-space: nowrap;
-  animation: pop 0.22s ease both;
+  animation: var(--anim-rise);
 }
 
 /* the live line stays short: a capped width with one line and an ellipsis; the full text is the hover title */
@@ -76,7 +76,7 @@
   overflow: hidden;
 }
 
-/* ticker: old text leaves upward, new text arrives from below */
+/* ticker: one step of Roll, as the Ticker in ui.css: the new text rises a line from below, the old leaves up, quicker */
 .act-tick {
   position: relative;
   display: block;
@@ -98,10 +98,12 @@
   position: absolute;
   inset: 0 auto auto 0;
   width: 100%;
-  animation: act-out 0.22s ease forwards;
+  --leave-by: -100%;
+  animation: var(--anim-leave);
 }
 .act-tick-t.in {
-  animation: act-in 0.22s ease both;
+  --rise-by: 100%;
+  animation: var(--anim-rise);
 }
 .act-tick code,
 .act-det code {
@@ -111,27 +113,6 @@
   padding: 0;
   color: var(--body);
 }
-@keyframes act-out {
-  from {
-    transform: translateY(0);
-    opacity: 1;
-  }
-  to {
-    transform: translateY(-100%);
-    opacity: 0;
-  }
-}
-@keyframes act-in {
-  from {
-    transform: translateY(100%);
-    opacity: 0;
-  }
-  to {
-    transform: none;
-    opacity: 1;
-  }
-}
-
 .act-sum {
   min-width: 0;
   white-space: nowrap;
@@ -155,7 +136,8 @@
   display: inline-flex;
   color: var(--quiet);
   flex: none;
-  transition: transform 0.2s;
+  /* a chevron turns as the kit's accordion's does: the Switch on the curve */
+  transition: transform var(--tr-switch);
 }
 .act.open .act-chev {
   transform: rotate(90deg);
@@ -218,20 +200,6 @@
   font-size: 8px;
   width: 8px;
   margin-right: -4px;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .act-tick-t.in,
-  .act-skill {
-    animation: none !important;
-  }
-  .act-tick-t.out {
-    display: none;
-  }
-  .act-chev,
-  .sa-chev {
-    transition: none;
-  }
 }
 
 /* fan-out card: one per delegate_task, one row per subagent. No fill, a 1px line, 6px corners. */
@@ -377,7 +345,7 @@
   display: inline-flex;
   color: var(--quiet);
   flex: none;
-  transition: transform 0.2s;
+  transition: transform var(--tr-switch);
 }
 .sa-edit.open .sa-chev {
   transform: rotate(90deg);

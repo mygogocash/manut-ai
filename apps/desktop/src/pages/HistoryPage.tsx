@@ -6,6 +6,8 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { hhmm } from "../app/time";
 import { t, type Key } from "../i18n";
+import type { ShopRow } from "../lib/protocol";
+import { helpedShop } from "../lib/shops";
 import type { JobRow } from "../runtime/mission";
 import { selectSidebarBots, useStore, type Actions, type AppState } from "../state/store";
 import { homeBot } from "../sidebar/menu";
@@ -14,6 +16,7 @@ import type { ThreadStatus } from "../threads/status";
 import { MenuIcon, SearchGlyph } from "../sidebar/menuIcons";
 import { Avatar } from "../ui";
 import { Empty, MenuPageFrame } from "./MenuPage";
+import { OwnersOnly } from "./OwnersOnly";
 import { byDay, dayBand, historyEntries, jobLane, lanesPresent, matchWords, threadLane, type HistoryLane, type LaneWho } from "./history";
 import { kitOf } from "./home";
 import { stageTag } from "./job";
@@ -234,7 +237,14 @@ export function HistoryView({
   older,
   archive,
   nowMs = Date.now(),
+  helped = null,
+  onNeeds,
 }: {
+  /** The shop shown, when the person only helps there: its past work and its activity log are its owner's, so the page says
+   *  whose they are in place of the list, the search and the log's button. */
+  helped?: Pick<ShopRow, "name" | "owner"> | null;
+  /** opens Needs you, from the words a helper's shop shows */
+  onNeeds?: () => void;
   days: HistoryDayView[];
   /** The chats the person archived (`historyArchive`): drawn as the Archive under the days, with a way to bring each back. */
   archive?: HistoryRowView[];
@@ -255,6 +265,14 @@ export function HistoryView({
   /** the runtime has older work than the list holds, or Show older has shown all of it (older.ts): the line and the button under the list */
   older?: OlderView;
 }) {
+  if (helped)
+    return (
+      <MenuPageFrame page="history" title={t("menu.history")}>
+        <div className="pane">
+          <OwnersOnly shop={helped} screen="history" icon={<MenuIcon row="history" />} onNeeds={onNeeds} />
+        </div>
+      </MenuPageFrame>
+    );
   const find = (
     <div className="find" role="search">
       <SearchGlyph />
@@ -397,6 +415,8 @@ export function HistoryPage() {
       lane={lane}
       onLane={setPicked}
       older={older ? { state: older, ui: more.ui, onShow: more.show } : undefined}
+      helped={helpedShop(s.shops)}
+      onNeeds={() => s.openPage("needs")}
     />
   );
 }

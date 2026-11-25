@@ -1,5 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import { approvalIndexRoute, readyOnFirstTask, stepBackfill, wipeApprovalIndex } from "./approval-index";
+import { artifactTenantRoute, wipeArtifactsTenant } from "./artifact-store";
 import { actorOr, auditPut, auditTenantRoute, wipeAuditTenant } from "./audit-log";
 import { readJsonBody } from "./body";
 import { isValidTenant } from "./companies";
@@ -209,6 +210,11 @@ export class TenantObject extends DurableObject {
     if (url.pathname === "/people" || url.pathname.startsWith("/people/")) {
       return peopleTenantRoute(this.ctx.storage, request, url, () => this.feed.touch());
     }
+    // The shop's artifact links: its pages published as links anyone with them can open, and the public read's lookup
+    // (artifact-store.ts). A link names this object by its own id, which the store is given to write into a new link.
+    if (url.pathname === "/artifacts" || url.pathname.startsWith("/artifacts/")) {
+      return artifactTenantRoute(this.ctx.storage, request, url, this.ctx.id.toString());
+    }
     // Which task holds each of the shop's approval requests, and which may still be open (approval-index.ts).
     if (request.method === "POST" && url.pathname === "/approvals/backfill") {
       return this.backfillStep(request);
@@ -414,8 +420,10 @@ export class TenantObject extends DurableObject {
   /// override, monthly totals and their crossings of the cap, reservations,
   /// per-call records, and the crossings' notice for AuthObject), audit log
   /// (entries and the miss count), memory (facts and the fingerprints of
-  /// forgotten texts) and people (helpers, invites and every helper
-  /// session, so no helper can open a deleted shop), then writes a tombstone.
+  /// forgotten texts), people (helpers, invites and every helper
+  /// session, so no helper can open a deleted shop) and artifact links (every
+  /// page and its way in, so no link of the shop opens again), then writes a
+  /// tombstone.
   /// Sessions are wiped by AuthObject through the worker; the tombstone
   /// proves the deletion happened and marks any data that reappears
   /// afterwards as new, never restored.
@@ -440,6 +448,7 @@ export class TenantObject extends DurableObject {
     await wipeMemoryTenant(this.ctx.storage, body.tenant);
     await wipePeopleTenant(this.ctx.storage, body.tenant);
     await wipeAuditTenant(this.ctx.storage, body.tenant);
+    await wipeArtifactsTenant(this.ctx.storage, body.tenant);
     const tombstone = { deletedAt: new Date().toISOString(), tasksWiped: ids.length };
     await this.ctx.storage.put(`tomb:${body.tenant}`, tombstone);
     // The shop is gone, and so is every session that followed it: its sockets close, and each desktop learns why from

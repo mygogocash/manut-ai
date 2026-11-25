@@ -105,7 +105,7 @@
   font-size: 12px;
   font-weight: 500;
   white-space: nowrap;
-  transition: background 0.12s;
+  transition: background-color var(--tr-hover);
 }
 .omh-pop-go:hover:not(:disabled) {
   background: var(--raise);
@@ -208,7 +208,7 @@
   gap: 10px;
   align-items: center;
   padding: 8px var(--side-x);
-  transition: background 0.12s;
+  transition: background-color var(--tr-hover);
   border-radius: var(--r);
   text-align: left;
   width: 100%;
@@ -552,7 +552,9 @@ button.upd:hover {
   display: grid;
   place-items: center;
   background: rgba(4, 3, 6, 0.7);
-  animation: upd-fade 0.12s ease both;
+  /* the veil and its card fade in (an overlay's Rise without the distance): the card is an ask, so it never moves */
+  --rise-by: 0px;
+  animation: var(--anim-arrive);
 }
 [data-theme="light"] .upd-veil {
   background: rgba(20, 16, 22, 0.32);
@@ -567,7 +569,7 @@ button.upd:hover {
   color: var(--body);
   font-size: 12.5px;
   line-height: 1.5;
-  animation: pop 0.16s ease both;
+  animation: var(--anim-arrive);
 }
 .upd-dlg-t {
   margin: 0 0 6px;
@@ -616,17 +618,6 @@ button.upd:hover {
 .upd-dlg-btn:focus-visible {
   outline: 2px solid var(--line-strong);
   outline-offset: 2px;
-}
-@keyframes upd-fade {
-  from {
-    opacity: 0;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .upd-veil,
-  .upd-dlg {
-    animation: none;
-  }
 }
 .upd-err {
   flex-basis: 100%;
@@ -971,7 +962,7 @@ button.upd:hover {
   display: grid;
   place-items: center;
   color: var(--muted);
-  transition: transform 0.12s;
+  transition: transform var(--tr-switch);
 }
 .needs-w.open .needs-chev {
   transform: rotate(180deg);
@@ -1098,7 +1089,7 @@ button.upd:hover {
 /* ---- hold to drag (useRowDrag) ---------------------------------------------------------------------- */
 /* while a row is held the others slide out of its way; the held row follows the pointer with no easing */
 .bot-w.sliding {
-  transition: transform 0.16s ease;
+  transition: transform var(--tr-slide);
 }
 .bot-w.lifted {
   z-index: 2;
@@ -1123,11 +1114,6 @@ body.row-dragging,
 body.row-dragging * {
   cursor: grabbing !important;
   user-select: none;
-}
-@media (prefers-reduced-motion: reduce) {
-  .bot-w.sliding {
-    transition: none;
-  }
 }
 .bot-more {
   position: absolute;
@@ -1202,7 +1188,8 @@ body.row-dragging .bot-w .bot-new {
   border-radius: var(--r);
   padding: 4px;
   box-shadow: var(--pop-shadow);
-  animation: pop 0.14s ease both;
+  --rise-by: calc(var(--arrive-by) * -1);
+  animation: var(--anim-arrive);
   display: flex;
   flex-direction: column;
 }
@@ -1366,7 +1353,8 @@ body.row-dragging .bot-w .bot-new {
   border: 1px solid var(--line);
   border-radius: var(--r);
   box-shadow: var(--pop-shadow);
-  animation: pop 0.14s ease both;
+  --rise-by: calc(var(--arrive-by) * -1);
+  animation: var(--anim-arrive);
 }
 .rs-act:focus-visible {
   outline: 1px solid var(--line-strong);
@@ -1388,10 +1376,11 @@ body.row-dragging .bot-w .bot-new {
 
 
 /* ---- The dock: the bots scrolled out of view above BOTS, as Arc-favourites tiles above the account row (Dock.tsx);
-   only while BOTS is scrolled, fading and sliding in and out ---------------------------------------------------- */
+   only while BOTS is scrolled, rising in and fading out ---------------------------------------------------- */
 .dock {
   flex: none;
-  animation: dk-in 150ms ease-out;
+  --rise-by: var(--arrive-by);
+  animation: var(--anim-arrive);
   display: grid;
   /* the tiles fill each row (Arc): Dock.tsx sets the column count so no tile is left alone on a row (4 = 2x2) */
   grid-template-columns: repeat(6, minmax(0, 1fr));
@@ -1409,7 +1398,6 @@ body.row-dragging .bot-w .bot-new {
   border-radius: 9px;
   background: var(--raise2);
   border: 1px solid transparent;
-  transition: background 0.12s;
   touch-action: none;
 }
 .dk-t:hover {
@@ -1459,7 +1447,7 @@ body.row-dragging .bot-w .bot-new {
   border: 1.5px solid color-mix(in srgb, var(--dk-run, var(--spin)) 22%, transparent);
   border-top-color: var(--dk-run, var(--spin));
   border-right-color: var(--dk-run, var(--spin));
-  animation: dk-turn 1.1s linear infinite;
+  animation: var(--anim-spin);
   pointer-events: none;
 }
 .dk-dot {
@@ -1477,32 +1465,9 @@ body.row-dragging .bot-w .bot-new {
 .dk-dot.failed {
   background: #e5484d;
 }
+/* leaving: it fades where it stands, faster than it came (Dock.tsx waits DOCK_FADE_MS, motion.css's --move-leave) */
 .dock.out {
-  animation: dk-out 150ms ease-in forwards;
-}
-@keyframes dk-in {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-}
-@keyframes dk-out {
-  to {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-}
-@keyframes dk-turn {
-  to {
-    transform: rotate(360deg);
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .dk-t.ring::after,
-  .dock,
-  .dock.out {
-    animation: none;
-  }
+  animation: var(--anim-leave);
 }
 /* a sidebar too narrow for three tiles hides the dock (a short window keeps one row: Dock.tsx) */
 .side {

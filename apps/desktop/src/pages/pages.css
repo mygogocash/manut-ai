@@ -70,7 +70,7 @@
   flex: none;
   background: var(--raise2);
   color: var(--quiet);
-  transition: background 0.2s, color 0.2s;
+  transition: var(--tr-control);
 }
 .pg-ask.has .pg-send {
   background: var(--g-accent);
@@ -318,7 +318,7 @@
   position: relative;
   background: var(--toggle-off);
   box-shadow: inset 0 0 0 1px var(--toggle-off-line);
-  transition: background 0.15s;
+  transition: var(--tr-switch-track);
 }
 .pg-tog > span {
   position: absolute;
@@ -328,7 +328,7 @@
   height: 12px;
   border-radius: 50%;
   background: var(--quiet);
-  transition: transform 0.15s, background 0.15s;
+  transition: var(--tr-switch-thumb);
 }
 .pg-tog[aria-checked="true"] {
   background: var(--body);

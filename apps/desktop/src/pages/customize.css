@@ -129,7 +129,6 @@
   font-size: 13px;
   font-weight: 500;
   white-space: nowrap;
-  transition: background 0.15s;
 }
 .brain .btn:hover {
   background: var(--hov);
@@ -264,7 +263,7 @@
   border-radius: var(--rad-pill);
   background: var(--toggle-off);
   box-shadow: inset 0 0 0 1px var(--toggle-off-line);
-  transition: background 0.2s;
+  transition: var(--tr-switch-track);
 }
 .brain .sw::after {
   content: "";
@@ -276,7 +275,7 @@
   border-radius: var(--rad-pill);
   background: #ffffff;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
-  transition: transform 0.25s;
+  transition: var(--tr-switch-thumb);
 }
 .brain .sw[aria-checked="true"]::before {
   background: var(--aui-primary);
@@ -295,12 +294,6 @@
   outline: 2px solid var(--focus);
   outline-offset: 2px;
   border-radius: var(--rad);
-}
-@media (prefers-reduced-motion: reduce) {
-  .brain .sw::before,
-  .brain .sw::after {
-    transition: none;
-  }
 }
 
 /* The New routine form: a boxed set of short fields, in the routines column. */

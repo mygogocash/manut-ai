@@ -94,4 +94,7 @@
   color: var(--muted);
   white-space: nowrap;
   pointer-events: none;
+  /* a tooltip shown because the pointer passed over a link: it fades in where it is and never moves */
+  --rise-by: 0px;
+  animation: var(--anim-arrive);
 }
