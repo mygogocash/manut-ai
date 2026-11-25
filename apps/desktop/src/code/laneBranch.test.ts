@@ -95,9 +95,11 @@ describe("where a session's agent works", () => {
 
 describe("the shell's answers about a lane's folder", () => {
   it("takes a made folder only with a branch Kit makes and absolute folders", () => {
-    const ok = { branch: "kit/qr", base: "main", dir: "/h/.manut/lanes/a/qr", worktree: "/h/.manut/lanes/a/qr", left: 2, from: "", local: "" };
+    const ok = { branch: "kit/qr", base: "main", dir: "/h/.manut/lanes/a/qr", worktree: "/h/.manut/lanes/a/qr", left: 2, from: "", local: "", config: 3, stayed: 1 };
     expect(readMade(ok)).toEqual(ok);
     expect(readMade({ ...ok, left: undefined })).toEqual({ ...ok, left: 0 });
+    // a shell older than item 72 says nothing of the agent settings that came along
+    expect(readMade({ ...ok, config: undefined, stayed: -1 })).toEqual({ ...ok, config: 0, stayed: 0 });
     for (const bad of [null, "x", { ...ok, branch: "main" }, { ...ok, dir: "relative" }, { ...ok, worktree: "" }, { ...ok, base: "" }]) expect(readMade(bad), JSON.stringify(bad)).toBeNull();
   });
 

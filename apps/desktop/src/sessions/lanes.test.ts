@@ -80,7 +80,7 @@ async function setup(over: { branch?: string; left?: number; laneWorktree?: Sess
     const dir = laneDir(names[0], cwd);
     // the lane's folder is on its own branch; the developer's stays where it was
     s.folders[dir] = names[0];
-    return { branch: names[0], base: s.folders[cwd], dir, worktree: dir, left: over.left ?? 0, from: "", local: "", ...over.made } satisfies LaneMade;
+    return { branch: names[0], base: s.folders[cwd], dir, worktree: dir, left: over.left ?? 0, from: "", local: "", config: 0, stayed: 0, ...over.made } satisfies LaneMade;
   };
   const release = over.release
     ? {
@@ -134,6 +134,20 @@ test("the chat says where the lane works and what did not come along", async () 
   expect(said).toContain("Nothing is installed in it yet. Kit asks before it installs anything.");
   const quiet = await setup();
   expect(quiet.notes(await quiet.startIn("Fix the totals"))[0]).not.toContain("did not come along");
+});
+
+test("the chat says how many of the project's own agent settings came along, and which stayed and why", async () => {
+  const t = await setup({ made: { config: 3, stayed: 2 } });
+  const [said] = t.notes(await t.startIn("Fix the totals"));
+  expect(said).toContain("3 of your own agent settings files that git does not hold came along (MCP servers, skills and local settings), kept out of git in the lane.");
+  expect(said).toContain("2 agent settings files stayed in your folder: git would see them in the lane, so they could be committed.");
+  const one = await setup({ made: { config: 1, stayed: 1 } });
+  const [once] = one.notes(await one.startIn("Fix the totals"));
+  expect(once).toContain("1 of your own agent settings files");
+  expect(once).toContain("1 agent settings file stayed in your folder");
+  // nothing to say when none came and none stayed
+  const quiet = await setup();
+  expect(quiet.notes(await quiet.startIn("Fix the totals"))[0]).not.toContain("agent settings");
 });
 
 test("makes a lane from a detached commit, and a name for a first message with no words", async () => {

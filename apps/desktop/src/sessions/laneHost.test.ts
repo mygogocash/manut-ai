@@ -24,7 +24,7 @@ describe("TauriHost: a lane's folder", () => {
 
   it("asks the shell for a folder of its own with the names to try, and believes only a folder it can use", async () => {
     const h = new Host(() => ({ branch: "kit/qr", base: "main", dir, worktree: dir, left: 1 }));
-    expect(await h.laneWorktree("/Users/fon/web-app", ["kit/qr", "kit/qr-2"])).toEqual({ branch: "kit/qr", base: "main", dir, worktree: dir, left: 1, from: "", local: "" });
+    expect(await h.laneWorktree("/Users/fon/web-app", ["kit/qr", "kit/qr-2"])).toEqual({ branch: "kit/qr", base: "main", dir, worktree: dir, left: 1, from: "", local: "", config: 0, stayed: 0 });
     expect(h.sent).toEqual([{ cmd: "lane_worktree", args: { cwd: "/Users/fon/web-app", names: ["kit/qr", "kit/qr-2"], start: null } }]);
     // Settings › Worktrees go with the call, and the shell says where the lane started
     const r = new Host(() => ({ branch: "team/ana/qr", base: "main", dir, worktree: dir, left: 0, from: "origin/main", local: "" }));
@@ -34,6 +34,26 @@ describe("TauriHost: a lane's folder", () => {
     await expect(new Host(() => ({ branch: "kit/qr", base: "main" })).laneWorktree("/w", ["kit/qr"])).rejects.toThrow("no_folder");
   });
 
+  it("says how many of the project's own agent settings came along and how many stayed", async () => {
+    const h = new Host(() => ({ branch: "kit/qr", base: "main", dir, worktree: dir, left: 0, config: 4, stayed: 1 }));
+    expect(await h.laneWorktree("/w", ["kit/qr"])).toMatchObject({ config: 4, stayed: 1 });
+    const { h: m } = new MockSetup().make({ __manutConfig: { "/w": 3 }, __manutStayed: { "/w": 2 }, __manutBranches: { "/w": "main" } });
+    expect(await m.laneWorktree("/w", ["kit/qr"])).toMatchObject({ config: 3, stayed: 2 });
+  });
+
+  it("asks the shell for the MCP servers and skills by name, with the project when one is chosen", async () => {
+    const answer = [{ agent: "claude", found: true, servers: [{ name: "github", from: "home", state: "on", command: "gh-mcp", env: { T: "sk-SECRET" } }], skills: [] }];
+    const h = new Host(() => answer);
+    expect(await h.agentConfig("/Users/fon/web-app")).toEqual([{ agent: "claude", found: true, servers: [{ name: "github", from: "home", state: "on" }], skills: [] }]);
+    expect(await h.agentConfig()).toHaveLength(1);
+    expect(h.sent).toEqual([
+      { cmd: "agent_config_list", args: { cwd: "/Users/fon/web-app" } },
+      { cmd: "agent_config_list", args: { cwd: null } },
+    ]);
+    // a browser cannot read this computer's files
+    expect(await new MockSetup().make({}).h.agentConfig()).toBeNull();
+  });
+
   it("lists and removes with the numbers the person saw", async () => {
     const h = new Host((cmd) => (cmd === "lane_list" ? [{ worktree: dir, dir, branch: "kit/qr", base: "main", made: 3, exists: true, changed: 2, ahead: null, unpushed: 1 }, { nope: 1 }] : { removed: true, deleted: false, changed: null, ahead: null, error: null }));
     expect(await h.laneList("/Users/fon/web-app")).toEqual([{ worktree: dir, dir, branch: "kit/qr", base: "main", made: 3, exists: true, changed: 2, ahead: null, unpushed: 1 }]);
@@ -41,6 +61,13 @@ describe("TauriHost: a lane's folder", () => {
     expect(h.sent[1]).toEqual({ cmd: "lane_remove", args: { worktree: dir, ask: { changed: 2, branch: true, ahead: 0 } } });
   });
 });
+
+/** A browser stand-in with the given globals. */
+class MockSetup {
+  make(g: Record<string, unknown>) {
+    return { h: new MockHost({ __manutSessionCalls: [] as MockCall[], ...g } as never) };
+  }
+}
 
 describe("MockHost: a lane's folder, as the shell makes it", () => {
   const DEV = "/home/you/code/web-app";
@@ -53,7 +80,7 @@ describe("MockHost: a lane's folder, as the shell makes it", () => {
     const { h, g } = host({ __manutLeft: { [DEV]: 2 } });
     const a = await h.laneWorktree(DEV, ["kit/qr"]);
     const b = await h.laneWorktree(DEV, ["kit/qr", "kit/qr-2"]);
-    expect(a).toEqual({ branch: "kit/qr", base: "main", dir: "/home/you/.manut/lanes/web-app/qr", worktree: "/home/you/.manut/lanes/web-app/qr", left: 2, from: "", local: "" });
+    expect(a).toEqual({ branch: "kit/qr", base: "main", dir: "/home/you/.manut/lanes/web-app/qr", worktree: "/home/you/.manut/lanes/web-app/qr", left: 2, from: "", local: "", config: 0, stayed: 0 });
     expect(b).toMatchObject({ branch: "kit/qr-2", base: "main", dir: "/home/you/.manut/lanes/web-app/qr-2" });
     expect(await h.branch(DEV)).toBe("main");
     expect(await h.branch(a.dir)).toBe("kit/qr");

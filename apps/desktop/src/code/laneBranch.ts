@@ -53,6 +53,11 @@ export interface LaneMade {
   /** Why it started from the local branch though Start from the remote was on (`no_remote`, `fetch_failed`, `detached`,
    *  `ahead`, `diverged`, `not_in_remote`); "" when it was off or the remote was used. */
   local: string;
+  /** How many of the project's own agent settings files that git does not hold came along (an ignored `.mcp.json`, local
+   *  settings, untracked skills), each kept out of git in the lane (src-tauri/src/lane_config.rs); `stayed`: how many did not,
+   *  because git would see them there, or they are links or too big. Both 0 from a shell older than item 72. */
+  config: number;
+  stayed: number;
 }
 
 /** A lane's working folder the app made, as the shell lists it (`lane_list`): still there or not, how many of its files are
@@ -150,7 +155,7 @@ const count = (v: unknown): number | null => (typeof v === "number" && Number.is
 export function readMade(raw: unknown): LaneMade | null {
   if (!raw || typeof raw !== "object") return null;
   const r = raw as Record<string, unknown>;
-  const made = { branch: str(r.branch), base: str(r.base), dir: str(r.dir), worktree: str(r.worktree), left: count(r.left) ?? 0, from: str(r.from), local: str(r.local) };
+  const made = { branch: str(r.branch), base: str(r.base), dir: str(r.dir), worktree: str(r.worktree), left: count(r.left) ?? 0, from: str(r.from), local: str(r.local), config: count(r.config) ?? 0, stayed: count(r.stayed) ?? 0 };
   const abs = (p: string) => p.startsWith("/") || /^[A-Za-z]:[\\/]/.test(p);
   return isLaneBranch(made.branch) && made.base && abs(made.dir) && abs(made.worktree) ? made : null;
 }
