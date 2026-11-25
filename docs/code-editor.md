@@ -676,8 +676,14 @@ another's files or the developer's folder.
   and the dial asks first, as for any install.
 - **When a folder goes.** When its session is closed (the chat is deleted), once its agent stopped, and Settings › Worktrees'
   "Remove the folder when its chat is deleted" is on (it is, by default), `lane_release` removes it only if nothing in it is
-  changed or new (what git ignores goes with it), git is not partway through a rebase, merge, cherry-pick, revert or bisect
-  there, and every commit on its branch is on a remote (`git rev-list --count refs/heads/<branch> --not --remotes` is 0).
+  changed or new, git is not partway through a rebase, merge, cherry-pick, revert or bisect there, every commit on its branch
+  is on a remote (`git rev-list --count refs/heads/<branch> --not --remotes` is 0), and nothing git ignores in it may be the
+  developer's own (item 86). `git worktree remove` takes ignored files without a word, so the folder's ignored files are listed
+  first (`git ls-files --others --ignored --exclude-standard --directory`): only what a project rebuilds (inside a folder of
+  `turn_files::REBUILT`, the list Rewind already leaves out: `node_modules`, `target`, `dist`, `build`, `.next`, `.venv` and the
+  rest), the system's own files (`.DS_Store`, `Thumbs.db`, `desktop.ini`) and the agent settings item 72 copied in (and the
+  `.gitignore` it writes in an agent folder it makes) may go with it. Anything else, a `.env.local` or a local database made
+  in the lane, keeps the folder, and the kept list names the first of those files; Remove's panel names them as going too.
   The branch stays, and no force flag is ever passed: the removal is `git worktree remove <folder>`, which git itself refuses
   for a locked worktree or one holding files it will not take. A folder kept for commits on no remote says so in the kept
   list. With the switch off, every folder of a deleted chat is kept and listed. A folder with changes is kept and listed under the lanes
@@ -715,7 +721,8 @@ another's files or the developer's folder.
     --json headRefOid,mergedAt --limit 10` (GitLab: `glab mr list --repo <r> --source-branch <branch> --merged --output json
     --per-page 10`), and removes the folder only when a merged request exists, the branch's tip is in the default branch on the
     remote (fetched first, one branch) or, on GitHub, is exactly the commit that merged (what a squash merge leaves), and then
-    `lane_release`'s checks pass: nothing changed or new, git not busy there, and no session still works in it. The branch
+    `lane_release`'s checks pass: nothing changed or new, nothing ignored that may be the developer's, git not busy there, and
+    no session still works in it. The branch
     stays. Each folder it leaves is listed with why (not merged, not in the default branch yet, changes of its own, ...).
 - **While the session is listed** the folder stays, through the agent's end, a Restart and a restart of the app: a lane's
   branch and folder are saved with its session, so Resume and Restart start its agent in its own folder again, never in the

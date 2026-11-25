@@ -132,6 +132,19 @@ describe("what a clean-up left, said where the kept folders are listed", () => {
     expect(text(p)).toEqual(["It has changes of its own, so the clean-up left it.", "Its pull request merged, but its commits are not in the default branch yet.", "Its pull request has not merged."]);
   });
 
+  it("names the files git ignores that a clean-up left a folder for, and says Remove takes them", () => {
+    const files = [".env.local", "data/", "dev.db"];
+    expect(text(props({ rows: [kept({ changed: 0, ignored: files })] }))).toEqual(["It holds files git ignores that may be yours (.env.local, data/, dev.db), so a clean-up leaves it. Remove takes them with it."]);
+    expect(text(props({ rows: [kept({ changed: 0, ignored: files })], why: { "kit/promptpay-qr": "ignored" } }))[0]).toContain(".env.local, data/, dev.db");
+    // the merged clean-up's reason alone, before the list read the folder
+    expect(text(props({ rows: [kept({ changed: 0 })], why: { "kit/promptpay-qr": "ignored" } }))).toEqual(["It holds files git ignores that may be yours, so the clean-up left it."]);
+    // more than five are cut, and the Remove panel names them as going too
+    const many = ["a", "b", "c", "d", "e", "f"].map((x) => `${x}.db`);
+    expect(text(props({ rows: [kept({ changed: 0, ignored: many })] }))[0]).toContain("a.db, b.db, c.db, d.db, e.db, …");
+    expect(String(byId(props({ rows: [kept({ ignored: files })], open: opened() }), "kept-lose-ignored")[0].props.children)).toBe("Files git ignores in it go with it too: .env.local, data/, dev.db.");
+    expect(byId(props({ rows: [kept()], open: opened() }), "kept-lose-ignored")).toHaveLength(0);
+  });
+
   it("says it could not tell, and why, even with no folder to list", () => {
     for (const [code, words] of [["no_remote", "remote is not on GitHub or GitLab"], ["not_installed", "gh or glab is not installed"], ["not_signed_in", "gh or glab is not signed in"]]) {
       const p = props({ rows: [kept()], cannot: code });
@@ -144,6 +157,7 @@ describe("what a clean-up left, said where the kept folders are listed", () => {
     for (const l of ["ko", "ja", "zh"] as const) {
       setLang(l);
       expect(html(props({ rows: [kept({ changed: 0, unpushed: 2 })], why: { "kit/promptpay-qr": "busy" }, cannot: "no_remote" }))).not.toContain("clean-up");
+      expect(html(props({ rows: [kept({ changed: 0, ignored: [".env.local"] })], open: opened() }))).not.toMatch(/clean-up|go with it/);
     }
   });
 });

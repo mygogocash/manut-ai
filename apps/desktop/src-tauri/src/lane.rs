@@ -23,9 +23,12 @@
 //! Settings › Worktrees (item 73): the folder lanes are made under can be the person's own (`Start::root`, checked by
 //! `check_lanes_root`: never inside a checkout, never unwritable), while the record stays under `~/.manut/lanes`; a lane can start
 //! from the remote's latest commit of its base branch (`Start::remote`, `remote_start`); the branch prefix is the page's
-//! (`valid_prefix`); and `release` removes a folder for a clean-up only when nothing in it is changed, new or unpushed.
+//! (`valid_prefix`); and `release` removes a folder for a clean-up only when nothing in it is changed, new or unpushed, and
+//! nothing git ignores in it is the developer's own (item 86: only what a project rebuilds and the agent settings the app copied
+//! in may go with it).
 //!
-//! When a folder goes: when its session is closed, if nothing in it would be lost (git says no file in it is changed or new).
+//! When a folder goes: when its session is closed, if nothing in it would be lost (git says no file in it is changed or new,
+//! and it ignores nothing there but what is rebuilt or the app's own copies).
 //! Otherwise it is kept, and the Code page lists it with Remove, which says how many changed files go with it; the branch
 //! stays unless the person also asks for it to go, and a branch with commits that are not on its base goes only after the
 //! person saw how many. Every refusal is a short code the page maps to its own words; the agent still starts without a
@@ -62,6 +65,10 @@ const RECORDS_MAX: usize = 500;
 const STATUS_MAX: usize = 20;
 /// The largest record read: one is a few hundred bytes.
 const RECORD_BYTES: u64 = 16 * 1024;
+/// The most ignored files and folders of a lane's folder a clean-up names when it keeps the folder for them.
+pub(crate) const IGNORED_SHOWN: usize = 20;
+/// The most ignored files and folders read in one lane's folder; a folder with more is kept, the first ones named.
+const IGNORED_MAX: usize = 2000;
 
 /// Making and removing lanes one at a time, so two calls never choose the same folder or remove one twice. Reads take no
 /// turn: they only look.
@@ -137,6 +144,9 @@ pub struct Kept {
     pub ahead: Option<u32>,
     /// How many commits on its branch are on no remote branch (null: not read): what a clean-up keeps a folder for.
     pub unpushed: Option<u32>,
+    /// The files and folders git ignores in it that are not plainly rebuilt and the app did not put there (see
+    /// [`Git::ignored_own`]), at most [`IGNORED_SHOWN`]: what a clean-up keeps a clean folder for.
+    pub ignored: Vec<String>,
 }
 
 /// What the person said yes to when a lane's folder goes. `changed`: how many changed or new files they saw counted and said
@@ -308,7 +318,54 @@ impl Git {
     }
 }
 
+/// Whether `rel` (a path git listed as ignored, a folder ending in `/`) is something a project rebuilds or the system writes:
+/// inside a folder named in `turn_files::REBUILT` (the list Rewind already leaves out of a folder with no ignore rules to read,
+/// `node_modules`, `target`, `dist`, `.next`, `.venv` and the rest), or a file named in `turn_files::SYSTEM_FILES` (`.DS_Store`).
+fn rebuilt(rel: &str) -> bool {
+    let folder = rel.ends_with('/');
+    let parts: Vec<&str> = rel.trim_end_matches('/').split('/').filter(|p| !p.is_empty()).collect();
+    let Some((last, dirs)) = parts.split_last() else { return false };
+    dirs.iter().any(|d| crate::turn_files::REBUILT.contains(d)) || (folder && crate::turn_files::REBUILT.contains(last)) || (!folder && crate::turn_files::SYSTEM_FILES.contains(last))
+}
+
 impl Git {
+    /// What git ignores in the lane's folder `wt` that a clean-up may not take without a yes: every ignored file or folder but
+    /// what a project rebuilds and the system writes ([`rebuilt`]) and the agent settings the app copied in for the lane made in
+    /// `prefix` (`lane_config::brought_here`). git lists a folder it ignores as a whole once (`--directory`, ending in `/`); one
+    /// that may hold copied settings (`.claude/`) is read inside, file by file. Sorted as git lists them, at most
+    /// [`IGNORED_MAX`]; None when git could not say.
+    pub(crate) fn ignored_own(&self, wt: &Path, prefix: &str) -> Option<Vec<String>> {
+        let list = |extra: &[&str]| -> Option<Vec<String>> {
+            let mut args = vec!["ls-files", "-z", "--others", "--ignored", "--exclude-standard"];
+            args.extend_from_slice(extra);
+            let ran = self.run_with(wt, &args, tasks::TIMEOUT, &[("GIT_LITERAL_PATHSPECS", "1")]).ok()?;
+            (ran.code == Some(0)).then(|| ran.out.split('\0').filter(|p| !p.is_empty()).map(str::to_string).collect())
+        };
+        let mut own: Vec<String> = Vec::new();
+        for e in list(&["--directory", "--no-empty-directory"])? {
+            if own.len() >= IGNORED_MAX {
+                break;
+            }
+            if rebuilt(&e) {
+                continue;
+            }
+            match e.strip_suffix('/') {
+                Some(dir) if crate::lane_config::may_hold_brought(dir, prefix) => {
+                    for f in list(&["--", dir])? {
+                        if !rebuilt(&f) && !crate::lane_config::brought_here(&f, prefix) {
+                            own.push(f);
+                        }
+                    }
+                }
+                Some(_) => own.push(e),
+                None if crate::lane_config::brought_here(&e, prefix) => {}
+                None => own.push(e),
+            }
+        }
+        own.truncate(IGNORED_MAX);
+        Some(own)
+    }
+
     /// How many commits on `branch` are on no remote branch (the ones a clean-up keeps a folder for), or None when git could
     /// not say. With no remote at all that is every commit of the branch.
     pub(crate) fn unpushed(&self, at: &Path, branch: &str) -> Option<u32> {
@@ -776,6 +833,7 @@ pub fn list(home: &Path, cwd: &Path) -> Result<Vec<Kept>, String> {
                 changed: if read { git.changed(&wt) } else { None },
                 ahead: if read { git.ahead(&wt, &r) } else { None },
                 unpushed: if read { git.unpushed(&wt, &r.branch) } else { None },
+                ignored: if read { git.ignored_own(&wt, &r.prefix).map(|mut v| { v.truncate(IGNORED_SHOWN); v }).unwrap_or_default() } else { Vec::new() },
                 exists,
                 worktree: r.worktree,
                 branch: r.branch,
@@ -869,7 +927,8 @@ pub(crate) fn own_lane(home: &Path, worktree: &str) -> Result<(PathBuf, PathBuf,
 }
 
 /// What a clean-up did with one lane's folder: `removed`, or why it was kept. `kept` is a short code the page words:
-/// `changes` (a changed or new file), `unpushed` (commits on its branch that are on no remote), `busy` (git is partway through
+/// `changes` (a changed or new file), `unpushed` (commits on its branch that are on no remote), `ignored` (files git ignores
+/// that are not rebuilt and the app did not put there, named in `ignored`), `busy` (git is partway through
 /// something there), `unread` (git could not say what is there), `changed` (it changed while this ran), `held` (a session still
 /// works in it). `changed` and `unpushed` give the numbers.
 #[derive(Debug, Serialize, PartialEq, Default)]
@@ -878,13 +937,18 @@ pub struct Released {
     pub kept: Option<String>,
     pub changed: Option<u32>,
     pub unpushed: Option<u32>,
+    /// `ignored`: the files and folders git ignores that it keeps the folder for, at most [`IGNORED_SHOWN`].
+    pub ignored: Vec<String>,
 }
 
 /// Removes the lane's folder `worktree` for a clean-up (a deleted chat's, or one whose pull request merged), never one with
-/// work of its own in it: nothing changed or new, git not partway through something, and every commit on its branch on a
-/// remote (`pushed`, which a merged lane overrides in `lane_clean.rs` with the proof of its own). The branch always stays. No
-/// force flag reaches git here: the removal is [`remove`] with nothing to lose, which git itself refuses when it finds
-/// anything it would not take. `Err` as [`remove`]'s for a folder the app did not make.
+/// work of its own in it: nothing changed or new, git not partway through something, every commit on its branch on a
+/// remote (`pushed`, which a merged lane overrides in `lane_clean.rs` with the proof of its own), and nothing git ignores in it
+/// but what a project rebuilds and the agent settings the app copied in (`ignored`, named: [`Git::ignored_own`]). `git
+/// worktree remove` takes ignored files without a word, so a developer's `.env.local` or local database made in the lane would
+/// otherwise go with a deleted chat. The branch always stays. No force flag reaches git here: the removal is [`remove`] with
+/// nothing to lose, which git itself refuses when it finds anything it would not take. `Err` as [`remove`]'s for a folder the
+/// app did not make.
 pub fn release(home: &Path, worktree: &str, pushed: bool) -> Result<Released, String> {
     let (wt, _, rec) = own_lane(home, worktree)?;
     let git = Git::new(home)?;
@@ -895,7 +959,7 @@ pub fn release(home: &Path, worktree: &str, pushed: bool) -> Result<Released, St
         if !ours {
             return Err("not_a_lane".into());
         }
-        let keep = |code: &str, changed: Option<u32>, unpushed: Option<u32>| Ok(Released { removed: false, kept: Some(code.into()), changed, unpushed });
+        let keep = |code: &str, changed: Option<u32>, unpushed: Option<u32>| Ok(Released { removed: false, kept: Some(code.into()), changed, unpushed, ignored: Vec::new() });
         let changed = git.changed(&wt);
         match changed {
             None => return keep("unread", None, None),
@@ -913,11 +977,19 @@ pub fn release(home: &Path, worktree: &str, pushed: bool) -> Result<Released, St
                 _ => {}
             }
         }
+        match git.ignored_own(&wt, &rec.prefix) {
+            None => return keep("unread", Some(0), None),
+            Some(mut own) if !own.is_empty() => {
+                own.truncate(IGNORED_SHOWN);
+                return Ok(Released { removed: false, kept: Some("ignored".into()), changed: Some(0), unpushed: None, ignored: own });
+            }
+            _ => {}
+        }
     }
     // a folder removed by hand has only git's note and the record left, which `remove` takes
     match remove(home, worktree, &RemoveAsk::default()) {
         Ok(r) if r.removed => Ok(Released { removed: true, ..Released::default() }),
-        Ok(r) => Ok(Released { removed: false, kept: Some("changed".into()), changed: r.changed, unpushed: None }),
+        Ok(r) => Ok(Released { removed: false, kept: Some("changed".into()), changed: r.changed, ..Released::default() }),
         Err(e) if e == "not_a_lane" => Err(e),
         // git's own refusal (an untracked file it will not take, a locked worktree): the folder stays
         Err(_) => Ok(Released { removed: false, kept: Some("changes".into()), ..Released::default() }),
@@ -1705,6 +1777,59 @@ pub(crate) mod tests {
         // and nothing that was kept lost a file
         assert_eq!(fs::read_to_string(Path::new(&a.worktree).join("a.txt")).unwrap(), "changed\n");
         assert!(Path::new(&c.worktree).join("apps/web/new/x.txt").exists() && Path::new(&e.worktree).join("e.txt").exists());
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn a_clean_up_keeps_a_folder_holding_files_git_ignores_that_are_the_developer_s_and_names_them() {
+        let Some((home, d)) = repo("release-ignored") else { return };
+        with_origin(&home, &d);
+        // the repository ignores local settings and databases (its exclude file is every worktree's)
+        fs::create_dir_all(d.join(".git/info")).unwrap();
+        fs::write(d.join(".git/info/exclude"), ".env.local\n*.db\ndata/\n").unwrap();
+        let a = pushed_lane(&home, &d, "env");
+        let wt = Path::new(&a.worktree);
+        fs::write(wt.join(".env.local"), "KEY=only-here\n").unwrap();
+        fs::write(wt.join("dev.db"), "rows\n").unwrap();
+        fs::create_dir_all(wt.join("data/uploads")).unwrap();
+        fs::write(wt.join("data/uploads/photo.jpg"), "x").unwrap();
+        let r = release(&home, &a.worktree, true).unwrap();
+        assert_eq!((r.removed, r.kept.as_deref()), (false, Some("ignored")), "{r:?}");
+        assert_eq!(r.ignored, vec![".env.local".to_string(), "data/".into(), "dev.db".into()]);
+        assert_eq!(fs::read_to_string(wt.join(".env.local")).unwrap(), "KEY=only-here\n");
+        assert!(wt.join("dev.db").exists() && wt.join("data/uploads/photo.jpg").exists());
+        // the kept list names them too, so a folder kept after its chat was deleted says why
+        let kept = list(&home, &d).unwrap().into_iter().find(|k| k.worktree == a.worktree).unwrap();
+        assert_eq!(kept.ignored, vec![".env.local".to_string(), "data/".into(), "dev.db".into()]);
+        // the merged clean-up's path (no remote proof asked) keeps it the same way
+        assert_eq!(release(&home, &a.worktree, false).unwrap().kept.as_deref(), Some("ignored"));
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn a_clean_up_still_takes_what_a_project_rebuilds_and_the_agent_settings_the_app_copied_in() {
+        let Some((home, d)) = repo("release-rebuilt") else { return };
+        with_origin(&home, &d);
+        // the developer's own agent settings, which the lane brings in ignored (lane_config.rs)
+        fs::create_dir_all(d.join(".git/info")).unwrap();
+        fs::write(d.join(".git/info/exclude"), ".mcp.json\ntarget/\n.next/\n.DS_Store\n").unwrap();
+        fs::write(d.join(".mcp.json"), "{}\n").unwrap();
+        fs::create_dir_all(d.join(".claude")).unwrap();
+        fs::write(d.join(".claude/settings.local.json"), "{}\n").unwrap();
+        let a = pushed_lane(&home, &d, "deps");
+        assert_eq!(a.config, 2, "{a:?}");
+        let wt = Path::new(&a.worktree);
+        // an agent writes its own local setting (an "always allow"), and the lane installs and builds
+        fs::write(wt.join(".claude/settings.local.json"), "{\"allow\":[\"x\"]}\n").unwrap();
+        for f in ["node_modules/q/index.js", "apps/web/node_modules/r/i.js", "target/debug/app", ".next/cache/x", ".DS_Store"] {
+            fs::create_dir_all(wt.join(f).parent().unwrap()).unwrap();
+            fs::write(wt.join(f), "x").unwrap();
+        }
+        assert_eq!(list(&home, &d).unwrap()[0].ignored, Vec::<String>::new());
+        assert_eq!(release(&home, &a.worktree, true).map(|r| r.removed), Ok(true));
+        assert!(!wt.exists());
+        // the developer's own copies stay in their folder
+        assert!(d.join(".mcp.json").exists() && d.join(".claude/settings.local.json").exists());
         let _ = fs::remove_dir_all(home);
     }
 

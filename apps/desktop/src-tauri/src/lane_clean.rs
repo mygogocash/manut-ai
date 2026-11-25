@@ -4,8 +4,10 @@
 //!
 //! A lane's folder is removed only when all of this holds, each read now and none assumed:
 //! - its session is closed (the page names the folders a session still works in, and those are never touched);
-//! - nothing in it is changed or new, and git is not partway through something there (`lane::release`, the same check as the
-//!   one a deleted chat's folder goes through, so there is one rule for "work of its own");
+//! - nothing in it is changed or new, git is not partway through something there, and nothing git ignores in it is the
+//!   developer's own (a `.env.local`, a local database: only what a project rebuilds and the agent settings the app copied in
+//!   may go) (`lane::release`, the same check as the one a deleted chat's folder goes through, so there is one rule for "work of
+//!   its own");
 //! - the person's own `gh` (GitHub) or `glab` (GitLab) lists a merged pull / merge request whose head branch is the lane's, and
 //!   the lane's branch tip is already in the default branch on the remote, or (GitHub only) is exactly the commit that pull
 //!   request merged, which is what a squash merge leaves: the branch then holds nothing the pull request did not carry.
@@ -30,7 +32,7 @@ use crate::tasks::{self, Source, Tasks};
 const MAX_LANES: usize = 20;
 const BUDGET: Duration = Duration::from_secs(90);
 
-/// One folder a clean-up left, with why: a code from `lane::release` (`changes`, `busy`, `unread`, `changed`), or `open` (no
+/// One folder a clean-up left, with why: a code from `lane::release` (`changes`, `ignored`, `busy`, `unread`, `changed`), or `open` (no
 /// merged pull request for the branch), `not_in_default` (merged, but its commits are not in the default branch), `no_default`
 /// (the default branch could not be found), `later` (not asked about yet in this run).
 #[derive(Debug, Serialize, PartialEq)]
@@ -281,6 +283,21 @@ mod tests {
         let out = run(&home, &d, Source::Gitlab, &|_| Some(r#"[{"state":"merged"}]"#.into()));
         assert_eq!(out.kept.iter().map(|k| k.why.as_str()).collect::<Vec<_>>(), vec!["not_in_default"]);
         assert!(Path::new(&other.worktree).join(".git").exists());
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn a_merged_lane_holding_a_file_git_ignores_that_is_the_developer_s_is_kept_with_its_own_reason() {
+        let Some((home, d)) = repo("clean-ignored") else { return };
+        with_origin(&home, &d);
+        fs::create_dir_all(d.join(".git/info")).unwrap();
+        fs::write(d.join(".git/info/exclude"), ".env.local\n").unwrap();
+        let (made, tip) = lane(&home, &d, "env", true);
+        fs::write(Path::new(&made.worktree).join(".env.local"), "KEY=only-here\n").unwrap();
+        let out = run(&home, &d, Source::Github, &|_| Some(said(&tip)));
+        assert_eq!(out.removed, Vec::<String>::new(), "{out:?}");
+        assert_eq!(out.kept, vec![CleanKept { branch: "kit/env".into(), why: "ignored".into() }]);
+        assert_eq!(fs::read_to_string(Path::new(&made.worktree).join(".env.local")).unwrap(), "KEY=only-here\n");
         let _ = fs::remove_dir_all(home);
     }
 
