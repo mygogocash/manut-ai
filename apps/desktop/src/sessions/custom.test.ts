@@ -18,7 +18,7 @@ describe("the Agents page model", () => {
     const g: Record<string, unknown> = {
       __manutMockAgents: ["claude", "opencode", "gemini"],
       __manutCustomFile: [
-        { id: "cursor", label: "Cursor", program: "cursor-agent", args: ["acp"], install: "" },
+        { id: "acme", label: "Acme", program: "acme-agent", args: ["acp"], install: "" },
         { id: "missing", label: "Missing", program: "not-here", args: ["acp"], install: "" },
         { id: "evil", label: "Evil", program: "sh", args: ["-c", "rm -rf ~"], install: "" },
         { id: "claude", label: "Mine", program: "x", args: [] },
@@ -41,10 +41,12 @@ describe("the Agents page model", () => {
       ["kimi", "acp", false],
       ["copilot", "acp", false],
       ["cline", "acp", false],
+      ["cursor-agent", "acp", false],
+      ["agy", "acp", false],
     ]);
     // the person's own: the command with every argument, found or not; the broken entries are listed, never as agents
     expect(m.mine).toEqual([
-      { id: "cursor", label: "Cursor", program: "cursor-agent", args: ["acp"], command: "/opt/homebrew/bin/cursor-agent acp", found: true },
+      { id: "acme", label: "Acme", program: "acme-agent", args: ["acp"], command: "/opt/homebrew/bin/acme-agent acp", found: true },
       { id: "missing", label: "Missing", program: "not-here", args: ["acp"], command: "not-here acp", found: false },
     ]);
     expect(m.broken).toEqual([
@@ -57,18 +59,18 @@ describe("the Agents page model", () => {
   });
 
   it("checks as the shell does: shell characters, relative paths, a built-in's id, OpenCode and Kilo Code are refused", () => {
-    const ok = { id: "cursor", label: "Cursor", program: "cursor-agent", args: ["acp"], install: "" };
-    const found = (p: string) => p === "/opt/homebrew/bin/cursor-agent";
+    const ok = { id: "acme", label: "Acme", program: "acme-agent", args: ["acp"], install: "" };
+    const found = (p: string) => p === "/opt/homebrew/bin/acme-agent";
     expect(mockCheck(ok, found)).toBeNull();
-    expect(mockCheck({ ...ok, program: "/opt/homebrew/bin/cursor-agent" }, found)).toBeNull();
-    expect(mockCheck({ ...ok, program: "/opt/elsewhere/cursor-agent" }, found)).toBe("path");
+    expect(mockCheck({ ...ok, program: "/opt/homebrew/bin/acme-agent" }, found)).toBeNull();
+    expect(mockCheck({ ...ok, program: "/opt/elsewhere/acme-agent" }, found)).toBe("path");
     for (const [patch, why] of [
-      [{ id: "Cursor" }, "id"],
+      [{ id: "Acme" }, "id"],
       [{ id: "gemini" }, "builtin"],
       [{ id: "kilo" }, "builtin"],
-      [{ program: "./cursor-agent" }, "program"],
-      [{ program: "bin/cursor-agent" }, "program"],
-      [{ program: "cursor-agent; rm -rf ~" }, "program"],
+      [{ program: "./acme-agent" }, "program"],
+      [{ program: "bin/acme-agent" }, "program"],
+      [{ program: "acme-agent; rm -rf ~" }, "program"],
       [{ program: "$(id)" }, "program"],
       [{ args: ["acp", "$(id)"] }, "args"],
       [{ args: ["a b"] }, "args"],
@@ -86,10 +88,10 @@ describe("the confirm card", () => {
   it("shows exactly the command that will run, or the not-found line, and refusals in words", async () => {
     const g: Record<string, unknown> = {};
     const host = new MockHost(g);
-    const p = await host.customPreview(" Cursor Agent ", "cursor-agent", "acp  --model=x", "");
-    expect(p.entry).toEqual({ id: "cursor-agent", label: "Cursor Agent", program: "cursor-agent", args: ["acp", "--model=x"], install: "" });
+    const p = await host.customPreview(" Acme Agent ", "acme-agent", "acp  --model=x", "");
+    expect(p.entry).toEqual({ id: "acme-agent", label: "Acme Agent", program: "acme-agent", args: ["acp", "--model=x"], install: "" });
     // the card's text is the command, word for word: the program found, then the arguments the entry stores
-    expect(cardCommand(p)).toBe("/opt/homebrew/bin/cursor-agent acp --model=x");
+    expect(cardCommand(p)).toBe("/opt/homebrew/bin/acme-agent acp --model=x");
     expect(cardCommand(p)).toBe([p.command!.split(" ")[0], ...p.entry.args].join(" "));
     // not on the search path yet: the card still shows every argument it would pass once installed
     const missing: CustomPreview = { entry: { ...p.entry, program: "not-here", args: ["--unshown"] }, command: null };
@@ -108,27 +110,27 @@ describe("the confirm card", () => {
   it("only Add writes: the entry appears in the look-up as an ACP row of the person's own", async () => {
     const g: Record<string, unknown> = { __manutMockAgents: ["claude", "gemini"] };
     const host = new MockHost(g);
-    const p = await host.customPreview("Cursor Agent", "cursor-agent", "acp", "npm install -g cursor-agent");
+    const p = await host.customPreview("Acme Agent", "acme-agent", "acp", "npm install -g acme-agent");
     expect(g.__manutCustomFile).toBeUndefined();
     await host.customConfirm(p.entry);
     expect(g.__manutCustomFile).toEqual([p.entry]);
     await expect(host.customConfirm(p.entry)).rejects.toThrow("why:dup");
     const list = await host.agents();
-    const row = list.find((a) => a.id === "cursor-agent")!;
-    expect(row).toMatchObject({ label: "Cursor Agent", mode: "chat", path: "/opt/homebrew/bin/cursor-agent" });
-    expect(parseAcpRow(row.acp)).toEqual({ id: "cursor-agent", label: "Cursor Agent", program: "cursor-agent", args: ["acp"], login: "cursor-agent", install: "npm install -g cursor-agent", mark: "", continues: true, custom: true });
+    const row = list.find((a) => a.id === "acme-agent")!;
+    expect(row).toMatchObject({ label: "Acme Agent", mode: "chat", path: "/opt/homebrew/bin/acme-agent" });
+    expect(parseAcpRow(row.acp)).toEqual({ id: "acme-agent", label: "Acme Agent", program: "acme-agent", args: ["acp"], login: "acme-agent", install: "npm install -g acme-agent", mark: "", continues: true, custom: true });
     registerAcp(list);
-    expect(isCustom("cursor-agent")).toBe(true);
+    expect(isCustom("acme-agent")).toBe(true);
     expect(isCustom("gemini")).toBe(false);
     // TERMINALS offers no agent of the person's own: the shell starts only allow-listed programs in a terminal
-    // (a custom one there failed with `unknown agent "cursor-agent"`)
-    expect(opensAs("cursor-agent", list)).toEqual({ chat: true, terminal: false });
-    expect(ids(terminalAgents(list, []).shown.concat(terminalAgents(list, []).more))).not.toContain("cursor-agent");
+    // (a custom one there failed with `unknown agent "acme-agent"`)
+    expect(opensAs("acme-agent", list)).toEqual({ chat: true, terminal: false });
+    expect(ids(terminalAgents(list, []).shown.concat(terminalAgents(list, []).more))).not.toContain("acme-agent");
     expect(ids(terminalAgents(list, []).shown.concat(terminalAgents(list, []).more))).toContain("gemini");
     // the + menu: installed first as always, and inside that after the generic ACP agents
-    expect(ids(menuOrder(list, []).filter((a) => a.path))).toEqual(["claude", "gemini", "cursor-agent"]);
+    expect(ids(menuOrder(list, []).filter((a) => a.path))).toEqual(["claude", "gemini", "acme-agent"]);
     // its install line when it is missing; with none, the note names only what is missing
-    expect(missingNote("cursor-agent")).toBe("cursor-agent was not found on this computer · install: npm install -g cursor-agent");
+    expect(missingNote("acme-agent")).toBe("acme-agent was not found on this computer · install: npm install -g acme-agent");
     await host.customConfirm({ id: "bare", label: "Bare", program: "not-here", args: [], install: "" });
     registerAcp(await host.agents());
     expect(missingNote("bare")).toBe("not-here was not found on this computer");

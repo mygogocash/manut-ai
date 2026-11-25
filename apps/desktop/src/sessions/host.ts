@@ -709,7 +709,7 @@ export type MockGlobals = MockTurnGlobals & {
 };
 
 /** The programs the mock host finds unless a test says otherwise. */
-const MOCK_PROGRAMS: Record<string, string> = { "cursor-agent": "/opt/homebrew/bin/cursor-agent", "stub-acp": "/usr/local/bin/stub-acp" };
+const MOCK_PROGRAMS: Record<string, string> = { "cursor-agent": "/opt/homebrew/bin/cursor-agent", "acme-agent": "/opt/homebrew/bin/acme-agent", "stub-acp": "/usr/local/bin/stub-acp" };
 
 /** The mock's past conversations: two Claude Code and one Codex conversation in the e2e folders. */
 const MOCK_PAST: PastChat[] = [

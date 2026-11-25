@@ -72,7 +72,7 @@ describe("the + menu's two ways", () => {
       chat: ["claude", "codex", "opencode"],
       terminal: ["claude", "codex", "opencode"],
       // DeepSeek Harness has no terminal here, so the terminal part never lists it
-      more: ["omo", "pi", "omp", "grok", "gemini", "qwen", "kimi", "copilot", "cline"],
+      more: ["omo", "pi", "omp", "grok", "gemini", "qwen", "kimi", "copilot", "cline", "cursor-agent", "agy"],
     });
   });
 

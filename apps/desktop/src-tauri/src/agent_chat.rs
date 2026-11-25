@@ -34,7 +34,7 @@ use crate::acp_chat::{acp_agent, is_acp_session_id, no_rules, Acp, RuleProbe};
 use crate::ask_tool::{ask_tool, claude_tool, codex_change, codex_change_tool, codex_command_tool, pi_tool};
 use crate::dsh_chat::DshChat;
 use crate::session_files;
-use crate::sessions::{agent, chat_args, cmd_path_arg, coalesce, is_uuid, launch_for, layout, resume_args, signal_group, unrecognized_program, Mode, ProcessTree, COALESCE_BYTES, COALESCE_WINDOW, INPUT_QUEUE};
+use crate::sessions::{agent, chat_args, cmd_path_arg, coalesce, is_uuid, layout, resume_args, signal_group, unrecognized_program, Mode, ProcessTree, COALESCE_BYTES, COALESCE_WINDOW, INPUT_QUEUE};
 
 /// What the person did in the chat. Mirrors `ChatInput` in src/sessions/host.ts. A message's `images` are the
 /// saved copies (`session_files`) of the pictures the person attached, for the agent's own image input; any other
@@ -3804,19 +3804,44 @@ impl ChatSessions {
     where
         F: FnMut(ChatOut) + Send + 'static,
     {
+        let mine = crate::providers::stored_here(agent_id);
+        self.start_agent_mine(agent_id, cwd, resume, account_env, files, suggest, &mine, sink)
+    }
+
+    /// [`ChatSessions::start_agent_with`] with the agent's Settings › Providers settings `mine`, read once for the whole
+    /// start: turned off, nothing starts (not even a person's own agent); its home and variables come before the app's own
+    /// variables (the ask rules OpenCode gets win), and its arguments go after every argument added here.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn start_agent_mine<F>(
+        &self,
+        agent_id: &str,
+        cwd: &Path,
+        resume: Option<&str>,
+        account_env: &[(String, String)],
+        files: Option<&Path>,
+        suggest: bool,
+        mine: &crate::providers::Stored,
+        sink: F,
+    ) -> Result<u32, String>
+    where
+        F: FnMut(ChatOut) + Send + 'static,
+    {
         // an agent the person added on Settings › Agents and confirmed on its card: read and checked again now
         if agent(agent_id).is_none() {
             if let Some(c) = crate::custom_agents::lookup(agent_id) {
+                crate::providers::may_start(&c.label, mine)?;
                 return self.start_custom(&c, &crate::sessions::host_dirs(), cwd, resume, account_env, sink);
             }
         }
         let a = agent(agent_id).ok_or_else(|| format!("unknown agent \"{agent_id}\""))?;
+        crate::providers::may_start(a.label, mine)?;
         if a.mode != Mode::Chat {
             return Err(format!("{} has no chat mode", a.label));
         }
         if agent_id == "dsh" {
-            // DeepSeek Harness: `resume` is the `session-<uuid>` it reported (resume_args checks it)
-            let chat = DshChat::start(cwd, resume, sink)?;
+            // DeepSeek Harness: `resume` is the `session-<uuid>` it reported (resume_args checks it); its program is the
+            // path set on Settings › Providers when there is one (it takes nothing else from there)
+            let chat = DshChat::start(cwd, resume, mine, sink)?;
             let id = self.next.fetch_add(1, Ordering::SeqCst) + 1;
             self.dsh.lock().unwrap().insert(id, chat);
             return Ok(id);
@@ -3838,7 +3863,8 @@ impl ChatSessions {
             Some(row) => Box::new(Acp::new(row, &cwd.to_string_lossy(), thread).with_mcp(crate::acp_mcp::for_session(cwd))) as Box<dyn Adapter>,
             None => adapter_for(agent_id, &cwd.to_string_lossy(), thread).ok_or("no chat adapter")?,
         };
-        let (mut argv, path_env) = launch_for(agent_id)?;
+        let (mut argv, path_env) = crate::sessions::launch_with(agent_id, mine)?;
+        let through_cmd = argv.first().is_some_and(|p| p == "cmd.exe");
         let program = argv.clone();
         if let Some(path) = unrecognized_program(agent_id) {
             adapter = Unrecognized::wrap(adapter, agent_id, &path);
@@ -3860,12 +3886,17 @@ impl ChatSessions {
         if let Some(dir) = files.filter(|_| agent_id == "claude") {
             argv.extend(add_dir_args(&argv[0], dir));
         }
+        // the person's own arguments (Settings › Providers), after every one added above
+        argv.extend(crate::providers::extra_args(agent_id, mine, through_cmd)?);
+        // the person's variables and the home they set, then the account's home
+        let mut env = crate::providers::session_env(agent_id, mine, account_env, true);
         // an agent whose own default runs tools unasked (OpenCode) gets ask rules built from its own
         // resolved rules, so nothing the person allows runs unasked and nothing they deny becomes askable; or it does
-        // not start
-        let mut env = account_env.to_vec();
+        // not start. Its rules are read with the variables it will run with, so one of the person's that changes them is
+        // read too, and the rule variable goes last, so it is the one the agent gets.
         if let Some((probe, label)) = acp.and_then(|a| a.rules.as_ref().map(|r| (r, a.label))) {
-            env.push(agent_rules(probe, label, &program, cwd, &path_env, account_env)?);
+            let rules = agent_rules(probe, label, &program, cwd, &path_env, &env)?;
+            env.push(rules);
         }
         self.spawn(argv, cwd, Some(path_env), &env, adapter, sink)
     }
@@ -3877,13 +3908,25 @@ impl ChatSessions {
     where
         F: FnMut(ChatOut) + Send + 'static,
     {
+        self.start_buddy_mine(cwd, prompt_file, account_env, &crate::providers::stored_here("claude"), sink)
+    }
+
+    /// [`ChatSessions::start_buddy`] with Claude Code's Settings › Providers settings `mine`. Claude Code turned off starts
+    /// no Buddy either, and the path set there is the program. Nothing else of the person's reaches Buddy's start: no extra
+    /// argument (Buddy's `--permission-mode default` stays the last word on its asks) and no variable, only the home its
+    /// account runs with.
+    pub(crate) fn start_buddy_mine<F>(&self, cwd: &Path, prompt_file: &Path, account_env: &[(String, String)], mine: &crate::providers::Stored, sink: F) -> Result<u32, String>
+    where
+        F: FnMut(ChatOut) + Send + 'static,
+    {
         let mut adapter = adapter_for("claude", &cwd.to_string_lossy(), None).ok_or("no chat adapter")?;
-        let (launch, path_env) = launch_for("claude")?;
+        let (launch, path_env) = crate::sessions::launch_with("claude", mine)?;
         if let Some(path) = unrecognized_program("claude") {
             adapter = Unrecognized::wrap(adapter, "claude", &path);
         }
         let argv = crate::buddy_chat::claude_argv(launch, prompt_file)?;
-        self.spawn(argv, cwd, Some(path_env), account_env, adapter, sink)
+        let env = crate::providers::session_env("claude", mine, account_env, false);
+        self.spawn(argv, cwd, Some(path_env), &env, adapter, sink)
     }
 
     /// Start custom agent `c` (Settings › Agents, confirmed on its card) as a chat through the generic ACP adapter:
@@ -4622,6 +4665,103 @@ mod tests {
             thread::sleep(Duration::from_millis(20));
         }
         false
+    }
+
+    /// A stand-in program at `<dir>/<name>` that writes each argument it got on a line of `<dir>/<name>.seen`, then
+    /// `VAR=<$MY_TOKEN>` and `HOME_VAR=<$CLAUDE_CONFIG_DIR>`, and exits.
+    #[cfg(unix)]
+    fn recorder(dir: &Path, name: &str) -> (PathBuf, PathBuf) {
+        use std::os::unix::fs::PermissionsExt;
+        let prog = dir.join(name);
+        let seen = dir.join(format!("{name}.seen"));
+        let body = format!(
+            "#!/bin/sh\nfor a in \"$@\"; do printf '%s\\n' \"$a\"; done > '{s}.tmp'\nprintf 'VAR=%s\\nHOME_VAR=%s\\n' \"$MY_TOKEN\" \"$CLAUDE_CONFIG_DIR\" >> '{s}.tmp'\nmv '{s}.tmp' '{s}'\n",
+            s = seen.display()
+        );
+        std::fs::write(&prog, body).unwrap();
+        std::fs::set_permissions(&prog, std::fs::Permissions::from_mode(0o755)).unwrap();
+        (prog, seen)
+    }
+
+    #[cfg(unix)]
+    fn seen_lines(seen: &Path) -> Vec<String> {
+        assert!(wait_for(|| seen.exists(), 20), "{} never ran", seen.display());
+        std::fs::read_to_string(seen).unwrap().lines().map(str::to_string).collect()
+    }
+
+    /// Settings › Providers (item 74) on a real chat start: a turned-off agent starts no process at all; the path set is
+    /// the program; the app's own arguments come first and unchanged, the person's after them; their variables and the home
+    /// they set reach the process; an added account's home wins over that home. Buddy, with the very same settings, gets
+    /// none of the person's arguments or variables, so its `--permission-mode default` stays the last word.
+    #[cfg(unix)]
+    #[test]
+    fn providers_settings_reach_a_chat_and_never_weaken_its_start() {
+        use crate::providers::{Stored, Var};
+        let base = std::env::temp_dir().join(format!("manut-prov-chat-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+        let dir = base.canonicalize().unwrap();
+        let (prog, seen) = recorder(&dir, "fake-claude");
+        let home = dir.join("claude-home");
+        std::fs::create_dir_all(&home).unwrap();
+        let c = ChatSessions::default();
+
+        let off = Stored { off: true, path: prog.to_string_lossy().into_owned(), ..Stored::default() };
+        assert!(c.start_agent_mine("claude", &dir, None, &[], None, false, &off, |_| {}).unwrap_err().contains("turned off"));
+        assert!(c.start_buddy_mine(&dir, &dir.join("p.md"), &[], &off, |_| {}).unwrap_err().contains("turned off"));
+        thread::sleep(Duration::from_millis(200));
+        assert!(!seen.exists() && c.count() == 0, "a turned-off agent started");
+
+        let mine = Stored {
+            path: prog.to_string_lossy().into_owned(),
+            home: home.to_string_lossy().into_owned(),
+            args: vec!["--model=opus".into(), "--effort=high".into()],
+            env: vec![Var { name: "MY_TOKEN".into(), value: "t0ken-value".into() }],
+            ..Stored::default()
+        };
+        c.start_agent_mine("claude", &dir, None, &[], None, false, &mine, |_| {}).unwrap();
+        let mut want: Vec<String> = crate::sessions::CLAUDE_CHAT_ARGS.iter().map(|a| a.to_string()).collect();
+        want.extend(["--model=opus".to_string(), "--effort=high".to_string()]);
+        want.push("VAR=t0ken-value".into());
+        want.push(format!("HOME_VAR={}", home.display()));
+        assert_eq!(seen_lines(&seen), want);
+
+        // a refused argument in the file (changed by hand) starts nothing
+        std::fs::remove_file(&seen).unwrap();
+        let bad = Stored { args: vec!["--dangerously-skip-permissions".into()], ..mine.clone() };
+        assert!(c.start_agent_mine("claude", &dir, None, &[], None, false, &bad, |_| {}).unwrap_err().contains("arg_skips"));
+        thread::sleep(Duration::from_millis(200));
+        assert!(!seen.exists());
+
+        // an added account's home replaces the one set here
+        let acct = vec![("CLAUDE_CONFIG_DIR".to_string(), "/h/.manut/accounts/claude/work".to_string())];
+        c.start_agent_mine("claude", &dir, None, &acct, None, false, &mine, |_| {}).unwrap();
+        assert_eq!(seen_lines(&seen).last().map(String::as_str), Some("HOME_VAR=/h/.manut/accounts/claude/work"));
+
+        // Buddy: its own fixed arguments, the instructions file, and nothing of the person's but the home
+        std::fs::remove_file(&seen).unwrap();
+        let prompt = dir.join("buddy-prompt.md");
+        std::fs::write(&prompt, "Buddy").unwrap();
+        c.start_buddy_mine(&dir, &prompt, &[], &mine, |_| {}).unwrap();
+        let mut want: Vec<String> = crate::sessions::CLAUDE_CHAT_ARGS.iter().chain(crate::buddy_chat::BUDDY_CLAUDE_ARGS.iter()).map(|a| a.to_string()).collect();
+        want.push("--append-system-prompt-file".into());
+        want.push(prompt.to_string_lossy().into_owned());
+        want.push("VAR=".into());
+        want.push(format!("HOME_VAR={}", home.display()));
+        assert_eq!(seen_lines(&seen), want);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A person's own agent turned off on Settings › Providers is refused before its entry is even resolved.
+    #[test]
+    fn a_turned_off_custom_or_acp_agent_starts_nothing() {
+        let c = ChatSessions::default();
+        let off = crate::providers::Stored { off: true, ..Default::default() };
+        let tmp = std::env::temp_dir();
+        for id in ["gemini", "cursor-agent", "agy", "opencode", "codex", "dsh"] {
+            assert!(c.start_agent_mine(id, &tmp, None, &[], None, false, &off, |_| {}).unwrap_err().contains("turned off"), "{id}");
+        }
+        assert_eq!(c.count(), 0);
     }
 
     #[cfg(unix)]

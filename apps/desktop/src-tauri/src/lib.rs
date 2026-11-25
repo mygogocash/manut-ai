@@ -26,6 +26,7 @@ mod platform;
 mod outpost;
 mod power;
 mod preview;
+mod providers;
 #[cfg(all(test, unix))]
 mod pty_bench;
 mod running;
@@ -226,6 +227,71 @@ async fn account_login_cancel(shell: State<'_, Shell>, login: u32) -> Result<(),
     Ok(())
 }
 
+/// Settings › Providers › Accounts: the accounts of Claude Code and Codex on this computer, read by the shell in every
+/// mode (item 74: the Hermes bridge used to list them, so Practice and Connected had none). Never a token.
+#[tauri::command]
+async fn accounts_list() -> Result<Vec<accounts::Group>, String> {
+    let home = user_home()?;
+    tauri::async_runtime::spawn_blocking(move || accounts::list_here(&home)).await.map_err(|e| e.to_string())
+}
+
+/// A new empty home folder for `cli` named from `label` (the page then runs the CLI's own sign-in with it).
+#[tauri::command]
+async fn accounts_add(cli: String, label: String) -> Result<serde_json::Value, String> {
+    let home = user_home()?;
+    tauri::async_runtime::spawn_blocking(move || accounts::add(&home, &cli, &label).map(|(id, dir)| serde_json::json!({"id": id, "dir": dir})))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// The account new sessions of `cli` start with. Running sessions are untouched.
+#[tauri::command]
+async fn accounts_set_active(cli: String, account: String) -> Result<(), String> {
+    let home = user_home()?;
+    tauri::async_runtime::spawn_blocking(move || accounts::set_active(&home, &cli, &account)).await.map_err(|e| e.to_string())?
+}
+
+/// The person's own name for a row ("" clears it).
+#[tauri::command]
+async fn accounts_label(cli: String, account: String, label: String) -> Result<(), String> {
+    let home = user_home()?;
+    tauri::async_runtime::spawn_blocking(move || accounts::set_label(&home, &cli, &account, &label)).await.map_err(|e| e.to_string())?
+}
+
+/// Deletes `~/.manut/accounts/<cli>/<account>/` and nothing else.
+#[tauri::command]
+async fn accounts_remove(cli: String, account: String) -> Result<(), String> {
+    let home = user_home()?;
+    tauri::async_runtime::spawn_blocking(move || accounts::remove(&home, &cli, &account)).await.map_err(|e| e.to_string())?
+}
+
+/// A cancelled sign-in's folder, removed; refused when the CLI did sign in there.
+#[tauri::command]
+async fn accounts_discard(cli: String, account: String) -> Result<(), String> {
+    let home = user_home()?;
+    tauri::async_runtime::spawn_blocking(move || accounts::discard(&home, &cli, &account)).await.map_err(|e| e.to_string())?
+}
+
+/// Settings › Providers: every agent the app knows, with what the person set for it, as the shell read it now. Variables
+/// come as names only: a value never leaves the shell once saved (`providers::View`).
+#[tauri::command]
+async fn providers_list() -> Result<Vec<providers::View>, String> {
+    tauri::async_runtime::spawn_blocking(providers::list_here).await.map_err(|e| e.to_string())
+}
+
+/// One change to agent `id`'s settings, checked by the shell and saved in its own file; the answer is the agent's new view.
+/// A refusal is `why:<code>` or `why:<code>:<option or variable name>`, never a value.
+#[tauri::command]
+async fn provider_save(id: String, patch: providers::Patch) -> Result<providers::View, String> {
+    tauri::async_runtime::spawn_blocking(move || providers::save_here(&id, patch)).await.map_err(|e| e.to_string())?
+}
+
+/// The version agent `id`'s program prints with `--version` (the token only), for the agents whose flag was read here.
+#[tauri::command]
+async fn provider_version(id: String) -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || providers::version_here(&id)).await.map_err(|e| e.to_string())?
+}
+
 /// The allow-listed agent programs (claude, codex, omo, dsh, omh, pi, omp, grok), how each opens and where each
 /// was found, if anywhere.
 /// One row of the agent look-up: an allow-listed agent, or one the person added on Settings › Agents.
@@ -239,9 +305,14 @@ enum AnyAgent {
 #[tauri::command]
 async fn sessions_agents() -> Result<Vec<AnyAgent>, String> {
     tauri::async_runtime::spawn_blocking(|| {
-        let mut all: Vec<AnyAgent> = sessions::agents_on_this_machine().into_iter().map(AnyAgent::Listed).collect();
+        // what Settings › Providers says of each (turned off, a display name, a program path), read once for the list
+        let cfg = providers::load_here();
+        let mut all: Vec<AnyAgent> = sessions::agents_on_this_machine_with(&cfg).into_iter().map(AnyAgent::Listed).collect();
         // then the person's own agents, each checked as the file is read now (a broken entry is not listed here)
-        all.extend(custom_agents::list_here().agents.into_iter().map(AnyAgent::Custom));
+        all.extend(custom_agents::list_here().agents.into_iter().map(|mut c| {
+            c.off = cfg.get(&c.id).off;
+            AnyAgent::Custom(c)
+        }));
         all
     })
     .await
@@ -1324,6 +1395,15 @@ fn commands(invoke: tauri::ipc::Invoke) -> bool {
         account_version,
         account_login_start,
         account_login_cancel,
+        accounts_list,
+        accounts_add,
+        accounts_set_active,
+        accounts_label,
+        accounts_remove,
+        accounts_discard,
+        providers_list,
+        provider_save,
+        provider_version,
         sessions_agents,
         custom_agents_list,
         custom_agent_preview,

@@ -108,11 +108,21 @@ fn valid_account(account: &str) -> bool {
 }
 
 /// The account a Claude Code session started with `account_env` runs under: the manut account folder its
-/// `CLAUDE_CONFIG_DIR` names, or `default` without one. `None` for a folder that is not an manut account's name.
+/// `CLAUDE_CONFIG_DIR` names, or `default` without one or with a folder outside the accounts' (the home set on Settings ›
+/// Providers). `None` for an account folder whose name is not an manut account's name.
 pub fn account_of(account_env: &[(String, String)]) -> Option<String> {
     match account_env.iter().find(|(k, _)| k == "CLAUDE_CONFIG_DIR") {
         None => Some(DEFAULT_ACCOUNT.to_string()),
-        Some((_, dir)) => Path::new(dir).file_name().and_then(|n| n.to_str()).filter(|n| crate::accounts::valid_account_id(n)).map(str::to_string),
+        // an added account's folder is `~/.manut/accounts/claude/<id>`; any other folder is the home the person set for
+        // Claude Code on Settings › Providers, which is "This computer" (item 74), so its usage is the default's
+        Some((_, dir)) => {
+            let p = Path::new(dir);
+            let added = p.parent().is_some_and(|parent| parent.ends_with(Path::new(".manut").join("accounts").join("claude")));
+            if !added {
+                return Some(DEFAULT_ACCOUNT.to_string());
+            }
+            p.file_name().and_then(|n| n.to_str()).filter(|n| crate::accounts::valid_account_id(n)).map(str::to_string)
+        }
     }
 }
 
@@ -583,7 +593,12 @@ mod tests {
     fn the_account_is_the_manut_folder_name_or_default() {
         assert_eq!(account_of(&[]), Some("default".into()));
         assert_eq!(account_of(&[("CLAUDE_CONFIG_DIR".into(), "/h/.manut/accounts/claude/work".into())]), Some("work".into()));
-        assert_eq!(account_of(&[("CLAUDE_CONFIG_DIR".into(), "/h/Somewhere Else".into())]), None);
+        // a home the person set on Settings › Providers is "This computer", whatever its folder is called (item 74)
+        assert_eq!(account_of(&[("CLAUDE_CONFIG_DIR".into(), "/h/Somewhere Else".into())]), Some("default".into()));
+        assert_eq!(account_of(&[("CLAUDE_CONFIG_DIR".into(), "/h/.claude-work".into())]), Some("default".into()));
+        assert_eq!(account_of(&[("CLAUDE_CONFIG_DIR".into(), "/h/.manut/accounts/codex/work".into())]), Some("default".into()));
+        // an added account's folder whose name is not an account id records nothing
+        assert_eq!(account_of(&[("CLAUDE_CONFIG_DIR".into(), "/h/.manut/accounts/claude/Bad Name".into())]), None);
     }
 
     #[test]
