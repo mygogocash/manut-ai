@@ -188,10 +188,9 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    Helpers are now that Claude Code session's own subagents, each in a worktree the lead made beside T3's
    (`~/.t3/worktrees/manut-ai/cc-item<N>-<name>`), and they stop when that session ends: check each worktree for
    commits that were never pushed before starting anything again.
-   They run, each on its own branch from `pilot/week-1`; review each, merge it after
-   the full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
-   - item 66, Kit as a chat from the + menu, beside the terminal (`feat/kit-chat-lane`, Opus, worktree
-     `cc-item66-kit-chat`), started 25 Nov at 16:13.
+   No helper is running (25 Nov, 16:50): items 63 and 66 merged. A helper runs on its own branch from `pilot/week-1`;
+   review each, merge it after the full root gate, add its decisions to `docs/decisions.md` and mark both trackers in
+   `docs/plan.md`.
    A helper's run can also fail when the API sends nothing for 10 minutes; that is not a usage limit and nothing sends
    it on. Item 50 failed so at 00:39 on 25 Nov, after its page, tests and visual check: its last commit was local only.
    Push such a commit from the helper's worktree, review it and finish what is left as the lead.
@@ -205,7 +204,12 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    The security review of 24 Nov (findings only) found no critical issue, two high and three medium ones that need
    `EMAIL_SIGN_IN` or `SELF_SERVE_SHOPS` on, and three low ones; its proofs are in the review thread's report, and
    `docs/turning-on.md` says to keep both switches off until items 41 and 42 merge.
-   Merged: 63 (the desktop's release builds and the updater: `.github/workflows/release-desktop.yml` runs only by hand
+   Merged: 66 (Kit as a chat from the + menu, beside the terminal: under the folder chip the menu has Chat with Kit,
+   each installed agent that runs as the app's chat, then In a terminal as before; a pick opens the agent's New session
+   chat, whose first message starts a lane the Lanes band lists; the first focus stays on a terminal row, so Command-N
+   then Enter still starts a terminal; checked by unit tests and in a browser against the stand-in agent, and a real
+   Claude Code or Codex lane started from the menu in the built app has not been seen yet), 63 (the desktop's release
+   builds and the updater: `.github/workflows/release-desktop.yml` runs only by hand
    or on a `desktop-vX.Y.Z` tag, builds the Mac app for both chips one after the other into a draft release only the
    owner publishes, signed and notarized once the five Apple secrets are added and unsigned with a plain warning
    until then, keeps the Windows installer as a workflow artifact, and the app's updater is on with Manut AI's own key
@@ -339,10 +343,12 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    packages to `docs/plan.md` as the phases need them; a run that finds the queue empty stops and says so.
 3. Next, from the December list in `docs/plan.md`, as slots free (two heavy helpers at a time on this Mac; three or four
    at once swapped hard and reached the usage limit on 24 and 25 Nov):
-   - running, for the desktop's first release, which is Practice mode and the code editor on the Mac (the owner, 25 Nov;
-     the owner's Apple Developer account is the business's, an organization; sign-in and a model key are not needed for
-     now): item 66 (Kit as a chat from the + menu, beside the terminal, the owner's choice). Item 63 (the release
-     builds and the updater, whose key's owner's copy is in `~/manut-ai-updater-key`) merged on 25 Nov. Item 65 (a Thai dictionary for the
+   - the desktop's first release, which is Practice mode and the code editor on the Mac (the owner, 25 Nov; the
+     owner's Apple Developer account is the business's, an organization; sign-in and a model key are not needed for
+     now), has everything built that it waited for: item 66 (Kit as a chat from the + menu, beside the terminal, the
+     owner's choice) and item 63 (the release builds and the updater, whose key's owner's copy is in
+     `~/manut-ai-updater-key`) merged on 25 Nov. What is left is the release workflow's first run and the owner's
+     steps ("Needs the owner", the Mac release). Item 65 (a Thai dictionary for the
      desktop) is parked: on 25 Nov the owner said Thai is not needed yet. Item 64 (Apple sessions refused on the lifted routes, which turning
      Sign in with Apple on needs first) is parked until sign-in is wanted;
    - candidates that need no owner:
