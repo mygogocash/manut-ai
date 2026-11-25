@@ -750,6 +750,26 @@ describe("the Make a routine form, once the routine is made", () => {
     expect(within(rowsOf()[1]!).getByText("Evening brief")).toBeTruthy();
   });
 
+  it("lists two routines made one after another before the list is read again, each as its own answer, in the order they were made", async () => {
+    const pending = deferred<RoutinesRead>();
+    let reads = 0;
+    const getRoutines = vi.fn(() => (++reads === 1 ? Promise.resolve(view([MORNING])) : pending.promise));
+    const createRoutine = vi.fn(async (body: NewRoutine) => made(body, { id: `rt-${body.name.toLowerCase()}` }));
+    renderPage({ getRoutines, createRoutine });
+    await ready();
+    fillDaily("First", "08:00");
+    saysYes(openQuestion("First"), "First");
+    await waitFor(() => expect(rowsOf()).toHaveLength(2));
+    await waitFor(() => expect(text("Name").disabled).toBe(false));
+    fillDaily("Second", "09:00");
+    saysYes(openQuestion("Second"), "Second");
+    await waitFor(() => expect(rowsOf()).toHaveLength(3));
+    expect(rowsOf().map((row) => within(row).getAllByText(/^(Morning brief|First|Second)$/)[0]!.textContent)).toEqual(["Morning brief", "First", "Second"]);
+    expect(within(screen.getByRole("region", { name: "Routines for Baan Mali" })).getByText("3 routines")).toBeTruthy();
+    // Neither read has answered: the list is the one the page held and the two routines the API made.
+    expect(getRoutines).toHaveBeenCalledTimes(3);
+  });
+
   it("keeps the routine in the list when the read after it fails, and says that the read failed", async () => {
     let reads = 0;
     const getRoutines = vi.fn(async () => {
