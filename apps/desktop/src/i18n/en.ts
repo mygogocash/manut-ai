@@ -2140,7 +2140,7 @@ export const en = {
   "review.merge.droppedOne": "1 agent credit line was taken out (Settings, Source control). Every human co-author stays.",
   "review.merge.droppedMany": "{n} agent credit lines were taken out (Settings, Source control). Every human co-author stays.",
   "set.mcp": "MCP and Skills",
-  "mcp.intro": "What each coding agent on this computer has, read from its own settings files. This page changes nothing: add or remove a server or a skill with the agent's own commands.",
+  "mcp.intro": "What each coding agent on this computer has, read from its own settings files. The lists change nothing: add or remove a server or a skill with the agent's own commands, or install skills from a link below, each asked first.",
   "mcp.project.title": "Project",
   "mcp.project.hint": "Choose a project folder to also see the servers and skills that belong to it.",
   "mcp.project.none": "No project chosen",
