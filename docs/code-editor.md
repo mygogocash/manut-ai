@@ -439,6 +439,28 @@ conversation to put away. A row is in one place: each choice replaces the others
   is not tried again within the five minutes, and a missing or signed-out `gh` shows no pull request. Nothing is written to GitHub or
   GitLab. `tasks/pulls.ts`.
 
+### Titles and words by a model (item 96)
+
+Settings › General › Titles and words lets the person's own Claude Code write a chat's title and a pull request's words. It is **off**
+until turned on, and it works with Claude Code only: its `--help` names the three switches a run with no tools and no project needs,
+and no other agent here has been checked. The setting says so.
+
+- **The run** (`src-tauri/src/title_run.rs`, commands `title_run` and `title_cancel`): `claude -p` with `--tools ""`, `--strict-mcp-config`
+  and no MCP config, `--disable-slash-commands`, `--permission-mode default`, `--no-session-persistence`, `--setting-sources user`, and the
+  chosen `--model` and `--effort` (each checked). It starts as a chat does (the allow-list, the child `PATH`, the account's home) in the
+  empty folder `~/.manut/titles`. The text goes in on standard input, masked and cut to 6,000 characters. One run at a time, 45 seconds, four
+  starts a minute, cancel by key. The answer is cleaned and only returned. Its rate-limit event reaches the usage the meter reads.
+- **A chat's title** (`sessions/titleWords.ts`): after a turn ends done, from the first message and first answer. It becomes
+  `SessionRec.modelTitle`, which `pickTitle` ranks below a name the person gave and above the agent's title and the summary. A result that
+  arrives after a rename is dropped. Row menu › Write the title again asks for another, and is offered only for a chat the person has not
+  named. A failed automatic run is quiet; a failed ask says why.
+- **A pull request's words**: Suggest in the review draft sends the lane's commit subjects and changed files with a few lines of each,
+  masked, and fills the title and description to be read and changed. Ask, and the ask's own yes, are unchanged.
+- **Not done**: commit messages, and any agent but Claude Code.
+- **Checked**: Rust stand-in tests (`title_run` module, a stand-in program for the CLI, so no real agent runs), `sessions/titleWords.test.ts`,
+  `settings/TitlesRows.test.tsx` and `code/Review.test.tsx`. How a real Claude Code answers, and how the row and the button look, are a
+  hands-on pass that spends the owner's tokens.
+
 ### The suggested next message
 
 After a turn ends in a coding chat, the empty box may show one predicted next message in grey; Tab takes it into the box (where it is
