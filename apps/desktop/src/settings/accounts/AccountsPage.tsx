@@ -84,7 +84,7 @@ export function AccountsPage({ embedded = false }: { embedded?: boolean }) {
 export function OutsideUseSwitch() {
   const [on, setOn] = useState(() => outsideUseOn());
   return (
-    <div className="acc-auto acc-outside" data-testid="outside-row">
+    <div className="acc-outside" data-testid="outside-row">
       <button
         type="button"
         role="switch"
