@@ -328,19 +328,34 @@ pub fn draft<X: Fn(&Path) -> bool>(home: &Path, label: &str, program: &str, args
 /// stricter: its program may not be a shell or an interpreter ([`INTERPRETERS`]) or a built-in agent's program. The
 /// arguments come as the draft's own list, never split again. Writes nothing; only the card's Add does.
 pub fn bot_draft<X: Fn(&Path) -> bool>(home: &Path, label: &str, program: &str, args: &[String], install: &str, os: Os, is_program: X) -> Result<CustomAgent, Why> {
+    if let Some(why) = bot_refusal(program) {
+        return Err(why);
+    }
+    draft_of(home, label, program, args.to_vec(), install, os, is_program)
+}
+
+/// What a draft from anyone but the person refuses on top of [`check`]: a shell or an interpreter as the program, OpenCode
+/// and Kilo Code by name, and a built-in agent's program. A bot's draft ([`bot_draft`]) and an ACP registry entry
+/// (`acp_registry.rs`) are both held to it.
+pub fn bot_refusal(program: &str) -> Option<Why> {
     let base = base_name(program.trim());
     if INTERPRETERS.contains(&base.as_str()) {
-        return Err(Why::Interp);
+        return Some(Why::Interp);
     }
     match base.as_str() {
-        "opencode" => return Err(Why::Opencode),
-        "kilo" | "kilocode" => return Err(Why::Kilo),
+        "opencode" => return Some(Why::Opencode),
+        "kilo" | "kilocode" => return Some(Why::Kilo),
         _ => {}
     }
     if crate::sessions::AGENTS.iter().any(|a| a.program == base || a.id == base) || crate::acp_agents::entry(&base).is_some() {
-        return Err(Why::Builtin);
+        return Some(Why::Builtin);
     }
-    draft_of(home, label, program, args.to_vec(), install, os, is_program)
+    None
+}
+
+/// The program's file name without folder or `.exe`, lower-cased: how two programs are told to be the same one.
+pub fn program_base(p: &str) -> String {
+    base_name(p.trim())
 }
 
 fn draft_of<X: Fn(&Path) -> bool>(home: &Path, label: &str, program: &str, args: Vec<String>, install: &str, os: Os, is_program: X) -> Result<CustomAgent, Why> {
