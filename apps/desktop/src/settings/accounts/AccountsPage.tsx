@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import "./accounts.css";
 import type { AccountGroup } from "../../lib/protocol";
 import { getStore } from "../../state/store";
+import { getSessions } from "../../sessions/sessions";
 import { AgentIcon, Popover } from "../../ui";
 import { Ring } from "../../sidebar/Usage";
 import { accountHost, accountOps, type LoginStatus, type SignInEvent } from "./native";
@@ -169,13 +170,15 @@ function CliGroup({ g, status, version, note }: { g: AccountGroup; status: Recor
   const [renaming, setRenaming] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<Row | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
+  // pi has no sign-in line to run: the account is made, then a pi terminal opens as it and the person types /login there
+  const [piSignIn, setPiSignIn] = useState<{ id: string; name: string } | null>(null);
   const live = useRef<SignIn | null>(null);
   live.current = signIn;
 
   const rows = g.accounts.map((a) => mergeRow(a, status[`${g.cli}:${a.id}`]));
   const cpaRows = rows.filter(isCpa).length;
   const now = Date.now() / 1000;
-  const canAdd = SIGN_IN[g.cli] === "run" && host.canSignIn;
+  const canAdd = (SIGN_IN[g.cli] === "run" || SIGN_IN[g.cli] === "session") && host.canSignIn;
 
   const run = async (fn: () => Promise<unknown>) => {
     try {
@@ -216,7 +219,13 @@ function CliGroup({ g, status, version, note }: { g: AccountGroup; status: Recor
       return;
     }
     setAdding(false);
+    const named = label.trim() || id;
     setLabel("");
+    if (SIGN_IN[g.cli] === "session") {
+      setPiSignIn({ id, name: named });
+      await reloadAccounts();
+      return;
+    }
     const state: SignIn = { id, login: null, lines: [], ending: false };
     setSignIn(state);
     const onEvent = (ev: SignInEvent) => {
@@ -294,7 +303,8 @@ function CliGroup({ g, status, version, note }: { g: AccountGroup; status: Recor
                 <RowMenu
                   label={t("acc.actionsFor", { name: rowTitle(r, i) })}
                   items={[
-                    { label: t("acc.useForNew"), on: () => void run(() => s.setActive(g.cli, r.id)), disabled: inUse || !r.signedIn },
+                    // pi can be signed in by a key in its environment, which no folder shows, so it is never held back
+                    { label: t("acc.useForNew"), on: () => void run(() => s.setActive(g.cli, r.id)), disabled: inUse || (!r.signedIn && g.cli !== "pi") },
                     { label: r.label ? t("acc.rename") : t("acc.addName"), on: () => setRenaming(r.id) },
                     ...(r.id === "default" ? [] : [{ label: t("acc.remove"), on: () => setConfirm(r), danger: true }]),
                   ]}
@@ -303,6 +313,33 @@ function CliGroup({ g, status, version, note }: { g: AccountGroup; status: Recor
             </div>
           );
         })}
+        {piSignIn && (
+          <div className="acc-signin" role="status" data-testid="pi-signin-panel">
+            <span className="acc-signin-t">
+              <b>{t("acc.piTitle", { name: piSignIn.name })}</b>
+              <span className="acc-sub">{t("acc.piLine")}</span>
+            </span>
+            <button
+              type="button"
+              className="st-btn primary"
+              onClick={() => getSessions().startTerminal(g.cli, getSessions().getState().home ?? undefined, undefined, piSignIn.id)}
+              data-testid="pi-signin-open"
+            >
+              {t("acc.piOpen")}
+            </button>
+            <button
+              type="button"
+              className="st-btn"
+              onClick={() => {
+                setPiSignIn(null);
+                void reloadAccounts();
+              }}
+              data-testid="pi-signin-done"
+            >
+              {t("acc.piDone")}
+            </button>
+          </div>
+        )}
         {signIn && (
           <div className="acc-signin" role="status" data-testid="signin-panel">
             <span className="acc-spin" aria-hidden="true" />
@@ -390,7 +427,7 @@ function CliGroup({ g, status, version, note }: { g: AccountGroup; status: Recor
           </button>
         </div>
       )}
-      {!canAdd && SIGN_IN[g.cli] === "session" && (
+      {!canAdd && SIGN_IN[g.cli] === "session" && !piSignIn && (
         <div className="acc-foot">
           <button
             type="button"
@@ -403,7 +440,7 @@ function CliGroup({ g, status, version, note }: { g: AccountGroup; status: Recor
           </button>
         </div>
       )}
-      {canAdd && !signIn && (
+      {canAdd && !signIn && !piSignIn && (
         <div className="acc-foot">
           {adding ? (
             <form
@@ -424,7 +461,7 @@ function CliGroup({ g, status, version, note }: { g: AccountGroup; status: Recor
                 data-testid={`add-label-${g.cli}`}
               />
               <button type="submit" className="st-btn primary" data-testid={`add-confirm-${g.cli}`}>
-                {t("acc.signIn")}
+                {SIGN_IN[g.cli] === "session" ? t("acc.addConfirm") : t("acc.signIn")}
               </button>
               <button type="button" className="st-btn" onClick={() => setAdding(false)}>
                 {t("acc.cancel")}

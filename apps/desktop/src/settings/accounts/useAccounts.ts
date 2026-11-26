@@ -16,7 +16,8 @@ import { changes } from "../../lib/changes";
 import { errText } from "../../lib/errText";
 
 const REFRESH_MS = 60_000;
-const ASKS_STATUS: AccountCli[] = ["claude", "codex"];
+/** The CLIs the app reads a sign-in for: a status command (Claude Code, Codex) or the account folder's own auth file (Grok, pi). */
+const ASKS_STATUS: AccountCli[] = ["claude", "codex", "grok", "pi"];
 
 type Snap = {
   groups: AccountGroup[] | null;

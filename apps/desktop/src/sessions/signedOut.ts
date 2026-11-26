@@ -2,10 +2,10 @@
 // The app knows a sign-in in two ways, both already read for Settings › Accounts and neither one a run of the agent:
 //   - Claude Code and Codex: the CLI's own status command (`claude auth status --json`, `codex login status`; src-tauri
 //     accounts.rs `fixed_args`), asked for each account every minute by the Accounts watcher.
-//   - Grok: the bridge's own state for the account ("login" = nobody is signed in there), the same reading the Accounts page
-//     words as "Not signed in". Grok has no chat here, so it can only show in the terminal part.
-// Every other agent (OmO, pi, oh-my-pi, OpenCode, DeepSeek Harness, the ACP agents, a person's own) has no account in
-// the app, so the app cannot tell and shows nothing. The knowledge can be stale (someone signs in from a terminal a
+//   - Grok: whether the account's own folder holds Grok's `auth.json` (a stat, never opened; accounts.rs `signed_in_here`),
+//     the same reading the Accounts page words as "Not signed in".
+// Every other agent (OmO, pi, oh-my-pi, OpenCode, DeepSeek Harness, the ACP agents, a person's own) is one the app cannot
+// tell, and shows nothing. pi has accounts (item 101d) but is left out on purpose: see NO_SIGNED_OUT_WORD. The knowledge can be stale (someone signs in from a terminal a
 // moment ago), so the row stays pickable: this only says what the app last read.
 import type { AccountGroup } from "../lib/protocol";
 import type { LoginStatus } from "../settings/accounts/native";
@@ -23,13 +23,17 @@ export interface SignInKnowledge {
 
 /** The CLI's own sign-in command, from the fixed list accounts.rs runs for Settings › Accounts. Grok's is not known to the
  *  app, so its tooltip names no command. */
-const LOGIN_COMMAND: Partial<Record<AgentId, string>> = { claude: "claude auth login", codex: "codex login" };
+const LOGIN_COMMAND: Partial<Record<AgentId, string>> = { claude: "claude auth login", codex: "codex login", grok: "grok login" };
+
+/** Agents the app can tell nothing from: pi is signed in by its /login (a file in the account's folder) or by an API key in
+ *  its environment, which no folder shows, so a pi row never says it is not signed in. */
+const NO_SIGNED_OUT_WORD: readonly AgentId[] = ["pi"];
 
 /** True only when the app has read that the account a new session of `agent` runs as is not signed in. False for "signed
  *  in" and for "cannot tell" alike, so nothing new shows where the app does not know. */
 export function agentSignedOut(known: SignInKnowledge, agent: AgentId): boolean {
   const cli = SESSION_CLI[agent];
-  if (!cli) return false;
+  if (!cli || NO_SIGNED_OUT_WORD.includes(agent)) return false;
   const account = accountForNewSessions(known.groups, cli);
   if (!account) return false;
   return !mergeRow(account, known.status[`${cli}:${account.id}`]).signedIn;

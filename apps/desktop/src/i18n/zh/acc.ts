@@ -1,7 +1,7 @@
 import type { acc as en } from "../en/acc";
 
 export const acc: Record<keyof typeof en, string> = {
-  "acc.headerLine": "Manut AI 替你运行 Claude Code、Codex 或 pi 时使用的登录账号。团队另在「{bots}」页面设置。",
+  "acc.headerLine": "Manut AI 替你运行 Claude Code、Codex、Grok 或 pi 时使用的登录账号。团队另在「{bots}」页面设置。",
   "acc.autoSwitch": "自动切换",
   "acc.autoSwitchOf": "{cli} 自动切换",
   "acc.autoSwitchLine": "当前账号达到上限后，新的请求会自动改用下一个账号。",
@@ -29,6 +29,11 @@ export const acc: Record<keyof typeof en, string> = {
   "acc.removeConfirm": "从 Manut AI 移除 {name}？本机的登录信息也会一并删除。",
   "acc.removeBtn": "移除",
   "acc.addSoonTip": "Manut AI 暂时还不能添加第二个 {cli} 账号，使用的是这台电脑上的 {cli} 登录。",
+  "acc.piTitle": "以 {name} 登录 pi",
+  "acc.piLine": "以此账号打开 pi，在其中输入 /login 并选择服务商，然后回到这里。",
+  "acc.piOpen": "打开 pi",
+  "acc.piDone": "完成",
+  "acc.addConfirm": "添加",
   "acc.add": "+ 添加账号",
   "acc.soon": "即将推出",
   "acc.namePh": "名称（可选，例如：工作）",
