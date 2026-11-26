@@ -301,7 +301,8 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    101a (Cursor and Antigravity as chats) and 101e (the first-launch offer to bring over Claude Code and Codex work)
    merged, then 131 (GoSpark's sounds, asked for by the owner that night; the owner should listen to them on a real
    Mac), then 101b (Grok as a chat; Muse Code needs the owner). Then 132 (GoSpark's effort card, asked for by the owner
-   that night) and 101d (Grok and pi accounts). Running: 101c (the ACP registry), 104 (a snapshot of any app), 102a
+   that night) 101d (Grok and pi accounts), 101c (the ACP registry) and 104 (a snapshot of any app; the owner's steps to try it
+   are 11 to 18 in `docs/computer-use.md`). Running: 102a
    and 102d (from the design `docs/several-agents.md`, whose eight open questions the lead answered provisionally with
    its own recommendations, logged in `docs/decisions/102-several-agents.md`), and 133 (motion-lists steady). Needs the owner from 101b: Grok signed in and `permission_mode = "ask"`
    under `[ui]` in `~/.grok/config.toml` (it says always-approve, so Grok chats are refused), and Muse Code's CLI. From 101e: all 325 Codex sessions on the owner's Mac are compressed, so
@@ -689,6 +690,10 @@ Every switch that turns a built part on, and what each needs from the owner, is 
 
 ## Known flaky tests (they fail only under heavy load)
 
+- `apps/api` `test/task-companies.test.ts` ("non-members cannot wait on company tasks...", "deleting a company
+  releases its tasks...") and `test/auth-email.test.ts` ("gives Apple's session in every way..."): timed out at 5 s in
+  item 104's run 45873764860 (with a `rows.filter is not a function` uncaught in workerd), a branch that changes no API
+  code; all passed on the next run. If they time out again, look at that uncaught error first.
 - `apps/desktop` `src/sessions/term/engine-osc52.test.ts`: builds clipboard-sized strings, can pass 5 seconds.
 - `apps/desktop` `src/lib/sounds.test.ts` and `apps/web` `test/RoutinesView.test.tsx` ("pauses everyone in practice"): each
   failed once in the gate of 25 Nov at load 7 with a helper's gate beside it (the second waited past testing-library's one

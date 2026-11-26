@@ -3,6 +3,7 @@ import type { Key } from "./index";
 import { ab } from "./zh/ab";
 import { acc } from "./zh/acc";
 import { acct } from "./zh/acct";
+import { acpreg } from "./zh/acpreg";
 import { act } from "./zh/act";
 import { ag } from "./zh/ag";
 import { art } from "./zh/art";
@@ -117,6 +118,7 @@ import { shops } from "./zh/shops";
 import { side } from "./zh/side";
 import { skills } from "./zh/skills";
 import { skl } from "./zh/skl";
+import { snap } from "./zh/snap";
 import { sounds } from "./zh/sounds";
 import { split } from "./zh/split";
 import { sq } from "./zh/sq";
@@ -159,6 +161,7 @@ export const zh: Record<Key, string> = {
   ...ab,
   ...acc,
   ...acct,
+  ...acpreg,
   ...act,
   ...ag,
   ...art,
@@ -273,6 +276,7 @@ export const zh: Record<Key, string> = {
   ...side,
   ...skills,
   ...skl,
+  ...snap,
   ...sounds,
   ...split,
   ...sq,

@@ -14,12 +14,16 @@
 //!   in this chat, or the list of apps, is answered at once; anything else is the chat's card, and only the person's
 //!   Allow once lets that one call run, once.
 //!
+//! - A key the person sets (`snap.rs`, item 104) reads the front window of any app with the same reader and refusals,
+//!   masks it, and opens a new chat whose box holds it, sent only when the person presses Send.
+//!
 //! Elsewhere than macOS there is no computer use: the commands say so and no chat is handed the tools.
 
 pub mod hub;
 pub mod keys;
 pub mod mcp;
 pub mod room;
+pub mod snap;
 pub mod tap;
 
 #[cfg(test)]
@@ -122,11 +126,13 @@ mod tests {
     /// grant either permission, in System Settings.
     #[test]
     fn reading_the_permissions_never_prompts() {
-        let files = [include_str!("mod.rs"), include_str!("mac.rs"), include_str!("room.rs"), include_str!("hub.rs"), include_str!("tap.rs"), include_str!("mcp.rs")];
+        let files = [include_str!("mod.rs"), include_str!("mac.rs"), include_str!("room.rs"), include_str!("hub.rs"), include_str!("tap.rs"), include_str!("mcp.rs"), include_str!("snap.rs")];
         for src in files {
             // the code, without the comments that name what is not here
             let code: String = src.split("#[cfg(test)]\nmod tests").next().unwrap().lines().filter(|l| !l.trim_start().starts_with("//")).collect::<Vec<_>>().join("\n");
-            for banned in ["AXIsProcessTrustedWithOptions", "kAXTrustedCheckOptionPrompt", "CGRequestScreenCaptureAccess", "AXMakeProcessTrusted", "tccutil", "SCShareableContent"] {
+            // and no event tap, which macOS lets run only with Input Monitoring or Accessibility asked for (the snapshot's
+            // key is a Carbon hot key, snap.rs, which needs neither)
+            for banned in ["AXIsProcessTrustedWithOptions", "kAXTrustedCheckOptionPrompt", "CGRequestScreenCaptureAccess", "AXMakeProcessTrusted", "tccutil", "SCShareableContent", "CGEventTapCreate", "CGRequestListenEventAccess"] {
                 assert!(!code.contains(banned), "{banned}");
             }
         }

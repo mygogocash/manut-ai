@@ -20,10 +20,12 @@ pub struct Facts {
     /// Where it is: its index among its siblings from the window down, and its frame on screen.
     pub path: Vec<usize>,
     pub frame: [i64; 4],
+    /// How deep the tree reads it, when a test sets it; else the window is level 0 and the rest level 1.
+    pub depth: Option<usize>,
 }
 
 pub fn f(role: &'static str, label: &str) -> Facts {
-    Facts { role, subrole: "", label: label.into(), value: None, enabled: true, address: None, path: Vec::new(), frame: [0, 0, 80, 24] }
+    Facts { role, subrole: "", label: label.into(), value: None, enabled: true, address: None, path: Vec::new(), frame: [0, 0, 80, 24], depth: None }
 }
 
 /// The stand-in window numbers: app `pid`'s window `w` is `pid * 10 + w`.
@@ -136,6 +138,8 @@ pub struct Stand {
     focused_control: Mutex<HashMap<(i32, usize), usize>>,
     /// The layout in use and the others turned on; None when it cannot be read.
     keyboard: Mutex<Option<Keyboard>>,
+    /// The app that has the keyboard on the Mac, by its process; None for none that can be told.
+    front: Mutex<Option<i32>>,
     calls: Mutex<Vec<String>>,
 }
 
@@ -193,6 +197,7 @@ impl Stand {
             focused: Mutex::new(HashMap::new()),
             focused_control: Mutex::new(HashMap::new()),
             keyboard: Mutex::new(Some(Keyboard { current: layout("U.S.", &US), others: Vec::new() })),
+            front: Mutex::new(Some(TEXTEDIT)),
             calls: Mutex::new(Vec::new()),
         }
     }
@@ -238,6 +243,11 @@ impl Stand {
     /// Window `w` of the app gets the keyboard, or with None no window the Mac can tell.
     pub fn focus_window(&self, pid: i32, w: Option<usize>) {
         self.focused.lock().unwrap().insert(pid, w);
+    }
+
+    /// App `pid` has the keyboard on the Mac, or with None no app the Mac can tell.
+    pub fn front_app(&self, pid: Option<i32>) {
+        *self.front.lock().unwrap() = pid;
     }
 
     /// The keyboard layouts the Mac says are in use and turned on, or None for none it can read.
@@ -291,7 +301,7 @@ impl Stand {
     fn node(&self, pid: i32, window: usize, i: usize) -> Option<Node> {
         let nodes = self.nodes.lock().unwrap();
         let x = nodes.get(&(pid, window))?.get(i)?.clone();
-        Some(Node { depth: usize::from(i > 0), role: x.role.into(), subrole: x.subrole.into(), label: x.label, value: x.value, enabled: x.enabled, address: x.address, handle: Arc::new((pid, window, i)) as Handle })
+        Some(Node { depth: x.depth.unwrap_or(usize::from(i > 0)), role: x.role.into(), subrole: x.subrole.into(), label: x.label, value: x.value, enabled: x.enabled, address: x.address, handle: Arc::new((pid, window, i)) as Handle })
     }
 
     /// Window `w` of app `pid` as the Mac says it is: the stand-in's windows are flat, so every address any of its
@@ -368,6 +378,9 @@ impl Desk for Stand {
             None => None,
         };
         Some(Focus { window, control })
+    }
+    fn front(&self) -> Option<i32> {
+        *self.front.lock().unwrap()
     }
     fn press(&self, handle: &Handle) -> Result<(), String> {
         let (pid, w, i) = Stand::at(handle);

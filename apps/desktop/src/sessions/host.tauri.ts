@@ -2,6 +2,7 @@
 import { type AgentId, type AgentInfo } from "./agents";
 import { tauriTurnFiles, type TurnFilesHost } from "./turnFiles";
 import { type CustomEntry, type CustomList, type CustomPreview } from "./custom";
+import type { RegistryList } from "../settings/agents/acpRegistry";
 import { t } from "../i18n";
 import type { DiskState } from "../lib/disk";
 import type { ImportApp, ImportProfile } from "./term/import";
@@ -372,6 +373,14 @@ export class TauriHost implements SessionHost, BuddyHost {
   async customRemove(id: string) {
     const { invoke } = await this.core();
     await invoke("custom_agent_remove", { id });
+  }
+  async acpRegistry() {
+    const { invoke } = await this.core();
+    return invoke<RegistryList>("acp_registry_list");
+  }
+  async acpRegistryPreview(id: string) {
+    const { invoke } = await this.core();
+    return invoke<CustomPreview>("acp_registry_preview", { id });
   }
   async diskWatch(warnGb: number) {
     const { invoke } = await this.core();
