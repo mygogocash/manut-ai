@@ -31,6 +31,7 @@ import { AvatarEditor, BotFacts, NameEditor, PictureActions, placeName, useBotIn
 import { ShopSettings } from "../onboarding/ShopSettings";
 import { PeoplePage, peopleOffered } from "../pages/PeoplePane";
 import { DeveloperPage } from "./DeveloperPage";
+import { AccountRows, DeleteAccountPage, DELETE_PAGE } from "./DeleteAccount";
 import { WorktreesPage } from "./WorktreesPage";
 import { SourceControlPage } from "./SourceControlPage";
 import { ArtifactLinksPage } from "./ArtifactLinksPage";
@@ -100,14 +101,16 @@ export default function Settings({ page }: SlotProps["settings"]) {
   const botName = page.startsWith("bot:") ? page.slice(4) : null;
   const bot = botName ? s.bots.find((b) => b.name === botName) : undefined;
   const asked = pageOf(page);
-  const current = bot ? `bot:${bot.name}` : asked === "bots" || (asked === "people" && peopleOffered()) || APP_PAGES.some((p) => p.id === asked) ? asked : "general";
+  const current = bot ? `bot:${bot.name}` : asked === "bots" || asked === DELETE_PAGE || (asked === "people" && peopleOffered()) || APP_PAGES.some((p) => p.id === asked) ? asked : "general";
   const [hood, toggleHood] = useHood(current);
+  // Delete account is General's own page, reached from its row: General stays marked in the list while it shows.
+  const marked = current === DELETE_PAGE ? "general" : current;
 
   return (
     <div className="st" data-testid="settings-view">
       <nav className="st-nav" aria-label={t("set.sections")}>
         {EVERYDAY_PAGES.map((p) => (
-          <NavItem key={p.id} id={p.id} current={current} onPick={s.openSettings}>
+          <NavItem key={p.id} id={p.id} current={marked} onPick={s.openSettings}>
             {t(p.label)}
           </NavItem>
         ))}
@@ -186,6 +189,8 @@ export default function Settings({ page }: SlotProps["settings"]) {
           <DeveloperPage />
         ) : current === "people" ? (
           <PeoplePage />
+        ) : current === DELETE_PAGE ? (
+          <DeleteAccountPage />
         ) : (
           <GeneralPage />
         )}
@@ -774,6 +779,8 @@ function GeneralPage() {
     <div className="st-page">
       {/* The first-run setup again, on Your shop: the only place the person and the shop are changed. */}
       <ShopSettings shop={s.ui.shop} onSetUp={s.openFirstRun} />
+      {/* The account, and deleting it (item 124, App Review 5.1.1(v)): where the "You" row leads, so it is easy to find. */}
+      <AccountRows />
       <div className="st-gh">{t("set.appearance")}</div>
       <Appearance />
       <div className="st-grp st-grp-lang">

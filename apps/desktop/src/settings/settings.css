@@ -1209,3 +1209,137 @@
   min-height: 40px;
   font-size: 14px;
 }
+
+/* Settings › General › Delete account (DeleteAccount.tsx, item 124): the design canvas's danger pattern (Settings.dc.html,
+   "Delete this shop"; KitActions), lifted from packages/ui-kit/app.css: `.btn.danger` for the first press, `.btn.danger
+   .solid` for the last step only, `.btn.dark` for the one black button, which keeps the account; and the `.dialog` card for
+   the last step, which is the decision. The canvas's short names map onto the desktop's tokens: --erri is --aui-danger,
+   --pri and --onpri are --aui-primary and --aui-on-primary, --bg is --aui-surface, --sh is --aui-shadow-card. Its heading
+   leaves out the canvas's letter-spacing (docs/design-audit.md: no letter-spacing). Nothing here moves: an ask and an
+   error appear and stay still (docs/motion.md); the buttons press as every .st-btn does. */
+.st-btn.danger {
+  border-color: var(--aui-danger);
+  color: var(--aui-danger);
+}
+.st-btn.danger.solid,
+.st-btn.danger.solid:hover:not(:disabled) {
+  background: var(--aui-danger);
+  color: var(--aui-surface);
+}
+.st-btn.danger.solid:hover:not(:disabled),
+.st-btn.dark:hover:not(:disabled) {
+  opacity: 0.88;
+}
+.st-btn.dark,
+.st-btn.dark:hover:not(:disabled) {
+  border-color: var(--aui-primary);
+  background: var(--aui-primary);
+  color: var(--aui-on-primary);
+}
+.st-btn[aria-busy="true"] {
+  cursor: progress;
+}
+.st-del {
+  max-width: 696px;
+}
+.st-del-head h2 {
+  margin: 0 0 16px;
+  padding-left: 10px;
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.st-del-list {
+  margin: 8px 0 0;
+  padding: 0 10px 0 30px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 14px;
+  color: var(--body);
+}
+.st-del-none {
+  margin: 0 10px;
+  font-size: 14px;
+  color: var(--body);
+}
+.st-del-spec {
+  font-size: 12px;
+  color: var(--aui-muted);
+  font-variant-numeric: tabular-nums;
+}
+.st-del-acts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.st-del-dialog,
+.st-del-done {
+  margin: 16px 0 0;
+  max-width: 440px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--rad-xl);
+  background: var(--aui-overlay);
+  box-shadow: var(--aui-shadow-card);
+  font-size: 14px;
+  color: var(--body);
+}
+/* What it came to is no decision, so it is no card: the page's own text, a step in, as the canvas's rows sit. */
+.st-del-done {
+  margin: 0;
+  max-width: 560px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+}
+.st-del-dialog h3,
+.st-del-done h3 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--ink);
+}
+/* Under the page's own heading the done line is the first line of text, in its weight, not a second heading's size. */
+.st-del-done h3 {
+  font-size: 14px;
+}
+.st-del-dialog p,
+.st-del-done p {
+  margin: 0;
+}
+.st-del-dialog .st-del-acts {
+  justify-content: flex-end;
+}
+.st-del-help {
+  font-size: 12.5px;
+  color: var(--aui-muted);
+}
+.st-del-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink);
+}
+.st-del-field .dev-in {
+  width: 100%;
+}
+.st-del-field .dev-in[aria-invalid="true"] {
+  border-color: var(--aui-danger);
+}
+.st-del-msg {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: var(--rad);
+  background: var(--errbg);
+  color: var(--aui-danger);
+  font-size: 13px;
+}

@@ -309,6 +309,19 @@ describe("signing out", () => {
     await settled();
     expect(disk.files.size).toBe(0);
   });
+
+  it("deleting the account (item 124) ends nothing on the API again, and the store lists no shop of it any more", async () => {
+    const { api, session, store, disk } = await opened();
+    expect(store.getState().shops.list.map((s) => s.name)).toEqual(["Baan Mali", "Ran Pa Noi"]);
+    api.on("POST", "/v1/account/deletion", { status: 200, json: { deleted: true, shops: [{ id: SHOP_A.id, name: "Baan Mali" }],
+      left: [{ id: SHOP_B.id, name: "Ran Pa Noi" }] } });
+    expect((await session.deleteAccount([{ shop: SHOP_A.id, name: "Baan Mali" }])).kind).toBe("deleted");
+    await settled();
+    expect(store.getState().shops.list).toEqual([]);
+    expect(api.to("POST", "/v1/shops/session/end")).toEqual([]);
+    expect(api.to("DELETE", "/v1/auth/session")).toEqual([]);
+    expect(disk.files.size).toBe(0);
+  });
 });
 
 describe("offline", () => {
