@@ -259,6 +259,7 @@
     .tm-imp-btn,
     .pv-add-btn,
     .copy-btn,
+    .dw-btn,
     .termpanel-ib,
     .pg-send,
     .ap-pv-send,
@@ -271,6 +272,7 @@
     .rc-x,
     .pg-x,
     .omhp-x,
+    .dw-x,
     .ss-split-x,
     .termpanel-tab-x
   ) {
@@ -291,6 +293,7 @@
     .tm-imp-btn,
     .pv-add-btn,
     .copy-btn,
+    .dw-btn,
     .termpanel-ib,
     .att-plus,
     .ss-plus,
@@ -301,6 +304,7 @@
     .rc-x,
     .pg-x,
     .omhp-x,
+    .dw-x,
     .ss-split-x,
     .termpanel-tab-x
   ):active:not(:disabled, [aria-disabled="true"]) {

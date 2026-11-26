@@ -1,0 +1,177 @@
+/* A drawing in the chat (Drawing.tsx; docs/security/chat-drawings.md). Lifted from the kit (packages/ui-kit/app.css) as
+   the Chat board uses it: a grey band in sentence case with a quiet underlined link on its right (`.band`, `.lk`), a lined
+   box (`.box`), a quiet button (`.btn.ghost`), and for Open larger the overlay's box with the one shadow (`.dialog`, as
+   the palette draws it). No card shadow in the chat: a card is for a decision, and this is a picture. The drawing keeps
+   its own white page in both themes, as a browser tab shows a page that sets no background. */
+
+/* the chat's answer is set in the reading serif; the card is the app's own words, in its own face */
+.dw-code .dw-row,
+.dw-card {
+  font-family: var(--aui-font);
+}
+.dw-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+/* Show drawing, Hide drawing and Show on a still card: the kit's quiet button */
+.dw-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: var(--rad);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.dw-btn:hover {
+  background: var(--hov);
+  color: var(--ink);
+}
+.dw-why {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+/* the card arrives with the board's Rise, once, and stands still under reduced motion (motion.css) */
+.dw-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+  animation: var(--anim-rise);
+}
+.dw-band {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 32px;
+  padding: 0 10px;
+  border-radius: var(--rad);
+  background: var(--aui-subtle);
+  color: var(--muted);
+  font-size: 13px;
+}
+.dw-by {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Open larger: the kit's quiet link */
+.dw-lk {
+  flex: none;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.dw-lk:hover {
+  color: var(--ink);
+}
+.dw-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.dw-note > svg {
+  flex: none;
+}
+.dw-box {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--rad);
+  background: #ffffff;
+}
+.dw-frame {
+  display: block;
+  width: 100%;
+  border: 0;
+  background: #ffffff;
+}
+.dw-still {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 44px;
+  padding: 0 4px 0 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--rad);
+  font-size: 13px;
+  color: var(--muted);
+}
+
+/* Open larger: the same box in a sheet over the window */
+.dw-back {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: color-mix(in srgb, var(--bg, #000) 45%, transparent);
+  --rise-by: 0px;
+  animation: var(--anim-arrive);
+}
+.dw-sheet {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: min(1100px, 100%);
+  height: min(860px, 100%);
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--rad-xl);
+  background: var(--pop);
+  box-shadow: var(--pop-shadow);
+  font-family: var(--aui-font);
+  --rise-by: var(--arrive-by);
+  animation: var(--anim-arrive);
+}
+.dw-sheet .dw-band {
+  min-height: 34px;
+  padding-right: 0;
+}
+.dw-x {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: var(--rad);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.dw-x:hover {
+  background: var(--hov);
+  color: var(--ink);
+}
+.dw-box.fill {
+  flex: 1;
+  min-height: 0;
+}
+.dw-box.fill .dw-frame {
+  height: 100%;
+}

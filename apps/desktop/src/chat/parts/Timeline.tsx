@@ -158,10 +158,11 @@ export function Timeline({
           return (
             <>
               <WatchLine name={it.watch.name} ts={it.watch.ts} text={it.text} />
-              <Bubble item={it} bot={bot.name} face faceEl={face} />
+              <Bubble item={it} bot={bot.name} face faceEl={face} drawingsBy={bot.display_name} />
             </>
           );
-        return <Bubble item={it} bot={bot.name} face={!botSpoke(prev)} faceEl={face} quote={quoteFor(items, at)} onQuote={showMessage} />;
+        // a finished answer's html and svg blocks offer a drawing by this chat's member or agent (src/chat/drawing/)
+        return <Bubble item={it} bot={bot.name} face={!botSpoke(prev)} faceEl={face} quote={quoteFor(items, at)} onQuote={showMessage} drawingsBy={bot.display_name} />;
       case "activity": {
         const C = slots.activity ?? ActivityFallback;
         return <C bot={bot.name} item={it} live={chat?.turn?.id === it.turn.id} />;
