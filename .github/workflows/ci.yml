@@ -259,12 +259,15 @@ jobs:
         run: |
           rustup toolchain install stable --profile minimal --no-self-update
           rustup default stable
-      # Caches ~/.cargo and src-tauri/target. Only pushes save it: a pull request's cache is visible to that pull
-      # request alone, and Tauri's build cache is big enough to push the useful branch caches out.
+      # Caches ~/.cargo and src-tauri/target. Only pushes to main and the pilot branches save it. A run can restore
+      # only its own branch's caches and the default branch's (GitHub's dependency caching reference), so a pull
+      # request's or a helper branch's cache would serve that branch alone, and at about 1.5 GB a branch (Linux and
+      # macOS) a few helpers' caches would push the useful ones out of the repository's 10 GB (26 Nov 2026: 10.9 GB in
+      # use after one helper branch's first runs). A helper's branch restores main's.
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: apps/desktop/src-tauri -> target
-          save-if: ${{ github.event_name == 'push' }}
+          save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/pilot/')) }}
       # --locked fails when Cargo.lock no longer matches Cargo.toml, instead of quietly rewriting it.
       - name: cargo check
         working-directory: apps/desktop/src-tauri

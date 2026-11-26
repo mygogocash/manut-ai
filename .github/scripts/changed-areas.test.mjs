@@ -253,6 +253,10 @@ describe("ci.yml and this script agree", () => {
     assert.deepEqual(["main", "pilot/week-1", "cloud/format", "feat/x", "mainline"].map(integrates), [true, true, false, false, false]);
   });
 
+  it("saves the Rust cache from pushes to main and the pilot branches only, which every helper branch cannot fill", () => {
+    assert.match(ci, /\n {10}save-if: \$\{\{ github\.event_name == 'push' && \(github\.ref == 'refs\/heads\/main' \|\| startsWith\(github\.ref, 'refs\/heads\/pilot\/'\)\) \}\}\n/);
+  });
+
   it("never cancels a run on main or a pilot branch, and cancels a superseded one anywhere else", () => {
     assert.match(ci, /\nconcurrency:\n {2}group: ci-\$\{\{ github\.ref \}\}\n {2}cancel-in-progress: \$\{\{ github\.ref != 'refs\/heads\/main' && !startsWith\(github\.ref, 'refs\/heads\/pilot\/'\) \}\}\n/);
     assert.doesNotMatch(ci, /\n {2}queue: max/);
