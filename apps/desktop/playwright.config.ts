@@ -2,9 +2,10 @@ import { defineConfig } from "@playwright/test";
 import { chatResume } from "./e2e/start";
 // The Playwright suite inherited from Oh My Hermes. It reaches the app through the WebSocket runtime adapter
 // (VITE_MANUT_BRIDGE below) and the Node mock bridge in e2e/mock-bridge.mjs, not the in-process runtime the app
-// uses by default. CI runs it as six shards (job `e2e` in .github/workflows/ci.yml); on a small machine run one
-// file at a time: `pnpm exec playwright test e2e/<file>`. The specs of screens the fork removed were deleted, or are
-// skipped with the reason beside them.
+// uses by default. CI runs it as nine shards of whole spec files balanced by their measured time (job `e2e` in
+// .github/workflows/ci.yml, .github/scripts/e2e-shards.mjs and e2e/timings.json); on a small machine run one file at a
+// time: `pnpm exec playwright test e2e/<file>`. The specs of screens the fork removed were deleted, or are skipped with
+// the reason beside them.
 // Each dag node runs its own ports (MANUT_PORT for vite, MANUT_MOCK_PORT for the mock bridge) so
 // parallel e2e runs never collide. Defaults are for a person running `pnpm e2e` alone.
 const port = Number(process.env.MANUT_PORT || 5307);
@@ -12,6 +13,9 @@ const mock = Number(process.env.MANUT_MOCK_PORT || 5308);
 export default defineConfig({
   testDir: "e2e",
   timeout: 30_000,
+  // On CI a failed test runs once more: a one-off slow start on a shared runner then shows as flaky in the shard's
+  // summary instead of failing the run, and a real failure fails twice. On a person's machine it fails at once.
+  retries: process.env.CI ? 1 : 0,
   // One mock bridge holds shared state (calls log, running turn): spec files must not run against it at once.
   workers: 1,
   use: {

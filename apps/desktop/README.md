@@ -130,8 +130,9 @@ ad hoc (`"-"`); there is no signing identity, notarisation or release workflow h
 
 ## Not done in this pass
 
-- The Playwright suite (`e2e/`, 156 spec files) runs in CI as six shards (job `e2e` in `.github/workflows/ci.yml`; run
-  one file locally with `pnpm exec playwright test e2e/<file>`). Specs of removed screens were deleted or skipped, each
-  skip with its reason beside it.
+- The Playwright suite (`e2e/`, about 210 spec files) runs in CI as nine shards of whole spec files balanced by their
+  measured time (job `e2e` in `.github/workflows/ci.yml`, `.github/scripts/e2e-shards.mjs`, `e2e/timings.json`), and a
+  failing spec fails the run; run one file locally with `pnpm exec playwright test e2e/<file>`. Specs of removed
+  screens were deleted or skipped, each skip with its reason beside it.
 - Rust tests were not run, only `cargo check`.
 - Dictionary strings of the hidden and removed screens were left in the four language files.

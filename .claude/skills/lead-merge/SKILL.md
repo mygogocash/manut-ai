@@ -1,6 +1,6 @@
 ---
 name: lead-merge
-description: The lead's routine for one plan item in Manut AI - start a helper's worktree, gate its branch, merge it, mark it and clean up. Use when a helper reports an item finished, when starting a new item, or when a merge conflicts in the decisions or the dictionaries.
+description: The lead's routine for one plan item in Manut AI - start a helper's worktree, wait for CI on its pushed branch (or gate it when CI is down), merge it, mark it and clean up. Use when a helper reports an item finished, when starting a new item, or when a merge conflicts in the decisions or the dictionaries.
 ---
 
 # Merging an item as the lead
@@ -26,18 +26,26 @@ model by the work, as the owner asked on 25 Nov 2026: think with the strongest m
 | Mechanical edits with no judgement (a rename, marking docs, moving text) | Haiku, or a script |
 
 When an item is large, the lead settles the design first and hands a lighter model the plan, rather than a strong model
-the whole thing. The Mac, not the models, is the limit: reading and writing are light, a gate is heavy, and
-`gate.sh` lets only one run at a time, so three builders and a read-only reviewer or two can work together when the
-owner wants speed (25 Nov: credits were plentiful). More than that, and the lead's own review is the queue.
+the whole thing. The Mac was the limit while every item's gate ran on it, one at a time; since item 126 CI checks each
+helper's push on GitHub, several at once (one full run is 18 jobs, and the organisation's free plan runs 20 at a
+time), so the lead's own review is the queue. Helpers still share the Mac for their own tests: keep heavy local runs to
+one or two at once.
 
 ## 2. When the helper reports
+
+The order since 26 Nov 2026 (item 126): **the helper merges the lead's branch in and pushes, CI checks that commit on
+GitHub, and the lead merges on green.** CI runs on every push of a `feat/`, `fix/`, `refactor/`, `test/`, `docs/`, `ci/`
+or `chore/` branch, measured from the newest green commit of `pilot/week-1` the branch holds, so several items are
+checked at once in the cloud instead of one at a time on this Mac. CI runs everything the gate does, and the browser
+specs the gate never ran.
 
 Read its report for what it did NOT do or could not check, then:
 
 1. Read the risky part of the diff yourself: anything that removes, sends, pays, runs a command, starts a program, or
    keeps a secret. Check a flag it used against the tool's own `--help`.
-2. Merge the lead's branch into the item's (`git merge --no-edit feat/continue-pilot-week-1` in the item's worktree).
-   Conflicts are nearly always two items adding at one place:
+2. Make sure the item's branch holds the lead's newest commit. The helper merged it in before pushing; if the lead's
+   branch has moved since, merge it again in the item's worktree (`git merge --no-edit feat/continue-pilot-week-1`) and
+   push. Conflicts are nearly always two items adding at one place:
    ```bash
    .claude/skills/lead-merge/scripts/keep-both.py $(git diff --name-only --diff-filter=U -- apps/desktop/src/i18n)
    ```
@@ -63,28 +71,40 @@ Read its report for what it did NOT do or could not check, then:
    table head.
    Read any other conflict yourself. Two functions added at one place share the closing brace after the marker; a
    sentence both sides extended is joined by hand.
-3. Gate the merged branch: `.claude/skills/lead-merge/scripts/gate.sh <item worktree>`. It installs, runs every
-   package's tests, type checks and the whole Rust suite, one cargo at a time (a second time by itself when the first
-   run fails). This is the item's only whole gate: helpers run just what they touched. Fix what fails on the item's branch and
-   gate again. A test that fails only under load is in `docs/handoff.md`, "Known flaky tests": run it alone first.
-   When several items are ready together, stack them: merge the first item's branch into the second's, the second's
-   into the third's, and gate only the top. Then finish them in order; before each `finish-item.sh` after the first,
-   merge the lead's branch into the item's and check its tree did not change (`git rev-parse 'HEAD^{tree}'` before
-   and after), so the tree that is pushed is the tree that was gated.
-4. If the item changed a menu, a Settings page, a lane's life or the chat box, run the Playwright specs for that area
-   (`apps/desktop`, `pnpm exec playwright test e2e/<spec>`): CI's shards may fail without failing a run.
+3. Wait for CI on that exact commit:
+   ```bash
+   .claude/skills/lead-merge/scripts/ci-wait.sh feat/lane-diff      # prints each job; exits 0 only when green
+   ```
+   A skipped job counts as passed (it could not see the change). A red job is the item's to fix on its branch: push the
+   fix and wait again. `gh run view <id> --log-failed` shows why. A browser spec that failed once and passed on its retry
+   shows as flaky, not red. A test that fails only under load is in `docs/handoff.md`, "Known flaky tests".
+4. Several items ready together need not wait for each other: each was checked on its own push. Merge them one after
+   another; each merge moves the lead's branch, so the next item merges it in, pushes and waits once more. A full run
+   took about 12 minutes on 26 Nov when runners were free (its longest shard is `panel-max.spec.ts` alone, about 8
+   minutes), and a docs-only push a few. When the organisation's 20 job places are taken (a burst of Dependabot pull
+   requests, each a full run, held one run queued for 30 minutes that day), a run waits for places.
+
+**When CI is down** (GitHub's status page, or runs that never start), gate on this Mac instead:
+`.claude/skills/lead-merge/scripts/gate.sh <item worktree>` installs, runs every package's tests, type checks and the
+whole Rust suite, one cargo at a time (a second time by itself when the first run fails), behind a lock so only one runs
+at a time. It does not run the browser specs: run the Playwright specs for any menu, Settings page, chat box or lane's
+life the item changed (`apps/desktop`, `pnpm exec playwright test e2e/<spec>`). Then finish without `--ci`.
 
 ## 3. Merge, mark, push, clean up
 
 1. Write the merge message to a file (what it does for a person, the safety rule if it has one, what the lead checked,
-   what is not verified; `Co-Authored-By` for the helper's model and for the lead). `git commit -F -` cannot read
-   stdin in this shell, so always a file.
-2. `.claude/skills/lead-merge/scripts/finish-item.sh <item worktree> <message file>`: pushes the branch, merges it
-   `--no-ff`, checks the merged tree is the gated one, removes the worktree and the branch.
+   what is not verified, the CI run it merged on; `Co-Authored-By` for the helper's model and for the lead).
+   `git commit -F -` cannot read stdin in this shell, so always a file.
+2. `.claude/skills/lead-merge/scripts/finish-item.sh --ci <item worktree> <message file>`: requires the item's head to be
+   the branch's head on GitHub, waits for CI's run of exactly that commit and refuses unless it is green, merges that
+   commit `--no-ff`, checks the merged tree is the checked one, and removes the worktree and the branch. A push while it
+   waits, or a lead's branch that moved, refuses the merge. Without `--ci` (when CI is down) it trusts the gate and
+   pushes the branch itself.
 3. Mark `docs/plan.md` (the row to `done`, with one line on what merged and what is still open) and `docs/handoff.md`
-   (the running list, the Merged list, anything the owner must do). Commit, then push once:
-   `git push origin HEAD:pilot/week-1` from the lead's worktree. One push, so CI runs once: a second push cancels the
-   run in progress, and CI measures what changed from its last green run.
+   (the running list, the Merged list, anything the owner must do). Commit, then push:
+   `git push origin HEAD:pilot/week-1` from the lead's worktree. A run on `pilot/week-1` is never cancelled by the next
+   push: one runs, the newest waits, and a run already waiting is replaced by a newer one, so quick merges are all
+   covered by the runs that finish (each measures from the last green commit).
 4. Start the next item.
 
 ## When the Mac or the account stops

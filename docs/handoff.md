@@ -713,10 +713,10 @@ Every switch that turns a built part on, and what each needs from the owner, is 
 - `apps/api` `test/model-alerts.test.ts` ("notes 80% and then 100%"), `test/google-books.test.ts` ("makes the sheet once") and
   `test/approvals-route.test.ts` ("lists the session's open approvals"): all three passed five seconds in one CI run on
   `7ef8505` (25 Nov) and passed on the next commit; each has thirty seconds since.
-- The desktop's Playwright shards may fail without failing a CI run, so a spec that a merge breaks goes unseen: five did on
-  25 Nov (a row's menu, the Settings pages' order, a closed lane's clean-up, a word kept in English). After merging an
-  item that changes a menu, a Settings page or a lane's life, read the newest run's "Desktop Playwright (all shards)"
-  summary, or run the specs named for that area before pushing.
+- Until item 126 (26 Nov) the desktop's Playwright shards could fail without failing a CI run, so a spec that a merge
+  broke went unseen: five did on 25 Nov (a row's menu, the Settings pages' order, a closed lane's clean-up, a word kept
+  in English). Now a failing spec fails its shard and the run. On CI a failed spec runs once more, so one that passes on
+  its retry shows as flaky in "Desktop Playwright (all shards)": a spec flaky in two runs in a row belongs in this list.
 - `apps/web` `test/MakeRoutineForm.test.tsx`, "lists two routines made one after another": failed once in CI's Web
   tests on `0646cc1` (25 Nov), counting two reads where it expected three. The read after the second routine is asked
   for a moment after its row shows, and the test looked at once; it waits for the read since then.
@@ -751,6 +751,17 @@ Every switch that turns a built part on, and what each needs from the owner, is 
   push runs two short jobs. A pull request's own run of a `pilot/*` commit skips everything, as the push's run checks
   it. A skipped job shows as skipped and counts as passed; start CI by hand (Actions, CI, Run workflow) to run every
   job on a branch.
+- How an item merges, since item 126 (26 Nov): the helper merges the lead's branch in and pushes its branch; CI checks
+  that commit on GitHub (it runs on every push of `feat/`, `fix/`, `refactor/`, `test/`, `docs/`, `ci/` and `chore/`
+  branches, a helper's first push measured from the newest green `pilot/week-1` commit it holds); the lead merges on
+  green with `finish-item.sh --ci`, which refuses any commit but the one CI passed (`ci-wait.sh <branch>` prints each
+  job). `gate.sh` on this Mac is for when CI is down, and it does not run the browser specs. A run on `pilot/week-1` or
+  `main` is never cancelled by the next push: one runs, the newest waits, and a run already waiting is replaced. The
+  desktop's browser specs run as nine shards balanced by each spec file's measured time
+  (`apps/desktop/e2e/timings.json`); when the shards drift apart, refresh it from a green run with
+  `node .github/scripts/e2e-timings.mjs <run id>` and commit it. One full run is 18 jobs at its widest, and the
+  organisation's free plan runs 20 at once (5 on macOS), so a second full run at the same moment waits a few minutes
+  for places.
 - GitHub: `git push` works as it is. For `gh`, prefix commands with
   `GH_TOKEN="$(gh auth token --user KunanonJ)"`; the default `gh` account cannot see the organisation.
 - Secrets never go into source, logs, tests or chat. A secret the owner gives arrives through T3 Code's secure
