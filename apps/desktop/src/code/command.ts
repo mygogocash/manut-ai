@@ -105,6 +105,50 @@ function samePath(a: string, b: string): boolean {
   return within(a, b) && within(b, a);
 }
 
+// ---- files a change to which always asks --------------------------------------------------------------------------
+
+/** Folders whose files make a program run later or change what an agent may do: git's own; the agents' settings,
+ *  instructions, skills, commands and plugins (for every agent the app starts, `src-tauri/src/agent_chat.rs`,
+ *  `acp_agents.rs`, `lane_config.rs`); hooks a tool on the person's side runs (husky, a hooks folder, CI, an editor's
+ *  tasks, a dev container); and the package managers' and cargo's own settings, which name what runs every script. */
+const GUARDED_DIRS = new Set([
+  ".git", ".claude", ".codex", ".agents", ".agent", ".cursor", ".gemini", ".qwen", ".kimi", ".opencode", ".pi", ".omp", ".clinerules",
+  ".cline", ".copilot", ".github", ".husky", ".githooks", ".vscode", ".idea", ".devcontainer", ".zed", ".helix", ".fleet", ".yarn",
+  ".circleci", ".buildkite", ".gitlab", ".mise", ".cargo",
+]);
+/** Files of the same kinds, in any folder, and package.json, Makefile and the like, whose scripts a check and Preview's
+ *  Start run by a name that says nothing of what they do. */
+const GUARDED_FILES = new Set([
+  ".mcp.json", "claude.md", "claude.local.md", "agents.md", "agents.override.md", "gemini.md", "qwen.md", ".cursorrules", "opencode.json",
+  "opencode.jsonc", ".envrc", ".npmrc", ".yarnrc", ".yarnrc.yml", ".yarnrc.yaml", "pnpm-workspace.yaml", "bunfig.toml", ".bunfig.toml",
+  "package.json", ".gitmodules", ".pre-commit-config.yaml", "lefthook.yml", "lefthook.yaml", ".lefthook.yml", ".lefthook.yaml",
+  "lefthook-local.yml", "lefthook-local.yaml", ".simple-git-hooks.json", ".simple-git-hooks.js", ".simple-git-hooks.cjs",
+  "simple-git-hooks.json", ".gitlab-ci.yml", "azure-pipelines.yml", "bitbucket-pipelines.yml", "jenkinsfile", "makefile",
+  "gnumakefile", "justfile", ".justfile", "taskfile.yml", "taskfile.yaml", "taskfile.dist.yml", "taskfile.dist.yaml", "mise.toml",
+  ".mise.toml", "mise.local.toml", ".mise.local.toml", "composer.json", "deno.json", "deno.jsonc", "project.json", "nx.json",
+  ".nvim.lua", ".nvimrc", ".exrc",
+]);
+const GUARDED_NAMES = [/^\.pnpmfile\./, /^\.lintstagedrc/, /^lint-staged\.config\./, /\.code-workspace$/, /^\.?mise\..+\.toml$/];
+
+/** A file name as a disk that ignores letter case compares it (macOS's, by default): upper case and back folds the
+ *  Kelvin sign and the long s as that disk does. A Windows disk also drops dots and spaces at a name's end and reads
+ *  `name::$DATA` as the file itself. */
+const fold = (part: string) => part.normalize("NFC").toUpperCase().toLowerCase().replace(/:.*$/, "").replace(/[. ]+$/, "");
+
+/** Whether a change to `written` is one the dial never lets go alone: a path into one of the folders above or to one of
+ *  the files, compared after `.` and `..` are taken out and by name whatever its letter case, from the project's folder
+ *  (a project kept inside a folder of that name is not one). A Windows short name (`PACKAG~1.JSO`) may be any of them. */
+export function guardedPath(written: string, where: Pick<Where, "cwd" | "root" | "home">): boolean {
+  const abs = resolve(written, where.cwd, where.home);
+  const p = parts(abs ?? written);
+  const r = parts(where.root);
+  const inside = abs !== null && within(abs, where.root);
+  const list = (inside ? p.list.slice(r.list.length) : p.list).map(fold);
+  if (list.some((x) => GUARDED_DIRS.has(x) || /~[0-9]/.test(x))) return true;
+  const name = list[list.length - 1] ?? "";
+  return GUARDED_FILES.has(name) || GUARDED_NAMES.some((re) => re.test(name));
+}
+
 const NULL_DEVICES = new Set(["/dev/null", "/dev/stdin", "/dev/stdout", "/dev/stderr", "/dev/tty", "nul", "NUL"]);
 const URL_LIKE = /^[A-Za-z][A-Za-z0-9+.-]*:\/\//;
 const SCP_LIKE = /^[^\s/:@]+@[^\s/:]+:/;
@@ -684,8 +728,6 @@ function git(words: string[], where: Where): Verdict {
     case "rebase":
     case "cherry-pick":
     case "revert":
-    case "am":
-    case "apply":
     case "pull":
     case "init":
     case "notes":
@@ -866,7 +908,10 @@ const RUNS_PROGRAM: Record<string, { opts: string[]; values: string }> = {
   less: { opts: ["-k", "--lesskey-file", "--lesskey-src", "--lesskey-content"], values: "bhjopPtTxyzO#" },
   more: { opts: ["-k", "--lesskey-file", "--lesskey-src", "--lesskey-content"], values: "bhjopPtTxyzO#" },
 };
-const CHANGES = new Set(["mkdir", "touch", "cp", "mv", "ln", "chmod", "install", "patch", "tar", "unzip", "zip", "gzip", "gunzip", "dos2unix", "truncate"]);
+const CHANGES = new Set(["mkdir", "touch", "cp", "mv", "chmod", "install", "tar", "unzip", "zip", "gzip", "gunzip", "dos2unix", "truncate"]);
+/** Programs that write files the command does not name: a link (`ln`, `link`, `cp -s`) makes a later change to its path
+ *  land where the link leads, and a patch names its own files inside. */
+const WRITES_UNNAMED = new Set(["ln", "link", "patch"]);
 const DELETES = new Set(["rm", "rmdir", "unlink", "shred", "trash"]);
 const THIS_MAC = new Set(["brew", "port", "apt", "apt-get", "yum", "dnf", "pacman", "snap", "choco", "winget", "scoop", "softwareupdate", "defaults", "launchctl", "systemctl", "crontab", "mas", "sudo", "doas", "su", "chown", "nvm", "fnm", "volta", "asdf", "mise", "pyenv", "rbenv"]);
 const SENDS = new Set(["ssh", "scp", "sftp", "nc", "ncat", "telnet", "ftp", "mosh"]);
@@ -1300,6 +1345,13 @@ function classify(words: string[], where: Where): Verdict {
   if (ONLY_TEXT.has(name)) return v("read", say("kit.say.read"), undefined, { text: new Set(words.map((_, i) => i).slice(1)) });
   if (READS.has(name)) return v("read", say("kit.say.read"));
   if (DELETES.has(name)) return v("delete", say("kit.say.delete"), "exact");
+  if (WRITES_UNNAMED.has(name)) return unknownProgram(name);
+  if (name === "cp" && hasIn("tS", words.slice(1), "-s", "-l", "--symbolic-link", "--link")) return unknownProgram(name);
+  // an archive names its own files, links and folders, `..` among them
+  if (name === "tar" && (hasIn("fCbTXKNLHV", words.slice(1), "-x", "--extract", "--get") || /^[a-wyzA-Z]*x/.test(words[1] ?? ""))) return unknownProgram(name);
+  if (name === "unzip" && !["-l", "-t", "-v", "-Z", "-p"].includes(words[1] ?? "")) return unknownProgram(name);
+  // gunzip writes the file named after the archive, its ending taken off
+  if ((name === "gunzip" || (name === "gzip" && has(words.slice(1), "-d", "--decompress"))) && words.slice(1).some((w) => !w.startsWith("-") && guardedPath(w.replace(/(\.gz|\.z|-gz|-z|_z)$/i, ""), where))) return unknownProgram(name);
   if (CHANGES.has(name)) return (v("change", say("kit.say.change"), 1));
   if (name === "rsync") return words.slice(1).some((w) => SCP_LIKE.test(w) || /^[^/\s]+:/.test(w)) ? sends() : (v("change", say("kit.say.change"), 1));
   if (THIS_MAC.has(name)) return thisMac();
@@ -1418,7 +1470,7 @@ export function readCommand(line: string, where: Where): ReadCommand {
   const verdicts: Verdict[] = [];
   let saves = false;
   let wipes = false;
-  /** A step that changes something names a path in git's own folder. */
+  /** A step that changes something names a path in git's own folder, or another whose change always asks. */
   let gitOwn = false;
   for (const c of cmds) {
     let at = 0;
@@ -1461,9 +1513,14 @@ export function readCommand(line: string, where: Where): ReadCommand {
       }
     });
     for (const r of c.redirects) check(r, true);
-    // git's own folder holds its settings and hooks, which can make a later read run a program: a step that changes
-    // anything there is not one the dial lets go alone
-    if (c.writes.some((w) => IN_GIT_DIR.test(w)) || (!reads && words.some((w, i) => i > 0 && !verdict.text?.has(i) && IN_GIT_DIR.test(w)))) gitOwn = true;
+    // git's own folder, the agents' settings, a hook a tool runs by itself and package.json can make a later step run a
+    // program or let an agent do more (`guardedPath`): a step that changes anything there, by a word it names, a file
+    // it writes its output into, or the folder it went into first, is not one the dial lets go alone. A short option's
+    // joined value (`-o.npmrc`) may be its name from any letter on.
+    const here = { cwd, root: where.root, home: where.home };
+    const named = (w: string) => [...valuesIn(w), ...(/^-[^-]./.test(w) ? Array.from({ length: w.length - 2 }, (_, k) => w.slice(k + 2)) : [])];
+    if (c.writes.some((w) => IN_GIT_DIR.test(w) || guardedPath(w, here))) gitOwn = true;
+    if (!reads && (guardedPath(cwd, here) || words.some((w, i) => i > 0 && !verdict.text?.has(i) && (IN_GIT_DIR.test(w) || named(w).some((x) => x !== "" && guardedPath(x, here)))))) gitOwn = true;
 
     if (verdict.cd !== undefined) {
       const to = verdict.cd === "~" ? (where.home ?? null) : resolve(verdict.cd, cwd, where.home);
