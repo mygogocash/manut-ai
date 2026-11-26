@@ -1332,6 +1332,7 @@ export const zh: Record<Key, string> = {
   "dw.unsafe": "无法安全地显示这张图。",
   "dw.empty": "这个代码块里没有可画的内容。",
   "dw.tooBig": "太大了，无法作为图显示（超过 256 KB）。",
+  "dw.tooMany": "太大，无法绘制：它会画出超过 5,000 个图形。",
   "diff.new": "新文件",
   "diff.deleted": "已删除",
   "diff.more": "还有 {n} 行",

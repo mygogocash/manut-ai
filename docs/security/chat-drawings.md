@@ -55,7 +55,16 @@ rules below are the feature; the code keeps them in `apps/desktop/src/chat/drawi
 8. **It costs little.** At most 256 KiB of source; a bigger block says it is too large instead of offering Show. At most
    three drawings are live at once across the app; showing a fourth puts the oldest back to a still card with Show. A
    frame goes when its card is more than 1200 pixels out of the chat's view, or when the chat closes. Nothing about a
-   shown drawing is kept, so after a restart it is code again until the person presses Show.
+   shown drawing is kept, so after a restart it is code again until the person presses Show. Since item 121 the size cap
+   is not the only bound: `sanitize.ts` counts what the drawing would draw with every reference followed (each `<use>`
+   expanded, a marker at every vertex of the shapes it marks, a pattern's, a mask's, a clip's and a filter's content
+   where it is named, an SVG picture in an `<img>`, an `<image>` or a style sheet, along every chain, the product along
+   each), reading style sheets and style attributes with the engine's own CSS parser and giving each declaration to the
+   elements its selector matches. A drawing that would draw more than 5,000 shapes beyond the elements it writes out is
+   not drawn, and the card says it is too large to draw; one whose references cannot be read (a style sheet the engine
+   refuses, an SVG picture that does not decode, pictures nested more than three deep) says it could not be shown
+   safely. A reference back into a chain being drawn draws nothing, as the engines draw it. Gradients draw no shape, so
+   gradients inheriting from each other add nothing.
 
 ## On by default
 
@@ -97,8 +106,11 @@ choice.
   map's area. The app's box reached it by nothing.
 - A script that loops forever, in a frame with `allow-scripts`, left the page itself unable to answer for 4 seconds in
   both engines; with the empty sandbox the page answered in 4 ms. No script of a drawing runs, so none can spin. Heavy
-  CSS or a very large SVG is still the web view's own work on its main thread; the 256 KiB cap bounds it, and nothing
-  else was measured.
+  CSS or a very large SVG is still the web view's own work on its main thread. The 256 KiB cap does not bound references
+  that multiply: the fifth security read (26 Nov) froze the page for good with 1,893 bytes of nested `<use>` (ten
+  million rectangles), which the count above now refuses before anything is drawn (`e2e/chat-drawing.ts`, "what a
+  drawing would draw", in both engines). Cost that is not a count (a huge filter radius, `feTurbulence` over a large
+  area, deep CSS) was not measured.
 
 ## In this Mac's own web view
 

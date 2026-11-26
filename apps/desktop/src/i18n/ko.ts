@@ -1332,6 +1332,7 @@ export const ko: Record<Key, string> = {
   "dw.unsafe": "이 그림은 안전하게 보여 줄 수 없었어요.",
   "dw.empty": "이 블록에는 그릴 수 있는 것이 없어요.",
   "dw.tooBig": "그림으로 보여 주기에는 너무 커요(256 KB 초과).",
+  "dw.tooMany": "너무 커서 그릴 수 없어요. 도형을 5,000개 넘게 그리게 돼요.",
   "diff.new": "새 파일",
   "diff.deleted": "삭제됨",
   "diff.more": "{n}줄 더",

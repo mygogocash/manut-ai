@@ -1338,6 +1338,7 @@ export const en = {
   "dw.unsafe": "This drawing could not be shown safely.",
   "dw.empty": "Nothing in this block can be drawn.",
   "dw.tooBig": "Too large to show as a drawing (over 256 KB).",
+  "dw.tooMany": "Too large to draw: it would draw more than 5,000 shapes.",
   "diff.new": "new",
   "diff.deleted": "deleted",
   "diff.more": "{n} more lines",

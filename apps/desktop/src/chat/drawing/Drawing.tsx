@@ -125,7 +125,7 @@ export function DrawingCard({ code, by }: { code: string; by: string }) {
       </div>
       {!prepared.ok ? (
         <div className="dw-still" data-testid="drawing-refused" data-why={prepared.why}>
-          {prepared.why === "empty" ? t("dw.empty") : t("dw.unsafe")}
+          {prepared.why === "empty" ? t("dw.empty") : prepared.why === "too_many" ? t("dw.tooMany") : t("dw.unsafe")}
         </div>
       ) : live && doc ? (
         <Frame doc={doc} title={title} ratio={prepared.parts.ratio} />

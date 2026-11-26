@@ -1332,6 +1332,7 @@ export const ja: Record<Key, string> = {
   "dw.unsafe": "この図は安全に表示できませんでした。",
   "dw.empty": "このブロックには描けるものがありません。",
   "dw.tooBig": "大きすぎて図として表示できません（256 KB 超）。",
+  "dw.tooMany": "大きすぎて描けません。5,000 個を超える図形を描くことになります。",
   "diff.new": "新規",
   "diff.deleted": "削除",
   "diff.more": "あと{n}行",
