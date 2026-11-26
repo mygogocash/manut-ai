@@ -1,5 +1,6 @@
 // The whole app view model: one reducer, one store, one React hook. UI nodes only read this and call
 // its actions; they never edit this file.
+import { recordError } from "../report/errors";
 import { bareText } from "../chat/box/carry";
 import { SESSIONS_ENTRY } from "../sessions/entry";
 import { useSyncExternalStore } from "react";
@@ -2448,6 +2449,10 @@ export function createStore(bridge: BridgeLike, opts: StoreOptions = {}): Store 
   const flushing = new Set<string>();
   const interrupting = new Set<string>();
   const dispatch = (a: Action) => {
+    // what Settings › Report a problem lists (kept in memory only, one masked line each)
+    if (a.type === "error" && a.message) recordError("chat", a.message);
+    else if (a.type === "send.failed") recordError("chat", a.error);
+    else if (a.type === "chat.failed") recordError("chat", a.message);
     const next = reduce(state, a);
     if (next === state) return;
     state = next;

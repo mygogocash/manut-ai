@@ -161,6 +161,12 @@ export const ACTIONS: ActionDef[] = [
     offer: (c) => c.workflows.map((w) => ({ id: `do:workflow:${w.file}`, label: t("wf.palette", { name: w.name }), icon: "nodes", run: () => c.runWorkflow(w.file) })),
   },
   {
+    // Settings › Report a problem: opens the page, which gathers and shows the report; nothing is sent from the palette
+    id: "report-problem",
+    elsewhere: "report-page",
+    offer: (c) => [{ id: "do:report-problem", label: t("set.report"), icon: "flag", run: () => c.openSettings("report") }],
+  },
+  {
     id: "language",
     elsewhere: "language",
     offer: (c) => LANGS.filter((l) => l !== c.lang).map((l) => ({ id: `do:language:${l}`, label: `${t("lang.title")}: ${LANG_NAMES[l]}`, icon: "globe", run: () => c.setLanguage(l) })),

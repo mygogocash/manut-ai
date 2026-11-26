@@ -45,6 +45,7 @@ mod pty_bench;
 mod running;
 mod session_files;
 mod sessions;
+mod report_system;
 mod source_tools;
 mod shop_cache;
 mod shop_cache_key;
@@ -860,6 +861,12 @@ async fn tasks_me(me: State<'_, Arc<gh_me::Me>>, account: String, section: Strin
 async fn source_tools(tasks: State<'_, Arc<tasks::Tasks>>, me: State<'_, Arc<gh_me::Me>>, fresh: Option<bool>) -> Result<source_tools::Tools, String> {
     let (t, m) = (Arc::clone(&tasks), Arc::clone(&me));
     tauri::async_runtime::spawn_blocking(move || source_tools::read(&t, &m, fresh.unwrap_or(false))).await.map_err(|e| e.to_string())
+}
+
+/// Settings › Report a problem (item 105): Manut AI's version, the macOS version and the chip (report_system.rs). Only reads.
+#[tauri::command]
+async fn report_system() -> Result<report_system::SystemFacts, String> {
+    tauri::async_runtime::spawn_blocking(report_system::facts).await.map_err(|e| e.to_string())
 }
 
 /// Settings › Accounts › GitHub: gh's own sign-in for one more account in a terminal-panel tab (`gh auth login`, or
@@ -1923,6 +1930,7 @@ fn commands(invoke: tauri::ipc::Invoke) -> bool {
         project_icon,
         gh_accounts,
         source_tools,
+        report_system,
         tasks_me,
         gh_login_start,
         window_close,

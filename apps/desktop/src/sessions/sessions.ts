@@ -71,6 +71,7 @@ import { parseCommands, type AgentCommand } from "../chat/parts/commands";
 import { noteMcpSeen } from "../settings/mcp/agentConfig";
 import { t as tr, type Key } from "../i18n";
 import { sandboxSaid } from "../appStore";
+import { recordError } from "../report/errors";
 import { notesSaid } from "./projectNotes";
 import { windowWatched, type SessionNote } from "../lib/notify";
 import { createCloseGrace, graceMs, restoreSplitIn, type SplitWas } from "./closeGrace";
@@ -390,7 +391,10 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     // `ms`: a program that ends within its first seconds did not really run
     notifyState?.(id, { kind, name: nameOf(r), ...detail, ms: Date.now() - r.startedAt, told });
   };
-  const patchRec = (id: string, p: Partial<SessionRec>) => set({ list: state.list.map((s) => (s.id === id ? { ...s, ...p } : s)) });
+  const patchRec = (id: string, p: Partial<SessionRec>) => {
+    if (p.error) recordError("session", p.error);
+    set({ list: state.list.map((s) => (s.id === id ? { ...s, ...p } : s)) });
+  };
   let titles = readTitles();
   const saveTitles = (next: Record<string, string>) => {
     titles = next;
