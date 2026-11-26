@@ -1,0 +1,28 @@
+import type { acpreg as en } from "../en/acpreg";
+
+export const acpreg: Record<keyof typeof en, string> = {
+  "acpreg.title": "ACP レジストリから",
+  "acpreg.hint": "Agent Client Protocol のレジストリに載っているエージェントです。Manut AI に同梱した写しから読みます。「追加…」で、保存する前に実行する内容をそのまま確認できます。Manut AI は何もインストールせず、この一覧をダウンロードすることもありません。",
+  "acpreg.search": "レジストリを検索",
+  "acpreg.loading": "レジストリを読み込み中…",
+  "acpreg.none": "一致するエージェントはレジストリにありません。",
+  "acpreg.add": "追加…",
+  "acpreg.addOf": "{name} を追加…",
+  "acpreg.there": "プロバイダーに {name} としてあります",
+  "acpreg.yours": "{name} として追加済み",
+  "acpreg.quarantine": "レジストリ自身のチェックで保留中: {why}",
+  "acpreg.platform": "このコンピューターでは使えません",
+  "acpreg.env": "{names} の設定が必要ですが、Manut AI は設定しません",
+  "acpreg.start": "Manut AI が確認していないオプションで起動します",
+  "acpreg.bin": "起動するコマンドがわかりません",
+  "acpreg.interp": "レジストリがプログラムとしてシェルかインタープリターを指定しています。",
+  "acpreg.gone": "このレジストリの項目は今は追加できません。",
+  "acpreg.pinned": "ACP レジストリ {tag}（{date} 公開）",
+  "acpreg.cardFrom": "ACP レジストリ（{tag}）から: {name} {version}",
+  "acpreg.cardInstall": "先にターミナルで自分でインストールしてください。Manut AI はこれを実行しません:",
+  "acpreg.cardDownload": "自分でダウンロードして展開し、{program} を検索パスに置いてください。Manut AI はダウンロードしません:",
+  "acpreg.cardSource": "ソース: {url}",
+  "acpreg.cardLicense": "ライセンス: {license}",
+  "acpreg.change": "変更…",
+  "acpreg.cardSum": "SHA-256 {sum}",
+};

@@ -55,8 +55,9 @@ async function englishLeft(page: Page, root: string): Promise<string[]> {
         out.add(s);
       }
     };
-    // .prov-n: an agent's own product name on Settings › Providers (Copilot CLI, Cursor), as .ss-l is in the + menu
-    const skip = (el: Element | null) => !!el?.closest("code, pre, kbd, .mono, .msg, .md, .ap-preview, [data-testid=bot-sub], [data-testid=bots-grid] .bc-desc, .be-desc, .acc-n, .acc-sub, .pv-ms, .pv-v, .mp-list, .ss-n, .ss-l, .ss-where, [data-testid=session-sub], [data-testid=session-name], .bot-n, .head-title, .prov-n");
+    // .prov-n: an agent's own product name on Settings › Providers (Copilot CLI, Cursor), as .ss-l is in the + menu;
+    // .areg-data: an ACP registry entry's name, version, description and reason, in the registry's own words (item 101c)
+    const skip = (el: Element | null) => !!el?.closest("code, pre, kbd, .mono, .msg, .md, .ap-preview, [data-testid=bot-sub], [data-testid=bots-grid] .bc-desc, .be-desc, .acc-n, .acc-sub, .pv-ms, .pv-v, .mp-list, .ss-n, .ss-l, .ss-where, [data-testid=session-sub], [data-testid=session-name], .bot-n, .head-title, .prov-n, .areg-data");
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
     for (let n = walker.nextNode(); n; n = walker.nextNode()) {
       const el = n.parentElement;

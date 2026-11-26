@@ -6,6 +6,7 @@ import type { HistoryHost } from "./term/history";
 import { type AgentId, type AgentInfo } from "./agents";
 import { type TurnFilesHost } from "./turnFiles";
 import { type CustomEntry, type CustomList, type CustomPreview } from "./custom";
+import type { RegistryList } from "../settings/agents/acpRegistry";
 import type { ApprovalChoice, ClarifyAnswers } from "../lib/protocol";
 import type { DiskState } from "../lib/disk";
 import type { ImportApp, ImportProfile } from "./term/import";
@@ -321,6 +322,14 @@ export interface SessionHost extends HistoryHost {
   customConfirm(entry: CustomEntry): Promise<void>;
   /** The remove confirm: agent `id` leaves the file. */
   customRemove(id: string): Promise<void>;
+  /** Settings › Providers › From the ACP registry (item 101c): the agents of the registry's pinned copy, which the shell
+   *  compiles in and never fetches (src-tauri/src/acp_registry.rs), each offered or not with its reason. Absent on a
+   *  shell older than the item. */
+  acpRegistry?(): Promise<RegistryList>;
+  /** The confirm card for registry entry `id`: drafted as a bot's draft is (the form's checks, and no shell, interpreter
+   *  or built-in program), with the exact command and where it comes from. Writes nothing: Add is `customConfirm`. A
+   *  refusal rejects with `why:<code>`. */
+  acpRegistryPreview?(id: string): Promise<CustomPreview>;
   /** Free space on the home folder's volume (src/lib/disk.ts): Settings' warn value in GB (0 = off), answered with
    *  the level and the last reading. */
   diskWatch(warnGb: number): Promise<DiskState>;
