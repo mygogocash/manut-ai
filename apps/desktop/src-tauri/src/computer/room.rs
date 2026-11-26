@@ -180,6 +180,9 @@ pub trait Desk: Send + Sync {
     /// Where the app's key presses go now: the window that has the keyboard and the control focused in it, or None when
     /// that cannot be told.
     fn focus(&self, pid: i32) -> Option<Focus>;
+    /// The app that has the keyboard on this Mac now (the system-wide `AXFocusedApplication`), by its process, or None
+    /// when that cannot be told. A snapshot (`snap.rs`) reads the window of this app.
+    fn front(&self) -> Option<i32>;
     fn press(&self, handle: &Handle) -> Result<(), String>;
     fn set_value(&self, handle: &Handle, text: &str) -> Result<(), String>;
     /// The keyboard layout in use and the others the person has turned on, read fresh (`keys.rs`).
@@ -752,8 +755,9 @@ impl Room {
         Some(Focus { window, control: f.control.map(|(n, p)| (Room::tidy(n), p)) })
     }
 
-    /// A control as the Mac reads it, its name and value without invisible format characters.
-    fn tidy(n: Node) -> Node {
+    /// A control as the Mac reads it, its name and value without invisible format characters (a snapshot reads its nodes
+    /// through this too, `snap.rs`).
+    pub(super) fn tidy(n: Node) -> Node {
         Node { label: clean(&n.label), value: n.value.map(|v| clean(&v)), role: clean(&n.role), subrole: clean(&n.subrole), address: n.address.map(|a| clean(&a)), ..n }
     }
 

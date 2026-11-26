@@ -118,6 +118,7 @@ import { shops } from "./zh/shops";
 import { side } from "./zh/side";
 import { skills } from "./zh/skills";
 import { skl } from "./zh/skl";
+import { snap } from "./zh/snap";
 import { sounds } from "./zh/sounds";
 import { split } from "./zh/split";
 import { sq } from "./zh/sq";
@@ -275,6 +276,7 @@ export const zh: Record<Key, string> = {
   ...side,
   ...skills,
   ...skl,
+  ...snap,
   ...sounds,
   ...split,
   ...sq,
