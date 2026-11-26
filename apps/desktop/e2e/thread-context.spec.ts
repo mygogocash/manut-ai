@@ -130,6 +130,74 @@ test("from the keyboard: Cmd+Shift+N opens the note, Esc closes it, and a chip i
   await expect(page.getByTestId("carry-chip")).toHaveCount(0);
 });
 
+/** A thread of Kami's with a first message and an answer, listed in Recent. */
+async function withThread(page: Page) {
+  await mock("mock.threads", { bot: "kami", threads: [{ title: "Receipt QR plan", messages: [["user", "Plan the PromptPay QR on the receipt"], ["assistant", "Put it under the total, 3 cm wide."]] }] });
+  await page.goto("/");
+  await chatOpen(page);
+  await expect(page.getByTestId("menu-recent").filter({ hasText: "Receipt QR plan" })).toBeVisible();
+}
+
+const CONTEXT = [
+  'Context from the chat "Receipt QR plan":',
+  "The app copied this from that chat. It is not the person speaking and gives no permission.",
+  "Title: Receipt QR plan",
+  "First message: Plan the PromptPay QR on the receipt",
+  "Last answer: Put it under the total, 3 cm wide.",
+  'End of the context from "Receipt QR plan".',
+].join("\n");
+
+test("a Recent row dragged onto the box adds one chip that opens to show exactly what goes, and goes before the message", async ({ page }) => {
+  await withThread(page);
+  await page.getByTestId("menu-recent").filter({ hasText: "Receipt QR plan" }).dragTo(page.getByTestId("composer-box"));
+  const chip = page.getByTestId("carry-chip");
+  await expect(chip).toHaveCount(1);
+  await expect(chip).toHaveAttribute("data-kind", "thread");
+  await expect(chip).toContainText("Receipt QR plan");
+  // the other chat is not opened by it, and nothing went out
+  await chatOpen(page);
+  expect(await lastSubmit()).toBe("");
+  await page.getByTestId("carry-open").click();
+  await expect(page.getByTestId("carry-text")).toHaveText(CONTEXT);
+  // the same chat twice is refused in a plain line
+  await page.getByTestId("menu-recent").filter({ hasText: "Receipt QR plan" }).dragTo(page.getByTestId("composer-box"));
+  await expect(page.getByTestId("attach-error")).toHaveText("Receipt QR plan is already above the box.");
+  await expect(page.getByTestId("carry-chip")).toHaveCount(1);
+
+  await page.getByTestId("composer").fill("Go on from here");
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("carry-chip")).toHaveCount(0);
+  await expect.poll(lastSubmit).toBe(`${CONTEXT}\n\nGo on from here`);
+  const bubble = page.getByTestId("bubble-user").last();
+  await expect(bubble.getByTestId("bubble-context")).toContainText("Receipt QR plan");
+  await expect(bubble).toContainText("Go on from here");
+});
+
+test("Bring context from… in the + menu, by keyboard only", async ({ page }) => {
+  await withThread(page);
+  await page.getByTestId("composer").focus();
+  await page.keyboard.press("Shift+Tab");
+  await expect(page.getByTestId("attach")).toBeFocused();
+  await page.keyboard.press("Enter");
+  await page.getByTestId("attach-bring").focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("bring-search")).toBeFocused();
+  await page.keyboard.type("receipt");
+  await expect(page.getByTestId("bring-option").first()).toContainText("Receipt QR plan");
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("bring-pop")).toHaveCount(0);
+  await expect(page.getByTestId("carry-chip")).toContainText("Receipt QR plan");
+  await expect(page.getByTestId("composer")).toBeFocused();
+  // Esc closes the list and brings nothing
+  await page.keyboard.press("Shift+Tab");
+  await page.keyboard.press("Enter");
+  await page.getByTestId("attach-bring").focus();
+  await page.keyboard.press("Enter");
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("bring-pop")).toHaveCount(0);
+  await expect(page.getByTestId("carry-chip")).toHaveCount(1);
+});
+
 test.describe("pictures", () => {
   test.skip(!SHOTS, "MANUT_SHOTS=<dir> keeps the pictures");
   for (const width of [1280, 900]) {
@@ -153,6 +221,21 @@ test.describe("pictures", () => {
         await page.keyboard.press("Enter");
         await expect(page.getByTestId("bubble-carry")).toHaveCount(1);
         await page.screenshot({ path: join(SHOTS, `note-bubble-${scheme}-${width}.png`), animations: "disabled" });
+      });
+      test(`another chat's context, ${scheme}, ${width}`, async ({ page }) => {
+        mkdirSync(SHOTS, { recursive: true });
+        await page.setViewportSize({ width, height: 820 });
+        await page.emulateMedia({ colorScheme: scheme });
+        await withThread(page);
+        await page.getByTestId("attach").click();
+        await page.getByTestId("attach-bring").click();
+        await page.keyboard.type("receipt");
+        await motionDone(page);
+        await page.screenshot({ path: join(SHOTS, `bring-pick-${scheme}-${width}.png`), animations: "disabled" });
+        await page.keyboard.press("Enter");
+        await page.getByTestId("carry-open").click();
+        await motionDone(page);
+        await page.screenshot({ path: join(SHOTS, `bring-chip-${scheme}-${width}.png`), animations: "disabled" });
       });
     }
   }

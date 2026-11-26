@@ -105,7 +105,7 @@ export function BringPicker({ rows, onPick, onClose }: { rows: (query: string) =
               data-testid="bring-option"
               data-ref={refKey(r.ref)}
             >
-              <span className="sk-name">{r.title}</span>
+              <span className="bring-n">{r.title}</span>
               <span className="sk-d">{r.who}</span>
             </div>
           ))

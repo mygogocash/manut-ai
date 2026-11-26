@@ -201,3 +201,11 @@ button.bx-carry-n:hover {
   max-height: 260px;
   overflow-y: auto;
 }
+.bring-n {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--ink);
+  font-size: 14px;
+}

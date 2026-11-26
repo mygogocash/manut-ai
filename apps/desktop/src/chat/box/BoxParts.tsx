@@ -115,7 +115,7 @@ export function CarriedChips({ chatKey, list, scope, onRemoved }: { chatKey: str
           <pre className="bx-ctx-text" tabIndex={0} data-testid="carry-text">
             {shown.text}
           </pre>
-          <button type="button" className="bx-ctx-close" onClick={() => setOpen(null)} data-testid="carry-close">
+          <button type="button" className="card-btn" onClick={() => setOpen(null)} data-testid="carry-close">
             {t("carry.close")}
           </button>
         </div>
