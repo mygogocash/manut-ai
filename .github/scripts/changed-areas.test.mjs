@@ -171,6 +171,11 @@ describe("ci.yml and this script agree", () => {
     assert.deepEqual(["main", "pilot/week-1", "cloud/format", "feat/x", "mainline"].map(pushRuns), [true, true, true, false, false]);
   });
 
+  it("never cancels a run on main or a pilot branch, and cancels a superseded one anywhere else", () => {
+    assert.match(ci, /\nconcurrency:\n {2}group: ci-\$\{\{ github\.ref \}\}\n {2}cancel-in-progress: \$\{\{ github\.ref != 'refs\/heads\/main' && !startsWith\(github\.ref, 'refs\/heads\/pilot\/'\) \}\}\n/);
+    assert.doesNotMatch(ci, /\n {2}queue: max/);
+  });
+
   it("ties every job but the first to an area this script answers, and hands every area on", () => {
     const jobs = ci.slice(ci.indexOf("\njobs:\n") + "\njobs:\n".length).split(/\n(?= {2}[a-z][a-z0-9-]*:\n)/)
       .map((text) => ({ name: /^ {2}([a-z][a-z0-9-]*):/.exec(text)[1], text: `\n${text}` }));

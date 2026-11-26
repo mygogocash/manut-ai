@@ -15,10 +15,17 @@ on:
     branches: [main, "pilot/**", "cloud/**"]
   workflow_dispatch:
 
-# A newer push to the same branch or pull request makes the run in progress pointless, so it is cancelled.
+# One run at a time for each branch or pull request. On a helper's branch or a pull request, a newer push makes the run
+# in progress pointless, so it is cancelled. On main and the pilot branches it is not: there the lead merges items one
+# after another, and cancelling left no run finished and no green commit to measure from (26 Nov 2026). Without
+# cancel-in-progress, GitHub's documented behaviour is that at most one run of the group is running and, with the
+# default queue (single), at most one is pending: a newer run waits as pending, and a run already pending is cancelled
+# and replaced by the newer one. So three quick merges run the first and the last, and the last run's check covers the
+# middle one's files, since it measures from the last commit CI passed on. (`queue: max` would keep every run waiting,
+# but GitHub refuses it together with cancel-in-progress: true, which the other branches keep.)
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/heads/pilot/') }}
 
 # Read-only: no job here writes to the repository, its issues or its pull requests.
 permissions:
