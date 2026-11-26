@@ -12,7 +12,7 @@
 // not cover whole (a plan, a tool that is not a file tool, a path the shell cut short, a change that names no file)
 // is left as it is.
 import { kitDecide, type Connection, type KitAction, type KitDecision } from "@manut/member-grants";
-import { IN_GIT_DIR, folderOf, guardedPath, insideProject, readCommand, ruleMatches, type Rule, type Say, type Where } from "./command";
+import { IN_GIT_DIR, folderOf, guardedPath, insideProject, readCommand, ruleMatches, type ReadCommand, type Rule, type Say, type Where } from "./command";
 import type { KitProject } from "./project";
 import type { AskTool } from "../lib/protocol";
 
@@ -44,6 +44,10 @@ export interface AskRead {
   /** A command's line as it was read: what a kept rule is matched against. */
   line?: string;
   say: Say;
+  /** For a command: the folders its shell may be in once it has run, and the folder a `cd` to the project's set it to
+   *  (`foldersAfter` in ./command). */
+  ends?: (string | null)[];
+  resets?: string;
 }
 
 const RUN = "Run this command?";
@@ -94,6 +98,9 @@ function listed(paths: string[], where: Where): string {
   return out;
 }
 
+/** Where a command leaves its shell, for the session's next command. */
+const folders = (c: ReadCommand): Pick<AskRead, "ends" | "resets"> => ({ ends: c.ends, ...(c.resets ? { resets: c.resets } : {}) });
+
 /** `v` when it is text that is not blank. */
 const text = (v: unknown): string | null => (typeof v === "string" && v.trim() !== "" ? v : null);
 
@@ -131,7 +138,7 @@ function readTool(tool: unknown, where: Where): AskRead | null {
     const reads = c.action === "read" || c.action === "check";
     const outside = [...c.outside];
     for (const p of outsideOf(paths ?? [], at, reads ? allowed : [])) if (!outside.includes(p)) outside.push(p);
-    return { what: "command", action: c.action, outside, folder: folder(outside), saves: c.saves, rule: outside.length ? null : c.rule, line, say: c.say };
+    return { what: "command", action: c.action, outside, folder: folder(outside), saves: c.saves, rule: outside.length ? null : c.rule, line, say: c.say, ...folders(c) };
   }
   if (!paths) return null;
   if (t.kind === "read") {
@@ -182,7 +189,7 @@ function readWords(ask: AskWords, where: Where): AskRead | null {
   const isCommand = ask.title === RUN || (ask.command.trim() !== "" && !/^Allow .+\?$/s.test(ask.title));
   if (!isCommand || cut(ask.command)) return null;
   const c = readCommand(ask.command, at);
-  return { what: "command", action: c.action, outside: c.outside, folder: c.outside.length ? folderOf(c.outside[0], at) : null, saves: c.saves, rule: c.rule, line: ask.command, say: c.say };
+  return { what: "command", action: c.action, outside: c.outside, folder: c.outside.length ? folderOf(c.outside[0], at) : null, saves: c.saves, rule: c.rule, line: ask.command, say: c.say, ...folders(c) };
 }
 
 /** What Kit's dial does with the step `read`, in `project`, while `keys` (files with a key typed in) are in the

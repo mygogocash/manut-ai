@@ -268,6 +268,32 @@ program or reaches the network. What it does not understand is `unknown`, and as
   retractions. A kubeconfig or kuberc named on the line asks (it can name a program kubectl runs), and `turbo.json`,
   which can name where turbo sends its cache, is a file a change to which always asks.
 
+#### The folder a session's commands run in (item 116)
+
+An ask names the folder a command runs in as the session's own, but an agent's shell may keep a `cd` for its next
+command. Claude Code no longer does (it starts with `CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR=1`, see the open notes
+below), but the dial does not rely on any agent:
+
+- **A `cd` asks when it goes somewhere that matters.** A `cd` into a folder a change to which always asks (`.git`,
+  `.claude`, `.husky`, `.github`, `.vscode` and the rest) asks, as one outside the project is stopped. One whose folder
+  cannot be known asks too: `cd -`, a folder from the stack (`cd +1`, `cd -2`), zsh's two-word form, `~user`, `pushd`,
+  `popd`, `source`, `.` and `eval`.
+- **Each session's folders are carried.** The app keeps, for each session, every folder its shell may be in after the
+  commands it has asked about, and reads each new command from the session's folder and from each of those, the
+  strictest reading speaking. A command the dial stopped never ran and moves nothing; one the person may still allow is
+  counted as if it ran. The list only grows, since a command may fail and an agent may then stay where it was; a command
+  that is only `cd` to the project's folder, written in full, sets it back to that folder.
+- **Every way through a line.** Within one line, a `cd` may fail: `;` and a line break run the next command either way,
+  `&&` only after a `cd` that went, `||` only after one that did not. A `cd` in a pipeline or in the background moves
+  nothing, but both folders are kept. So `cd x; cat ../secret` is read from the project's folder too.
+- **A folder that cannot be known.** After a command that leaves the folder unknown (the forms above, a subshell or a
+  brace group that holds a `cd`, or a shell command the dial could not read at all), every later command of the session
+  asks, except one that names no file (`pwd`, `echo`, `date` and the like) and a `cd` to a folder written in full, until
+  a command that is only `cd` to the project's folder.
+- **Not seen.** A command an agent runs without asking (its own allow rules) is never read, so a `cd` in it is not
+  carried; a shell function or alias from the person's own shell setup that moves the folder, zsh's `AUTO_CD`, and a
+  `CDPATH` that sends `cd name` elsewhere are not followed either. With Claude Code these no longer carry past one command.
+
 `command.hostile.test.ts` holds over 300 such lines, each beside the plain line it imitates, which reads as it did, and
 221 everyday commands, each pinned to what it read as before item 112 (only `cdk synth` moved, to a build).
 

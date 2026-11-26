@@ -23,6 +23,10 @@ export interface Where {
   allowed?: readonly string[];
   /** The branch the project has checked out, for a push that names none. */
   branch?: string;
+  /** The folders a session's earlier commands may have left its shell in, besides `cwd` (item 116): absolute paths, and
+   *  null for one that cannot be known. The line is read from `cwd` and from each of them, and the strictest reading
+   *  speaks, so whether an agent keeps a `cd` for its next command never decides what the dial lets go. */
+  from?: readonly (string | null)[];
 }
 
 /** What a step does, in words: a dictionary key and its slots. */
@@ -46,6 +50,12 @@ export interface ReadCommand {
   /** The rule "Always allow in this project" would keep, or null when none may be kept. */
   rule: Rule | null;
   say: Say;
+  /** The folders the shell may be in once the line has run, absolute (null: one that cannot be known), for the
+   *  session's next command (`foldersAfter`). */
+  ends: (string | null)[];
+  /** The line is only a `cd` to the project's or the session's folder, written in full: after it, that is where the
+   *  shell is. */
+  resets?: string;
 }
 
 // ---- paths --------------------------------------------------------------------------------------------------------
@@ -182,8 +192,15 @@ function pathLike(word: string): boolean {
 
 // ---- the shell's words --------------------------------------------------------------------------------------------
 
+/** What joins a simple command to the one before it or after it: `start` and `end` for the line's ends, `;` also for a
+ *  line break. */
+type Sep = "start" | "end" | ";" | "&&" | "||" | "|" | "&";
+
 interface Simple {
   words: string[];
+  /** What joins it to the command before it, and to the one after it. */
+  sep: Sep;
+  after: Sep;
   /** Where its output or input goes: each target as written. */
   redirects: string[];
   /** The targets it writes its output into. */
@@ -202,7 +219,7 @@ interface Lexed {
 function lex(line: string): Lexed {
   const cmds: Simple[] = [];
   let opaque = false;
-  let cur: Simple = { words: [], redirects: [], writes: [], piped: false };
+  let cur: Simple = { words: [], redirects: [], writes: [], piped: false, sep: "start", after: "end" };
   let word = "";
   let inWord = false;
   let quote: "'" | '"' | null = null;
@@ -232,11 +249,17 @@ function lex(line: string): Lexed {
     braceOpen = false;
     braceList = false;
   };
-  const endCmd = (piped: boolean) => {
+  const endCmd = (next: Sep) => {
     endWord();
     if (redirect) opaque = true; // a redirect with no target
-    if (cur.words.length || cur.redirects.length) cmds.push(cur);
-    cur = { words: [], redirects: [], writes: [], piped };
+    if (cur.words.length || cur.redirects.length) {
+      cur.after = next;
+      cmds.push(cur);
+      cur = { words: [], redirects: [], writes: [], piped: next === "|", sep: next, after: "end" };
+    } else if (cur.sep === "start" || cur.sep === ";") {
+      // `a &&` then a line break goes on with the same list: a command after it is joined by `&&`, not by the break
+      cur = { ...cur, piped: next === "|", sep: next };
+    }
   };
 
   for (let i = 0; i < line.length; i++) {
@@ -279,21 +302,21 @@ function lex(line: string): Lexed {
       continue;
     }
     if (c === "\n" || c === ";") {
-      endCmd(false);
+      endCmd(";");
       continue;
     }
     if (c === "&" && next === "&") {
-      endCmd(false);
+      endCmd("&&");
       i++;
       continue;
     }
     if (c === "|") {
       if (next === "|") {
-        endCmd(false);
+        endCmd("||");
         i++;
       } else {
         if (next === "&") i++;
-        endCmd(true);
+        endCmd("|");
       }
       continue;
     }
@@ -305,7 +328,7 @@ function lex(line: string): Lexed {
       continue;
     }
     if (c === "&") {
-      endCmd(false);
+      endCmd("&");
       continue;
     }
     if ((c === "<" || c === ">") && next === "(") {
@@ -376,7 +399,7 @@ function lex(line: string): Lexed {
     inWord = true;
   }
   if (quote) opaque = true;
-  endCmd(false);
+  endCmd("end");
   return { cmds, opaque };
 }
 
@@ -397,6 +420,8 @@ interface Verdict {
   cd?: string;
   /** Its folders are where it looks, not what it deletes (a `find` that deletes only what matches a name). */
   filtered?: true;
+  /** After it, the folder the shell is in cannot be known (`cd -`, `pushd`, `popd`, `source`, `eval`). */
+  lost?: true;
 }
 
 const say = (key: Key, vars?: Say["vars"]): Say => (vars ? { key, vars } : { key });
@@ -1316,6 +1341,37 @@ function web(name: string, words: string[]): Verdict {
   return sends();
 }
 
+/** cd's own options (bash's and zsh's) that only choose how a link in the path is followed or how much it says. */
+const CD_FLAGS = /^-[PLqse@]+$/;
+
+/** A `cd` (or zsh's `chdir`). It reads nothing, but it decides where every later command of the session runs (item 116):
+ *  one into a folder a change to which always asks asks too, and one whose folder cannot be known (`cd -`, a folder
+ *  from the stack as `+1` or `-2`, zsh's two-word form, `~user`, the home folder when it is not known) asks and leaves
+ *  the folder unknown. */
+function changeFolder(words: string[], where: Where): Verdict {
+  const lost = (extra: Partial<Verdict> = {}): Verdict => v("unknown", say("kit.say.opaque"), undefined, { lost: true, ...extra });
+  const ops: string[] = [];
+  for (let i = 1; i < words.length; i++) {
+    const w = words[i];
+    if (w === "--" && !ops.length) {
+      ops.push(...words.slice(i + 1));
+      break;
+    }
+    if (!ops.length && w.length > 1 && /^[+-]/.test(w)) {
+      if (CD_FLAGS.test(w)) continue;
+      return lost();
+    }
+    ops.push(w);
+  }
+  if (ops.length > 1 || ops[0] === "-") return lost();
+  const to = ops[0] ?? "~";
+  const abs = to === "~" ? (where.home ?? null) : resolve(to, where.cwd, where.home);
+  // the path is kept so that the line reads it as outside, as it did before
+  if (abs === null) return lost({ cd: to });
+  if (guardedPath(abs, where)) return v("unknown", say("kit.say.opaque"), undefined, { cd: to });
+  return v("read", say("kit.say.read"), undefined, { cd: to });
+}
+
 /** One simple command's words as a step, wrappers taken off. Word numbers in the result (the rule's head, the words
  *  that are text) count from the program. */
 function classify(words: string[], where: Where): Verdict {
@@ -1467,11 +1523,9 @@ function classify(words: string[], where: Where): Verdict {
   }
   if (name === "sort") return (hasIn("ktST", words.slice(1), "-o", "--output") ? v("change", say("kit.say.change"), 1) : v("read", say("kit.say.read")));
   if (name === "tee") return (v("change", say("kit.say.change"), 1));
-  if (name === "cd") {
-    const ops = operands(words, 1);
-    const to = ops.length ? words[ops[0]] : "~";
-    return to === "-" ? v("unknown", say("kit.say.opaque")) : v("read", say("kit.say.read"), undefined, { cd: to });
-  }
+  if (name === "cd" || name === "chdir") return changeFolder(words, where);
+  // the folder stack, a script read into this shell and text run as a command can each move the shell anywhere
+  if (["pushd", "popd", "source", ".", "eval"].includes(name)) return { ...unknownProgram(name), lost: true };
   // bash's and zsh's printf take one option, `-v NAME`, which puts its text into a variable instead of printing it: into
   // PATH, it decides which program every later word of the line runs
   if (name === "printf" && /^-./.test(words[1] ?? "") && words[1] !== "--") return v("unknown", say("kit.say.opaque"));
@@ -1673,44 +1727,117 @@ function reachesOut(words: string[], verdict: Verdict): boolean {
   });
 }
 
-/** What `line` does when it runs at `where`. */
+/** Programs that name no file and read nothing from the folder they run in: the only ones read as they are from a folder
+ *  that cannot be known. */
+const NO_FILE = new Set(["pwd", "echo", "printf", "date", "whoami", "uname", "true", "false", "sleep", "id", "sw_vers", "uptime", "which", "type", "wait", "exit"]);
+/** Words that, as a command, may move the shell to another folder. */
+const MOVES = new Set(["cd", "chdir", "pushd", "popd", "source", ".", "eval"]);
+/** Words before a program that only change how it runs (`builtin cd x` is a `cd`). */
+const WRAPS = new Set(["time", "nohup", "command", "builtin", "exec", "stdbuf", "caffeinate", "nice", "timeout"]);
+/** The most folders a session's shell is followed through. Past it, where it is cannot be known. */
+const MAX_FOLDERS = 32;
+
+/** The program a simple command runs, assignments and wrappers taken off, as written. */
+const programOf = (words: readonly string[]) => words.find((w) => !ASSIGNMENT.test(w) && !WRAPS.has(w) && !w.startsWith("-") && !/^[0-9]+$/.test(w)) ?? "";
+
+/** One way through a line: the folder the shell is in (null when it cannot be known), as written, and whether the last
+ *  step that decides a `&&` or a `||` succeeded (`ok`: a `cd` that went; `fail`: one that did not; `any`: not known). */
+interface Flow {
+  dir: string | null;
+  written: string;
+  st: "ok" | "fail" | "any";
+}
+
+/** Folders as a list with no two the same. */
+function distinct(list: readonly (string | null)[]): (string | null)[] {
+  const out: (string | null)[] = [];
+  for (const f of list) if (!out.some((x) => (x === null || f === null ? x === f : samePath(x, f)))) out.push(f);
+  return out;
+}
+
+/** What `line` does when it runs at `where`: read from `cwd` and from every folder in `from`, the strictest reading
+ *  speaking for all of them. */
 export function readCommand(line: string, where: Where): ReadCommand {
-  const { cmds, opaque } = lex(line);
+  const lexed = lex(line);
+  const session = where.cwd || where.root;
+  const reads = distinct([session, ...(where.from ?? [])]).map((start) => readFrom(lexed, where, start));
+  const first = reads[0];
+  const worst = reads.reduce((a, b) => (RANK[b.action] > RANK[a.action] ? b : a));
+  const outside: string[] = [];
+  for (const r of reads) for (const p of r.outside) if (!outside.includes(p)) outside.push(p);
+  const sameRule = reads.every((r) => JSON.stringify(r.rule) === JSON.stringify(first.rule));
+  // only a `cd` to the project's or the session's folder, written in full: that folder is there, so the shell is in it
+  const only = lexed.cmds.length === 1 && !lexed.opaque ? lexed.cmds[0].words : null;
+  const to = only && only.length === 2 && ["cd", "chdir"].includes(only[0]) && isAbs(only[1]) ? only[1] : null;
+  const resets = to !== null && (samePath(to, where.root) || samePath(to, session)) ? to : null;
+  return {
+    action: worst.action,
+    outside,
+    saves: reads.some((r) => r.saves),
+    rule: sameRule && !outside.length ? first.rule : null,
+    say: worst.say,
+    ends: distinct(reads.flatMap((r) => r.ends)),
+    ...(resets ? { resets } : {}),
+  };
+}
+
+/** The folders a session's shell may be in after a command read as `read`, from those it may have been in before. They
+ *  only grow: a command may fail, and an agent may keep the folder it failed in. Only a command that is a `cd` to the
+ *  project's folder (`resets`) sets them again. */
+export function foldersAfter(before: readonly (string | null)[], read: Pick<ReadCommand, "ends" | "resets">): (string | null)[] {
+  if (read.resets) return [read.resets];
+  const all = distinct([...before, ...read.ends]);
+  return all.includes(null) || all.length > MAX_FOLDERS ? [null] : all;
+}
+
+/** `line` read as it runs from the folder `start` (null: a folder that cannot be known), followed through each way the
+ *  shell can take: a `cd` may fail, `&&` runs the next command only after one that went, `||` only after one that did
+ *  not, and `;` runs it either way. */
+function readFrom({ cmds, opaque }: Lexed, where: Where, start: string | null): Omit<ReadCommand, "resets"> {
   const allowed = where.allowed ?? [];
+  const session = where.cwd || where.root;
   const outside: string[] = [];
   const out = (written: string) => {
     if (!outside.includes(written)) outside.push(written);
   };
-  let cwd = where.cwd || where.root;
-  // where the commands run so far, as written: the folder they started in, or the last `cd`
-  let cwdWritten = cwd;
-  if (!insideProject(cwd, where.root, allowed)) out(cwd);
+  if (start !== null && !insideProject(start, where.root, allowed)) out(start);
 
   const verdicts: Verdict[] = [];
   let saves = false;
   let wipes = false;
   /** A step that changes something names a path in git's own folder, or another whose change always asks. */
   let gitOwn = false;
-  for (const c of cmds) {
+
+  /** One simple command read in the folder of `f`: what it moves the shell to, or that the folder is lost after it. */
+  const readOne = (c: Simple, f: Flow): { to?: { dir: string; written: string }; lost?: true } => {
+    const unknownHere = f.dir === null;
+    const cwd = f.dir ?? session;
+    // where the commands run so far, as written: the folder they started in, or the last `cd`
+    const cwdWritten = f.dir === null ? session : f.written;
     let at = 0;
     while (at < c.words.length && ASSIGNMENT.test(c.words[at])) at++;
     const words = c.words.slice(at);
     // a variable set for this command can make the same words run another program, unless it is a harmless one
     if (c.words.slice(0, at).some((w) => !SAFE_VAR.test(w))) {
       verdicts.push(v("unknown", say("kit.say.opaque")));
-      continue;
+      return MOVES.has(programOf(words)) ? { lost: true } : {};
     }
     // a pipe into a shell or a runtime runs text nobody has read
     if (c.piped && words.length && (OPAQUE_PROGRAMS.has(words[0]) || RUNTIMES.has(words[0]) || ["python", "python3"].includes(words[0]))) {
       verdicts.push(v("unknown", say("kit.say.opaque")));
-      continue;
+      return {};
     }
     const classified = classify(words, { ...where, cwd });
     // reaching another computer is not reading or changing the project, whatever the program
     const read = RANK[classified.action] < RANK.unknown && reachesOut(words, classified) ? { ...sends(), text: classified.text } : classified;
     // writing the output into a file changes the project, whatever the program is
     const writesFile = c.writes.some((w) => !NULL_DEVICES.has(w));
-    const verdict = writesFile && RANK[read.action] < RANK.change ? { ...read, action: "change" as const, say: say("kit.say.change"), head: undefined } : read;
+    let verdict: Verdict = writesFile && RANK[read.action] < RANK.change ? { ...read, action: "change" as const, say: say("kit.say.change"), head: undefined } : read;
+    // From a folder that cannot be known, a relative path may be anywhere: only a command that names no file, or a `cd`
+    // to a folder written in full, is read as it is. Anything else asks.
+    const absCd = verdict.cd !== undefined && (isAbs(verdict.cd) || verdict.cd === "~" || verdict.cd.startsWith("~/"));
+    const plain = NO_FILE.has(words[0] ?? "") && RANK[verdict.action] <= RANK.read && !c.redirects.length;
+    if (unknownHere && !absCd && !plain && RANK[verdict.action] < RANK.unknown) verdict = { ...verdict, action: "unknown", say: say("kit.say.opaque"), head: undefined };
     verdicts.push(verdict);
     if (verdict.saves) saves = true;
     // an allowed folder is for reading: a step that changes anything stays inside the project itself
@@ -1744,14 +1871,52 @@ export function readCommand(line: string, where: Where): ReadCommand {
     if (!reads && (guardedPath(cwd, here) || words.some((w, i) => i > 0 && !verdict.text?.has(i) && (IN_GIT_DIR.test(w) || named(w).some((x) => x !== "" && guardedPath(x, here)))))) gitOwn = true;
 
     if (verdict.cd !== undefined) {
-      const to = verdict.cd === "~" ? (where.home ?? null) : resolve(verdict.cd, cwd, where.home);
-      if (to === null || !insideProject(to, where.root, allowed)) out(verdict.cd);
-      if (to) {
-        cwd = to;
-        cwdWritten = verdict.cd;
-      }
+      // from a folder that cannot be known, a relative `cd` goes nowhere that can be said: it asks, and is not outside
+      const known = !unknownHere || absCd;
+      const to = !known ? null : verdict.cd === "~" ? (where.home ?? null) : resolve(verdict.cd, cwd, where.home);
+      if (known && (to === null || !insideProject(to, where.root, allowed))) out(verdict.cd);
+      if (to !== null && !verdict.lost) return { to: { dir: to, written: verdict.cd } };
+      return { lost: true };
     }
+    return verdict.lost ? { lost: true } : {};
+  };
+
+  let flows: Flow[] = [{ dir: start, written: start ?? session, st: "any" }];
+  for (let i = 0; i < cmds.length; ) {
+    // a pipeline: each of its commands runs in a shell of its own, started where the pipeline starts
+    let j = i + 1;
+    while (j < cmds.length && cmds[j].sep === "|") j++;
+    const pipe = cmds.slice(i, j);
+    const sep = cmds[i].sep;
+    // a `cd` moves the shell itself only alone, not in a pipeline or in the background
+    const alone = pipe.length === 1 && pipe[0].after !== "&";
+    const runs = (f: Flow) => !((sep === "&&" && f.st === "fail") || (sep === "||" && f.st === "ok"));
+    // a command no way through runs is read all the same, from every folder: nothing goes unread
+    const taken = flows.some(runs) ? flows : flows.map((f) => ({ ...f, st: "any" as const }));
+    const next: Flow[] = [];
+    for (const f of taken) {
+      if (!runs(f)) {
+        next.push(f);
+        continue;
+      }
+      const moved: { dir: string; written: string }[] = [];
+      let lost = false;
+      for (const c of pipe) {
+        const r = readOne(c, f);
+        if (r.lost) lost = true;
+        if (r.to) moved.push(r.to);
+      }
+      if (lost) next.push({ dir: null, written: session, st: "any" });
+      else if (moved.length && alone) next.push({ ...moved[0], st: "ok" }, { ...f, st: "fail" });
+      else next.push({ ...f, st: "any" }, ...moved.map((m) => ({ ...m, st: "any" as const })));
+    }
+    flows = next.filter((f, k) => next.findIndex((g) => g.st === f.st && (g.dir === null || f.dir === null ? g.dir === f.dir : samePath(g.dir, f.dir))) === k);
+    if (flows.length > MAX_FOLDERS * 2) flows = [{ dir: null, written: session, st: "any" }];
+    i = j;
   }
+  // a line that cannot be read in advance and holds a command that may move the shell (a `cd` in a subshell or a brace
+  // group, a `source`) leaves it where nobody can say
+  const ends = opaque && cmds.some((c) => MOVES.has(programOf(c.words))) ? [null] : distinct(flows.map((f) => f.dir));
 
   const whole = verdicts.length ? strictest(verdicts) : v("unknown", say("kit.say.opaque"));
   let action: KitAction = whole.action;
@@ -1774,7 +1939,7 @@ export function readCommand(line: string, where: Where): ReadCommand {
   if (only && ruleable && !opaque && !outside.length && !only.redirects.length && !ASSIGNMENT.test(only.words[0] ?? "") && whole.head !== undefined) {
     rule = whole.head === "exact" ? { words: [...only.words], exact: true } : { words: only.words.slice(0, whole.head) };
   }
-  return { action, outside, saves, rule, say: s };
+  return { action, outside, saves, rule, say: s, ends };
 }
 
 /** A package manager's own subcommands: none of them runs a script of the project's by its name. */
