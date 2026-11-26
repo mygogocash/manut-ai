@@ -30,6 +30,9 @@ import { usePullRequests, type LanePull } from "../tasks/pulls";
 import { MoreButton, useRowMenu } from "../sidebar/RowMenu";
 import { arrange, sessionRowKey, untilWord, type RowMark, type RowMarks, type RowPlace } from "../sidebar/rows";
 
+/** A lane's row key for its marks. */
+export const laneKey = (row: Pick<LaneRow, "id" | "rowKey">): string => row.rowKey ?? sessionRowKey({ id: row.id });
+
 /** The branch a lane's row shows, and why: Kit's own for the lane (with the folder of its own it works in), the folder's
  *  branch now that it is not the lane's, or the folder's own for a lane that made none. */
 export type LaneBranchTag =
@@ -40,6 +43,9 @@ export type LaneBranchTag =
 export interface LaneRow {
   /** The session's id. */
   id: string;
+  /** Its row's key for the marks (sidebar/rows.ts `sessionRowKey`): its own folder, else the session's link id, so a lane's pin or
+   *  snooze lasts across a restart (item 94). None (a test's row): by its id. */
+  rowKey?: string;
   /** The folder of its own the lane works in, where its main-moved note reads git; null: it works in the session's folder. */
   dir: string | null;
   /** The lane's worktree, the folder the app made for it (lane.rs): what Put up for review names to the shell (Review.tsx). */
@@ -66,7 +72,7 @@ export interface LaneRow {
 }
 
 export interface LaneRowInput {
-  rec: Pick<SessionRec, "id" | "agent" | "cwd" | "status"> & Partial<Pick<SessionRec, "title" | "agentTitle" | "promptTitle" | "error" | "lane">>;
+  rec: Pick<SessionRec, "id" | "agent" | "cwd" | "status"> & Partial<Pick<SessionRec, "title" | "agentTitle" | "promptTitle" | "error" | "lane" | "linkId">>;
   agent: string;
   live?: Pick<AgentLive, "branch">;
   lane: LaneRecord;
@@ -103,6 +109,7 @@ export function laneRowOf(i: LaneRowInput, time: (ms: number) => string = (ms) =
   const at = lane.revertedAt ?? lane.backAt;
   return {
     id: rec.id,
+    rowKey: sessionRowKey(rec),
     dir: own?.dir ?? null,
     ...(own?.worktree ? { worktree: own.worktree } : {}),
     title: pickTitle(rec, folderName(rec.cwd)).title,
@@ -201,7 +208,7 @@ function LaneItem({ row, now, onOpen, onPull, backOpen, onBack, below, place, ma
   const tag = laneTag(row.status);
   const line = row.status === "failed" ? row.error : row.line ? t(row.line.key, row.line.vars) : "";
   return (
-    <div className={`lane${place === "settled" ? " settled" : ""}`} data-testid={`lane-${row.id}`} data-row-key={sessionRowKey(row.id)} data-status={row.status} data-place={place}>
+    <div className={`lane${place === "settled" ? " settled" : ""}`} data-testid={`lane-${row.id}`} data-row-key={laneKey(row)} data-status={row.status} data-place={place}>
       <button type="button" className="rowl" onClick={() => onOpen(row.id)} title={t("lane.open")}>
         {place === "pinned" && (
           <span className="lane-pin" role="img" aria-label={t("row.pinned")} title={t("row.pinned")} data-testid="lane-pin">
@@ -271,7 +278,7 @@ function LaneItem({ row, now, onOpen, onPull, backOpen, onBack, below, place, ma
 /** A lane's menu (Pin, Snooze, Done for now, Archive): the one part of a row that keeps state, so the rest of the view stays a
  *  function of its props. It draws the quiet "more" button, and a right-click anywhere on the row opens the menu too. */
 export function LaneMore({ row, mark }: { row: LaneRow; mark: RowMark | undefined }) {
-  const menu = useRowMenu({ rowKey: sessionRowKey(row.id), kind: "lane", mark, name: row.title });
+  const menu = useRowMenu({ rowKey: laneKey(row), kind: "lane", mark, name: row.title });
   const here = useRef<HTMLSpanElement>(null);
   const open = menu.open;
   useEffect(() => {
@@ -304,7 +311,7 @@ export function LanesView({ rows, now, onOpen, onPull, onNew, backOpen = null, o
   // pinned on top, in the order pinned, then the rest, then the settled ones, small and quiet. Snoozed and archived lanes are put
   // away: a line under the list counts them and opens them. A lane that asks something is never put away (rows.ts `placeOf`).
   const places = arrange(
-    rows.map((r) => ({ key: sessionRowKey(r.id), needs: r.status === "needs_you", r })),
+    rows.map((r) => ({ key: laneKey(r), needs: r.status === "needs_you", r })),
     marks,
     now,
   );
@@ -314,7 +321,7 @@ export function LanesView({ rows, now, onOpen, onPull, onNew, backOpen = null, o
     ...places.settled.map((x) => ({ r: x.r, place: "settled" as const })),
   ];
   const hidden = [...places.snoozed, ...places.archived];
-  const item = (r: LaneRow, place: RowPlace) => <LaneItem key={r.id} row={r} now={now} onOpen={onOpen} onPull={onPull} backOpen={backOpen === r.id} onBack={onBack} below={below} place={place} mark={marks[sessionRowKey(r.id)]} />;
+  const item = (r: LaneRow, place: RowPlace) => <LaneItem key={r.id} row={r} now={now} onOpen={onOpen} onPull={onPull} backOpen={backOpen === r.id} onBack={onBack} below={below} place={place} mark={marks[laneKey(r)]} />;
   return (
     <>
       <div className="band" data-testid="lanes-band">

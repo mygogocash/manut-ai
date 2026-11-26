@@ -16,8 +16,8 @@ describe("reading a saved record", () => {
     expect(parseRowMarks(raw)).toEqual({ [T]: { pinned: 5 }, "thread:buddy:t2": { settled: true }, "thread:buddy:t3": { snoozed: 9 } });
   });
 
-  it("drops a mark of the wrong type, a row with no mark left and a key that is not a chat's", () => {
-    const raw = JSON.stringify({ [T]: { pinned: "yes", snoozed: -1, settled: false }, [sessionRowKey("s1")]: { pinned: 1 }, x: { pinned: 1 }, "thread:b:t": 5 });
+  it("drops a mark of the wrong type, a row with no mark left and a key that is not a chat's, a lane's or a terminal's", () => {
+    const raw = JSON.stringify({ [T]: { pinned: "yes", snoozed: -1, settled: false }, "job:s1": { pinned: 1 }, x: { pinned: 1 }, "thread:b:t": 5 });
     expect(parseRowMarks(raw)).toEqual({});
   });
 
@@ -131,13 +131,26 @@ describe("what is kept", () => {
     resetRowMarks({});
   });
 
-  it("saves a chat's marks and not a lane's or a terminal's, which are of this run", () => {
+  it("keys a lane by its own folder and a terminal by its link id, never by the session's number (item 94)", () => {
+    expect(sessionRowKey({ id: "s3", linkId: "k7m2p9q4", lane: { worktree: "/Users/me/.manut/lanes/web-app/promptpay-qr" } })).toBe("lane:/Users/me/.manut/lanes/web-app/promptpay-qr");
+    expect(sessionRowKey({ id: "s3", linkId: "k7m2p9q4" })).toBe("session:k7m2p9q4");
+    // a lane that made no folder of its own is known by its link id, as a terminal is
+    expect(sessionRowKey({ id: "s3", linkId: "k7m2p9q4", lane: {} })).toBe("session:k7m2p9q4");
+    // the same session after a restart (same folder, same link id, perhaps another number) has the same key
+    expect(sessionRowKey({ id: "s1", linkId: "k7m2p9q4" })).toBe(sessionRowKey({ id: "s3", linkId: "k7m2p9q4" }));
+  });
+
+  it("keeps the marks of a chat, a lane and a terminal across a restart (item 94)", () => {
+    const lane = sessionRowKey({ id: "s2", linkId: "aaaa2222", lane: { worktree: "/Users/me/.manut/lanes/web-app/promptpay-qr" } });
+    const term = sessionRowKey({ id: "s5", linkId: "bbbb5555" });
     markRow(T, { do: "pin" }, 7);
-    markRow(sessionRowKey("s1"), { do: "pin" }, 8);
-    expect(getRowMarks()[sessionRowKey("s1")]).toEqual({ pinned: 8 });
-    expect(JSON.parse(localStorage.getItem(ROWS_KEY) ?? "{}")).toEqual({ [T]: { pinned: 7 } });
+    markRow(lane, { do: "settle" }, 8);
+    markRow(term, { do: "snooze", until: 9e12 }, 9);
+    const kept = { [T]: { pinned: 7 }, [lane]: { settled: true }, [term]: { snoozed: 9e12 } };
+    expect(JSON.parse(localStorage.getItem(ROWS_KEY) ?? "{}")).toEqual(kept);
     // a restart reads what was kept
-    expect(parseRowMarks(localStorage.getItem(ROWS_KEY))).toEqual({ [T]: { pinned: 7 } });
+    resetRowMarks(parseRowMarks(localStorage.getItem(ROWS_KEY)));
+    expect(getRowMarks()).toEqual(kept);
   });
 
   it("clears a mark when an ask wakes the row, and says nothing for a row with none", () => {

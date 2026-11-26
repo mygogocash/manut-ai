@@ -38,6 +38,12 @@ describe("a lane's row", () => {
     expect(row({ rec: { ...input().rec, promptTitle: undefined } }).title).toBe("baanmali-preorder");
   });
 
+  it("keeps its marks by its own folder, else by the session's link id, so they last across a restart (item 94)", () => {
+    const lane = { name: "kit/promptpay-qr", base: "main", dir: "/Users/fon/.manut/lanes/baanmali-preorder/promptpay-qr", worktree: "/Users/fon/.manut/lanes/baanmali-preorder/promptpay-qr" };
+    expect(row({ rec: { ...input().rec, linkId: "k7m2p9q4", lane } }).rowKey).toBe("lane:/Users/fon/.manut/lanes/baanmali-preorder/promptpay-qr");
+    expect(row({ rec: { ...input().rec, linkId: "k7m2p9q4" } }).rowKey).toBe("session:k7m2p9q4");
+  });
+
   it("shows the branch Kit made for it, and says where it was made from", () => {
     expect(row().branch).toEqual({ name: "kit/promptpay-qr", kind: "own", base: "main" });
   });
@@ -335,12 +341,12 @@ describe("pinned, settled, snoozed and archived lanes (item 76)", () => {
   });
 
   it("puts a pinned lane on top, in the order pinned, and a settled one last", () => {
-    expect(ids({ [sessionRowKey("s3")]: { pinned: 2 }, [sessionRowKey("s2")]: { pinned: 1 } })).toEqual(["s2", "s3", "s1"]);
-    expect(ids({ [sessionRowKey("s1")]: { settled: true } })).toEqual(["s2", "s3", "s1"]);
+    expect(ids({ [sessionRowKey({ id: "s3" })]: { pinned: 2 }, [sessionRowKey({ id: "s2" })]: { pinned: 1 } })).toEqual(["s2", "s3", "s1"]);
+    expect(ids({ [sessionRowKey({ id: "s1" })]: { settled: true } })).toEqual(["s2", "s3", "s1"]);
   });
 
   it("puts a snoozed and an archived lane away behind one line that counts them, and shows them when it is open", () => {
-    const marks: RowMarks = { [sessionRowKey("s1")]: { snoozed: NOW + 60_000 }, [sessionRowKey("s2")]: { archived: 5 } };
+    const marks: RowMarks = { [sessionRowKey({ id: "s1" })]: { snoozed: NOW + 60_000 }, [sessionRowKey({ id: "s2" })]: { archived: 5 } };
     expect(ids(marks)).toEqual(["s3"]);
     const closed = renderToString(createElement(LanesView, { rows: canvas(), now: NOW, onOpen: vi.fn(), marks }));
     expect(closed).toContain("Snoozed and archived (2)");
@@ -350,13 +356,13 @@ describe("pinned, settled, snoozed and archived lanes (item 76)", () => {
   });
 
   it("never puts away a lane that asks something: the Needs you lane stays in its place, snoozed or settled", () => {
-    const marks: RowMarks = { [sessionRowKey("s3")]: { snoozed: NOW + 60_000 }, [sessionRowKey("s1")]: { settled: true } };
+    const marks: RowMarks = { [sessionRowKey({ id: "s3" })]: { snoozed: NOW + 60_000 }, [sessionRowKey({ id: "s1" })]: { settled: true } };
     expect(ids(marks)).toEqual(["s2", "s3", "s1"]);
     expect(renderToString(createElement(LanesView, { rows: canvas(), now: NOW, onOpen: vi.fn(), marks }))).not.toContain("lane-away");
   });
 
   it("marks a pinned lane with its pin and a settled one as settled", () => {
-    const out = renderToString(createElement(LanesView, { rows: canvas(), now: NOW, onOpen: vi.fn(), marks: { [sessionRowKey("s1")]: { pinned: 1 }, [sessionRowKey("s2")]: { settled: true } } }));
+    const out = renderToString(createElement(LanesView, { rows: canvas(), now: NOW, onOpen: vi.fn(), marks: { [sessionRowKey({ id: "s1" })]: { pinned: 1 }, [sessionRowKey({ id: "s2" })]: { settled: true } } }));
     expect(out).toContain('data-testid="lane-pin"');
     expect(out).toMatch(/class="lane settled"[^>]*data-testid="lane-s2"/);
   });

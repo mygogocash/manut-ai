@@ -5,9 +5,12 @@
 // The idea of the places (pinned on top, snoozed and settled below, an archive) comes from T3 Code's sidebar (pingdotgg/t3code,
 // MIT License); the code is this app's own.
 //
-// Where it is kept: a chat's marks are kept on this computer (localStorage `manut.sidebar.rows`), because the chat itself is
-// kept by the runtime and lives on across restarts. A lane and a terminal session are of this run of the app (the sessions'
-// list is not saved: sessions/sessions.ts), so their marks are kept in memory only and go when the session is closed.
+// Where it is kept: every row's marks are kept on this computer (localStorage `manut.sidebar.rows`). A chat lives on across
+// restarts in the runtime, and a lane and a terminal session come back with the sessions' list (app/resume.ts), so since item 94
+// their marks come back with them. A lane is known by its own folder, whose record is under `~/.manut/lanes` (src-tauri/src/lane.rs),
+// and a terminal by its link id (`manut://terminal/<linkId>`), which is drawn when the session is made and kept across restarts:
+// never by the session's number (`s3`), which a later run may give to another session. A lane's or a terminal's marks go when the
+// person closes its session.
 //
 // Rules that must hold:
 //  - A row is in one place. Pinning, snoozing, settling and archiving each replace the others.
@@ -30,9 +33,15 @@ export interface RowMark {
 }
 export type RowMarks = Readonly<Record<string, RowMark>>;
 
-/** A chat is `thread:<bot>:<thread>`; a lane or terminal session is `session:<id>`. */
+/** A chat is `thread:<bot>:<thread>`; a lane with a folder of its own is `lane:<that folder>`; any other session (a terminal, a lane
+ *  that made no folder) is `session:<its link id>`. A record without a link id (a test's) falls back to its id. */
 export const threadRowKey = (bot: string, thread: string): string => `thread:${bot}:${thread}`;
-export const sessionRowKey = (id: string): string => `session:${id}`;
+export function sessionRowKey(rec: { id: string; linkId?: string; lane?: { worktree?: string } }): string {
+  return rec.lane?.worktree ? `lane:${rec.lane.worktree}` : `session:${rec.linkId || rec.id}`;
+}
+/** Whether `key` is a session's (a lane or a terminal), whose row goes when the session is closed. */
+export const isSessionKey = (key: string): boolean => key.startsWith("session:") || key.startsWith("lane:");
+const KEPT = (key: string): boolean => key.startsWith("thread:") || isSessionKey(key);
 
 /** The most rows kept; the oldest marks go first. */
 const MAX = 500;
@@ -46,7 +55,7 @@ export function parseRowMarks(raw: string | null): Record<string, RowMark> {
     const v: unknown = raw ? JSON.parse(raw) : null;
     if (!v || typeof v !== "object" || Array.isArray(v)) return out;
     for (const [key, m] of Object.entries(v as Record<string, unknown>)) {
-      if (!key.startsWith("thread:") || !m || typeof m !== "object" || Array.isArray(m)) continue;
+      if (!KEPT(key) || !m || typeof m !== "object" || Array.isArray(m)) continue;
       const r = m as Record<string, unknown>;
       const mark: RowMark = {};
       const pinned = num(r.pinned);
@@ -252,9 +261,9 @@ export function setRowMarks(next: RowMarks): void {
   if (next === load()) return;
   marks = next;
   try {
-    // only chats are kept: a session's id is of this run
-    const kept = Object.fromEntries(Object.entries(next).filter(([k]) => k.startsWith("thread:")));
-    localStorage.setItem(ROWS_KEY, JSON.stringify(kept));
+    const kept = Object.entries(next).filter(([k]) => KEPT(k));
+    // the newest marks are kept when there are more than MAX (reading keeps the first MAX)
+    localStorage.setItem(ROWS_KEY, JSON.stringify(Object.fromEntries(kept.slice(-MAX))));
   } catch {
     /* no storage */
   }
