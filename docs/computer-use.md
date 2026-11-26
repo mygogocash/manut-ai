@@ -293,7 +293,7 @@ person", so this is the design, written before the code, and what was built from
 - **Masked before it leaves the shell.** Every name, title and value loses its invisible format characters and control
   characters, a link that answers an ask loses its token (`/approve/…`, `room.rs` `hide_links`), and text that looks
   like a key or a password becomes `••••` through the app's one masker (`src/lib/secrets.json`, the shell's
-  `tasks.rs` `mask_secrets`, the same rules the vault's and every other surface's text goes through). Each is counted.
+  `tasks.rs` `mask_secrets`, the rules a phone's view, a skill bundle and Kit's changes are masked with). Each is counted.
   Then the lines are cut: 2,000 characters a value, 200 a name, 8,000 in all.
 - **Shown first, never sent.** Pressing the key brings Manut AI to the front and opens a new chat with Home's member
   (Buddy, the runtime's default) whose box holds the snapshot as text the person reads and edits: a line naming the app
