@@ -289,6 +289,11 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    value on a card could still hide words that run) and several medium, fixed as items 120 and 121. On the owner's
    word the app is also going to the Mac App Store in GoSpark's listing (item 119), and the GitHub 0.1.2 waits for the
    Apple Developer ID secrets, to go out as a pre-release (owner, 26 Nov).
+   On 26 Nov at 16:50 the owner had the README merged to main (#22) and then the pilot itself (#1, merge commit
+   `374c49ee`). The repository deletes a pull request's head branch when it merges (`delete_branch_on_merge`), so
+   merging #1 deleted `pilot/week-1`; the lead pushed it back at the same commit about ten minutes later. Before the
+   next pilot-to-main merge, the owner protects `pilot/week-1` or turns that setting off, or the branch goes again.
+   Merging also switched on Dependabot, whose pull requests target main.
    Running at 14:15: items 100b, 119, 120 and 121, each a subagent in its own `cc-item…` worktree.
    By 15:35 on 26 Nov items 100b, 119 (the App Store edition), 120 (the fifth read's dial fixes) and 123 (the App
    Privacy draft) are merged. Item 121 (what an ask shows) is reviewed and in its gate; 122 (icon-led menus and
