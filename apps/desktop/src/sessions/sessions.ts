@@ -56,6 +56,8 @@ import { planLaneBranch, workDir, type LaneBranch } from "../code/laneBranch";
 import { openFolderInEditor } from "../code/editor";
 import { startOf, worktreeSettings } from "../lib/worktrees";
 import { forgetLane, keptLanesChanged, noteLaneEvent } from "../code/laneStore";
+import { forgetChatPull, noteChatPull } from "../code/chatPull";
+import { taskHost, type TaskHost } from "../tasks/host";
 import { forgetPreview } from "../code/previewStore";
 import { continuesItself, type SavedSession } from "../app/resume";
 import { accountGroups } from "../settings/accounts/useAccounts";
@@ -306,7 +308,8 @@ const readOpens = () => {
   }
 };
 
-export function createSessions(host: SessionHost, store: () => Store = getStore, accounts: () => AccountGroup[] | null = () => null) {
+/** `pulls`: the Tasks host a chat's own pull request is read through (item 100, code/chatPull.ts); none reads nothing. */
+export function createSessions(host: SessionHost, store: () => Store = getStore, accounts: () => AccountGroup[] | null = () => null, pulls: () => Pick<TaskHost, "remote" | "view"> | null = () => null) {
   let state: SessionsState = { agents: null, home: null, list: [], recent: readRecent(), opens: readOpens(), models: {}, notes: {}, live: {}, unseen: {} };
   const listeners = new Set<() => void>();
   const terms = new Map<string, Term>();
@@ -748,6 +751,12 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
         if (ev.event === "tool.diff" && Array.isArray(ev.files)) noteChange(keys.get(id) ?? "", ev.files as DiffFile[]);
         // what the lane's work has shown: its test runs read from their output, and the files that changed
         noteLaneEvent(keys.get(id) ?? "", ev, Date.now(), laneWhere(id));
+        // a pull request the chat opened itself, by a command that printed its address: linked once checked (item 100)
+        if (ev.event === "tool.end" && typeof ev.command === "string") {
+          const tasks = pulls();
+          const w = laneWhere(id);
+          if (tasks && w) void noteChatPull(tasks, keys.get(id) ?? "", ev, { cwd: w.root, root: w.root, ...(w.home ? { home: w.home } : {}) }).catch(() => undefined);
+        }
         if (ev.event === "turn.end") afterTurn(id, ev.outcome === "interrupted");
         // the files as the turn left them: what changes before the next turn reads as changed by hand (rewind.ts)
         if (ev.event === "turn.end") turns.afterTurn(id);
@@ -2711,6 +2720,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
       setChatRoute(key, null);
       store().dispatch({ type: "chat.forget", bot: key }); // its asks leave the Needs-you strip with it
       forgetLane(key);
+      forgetChatPull(key);
       // the lane's preview stops with its session, so no dev server of a closed lane runs on unseen
       forgetPreview(key);
     }
@@ -3036,7 +3046,7 @@ export type SessionsStore = ReturnType<typeof createSessions>;
 let singleton: SessionsStore | null = null;
 export function getSessions(): SessionsStore {
   if (!singleton) {
-    const s = createSessions(getHost(), getStore, accountGroups);
+    const s = createSessions(getHost(), getStore, accountGroups, taskHost);
     singleton = s;
     // e2e (mock host only): drive a terminal's foreground CLI the way the shell's event will
     if (typeof window !== "undefined" && !("__TAURI_INTERNALS__" in window)) (window as unknown as { __manutSessions?: SessionsStore }).__manutSessions = s;

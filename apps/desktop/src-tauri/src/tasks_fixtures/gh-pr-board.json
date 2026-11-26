@@ -1,0 +1,245 @@
+[
+ {
+  "number": 41,
+  "title": "Make the QR code bigger on phones",
+  "state": "OPEN",
+  "url": "https://github.com/shop/site/pull/41",
+  "labels": [],
+  "author": {
+   "login": "noi",
+   "is_bot": false
+  },
+  "createdAt": "2026-11-20T09:00:00Z",
+  "updatedAt": "2026-11-25T09:00:00Z",
+  "isDraft": false,
+  "headRefName": "fix/qr-size",
+  "baseRefName": "main",
+  "statusCheckRollup": [
+   {
+    "__typename": "CheckRun",
+    "name": "build",
+    "status": "COMPLETED",
+    "conclusion": "SUCCESS",
+    "detailsUrl": "https://github.com/shop/site/actions/runs/41"
+   },
+   {
+    "__typename": "CheckRun",
+    "name": "test",
+    "status": "COMPLETED",
+    "conclusion": "SUCCESS",
+    "detailsUrl": "https://github.com/shop/site/actions/runs/41"
+   }
+  ],
+  "isCrossRepository": false,
+  "headRepository": {
+   "id": "R_x",
+   "name": "site",
+   "nameWithOwner": "shop/site"
+  },
+  "headRepositoryOwner": {
+   "id": "U_x",
+   "login": "shop"
+  },
+  "reviewDecision": "APPROVED",
+  "mergeable": "MERGEABLE"
+ },
+ {
+  "number": 42,
+  "title": "Read the order total ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789",
+  "state": "OPEN",
+  "url": "https://github.com/shop/site/pull/42",
+  "labels": [],
+  "author": {
+   "login": "noi",
+   "is_bot": false
+  },
+  "createdAt": "2026-11-20T09:00:00Z",
+  "updatedAt": "2026-11-25T09:00:00Z",
+  "isDraft": false,
+  "headRefName": "kit/total",
+  "baseRefName": "main",
+  "statusCheckRollup": [
+   {
+    "__typename": "CheckRun",
+    "name": "build",
+    "status": "COMPLETED",
+    "conclusion": "SUCCESS",
+    "detailsUrl": "https://github.com/shop/site/actions/runs/42"
+   },
+   {
+    "__typename": "CheckRun",
+    "name": "test",
+    "status": "IN_PROGRESS",
+    "conclusion": "",
+    "detailsUrl": "https://github.com/shop/site/actions/runs/42"
+   }
+  ],
+  "isCrossRepository": false,
+  "headRepository": {
+   "id": "R_x",
+   "name": "site",
+   "nameWithOwner": "shop/site"
+  },
+  "headRepositoryOwner": {
+   "id": "U_x",
+   "login": "shop"
+  },
+  "reviewDecision": "",
+  "mergeable": "MERGEABLE"
+ },
+ {
+  "number": 43,
+  "title": "New delivery zones",
+  "state": "OPEN",
+  "url": "https://github.com/shop/site/pull/43",
+  "labels": [],
+  "author": {
+   "login": "fon",
+   "is_bot": false
+  },
+  "createdAt": "2026-11-20T09:00:00Z",
+  "updatedAt": "2026-11-25T09:00:00Z",
+  "isDraft": false,
+  "headRefName": "feat/zones",
+  "baseRefName": "main",
+  "statusCheckRollup": [
+   {
+    "__typename": "CheckRun",
+    "name": "build",
+    "status": "COMPLETED",
+    "conclusion": "SUCCESS",
+    "detailsUrl": "https://github.com/shop/site/actions/runs/43"
+   },
+   {
+    "__typename": "CheckRun",
+    "name": "test",
+    "status": "COMPLETED",
+    "conclusion": "SUCCESS",
+    "detailsUrl": "https://github.com/shop/site/actions/runs/43"
+   }
+  ],
+  "isCrossRepository": false,
+  "headRepository": {
+   "id": "R_x",
+   "name": "site",
+   "nameWithOwner": "shop/site"
+  },
+  "headRepositoryOwner": {
+   "id": "U_x",
+   "login": "shop"
+  },
+  "reviewDecision": "CHANGES_REQUESTED",
+  "mergeable": "MERGEABLE"
+ },
+ {
+  "number": 44,
+  "title": "Try a darker header",
+  "state": "OPEN",
+  "url": "https://github.com/shop/site/pull/44",
+  "labels": [],
+  "author": {
+   "login": "noi",
+   "is_bot": false
+  },
+  "createdAt": "2026-11-20T09:00:00Z",
+  "updatedAt": "2026-11-25T09:00:00Z",
+  "isDraft": true,
+  "headRefName": "try/header",
+  "baseRefName": "main",
+  "statusCheckRollup": [
+   {
+    "__typename": "CheckRun",
+    "name": "build",
+    "status": "COMPLETED",
+    "conclusion": "SUCCESS",
+    "detailsUrl": "https://github.com/shop/site/actions/runs/44"
+   }
+  ],
+  "isCrossRepository": false,
+  "headRepository": {
+   "id": "R_x",
+   "name": "site",
+   "nameWithOwner": "shop/site"
+  },
+  "headRepositoryOwner": {
+   "id": "U_x",
+   "login": "shop"
+  },
+  "reviewDecision": "",
+  "mergeable": "MERGEABLE"
+ },
+ {
+  "number": 45,
+  "title": "Move the menu",
+  "state": "OPEN",
+  "url": "https://github.com/shop/site/pull/45",
+  "labels": [],
+  "author": {
+   "login": "noi",
+   "is_bot": false
+  },
+  "createdAt": "2026-11-20T09:00:00Z",
+  "updatedAt": "2026-11-25T09:00:00Z",
+  "isDraft": false,
+  "headRefName": "feat/menu",
+  "baseRefName": "main",
+  "statusCheckRollup": [
+   {
+    "__typename": "CheckRun",
+    "name": "build",
+    "status": "COMPLETED",
+    "conclusion": "SUCCESS",
+    "detailsUrl": "https://github.com/shop/site/actions/runs/45"
+   }
+  ],
+  "isCrossRepository": false,
+  "headRepository": {
+   "id": "R_x",
+   "name": "site",
+   "nameWithOwner": "shop/site"
+  },
+  "headRepositoryOwner": {
+   "id": "U_x",
+   "login": "shop"
+  },
+  "reviewDecision": "REVIEW_REQUIRED",
+  "mergeable": "CONFLICTING"
+ },
+ {
+  "number": 46,
+  "title": "Fix a typo on the about page",
+  "state": "OPEN",
+  "url": "https://github.com/shop/site/pull/46",
+  "labels": [],
+  "author": {
+   "login": "stranger",
+   "is_bot": false
+  },
+  "createdAt": "2026-11-20T09:00:00Z",
+  "updatedAt": "2026-11-25T09:00:00Z",
+  "isDraft": false,
+  "headRefName": "fix/typo",
+  "baseRefName": "main",
+  "statusCheckRollup": [
+   {
+    "__typename": "CheckRun",
+    "name": "build",
+    "status": "COMPLETED",
+    "conclusion": "FAILURE",
+    "detailsUrl": "https://github.com/shop/site/actions/runs/46"
+   }
+  ],
+  "isCrossRepository": true,
+  "headRepository": {
+   "id": "R_x",
+   "name": "site",
+   "nameWithOwner": "stranger/site"
+  },
+  "headRepositoryOwner": {
+   "id": "U_x",
+   "login": "stranger"
+  },
+  "reviewDecision": "",
+  "mergeable": "MERGEABLE"
+ }
+]

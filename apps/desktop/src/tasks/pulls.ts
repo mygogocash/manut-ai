@@ -122,7 +122,7 @@ export async function readPulls(host: TaskHost, source: CliSource, repo: string,
 
 const remotes = new Map<string, Promise<TaskRemote | null>>();
 /** The repository the folder `cwd` is a clone of (its `.git/config`), asked once per folder. */
-export function remoteOf(host: TaskHost, cwd: string): Promise<TaskRemote | null> {
+export function remoteOf(host: Pick<TaskHost, "remote">, cwd: string): Promise<TaskRemote | null> {
   let p = remotes.get(cwd);
   if (!p) {
     p = host.remote(cwd).catch(() => null);
@@ -135,6 +135,11 @@ const subscribe = (l: () => void) => {
   listeners.add(l);
   return () => void listeners.delete(l);
 };
+
+/** Re-renders when the cache learns anything (a chat's linked request reads its state from it, code/chatPull.ts). */
+export function usePullsVersion(): number {
+  return useSyncExternalStore(subscribe, () => version, () => version);
+}
 
 /** The pull request for each of `branches` of the project at `root`, by branch name. It reads the repository once when its cache is
  *  stale (see the top of this file) and follows the cache as the Tasks page fills it. */

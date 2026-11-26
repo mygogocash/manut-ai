@@ -37,6 +37,11 @@
 //! merges automatically later, uses administrator rights or deletes the branch. Neither CLI can bind the base on the merge
 //! itself, so a retarget in the moment between that read and the merge is the one change this cannot see. The app never
 //! deletes the remote branch.
+//!
+//! The Pull requests list (item 100) merges through the same ask (`Ledger::ask_merge_pull`): a request of the project's own
+//! repository (its folder's remote), from a branch of that very repository. A lane's request is asked as that lane's own Merge;
+//! any other is asked the same way without a lane's tip to check, bound to the head commit shown and read again before it runs,
+//! with a method the repository allows. No other write is added.
 
 use std::collections::HashMap;
 use std::io::Read;
@@ -133,7 +138,9 @@ pub struct Draft {
 #[derive(Clone, Debug)]
 enum Plan {
     Open { home: PathBuf, dir: PathBuf, branch: String, head: String, push: Vec<String>, cli: PathBuf, create: Vec<String> },
-    Merge { source: Source, cli: PathBuf, view: Vec<String>, home: PathBuf, dir: PathBuf, branch: String, base: String, head: String, number: u64, url: String, merge: Vec<String> },
+    /// `lane`: the home folder and the lane's folder, when the request is a lane's (its tip is read again before the merge); none
+    /// for a request of the project's that no lane of the app's made (item 100), which is bound to the head commit shown alone.
+    Merge { source: Source, cli: PathBuf, view: Vec<String>, lane: Option<(PathBuf, PathBuf)>, branch: String, base: String, head: String, number: u64, url: String, merge: Vec<String> },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -518,6 +525,25 @@ fn lane_holds(l: &Lane, head: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Pull request `number` of `repo`, read now for a merge's ask: the view's argv (kept in the plan to read it again) and what it
+/// answered.
+fn read_for_merge(source: Source, repo: &str, cli: &Path, number: u64) -> Result<(Vec<String>, Pull), String> {
+    let view = view_argv(source, repo, number)?;
+    let ran = tasks::run_env_for(cli, &view, true, &[], &[], CLI_LIMIT)?;
+    if ran.code != Some(0) {
+        return Err(tasks::error_line(&ran.err));
+    }
+    let p = read_pull(source, &ran.out)?;
+    Ok((view, p))
+}
+
+/// The folder of the app's lane on `branch` of the repository `dir` is in, while that folder is there (item 100: a request
+/// from it is merged by the lane's own ask).
+fn lane_on(home: &Path, dir: &Path, branch: &str) -> Option<String> {
+    let repo = Git::new(home).ok()?.common_dir(dir)?;
+    lane::records(home).into_iter().map(|(_, r)| r).find(|r| real(Path::new(&r.repo)) == repo && r.branch == branch && Path::new(&r.worktree).is_dir()).map(|r| r.worktree)
+}
+
 /// What every ask reads of a lane first: the app's own folder, there, a worktree of its recorded repository on the lane's own
 /// branch, with a GitHub or GitLab remote and that CLI installed and signed in.
 struct Lane {
@@ -653,12 +679,7 @@ impl Ledger {
     pub fn ask_merge(&self, home: &Path, worktree: &str, number: u64, method: &str, credits: bool) -> Result<Ask, String> {
         let method = Method::parse(method)?;
         let l = self.lane(home, worktree)?;
-        let view = view_argv(l.source, &l.repo, number)?;
-        let ran = tasks::run_env_for(&l.cli, &view, true, &[], &[], CLI_LIMIT)?;
-        if ran.code != Some(0) {
-            return Err(tasks::error_line(&ran.err));
-        }
-        let p = read_pull(l.source, &ran.out)?;
+        let (view, p) = read_for_merge(l.source, &l.repo, &l.cli, number)?;
         if p.number != number || p.head_branch != l.rec.branch {
             return Err("not_this_lane".into());
         }
@@ -671,7 +692,76 @@ impl Ledger {
         }
         // what merges is the lane's own work, all of it: the pull request's head is the lane's tip here and as this Mac pushed it
         lane_holds(&l, &p.head)?;
-        let (subject, mut message) = message_for(l.source, method, &l.repo, &p);
+        let lane = Some((home.to_path_buf(), l.wt.clone()));
+        self.merge_ask(l.source, l.repo, l.remote, &l.cli, view, p, method, credits, lane)
+    }
+
+    /// Asks to merge request `number` of `repo`, a project's of the person's, from the Pull requests list (item 100), with
+    /// `method`. It is the lane's own ask, plan and run for the same request:
+    ///
+    /// - `folder` is the project the list read it for, and its remote must name `repo` on `source`: a request of any other
+    ///   repository is refused (`not_this_project`) before anything is asked.
+    /// - The request is read now. Its branch must be this very repository's own (`other_repo` for a fork's, item 86), and when a
+    ///   lane of the app's is on that branch (its folder still here), the ask is that lane's own Merge ([`Ledger::ask_merge`]),
+    ///   with every check of its tip.
+    /// - Otherwise the request must be able to merge now, with a method the repository allows (`method_not_allowed`, when GitHub
+    ///   says so; GitLab's is the host's to refuse), and the ask names its repository and branch, the method and exactly the
+    ///   message. The merge is bound to the head commit shown, and just before it runs the request is read again, as a lane's is.
+    ///
+    /// Writes nothing: only [`Ledger::settle`] with its id and a Yes runs it.
+    #[allow(clippy::too_many_arguments)]
+    pub fn ask_merge_pull(&self, home: &Path, folder: &str, source: &str, repo: &str, number: u64, method: &str, credits: bool) -> Result<Ask, String> {
+        let method = Method::parse(method)?;
+        let source = Source::parse(source).map_err(|_| "bad_name".to_string())?;
+        let repo = tasks::check_repo(source, repo).map_err(|_| "bad_name".to_string())?;
+        let dir = Path::new(folder);
+        if !dir.is_absolute() || !dir.is_dir() {
+            return Err("gone".into());
+        }
+        // the repository is the project's own: what its folder's remote names, never a name the page sends alone
+        let found = tasks::folder_remote(dir).ok_or("no_remote")?;
+        if Source::parse(&found.source)? != source || !found.repo.eq_ignore_ascii_case(&repo) {
+            return Err("not_this_project".into());
+        }
+        let cli = self.cli(source).ok_or("not_installed")?;
+        let signed = tasks::run_env(&cli, &tasks::auth_argv(source), false, &[], &[]).is_ok_and(|r| r.code == Some(0));
+        if !signed {
+            return Err("not_signed_in".into());
+        }
+        let (view, p) = read_for_merge(source, &repo, &cli, number)?;
+        if p.number != number {
+            return Err("unread".into());
+        }
+        if !p.same_repo {
+            return Err("other_repo".into());
+        }
+        if let Some(worktree) = lane_on(home, dir, &p.head_branch) {
+            return self.ask_merge(home, &worktree, number, method.word(), credits);
+        }
+        if let Some(why) = &p.cannot {
+            return Err(format!("cannot_merge:{why}"));
+        }
+        if source == Source::Github {
+            let allowed = crate::pulls::methods_argv(&repo)
+                .ok()
+                .and_then(|a| tasks::run_env_for(&cli, &a, true, &[], &[], CLI_LIMIT).ok())
+                .filter(|r| r.code == Some(0))
+                .map(|r| crate::pulls::parse_methods(&r.out))
+                .unwrap_or_default();
+            if !allowed.allows(method.word()) {
+                return Err("method_not_allowed".into());
+            }
+        }
+        let remote = Git::new(home).ok().and_then(|g| remote_name(&g, dir)).unwrap_or_default();
+        self.merge_ask(source, repo, remote, &cli, view, p, method, credits, None)
+    }
+
+    /// The ask both Merges make once the request was read and checked: the message as GitHub or GitLab would write it, with the
+    /// recognised agent credit lines taken out when `credits`, the merge's argv bound to the head commit shown, and the plan kept.
+    #[allow(clippy::too_many_arguments)]
+    fn merge_ask(&self, source: Source, repo: String, remote: String, cli: &Path, view: Vec<String>, p: Pull, method: Method, credits: bool, lane: Option<(PathBuf, PathBuf)>) -> Result<Ask, String> {
+        let number = p.number;
+        let (subject, mut message) = message_for(source, method, &repo, &p);
         let mut dropped = 0;
         if credits && method != Method::Rebase {
             let (cleaned, n) = crate::credits::remove_agent_credits(&message);
@@ -679,14 +769,13 @@ impl Ledger {
             // an empty message would let the host write its own, which brings the credits back: the title stands in, as T3 Code does
             message = if n > 0 && cleaned.trim().is_empty() { p.title.clone() } else { cleaned };
         }
-        let merge = merge_argv(l.source, &l.repo, number, method, &p.head, &subject, &message)?;
+        let merge = merge_argv(source, &repo, number, method, &p.head, &subject, &message)?;
         let plan = Plan::Merge {
-            source: l.source,
-            cli: l.cli.clone(),
+            source,
+            cli: cli.to_path_buf(),
             view,
-            home: home.to_path_buf(),
-            dir: l.wt.clone(),
-            branch: l.rec.branch.clone(),
+            lane,
+            branch: p.head_branch.clone(),
             base: p.base.clone(),
             head: p.head.clone(),
             number,
@@ -694,13 +783,13 @@ impl Ledger {
             merge,
         };
         let id = self.keep(plan);
-        let from = if p.from.is_empty() { l.repo.clone() } else { p.from.clone() };
+        let from = if p.from.is_empty() { repo.clone() } else { p.from.clone() };
         Ok(Ask {
             id,
             kind: "merge".into(),
-            source: if l.source == Source::Github { "github" } else { "gitlab" }.into(),
-            repo: l.repo,
-            remote: l.remote,
+            source: if source == Source::Github { "github" } else { "gitlab" }.into(),
+            repo,
+            remote,
             from,
             branch: p.head_branch,
             base: p.base,
@@ -779,7 +868,7 @@ fn run(_settled: Settled, plan: &Plan) -> Done {
                 Err(e) => Done::failed("create", tasks::error_line(&e), true),
             }
         }
-        Plan::Merge { source, cli, view, home, dir, branch, base, head, number, url, merge } => {
+        Plan::Merge { source, cli, view, lane, branch, base, head, number, url, merge } => {
             // the pull request is read again: still this repository's own branch, still open and able to merge, still at the
             // commit the person saw, and still into the base the ask named (a retarget would merge into a branch it never named)
             let now = tasks::run_env_for(cli, view, true, &[], &[], CLI_LIMIT).ok().filter(|r| r.code == Some(0)).and_then(|r| read_pull(*source, &r.out).ok());
@@ -788,11 +877,13 @@ fn run(_settled: Settled, plan: &Plan) -> Done {
                 Some(_) => return Done::failed("check", "changed".into(), false),
                 None => return Done::failed("check", "unread".into(), false),
             }
-            // and the lane: a commit made since the ask would be left out of what merges
-            let Ok(git) = Git::new(home) else { return Done::failed("check", "git_missing".into(), false) };
-            let tip = git.line(dir, &["rev-parse", "--verify", "--quiet", &format!("refs/heads/{branch}^{{commit}}")]);
-            if tip.as_deref() != Some(head.as_str()) {
-                return Done::failed("check", "changed".into(), false);
+            // and the lane, when it is a lane's: a commit made since the ask would be left out of what merges
+            if let Some((home, dir)) = lane {
+                let Ok(git) = Git::new(home) else { return Done::failed("check", "git_missing".into(), false) };
+                let tip = git.line(dir, &["rev-parse", "--verify", "--quiet", &format!("refs/heads/{branch}^{{commit}}")]);
+                if tip.as_deref() != Some(head.as_str()) {
+                    return Done::failed("check", "changed".into(), false);
+                }
             }
             match tasks::run_env_for(cli, merge, true, &[], &[], CLI_LIMIT) {
                 Ok(r) if r.code == Some(0) => Done { outcome: "merged".into(), url: url.clone(), number: *number, ..Done::default() },
@@ -826,7 +917,8 @@ pub(crate) mod tests {
 
     /// A stand-in CLI at `home/bin/<name>`: it writes each call's argv to `home/<name>.log` (the words split by NUL, the calls by
     /// 0x1e), answers `auth status` with `auth` as its exit code, prints a pull request's address for a create, prints
-    /// `home/<name>-view.json` for a view, and says yes to a merge.
+    /// `home/<name>-view.json` for a view and `home/<name>-repo.json` for a repository's view (failing when there is none), and says
+    /// yes to a merge.
     pub(crate) fn stand_in(home: &Path, name: &str, auth: i32) -> PathBuf {
         let bin = home.join("bin");
         fs::create_dir_all(&bin).unwrap();
@@ -834,9 +926,10 @@ pub(crate) mod tests {
         let log = home.join(format!("{name}.log"));
         let view = home.join(format!("{name}-view.json"));
         let script = format!(
-            "#!/bin/sh\nprintf '%s\\0' \"$@\" >> '{log}'\nprintf '\\036' >> '{log}'\ncase \"$1 $2\" in\n\"auth status\") exit {auth};;\n\"pr create\") echo 'https://github.com/o/r/pull/7'; exit 0;;\n\"mr create\") echo 'https://gitlab.com/g/p/-/merge_requests/4'; exit 0;;\n\"pr view\"|\"mr view\") cat '{view}'; exit 0;;\n\"pr merge\"|\"mr merge\") exit 0;;\nesac\nexit 2\n",
+            "#!/bin/sh\nprintf '%s\\0' \"$@\" >> '{log}'\nprintf '\\036' >> '{log}'\ncase \"$1 $2\" in\n\"auth status\") exit {auth};;\n\"pr create\") echo 'https://github.com/o/r/pull/7'; exit 0;;\n\"mr create\") echo 'https://gitlab.com/g/p/-/merge_requests/4'; exit 0;;\n\"pr view\"|\"mr view\") cat '{view}'; exit 0;;\n\"repo view\") cat '{repo}' || exit 1; exit 0;;\n\"pr merge\"|\"mr merge\") exit 0;;\nesac\nexit 2\n",
             log = log.display(),
-            view = view.display()
+            view = view.display(),
+            repo = home.join(format!("{name}-repo.json")).display()
         );
         fs::write(&p, script).unwrap();
         #[cfg(unix)]
@@ -1330,6 +1423,91 @@ pub(crate) mod tests {
 
     /// The page reaches the writes only through an ask: lib.rs names this module's asks, `settle` and `withdraw`, and never the
     /// function that runs a plan or the proof it takes.
+    #[test]
+    fn a_merge_from_the_list_is_refused_for_a_request_of_another_repository_than_the_project_s() {
+        let Some((home, d, _, _)) = lane_with_work("review-pull-other") else { return };
+        let l = ledger(&home);
+        let folder = d.to_string_lossy().into_owned();
+        // the folder's remote is github.com/o/r: any other repository, or the other host, is not this project's
+        assert_eq!(l.ask_merge_pull(&home, &folder, "github", "o/other", 7, "merge", false), Err("not_this_project".into()));
+        assert_eq!(l.ask_merge_pull(&home, &folder, "gitlab", "o/r", 7, "merge", false), Err("not_this_project".into()));
+        assert_eq!(l.ask_merge_pull(&home, &folder, "github", "o/r/x", 7, "merge", false), Err("bad_name".into()));
+        assert_eq!(l.ask_merge_pull(&home, "relative/folder", "github", "o/r", 7, "merge", false), Err("gone".into()));
+        assert_eq!(l.ask_merge_pull(&home, &folder, "github", "o/r", 7, "fast-forward", false), Err("bad_method".into()));
+        // nothing was asked of gh, not even whether it is signed in
+        assert!(calls(&home, "gh").is_empty(), "{:?}", calls(&home, "gh"));
+        // a folder with no remote
+        let (h2, bare_folder) = repo("review-pull-noremote").unwrap();
+        assert_eq!(ledger(&h2).ask_merge_pull(&h2, &bare_folder.to_string_lossy(), "github", "o/r", 7, "merge", false), Err("no_remote".into()));
+        let _ = fs::remove_dir_all(home);
+        let _ = fs::remove_dir_all(h2);
+    }
+
+    #[test]
+    fn a_lane_s_request_merged_from_the_list_is_the_lane_s_own_ask_and_plan() {
+        let Some((home, d, _, made, head)) = pushed_lane_with_work("review-pull-lane") else { return };
+        let l = ledger(&home);
+        gh_view(&home, &head, serde_json::json!({}));
+        let lane = l.ask_merge(&home, &made.worktree, 7, "squash", true).unwrap();
+        let list = l.ask_merge_pull(&home, &d.to_string_lossy(), "github", "o/r", 7, "squash", true).unwrap();
+        assert_eq!(Ask { id: lane.id.clone(), ..list.clone() }, lane);
+        assert_ne!(list.id, lane.id);
+        // the lane's checks of its tip run for it too: a commit made in the lane since the ask stops the Yes
+        commit_in(Path::new(&made.worktree), "later.txt", "later\n");
+        assert_eq!(l.settle(&list.id, true).unwrap(), Done::failed("check", "changed".into(), false));
+        assert!(writes(&home, "gh").is_empty());
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn a_request_no_lane_made_is_asked_with_its_repository_and_branch_and_merged_once() {
+        let Some((home, d, _, _)) = lane_with_work("review-pull-own") else { return };
+        let l = ledger(&home);
+        let folder = d.to_string_lossy().into_owned();
+        let sha = "c".repeat(40);
+        gh_view(&home, &sha, serde_json::json!({"headRefName": "fix/typo", "title": "Fix a typo", "body": "On the about page."}));
+        let ask = l.ask_merge_pull(&home, &folder, "github", "o/r", 7, "merge", false).unwrap();
+        assert_eq!(
+            (ask.kind.as_str(), ask.repo.as_str(), ask.from.as_str(), ask.branch.as_str(), ask.base.as_str(), ask.head.as_str(), ask.method.as_str()),
+            ("merge", "o/r", "o/r", "fix/typo", "main", sha.as_str(), "merge")
+        );
+        assert_eq!(ask.subject, "Merge pull request #7 from o/fix/typo");
+        assert_eq!(ask.message, "Fix a typo\n\nOn the about page.");
+        assert!(writes(&home, "gh").is_empty(), "the ask writes nothing");
+        let done = l.settle(&ask.id, true).unwrap();
+        assert_eq!(done, Done { outcome: "merged".into(), url: "https://github.com/o/r/pull/7".into(), number: 7, ..Done::default() });
+        // the same argv a lane's merge sends: bound to the head commit shown, with the message shown, and nothing else
+        let expected = merge_argv(Source::Github, "o/r", 7, Method::Merge, &sha, &ask.subject, &ask.message).unwrap();
+        assert_eq!(writes(&home, "gh"), vec![expected]);
+        assert_eq!(l.settle(&ask.id, true), Err("already_decided".into()));
+        assert_eq!(writes(&home, "gh").len(), 1);
+        // a request that moved since the ask is not merged
+        let again = l.ask_merge_pull(&home, &folder, "github", "o/r", 7, "merge", false).unwrap();
+        gh_view(&home, &"d".repeat(40), serde_json::json!({"headRefName": "fix/typo"}));
+        assert_eq!(l.settle(&again.id, true).unwrap(), Done::failed("check", "changed".into(), false));
+        assert_eq!(writes(&home, "gh").len(), 1);
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn a_request_from_the_list_is_asked_only_from_this_repository_when_it_can_merge_with_a_method_allowed() {
+        let Some((home, d, _, _)) = lane_with_work("review-pull-refuse") else { return };
+        let l = ledger(&home);
+        let folder = d.to_string_lossy().into_owned();
+        let sha = "c".repeat(40);
+        let fork = serde_json::json!({"headRefName": "fix/typo", "isCrossRepository": true, "headRepositoryOwner": {"login": "stranger"}, "headRepository": {"name": "r", "nameWithOwner": "stranger/r"}});
+        gh_view(&home, &sha, fork);
+        assert_eq!(l.ask_merge_pull(&home, &folder, "github", "o/r", 7, "merge", false), Err("other_repo".into()));
+        gh_view(&home, &sha, serde_json::json!({"headRefName": "fix/typo", "mergeStateStatus": "BLOCKED"}));
+        assert_eq!(l.ask_merge_pull(&home, &folder, "github", "o/r", 7, "merge", false), Err("cannot_merge:blocked".into()));
+        gh_view(&home, &sha, serde_json::json!({"headRefName": "fix/typo"}));
+        fs::write(home.join("gh-repo.json"), r#"{"mergeCommitAllowed": false, "squashMergeAllowed": true, "rebaseMergeAllowed": false}"#).unwrap();
+        assert_eq!(l.ask_merge_pull(&home, &folder, "github", "o/r", 7, "merge", false), Err("method_not_allowed".into()));
+        assert_eq!(l.ask_merge_pull(&home, &folder, "github", "o/r", 7, "squash", false).map(|a| a.method), Ok("squash".into()));
+        assert!(writes(&home, "gh").is_empty());
+        let _ = fs::remove_dir_all(home);
+    }
+
     #[test]
     fn the_page_reaches_the_writes_only_through_a_settled_ask() {
         let lib = include_str!("lib.rs");

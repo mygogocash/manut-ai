@@ -102,13 +102,13 @@ keeps them:
 
 | Feature | Today | Plan |
 | --- | --- | --- |
-| A thread links the PR it opened; a PR viewer | part: lanes show their open PR, read only | 100 |
-| A PR tab to review and merge, by merge readiness | part: the Tasks page lists and sorts by what needs attention; merging is from a lane, asked first | 100 |
+| A thread links the PR it opened; a PR viewer | has (item 100): a coding chat that runs `gh pr create` is linked to the request both ways once one view finds it in the chat's own repository; Tasks › Pull requests opens any request in the app (description, checks, files and counts) | 100 |
+| A PR tab to review and merge, by merge readiness | has (item 100): Tasks › Pull requests lists every project's open requests under bands by readiness; Merge is the lane's own ask, for a lane's request or any other of the project's | 100 |
 | A thread settles when its PR merges | has, for a lane, when the host said it merged (item 94) | 94 |
-| Frugal PR monitoring | part: caches and one query; no conditional requests | 100 |
-| GitHub, GitLab, Bitbucket, Azure DevOps, Forgejo | part: GitHub and GitLab | 100 |
-| Control worktrees; no-project threads; new project with GitHub | part: where and how; no new project | 100 |
-| Project icons | no | 100 |
+| Frugal PR monitoring | has (item 100): a GitHub list is read again only after `If-None-Match` says it changed (a 304 costs no rate limit), a check still ran, or ten minutes passed; the page reads at most once a minute while shown, never hidden | 100 |
+| GitHub, GitLab, Bitbucket, Azure DevOps, Forgejo | part: GitHub and GitLab; the others are item 100's part 4, left for a later run | 100 |
+| Control worktrees; no-project threads; new project with GitHub | part: where and how; no new project (item 100's part 5, left for a later run) | 100 |
+| Project icons | no (item 100's part 6, left for a later run) | 100 |
 
 ## In the chat, use, look and trouble
 

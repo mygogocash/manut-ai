@@ -30,7 +30,8 @@ import { askText, getStore, selectAsks, useStore } from "../state/store";
 import { failedNames, laneLine, laneStatus, laneTag, testState, type LaneRecord, type LaneStatus } from "./lane";
 import { isLaneChat, laneOf, useLanesVersion } from "./laneStore";
 import type { Say } from "./command";
-import { useLanePulls, type LanePull } from "../tasks/pulls";
+import { useLanePulls, usePullsVersion, type LanePull } from "../tasks/pulls";
+import { asLanePull, chatPullOf, useChatPullsVersion } from "./chatPull";
 import { MoreButton, settledWhy, useRowMenu } from "../sidebar/RowMenu";
 import { arrange, sessionRowKey, settleDue, settleRows, untilWord, useRowMarks, type RowMark, type RowMarks, type RowPlace } from "../sidebar/rows";
 import { useInbox } from "../sidebar/inbox";
@@ -175,6 +176,8 @@ export function useLaneRows(root: string): LaneRow[] {
       }),
     ];
   });
+  useChatPullsVersion();
+  usePullsVersion();
   // each lane with a branch of its own gets the open pull request made from it, when the app has read one (tasks/pulls.ts)
   const pulls = useLanePulls(
     root,
@@ -182,7 +185,8 @@ export function useLaneRows(root: string): LaneRow[] {
   );
   return rows.map((r) => {
     const own = r.branch?.kind === "own" ? r.branch.name : null;
-    const pull = own ? pulls.open.get(own) : undefined;
+    // and any chat that opened a pull request itself shows it the same way (item 100, code/chatPull.ts)
+    const pull = (own ? pulls.open.get(own) : undefined) ?? asLanePull(chatPullOf(sessions.chatKey(r.id))) ?? undefined;
     const merged = own !== null && pulls.merged.has(own);
     return pull || merged ? { ...r, ...(pull ? { pull } : {}), ...(merged ? { merged } : {}) } : r;
   });

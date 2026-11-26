@@ -3,7 +3,8 @@
 // read-only drawer; "Start in thread" hands the item to a bot, "Open terminal here" opens a TERMINALS shell in the
 // repository's folder. manut writes nothing to GitHub, GitLab or Linear (BOUNDARY rule 33). The scope toggle at the top
 // switches to "나" (Me, MeView.tsx): my pull requests, reviews, issues and mentions across repositories and the GitHub
-// accounts chosen in Settings › Accounts.
+// accounts chosen in Settings › Accounts; and to Pull requests (PullsView.tsx, item 100): every project's open requests by how
+// ready each is to merge, with Merge through the lane's own ask.
 //
 // After Orca's task page (stablyai/orca, MIT License, Copyright (c) 2026 Lovecast Inc.: task-page/TaskPage.tsx,
 // SourceBar.tsx, ProviderFilters.tsx, ListChrome.tsx, PaginationBar.tsx); the layout is ported, the code is manut's.
@@ -21,6 +22,8 @@ import { clearOpen, getTasks, setFilter, setKind, setPage, setRepo, setRepoAccou
 import { notePulls } from "./pulls";
 import { accountsOnHost, pickRepoAccount } from "./me";
 import { MeView, AccountDot } from "./MeView";
+import { PullsView } from "./PullsView";
+import { getHost } from "../sessions/host";
 import { SourceMark, IssueMark } from "./marks";
 import { firstMessage, threadTitle } from "./message";
 import { SOURCE_NAME } from "./TasksBar";
@@ -246,9 +249,9 @@ export function TasksPage() {
       <header className="head pg-head tk-head" data-testid="header">
         <span className="head-title">{t("tasks.title")}</span>
         <div className="tk-seg tk-scope" role="group" aria-label={t("tasks.scope")}>
-          {(["repo", "me"] as const).map((sc) => (
+          {(["repo", "me", "pulls"] as const).map((sc) => (
             <button key={sc} type="button" className={tk.scope === sc ? "on" : undefined} aria-pressed={tk.scope === sc} onClick={() => setScope(sc)} data-testid={`tasks-scope-${sc}`}>
-              {sc === "repo" ? t("tasks.scope.repo") : t("tasks.scope.me")}
+              {sc === "repo" ? t("tasks.scope.repo") : sc === "me" ? t("tasks.scope.me") : t("tasks.scope.pulls")}
             </button>
           ))}
         </div>
@@ -268,6 +271,8 @@ export function TasksPage() {
       </header>
       {tk.scope === "me" ? (
         <MeView />
+      ) : tk.scope === "pulls" ? (
+        <PullsView host={host} merge={getHost()} />
       ) : cli ? (
         <div className={`tk-body${sel ? " has-detail" : ""}`}>
           <div className="tk-main">
