@@ -348,6 +348,15 @@ program is known to take harmlessly (`KNOWN` in `src/code/command.ts`), and any 
 - **A guarded file as an option's value.** On any read or check, an option's value that is a file a change to which
   always asks (`--log CLAUDE.md`, `--x=.husky/pre-commit`) asks; one that only leaves something out
   (`--exclude-dir=.git`) does not, and a file named as an operand (`cat package.json`) stays a read.
+- **An option's value never hides the next option (item 120).** In every allow-list (the checkers', pip's and uv's, a
+  package manager's own, make's, just's and task's, git fetch's, git branch's and git config's) an option that takes a
+  value never takes a next word that starts with `-`: vitest's `--changed`, cargo's `--test`, jest's `--bail` and make's
+  `--jobs` take their value only joined, so `vitest run --changed --inspect=0.0.0.0:9229` ran a debugger on every network
+  while it read as the tests. Options whose value is optional are listed as such from each program's help (vitest 3.2.7's
+  `--changed`, cargo's `-p`, `--bin`, `--example`, `--test`, `--bench` and `--target`, jest's `--bail`, make's `-j` and
+  `-l`, which take a number only). A program whose value is required takes such a word or refuses to start, so reading
+  it as an option only asks more. As a backstop, `--inspect`, `--inspect-brk`, `--inspect-port`, `--inspect-wait`,
+  `--debug-port` and `--debug-brk` make any check ask, in any runner and in what a script is handed.
 
 None of the 221 everyday commands changed. Not yet on a list: the reads that item 112 checked against their manuals
 (cat, ls, head, diff and the like), git's, gh's, docker's, kubectl's, terraform's and helm's reads, the words

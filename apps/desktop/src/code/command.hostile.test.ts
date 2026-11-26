@@ -974,6 +974,87 @@ describe("D1: a push read with a branch the line has moved away from (item 120)"
   });
 });
 
+describe("D2: an option that takes a value, read as taking the option after it (item 120)", () => {
+  /** A program read from a list of its options, the options of it that take a value, and an option no list holds, written
+   *  the way the program reads its options. Each value option is followed by the unknown option: a program whose value is
+   *  optional (vitest's `--changed`, make's `-j`, cargo's `--test`) leaves the next option to itself, and one whose value
+   *  is required takes it as the value or refuses to start, so reading it as an option only ever asks more. */
+  const PROGRAMS: [prefix: string, values: string, unknown: string][] = [
+    ["vitest run", "-r --root -c --config -t --testNamePattern --dir --reporter --mode --workspace --pool --maxWorkers --minWorkers --environment --shard --changed --testTimeout --hookTimeout --bail --retry --exclude --project --slowTestThreshold --teardownTimeout --maxConcurrency", "--zzz-unread"],
+    ["npx vitest list", "--changed --project -t", "--zzz-unread"],
+    ["tsc --noEmit", "-p --project --target --module --moduleResolution --lib --jsx --types --moduleDetection --locale", "--zzz-unread"],
+    ["npx playwright test", "-c --config --browser -g --grep -G --grep-invert --global-timeout -j --workers --max-failures --project --repeat-each --reporter --retries --shard --timeout", "--zzz-unread"],
+    ["pytest", "-k -m --maxfail --durations --durations-min --verbosity -r --tb --show-capture --color --code-highlight -W --ignore --ignore-glob --deselect --doctest-glob --import-mode --capture --assert --log-level --log-cli-level --log-format --log-date-format", "--zzz-unread"],
+    ["mypy", "-O --follow-imports --python-version --platform --always-true --always-false --untyped-calls-exclude --deprecated-calls-exclude --disable-error-code --enable-error-code --exclude -m -p", "--zzz-unread"],
+    ["ruff check", "--output-format --target-version --extension --select --ignore --extend-select --per-file-ignores --extend-per-file-ignores --fixable --unfixable --extend-fixable --exclude --extend-exclude --color", "--zzz-unread"],
+    ["ruff format --check", "--extension --target-version --output-format --exclude --line-length --range --color", "--zzz-unread"],
+    ["npx jest", "-b --bail --changedSince --collectCoverageFrom --coverageProvider --maxConcurrency -w --maxWorkers --seed --selectProjects --shard --testMatch -t --testNamePattern --testPathIgnorePatterns --testPathPatterns --testTimeout", "--zzz-unread"],
+    ["npx mocha", "--global --globals -j --jobs --retries -s --slow -t --timeout --timeouts -u --ui --extension --ignore --exclude -f --fgrep -g --grep", "--zzz-unread"],
+    ["npx eslint", "--ext --global --rule --ignore-pattern --max-warnings -f --format --report-unused-disable-directives-severity --cache-strategy --fix-type --concurrency", "--zzz-unread"],
+    ["npx prettier --check", "--ignore-path --config-precedence --log-level --find-config-path", "--zzz-unread"],
+    ["pylint", "--disable -d --enable -j --ignore --msg-template --recursive --source-roots", "--zzz-unread"],
+    ["shellcheck", "-i --include -e --exclude --extended-analysis -f --format -o --enable -s --shell -S --severity -W --wiki-link-count", "--zzz-unread"],
+    ["actionlint", "-ignore -format", "-zzzunread"],
+    ["go test", "-bench -benchtime -count -covermode -coverpkg -cpu -list -parallel -run -shuffle -skip -timeout -vet", "-zzzunread"],
+    ["cargo test", "--message-format --color -p --package --exclude --bin --example --test --bench -F --features -j --jobs --profile --target", "--zzz-unread"],
+    ["cargo clippy", "-p --package --bin --test --target", "--zzz-unread"],
+    ["pip list", "--format --exclude", "--zzz-unread"],
+    ["uv pip list", "--exclude --format", "--zzz-unread"],
+    ["pnpm test --", "-t --testNamePattern --reporter --pool --project --shard --testTimeout --maxWorkers --environment --config --mode", "--zzz-unread"],
+    ["turbo run test", "--filter -F", "--zzz-unread"],
+    ["make", "-C --directory -j --jobs -l --load-average", "--file=other.mk"],
+    ["just", "--color", "--justfile=other"],
+    ["task", "--concurrency", "--taskfile=other.yml"],
+    ["pnpm", "--filter -F -C --dir --prefix --workspace --cwd --reporter --loglevel --workspace-dir --depth --workspace-concurrency --resume-from --test-pattern --omit --include --tag", "--config.script-shell=./x.sh"],
+    ["git fetch", "--depth --deepen --shallow-since --shallow-exclude --jobs -j --filter --negotiation-tip", "--upload-pack=./x.sh"],
+    ["git branch", "--sort --format", "--set-upstream-to=origin/main"],
+    ["git config", "--type --default", "--global"],
+  ];
+  /** What each program is given after the options: a target, a task or a script for those that need one. */
+  const after = (prefix: string) => (["make", "just", "task"].includes(prefix) ? " test" : prefix === "pnpm" ? " test" : prefix === "git config" ? " user.name" : "");
+
+  it("reads the option after it as the option it is: a value option never takes a word that starts with `-`", () => {
+    const wrong: string[] = [];
+    let n = 0;
+    for (const [prefix, values, unknown] of PROGRAMS) {
+      for (const opt of values.split(" ")) {
+        n++;
+        const line = `${prefix} ${opt} ${unknown}${after(prefix)}`;
+        if (alone(line)) wrong.push(line);
+      }
+      // the plain twin: the program alone still goes
+      if (!alone(`${prefix}${after(prefix)}`) && !["git config"].includes(prefix)) wrong.push(`plain asks: ${prefix}${after(prefix)}`);
+    }
+    expect(wrong).toEqual([]);
+    expect(n).toBeGreaterThan(200);
+    counted += n;
+  });
+
+  it("asks for the review's lines, in every form a runner is started", () => {
+    counted += holds([
+      ["vitest run --changed --inspect=0.0.0.0:9229", "vitest run --changed", "check"],
+      ["vitest run --changed --inspect-brk=0.0.0.0:9229", "vitest run --changed HEAD~1", "check"],
+      ["vitest --changed --inspect=0.0.0.0:9229 --changed --no-file-parallelism", "vitest --changed --no-file-parallelism", "check"],
+      ["npx vitest run --changed --inspect=0.0.0.0:9229", "npx vitest run --changed=main", "check"],
+      ["pnpm exec vitest run --changed --inspect=0.0.0.0:9229", "pnpm exec vitest run --changed", "check"],
+      ["node_modules/.bin/vitest run --changed --inspect=0.0.0.0:9229", "node_modules/.bin/vitest run --changed", "check"],
+      ["vitest run --changed --browser.api.host=0.0.0.0", "vitest run --changed --coverage", "check"],
+      ["pnpm vitest run --changed --inspect-brk=0.0.0.0:9229 --no-file-parallelism", "pnpm vitest run --no-file-parallelism", "check"],
+      ["npx vitest list --changed --inspect=0.0.0.0:9229", "npx vitest list --changed", "check"],
+      ["make -j --file=other.mk test", "make -j test", "check"],
+      ["make --jobs --file=other.mk test", "make --jobs 4 test", "check"],
+      ["make --load-average --file=other.mk test", "make --load-average 2.5 test", "check"],
+      ["make -l --file=other.mk test", "make -j4 test", "check"],
+      ["cargo test --test --manifest-path fixtures/x/Cargo.toml", "cargo test --test api", "check"],
+      ["npx jest --bail --watchman=false --runInBand", "npx jest --bail --runInBand", "check"],
+      // a debugger asks in every runner, whatever reads its options: the words a script is handed, mocha's and node's names
+      ["pnpm test -- --inspect-port=0.0.0.0:9229", "pnpm test -- --coverage", "check"],
+      ["npx mocha --debug-port=9229", "npx mocha --exit", "check"],
+      ["npx jest --inspect-brk", "npx jest --ci", "check"],
+    ]);
+  });
+});
+
 describe("everyday commands", () => {
   /** What a developer and an agent run all day, each as it read before item 112 (only `cdk synth`, now a build, moved).
    *  None of these may start to ask because a hostile line beside it does. */

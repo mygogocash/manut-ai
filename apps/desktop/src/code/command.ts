@@ -555,7 +555,7 @@ function strangePmOption(words: string[], from: number, to: number): string | nu
     if (!w.startsWith("-") || w === "-") continue;
     if (PM_FLAGS.has(w)) continue;
     if (PM_VALUE.has(w.split("=")[0])) {
-      if (!w.includes("=")) i++;
+      if (!w.includes("=") && takesWord(words[i + 1])) i++;
       continue;
     }
     return w;
@@ -677,7 +677,7 @@ function fetch(words: string[], head: number): Verdict {
       if (w === "--multiple") multiple = true;
       if (FETCH_FLAGS.has(w)) continue;
       if (FETCH_VALUES.has(name)) {
-        if (!w.includes("=") && !["--recurse-submodules"].includes(w)) i++;
+        if (!w.includes("=") && !["--recurse-submodules"].includes(w) && takesWord(words[i + 1])) i++;
         continue;
       }
       // bundled short flags (`-pq`) and a job count joined to its option (`-j4`)
@@ -717,7 +717,7 @@ function onlyLists(args: string[], kind: "branch" | "tag"): boolean {
     if (LIST_FLAGS[kind].has(w) || (kind === "tag" && /^-n[0-9]+$/.test(w))) continue;
     if (LIST_VALUES.has(name)) {
       // the commit after `--contains` is optional and is taken as a pattern either way
-      if (!w.includes("=") && ["--sort", "--format"].includes(w)) i++;
+      if (!w.includes("=") && ["--sort", "--format"].includes(w) && takesWord(args[i + 1])) i++;
       continue;
     }
     return false;
@@ -743,7 +743,7 @@ function configReads(args: string[], rest: string[]): boolean {
       continue;
     }
     if (CONFIG_VALUES.has(name)) {
-      if (!w.includes("=")) i++;
+      if (!w.includes("=") && takesWord(args[i + 1])) i++;
       continue;
     }
     return false;
@@ -1117,6 +1117,9 @@ const CHECK_RUNS = new Set([
   // options a runner hands to node for its workers (mocha's `--node-option`, ava's `--node-arguments`, vitest's
   // `execArgv`), where `--import` and `--require` load a program as `NODE_OPTIONS` would
   "nodeoption", "nodearguments", "nodeargs", "execargv", "customprovidermodule",
+  // a debugger on an address, which runs whatever anyone who reaches it sends (item 120): a backstop for every runner, and
+  // for node's own names wherever a runner hands them on
+  "inspect", "inspectbrk", "inspectport", "inspectwait", "debugport", "debugbrk",
 ]);
 /** Long options only one runner reads this way (another runner's option of the same name is harmless): vitest's diff
  *  settings, pool and workspace name a module it loads, and its benchmark's JSON is a file it writes. */
@@ -1177,11 +1180,15 @@ const namesAFile = (value: string) => /[\\/]/.test(value) || value.startsWith(".
 /** A program's options: `flags` take no value, `values` take one (joined by `=`, joined to a short one, or the next word),
  *  and `changes` make the step a change. A long one is written `--name`, compared without letter case, `-` and `_`, and
  *  taken back with `--no-name` when it is a flag; a short one is `-x`, bundled with others. `long1` reads `-name` as a
- *  long option, as Go's flags do. */
+ *  long option, as Go's flags do. `optional` are the options of `values` whose value is optional, from the program's own
+ *  help (item 120): the program takes one only joined to it, never the next word. No value option takes a next word that
+ *  starts with `-`: a program whose value is optional reads that word as an option of its own, and one whose value is
+ *  required takes it as the value or refuses to start, so reading it as an option only ever asks more. */
 interface Known {
   flags?: string;
   values?: string;
   changes?: string;
+  optional?: string;
   long1?: true;
 }
 
@@ -1193,6 +1200,8 @@ const UV_COMMON = "-h --help -q --quiet -v --verbose -n --no-cache --color --off
 const VITEST =
   "-w --watch --silent --hideSkippedTests --coverage --isolate --globals --fileParallelism --passWithNoTests --logHeapUsage --allowOnly --expandSnapshotDiff --disableConsoleIntercept --typecheck --printConsoleTrace --includeTaskLocation --run --color --clearScreen -h --help -v --version";
 const VITEST_VALUES = "-r --root -c --config -t --testNamePattern --dir --reporter --mode --workspace --pool --maxWorkers --minWorkers --environment --shard --changed --testTimeout --hookTimeout --bail --retry --exclude --project --slowTestThreshold --teardownTimeout --maxConcurrency";
+/** vitest 3.2.7's `--help` writes these with `[value]`: cac over mri takes a next word for them only when it is no option. */
+const VITEST_OPTIONAL = "--changed";
 const TSC_FLAGS =
   "--noEmit --pretty --strict --skipLibCheck --skipDefaultLibCheck --listFiles --listFilesOnly --explainFiles --diagnostics --extendedDiagnostics --traceResolution --noErrorTruncation --showConfig --version --help --all " +
   "--allowJs --checkJs --resolveJsonModule --esModuleInterop --allowSyntheticDefaultImports --forceConsistentCasingInFileNames --isolatedModules --isolatedDeclarations --verbatimModuleSyntax --erasableSyntaxOnly " +
@@ -1203,10 +1212,12 @@ const TSC_VALUES = "-p --project --target --module --moduleResolution --lib --js
 const CARGO_CHECK =
   "--future-incompat-report -v --verbose -q --quiet -h --help --workspace --all --lib --bins --examples --tests --benches --all-targets --all-features --no-default-features -r --release --ignore-rust-version --locked --offline --frozen --keep-going";
 const CARGO_VALUES = "--message-format --color -p --package --exclude --bin --example --test --bench -F --features -j --jobs --profile --target";
+/** cargo's `--help` writes these with `[<NAME>]`: with none it lists the targets. */
+const CARGO_OPTIONAL = "-p --package --bin --example --test --bench --target";
 
 const KNOWN: Record<string, Known> = {
-  vitest: { flags: VITEST, values: VITEST_VALUES, changes: "-u --update" },
-  "vitest list": { flags: `${VITEST} --filesOnly`, values: VITEST_VALUES },
+  vitest: { flags: VITEST, values: VITEST_VALUES, changes: "-u --update", optional: VITEST_OPTIONAL },
+  "vitest list": { flags: `${VITEST} --filesOnly`, values: VITEST_VALUES, optional: VITEST_OPTIONAL },
   tsc: { flags: TSC_FLAGS, values: TSC_VALUES },
   "vue-tsc": { flags: TSC_FLAGS, values: TSC_VALUES },
   "playwright test": { flags: "--fail-on-flaky-tests --forbid-only --fully-parallel --headed --last-failed --list --no-deps --pass-with-no-tests --quiet --shuffle -x -h --help", values: "-c --config --browser -g --grep -G --grep-invert --global-timeout -j --workers --max-failures --project --repeat-each --reporter --retries --shard --timeout", changes: "-u --update-snapshots" },
@@ -1230,6 +1241,8 @@ const KNOWN: Record<string, Known> = {
     flags: "--ci --clearMocks --collectTests --colors --coverage --collectCoverage --detectOpenHandles --errorOnDeprecated -e --expand --forceExit --help --injectGlobals --listTests --logHeapUsage --noStackTrace -o --onlyChanged -f --onlyFailures --passWithNoTests --randomize --resetMocks --restoreMocks -i --runInBand --runTestsByPath --showSeed --silent --testLocationInResults --useStderr --verbose -v --version --watch --watchAll --workerThreads",
     values: "-b --bail --changedSince --collectCoverageFrom --coverageProvider --maxConcurrency -w --maxWorkers --seed --selectProjects --shard --testMatch -t --testNamePattern --testPathIgnorePatterns --testPathPatterns --testTimeout",
     changes: "-u --updateSnapshot",
+    // jest's CLI documentation writes `--bail[=<n>]`
+    optional: "-b --bail",
   },
   mocha: {
     flags: "--allow-uncaught -A --async-only -b --bail --check-leaks --color -c --colors --delay --diff --dry-run --exit --fail-zero --forbid-only --forbid-pending --full-trace --inline-diffs -i --invert --list-interfaces --list-reporters -C --no-colors -p --parallel --posix-exit-codes --recursive --sort -S -h --help -V --version",
@@ -1250,10 +1263,10 @@ const KNOWN: Record<string, Known> = {
   actionlint: { long1: true, flags: "-color -no-color -oneline -verbose -version -debug", values: "-ignore -format" },
   "go test": { long1: true, flags: "-json -cover -failfast -fullpath -short -v -benchmem", values: "-bench -benchtime -count -covermode -coverpkg -cpu -list -parallel -run -shuffle -skip -timeout -vet" },
   "go vet": { long1: true },
-  "cargo test": { flags: `${CARGO_CHECK} --no-run --no-fail-fast --doc`, values: CARGO_VALUES },
-  "cargo check": { flags: CARGO_CHECK, values: CARGO_VALUES },
-  "cargo bench": { flags: CARGO_CHECK, values: CARGO_VALUES },
-  "cargo clippy": { flags: `${CARGO_CHECK} --no-deps`, values: CARGO_VALUES, changes: "--fix" },
+  "cargo test": { flags: `${CARGO_CHECK} --no-run --no-fail-fast --doc`, values: CARGO_VALUES, optional: CARGO_OPTIONAL },
+  "cargo check": { flags: CARGO_CHECK, values: CARGO_VALUES, optional: CARGO_OPTIONAL },
+  "cargo bench": { flags: CARGO_CHECK, values: CARGO_VALUES, optional: CARGO_OPTIONAL },
+  "cargo clippy": { flags: `${CARGO_CHECK} --no-deps`, values: CARGO_VALUES, changes: "--fix", optional: CARGO_OPTIONAL },
   "pip list": { flags: `${PIP_COMMON} -o --outdated -u --uptodate -e --editable -l --local --user --pre --not-required --exclude-editable --include-editable --no-index`, values: "--format --exclude" },
   "pip show": { flags: `${PIP_COMMON} -f --files` },
   "pip freeze": { flags: `${PIP_COMMON} -l --local --user --all --exclude-editable`, values: "--exclude" },
@@ -1278,6 +1291,10 @@ function knownOptions(key: string, args: readonly string[], handed = false): "ch
   const flags = setOf(k.flags, k.long1);
   const values = setOf(k.values, k.long1);
   const changes = setOf(k.changes, k.long1);
+  const optional = setOf(k.optional, k.long1);
+  /** Whether the word after a value option at `i` is its value (item 120): never one that starts with `-`, and never for one
+   *  whose value is optional. */
+  const takesNext = (i: number, n: string) => !optional.has(n) && takesWord(args[i + 1]);
   let change = false;
   for (let i = 0; i < args.length; i++) {
     const w = args[i];
@@ -1289,8 +1306,8 @@ function knownOptions(key: string, args: readonly string[], handed = false): "ch
     if (w.startsWith("--") || k.long1) {
       const n = optKey(`--${w.replace(/^--?/, "").split("=")[0]}`);
       if (flags.has(n) || (n.startsWith("--no") && flags.has(`--${n.slice(4)}`))) continue;
-      if (values.has(n)) {
-        if (!w.includes("=")) i++;
+      if (values.has(n) || optional.has(n)) {
+        if (!w.includes("=") && takesNext(i, n)) i++;
         continue;
       }
       if (changes.has(n)) {
@@ -1306,8 +1323,8 @@ function knownOptions(key: string, args: readonly string[], handed = false): "ch
         change = true;
         continue;
       }
-      if (values.has(c)) {
-        if (j === w.length - 1) i++;
+      if (values.has(c) || optional.has(c)) {
+        if (j === w.length - 1 && takesNext(i, c)) i++;
         break;
       }
       return "unknown";
@@ -1315,6 +1332,12 @@ function knownOptions(key: string, args: readonly string[], handed = false): "ch
   }
   return change ? "change" : null;
 }
+
+/** Whether `next`, the word after an option that takes a value, is read as that value by an allow-list (item 120): never a
+ *  word that starts with `-` (but `-` alone, which names the input), so a program whose value is optional cannot hide its
+ *  next option there. A program whose value is required takes the word or refuses to start: reading it as an option only
+ *  asks more. */
+const takesWord = (next: string | undefined) => next !== undefined && (next === "-" || !next.startsWith("-"));
 
 /** What a check's own options make of it, or null when they leave it a check: an option that loads a program, a settings
  *  file that is not one, a file it writes, or a service it sends to. `runner` names the runner (`""` when the words go to a
@@ -1840,7 +1863,10 @@ function classify(words: string[], where: Where): Verdict {
       }
       if (RUNNER_FLAGS[name].has(w) || RUNNER_JOINED[name].test(w)) continue;
       if (values.has(w.split("=")[0])) {
-        if (!w.includes("=")) i++;
+        // make's `-j` and `-l` take a number after them only when one is there (GNU make's manual: `-j [jobs]`); no value
+        // option takes a word that starts with `-` (item 120: `make -j --file=other.mk test` runs the other file's test)
+        const optional = name === "make" && ["-j", "--jobs", "-l", "--load-average"].includes(w);
+        if (!w.includes("=") && takesWord(words[i + 1]) && (!optional || /^[0-9.]+$/.test(words[i + 1]))) i++;
         continue;
       }
       return unknownProgram(name);
