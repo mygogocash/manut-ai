@@ -39,8 +39,8 @@ describe("an approval card's command", () => {
     ].join("\n");
     const html = renderToString(<Cards bot="agent:proj" item={ask(hostile)} />);
     expect(commandOf(html)).toBe(hostile);
-    // the block scrolls with the keyboard too, and is named for a screen reader
-    expect(html).toMatch(/<pre class="card-cmd" data-testid="card-command" tabindex="0" aria-label="The whole command">/);
+    // the block scrolls by keyboard once clicked into, is no stop of Tab (Deny stays the first), and is named for a screen reader
+    expect(html).toMatch(/<pre class="card-cmd" data-testid="card-command" tabindex="-1" aria-label="The whole command">/);
   });
 
   it("still masks a key, on the card and on its closed line", () => {

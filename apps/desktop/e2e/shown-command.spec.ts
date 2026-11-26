@@ -91,7 +91,8 @@ for (const theme of THEMES) {
     expect(await block.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
     // its lower edge fades while more is below, and the fade is gone at the end; a short one never has it
     await expect(block).toHaveClass(/\bmore\b/);
-    await block.focus();
+    // clicked into, End scrolls the command; Tab from the card still goes to Deny first
+    await block.click();
     await page.keyboard.press("End");
     await expect.poll(() => block.evaluate((el) => Math.round(el.scrollTop + el.clientHeight) >= el.scrollHeight - 1)).toBe(true);
     await expect(block).not.toHaveClass(/\bmore\b/);

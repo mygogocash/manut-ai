@@ -51,10 +51,10 @@ const BUTTONS: { choice: ApprovalChoice; label: Key; key: string }[] = [
   { choice: "session", label: "card.allowSession", key: "3" },
 ];
 
-/** A command in the card's mono block, whole (item 117). A long one scrolls inside the block, by keyboard too (Home and End
- *  move the command, not the chat, whose End jumps to its bottom), and while more of it is below the fold its lower edge
- *  fades, as a long list of agents does (sessions.css `.ss-scroll.more`), so the block reads as one that scrolls; the fade
- *  is gone once it is scrolled to its end. */
+/** A command in the card's mono block, whole (item 117). A long one scrolls inside the block, and by keyboard once clicked
+ *  into (Home and End move the command, not the chat, whose End jumps to its bottom); it is no stop of Tab, so Deny stays the
+ *  card's first. While more of it is below the fold its lower edge fades, as a long list of agents does (sessions.css
+ *  `.ss-scroll.more`), so the block reads as one that scrolls; the fade is gone once it is scrolled to its end. */
 function CommandBlock({ text }: { text: string }) {
   const ref = useRef<HTMLPreElement>(null);
   const [more, setMore] = useState(false);
@@ -72,7 +72,7 @@ function CommandBlock({ text }: { text: string }) {
       ref={ref}
       className={more ? "card-cmd more" : "card-cmd"}
       data-testid="card-command"
-      tabIndex={0}
+      tabIndex={-1}
       aria-label={t("card.command")}
       onScroll={(e) => measure(e.currentTarget)}
       onKeyDown={(e) => {
