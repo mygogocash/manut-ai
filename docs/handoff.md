@@ -305,7 +305,9 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    are 11 to 18 in `docs/computer-use.md`). Then the design of 102
    (`docs/several-agents.md`; its eight open questions answered provisionally by the lead with the design's own
    recommendations, in `docs/decisions/102-several-agents.md`, for the owner) and 102d (its pure rules). Then 102a
-   (ask several agents). Running: 102e (helper blocks) and 133 (the flaky browser specs; three workers a shard). Needs the owner from 101b: Grok signed in and `permission_mode = "ask"`
+   (ask several agents). Then 133 (motion-lists and resilience fixed; CI now four
+   shards of three Playwright workers, since four on a 4-CPU runner made specs flaky). Running: 102e (helper blocks),
+   102f (a helper lane from a snapshot) and 134 (the join page's countdown test). Needs the owner from 101b: Grok signed in and `permission_mode = "ask"`
    under `[ui]` in `~/.grok/config.toml` (it says always-approve, so Grok chats are refused), and Muse Code's CLI. From 101e: all 325 Codex sessions on the owner's Mac are compressed, so
    only Claude Code's conversations are offered until 106b. Needs the owner from 101a: Cursor's Approval mode set to Allowlist (it is Run Everything, so Cursor
    chats are refused), and a Cursor plan with messages left to record a real tool call. GitHub reported 7 Dependabot alerts on `main` (2 critical) at that push, for the owner to look at.
@@ -698,12 +700,6 @@ Every switch that turns a built part on, and what each needs from the owner, is 
   releases its tasks...") and `test/auth-email.test.ts` ("gives Apple's session in every way..."): timed out at 5 s in
   item 104's run 45873764860 (with a `rows.filter is not a function` uncaught in workerd), a branch that changes no API
   code; all passed on the next run. If they time out again, look at that uncaught error first.
-- `apps/desktop/e2e/motion-lists.spec.ts`, its Home test: failed on its test and its retry in item 132's run
-  45859860218 (four workers a shard), passed 8 of 8 alone and in every run since. With the resilience spec above, the
-  second spec to fail twice in one run since item 129; if either fails twice again, fix it rather than re-run.
-- `apps/desktop/e2e/resilience.spec.ts` ("bridge lost mid-turn"): failed on its test and its retry in shard 2 of
-  item 101a's first CI run (45851189647), the first runs with four Playwright workers a shard (item 129); passed alone
-  and on the re-run. If it fails twice again, fix it rather than re-run: it may be the four workers' load.
 - `apps/desktop` `src/sessions/term/engine-osc52.test.ts`: builds clipboard-sized strings, can pass 5 seconds.
 - `apps/desktop` `src/lib/sounds.test.ts` and `apps/web` `test/RoutinesView.test.tsx` ("pauses everyone in practice"): each
   failed once in the gate of 25 Nov at load 7 with a helper's gate beside it (the second waited past testing-library's one
