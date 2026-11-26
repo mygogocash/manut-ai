@@ -460,7 +460,7 @@ mod tests {
 
         // a lane made under a folder the person chose (Settings › Worktrees) is a repository's top, and the app's own
         let root = home.join("lanes-root");
-        let made = lane::make_with(&home, &web, &names(&["kit/try-it"]), &lane::Start { root: s(&root), remote: false }).unwrap();
+        let made = lane::make_with(&home, &web, &names(&["kit/try-it"]), &lane::Start { root: s(&root), ..lane::Start::default() }).unwrap();
         assert!(Path::new(&made.worktree).starts_with(root.canonicalize().unwrap()));
         assert_eq!(project(&home, &made.worktree), Err("app_folder"));
         // and one made in the default place, inside the app's own folder

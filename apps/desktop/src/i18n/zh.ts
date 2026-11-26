@@ -1274,6 +1274,7 @@ export const zh: Record<Key, string> = {
   "ss.noChatMode": "{agent} 没有以聊天模式响应，可能是旧版本：{install}",
   "ss.newConversation": "没有找到之前的对话，已在这里开始新对话。",
   "ss.mcpDiffers": "未在此泳道中启动：{names}。泳道的 .mcp.json 条目与你在项目文件夹中批准的不同。",
+  "ss.mcpLaneFiles": "未在此泳道中启动：{names}。它会运行泳道自己文件夹中的文件，而泳道的智能体可以修改这些文件。在你项目文件夹的聊天中它会启动。",
   "ss.notes.read": "已读取此项目的 {names}。",
   "ss.notes.left": "未读取：{items}。",
   "ss.notes.more": "另外 {n} 个",
@@ -3790,6 +3791,7 @@ export const zh: Record<Key, string> = {
   "wf.why.unchecked": "无法检查它的项目文件夹。",
   "wf.why.moved": "它的项目文件夹不是你允许的那个。请再看一遍。",
   "wf.why.no_lane": "无法在它的项目中建立它自己的泳道，所以什么都没有运行。",
+  "wf.why.config": "没有运行：这个项目自己的 git 设置指定了要 git 运行的程序，或另一个获取地址。没有人在场时，应用不会自己运行这些；如果你信任它们，请按“立即运行”。",
   // Settings, Sharing and access: reaching this Mac from a paired phone (item 78b, src/settings/RemotePage.tsx).
   // rm.consent.operator is a marked placeholder the owner writes: who runs the relay, and where.
   "rm.intro": "无论身在何处，都能在手机上查看聊天并回答请求。每次允许都需要面容 ID 或手机密码。",

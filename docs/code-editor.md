@@ -1002,10 +1002,53 @@ and system settings are theirs and stay as they are. What the app's runs switch 
 (`core.hooksPath` pointed at a folder never made), `core.fsmonitor=false`, `--no-ext-diff --no-textconv` on every diff
 (`diff.external`, `diff.<driver>.command` and `.textconv`), `--no-verify-signatures` on the pull's write (`merge.verifySignatures`
 would run `gpg.program`), `protocol.ext.allow=never` on every automatic run, and a pager or an editor, which git starts only for a
-terminal (`GIT_PAGER=cat` too on the Diff). Work the person asked for by pressing something (a lane started, its fetch, a push
+terminal (`GIT_PAGER=cat` too on the Diff). A workflow's lane made by the clock is the app's own work too (item 114, see
+Workflows). Work the person asked for by pressing something (a lane started, Run now, its fetch, a push
 and a pull request after a Yes, Remove) runs git with their settings and the repository's, as the same git in a terminal would,
 hooks and the file monitor aside: they chose to act on that project, and a refusal there would break a repository-local LFS or
 deploy-key ssh setup the person relies on.
+
+**Where a fetch goes and what it trusts** (item 114, third security review). A repository's own config could also send the
+automatic pull's fetch, or the merged clean-up's, through a proxy of someone else's choosing, which answers 401 and is handed
+the person's git login (`git_pull.rs` shows it with git 2.54, a stand-in proxy on the Mac and a made-up credential helper).
+Read family by family from `git help config`, the repository's own scopes now also stop automatic work at:
+
+- `http.*` and `http.<url>.*`, every key: a proxy with its authentication and certificates, a name resolved to another
+  address (`curloptResolve`), redirects, which certificates and keys are trusted (`sslVerify`, `sslCAInfo`, `sslCAPath`,
+  `pinnedPubkey`, `sslBackend`), what is sent (`sslCert`, `sslKey`, `extraHeader`, `cookieFile`, `saveCookies`, `emptyAuth`,
+  `proactiveAuth`, `delegation`, `userAgent`). Ten keys that only pace a transfer do not stop it (`postBuffer`,
+  `lowSpeedLimit`, `lowSpeedTime`, `maxRequests`, `minSessions`, `version`, the three `keepAlive` keys and `noEPSV`): a
+  repository often has `http.postBuffer` set for a large push, and none of them names an address, a program, a file, a
+  header, a credential or a certificate. Any other `http` key stops it, a new one git adds included.
+- `remote.<name>.proxy` and `.proxyAuthMethod`, beside `.uploadpack`, `.receivepack`, `.vcs` and a `<transport>::` address.
+  The remote's own plain address stays: the fetch goes to the remote the repository names, as in a terminal. `.fetch` is not
+  read: the app's fetch now passes an empty `--refmap=`, since a configured refspec otherwise writes the fetched commit onto
+  another ref too (git's "opportunistic" update moved one of the person's own branches in a test). `.tagOpt`, `.prune`,
+  `.pruneTags`, `.mirror`, `.push`, `.serverOption`, `.followRemoteHEAD`, `.promisor` and `.partialCloneFilter` name no
+  address and run nothing (a promisor's lazy fetch goes to that same remote).
+- `url.<base>.*`: both its keys, as before.
+- `credential.*` and `credential.<url>.*`, every key: a helper is a program, and the rest says what is sent and how it is
+  protected (`username`, `useHttpPath`, `protectProtocol`, `sanitizePrompt`, `interactive`).
+- `ssh.variant`: how git passes options to the ssh program.
+- `protocol.allow`, `protocol.<name>.allow` and `protocol.version`: which transports git takes (every automatic run still
+  passes `-c protocol.ext.allow=never`).
+- `fetch.bundleURI` and `transfer.bundleURI`: a download from another address first, or from one the server names. The rest
+  of `fetch.*` and `transfer.*` only tune a fetch (`prune`, `pruneTags`, `fsckObjects`, `unpackLimit`, `writeCommitGraph`,
+  `parallel`, `output`, `negotiationAlgorithm`, `hideRefs`, `credentialsInUrl`) or are overridden on the command line
+  (`fetch.recurseSubmodules` by `--no-recurse-submodules`; with the explicit refspec, pruning reaches only that one branch,
+  checked with git 2.54).
+- `core.protectHFS` and `core.protectNTFS`: turned off in a repository, a checkout could write into `.git` through a name
+  the disk reads as the same. The rest of `core.*`: `sshCommand`, `gitProxy`, `askPass` and `alternateRefsCommand` as
+  before; `hooksPath` and `fsmonitor` overridden by `-c`; `editor` and `pager` start only for a terminal; `worktree` only says
+  where the work tree is, and git reads that folder's own repository there; the others are about the disk and the index.
+- `submodule.<name>.update` naming a command (`!`). The rest of `submodule.*` acts only inside a submodule, or when one is
+  cloned or updated, which the app never does by itself (item 90).
+- `pull.*` is not read by anything the app runs: it never runs `git pull`, but a fetch and `git merge --ff-only`, whose
+  settings are switched off on its command line as above (a merge driver runs only for a real merge, never a fast-forward).
+
+What a person sees: a project with any of these in its own `.git/config` is not pulled by itself and its merged lanes are not
+cleaned up by themselves, and the line names the setting (an address in a subsection shown as `*`). The person's own global
+and system settings, their proxy among them, stay theirs, and a pull in a terminal works as before.
 
 **Submodules** (item 90). A git that goes into a submodule reads that submodule's own config (`.git/modules/<name>/config`,
 nested ones too) and attributes, which none of the above reached, so a folder someone sent with a submodule whose config names a
@@ -1163,7 +1206,25 @@ still goes through the asks (How an ask is read, Kit's dial, Buddy's card).
   lane's `.mcp.json` is the lane's own file, which its agent can change, so another command, argument, variable, address,
   header or kind under an approved name, or a name the developer's folder does not have, starts nothing, and the chat says
   "Not started in this lane: <names>" with why (`session.note` `mcp_differs`, names only). A session in the developer's own
-  folder is held to the entries there, as Claude Code is. This one source because `.mcp.json` lives in the folder the agent already works in, so its
+  folder is held to the entries there, as Claude Code is. Item 114: an entry that is the approved one can still run the
+  LANE's files, since the agent starts its servers in the lane's folder: `node ./mcp/server.js` named the developer's script
+  where the person approved it and names the lane's copy here, which the lane's agent can change. Resolving such a path
+  against the developer's folder was not chosen: the server would still start in the lane's folder, and what a program
+  finds there by itself (a local package, a project file, a module path) would still be the lane's. So in a lane a stdio
+  server is not started (`acp_mcp::runs_the_lane`) when its program is named by a path from the working folder or inside the
+  lane, or found through a `PATH` with a relative or empty entry; when its program runs what the working folder's own files
+  name (package managers and runners: `npm`, `npx`, `pnpm`, `yarn`, `bun`, `deno`, `tsx`, `uv`, `uvx`, `poetry`, `pipenv`,
+  `make`, `just`, `cargo`, `go`, `mvn`, `gradle`, `dotnet`, `bundle`, `composer`, `git`; shells and wrappers such as `sh`,
+  `env` and `xargs`; `python` with `-m` or `-c`; `node` loading a module or inline code; `docker` or `podman` with `compose` or
+  `build`); when an argument, a part of one (an option's value after `=`, a bind mount's `.:/app`), or a variable's value names
+  something of the lane's (an absolute path inside it, a path from `.` or `..`, or a relative name whose first part is in
+  the lane, such as `mcp/server.js` or `server.py`); when `NODE_OPTIONS` loads a module; or when a variable ending in `PATH` or
+  `LIB` has an empty entry. The chat says "Not started in this lane: <names>. It runs files from the lane's own folder, which
+  the lane's agent can change. It starts in a chat in your project folder." (`mcp_lane_files`, names only). What a person
+  loses: in a lane, a project server started through `npx` or `uvx` (the usual way to name one) no longer starts, nor one
+  whose argument happens to name a file the lane has; in their own folder every approved server starts as before. Not
+  ruled out: a program named alone that reads its working folder by itself, with no word naming it (a server that loads
+  `./config.js` on its own). This one source because `.mcp.json` lives in the folder the agent already works in, so its
   literal values are ones the agent can read anyway, and its `${VAR}` and `${VAR:-default}` are filled in from the environment
   the agent already runs with (a server with a variable that is not set is left out). The servers the person added to Claude
   Code or Codex themselves are not handed on: their secrets were given to those agents. Shapes from the protocol's Session
@@ -1210,6 +1271,38 @@ helper or a status line program in a chat the app starts, where the agent has a 
   configuration and an inline `OPENCODE_CONFIG_CONTENT` stay. A person's variable of that name is refused on Settings ›
   Providers, as the app's own, and the app's value goes last.
 
+  **How OpenCode's own rules are read** (item 89, both forms since item 114). Before a chat starts, OpenCode lists its agents
+  and their resolved permission rules, the app builds ask rules from them (what the person allows for the shell and for edits
+  asks, what they deny stays denied) and sets them in `OPENCODE_CONFIG_CONTENT`, lists again, and starts the chat only when
+  OpenCode took exactly them and nothing else changed (`acp_chat::probe_rules`). OpenCode 2.3.0 has no `opencode agent list`:
+  it prints its help and ends with code 1, so every OpenCode chat was refused on this Mac. It lists the same fact as JSON with
+  `opencode debug agents --standalone` (each agent's `id`, `mode` and `permissions` as `action`, `resource`, `effect`), names the
+  shell tool `shell` rather than `bash` (its config still takes `bash`), matches case as written on every platform, and
+  decides by the last rule that matches, else ask (read in its bundle, and recorded on this Mac for five configs in
+  `tests/fixtures/acp/opencode2-rules.json`). `--standalone` matters: without it the listing comes from OpenCode's background
+  service, started earlier with other variables, while `opencode acp` always starts a server of its own that inherits the
+  chat's. The app tries the 2.x listing first and then 1.x's `agent list`; a listing that fails or cannot be read moves on to
+  the other, one whose rules were read but not kept refuses the chat at once, and neither readable refuses it as before ("could
+  not confirm it would keep your own OpenCode permission rules"). Not exercised: an OpenCode 2.3.0 chat itself (no agent was
+  run), so how 2.3.0's ACP side answers the chat's own messages is still only what item 89 recorded from 1.19.5; and
+  2.3.0's Code Mode `execute` and its own schedules, which are other actions than the shell and edits.
+
+  Since item 114 the inline value (after the ask rules) also says
+  `"formatter": false` and `"lsp": false`: OpenCode runs formatters after its write, edit and patch tools and language servers
+  for the files it touches, and both find and run the project's own tools and configs (a project-local Prettier, an ESLint
+  config), so the person's own config switching them on would still run the project's code with no card. Both keys take
+  `false` as "disabled" in OpenCode's own schema (1.x: "Omit or set to false to disable"; 2.3.0's config reader takes a boolean
+  for each, and `opencode debug config --standalone` on this Mac lists the inline value with both after the person's own
+  config, where a later `false` wins). Only a managed or organisation config, which OpenCode reads after it, could switch them
+  on again.
+
+  With a project's instructions file (item 93) the value OpenCode gets is one JSON object in three parts, in this order: the
+  ask rules (`agent`), then `"formatter": false, "lsp": false`, then the one `instructions` entry. The first two are what the
+  rules are built as and what `kept` rebuilds from a listing and compares byte for byte; the entry is added after them
+  (`acp_chat::with_instructions`, which leaves that text as it was), before the second listing, in whichever form was read
+  (`acp_chat::probe_rules`). So the value listed again is the very value the chat starts with, and a path the value cannot
+  carry refuses the start.
+
 **What a developer loses inside an app chat.** Claude Code: the project's `.claude/settings.json` and
 `.claude/settings.local.json` no longer apply, so their hooks, their allow, ask and deny rules (a team's deny rules
 included), `env`, `defaultMode`, plugins (`enabledPlugins`) and model; the project's `.mcp.json` servers do not connect, even
@@ -1217,7 +1310,9 @@ approved ones; Claude Code no longer reads the project's instruction files itsel
 text, and what that still leaves out is in [A project's own instructions, as text](#a-projects-own-instructions-as-text) (item
 93); the project's skills, commands and subagents are not offered; a "don't ask again" Claude Code writes to the local file is
 not read back. Buddy's chat, in its own empty folder, no longer reads a CLAUDE.md in the folders above it (`~/CLAUDE.md`).
-OpenCode: the project's `opencode.json` and `.opencode` folder; its instruction files come as text from the app too. What stays,
+OpenCode: the project's `opencode.json` and `.opencode` folder no longer apply; its instruction files come as text from the app
+too (item 93); and the formatters and language servers the person's own config switches on are off (item 114), so files the
+agent writes are not formatted for it and it gets no diagnostics from a language server. What stays,
 as a terminal would have it: the person's own settings, CLAUDE.md, rules, skills, commands, subagents and the plugins their
 own settings turn on, the MCP servers in `~/.claude.json` and their claude.ai connectors (read whatever the sources, Agent SDK
 page), managed settings, and auto memory. Kit's dial and the cards are unchanged. A developer who wants a project's own setup
@@ -1571,6 +1666,19 @@ refusing, an agent that is not a chat) starts no agent at all: `start` closes th
 person's drafts and never in place of one, is not opened in front of them, changes neither how they last opened the agent nor
 their last folder, and is named after the workflow. When a step's turn ends `done`, the next step goes through `send`, as the
 person's next message would, until the last.
+
+**A run nobody started by a press (item 114).** A run by the clock makes its lane with nobody there, so the lane is the app's
+own doing, as the automatic pull is: the page asks the shell for it with `unattended` (`LaneStart`), and `lane::make_with` then
+runs git as automatic work runs it (`Git::automatic`: no `ext::` remote, never into a submodule) and first reads the repository's
+own config and every submodule's (`Git::config_risk`, the same read as "Git the app runs by itself" above). While that names a
+program git would run or another address to fetch from, nothing is made, checked out, counted or fetched: `git worktree add`
+would run a smudge filter as it checks the files out, the count of the developer's files that did not come along a clean
+filter, and Start from the remote an `ext::` address or a proxy. The shell answers `config:<setting>`, no agent starts, and the
+run is kept as skipped (`config`) with the setting as its detail; the card says "Did not run: this project's own git settings
+name a program for git to run, or another address to fetch from. The app does not run those by itself while nobody is there;
+press Run now if you trust them." Only a press counts as someone there (`by === "person"`), so any way a run starts later (a
+webhook) is read as nobody there. Run now, and a lane the person starts from the chat box, stay as item 86 decided: the person
+is there and chose to act on that project, so git runs with their settings and the repository's, as in a terminal.
 
 - **An ask waits.** The run never answers one. An ask in any step is on its card and in Needs you as always, and the run waits
   there, since the turn has not ended; the page says "Waiting for you at step 2 of 3".

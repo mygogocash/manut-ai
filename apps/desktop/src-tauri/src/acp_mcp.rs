@@ -18,6 +18,11 @@
 //! which servers the lane's entry differs for ([`Approved::differs`]). A session in the developer's own folder reads the
 //! entries the person approved there, as Claude Code does.
 //!
+//! The same entry can still run the lane's files (item 114): the agent starts its servers in the lane's folder, so
+//! `node ./mcp/server.js` names the lane's copy, which its agent can change. In a lane a stdio server whose program, words or
+//! variables reach into its working folder is not started either, and the chat names it ([`runs_the_lane`],
+//! [`Approved::lane_files`]).
+//!
 //! Why this source and no other: `.mcp.json` lives in the folder the agent already works in, so its literal values are ones
 //! that agent can read anyway, and a `${VAR}` in it comes from the environment the agent already runs with. The servers the
 //! person added to Claude Code or Codex themselves are not handed on: their headers and environment hold secrets those
@@ -53,10 +58,11 @@ struct Server {
     how: Transport,
 }
 
-/// The approved servers of one session, and the names of the approved ones a lane's entry differs for, which are not handed
-/// on. Its `Debug` says how many and nothing else, so a value can never reach a log.
+/// The approved servers of one session, the names of the approved ones a lane's entry differs for, and the names of the
+/// approved ones that would run the lane's own files (item 114, [`runs_the_lane`]); neither of the last two is handed on. Its
+/// `Debug` says how many and nothing else, so a value can never reach a log.
 #[derive(Clone, Default, PartialEq, Eq)]
-pub struct Approved(Vec<Server>, Vec<String>);
+pub struct Approved(Vec<Server>, Vec<String>, Vec<String>);
 
 impl std::fmt::Debug for Approved {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -79,13 +85,25 @@ impl Approved {
     /// No server, and `names` as the approved ones a lane's entry differs for, for another module's test.
     #[cfg(test)]
     pub(crate) fn differing(names: &[&str]) -> Approved {
-        Approved(Vec::new(), names.iter().map(|n| n.to_string()).collect())
+        Approved(Vec::new(), names.iter().map(|n| n.to_string()).collect(), Vec::new())
+    }
+
+    /// No server, and `names` as the approved ones that would run the lane's own files, for another module's test.
+    #[cfg(test)]
+    pub(crate) fn lane_files_of(names: &[&str]) -> Approved {
+        Approved(Vec::new(), Vec::new(), names.iter().map(|n| n.to_string()).collect())
     }
 
     /// The names of the servers the person approved whose entry in this lane is not the one in the developer's folder:
     /// not started, and named to the person (a name only, never a value).
     pub fn differs(&self) -> &[String] {
         &self.1
+    }
+
+    /// The names of the servers the person approved that, in this lane, would run the lane's own files (item 114): not
+    /// started, and named to the person (a name only, never a value).
+    pub fn lane_files(&self) -> &[String] {
+        &self.2
     }
 
     /// The `mcpServers` list for an agent that takes HTTP (`http`) and SSE (`sse`) servers or not; stdio always.
@@ -215,12 +233,151 @@ impl Place {
     }
 }
 
+/// Programs that run what their working folder's own files name, whatever the words after them say (item 114): package
+/// managers and the runtimes that read a project file or a local package first (`npx` runs `node_modules/.bin` before the
+/// registry, `uv` and `uvx` read `uv.toml` and `pyproject.toml`, `bun` reads `bunfig.toml`, `deno` reads `deno.json`, `tsx`
+/// `tsconfig.json`), task runners and build tools (`make`, `cargo` reads `.cargo/config.toml`, `go` reads `go.work`), `git`
+/// (the lane's own config), shells and wrappers (a line or a program this reader does not read as a command). A program named
+/// here is matched by its file name, wherever it is.
+const RUN_THE_FOLDER: [&str; 47] = [
+    "npm", "npx", "pnpm", "pnpx", "yarn", "yarnpkg", "bun", "bunx", "deno", "corepack", "tsx", "ts-node", "uv", "uvx", "poetry", "pipenv", "pdm", "hatch", "rye", "pixi", "make", "gmake", "just", "task", "cargo", "go", "mvn", "gradle", "dotnet", "bundle", "bundler", "rake", "composer", "git", "sh",
+    "bash", "zsh", "dash", "ksh", "fish", "pwsh", "powershell", "cmd", "env", "xargs", "sudo", "nohup",
+];
+
+/// Node's options whose value is a module it loads, resolved from the working folder's `node_modules` when it is a bare name,
+/// or inline code (whose `require` resolves there too).
+const NODE_LOADS: [&str; 11] = ["-r", "--require", "--import", "--loader", "--experimental-loader", "--env-file", "--env-file-if-exists", "-e", "--eval", "-p", "--print"];
+
+/// The program's own name: the file name, lower case, without a Windows ending.
+fn program(command: &str) -> String {
+    let base = command.rsplit(['/', '\\']).next().unwrap_or(command).to_ascii_lowercase();
+    [".exe", ".cmd", ".bat", ".ps1"].iter().find_map(|e| base.strip_suffix(e).map(str::to_string)).unwrap_or(base)
+}
+
+/// `p` (absolute) is the lane's folder or inside it, read as it is written (`..` taken out) and as the disk has it.
+fn inside(p: &Path, lane: &Path) -> bool {
+    let mut plain = PathBuf::new();
+    for c in p.components() {
+        match c {
+            std::path::Component::ParentDir => {
+                plain.pop();
+            }
+            std::path::Component::CurDir => {}
+            other => plain.push(other),
+        }
+    }
+    let real = |x: &Path| x.canonicalize().unwrap_or_else(|_| x.to_path_buf());
+    plain.starts_with(lane) || real(&plain).starts_with(real(lane)) || plain.starts_with(real(lane))
+}
+
+/// Whether the word `w` (an argument, or a part of one, or of a variable's value) names something of the lane's: an
+/// absolute path inside it, a path that starts from the working folder (`.`, `..`, `./x`, `../x`), or a relative name whose
+/// first part is there, in the session's folder or at the lane's top (`mcp/server.js`, `server.py`). An option names what its
+/// value after `=` names. An address (`scheme://`) names nothing of the lane's, but a `file://` one names its path.
+fn names_lane(w: &str, lane: &Path, cwd: &Path) -> bool {
+    let w = w.trim();
+    if w.is_empty() {
+        return false;
+    }
+    if let Some(rest) = w.strip_prefix("file://") {
+        return names_lane(rest, lane, cwd);
+    }
+    if w.contains("://") {
+        return false;
+    }
+    if w.starts_with('-') {
+        return w.split_once('=').is_some_and(|(_, v)| names_lane(v, lane, cwd));
+    }
+    let p = Path::new(w);
+    if p.is_absolute() {
+        return inside(p, lane);
+    }
+    if w == "." || w == ".." || ["./", "../", ".\\", "..\\"].iter().any(|s| w.starts_with(s)) {
+        return true;
+    }
+    match p.components().next() {
+        Some(std::path::Component::Normal(first)) => [cwd, lane].iter().any(|at| std::fs::symlink_metadata(at.join(first)).is_ok()),
+        _ => true,
+    }
+}
+
+/// Whether any part of `text`, split at spaces, `=`, `:`, `,` and `;`, names something of the lane's ([`names_lane`]): a
+/// container's bind mount (`.:/app`, `src=.`) or a variable's list of folders is read part by part. An address is read
+/// whole.
+fn any_part_names_lane(text: &str, lane: &Path, cwd: &Path) -> bool {
+    text.split_whitespace().any(|w| names_lane(w, lane, cwd) || (!w.contains("://") && w.split(['=', ':', ',', ';']).any(|part| names_lane(part, lane, cwd))))
+}
+
+/// Node's words (its arguments, or `NODE_OPTIONS`'s) that load a module or run inline code: a value that is not an absolute
+/// path outside the lane is read from the working folder ([`NODE_LOADS`]).
+fn node_loads_lane(words: &[&str], lane: &Path) -> bool {
+    let outside = |v: &str| Path::new(v).is_absolute() && !inside(Path::new(v), lane);
+    let mut iter = words.iter();
+    while let Some(w) = iter.next() {
+        if NODE_LOADS.contains(w) {
+            if !iter.next().is_some_and(|v| outside(v)) {
+                return true;
+            }
+        } else if let Some((opt, v)) = w.split_once('=') {
+            if NODE_LOADS.contains(&opt) && !outside(v) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Whether stdio server `s`, started by the agent in a lane's folder `cwd` (the lane's top being `lane`), would run what the
+/// lane's agent can change (item 114). The entry is the one the person approved in their own folder, but there its words
+/// named the developer's files; here they name the lane's. So it is not started when:
+///
+/// - its program is named by a path from the working folder (`./bin/mcp`, `bin/mcp`), or inside the lane by its whole path,
+///   or found through a `PATH` with a relative or empty entry;
+/// - its program runs what its working folder's own files name ([`RUN_THE_FOLDER`]); `python` with `-m` or `-c` (which put the
+///   working folder first on the module path); `node` loading a module or inline code ([`node_loads_lane`]); `docker` or
+///   `podman` with `compose` or `build` (the folder's compose file or build context);
+/// - any argument, or any part of one, names something of the lane's ([`names_lane`]);
+/// - any variable's value does, or `NODE_OPTIONS` loads a module, or a variable whose name ends in `PATH` or `LIB` has an
+///   empty entry (the working folder).
+///
+/// An address (HTTP, SSE) starts no program here. What this cannot see: a program that reads its working folder by itself
+/// (a server that loads `./config.js` with no word naming it). `docs/code-editor.md` lists the class.
+fn runs_the_lane(s: &Server, lane: &Path, cwd: &Path, env: &dyn Fn(&str) -> Option<String>) -> bool {
+    let Transport::Stdio { command, args, env: vars } = &s.how else { return false };
+    if command.contains(['/', '\\']) {
+        let p = Path::new(command);
+        if !p.is_absolute() || inside(p, lane) {
+            return true;
+        }
+    } else if env("PATH").is_some_and(|path| std::env::split_paths(&path).any(|d| !d.is_absolute())) {
+        return true;
+    }
+    let name = program(command);
+    let words: Vec<&str> = args.iter().map(String::as_str).collect();
+    let python = name.starts_with("python") && words.iter().any(|w| w.starts_with('-') && !w.starts_with("--") && w.contains(['m', 'c']));
+    let node = matches!(name.as_str(), "node" | "nodejs") && node_loads_lane(&words, lane);
+    let container = matches!(name.as_str(), "docker" | "podman" | "nerdctl") && words.iter().any(|w| matches!(*w, "compose" | "build" | "buildx"));
+    if RUN_THE_FOLDER.contains(&name.as_str()) || python || node || container {
+        return true;
+    }
+    if words.iter().any(|w| any_part_names_lane(w, lane, cwd)) {
+        return true;
+    }
+    vars.iter().any(|(k, v)| {
+        let k = k.to_ascii_uppercase();
+        let listed = (k.ends_with("PATH") || k.ends_with("LIB")) && v.split([':', ';']).any(|part| part.trim().is_empty());
+        let node_opts = k == "NODE_OPTIONS" && node_loads_lane(&v.split_whitespace().collect::<Vec<_>>(), lane);
+        listed || node_opts || any_part_names_lane(v, lane, cwd)
+    })
+}
+
 /// The servers to hand an ACP agent working in `cwd`: see the module's note. `home` is the person's home folder and `env`
 /// this app's environment (the agent's own, which it inherits), read for `CLAUDE_CONFIG_DIR` and the `${VAR}`s.
 pub fn approved(home: &Path, cwd: &Path, env: &dyn Fn(&str) -> Option<String>) -> Approved {
     let p = project(home, cwd, env);
     let mut out = Vec::new();
     let mut differs = Vec::new();
+    let mut lane_files = Vec::new();
     for (name, v) in p.servers.iter() {
         if out.len() >= MAX_SERVERS || p.state(name) != "on" {
             continue;
@@ -230,10 +387,15 @@ pub fn approved(home: &Path, cwd: &Path, env: &dyn Fn(&str) -> Option<String>) -
             continue;
         }
         if let Some(s) = server(name, v, env) {
+            // in a lane, an approved entry that would run what the lane's agent can change is not started (item 114)
+            if p.lane.as_deref().is_some_and(|lane| runs_the_lane(&s, lane, cwd, env)) {
+                lane_files.push(name.clone());
+                continue;
+            }
             out.push(s);
         }
     }
-    Approved(out, differs)
+    Approved(out, differs, lane_files)
 }
 
 /// `v` as canonical JSON: every object's keys sorted, at every depth, and nothing else changed, so two entries that differ
@@ -300,6 +462,8 @@ pub(crate) struct ProjectMcp {
     /// For a session outside the developer's own folder (a lane): the digest of each server's entry in the developer's
     /// folder at the same place, the entries the person approved by name. `None` in the developer's folder itself.
     approved_digests: Option<std::collections::BTreeMap<String, String>>,
+    /// For a session in a lane: the lane's top folder, which its agent can change (item 114). `None` in the developer's folder.
+    lane: Option<PathBuf>,
 }
 
 impl ProjectMcp {
@@ -331,11 +495,12 @@ pub(crate) fn project(home: &Path, cwd: &Path, env: &dyn Fn(&str) -> Option<Stri
     let place = Place::of(home, cwd);
     let file = [cwd.join(".mcp.json"), place.top.join(".mcp.json")].into_iter().find(|p| p.is_file());
     let servers = file.and_then(|f| read_json(&f, MAX_FILE)).and_then(|v| v.get("mcpServers").and_then(Value::as_object).cloned()).unwrap_or_default();
-    let mut p = ProjectMcp { servers, entry: Value::Null, trusted: false, all: false, enabled: BTreeSet::new(), disabled: BTreeSet::new(), approved_digests: None };
+    let mut p = ProjectMcp { servers, entry: Value::Null, trusted: false, all: false, enabled: BTreeSet::new(), disabled: BTreeSet::new(), approved_digests: None, lane: None };
     if p.servers.is_empty() {
         return p;
     }
     p.approved_digests = developer_digests(&place, cwd);
+    p.lane = p.approved_digests.as_ref().map(|_| place.top.clone());
     let state = claude_state(home, env);
     let keys: Vec<String> = [place.root.clone(), place.root.canonicalize().unwrap_or_else(|_| place.root.clone())].iter().map(|p| p.to_string_lossy().into_owned()).collect();
     p.entry = state.get("projects").and_then(Value::as_object).and_then(|ps| keys.iter().find_map(|k| ps.get(k))).cloned().unwrap_or(Value::Null);
@@ -383,7 +548,7 @@ pub(crate) fn read_json_file(path: &Path, max: u64) -> Option<Value> {
 /// Every server of a `.mcp.json` body as if approved, for another module's test.
 #[cfg(test)]
 pub(crate) fn all_of(mcp: &Value, env: &dyn Fn(&str) -> Option<String>) -> Approved {
-    Approved(mcp.get("mcpServers").and_then(Value::as_object).into_iter().flatten().filter_map(|(n, v)| server(n, v, env)).collect(), Vec::new())
+    Approved(mcp.get("mcpServers").and_then(Value::as_object).into_iter().flatten().filter_map(|(n, v)| server(n, v, env)).collect(), Vec::new(), Vec::new())
 }
 
 /// [`approved`] for a session about to start in `cwd`, with this app's home folder and environment; none without a home.
@@ -576,6 +741,93 @@ mod tests {
         assert_ne!(entry_digest(&json!({"command": "a", "args": ["b"]})), entry_digest(&json!({"command": "a", "args": ["b", "c"]})));
         assert_ne!(entry_digest(&json!({"command": "a", "env": {"K": "${A}"}})), entry_digest(&json!({"command": "a", "env": {"K": "${B}"}})));
         assert_eq!(entry_digest(&json!({"command": "a"})).len(), 64);
+        let _ = fs::remove_dir_all(home);
+    }
+
+    /// Item 114 (third security review, 26 Nov 2026). An approved entry matches the developer's by digest, but what it runs
+    /// can still be the LANE's: a script it names, a file or folder an argument names, a package or task its launcher finds
+    /// in the working folder, a module a runtime loads from there. The lane's agent can change all of those, so in a lane such
+    /// a server is not started (and named). The cases are the ways an entry reaches into its working folder, one at a time;
+    /// the ones after them reach nothing of the lane's and still start.
+    #[test]
+    fn a_lanes_server_that_runs_the_lanes_own_files_is_not_started() {
+        let Some((home, d)) = setup("acpmcp-lanefiles", true, json!({"enableAllProjectMcpServers": true})) else { return };
+        fs::write(d.join(".gitignore"), "node_modules/\n.mcp.json\n").unwrap();
+        sh(&d, &["add", ".gitignore"]);
+        sh(&d, &["commit", "-q", "-m", "ignore"]);
+        let made = crate::lane::make(&home, &d, &crate::lane::tests::names(&["kit/files"])).unwrap();
+        let wt = PathBuf::from(&made.worktree);
+        let outside = home.join("tools");
+        fs::create_dir_all(&outside).unwrap();
+        // what the lane's agent could have written
+        for f in ["mcp/server.js", "server.py", "bin/mcp", "hook.js", "cfg.json", "loader.mjs"] {
+            fs::create_dir_all(wt.join(f).parent().unwrap()).unwrap();
+            fs::write(wt.join(f), "x").unwrap();
+        }
+        let lane_bin = wt.join("bin/mcp").to_string_lossy().into_owned();
+        let abs = outside.join("server.js").to_string_lossy().into_owned();
+        let hostile: Vec<(&str, Value)> = vec![
+            ("a script named from the working folder", json!({"command": "node", "args": ["./mcp/server.js"]})),
+            ("a script named without ./", json!({"command": "node", "args": ["mcp/server.js"]})),
+            ("a file name alone that is the lane's", json!({"command": "python3", "args": ["server.py"]})),
+            ("a program named from the working folder", json!({"command": "./bin/mcp"})),
+            ("a program named by a relative path", json!({"command": "bin/mcp"})),
+            ("a program inside the lane by its whole path", json!({"command": lane_bin})),
+            ("an option's value that is the lane's file", json!({"command": abs, "args": ["--config=./cfg.json"]})),
+            ("the parent folder", json!({"command": abs, "args": [".."]})),
+            ("a bind mount of the working folder", json!({"command": "docker", "args": ["run", "-v", ".:/app", "image"]})),
+            ("a file name alone after an option", json!({"command": abs, "args": ["--config", "cfg.json"]})),
+            ("a file:// address of the lane's file", json!({"command": abs, "args": [format!("file://{}/cfg.json", wt.display())]})),
+            ("a wrapper that runs another program", json!({"command": "env", "args": ["FOO=1", "gh-mcp"]})),
+            ("a program from a launcher's full path", json!({"command": "/opt/homebrew/bin/npx", "args": ["-y", "x"]})),
+            ("a module loaded before the script", json!({"command": "node", "args": ["--import=./loader.mjs", abs]})),
+            ("a package module loaded from the folder's node_modules", json!({"command": "node", "args": ["-r", "dotenv/config", abs]})),
+            ("a variable that loads the lane's file", json!({"command": "node", "args": [abs], "env": {"NODE_OPTIONS": "--require ./hook.js"}})),
+            ("a variable that adds the lane to the module path", json!({"command": abs, "env": {"PYTHONPATH": "."}})),
+            ("a module path with an empty entry, which is the working folder", json!({"command": abs, "env": {"PYTHONPATH": "/opt/lib:"}})),
+            ("npx, which runs the folder's own package first", json!({"command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"]})),
+            ("a package manager's script", json!({"command": "npm", "args": ["run", "mcp"]})),
+            ("uv, which reads the folder's project", json!({"command": "uv", "args": ["run", "server"]})),
+            ("uvx, which reads the folder's uv settings", json!({"command": "uvx", "args": ["mcp-server-git"]})),
+            ("python running a module from the folder", json!({"command": "python3", "args": ["-m", "server"]})),
+            ("a task runner", json!({"command": "make", "args": ["mcp"]})),
+            ("a shell line", json!({"command": "sh", "args": ["-c", "exec gh-mcp"]})),
+            ("docker compose, which reads the folder's compose file", json!({"command": "docker", "args": ["compose", "run", "mcp"]})),
+        ];
+        let fine: Vec<(&str, Value)> = vec![
+            ("a program on the PATH with plain arguments", json!({"command": "gh-mcp", "args": ["--token", "${GH_TOKEN}"]})),
+            ("a program outside the lane by its whole path", json!({"command": abs, "args": ["--port", "3000"]})),
+            ("a container image, whose name has slashes", json!({"command": "docker", "args": ["run", "-i", "--rm", "ghcr.io/github/github-mcp-server"]})),
+            ("an address", json!({"type": "http", "url": "https://docs.example/mcp"})),
+        ];
+        let mut servers = serde_json::Map::new();
+        for (i, (_, e)) in hostile.iter().chain(fine.iter()).enumerate() {
+            servers.insert(format!("s{i:02}"), e.clone());
+        }
+        let mcp = json!({"mcpServers": servers}).to_string();
+        // the developer's folder has the very same entries, so each is the one the person approved
+        fs::write(d.join(".mcp.json"), &mcp).unwrap();
+        fs::write(wt.join(".mcp.json"), &mcp).unwrap();
+        let got = approved(&home, &wt, &env);
+        for (i, (what, _)) in hostile.iter().enumerate() {
+            assert!(!got.names().contains(&format!("s{i:02}")), "{what}: started in the lane");
+        }
+        for (i, (what, _)) in fine.iter().enumerate() {
+            let name = format!("s{:02}", hostile.len() + i);
+            assert!(got.names().contains(&name), "{what}: not started");
+        }
+        // each one not started is named to the chat, by its name alone, apart from the entries that differ
+        let expected: Vec<String> = (0..hostile.len()).map(|i| format!("s{i:02}")).collect();
+        assert_eq!(got.lane_files(), expected.as_slice());
+        assert!(got.differs().is_empty());
+        assert!(!format!("{got:?}").contains("server.js"));
+        // the developer's own folder is the person's: what they approved there starts, as before
+        let mine = approved(&home, &d, &env);
+        assert_eq!(mine.names().len(), (hostile.len() + fine.len()).min(MAX_SERVERS));
+        assert!(mine.lane_files().is_empty());
+        // a PATH with a relative entry finds a program named alone in the working folder: nothing of that kind starts
+        let relative_path = |k: &str| if k == "PATH" { Some("node_modules/.bin:/usr/bin".to_string()) } else { env(k) };
+        assert!(!approved(&home, &wt, &relative_path).names().contains(&format!("s{:02}", hostile.len())));
         let _ = fs::remove_dir_all(home);
     }
 

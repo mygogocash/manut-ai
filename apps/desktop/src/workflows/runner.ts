@@ -16,6 +16,11 @@
 // (host.ts `project`): the top folder of a git repository, written as its real path, never the home folder, a disk's top or a
 // folder that holds them or the app's own. The lane is started in that real path, and a run whose lane could not have a branch
 // and folder of its own does not start (`startWorkflowLane` answers `no_lane`, having started no agent).
+//
+// Item 114: a run the clock starts makes its lane with nobody there, as the app's own doing. The shell then reads the project's
+// own git config first, as the automatic pull does (src-tauri/src/lane.rs `make_with`, `unattended`), and makes nothing while it
+// names a program git would run or another address to fetch from: the run is kept as skipped (`config`, the setting as its
+// detail) and the card says it. Run now is the person's own press, and its lane is made as one they start from the chat box.
 import { useSyncExternalStore } from "react";
 import { chatAgents, offeredAgents, type AgentId } from "../sessions/agents";
 import { getSessions, type SessionsStore } from "../sessions/sessions";
@@ -249,12 +254,19 @@ export function createWorkflows(deps: WorkflowDeps) {
     };
     let refusal: RunRefusal | null = null;
     try {
-      // in the folder the shell just checked, by its real path
-      const started = await ss.startWorkflowLane({ agent: wf.agent as AgentId, cwd: project.real, workflow: wf.name, first: wf.steps[0], made });
+      // in the folder the shell just checked, by its real path. Only a person's press is someone there (item 114): any other
+      // way a run starts (the clock, and whatever starts one later) makes its lane as the app's own doing, so the shell reads
+      // the repository's own config first and makes nothing while it names a program or another address
+      const unattended = by !== "person";
+      const started = await ss.startWorkflowLane({ agent: wf.agent as AgentId, cwd: project.real, workflow: wf.name, first: wf.steps[0], unattended, made });
       if (started === "no_lane") {
         endRun(id, "skipped", "no_lane");
         setRefused(wf.file, "no_lane");
         refusal = "no_lane";
+      } else if (typeof started === "object") {
+        endRun(id, "skipped", "config", started.setting);
+        setRefused(wf.file, "config");
+        refusal = "config";
       } else if (started !== "started") endRun(id, "failed", "start");
     } catch (e) {
       endRun(id, "failed", "start", errText(e));

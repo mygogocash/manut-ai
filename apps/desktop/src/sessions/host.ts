@@ -790,6 +790,10 @@ const FLOOD_MESSAGE = `${"build output ".repeat(5).slice(0, 62)}\r\n`.repeat(102
 export interface LaneStart {
   root: string;
   remote: boolean;
+  /** Item 114: the lane is made with nobody there (a workflow by the clock). The shell then reads the repository's own config
+   *  first, as the automatic pull does, and answers `config:<setting>` instead of making anything when it names a program or
+   *  another address. A lane the person starts themselves never sets it. */
+  unattended?: boolean;
 }
 
 /** A lane's working folder the mock shell made: its record, as lane.rs writes one. */

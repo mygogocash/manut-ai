@@ -1274,6 +1274,7 @@ export const ja: Record<Key, string> = {
   "ss.noChatMode": "{agent} がチャットモードで応答しませんでした。古いバージョンかもしれません: {install}",
   "ss.newConversation": "以前の会話が見つからなかったため、ここで新しい会話を始めました。",
   "ss.mcpDiffers": "このレーンでは起動しませんでした: {names}。レーンの .mcp.json の内容が、プロジェクトフォルダで承認したものと異なります。",
+  "ss.mcpLaneFiles": "このレーンでは起動しませんでした: {names}。レーン自身のフォルダにあるファイルを実行するためで、そのファイルはレーンのエージェントが変更できます。プロジェクトフォルダのチャットでは起動します。",
   "ss.notes.read": "このプロジェクトの {names} を読みました。",
   "ss.notes.left": "読まなかったファイル: {items}。",
   "ss.notes.more": "ほか {n} 件",
@@ -3790,6 +3791,7 @@ export const ja: Record<Key, string> = {
   "wf.why.unchecked": "プロジェクトのフォルダーを確認できませんでした。",
   "wf.why.moved": "プロジェクトのフォルダーが、許可したものと違います。もう一度確認してください。",
   "wf.why.no_lane": "プロジェクトに専用のレーンを作れなかったため、何も実行しませんでした。",
+  "wf.why.config": "実行しませんでした：このプロジェクト自身の git 設定が、git に実行させるプログラムか、別の取得先を指定しています。誰もいない間、アプリはそれを自分からは実行しません。信頼できる場合は「今すぐ実行」を押してください。",
   // Settings, Sharing and access: reaching this Mac from a paired phone (item 78b, src/settings/RemotePage.tsx).
   // rm.consent.operator is a marked placeholder the owner writes: who runs the relay, and where.
   "rm.intro": "どこにいても、スマートフォンでチャットを見て、確認に答えられます。許可するたびに Face ID かスマートフォンのパスコードが必要です。",
