@@ -21,9 +21,11 @@ export const isNoteKey = (e: { key: string; code?: string; metaKey: boolean; ctr
 
 interface Picked {
   text: string;
-  /** Where the selection ends on screen: the button and the popover sit just under it. */
+  /** Where the selection ends on screen: the button and the popover sit just under it, or above where it starts (`top`) when
+   *  the window has no room under it. */
   x: number;
   y: number;
+  top: number;
 }
 
 /** The selection now, when it lies inside one source within `root`; null otherwise. */
@@ -37,7 +39,8 @@ export function pickedIn(root: HTMLElement | null, sel: Selection | null): Picke
   if (!text.trim()) return null;
   const rects = range.getClientRects();
   const end = rects.length ? rects[rects.length - 1] : range.getBoundingClientRect();
-  return { text, x: end.right, y: end.bottom };
+  const first = rects.length ? rects[0] : end;
+  return { text, x: end.right, y: end.bottom, top: first.top };
 }
 
 export function SelectionNote({ chatKey, scope, box, onDone }: { chatKey: string; scope: Scope; box: RefObject<HTMLElement | null>; onDone?: () => void }) {
@@ -94,11 +97,14 @@ export function SelectionNote({ chatKey, scope, box, onDone }: { chatKey: string
 
   const at = open ?? sel;
   if (!at) return null;
-  // kept inside the window: the popover is 280px wide
+  // kept inside the window: the popover is 280px wide and about 200px high; with no room under the selection (an answer just
+  // above the box) the button and the popover go above where it starts
   const left = Math.max(8, Math.min(at.x - 12, window.innerWidth - 296));
-  const top = Math.min(at.y + 6, window.innerHeight - 48);
+  const under = at.y + 210 < window.innerHeight;
+  // above: the button sits over the selection's first line; the open popover grows up from just above it
+  const top = under ? at.y + 6 : open ? at.top - 6 : Math.max(8, at.top - 34);
   return createPortal(
-    <div className="sn-at" style={{ left, top }} data-testid="note-at">
+    <div className="sn-at" style={{ left, top }} data-testid="note-at" data-side={under ? "bottom" : "top"}>
       {!open && (
         <button
           ref={trigger}
@@ -113,7 +119,7 @@ export function SelectionNote({ chatKey, scope, box, onDone }: { chatKey: string
           {t("carry.add")}
         </button>
       )}
-      <Popover open={!!open} onClose={(why) => close(why === "escape")} side="bottom" align="left" width={280} label={t("carry.add")} className="sn-pop">
+      <Popover open={!!open} onClose={(why) => close(why === "escape")} side={under ? "bottom" : "top"} align="left" width={280} label={t("carry.add")} className="sn-pop">
         <form
           className="sn-form"
           onSubmit={(e) => {

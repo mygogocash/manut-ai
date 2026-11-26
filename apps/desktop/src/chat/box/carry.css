@@ -84,8 +84,12 @@ button.bx-carry-n:hover {
 .sn-add:hover {
   background: var(--hov);
 }
+/* the popover takes the button's place: from its top edge down, or from its bottom edge up */
 .sn-pop.ui-pop-bottom {
   top: 0;
+}
+.sn-pop.ui-pop-top {
+  bottom: 0;
 }
 .sn-form {
   display: grid;
