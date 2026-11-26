@@ -15,6 +15,8 @@ import { KitPanel } from "../code/KitPanel";
 import { MenuPageFrame } from "./MenuPage";
 import { can } from "../runtime";
 import { Usage } from "../sidebar/Usage";
+import { OutsideUse } from "../usage/OutsideUse";
+import { useSessions } from "../sessions/sessions";
 
 /** A press on the section itself, not on a row, a control or a menu: what opens the section's own menu. */
 const sessionBackground = (target: EventTarget) =>
@@ -23,6 +25,7 @@ const sessionBackground = (target: EventTarget) =>
 export function CodePage() {
   const [menu, setMenu] = useState<{ x: number; y: number; focus: HTMLElement } | null>(null);
   const closeMenu = useCallback(() => setMenu(null), []);
+  const { list } = useSessions();
   return (
     <MenuPageFrame page="code" title={t("menu.code")}>
       <div className="col">
@@ -59,6 +62,7 @@ export function CodePage() {
               {t("menu.plans")}
             </div>
             <Usage named />
+            <OutsideUse list={list} />
           </section>
         )}
       </div>

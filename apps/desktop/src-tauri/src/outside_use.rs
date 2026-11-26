@@ -111,6 +111,7 @@ pub struct Cache {
 }
 
 impl Cache {
+    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.map.len()
     }

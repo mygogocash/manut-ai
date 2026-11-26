@@ -31,6 +31,7 @@ import { reloadAccounts, useAccounts } from "./useAccounts";
 import { t, tx } from "../../i18n";
 import { holdImeEnter } from "../../lib/ime";
 import { GithubAccounts } from "./GithubAccounts";
+import { outsideUseOn, setOutsideUse } from "../../usage/outside";
 
 const errText = (e: unknown) => (typeof e === "object" && e && "message" in e ? String((e as { message: unknown }).message) : String(e));
 const NOTE_MS = 8000;
@@ -73,7 +74,34 @@ export function AccountsPage({ embedded = false }: { embedded?: boolean }) {
           {t("acc.missing", { list: split.missing.join(t("list.sep")) })}
         </p>
       )}
+      <OutsideUseSwitch />
       <GithubAccounts />
+    </div>
+  );
+}
+
+/** The one switch for counting use outside Manut AI (item 106; the Code page's plans show it). Off until turned on. */
+export function OutsideUseSwitch() {
+  const [on, setOn] = useState(() => outsideUseOn());
+  return (
+    <div className="acc-auto acc-outside" data-testid="outside-row">
+      <button
+        type="button"
+        role="switch"
+        aria-checked={on}
+        aria-label={t("out.switchOf")}
+        className="acc-switch"
+        data-testid="outside-switch"
+        onClick={() => {
+          setOutsideUse(!on);
+          setOn(!on);
+        }}
+      >
+        <span />
+      </button>
+      <span>
+        <b>{t("out.switch")}</b> {t("out.switchLine")}
+      </span>
     </div>
   );
 }

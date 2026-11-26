@@ -606,3 +606,75 @@
   font-family: var(--aui-font-mono);
   overflow-wrap: anywhere;
 }
+
+/* The Code page's "Outside Manut AI" lines under the plans (src/usage/OutsideUse.tsx, item 106): quiet, second-line text in the
+   muted colour, a row per tool, and a plain table on a click. No colour: nothing here is one of the four meanings. */
+.mpage .code-plans .out,
+.mpage .code-plans .out-off {
+  margin: 4px 10px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.mpage .code-plans .out-off {
+  display: block;
+  line-height: 1.5;
+}
+.mpage .code-plans .out-note {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.mpage .code-plans .out-r1 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+}
+.mpage .code-plans .out-name {
+  color: var(--ink);
+  font-weight: 600;
+}
+.mpage .code-plans .out-n {
+  flex: 1;
+  color: var(--muted);
+}
+.mpage .code-plans .out-link {
+  font: inherit;
+  font-size: 13px;
+  color: var(--muted);
+  text-decoration: underline;
+  text-decoration-color: var(--line-strong);
+  text-underline-offset: 2px;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+.mpage .code-plans .out-link:hover {
+  color: var(--ink);
+}
+.mpage .code-plans .out-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0 0 8px;
+  font-size: 13px;
+}
+.mpage .code-plans .out-table th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--muted);
+  padding: 6px 8px;
+  background: var(--aui-subtle);
+}
+.mpage .code-plans .out-table td {
+  padding: 6px 8px;
+  color: var(--body);
+}
+.mpage .code-plans .out-table .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
