@@ -1,5 +1,5 @@
-// Commands an agent could write so that Kit's dial reads them as harmless when they are not (item 88, docs/code-editor.md
-// "How an ask is read"). A read or a check goes without asking at every level, so each hostile line here must not be one
+// Commands an agent could write so that Kit's dial reads them as harmless when they are not (items 88 and 112,
+// docs/code-editor.md "How an ask is read"). A read or a check goes without asking at every level, so each hostile line here must not be one
 // with nothing outside: at the dial's lowest level, Asks every time, it is never taken alone. Each sits next to the plain
 // line it imitates, which still reads as it did, so ordinary reads do not start asking. Curl is the one deliberate change:
 // reaching the network is no longer a read.
@@ -526,8 +526,88 @@ describe("B6: a read or a check pointed at another computer", () => {
   });
 });
 
+describe("everyday commands", () => {
+  /** What a developer and an agent run all day, each as it read before item 112 (only `cdk synth`, now a build, moved).
+   *  None of these may start to ask because a hostile line beside it does. */
+  const EVERYDAY: Partial<Record<KitAction, string[]>> = {
+  read: [
+    "ls", "ls -la", "ls -la src", "ls src/code", "pwd", "cat package.json", "cat README.md", "head -50 src/a.ts",
+    "tail -n 100 logs/dev.log", "wc -l src/a.ts src/b.ts", "du -sh node_modules", "df -h", "file public/logo.png",
+    "stat package.json", "tree -L 2 src", "which node", "whoami", "uname -a", "date", "echo done",
+    "printf '%s\\n' hello", "git status", "git status --short", "git diff", "git diff --stat", "git diff --cached",
+    "git diff HEAD~1", "git diff @~1", "git diff main...HEAD", "git log --oneline -10",
+    "git log --oneline --graph --all", "git log -p -1", "git log --author=fon --since=2.weeks", "git show HEAD",
+    "git show --stat HEAD", "git blame src/a.ts", "git branch", "git branch -a", "git branch -vv",
+    "git branch --show-current", "git tag -l", "git remote -v", "git rev-parse HEAD",
+    "git rev-parse --abbrev-ref HEAD", "git ls-files", "git stash list", "git stash show -p", "git fetch",
+    "git fetch origin", "git fetch --prune", "git grep -n checkout", "git grep -e foo -- src",
+    "git config --get user.name", "git merge-base main HEAD", "git describe --tags", "git shortlog -sn", "gh pr list",
+    "gh pr view 12", "gh pr view https://github.com/baanmali/storefront/pull/1", "gh pr status", "gh pr checks",
+    "gh pr diff 12", "gh issue list", "gh run list", "gh run view 123 --log", "rg checkout src", "rg -n \"TODO\" src",
+    "rg -l foo", "rg --files", "rg -t ts useState", "rg -n 'https://api.example.com' src", "grep -rn foo src",
+    "grep -c foo src/a.ts", "find . -name '*.ts'", "find src -type f -name '*.test.ts'",
+    "find . -name node_modules -prune -o -name '*.ts' -print", "find . -type f -newer package.json",
+    "find . -maxdepth 2 -type d", "find src -name '*.ts' -exec grep -l useState {} +", "fd -e ts",
+    "sed -n '1,40p' src/a.ts", "sed 's/foo/bar/g' src/a.ts", "awk '{print $1}' data.txt", "sort src/a.txt",
+    "sort -u names.txt", "uniq names.txt", "uniq -c names.txt", "cut -d, -f1 data.csv", "tr a-z A-Z", "xxd a.bin",
+    "jq . package.json", "jq -r .version package.json", "jq '.scripts' package.json", "jq -n '1 + 1'",
+    "diff a.txt b.txt", "cmp a.bin b.bin", "pnpm outdated", "pnpm why react", "pnpm ls", "npm ls",
+    "npm view qrcode version", "pip list", "pip show requests", "go list ./...", "go list -m all", "go env GOPATH",
+    "docker ps", "docker compose ps", "docker compose logs", "docker images", "kubectl get pods",
+    "kubectl get pods -n web", "kubectl describe pod web", "kubectl logs web", "helm template web ./chart",
+    "helm lint ./chart", "terraform plan", "terraform validate", "cd src && ls", "export CI=1", "curl --version",
+    "wrangler whoami", "vercel ls",
+  ],
+  check: [
+    "pnpm test", "pnpm run test", "pnpm test -- src/a.test.ts", "pnpm lint", "pnpm typecheck", "pnpm -r test",
+    "pnpm --filter @manut/desktop test", "pnpm exec vitest run", "pnpm exec tsc --noEmit",
+    "pnpm exec playwright test e2e/home.spec.ts", "pnpm vitest run", "npm test", "npx vitest run",
+    "npx vitest run src/a.test.ts", "npx vitest --run --reporter=verbose", "npx tsc --noEmit", "npx eslint src",
+    "npx prettier --check .", "npx playwright test", "npx playwright test --project=chromium", "npx jest",
+    "npx jest --coverage", "npx -y vitest run", "yarn test", "bun test", "bunx vitest run", "vitest run",
+    "tsc --noEmit", "eslint src", "prettier --check .", "python -m pytest", "python -m pytest -q tests", "pytest -x",
+    "go test ./...", "go vet ./...", "cargo test", "cargo check", "cargo clippy", "cargo fmt --check", "make test",
+    "make -j4 test", "cd apps/desktop && pnpm test", "CI=1 pnpm test", "NODE_ENV=test pnpm test", "turbo run test",
+    "turbo run test --filter=web",
+  ],
+  change: [
+    "git add -A", "git add src/a.ts", "git commit -m \"Add QR\"", "git commit -am \"Fix\"",
+    "git commit --amend --no-edit", "git switch -c kit/qr", "git checkout main", "git stash", "git stash pop",
+    "git stash push -m wip", "git pull", "git pull --rebase", "git rebase main", "git merge main",
+    "sed -i '' 's/foo/bar/g' src/a.ts", "pnpm build", "pnpm dev", "npm run build", "npx eslint --fix src",
+    "npx prettier --write src", "go build ./...", "cargo build", "make build", "docker compose up -d",
+    "docker build .", "terraform fmt", "mkdir -p src/qr", "touch src/qr.ts", "cp src/a.ts src/b.ts",
+    "mv src/a.ts src/b.ts", "echo hi > notes.md", "turbo run build",
+  ],
+  install: [
+    "pnpm install", "pnpm i", "pnpm add qrcode", "pnpm add -D vitest", "pnpm remove dayjs", "npm ci", "npm install",
+    "yarn", "yarn add qrcode", "bun install", "go mod tidy",
+  ],
+  delete: [
+    "find . -name '*.log' -delete", "rm src/old.ts", "rm -rf dist",
+  ],
+  push: [
+    "git push", "git push -u origin kit/promptpay-qr", "gh pr create --title \"QR\" --body \"Adds a QR\"",
+  ],
+  };
+
+  it("read as they did before item 112", () => {
+    const wrong: string[] = [];
+    let n = 0;
+    for (const [as, lines] of Object.entries(EVERYDAY)) {
+      for (const line of lines ?? []) {
+        n++;
+        const c = read(line);
+        if (c.action !== as || c.outside.length) wrong.push(`${line}: ${c.action} [${c.outside.join(", ")}]`);
+      }
+    }
+    expect(wrong).toEqual([]);
+    expect(n).toBeGreaterThanOrEqual(200);
+  });
+});
+
 describe("the table", () => {
-  it("holds at least 120 hostile lines, each beside the plain line it imitates", () => {
-    expect(counted).toBeGreaterThanOrEqual(120);
+  it("holds at least 300 hostile lines, each beside the plain line it imitates", () => {
+    expect(counted).toBeGreaterThanOrEqual(300);
   });
 });

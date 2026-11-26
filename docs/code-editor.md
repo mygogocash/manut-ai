@@ -265,7 +265,12 @@ program or reaches the network. What it does not understand is `unknown`, and as
   retractions. A kubeconfig or kuberc named on the line asks (it can name a program kubectl runs), and `turbo.json`,
   which can name where turbo sends its cache, is a file a change to which always asks.
 
-`command.hostile.test.ts` holds 170 such lines, each beside the plain line it imitates, which reads as it did.
+`command.hostile.test.ts` holds over 300 such lines, each beside the plain line it imitates, which reads as it did, and
+221 everyday commands, each pinned to what it read as before item 112 (only `cdk synth` moved, to a build).
+
+Still read as reads or checks, for the owner to decide (a design question, not a reading): a check, `terraform plan` and
+`pulumi preview` run the project's own code, which an agent may have edited at Edits alone; and a command that prints
+the environment (`jq -n env`) shows the keys set for the session.
 
 #### Files a change to which always asks (item 88)
 
