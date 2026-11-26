@@ -14,6 +14,8 @@ import { hhmm } from "../../app/time";
 import { QueueMark, type QueueChoice, type QueueOffReasons } from "./QueueMark";
 import type { Quote } from "./answers";
 import { Icon } from "../../ui/icons";
+import { splitSent } from "../box/carry";
+import "../box/carry.css";
 
 /** Messenger bubble, filled on both sides. Bot text renders markdown; user text stays plain. Files the bot
  * sent (`MEDIA:` lines) leave the text and show under it in the same column as the bubble, in order; while
@@ -35,6 +37,7 @@ export const Bubble = memo(function Bubble({
   last,
   quote,
   onQuote,
+  drawingsBy,
 }: {
   item: Pick<MessageItem, "kind" | "text" | "error" | "reply" | "files" | "skills" | "wait" | "held" | "steered" | "readAt" | "steerReply" | "steerUnknown" | "steerUnused" | "autoSteer">;
   streaming?: boolean;
@@ -64,6 +67,9 @@ export const Bubble = memo(function Bubble({
    *  scrolls to that message. */
   quote?: Quote | null;
   onQuote?: (id: string) => void;
+  /** A chat's timeline: who its answers' drawings are by. A finished answer's html and svg blocks then offer Show
+   *  drawing (src/chat/drawing/); a bubble anywhere else never does. */
+  drawingsBy?: string;
 }) {
   if (item.kind === "user") {
     // one being steered into the running answer reads as a plain sent message (messenger style), not a held one
@@ -102,7 +108,7 @@ export const Bubble = memo(function Bubble({
               {copy}
               <QueueMark onPick={onQueue} busy={queueBusy} off={queueOff} unknown={!!item.steerUnknown} />
               <div className="b">
-                <SkillText text={item.text} skills={item.skills} />
+                <SentText text={item.text} skills={item.skills} />
               </div>
             </div>
           ) : read ? (
@@ -113,12 +119,12 @@ export const Bubble = memo(function Bubble({
                 {read}
               </span>
               <div className="b">
-                <SkillText text={item.text} skills={item.skills} />
+                <SentText text={item.text} skills={item.skills} />
               </div>
             </div>
           ) : (
             <div className="b">
-              <SkillText text={item.text} skills={item.skills} />
+              <SentText text={item.text} skills={item.skills} />
               {copy}
             </div>
           ))}
@@ -186,7 +192,8 @@ export const Bubble = memo(function Bubble({
       <div className="msg-col">
         {(shown || streaming || (paths.length === 0 && shown === text)) && (
           <div className="b md">
-            <Markdown text={shown} />
+            {/* a drawing only once the answer is finished: never while it is written */}
+            <Markdown text={shown} drawingsBy={streaming ? undefined : drawingsBy} />
             {/* copy the answer: beside the bubble's last line, on hover; it takes no room */}
             {!streaming && shown.trim() && <CopyButton className="msg-copy" text={() => shown} testId="copy-answer" />}
           </div>
@@ -224,4 +231,32 @@ function draftless(text: string, chatKey: string, streaming: boolean): string {
   let out = text;
   if (draftsAllowed(chatKey)) out = stripDrafts(out, streaming);
   return out;
+}
+
+/** The person's own message: the notes it carried in front (item 97, chat/box/carry.ts) drawn as their quote with their note
+ *  under it, another chat's context folded under its title, then what they typed. A message with none is the typed text. */
+function SentText({ text, skills }: { text: string; skills?: string[] }) {
+  const parts = splitSent(text);
+  if (!parts.quotes.length && !parts.contexts.length) return <SkillText text={text} skills={skills} />;
+  return (
+    <>
+      {parts.quotes.map((q, i) => (
+        <blockquote key={`q${i}`} className="msg-carry" aria-label={t("carry.quoted")} data-testid="bubble-carry">
+          <p className="msg-carry-q">{q.quote}</p>
+          {q.note && (
+            <p className="msg-carry-n" data-testid="bubble-carry-note">
+              {q.note}
+            </p>
+          )}
+        </blockquote>
+      ))}
+      {parts.contexts.map((c, i) => (
+        <details key={`c${i}`} className="msg-ctx" data-testid="bubble-context">
+          <summary>{c.title}</summary>
+          <pre>{c.body}</pre>
+        </details>
+      ))}
+      {parts.rest.trim() && <SkillText text={parts.rest} skills={skills} />}
+    </>
+  );
 }

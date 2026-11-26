@@ -97,6 +97,8 @@ test("off at first; turned on, Run now starts a lane that takes each step in ord
 });
 
 test("the palette offers Run workflow only while Workflows is on and for a workflow the person allowed, and presses the page's Run now", async ({ page }) => {
+  // it turns Workflows on, allows one, and runs it to the end: on a loaded CI runner that has taken over 30 seconds (26 Nov)
+  test.setTimeout(60_000);
   const key = (await page.evaluate(() => /Mac/.test(navigator.platform))) ? "Meta" : "Control";
   await page.keyboard.press(`${key}+k`);
   await page.getByTestId("palette-input").fill("run workflow");

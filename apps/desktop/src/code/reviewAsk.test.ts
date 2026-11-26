@@ -86,9 +86,10 @@ class Host extends TauriHost {
 }
 
 describe("the host's way to the shell", () => {
-  it("has no call that writes without an ask: its review calls are a draft, two asks, a settle by id and a withdraw", () => {
+  it("has no call that writes without an ask: its review calls are a draft, three asks, a settle by id and a withdraw", () => {
     const names = Object.getOwnPropertyNames(TauriHost.prototype);
-    expect(names.filter((n) => /^review/.test(n)).sort()).toEqual(["reviewAsk", "reviewDraft", "reviewMerge", "reviewSettle", "reviewWithdraw"]);
+    // the third ask is the Pull requests list's Merge (item 100): the same ask, for a request of the project's
+    expect(names.filter((n) => /^review/.test(n)).sort()).toEqual(["reviewAsk", "reviewDraft", "reviewMerge", "reviewMergePull", "reviewSettle", "reviewWithdraw"]);
     // nothing else pushes, creates or merges (laneCleanMerged removes the folders of lanes that merged; it writes to no remote)
     expect(names.filter((n) => !/^review/.test(n) && /push|Push|create|Create|[mM]erge(?!d)/.test(n))).toEqual([]);
   });
@@ -124,6 +125,11 @@ describe("the host's way to the shell", () => {
     // a merge's ask that does not say where the pull request comes from, or at which commit, is not shown
     await expect(new Host(() => ({ ...MERGE, from: "" })).reviewMerge("/w/qr", 7, "squash")).rejects.toThrow("unread");
     await expect(new Host(() => ({ ...MERGE, head: "not-a-commit" })).reviewMerge("/w/qr", 7, "squash")).rejects.toThrow("unread");
+    // the list's Merge sends the project's folder, the repository and the number, and believes only a merge's ask too
+    const l = new Host(() => MERGE);
+    expect(await l.reviewMergePull("/code/r", "github", "o/r", 7, "squash", true)).toEqual(MERGE);
+    expect(l.sent).toEqual([{ cmd: "review_ask_merge_pull", args: { folder: "/code/r", source: "github", repo: "o/r", number: 7, method: "squash", credits: true } }]);
+    await expect(new Host(() => ASK).reviewMergePull("/code/r", "github", "o/r", 7, "squash")).rejects.toThrow("unread");
   });
 
   it("MockHost keeps the shell's rules: one answer per ask, and the text the ask showed is the text it sends", async () => {

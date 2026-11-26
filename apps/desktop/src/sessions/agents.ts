@@ -388,6 +388,12 @@ export interface SessionRec {
   /** A lane a workflow started (src/workflows/): the workflow's name. Nobody may be watching it, so Kit's dial reads its asks at
    *  the most careful level, Asks every time, with no kept rule, whatever the project's dial says. Saved with the session. */
   workflow?: string;
+  /** Continue with… (item 97, continueWith.ts): the link id of the chat this one continues, and of the chat that continues this
+   *  one, each shown as a quiet line linking the other. */
+  continuedFrom?: string;
+  continuedIn?: string;
+  /** A continued chat's model picked in Continue with: set as its agent starts, before the first message goes. */
+  modelWant?: string;
 }
 
 /** How long a TERMINALS card's second line may be (the card truncates it further with an ellipsis). */

@@ -1,5 +1,6 @@
 // The whole app view model: one reducer, one store, one React hook. UI nodes only read this and call
 // its actions; they never edit this file.
+import { bareText } from "../chat/box/carry";
 import { SESSIONS_ENTRY } from "../sessions/entry";
 import { useSyncExternalStore } from "react";
 import type { BridgeStatus } from "../lib/bridge";
@@ -2321,6 +2322,9 @@ export interface Actions {
   newThreadWith(bot: string, first: string, away?: boolean): Promise<string | null>;
   /** Show thread `thread` of `bot` (reads its messages the first time); null = the bot's main chat. */
   openThread(bot: string, thread: string | null): Promise<void>;
+  /** A thread's messages as the runtime keeps them, read and nothing more: no chat opens, nothing in the store changes (item 97,
+   *  another chat's context brought into a box). */
+  readThread(bot: string, thread: string): Promise<{ role: "user" | "assistant"; text: string }[]>;
   /** Send in a thread; the first message names it. `how` as `send`'s. */
   threadSend(bot: string, thread: string, text: string, how?: FollowUp): Promise<void>;
   threadInterrupt(bot: string, thread: string): Promise<void>;
@@ -3454,6 +3458,10 @@ export function createStore(bridge: BridgeLike, opts: StoreOptions = {}): Store 
       if (thread && first.trim()) await actions.threadSend(bot, thread, first);
       return thread;
     },
+    async readThread(bot, thread) {
+      const res = await threadReq("thread.open", { bot, thread });
+      return (res.messages ?? []).flatMap((m) => (m.role === "user" || m.role === "assistant" ? [{ role: m.role, text: m.text }] : []));
+    },
     async openThread(bot, thread) {
       if (state.ui.roster && state.bots.some((b) => b.name === bot)) listBot(bot, true);
       if (!thread) return selectBot(bot);
@@ -3469,7 +3477,7 @@ export function createStore(bridge: BridgeLike, opts: StoreOptions = {}): Store 
       dispatch({ type: "local.user", bot: key, id, text: t, now: now() });
       const row = (state.threads[bot] ?? []).find((r) => r.thread === thread);
       // the row reads the first words at once; Hermes' own title replaces them when it lands
-      if (row && !row.title) dispatch({ type: "thread.upsert", bot, row: { ...row, title: firstWords(text), last: now() / 1000 } });
+      if (row && !row.title) dispatch({ type: "thread.upsert", bot, row: { ...row, title: firstWords(bareText(text)), last: now() / 1000 } });
       try {
         await bridge.request("chat.send", { bot, session: thread, text: text.trim() });
         dispatch({ type: "send.ok", bot: key, id, now: now() });
@@ -3496,7 +3504,7 @@ export function createStore(bridge: BridgeLike, opts: StoreOptions = {}): Store 
       const sent = promptText(text, results);
       dispatch({ type: "local.user", bot: key, id, text: t, now: now(), files: shown, sent });
       const row = (state.threads[bot] ?? []).find((r) => r.thread === thread);
-      if (row && !row.title) dispatch({ type: "thread.upsert", bot, row: { ...row, title: firstWords(t || files[0].name), last: now() / 1000 } });
+      if (row && !row.title) dispatch({ type: "thread.upsert", bot, row: { ...row, title: firstWords(bareText(t) || files[0].name), last: now() / 1000 } });
       try {
         await bridge.request("chat.send", { bot, session: thread, text: sent });
         dispatch({ type: "send.ok", bot: key, id, now: now() });

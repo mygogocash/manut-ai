@@ -10,7 +10,7 @@ import { FILTERS, KINDS, SOURCES, accountId, accountIdOk, repoOk } from "./types
 /** The colours an account's dot can take, in the order new accounts get them. */
 export const ACCOUNT_COLORS: readonly string[] = ["#4c8dff", "#f2994a", "#3fb68b", "#b07cff", "#e5534b", "#d4a72c"];
 
-export type TaskScope = "repo" | "me";
+export type TaskScope = "repo" | "me" | "pulls";
 export type MeGroup = "section" | "repo";
 
 export interface TasksState {
@@ -26,7 +26,7 @@ export interface TasksState {
   recent: Record<CliSource, string[]>;
   /** repository -> the folder on this computer it was found in (a cloned repository: \"Open terminal here\") */
   folders: Record<string, string>;
-  /** "이 저장소" (one repository) or "나" (me, across repositories) */
+  /** "이 저장소" (one repository), "나" (me, across repositories) or Pull requests (every project's open requests, item 100) */
   scope: TaskScope;
   /** the "나" list grouped by section or by repository */
   group: MeGroup;
@@ -40,6 +40,9 @@ export interface TasksState {
   repoAccount: string | null;
   /** A pull request to select as soon as the list shows it: a lane's row sent the person here (item 76). Not saved. */
   open: number | null;
+  /** A request to open in Pull requests as soon as the list has it: a chat's header or a lane's row sent the person there (item
+   *  100). Not saved. */
+  pick: { source: CliSource; repo: string; number: number } | null;
 }
 
 const KEY = "manut.tasks";
@@ -61,6 +64,7 @@ function fresh(): TasksState {
     accounts: [],
     repoAccount: null,
     open: null,
+    pick: null,
   };
 }
 
@@ -81,7 +85,7 @@ function read(): TasksState {
     }
     if (v.folders && typeof v.folders === "object")
       for (const [k, f] of Object.entries(v.folders)) if (typeof f === "string" && f.startsWith("/")) s.folders[k] = f;
-    if (v.scope === "me") s.scope = "me";
+    if (v.scope === "me" || v.scope === "pulls") s.scope = v.scope;
     if (v.group === "repo") s.group = "repo";
     if (v.mentionsOpen === true) s.mentionsOpen = true;
     if (Array.isArray(v.accounts))
@@ -104,7 +108,7 @@ const listeners = new Set<() => void>();
 
 function save() {
   if (typeof localStorage === "undefined") return;
-  const { page: _p, open: _o, ...keep } = state;
+  const { page: _p, open: _o, pick: _k, ...keep } = state;
   localStorage.setItem(KEY, JSON.stringify(keep));
 }
 
@@ -196,6 +200,17 @@ export function showPull(source: CliSource, repo: string, number: number, folder
   set({ source, scope: "repo", kind: "prs", filter: "open", page: 0, open: number });
   return true;
 }
+/** Open request `number` of `repo` in Tasks › Pull requests (item 100): the list, with the request open once it is listed. */
+export function showBoardPull(source: CliSource, repo: string, number: number): boolean {
+  if (!repoOk(source, repo) || !Number.isInteger(number) || number <= 0) return false;
+  set({ scope: "pulls", pick: { source, repo, number } });
+  return true;
+}
+/** The request a chat or a lane asked to open was opened (or the list has no such request). */
+export function clearPick(): void {
+  if (state.pick !== null) set({ pick: null });
+}
+
 /** The selection a lane's row asked for was made (or the list has no such request). */
 export function clearOpen(): void {
   if (state.open !== null) set({ open: null });

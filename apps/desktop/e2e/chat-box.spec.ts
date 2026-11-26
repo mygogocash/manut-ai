@@ -82,7 +82,7 @@ test.describe("Kit's chat", () => {
     await lane(page);
     await page.getByTestId("attach").click();
     const menu = page.getByTestId("attach-menu");
-    await expect(menu.getByRole("menuitem")).toHaveText([/^Add photos and files/, /^Folder/, /Actions and skills/]);
+    await expect(menu.getByRole("menuitem")).toHaveText([/^Add photos and files/, /^Folder/, /Actions and skills/, /^Bring context from…$/]);
     await expect(page.getByTestId("attach-mention")).toHaveCount(0);
     // Folder: the native picker (the mock's stand-in), a chip, then a line of its own under the text
     await page.evaluate((root) => ((window as any).__manutPickFolder = `${root}/src`), ROOT);
@@ -165,7 +165,7 @@ test.describe("Buddy's chat in Practice", () => {
 
   test("Add context: a file's copy and a folder are named in the message, a teammate by @, and the demo's and agent's actions", async ({ page }) => {
     await page.getByTestId("attach").click();
-    await expect(page.getByTestId("attach-menu").getByRole("menuitem")).toHaveText([/^Add photos and files/, /^Folder/, /Mention a teammate/, /Actions and skills/]);
+    await expect(page.getByTestId("attach-menu").getByRole("menuitem")).toHaveText([/^Add photos and files/, /^Folder/, /Mention a teammate/, /Actions and skills/, /^Bring context from…$/]);
     // a file: the shell keeps a copy outside Buddy's folder, and the message names it, so the agent asks before reading
     const chooser = page.waitForEvent("filechooser");
     await page.getByTestId("attach-files").click();

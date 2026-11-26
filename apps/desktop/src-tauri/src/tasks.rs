@@ -810,7 +810,7 @@ pub(crate) fn gl_same_project(v: &Value) -> bool {
     matches!((id("source_project_id"), id("target_project_id")), (Some(a), Some(b)) if a == b)
 }
 
-fn gh_item(v: &Value, change: bool) -> Item {
+pub(crate) fn gh_item(v: &Value, change: bool) -> Item {
     let draft = v.get("isDraft").and_then(Value::as_bool).unwrap_or(false);
     let state = match text(v, "state").to_ascii_uppercase().as_str() {
         "MERGED" => "merged",
@@ -834,7 +834,7 @@ fn gh_item(v: &Value, change: bool) -> Item {
     }
 }
 
-fn gl_item(v: &Value, change: bool) -> Item {
+pub(crate) fn gl_item(v: &Value, change: bool) -> Item {
     let draft = v.get("draft").and_then(Value::as_bool).unwrap_or(false) || v.get("work_in_progress").and_then(Value::as_bool).unwrap_or(false);
     let state = match text(v, "state").as_str() {
         "merged" => "merged",
