@@ -6,6 +6,7 @@ mod acp_mcp;
 mod agent_chat;
 mod agent_config;
 mod app_menu;
+mod app_store;
 mod appimage;
 mod ask_tool;
 mod buddy_chat;
@@ -187,11 +188,12 @@ pub(crate) fn web_link(url: &str) -> bool {
     !host.is_empty() && !host.contains('@') && !host.contains('\\')
 }
 
+/// The person's home folder. In the Mac App Store edition it is the password database's, never the sandbox's container
+/// (app_store.rs, which also points `HOME` there for every other reader and every child before the app starts).
 fn user_home() -> Result<PathBuf, String> {
-    std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
-        .filter(|v| !v.is_empty())
-        .map(PathBuf::from)
-        .ok_or_else(|| "no home folder".to_string())
+    let env = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" });
+    let passwd = if app_store::APP_STORE { app_store::passwd_home() } else { None };
+    app_store::resolve_home(app_store::APP_STORE, env.as_deref(), passwd).ok_or_else(|| "no home folder".to_string())
 }
 
 /// The env a new session of `cli` starts with to use manut account `id` (`default` = the CLI's own home).
@@ -1638,6 +1640,11 @@ pub fn computer_relay(args: &[std::ffi::OsString]) -> Option<i32> {
     Some(computer::mcp::relay_main())
 }
 
+/// The Mac App Store edition's real home, set before anything else runs (app_store.rs); nothing in the GitHub build.
+pub fn adopt_real_home() {
+    app_store::adopt_real_home();
+}
+
 pub fn statusline_relay(args: &[std::ffi::OsString]) -> Option<i32> {
     if args.get(1)?.to_str()? != claude_usage::RELAY_FLAG {
         return None;
@@ -1660,15 +1667,19 @@ pub fn run() {
             let _ = w.set_focus();
         }
     }));
-    let app = builder
+    let builder = builder
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_dialog::init())
-        // In-app updates: the page checks the one endpoint in tauri.conf.json, which moves only when the owner publishes
-        // a release, and installs only a build signed with the key whose public half is pinned there (docs/releasing.md).
+        .plugin(tauri_plugin_dialog::init());
+    // In-app updates: the page checks the one endpoint in tauri.conf.json, which moves only when the owner publishes
+    // a release, and installs only a build signed with the key whose public half is pinned there (docs/releasing.md).
+    // The Mac App Store edition leaves it out: the App Store updates that edition, and an app that updates itself is
+    // refused there (Guideline 2.4.5(vii), app_store.rs). Its page asks nothing either (src/sidebar/updater.ts).
+    #[cfg(not(app_store))]
+    let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    let app = builder
         // The process plugin does the restart that follows an update.
-        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         // The app's window keeps to the app's own pages and this computer's addresses, frames included (preview.rs)
         .plugin(app_window_guard())

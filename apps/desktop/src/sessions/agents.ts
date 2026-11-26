@@ -1,4 +1,5 @@
 import { pickTitle, type TitleSource } from "./titles";
+import { isAppStore } from "../appStore";
 import { t } from "../i18n";
 import { harness, harnessByName } from "../harness/registry";
 import type { LaneBranch } from "../code/laneBranch";
@@ -141,14 +142,19 @@ export const INSTALL: Record<BuiltinId, string> = {
   opencode: "npm install -g opencode-ai",
 };
 
-/** An agent's install line: a built-in's from [`INSTALL`], a generic ACP agent's from its row ("" when unknown). */
-export function installLine(agent: AgentId): string {
+/** An agent's install line: a built-in's from [`INSTALL`], a generic ACP agent's from its row ("" when unknown). The Mac
+ *  App Store edition has none: it offers no program to install (Guideline 2.4.5, docs/app-store.md), so where a line
+ *  would show, it says so instead ([`missingNote`], the Providers page). */
+export function installLine(agent: AgentId, appStore: boolean = isAppStore()): string {
+  if (appStore) return "";
   return isBuiltin(agent) ? INSTALL[agent] : (acpRow(agent)?.install ?? "");
 }
 
 /** Tooltip of an agent that is not installed: what is missing, then how to install it. DSH names DeepSeek Harness
  *  (another `dsh` on PATH, such as deepseek-bot's, does not count) and its desktop app, which carries the CLI. */
-export function missingNote(agent: AgentId): string {
+export function missingNote(agent: AgentId, appStore: boolean = isAppStore()): string {
+  // the App Store edition: what is missing, and why no install line follows
+  if (appStore) return t("ss.missingStore", { program: agent === "dsh" ? "DeepSeek Harness (dsh)" : agentDef(agent).program });
   // a person's own agent without an install line: only what is missing
   if (!installLine(agent)) return t("ss.missingOnly", { program: agentDef(agent).program });
   const install = t("ss.installHow", { cmd: installLine(agent) }) + (agent === "codex" ? t("ss.codexBundled") : agent === "dsh" ? t("ss.dshApp") : "");
