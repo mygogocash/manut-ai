@@ -246,11 +246,16 @@ test("send attaches each chip in order, then sends; the bubble shows the files",
   await mine.evaluate((e) =>
     Promise.all(e.getAnimations({ subtree: true }).filter((a) => a.effect?.getComputedTiming().iterations !== Infinity).map((a) => a.finished)),
   );
-  const bub = await box(mine.locator(".b"));
   const files = mine.getByTestId("sent-files");
   await expect(files).toHaveAttribute("data-grid", "2");
+  // a picture that loads after the first look starts its own Arrive, so the gap is read until it has come to rest
+  await expect
+    .poll(async () => Math.round(((await box(mine.getByTestId("media-image").first())).top - (await box(mine.locator(".b"))).bottom) * 2) / 2, {
+      message: "the files sit 6px under the bubble",
+    })
+    .toBe(6);
+  const bub = await box(mine.locator(".b"));
   const [a, b] = await Promise.all((await mine.getByTestId("media-image").all()).map(box));
-  expect(a.top - bub.bottom, "the files sit 6px under the bubble").toBeCloseTo(6, 0);
   expect(Math.abs(a.top - b.top)).toBeLessThanOrEqual(1);
   expect(Math.abs(b.right - bub.right)).toBeLessThanOrEqual(1);
   for (const row of await mine.getByTestId("sent-file").all()) {

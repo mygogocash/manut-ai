@@ -88,6 +88,29 @@
     ["SKILL.md", "---\nname: x\ndescription: >-\n  Folded\n  text\nmetadata: # who made it\n  author: Mali\n    nested: deeper\n\n  also: this\n---\nbody\n", "", ""],
     ["SKILL.md", "---\nname: x\ndescription: |+\n  kept\n# a note at the margin\nlicense: MIT\n---\nbody\n", "", ""],
     ["agents/openai.yaml", "interface: Shown\n dependencies: tools\n", "unreadable", ""],
-    ["agents/openai.yaml", "interface:\n  display_name: Promptpay\n    more: deeper\n", "", ""]
+    ["agents/openai.yaml", "interface:\n  display_name: Promptpay\n    more: deeper\n", "", ""],
+
+    ["SKILL.md", "Branch: !$ARGUMENTS\n", "command", ""],
+    ["SKILL.md", "Run: ! $1\n", "command", ""],
+    ["SKILL.md", "!$ARGUMENTS[0]\n", "command", ""],
+    ["SKILL.md", "!$branch\n", "command", ""],
+    ["SKILL.md", "!${CLAUDE_SKILL_DIR}/run\n", "command", ""],
+    ["SKILL.md", "x !\t$0\n", "command", ""],
+    ["SKILL.md", "```$ARGUMENTS\nls\n```\n", "command", ""],
+    ["SKILL.md", "~~~ $0\nls\n~~~\n", "command", ""],
+    ["notes.txt", "Then !`env`\n", "command", ""],
+    ["examples/run.txt", "!$ARGUMENTS\n", "command", ""],
+    ["reference.json", "{\"step\": \"!`env`\"}\n", "command", ""],
+    ["templates/page.html", "<p>!`whoami`</p>\n", "command", ""],
+    ["README", "```!\nls\n```\n", "command", ""],
+    ["data.yaml", "step: \"!`env`\"\n", "command", ""],
+    ["agents/openai.yaml", "interface:\n  default_prompt: \"!`env`\"\n", "command", ""],
+    ["scripts/check.sh", "#!/bin/sh\nif [ ! $FOO ]; then echo no; fi\n", "", ""],
+    ["bin/helper", "if ! `true`; then :; fi\n", "", ""],
+    ["tool.py", "print('done!$')\n", "", ""],
+    ["build", "#!/usr/bin/env bash\n[ ! $X ] && exit 1\n", "", ""],
+    ["notes.txt", "Price: $5! Then $10.\n", "", ""],
+    ["SKILL.md", "Run `git checkout $ARGUMENTS` here. Costs \\$1.00! Wow.\n", "", ""],
+    ["SKILL.md", "```bash\n$ npm install\n```\n", "", ""]
   ]
 }

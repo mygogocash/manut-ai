@@ -2,7 +2,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { renderToString } from "react-dom/server";
 import { setLang } from "../i18n";
-import { PaletteView, type PaletteViewProps } from "./Palette";
+import { PaletteView, pointerMoved, type PaletteViewProps } from "./Palette";
 import type { Group } from "./groups";
 
 const noop = () => {};
@@ -68,5 +68,14 @@ describe("the palette's overlay", () => {
     const html = draw({ groups: [{ key: "go", heading: "pal.go", rows: [row("go:a", "x")], icon: "chevron-right" }] });
     expect(html).toContain("移動");
     expect(html).toContain("コマンドパレット");
+  });
+});
+
+describe("the cursor follows the pointer only when the pointer moves", () => {
+  it("takes a move to a new place, and never the first move or one at the same place (the list changing under a resting pointer)", () => {
+    expect(pointerMoved(null, 10, 20)).toBe(false);
+    expect(pointerMoved({ x: 10, y: 20 }, 10, 20)).toBe(false);
+    expect(pointerMoved({ x: 10, y: 20 }, 11, 20)).toBe(true);
+    expect(pointerMoved({ x: 10, y: 20 }, 10, 19)).toBe(true);
   });
 });

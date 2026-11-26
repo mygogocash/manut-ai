@@ -42,9 +42,17 @@ export interface PaletteViewProps {
   leaving?: boolean;
 }
 
+/** Whether a mouse move is the person's: the browser also sends a move, at the same place, when the list changes under a
+ *  pointer that is resting, and that must not move the cursor while they type (Enter would then open another row). */
+export function pointerMoved(last: { x: number; y: number } | null, x: number, y: number): boolean {
+  return last !== null && (last.x !== x || last.y !== y);
+}
+
 export function PaletteView(p: PaletteViewProps) {
   let at = -1;
   const total = flat(p.groups).length;
+  // where the pointer was at its last move over the list (none yet: the first move only notes it)
+  const pointer = useRef<{ x: number; y: number } | null>(null);
   return (
     <div
       className="pal-back"
@@ -93,7 +101,11 @@ export function PaletteView(p: PaletteViewProps) {
                       className={`pal-row${i === p.cursor ? " on" : ""}`}
                       // the mouse never takes the focus off the field
                       onMouseDown={(e) => e.preventDefault()}
-                      onMouseMove={() => i !== p.cursor && p.onHover(i)}
+                      onMouseMove={(e) => {
+                        const moved = pointerMoved(pointer.current, e.clientX, e.clientY);
+                        pointer.current = { x: e.clientX, y: e.clientY };
+                        if (moved && i !== p.cursor) p.onHover(i);
+                      }}
                       onClick={() => p.onPick(r)}
                       data-testid="palette-row"
                       data-row={r.id}

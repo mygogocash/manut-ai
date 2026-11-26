@@ -541,6 +541,24 @@ pub fn compose(read: &[Note], mark: &str) -> Option<String> {
     Some(t)
 }
 
+/// `t` with OpenCode's own placeholders made plain words (item 118): a space after the brace of every `{env:` and `{file:`, in
+/// any letter case, so OpenCode's patterns (`\{env:([^}]+)\}`, `\$\{env:([^}]+)\}`, `\{file:[^}]+\}`, read in OpenCode 2.3.0's
+/// binary) never match, and the words stay readable. OpenCode fills those in within its config; whether it does within an
+/// instructions file's text could not be seen without a session, so a project's text never reaches it as one: it could
+/// otherwise put one of the person's own files, or a variable of theirs, into the system prompt.
+pub fn inert_for_opencode(t: &str) -> String {
+    let mut out = String::with_capacity(t.len());
+    for (i, c) in t.char_indices() {
+        out.push(c);
+        let rest = &t[i + c.len_utf8()..];
+        let opens = |word: &str| rest.get(..word.len()).is_some_and(|w| w.eq_ignore_ascii_case(word));
+        if c == '{' && (opens("env:") || opens("file:")) {
+            out.push(' ');
+        }
+    }
+    out
+}
+
 static SEQ: AtomicU32 = AtomicU32::new(0);
 
 /// A mark the repository's text cannot know in advance: it is made when the chat starts, after the files were written.
@@ -710,6 +728,8 @@ pub fn prepare(agent: Agent, cwd: &Path, home: Option<&Path>) -> Prepared {
     let (top, found) = read(agent, cwd, home);
     let mut p = Prepared { file: None, read: found.read.iter().map(|n| n.path.clone()).collect(), left: found.left };
     let Some(text) = compose(&found.read, &mark()) else { return p };
+    // the whole text, the files' paths in it too (item 118)
+    let text = if agent == Agent::OpenCode { inert_for_opencode(&text) } else { text };
     match home.ok_or_else(|| "no home folder".to_string()).and_then(|h| write(h, &text, &top)) {
         Ok(f) => p.file = Some(f),
         Err(_) => p.unsend(),
@@ -1100,6 +1120,33 @@ mod tests {
         for x in [d, home, home2, elsewhere] {
             let _ = fs::remove_dir_all(x);
         }
+    }
+
+    /// Item 118 (fourth security review, 26 Nov 2026). OpenCode fills in `{env:NAME}` and `{file:path}` in its config (OpenCode
+    /// 2.3.0's `debug config` showed an `{env:...}` value filled in), and whether it does inside an instructions file's text
+    /// could not be seen without a session, which the check allowed none of. So the text written for OpenCode never holds
+    /// either opening as OpenCode's own patterns read it (`\{env:([^}]+)\}`, `\$\{env:([^}]+)\}` and `\{file:[^}]+\}`, in its
+    /// binary), in any letter case, in a path as much as in a file's text; the words stay readable. Claude Code has no such
+    /// placeholders, so its text is as written.
+    #[test]
+    fn opencode_s_own_placeholders_never_reach_it_as_placeholders() {
+        let d = repo("placeholders");
+        put(&d, "AGENTS.md", "Key: {env:AWS_SECRET_ACCESS_KEY}\nCreds: {file:~/.aws/credentials}\nUpper: {ENV:HOME} {File:/etc/hosts}\nShell: ${env:TOKEN}\nTwice: {{env:X}}\nPlain: {envelope} {profile:x} {env} env:x\n");
+        put(&d, "apps/{env:HOME}/AGENTS.md", "Nested {file:/etc/passwd}.\n");
+        let home = tmp("placeholders-home");
+        let p = prepare(Agent::OpenCode, &d.join("apps/{env:HOME}"), Some(&home));
+        let text = fs::read_to_string(p.file().unwrap()).unwrap();
+        let lower = text.to_ascii_lowercase();
+        assert!(!lower.contains("{env:") && !lower.contains("{file:"), "{text}");
+        for kept in ["Key: { env:AWS_SECRET_ACCESS_KEY}", "Creds: { file:~/.aws/credentials}", "Upper: { ENV:HOME} { File:/etc/hosts}", "Shell: ${ env:TOKEN}", "Twice: {{ env:X}}", "Plain: {envelope} {profile:x} {env} env:x", "Contents of apps/{ env:HOME}/AGENTS.md:\nNested { file:/etc/passwd}."] {
+            assert!(text.contains(kept), "{kept}: {text}");
+        }
+        // Claude Code's own text is as the project wrote it
+        let c = prepare(Agent::Claude, &d, Some(&home));
+        assert!(fs::read_to_string(c.file().unwrap()).unwrap().contains("Key: {env:AWS_SECRET_ACCESS_KEY}"));
+        drop((p, c));
+        let _ = fs::remove_dir_all(d);
+        let _ = fs::remove_dir_all(home);
     }
 
     #[test]

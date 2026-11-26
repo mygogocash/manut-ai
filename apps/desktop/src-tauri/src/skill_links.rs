@@ -288,23 +288,49 @@ fn settings_refusal(lines: &[&str], from: usize, fenced: bool, allowed: &[&str])
     if fenced { ActsAlone::why("unreadable") } else { None }
 }
 
-/// `!` then a backtick with only space between, or a fence of three or more backticks or tildes whose word starts with `!`,
-/// anywhere in the text (Claude Code runs the first only at a line's start or after a space: wider only refuses more).
+/// `!` then a backtick or a `$` with only space between, or a fence of three or more backticks or tildes whose word starts with
+/// `!` or `$`, anywhere in the text (Claude Code runs the first only at a line's start or after a space: wider only refuses more).
+/// A `$` is an argument or a variable (`$ARGUMENTS`, `$1`, `$name`, `${CLAUDE_SKILL_DIR}`), which Claude Code fills in; its
+/// documentation does not say whether before or after it runs the commands, and before, an argument could finish one (item 118).
 fn runs_on_load(text: &str) -> bool {
     let c: Vec<char> = text.chars().collect();
-    (0..c.len()).filter(|&i| c[i] == '!').any(|i| {
-        let after = c[i + 1..].iter().find(|x| !is_space(**x));
+    (0..c.len()).filter(|&i| matches!(c[i], '!' | '$')).any(|i| {
         let mut j = i;
         while j > 0 && is_space(c[j - 1]) {
             j -= 1;
         }
         let fence = j > 0 && matches!(c[j - 1], '`' | '~') && c[..j].iter().rev().take_while(|x| **x == c[j - 1]).count() >= 3;
-        after == Some(&'`') || fence
+        let after = c[i + 1..].iter().find(|x| !is_space(**x));
+        fence || (c[i] == '!' && matches!(after, Some('`' | '$')))
     })
 }
 
+/// File endings that are programs or scripts a computer can run (skillBundle.ts `SCRIPT_ENDINGS`, the same list).
+const SCRIPT_ENDINGS: &[&str] = &[
+    "sh", "bash", "zsh", "fish", "ksh", "csh", "command", "py", "pyw", "rb", "pl", "pm", "php", "js", "mjs", "cjs", "ts", "mts", "cts", "jsx", "tsx", "ps1",
+    "psm1", "bat", "cmd", "vbs", "applescript", "scpt", "swift", "go", "rs", "lua", "r", "jl", "tcl", "awk", "exe", "app", "jar", "wasm", "dll", "so", "dylib",
+    "bin", "run", "deb", "pkg", "dmg", "msi",
+];
+
+/// Whether file `path` of a skill is a script by its path or its first line (skillBundle.ts `isScript`, without the executable
+/// bit a bundle does not carry): in a `scripts` or `bin` folder in any letter case, a script's ending, or a `#!` first line.
+fn script_like(path: &str, text: &str) -> bool {
+    if text.starts_with("#!") {
+        return true;
+    }
+    let steps: Vec<&str> = path.split('/').collect();
+    let (name, folders) = steps.split_last().unwrap_or((&"", &[]));
+    if folders.iter().any(|s| s.eq_ignore_ascii_case("scripts") || s.eq_ignore_ascii_case("bin")) {
+        return true;
+    }
+    name.rfind('.').filter(|&dot| dot > 0).is_some_and(|dot| SCRIPT_ENDINGS.contains(&name[dot + 1..].to_ascii_lowercase().as_str()))
+}
+
 /// What in file `path` of a skill an agent would act on by itself, or None (skillBundle.ts `fileActsAlone`): the settings at the
-/// top of any markdown file and any command run as it loads, and the settings of a Codex `agents/*.yaml`.
+/// top of any markdown file and of a Codex `agents/*.yaml`, and a command run as it loads in any file that is not a script
+/// ([`script_like`]). Claude Code runs those commands in the `SKILL.md` it loads and attaches a file an `@` reference names;
+/// which other files it reads as instructions is up to Claude, so every text file is read for one (item 118: wider only refuses
+/// more). A script is run, not loaded, and each run asks as usual.
 pub fn file_acts_alone(path: &str, text: &str) -> Option<ActsAlone> {
     let lower = path.to_ascii_lowercase();
     let markdown = [".md", ".markdown", ".mdx"].iter().any(|e| lower.ends_with(e));
@@ -314,7 +340,7 @@ pub fn file_acts_alone(path: &str, text: &str) -> Option<ActsAlone> {
         && steps[steps.len() - 2] == "agents"
         && name.strip_suffix(".yaml").or_else(|| name.strip_suffix(".yml")).is_some_and(|stem| !stem.is_empty());
     if !markdown && !agent_yaml {
-        return None;
+        return if !script_like(path, text) && runs_on_load(text) { ActsAlone::why("command") } else { None };
     }
     let all = lines(text.trim_start_matches('\u{feff}'));
     let first = all.iter().position(|l| !l.chars().all(is_blank));
@@ -324,7 +350,8 @@ pub fn file_acts_alone(path: &str, text: &str) -> Option<ActsAlone> {
         if top.starts_with("---") && top != "---" {
             return ActsAlone::why("unreadable");
         }
-        return settings_refusal(&all, if top == "---" { first + 1 } else { first }, false, HARMLESS_AGENT_FIELDS);
+        return settings_refusal(&all, if top == "---" { first + 1 } else { first }, false, HARMLESS_AGENT_FIELDS)
+            .or_else(|| if runs_on_load(text) { ActsAlone::why("command") } else { None });
     }
     if let Some(first) = first {
         let top = all[first].trim_start_matches(is_blank);
