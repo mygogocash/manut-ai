@@ -1200,6 +1200,12 @@ pub fn make_with(home: &Path, cwd: &Path, names: &[String], start: &Start) -> Re
         if start.unattended {
             add.insert(2, "--no-checkout");
         }
+        // whether the branch is already there, read as late as it can be: `git worktree add -b` makes the branch before it
+        // refuses a folder that exists, so only a branch that was not here a moment ago can be this try's to take back
+        let ref_name = format!("refs/heads/{name}");
+        #[cfg(test)]
+        between::at("claimed", &wt);
+        let branch_before = git.line(cwd, &["rev-parse", "--verify", "--quiet", &ref_name]).is_some();
         let ran = git.run_for(cwd, &add, SLOW);
         #[cfg(test)]
         between::at("added", &wt);
@@ -1227,9 +1233,13 @@ pub fn make_with(home: &Path, cwd: &Path, names: &[String], start: &Start) -> Re
             Ok(r) => tasks::error_line(&r.err),
             Err(e) => e.clone(),
         };
-        // another process made the branch (or the folder) first: git made nothing, so the record goes and the next name is
-        // tried. Whatever has that name is someone else's, and is never taken back
+        // another process made the branch or the folder first, so the record goes and the next name is tried. A folder that
+        // appeared in the way is not git's to have made, but git had made the branch by then: that one goes again, while it is
+        // still at the commit this try used and was not there before. Whatever else has that name is someone else's
         if err.contains("already exists") {
+            if !branch_before {
+                take_back_branch(&git, cwd, name, &at);
+            }
             let _ = fs::remove_file(&rec_path);
             continue;
         }
@@ -1275,11 +1285,18 @@ fn undo_make(git: &Git, cwd: &Path, wt: &Path, name: &str, at: &str) -> bool {
             return false;
         }
     }
+    take_back_branch(git, cwd, name, at);
+    true
+}
+
+/// Deletes the branch `name` that one try of `git worktree add -b` made, only while it is still at the commit `at` that try
+/// used (a branch that has moved since is someone else's work). The caller has checked the branch was not there before the
+/// try. `-D` is needed because the branch holds nothing merged anywhere; nothing else is forced.
+pub(crate) fn take_back_branch(git: &Git, cwd: &Path, name: &str, at: &str) {
     let ref_name = format!("refs/heads/{name}");
     if git.line(cwd, &["rev-parse", "--verify", "--quiet", &ref_name]).as_deref() == Some(at) {
         let _ = git.run(cwd, &["branch", "-D", name]);
     }
-    true
 }
 
 /// The lanes the app made for the repository `cwd` is in, newest first.
@@ -1638,6 +1655,40 @@ pub(crate) mod tests {
         assert_eq!(fs::read_to_string(Path::new(&a.dir).join("a.txt")).unwrap(), "one\nthai\n");
         assert_eq!(git_branch::branch(&d), "main");
         assert_eq!(fs::read_to_string(d.join("a.txt")).unwrap(), "one\n");
+        let _ = fs::remove_dir_all(home);
+    }
+
+    /// A folder planted where the lane's folder goes after its name was claimed: git makes the branch before it refuses the
+    /// folder, so that branch must go again, the planted folder stays, and a branch that already had the failed name is untouched.
+    #[test]
+    fn a_folder_planted_mid_make_is_left_alone_leaves_no_branch_and_the_next_name_is_used() {
+        let Some((home, d)) = repo("planted") else { return };
+        let planted = home.join(".manut/lanes/web-app/checkout");
+        let p = planted.clone();
+        between::set(Some(Box::new(move |step, wt| {
+            if step == "claimed" && wt == p {
+                fs::create_dir_all(wt).unwrap();
+                fs::write(wt.join("theirs.txt"), "theirs\n").unwrap();
+            }
+        })));
+        let got = make(&home, &d, &names(&["kit/checkout", "kit/checkout-2"]));
+        between::set(None);
+        let made = got.unwrap();
+        assert_eq!(made.branch, "kit/checkout-2");
+        assert_eq!(fs::read_to_string(planted.join("theirs.txt")).unwrap(), "theirs\n");
+        assert_eq!(sh(&d, &["branch", "--list", "kit/checkout"]), "", "a stray branch was left");
+        assert!(!home.join(".manut/lanes/web-app/checkout.json").exists());
+        // a branch of the failed name made by someone else in the same moment, at the developer's own commit, stays
+        let dd = d.clone();
+        between::set(Some(Box::new(move |step, wt| {
+            if step == "claimed" && wt.ends_with("web-app/other") {
+                sh(&dd, &["branch", "kit/other"]);
+            }
+        })));
+        let got = make(&home, &d, &names(&["kit/other", "kit/other-2"]));
+        between::set(None);
+        assert_eq!(got.unwrap().branch, "kit/other-2");
+        assert_eq!(sh(&d, &["rev-parse", "refs/heads/kit/other"]), sh(&d, &["rev-parse", "HEAD"]));
         let _ = fs::remove_dir_all(home);
     }
 
