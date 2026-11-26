@@ -62,7 +62,7 @@ test.beforeEach(async () => {
   await mock("mock.reset");
 });
 
-test("approval: card with mono command, coloured buttons of one weight; Deny collapses it and stops the turn", async ({ page }) => {
+test("approval: card with mono command, Allow once its one black button and the others quiet; Deny collapses it and stops the turn", async ({ page }) => {
   const events = recordEvents(page);
   await open(page);
   await send(page, "/approve clean the build");
@@ -75,8 +75,9 @@ test("approval: card with mono command, coloured buttons of one weight; Deny col
   expect(await cmd.evaluate((el) => getComputedStyle(el).fontFamily)).toMatch(/mono|Menlo/i);
   const btn = (name: string) => card.getByRole("button", { name, exact: true });
   for (const name of ["Allow once", "Allow for session", "Deny"]) await expect(btn(name)).toBeVisible();
-  // no brand gradient on any button; every answer carries the same weight and size, each in its own colour (Deny
-  // red, Allow once violet, Allow for session amber); Deny comes first
+  // no brand gradient on any button; every answer is the design kit's 34px button of one weight: Allow once is the card's
+  // one black button (white in dark, the primary), Deny and Allow for session are quiet and alike, no button is tinted;
+  // Deny comes first
   for (const name of ["Allow once", "Allow for session", "Deny"]) {
     const bgImage = await btn(name).evaluate((el) => getComputedStyle(el).backgroundImage);
     expect(bgImage).toBe("none");
@@ -90,8 +91,23 @@ test("approval: card with mono command, coloured buttons of one weight; Deny col
     ),
   );
   expect(new Set(looks.map((l) => `${l.weight}|${l.height}`)).size).toBe(1);
-  expect(new Set(looks.map((l) => l.color)).size).toBe(3);
-  expect(new Set(looks.map((l) => l.bg)).size).toBe(3);
+  expect(looks[0].height).toBeGreaterThanOrEqual(34);
+  const primary = await page.evaluate(() => {
+    const d = document.createElement("span");
+    d.style.color = "var(--aui-primary)";
+    document.body.append(d);
+    const v = getComputedStyle(d).color;
+    d.remove();
+    return v;
+  });
+  const [deny, once, session] = looks;
+  expect(once.bg).toBe(primary);
+  expect([deny.bg, deny.color]).toEqual([session.bg, session.color]);
+  expect(deny.bg).not.toBe(primary);
+  for (const l of looks) {
+    const [r, g, b] = (l.bg.match(/[\d.]+/g) ?? []).map(Number);
+    expect(Math.max(r, g, b) - Math.min(r, g, b)).toBeLessThan(24);
+  }
   const order = await card.getByRole("button").allTextContents();
   expect(order.slice(0, 3)).toEqual(["Deny", "Allow once", "Allow for session"]);
   await page.screenshot({ path: join(SHOTS, "cards-approval-dark.png") });

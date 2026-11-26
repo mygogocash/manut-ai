@@ -8,7 +8,9 @@ import type { BridgeError } from "../lib/protocol";
 import { MockHost, MockRuntime } from "../runtime/mock";
 import type { ArtifactLink, SharePlan } from "../runtime/artifacts";
 import { ArtifactsPage, ArtifactsView, gate, type ArtifactsViewProps } from "./ArtifactsPage";
-import { blockedReason, planFromFile, sizeText } from "./artifacts";
+import { blockedReason, ownSkills, planFromFile, planFromReads, sizeText } from "./artifacts";
+import { FileReview } from "../runtime/fileReview";
+import type { ReadSkill, SkillsPlan } from "../runtime/skillBundle";
 
 const words = (html: string) => html.replace(/<[^>]*>/g, " ").replace(/&quot;/g, '"').replace(/&#x27;/g, "'").replace(/&amp;/g, "&").replace(/\s+/g, " ");
 const NOW = Date.UTC(2026, 10, 25, 5);
@@ -143,5 +145,76 @@ describe("in Practice", () => {
       const refused = await req(op, params).then(() => null, (e: BridgeError) => e);
       expect(refused, op).toEqual({ code: "practice", message: t("art.err.practice") });
     }
+  });
+});
+
+describe("sharing skills as a link (item 84)", () => {
+  const KEY = "ghp_" + "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8";
+  const read = (over: Partial<ReadSkill> = {}): ReadSkill => ({
+    name: "promptpay",
+    files: [{ path: "SKILL.md", text: "Make a QR.", bytes: 10, exec: false }, { path: "bin/qr", text: "echo qr", bytes: 7, exec: true }],
+    refused: [],
+    leftOut: [],
+    ...over,
+  });
+  const PLAN_SKILLS: SkillsPlan = { shop: "pilot:shop-a", title: "promptpay", bytes: 120, scripts: ["promptpay/bin/qr"],
+    skills: [{ name: "promptpay", files: [{ path: "SKILL.md", text: "Make a QR." }, { path: "bin/qr", text: "echo qr" }] }] };
+
+  it("offers only the person's own skills, never a plugin's or a project's", () => {
+    expect(ownSkills([{ agent: "claude", found: true, servers: [], skills: [
+      { name: "promptpay", from: "home", state: "on", folder: "promptpay" },
+      { name: "helping", from: "plugin", plugin: "helper", state: "on", folder: "helping" },
+      { name: "shop-copy", from: "project", state: "on", folder: "shop-copy" },
+      { name: "no-folder", from: "home", state: "on" },
+    ] }])).toEqual([{ agent: "claude", folder: "promptpay", name: "promptpay" }]);
+  });
+
+  it("names every file that stops the publish (a link, a binary, a key) and never shows the key", () => {
+    const made = planFromReads([read({ refused: [{ path: "linked.txt", why: "link" }, { path: "logo.png", why: "binary" }] }),
+      read({ name: "deploy", files: [{ path: "SKILL.md", text: `push with ${KEY}`, bytes: 50, exec: false }], leftOut: [".env"] })], "pilot:shop-a");
+    expect(made.ok).toBe(false);
+    if (made.ok) return;
+    expect(made.lines).toEqual([
+      t("skl.err.link", { file: "promptpay/linked.txt" }),
+      t("skl.err.binary", { file: "promptpay/logo.png" }),
+      t("skl.err.secret", { file: "deploy/SKILL.md" }),
+    ]);
+    expect(made.leftOut).toEqual(["deploy/.env"]);
+    expect(JSON.stringify(made)).not.toContain(KEY);
+  });
+
+  it("makes the plan with each script marked, by its executable bit too", () => {
+    const made = planFromReads([read()], "pilot:shop-a");
+    expect(made.ok && made.plan).toMatchObject({ title: "promptpay", scripts: ["promptpay/bin/qr"], skills: PLAN_SKILLS.skills });
+  });
+
+  it("shows every file with its size and scripts marked, and holds Yes back until every file was looked at", () => {
+    const review = new FileReview(["promptpay/SKILL.md", "promptpay/bin/qr"]);
+    const ask = { kind: "skills" as const, id: "a1", plan: PLAN_SKILLS };
+    const skills = { review, shown: null, leftOut: [".env"], onView: () => {}, onTick: () => {} };
+    const yesDisabled = (html: string) => /<button[^>]*disabled=""[^>]*data-testid="art-ask-yes"/.test(html);
+    let html = draw({ ask, skills });
+    expect(html).toContain('data-kind="skills"');
+    expect((html.match(/data-testid="skl-file"/g) ?? []).length).toBe(2);
+    expect(html).toMatch(/data-path="promptpay\/bin\/qr" data-script="1"/);
+    expect(html).toMatch(/data-path="promptpay\/SKILL.md" data-script="0"/);
+    expect(words(html)).toContain(t("skl.ask.public"));
+    expect(words(html)).toContain("Hidden files are never shared, so these are left out: .env");
+    expect(words(html)).toContain(t("skl.wait"));
+    expect(yesDisabled(html)).toBe(true);
+    review.open("promptpay/SKILL.md");
+    expect(yesDisabled(draw({ ask, skills }))).toBe(true);
+    review.open("promptpay/bin/qr");
+    html = draw({ ask, skills });
+    expect(yesDisabled(html)).toBe(false);
+    expect(html).not.toContain('data-testid="skl-wait"');
+  });
+
+  it("says why skills cannot be chosen yet, with Settings when the switch is off", () => {
+    const html = draw({ picking: { step: "blocked", why: t("skl.why.switchedOff"), settings: true }, onShareSkills: () => {} });
+    expect(words(html)).toContain("Sharing skills by link is off on this Mac. Turn it on in Settings › Artifacts.");
+    expect(html).toContain('data-testid="skl-pick-settings"');
+    // while the picker is open, neither share button can start another
+    expect(/<button[^>]*disabled=""[^>]*data-testid="art-share-skills"/.test(html)).toBe(true);
   });
 });

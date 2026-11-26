@@ -81,6 +81,9 @@ describe("what the line says", () => {
     expect(pullLine(P({}))).toBe("main is up to date with origin.");
     expect(pullLine(P({ why: "changes" }))).toBe("Did not pull main: the folder has changed or new files.");
     expect(pullLine(P({ why: "diverged" }))).toContain("cannot simply move forward");
+    // a checkout with submodules: the app does not look inside them by itself
+    expect(pullLine(P({ why: "submodules" }))).toBe("Did not pull main: this project has submodules, and the app does not look inside them by itself. Pull in a terminal.");
+    expect(readPulled({ why: "submodules", branch: "main" })?.why).toBe("submodules");
     // the project's own git config names a program: the line says which setting, in one line
     expect(pullLine(P({ why: "config", setting: "core.sshcommand" }))).toBe(
       "Did not pull: this project's own git settings name a program for git to run, or another address to fetch from (core.sshcommand). The app does not run those by itself; pull in a terminal if you trust them.",

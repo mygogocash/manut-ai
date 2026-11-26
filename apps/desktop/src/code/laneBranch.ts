@@ -77,6 +77,9 @@ export interface KeptLane {
   /** Files and folders git ignores in it that may be the developer's (not rebuilt, not the agent settings the app copied in),
    *  at most 20, a folder ending in `/`: why a clean-up leaves a clean folder. Absent when there are none. */
   ignored?: string[];
+  /** It has submodules: what changed inside them is not in `changed` (the shell never reads inside one by itself), a clean-up
+   *  leaves it and Remove does not force it. Absent when it has none, or the shell did not say. */
+  submodules?: true;
 }
 
 /** What the person said yes to when a lane's folder goes (`lane_remove`): the changed files they saw counted and the commits
@@ -174,6 +177,7 @@ export function readKept(raw: unknown): KeptLane[] {
     const k: KeptLane = { worktree: str(r.worktree), dir: str(r.dir), branch: str(r.branch), base: str(r.base), made: count(r.made) ?? 0, exists: r.exists === true, changed: count(r.changed), ahead: count(r.ahead), unpushed: count(r.unpushed) };
     const ignored = paths(r.ignored);
     if (ignored.length > 0) k.ignored = ignored;
+    if (r.submodules === true) k.submodules = true;
     return k.worktree && isLaneBranch(k.branch) ? [k] : [];
   });
 }

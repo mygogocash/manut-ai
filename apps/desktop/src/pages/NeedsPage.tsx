@@ -1,10 +1,13 @@
 // Needs you: every approval and question waiting on the person, in any member's chat, thread or terminal session,
 // newest first. It is the sidebar's old Needs-you strip made a page, built from the strip's own pieces
-// (src/sidebar/Needs.tsx). Each row is the design canvas's ask (Approvals.dc.html): who asks and what they do, what is
-// asked in its card's words with the exact action under it, which kind it is, and since when it waits, with Look first,
-// which opens that chat with the ask scrolled into view and focused, as the strip did and ⌘J still does. So does the row
-// itself. With several shops, every shop's asks are here together, and each row names its shop (docs/several-shops.md). Nothing is approved from this list: an ask settles on its card in the chat, its one place (Home alone offers
-// Approve, for a plain command, through the same path).
+// (src/sidebar/Needs.tsx). Each ask is one card, as the design canvas's Needs you draws a decision (Approvals.dc.html):
+// who asks, what they do and since when it waits, with its amber mark (the colour of waiting for a person) saying which
+// kind it is; then what is asked as the kit's 17px line, with the exact action under it, whole; then Look first, which
+// opens that chat with the ask scrolled into view and focused, as the strip did and ⌘J still does. So does the card
+// itself. With several shops, every shop's asks are here together, and each card names its shop (docs/several-shops.md).
+// Nothing is approved from this list: an ask settles on its card in the chat, its one place (Home alone offers Approve,
+// for a plain command, through the same path). The board draws Approve on each card here; the app keeps the decision of
+// 24 Nov 2026 (docs/decisions.md) that an owner reads the card before approving, so Look first is the card's one action.
 import type { ReactNode } from "react";
 import { t } from "../i18n";
 import { askFrom, askText, chatTarget, isSessionChat, selectAsks, shopName, useStore, type Actions, type AppState, type Ask } from "../state/store";
@@ -16,6 +19,7 @@ import { Avatar } from "../ui";
 import { askLines } from "./home";
 import { whenText } from "./job";
 import { Empty, MenuPageFrame } from "./MenuPage";
+import "./needs.css";
 
 /** One ask as its row shows it. */
 export interface NeedRow {
@@ -59,7 +63,7 @@ export function needRows(s: AppState & Actions, nowMs: number): NeedRow[] {
       kind: a.item.kind,
       text: askText(a.item),
       age: age(a.ts, nowMs),
-      face: isSessionChat(a.bot) ? <SessionFace chatKey={a.bot} size={32} /> : <Avatar bot={a.bot} size={32} />,
+      face: isSessionChat(a.bot) ? <SessionFace chatKey={a.bot} size={32} /> : <Avatar bot={a.bot} size={32} live />,
       open: () => void s.jumpToAsk(a.bot, a.item.id),
       ...(role ? { role } : {}),
       ...(a.item.kind === "approval" && a.item.shop ? { shop: shopName(s, a.item.shop) } : {}),
@@ -71,34 +75,38 @@ export function needRows(s: AppState & Actions, nowMs: number): NeedRow[] {
   });
 }
 
+/** The one time a card shows: when it was asked ("Waiting since 09:14"), or how long ago when that is not known. */
+function waited(r: NeedRow): string {
+  return r.asked ? t("needs.since", { when: r.asked }) : r.age;
+}
+
 export function NeedsView({ rows }: { rows: NeedRow[] }) {
   return (
     <MenuPageFrame page="needs" title={t("menu.needs")}>
       <div className="col">
         {rows.length ? (
-          <ul className="rows" aria-label={t("needs.list")}>
+          <ul className="needs" aria-label={t("needs.list")} data-arrive="needs" data-arrive-rows=":scope > li">
             {rows.map((r, i) => (
-              <li key={r.key} className="tli">
-                <div className="rowl trow need" data-testid="needs-row">
-                  <button type="button" className="rowmain" onClick={r.open} aria-describedby={`needs-ask-${i}`} data-testid="needs-open">
-                    {r.face}
-                    <span className="grow">
-                      <span className="l1" id={`needs-ask-${i}`}>
-                        <AskLine text={r.title ?? r.text} />
-                      </span>
-                      {r.action && <code className={r.whole ? "act whole" : "act"}>{r.action}</code>}
-                      <span className="l2">
-                        {[r.who, r.shop, r.role].filter(Boolean).join(" · ")}
-                        {r.asked && ` · ${t("needs.since", { when: r.asked })}`}
-                      </span>
+              <li key={r.key} data-ask>
+                <article className="need" data-testid="needs-row">
+                  {/* The card opens the ask, as the row did: this button reaches over the whole card (needs.css). */}
+                  <button type="button" className="need-open" onClick={r.open} aria-describedby={`needs-ask-${i}`} data-testid="needs-open">
+                    <span className="need-h">
+                      {r.face}
+                      <span className="need-who">{[r.who, r.shop, r.role, waited(r)].filter(Boolean).join(" · ")}</span>
+                      <span className="tag warn">{r.kind === "approval" ? t("needs.approve") : t("needs.question")}</span>
                     </span>
-                    <span className="tag">{r.kind === "approval" ? t("needs.approve") : t("needs.question")}</span>
-                    <span className="when">{r.age}</span>
+                    <span className="l1" id={`needs-ask-${i}`}>
+                      <AskLine text={r.title ?? r.text} />
+                    </span>
+                    {r.action && <code className={r.whole ? "act whole" : "act"}>{r.action}</code>}
                   </button>
-                  <button type="button" className="btn look" onClick={r.open} aria-describedby={`needs-ask-${i}`} data-testid="needs-look">
-                    {t("home.look")}
-                  </button>
-                </div>
+                  <div className="need-acts">
+                    <button type="button" className="btn look" onClick={r.open} aria-describedby={`needs-ask-${i}`} data-testid="needs-look">
+                      {t("home.look")}
+                    </button>
+                  </div>
+                </article>
               </li>
             ))}
           </ul>

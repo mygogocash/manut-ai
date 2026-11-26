@@ -18,6 +18,7 @@ import { readView, type GitView } from "../code/moved";
 import { MOCK_MOVED, MOCK_MOVED_ROOT } from "../code/mockMoved";
 import { readCleaned, readKept, readMade, readReleased, readRemoved, type KeptLane, type LaneCleaned, type LaneMade, type LaneReleased, type LaneRemoveAsk, type LaneRemoved } from "../code/laneBranch";
 import { readAgentConfig, type AgentConfig } from "../settings/mcp/agentConfig";
+import { readInstallAsk, readInstallDone, readLinkRead, readSkillReads, type InstallAsk, type InstallDone, type LinkRead, type ReadSkill } from "../runtime/skillBundle";
 import { readAsk, readDone, readDraft, readPulled, readTools, type MergeMethod, type Pulled, type ReviewAsk, type ReviewDone, type ReviewDraft, type SourceTools } from "../code/source";
 import { checkArgs, checkVars, homeVarOf, rulesOf, versionAgent, type ProviderPatch, type ProviderView } from "../settings/providers/model";
 
@@ -163,6 +164,20 @@ export interface SessionHost extends HistoryHost {
    *  from their own files (src-tauri/src/agent_config.rs) for the person's own home and, when given, the project folder `cwd`.
    *  Only reads. Null where this computer's files cannot be read (a plain browser). */
   agentConfig?(cwd?: string): Promise<AgentConfig[] | null>;
+  /** Sharing skills by a link (item 84; src-tauri/src/skill_links.rs): the person's own skill folders `folders` of `agent`, read so
+   *  the page can show every file before anything is asked. Nothing is followed through a link. Rejects `<why>:<folder>`. Absent
+   *  where this computer's files cannot be read. */
+  skillBundleRead?(agent: "claude" | "codex", folders: string[]): Promise<ReadSkill[]>;
+  /** The bundle at `link`, fetched by the shell only when it is on `origin` (the artifact origin the API named; `other_host` with
+   *  nothing fetched otherwise), held to the bundle rules and kept by the shell under the answer's `read`. */
+  skillLinkRead?(link: string, origin: string): Promise<LinkRead>;
+  /** The ask to install skills `names` of kept bundle `read` for `agent`. Writes nothing; rejects `exists:<name>`, `link_root`... */
+  skillInstallAsk?(read: string, names: string[], agent: "claude" | "codex"): Promise<InstallAsk>;
+  /** The answer to install ask `id`, after approval-core settled it (runtime/skillInstallAsks.ts is the only caller): a Yes writes
+   *  what the ask named, once, with no executable bit, running nothing. */
+  skillInstallSettle?(id: string, yes: boolean): Promise<InstallDone>;
+  /** Takes a waiting install ask back. */
+  skillInstallWithdraw?(id: string): Promise<void>;
   /** Settings › Source control: git, gh and glab, each on this computer or not, its version, and for the two CLIs whether it is
    *  signed in and as whom (names only; src-tauri/src/source_tools.rs). `fresh` asks the CLIs again. Only reads. */
   sourceTools?(fresh?: boolean): Promise<SourceTools>;
@@ -394,6 +409,34 @@ export class TauriHost implements SessionHost, BuddyHost {
   async agentConfig(cwd?: string) {
     const { invoke } = await this.core();
     return readAgentConfig(await invoke<unknown>("agent_config_list", { cwd: cwd || null }));
+  }
+  async skillBundleRead(agent: "claude" | "codex", folders: string[]) {
+    const { invoke } = await this.core();
+    const read = readSkillReads(await invoke<unknown>("skill_bundle_read", { agent, folders }));
+    if (!read) throw new Error("unreadable");
+    return read;
+  }
+  async skillLinkRead(link: string, origin: string) {
+    const { invoke } = await this.core();
+    const read = readLinkRead(await invoke<unknown>("skill_link_read", { link, origin }));
+    if (!read) throw new Error("unreadable");
+    return read;
+  }
+  async skillInstallAsk(read: string, names: string[], agent: "claude" | "codex") {
+    const { invoke } = await this.core();
+    const ask = readInstallAsk(await invoke<unknown>("skill_install_ask", { read, names, agent }));
+    if (!ask) throw new Error("unreadable");
+    return ask;
+  }
+  async skillInstallSettle(id: string, yes: boolean) {
+    const { invoke } = await this.core();
+    const done = readInstallDone(await invoke<unknown>("skill_install_settle", { id, yes }));
+    if (!done) throw new Error("unreadable");
+    return done;
+  }
+  async skillInstallWithdraw(id: string) {
+    const { invoke } = await this.core();
+    await invoke("skill_install_withdraw", { id });
   }
   async sourceTools(fresh = false) {
     const { invoke } = await this.core();

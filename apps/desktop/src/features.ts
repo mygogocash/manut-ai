@@ -46,11 +46,13 @@ export interface DetailsPanelSlotProps {
 export interface HeaderPlacesSlotProps {
   bot: Bot;
 }
-/** Header right: the ONE control (model | reasoning pill + popover). Render a single root element. */
+/** The model | reasoning pill and its popover. Render a single root element. */
 export interface ModelPickerSlotProps {
   bot: Bot;
   /** The bot's main chat (model/provider/reasoning come from `chat.open` and `chat.set_model`). */
   chat: Chat | undefined;
+  /** In the chat box (item 85f): a quiet button whose menu opens above the box, as the box's own controls. */
+  inBox?: boolean;
 }
 /** Main column when `ui.view === "settings"`, below the "Settings" header. */
 export interface SettingsSlotProps {

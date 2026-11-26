@@ -55,6 +55,46 @@ test("publishing links is off until turned on in Settings, and Practice says why
   await expect(page.getByTestId("art-why")).toHaveAttribute("data-state", "practice");
   await expect(page.getByTestId("art-why")).toContainText("Public links can be made once Manut AI is connected to your shop.");
   await expect(page.getByTestId("art-share")).toBeDisabled();
+  await expect(page.getByTestId("art-share-skills")).toBeDisabled();
   await expect(page.getByTestId("art-ask")).toHaveCount(0);
   expect(api).toEqual([]);
+});
+
+test("sharing skills is a second switch, off by default, and Install skills from a link waits for it and fetches nothing", async ({ page }) => {
+  // The browser host reads no agent files; an empty list stands in for the shell's, so Settings › MCP and Skills draws its lists.
+  await page.addInitScript(() => {
+    (window as unknown as { __manutAgentConfig: unknown }).__manutAgentConfig = [];
+  });
+  const sent: string[] = [];
+  page.on("request", (r) => {
+    if (/\/v1\/|evil\.example|\/a\//.test(r.url())) sent.push(`${r.method()} ${r.url()}`);
+  });
+  await page.goto("/");
+  await page.getByTestId("nav-settings").click();
+  await page.getByTestId("settings-nav-artifacts").click();
+  await expect(page.getByTestId("art-set-publish")).toHaveAttribute("aria-checked", "false");
+  await expect(page.getByTestId("art-set-skills")).toHaveAttribute("aria-checked", "false");
+
+  // while it is off, the install section says so and has no field for a link
+  await page.getByTestId("settings-nav-mcp").click();
+  await expect(page.getByTestId("skl-install")).toHaveAttribute("data-step", "off");
+  await expect(page.getByTestId("skl-install-off")).toContainText("Installing skills from a link is off on this Mac.");
+  await expect(page.getByTestId("skl-install-link")).toHaveCount(0);
+
+  // its button opens Settings › Artifacts; turning skills on leaves pages off
+  await page.getByTestId("skl-install-settings").click();
+  await expect(page.getByTestId("artifact-links-page")).toBeVisible();
+  await page.getByTestId("art-set-skills").click();
+  await expect(page.getByTestId("art-set-skills")).toHaveAttribute("aria-checked", "true");
+  await expect(page.getByTestId("art-set-publish")).toHaveAttribute("aria-checked", "false");
+
+  // on, a link can be pasted; a browser has no shell to read it with, so it says so and nothing is fetched (a link on another
+  // host is refused unfetched by the page and the shell: src/settings/mcp/installLink.test.ts, src-tauri/src/skill_links.rs)
+  await page.getByTestId("settings-nav-mcp").click();
+  await expect(page.getByTestId("skl-install")).toHaveAttribute("data-step", "link");
+  await page.getByTestId("skl-install-link").fill(`https://evil.example/a/${"S".repeat(43)}.${"k".repeat(32)}`);
+  await page.getByTestId("skl-install-read").click();
+  await expect(page.getByTestId("skl-install-error")).toContainText("Skills can be shared or installed only in the Manut AI app on this Mac.");
+  await expect(page.getByTestId("skl-install-ask")).toHaveCount(0);
+  expect(sent).toEqual([]);
 });

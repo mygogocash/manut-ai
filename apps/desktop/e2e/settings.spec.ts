@@ -42,12 +42,14 @@ test.beforeEach(async () => {
   await mock("mock.reset");
 });
 
-test("model pill: the model control plus the panel button, popover lists providers and models with the current one checked", async ({ page }) => {
+test("model pill: in the chat box, popover lists providers and models with the current one checked", async ({ page }) => {
   await open(page);
+  // the header holds the panel button alone; the model is in the chat box since item 85f (the Chat board's header
+  // names no model)
   const right = page.getByTestId("head-right");
-  await expect(right.locator(":scope > *")).toHaveCount(2);
-  expect(await right.locator("button, a, [role=button], input, select").count()).toBe(2);
-  const pill = page.getByTestId("model-pill");
+  await expect(right.locator(":scope > *")).toHaveCount(1);
+  expect(await right.locator("button, a, [role=button], input, select").count()).toBe(1);
+  const pill = page.locator(".cw").getByTestId("model-pill");
   // the model's company mark sits before the name (Opus -> Claude)
   await expect(pill.locator('svg.model-ic[data-mark="claude"]')).toBeVisible();
   await expect(pill).toContainText("Opus 5.5");

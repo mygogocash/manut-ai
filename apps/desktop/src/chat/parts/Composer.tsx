@@ -315,12 +315,14 @@ export function Composer({
     }
   };
 
-  /** The mirror follows the textarea's box and scroll (its width leaves out a scrollbar). */
+  /** The mirror follows the textarea's box and scroll (its width leaves out a scrollbar). The width is the box's own,
+   *  fractions kept: `clientWidth` rounds, and half a pixel less moves a line break when the row beside the field (the
+   *  model's button in the box, item 85f) has a width that is not whole. */
   const syncMirror = useCallback(() => {
     const el = ref.current;
     const m = mirror.current;
     if (!el || !m) return;
-    m.style.width = `${el.clientWidth}px`;
+    m.style.width = `${el.getBoundingClientRect().width - (el.offsetWidth - el.clientWidth)}px`;
     m.style.height = `${el.clientHeight}px`;
     m.scrollTop = el.scrollTop;
   }, []);
