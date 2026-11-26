@@ -83,6 +83,10 @@ export function bundleWords(r: BundleRefusal): string {
   switch (r.reason) {
     case "secret":
       return t("skl.err.secret", { file });
+    case "acts_alone":
+      if (r.why === "field") return t("skl.err.actsField", { file, field: r.field ?? "" });
+      if (r.why === "command") return t("skl.err.actsCommand", { file });
+      return t("skl.err.actsUnreadable", { file });
     case "bad_path":
       return t("skl.err.badPath", { file });
     case "dot_file":

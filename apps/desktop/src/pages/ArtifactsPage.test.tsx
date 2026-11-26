@@ -183,6 +183,23 @@ describe("sharing skills as a link (item 84)", () => {
     expect(JSON.stringify(made)).not.toContain(KEY);
   });
 
+  it("warns the sharer of every skill an agent would act on by itself, naming its file and setting, so no one shares what no one can install", () => {
+    const md = (text: string) => ({ path: "SKILL.md", text, bytes: text.length, exec: false });
+    const made = planFromReads([
+      read({ name: "allowed", files: [md("---\nname: allowed\nallowed-tools: Bash(git *)\n---\nCommit.\n")] }),
+      read({ name: "loads", files: [md("Status: !`git status`\n")] }),
+      read({ name: "quoted", files: [md("---\n\"hooks\": {}\n---\n")] }),
+      read(),
+    ], "pilot:shop-a");
+    expect(made.ok).toBe(false);
+    if (made.ok) return;
+    expect(made.lines).toEqual([
+      "“allowed/SKILL.md” sets “allowed-tools”, which a coding agent acts on without asking first, so no one could install it. Take that setting out, then choose the skills again.",
+      t("skl.err.actsCommand", { file: "loads/SKILL.md" }),
+      t("skl.err.actsUnreadable", { file: "quoted/SKILL.md" }),
+    ]);
+  });
+
   it("makes the plan with each script marked, by its executable bit too", () => {
     const made = planFromReads([read()], "pilot:shop-a");
     expect(made.ok && made.plan).toMatchObject({ title: "promptpay", scripts: ["promptpay/bin/qr"], skills: PLAN_SKILLS.skills });

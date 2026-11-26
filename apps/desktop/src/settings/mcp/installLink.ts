@@ -23,10 +23,23 @@ export function linkOnOrigin(link: string, origin: string | null): boolean {
     !l.search && !l.hash && !link.trim().endsWith("?") && !link.trim().endsWith("#") && LINK_PATH.test(l.pathname);
 }
 
+/** Why a skill cannot be installed because an agent would act on part of it by itself, naming the file and the setting. A `why` this
+ *  page does not know reads as unreadable, never as installable. */
+export function actsWords(why: string, file: string, field = ""): string {
+  if (why === "field") return t("skl.in.actsField", { file, field });
+  if (why === "command") return t("skl.in.actsCommand", { file });
+  return t("skl.in.actsUnreadable", { file });
+}
+
 /** What the page says when reading a link or installing from it was refused, by the shell's code. */
 export function installWords(code: string, agent: "claude" | "codex" = "claude"): string {
   const [head, rest] = [code.split(":")[0] ?? "", code.split(":").slice(1).join(":")];
   switch (head) {
+    case "acts_alone": {
+      // `acts_alone:<why>:<skill>/<path>[:<field>]`; neither a name nor a path can hold a colon.
+      const [why = "", file = "", field = ""] = rest.split(":");
+      return actsWords(why, file, field);
+    }
     case "other_host":
     case "not_a_link":
       return t("skl.in.otherHost");

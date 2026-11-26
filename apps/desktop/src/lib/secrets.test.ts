@@ -19,7 +19,7 @@ describe("maskSecrets (the one masker; patterns in secrets.json)", () => {
   });
 
   it("runs the shared table (secrets.cases.json, also run by tasks.rs and the bridge)", () => {
-    expect(table.cases.length).toBeGreaterThan(10);
+    expect(table.cases.length).toBeGreaterThan(120);
     for (const [text, want] of table.cases) expect(maskSecrets(text), text).toBe(want);
   });
 

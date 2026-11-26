@@ -162,7 +162,11 @@ needs a QR reader, which the repository does not have: the browser's own is used
   counting. The Mac also keeps, per phone, the newest revision of each ask it sent that phone, and acts only on that
   one: a phone answering a chat it never opened, or a Mac started again, is refused as `changed`, and the phone opens
   the chat again.
-- **What a phone sees** is masked with `lib/secrets.ts`, the command included (the card masks it too), and shown whole.
+- **What a phone sees** is masked with `lib/secrets.ts`, the command included (the card masks it too), and shown whole. The masker's
+  patterns are `lib/secrets.json`, shared with the shell's `tasks::mask_secrets` and held by one table both run
+  (`lib/secrets.cases.json`): tokens by their prefix, private key blocks, JSON web tokens, credentials in HTTP headers,
+  `password:` and `"password":` values, the password in `scheme://user:pass@host`, quoted `KEY="..."` and `--password value`,
+  each with its name kept so the line still reads (item 113).
   An ask the card marks as needing an app update, or that the person may only pass on to the shop's owner, offers
   nothing; an approval offers at most Allow once and No.
 - **The relay's state.** The API's public `/v1/health` now says `relay: "on"` or `"off"`. After a socket that never came

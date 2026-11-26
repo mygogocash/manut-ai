@@ -5,7 +5,7 @@ import { dayText } from "../app/time";
 import { t } from "../i18n";
 import { kindOfFile, shareRefusal, titleOfFile, utf8Bytes, type ArtifactKind, type Publishing, type SharePlan } from "../runtime/artifacts";
 import { bundleWords, refusal } from "../runtime/http/artifacts";
-import { bundleBytes, isScript, MAX_SKILLS, secretFiles, skillsPlanRefusal, type ReadSkill, type SkillsPlan } from "../runtime/skillBundle";
+import { actsAloneSkills, bundleBytes, isScript, MAX_SKILLS, secretFiles, skillsPlanRefusal, type ReadSkill, type SkillsPlan } from "../runtime/skillBundle";
 import type { AgentConfig } from "../settings/mcp/agentConfig";
 
 export { dayText };
@@ -105,8 +105,10 @@ export function planFromReads(reads: readonly ReadSkill[], shop: string):
   if (reads.length > MAX_SKILLS) return { ok: false, lines: [bundleWords({ reason: "too_many_skills" })], leftOut };
   const lines = reads.flatMap((r) => r.refused.map((f) => bundleWords({ reason: f.why, skill: r.name, path: f.path })));
   const skills = reads.map((r) => ({ name: r.name, files: r.files.map((f) => ({ path: f.path, text: f.text })) }));
-  // Every file with a key is named, not only the first.
+  // Every file with a key is named, not only the first, and so is every skill an agent would act on by itself, by its file and
+  // setting: no one could install it, so it is not shared.
   lines.push(...secretFiles(skills).map((f) => bundleWords({ reason: "secret", ...f })));
+  lines.push(...actsAloneSkills(skills).map((a) => bundleWords({ reason: "acts_alone", ...a })));
   if (lines.length) return { ok: false, lines, leftOut };
   const plan: SkillsPlan = {
     shop,
