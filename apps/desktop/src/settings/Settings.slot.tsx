@@ -31,6 +31,7 @@ import { AvatarEditor, BotFacts, NameEditor, PictureActions, placeName, useBotIn
 import { ShopSettings } from "../onboarding/ShopSettings";
 import { PeoplePage, peopleOffered } from "../pages/PeoplePane";
 import { DeveloperPage } from "./DeveloperPage";
+import { ReportPage } from "../report/ReportPage";
 import { WorktreesPage } from "./WorktreesPage";
 import { SourceControlPage } from "./SourceControlPage";
 import { ArtifactLinksPage } from "./ArtifactLinksPage";
@@ -193,6 +194,8 @@ export default function Settings({ page }: SlotProps["settings"]) {
           <WorkflowsPage />
         ) : current === "developer" ? (
           <DeveloperPage />
+        ) : current === "report" ? (
+          <ReportPage />
         ) : current === "people" ? (
           <PeoplePage />
         ) : (
