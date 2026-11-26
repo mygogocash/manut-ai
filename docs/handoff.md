@@ -691,9 +691,6 @@ Every switch that turns a built part on, and what each needs from the owner, is 
 
 ## Known flaky tests (they fail only under heavy load)
 
-- `apps/web` `test/JoinPage.test.tsx`, "counts down to a new code from when the answer arrived": could not find "You
-  can ask for a new code in 0:42." in item 133's run 45882648481 (attempt 1), a branch that changes no web code;
-  passed on the re-run. A countdown read against the clock: if it fails again, give it fake time.
 - `apps/api` `test/task-companies.test.ts` ("non-members cannot wait on company tasks...", "deleting a company
   releases its tasks...") and `test/auth-email.test.ts` ("gives Apple's session in every way..."): timed out at 5 s in
   item 104's run 45873764860 (with a `rows.filter is not a function` uncaught in workerd), a branch that changes no API
@@ -720,7 +717,7 @@ Every switch that turns a built part on, and what each needs from the owner, is 
 - `apps/web` `test/ShopDataTab.test.tsx`, "says when the API could not be reached": failed once in a loaded full run.
 - Failed once each in a loaded gate on 26 Nov and passed alone: `apps/desktop` `src/i18n/literals.test.ts`,
   `src/lib/notify.device.test.ts`, `src/lib/notify.ask.test.ts`; `apps/web` `test/macRemote.test.ts`,
-  `test/MakeRoutineForm.test.tsx`, `test/JoinPage.test.tsx` ("counts down to a new code"). Each is a 5 second limit
+  `test/MakeRoutineForm.test.tsx`. Each is a 5 second limit
   reached at a load of 30, not yet read further.
 - `apps/desktop` `src/sessions/term/kitty-placeholders.test.ts`: failed once in item 124's loaded gate on 26 Nov
   (`expected [] to deeply equal [[32, 2, 2, 16]]`) and passed alone.
