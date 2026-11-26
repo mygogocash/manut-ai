@@ -305,7 +305,9 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    are 11 to 18 in `docs/computer-use.md`). Then the design of 102
    (`docs/several-agents.md`; its eight open questions answered provisionally by the lead with the design's own
    recommendations, in `docs/decisions/102-several-agents.md`, for the owner) and 102d (its pure rules). Then 102a
-   (ask several agents). Running: 102e (helper blocks) and 133 (the flaky browser specs; three workers a shard). Needs the owner from 101b: Grok signed in and `permission_mode = "ask"`
+   (ask several agents). Then 133 (motion-lists and resilience fixed; CI now four
+   shards of three Playwright workers, since four on a 4-CPU runner made specs flaky). Running: 102e (helper blocks),
+   102f (a helper lane from a snapshot) and 134 (the join page's countdown test). Needs the owner from 101b: Grok signed in and `permission_mode = "ask"`
    under `[ui]` in `~/.grok/config.toml` (it says always-approve, so Grok chats are refused), and Muse Code's CLI. From 101e: all 325 Codex sessions on the owner's Mac are compressed, so
    only Claude Code's conversations are offered until 106b. Needs the owner from 101a: Cursor's Approval mode set to Allowlist (it is Run Everything, so Cursor
    chats are refused), and a Cursor plan with messages left to record a real tool call. GitHub reported 7 Dependabot alerts on `main` (2 critical) at that push, for the owner to look at.
