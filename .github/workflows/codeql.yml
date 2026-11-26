@@ -42,7 +42,7 @@ jobs:
       # their system libraries. Without them, part of the desktop app's code would go unanalysed.
       - if: matrix.language == 'rust'
         uses: ./.github/actions/tauri-linux-deps
-      - uses: github/codeql-action/init@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
+      - uses: github/codeql-action/init@915412ff23e8b7659517e607487dbeae018f2934 # v4.39.5
         with:
           languages: ${{ matrix.language }}
           # CodeQL reads all three languages from source; nothing is built.
@@ -50,6 +50,6 @@ jobs:
           # The default queries plus the wider security set: the app holds credentials and moves money, so a few
           # more alerts to triage are worth the extra coverage.
           queries: security-extended
-      - uses: github/codeql-action/analyze@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
+      - uses: github/codeql-action/analyze@915412ff23e8b7659517e607487dbeae018f2934 # v4.39.5
         with:
           category: /language:${{ matrix.language }}

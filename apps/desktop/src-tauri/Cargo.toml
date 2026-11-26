@@ -30,8 +30,9 @@ plist = "1"
 # the tree via tauri
 zeroize = "1"
 # A rewind's copy of a folder that is not a git repository keeps each content once, under its sha256
-# (turn_files.rs); already in the tree via tauri
-sha2 = "0.10"
+# (turn_files.rs); also remote_keys.rs, accounts.rs and acp_mcp.rs. 0.11 is already in Cargo.lock
+# through tauri-codegen (wry keeps 0.10), so no new crate enters the tree
+sha2 = "0.11"
 # Settings › MCP and Skills reads the names of the MCP servers in Codex's own `config.toml` (agent_config.rs); already in
 # the tree via tauri
 toml = "1"

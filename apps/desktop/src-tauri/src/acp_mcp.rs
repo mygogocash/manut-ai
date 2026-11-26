@@ -765,6 +765,8 @@ mod tests {
         assert_ne!(entry_digest(&json!({"command": "a", "args": ["b"]})), entry_digest(&json!({"command": "a", "args": ["b", "c"]})));
         assert_ne!(entry_digest(&json!({"command": "a", "env": {"K": "${A}"}})), entry_digest(&json!({"command": "a", "env": {"K": "${B}"}})));
         assert_eq!(entry_digest(&json!({"command": "a"})).len(), 64);
+        // and it is the standard SHA-256 of the canonical text, so an approval an earlier build recorded still matches
+        assert_eq!(entry_digest(&json!({"command": "a"})), "e50e5a32d073f447861d50221b154fd327abf9f59018a003734300292500c2c2");
         let _ = fs::remove_dir_all(home);
     }
 
