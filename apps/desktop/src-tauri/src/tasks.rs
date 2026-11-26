@@ -36,8 +36,8 @@ const MAX_SEEN: usize = 100;
 pub const TIMEOUT: Duration = Duration::from_secs(20);
 /// How long an answer is kept for the same argv.
 pub const KEEP: Duration = Duration::from_secs(60);
-/// The most bytes of a program's output read.
-const MAX_OUT: u64 = 16 << 20;
+/// The most bytes of a program's output read (lane.rs takes a listing this long as one that may have been cut short).
+pub(crate) const MAX_OUT: u64 = 16 << 20;
 /// The most characters of an item's description or a comment passed to the page.
 const MAX_BODY: usize = 64 * 1024;
 /// The most comments passed to the page.
@@ -796,16 +796,24 @@ pub fn run_env(exe: &Path, argv: &[String], keep: bool, env: &[(&str, &str)], un
 /// `run_env`, with `inherited` set first as if manut itself had been started with it (gh_me.rs's tests: an inherited
 /// token without touching this process's environment), so `unset` takes it out as it would the real one.
 pub(crate) fn run_full(exe: &Path, argv: &[String], keep: bool, inherited: &[(&str, &str)], env: &[(&str, &str)], unset: &[&str]) -> Result<Ran, String> {
-    run_until(exe, argv, keep, inherited, env, unset, TIMEOUT)
+    run_until(exe, argv, keep, inherited, env, unset, TIMEOUT, MAX_OUT)
 }
 
 /// `run_env` with a deadline of its own instead of `TIMEOUT`: lane.rs makes and removes a lane's working folder, which
 /// writes or deletes every file a project tracks and can take longer than a read on a large project.
 pub(crate) fn run_env_for(exe: &Path, argv: &[String], keep: bool, env: &[(&str, &str)], unset: &[&str], limit: Duration) -> Result<Ran, String> {
-    run_until(exe, argv, keep, &[], env, unset, limit)
+    run_until(exe, argv, keep, &[], env, unset, limit, MAX_OUT)
 }
 
-fn run_until(exe: &Path, argv: &[String], keep: bool, inherited: &[(&str, &str)], env: &[(&str, &str)], unset: &[&str], limit: Duration) -> Result<Ran, String> {
+/// `run` with a deadline and a byte cap of the caller's own: at most `cap` bytes of the program's output are read, and
+/// the rest is never read at all (tailscale.rs, whose `status --json` answers a few kilobytes and is never trusted to
+/// stay small).
+pub(crate) fn run_capped(exe: &Path, argv: &[String], limit: Duration, cap: u64) -> Result<Ran, String> {
+    run_until(exe, argv, true, &[], &[], &[], limit, cap)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_until(exe: &Path, argv: &[String], keep: bool, inherited: &[(&str, &str)], env: &[(&str, &str)], unset: &[&str], limit: Duration, cap: u64) -> Result<Ran, String> {
     let out = || if keep { Stdio::piped() } else { Stdio::null() };
     let mut cmd = Command::new(exe);
     cmd.args(argv)
@@ -835,7 +843,7 @@ fn run_until(exe: &Path, argv: &[String], keep: bool, inherited: &[(&str, &str)]
     let to = std::thread::spawn(move || {
         let mut b = Vec::new();
         if let Some(mut so) = so {
-            let _ = (&mut so).take(MAX_OUT).read_to_end(&mut b);
+            let _ = (&mut so).take(cap).read_to_end(&mut b);
         }
         b
     });

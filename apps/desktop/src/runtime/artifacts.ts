@@ -11,9 +11,12 @@
 // The limits are the API's (apps/api/src/artifact-store.ts), checked here first so nothing the API would refuse is ever sent, and
 // so the ask never shows a page that could not be published.
 
-/** The two kinds of page a link can be. */
-export const ARTIFACT_KINDS = ["html", "markdown"] as const;
+/** What a link can be: an HTML or Markdown page, or a bundle of skills (item 84, src/runtime/skillBundle.ts). */
+export const ARTIFACT_KINDS = ["html", "markdown", "skills"] as const;
 export type ArtifactKind = (typeof ARTIFACT_KINDS)[number];
+/** The two kinds of page a file can be shared as. */
+export const PAGE_KINDS = ["html", "markdown"] as const;
+export type PageKind = (typeof PAGE_KINDS)[number];
 
 /** The most text one page holds, in UTF-8 bytes (`MAX_ARTIFACT_BYTES` in the API). */
 export const MAX_ARTIFACT_BYTES = 128 * 1024;
@@ -44,7 +47,7 @@ export interface SharePlan {
   /** the shop it is published for, as `artifacts.list` named it */
   shop: string;
   title: string;
-  kind: ArtifactKind;
+  kind: PageKind;
   text: string;
   /** the text's size in UTF-8 bytes */
   bytes: number;
@@ -61,16 +64,24 @@ export interface RemovePlan {
 export interface ArtifactOps {
   /** The links of the shop the switcher shows, newest first, the shop they were read for, and whether publishing is open now. Refused
    *  `owner_only` for a shop the person only helps at, and `no_shop` while they are in none. */
-  "artifacts.list": { params: Record<string, never>; result: { shop: string; publishing: Publishing; links: ArtifactLink[] } };
+  "artifacts.list": {
+    params: Record<string, never>;
+    /** `skillPublishing`: whether bundles of skills can be published now (item 84); `origin`: the links' own web address, which a
+     *  link to install skills from must be on, or null while there is none. */
+    result: { shop: string; publishing: Publishing; skillPublishing: Publishing; origin: string | null; links: ArtifactLink[] };
+  };
   /** Publishes the page ask `ask` showed, once that ask was settled with a yes (artifactAsks.ts). Refused `not_settled` for any other
    *  ask, and for one already used. */
   "artifacts.publish": { params: { ask: string }; result: { link: ArtifactLink } };
+  /** Publishes the bundle of skills ask `ask` showed (item 84), once it was settled with a yes after every file was looked at.
+   *  Refused `skills_off` while Settings › Artifacts › Allow sharing skills by link is off, and `not_settled` for any other ask. */
+  "artifacts.publishSkills": { params: { ask: string }; result: { link: ArtifactLink } };
   /** Removes the link ask `ask` named, once that ask was settled with a yes. */
   "artifacts.remove": { params: { ask: string }; result: { id: string } };
 }
 
 /** The kind of page a file name says, or null for a file that is neither HTML nor Markdown. */
-export function kindOfFile(name: string): ArtifactKind | null {
+export function kindOfFile(name: string): PageKind | null {
   const ext = /\.([A-Za-z0-9]+)$/.exec(name.trim())?.[1]?.toLowerCase();
   if (ext === "html" || ext === "htm") return "html";
   if (ext === "md" || ext === "markdown") return "markdown";
@@ -101,7 +112,7 @@ export const shareBody = (plan: Pick<SharePlan, "title" | "kind" | "text">) => (
  *  text that is there and not over `MAX_ARTIFACT_BYTES`, and a body the shell can send. */
 export function shareRefusal(plan: Pick<SharePlan, "title" | "kind" | "text">): "invalid_title" | "invalid_kind" | "invalid_text" | "too_large" | null {
   if (!titleOk(plan.title)) return "invalid_title";
-  if (!(ARTIFACT_KINDS as readonly string[]).includes(plan.kind)) return "invalid_kind";
+  if (!(PAGE_KINDS as readonly string[]).includes(plan.kind)) return "invalid_kind";
   if (typeof plan.text !== "string" || plan.text.length === 0) return "invalid_text";
   if (utf8Bytes(plan.text) > MAX_ARTIFACT_BYTES || utf8Bytes(JSON.stringify(shareBody(plan))) > MAX_REQUEST_BYTES) return "too_large";
   return null;

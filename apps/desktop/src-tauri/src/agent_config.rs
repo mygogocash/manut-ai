@@ -38,6 +38,9 @@ pub struct Item {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub plugin: Option<String>,
     pub state: &'static str,
+    /// A skill's folder name (not its path), which sharing it by a link names (skill_links.rs); none for a server.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub folder: Option<String>,
 }
 
 /// What one agent has. `found`: its home folder is on this computer.
@@ -57,7 +60,7 @@ fn clean(name: &str) -> Option<String> {
 }
 
 fn item(name: &str, from: &'static str, plugin: Option<&str>, state: &'static str) -> Option<Item> {
-    Some(Item { name: clean(name)?, from, plugin: plugin.and_then(clean), state })
+    Some(Item { name: clean(name)?, from, plugin: plugin.and_then(clean), state, folder: None })
 }
 
 /// The skills in `root`: each folder with a `SKILL.md`, named by its front matter's `name:` (else the folder's name).
@@ -76,8 +79,8 @@ fn skills_in(root: &Path, from: &'static str, plugin: Option<&str>) -> Vec<Item>
             if !std::fs::metadata(&file).map(|m| m.is_file()).unwrap_or(false) {
                 return None;
             }
-            let name = front_name(&file).unwrap_or(folder);
-            item(&name, from, plugin, "on")
+            let name = front_name(&file).unwrap_or_else(|| folder.clone());
+            item(&name, from, plugin, "on").map(|i| Item { folder: clean(&folder).filter(|f| *f == folder), ..i })
         })
         .take(MAX_ITEMS)
         .collect();
@@ -215,6 +218,29 @@ fn codex(home: &Path, project: Option<&Path>, env: &dyn Fn(&str) -> Option<Strin
     AgentConfig { agent: "codex", found: dir.is_dir(), servers, skills }
 }
 
+/// The folders `agent` keeps the person's own skills in (`from` = `home`), in the order this page lists them: Claude Code's
+/// `skills/`; Codex's `skills/` and `~/.agents/skills/`.
+pub fn home_skill_roots(home: &Path, agent: &str, env: &dyn Fn(&str) -> Option<String>) -> Vec<PathBuf> {
+    match agent {
+        "claude" => vec![crate::past_chats::cli_home(home, "claude", &[], env).unwrap_or_else(|| home.join(".claude")).join("skills")],
+        "codex" => vec![
+            crate::past_chats::cli_home(home, "codex", &[], env).unwrap_or_else(|| home.join(".codex")).join("skills"),
+            home.join(".agents").join("skills"),
+        ],
+        _ => Vec::new(),
+    }
+}
+
+/// Where a skill installed for `agent` goes: the person's own skills folder that agent reads in every project, Claude Code's
+/// `skills/`, or `~/.agents/skills/` for Codex (what Settings › MCP and Skills names as each one's folder).
+pub fn install_root(home: &Path, agent: &str, env: &dyn Fn(&str) -> Option<String>) -> Option<PathBuf> {
+    match agent {
+        "claude" => home_skill_roots(home, agent, env).into_iter().next(),
+        "codex" => Some(home.join(".agents").join("skills")),
+        _ => None,
+    }
+}
+
 /// What Claude Code and Codex have, for the person's own home (`home`) and, when one is given, the project `project`.
 pub fn read(home: &Path, project: Option<&Path>, env: &dyn Fn(&str) -> Option<String>) -> Vec<AgentConfig> {
     let project = project.filter(|p| p.is_absolute() && p.is_dir());
@@ -292,6 +318,9 @@ mod tests {
             rows(&c.skills),
             vec![row("nameless", "home", None, "on"), row("promptpay-qr", "home", None, "on"), row("shop-copy", "project", None, "on"), row("helping", "plugin", Some("helper"), "on")]
         );
+        // each skill names its folder, by name only, which sharing it by a link reads (skill_links.rs)
+        assert_eq!(c.skills.iter().map(|s| s.folder.as_deref()).collect::<Vec<_>>(), vec![Some("nameless"), Some("promptpay"), Some("shop-copy"), Some("helping")]);
+        assert!(c.servers.iter().all(|s| s.folder.is_none()));
         let x = &all[1];
         assert_eq!((x.agent, x.found), ("codex", true));
         // the project's Codex config is read by Codex only in a project it trusts

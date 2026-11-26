@@ -1,0 +1,123 @@
+/* The brand's team faces, lifted word for word from the kit (packages/ui-kit/app.css, "team faces"; the canvas's
+   KitFaces and States: team faces boards). Only the colour names differ: the kit's short names are the app's tokens here
+   (--blue is --aui-blue, --ok the kit's green --aui-green, --band --aui-subtle, --mut --muted), and --bg is the app's page
+   ground, the ground the badge's ring cuts out of. And each selector says `span.face` where the kit says `.face`: the
+   chat already marks a reply that has a face with the class `face` (`.msg.a.face`, `.msg-quotes.face`), and the kit's
+   rules must not size those rows. Avatar.tsx draws the markup; face.ts says which state shows.
+
+   Drawn like the mark: a person in profile as one flat shape in the mark's ink, cropped by the right and bottom edges of
+   a frame with the mark's corner (22.5%), on the member's own colour. The eye is a dot; when the work is checked it
+   becomes the mark's tick. One <span class="face" data-st="..."> holds one SVG, viewBox 0 0 56 56: the tile is 44 at
+   6,6. The frame (fr) around it and the badge (fb, bottom right) carry the state; the signs (fo, in front of the face)
+   say what kind of work it is. A negative margin keeps the footprint the size of an av: face = 24, md = 32, lg = 40,
+   xl = 96. Rule: the status word is always written beside the face. The face never carries a meaning on its own, so
+   a face shows a state only where its word is beside it (Avatar's `live`).
+
+   The moves are the kit's own keyframes under the kit's names, which src/theme/motionRule.test.ts allows as "the team
+   faces' own moves as the kit draws them". Only work in progress and a face that waits for the person loop. Reduced
+   motion ends every one of them at once (motion.css), so no face moves. */
+span.face{position:relative;display:inline-block;flex:none;width:32px;height:32px;margin:-4px;vertical-align:middle}
+span.face.md{width:43px;height:43px;margin:-5.5px}
+span.face.lg{width:53px;height:53px;margin:-6.5px}
+span.face.xl{width:128px;height:128px;margin:-16px}
+span.face svg{display:block;width:100%;height:100%;overflow:visible}
+span.face .fr{fill:none;stroke:transparent;stroke-width:2.2;stroke-linecap:round}
+span.face .fbody,span.face .fe,span.face .fk,span.face .fm,span.face .fb{transform-box:fill-box;transform-origin:center}
+span.face .fs,span.face .fh{fill:var(--face-ink)}
+span.face .fh{stroke-width:.9;stroke-linejoin:round}
+span.face .fe,span.face .fm{stroke:none}
+span.face .fa,span.face .fl,span.face .fk,span.face .fn,span.face .fx{fill:none;stroke-linecap:round;stroke-linejoin:round}
+span.face .fa{stroke-width:.95}span.face .fl,span.face .fn{stroke-width:1.1}span.face .fk{stroke-width:1.25}span.face .fx{stroke-width:.85}
+/* fit: the initial. An HTML letter over the tile, written after the svg. 17 of the 56 units, per face size. */
+span.face .fit{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--face-ink);font-family:var(--aui-font);font-size:9.7px;font-weight:600;line-height:1;pointer-events:none}
+span.face.md .fit{font-size:13px}span.face.lg .fit{font-size:16px}span.face.xl .fit{font-size:39px}
+span.face .fp{fill:var(--face-ink);opacity:.6;font-family:var(--aui-font);font-size:6.5px;font-weight:600;text-anchor:middle;letter-spacing:.04em}
+span.face .fl,span.face .fk,span.face .fn,span.face .fm,span.face .fo>*,span.face .fb,span.face .fb path{display:none}
+span.face .fo>*{fill:none;stroke:var(--face-ink);stroke-width:1.3;stroke-linecap:round;stroke-linejoin:round;opacity:.75}
+span.face .fo .o-dots{fill:var(--face-ink);stroke:none}
+span.face .fb circle{stroke:var(--bg);stroke-width:2.5}
+span.face .fb path{fill:none;stroke:#111110;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+@keyframes fblink{0%,94%,100%{transform:none}96%{transform:scaleY(.1)}}
+@keyframes flook{0%,100%{transform:translate(-.5px,-.9px)}50%{transform:translate(.5px,-1px)}}
+@keyframes fscan{0%,100%{transform:translateX(-.8px)}50%{transform:translateX(.8px)}}
+@keyframes ftrace{from{stroke-dashoffset:0}to{stroke-dashoffset:-100}}
+@keyframes fbob{0%,100%{transform:none}50%{transform:translateY(-.7px)}}
+@keyframes ftalk{from{transform:scaleY(.3)}to{transform:scaleY(1.7)}}
+@keyframes fdot{0%,100%{opacity:.15}40%{opacity:.8}}
+@keyframes fglow{0%,100%{opacity:.2}50%{opacity:.8}}
+@keyframes fbreath{0%,100%{opacity:1}50%{opacity:.35}}
+@keyframes flean{from{transform:translateY(.8px)}to{transform:translateY(-.8px)}}
+/* fbobt, fleant: the same two moves for the initial letter, in em so they follow the face size */
+@keyframes fbobt{0%,100%{transform:none}50%{transform:translateY(-.041em)}}
+@keyframes fleant{from{transform:translateY(.047em)}to{transform:translateY(-.047em)}}
+@keyframes fbadge{from{opacity:0;transform:scale(.6)}to{opacity:1;transform:none}}
+@keyframes fcheer{from{opacity:0;transform:scale(.4)}to{opacity:1;transform:none}}
+@keyframes fdraw{from{stroke-dashoffset:100}to{stroke-dashoffset:0}}
+@keyframes fzz{0%{opacity:0;transform:translate(1px,2px)}30%,70%{opacity:.75}100%{opacity:0;transform:translate(-1px,-2px)}}
+/* idle: ready, blinks now and then */
+span.face[data-st="idle"] .fe{animation:fblink 6s infinite}
+/* listen: you are talking to them; eye wide, sound marks in front of the face */
+span.face[data-st="listen"] .fe{transform:scale(1.3)}
+span.face[data-st="listen"] .fr{stroke:var(--aui-blue);opacity:.35}
+span.face[data-st="listen"] .o-wave{display:block;animation:fglow 1.2s ease-in-out infinite}
+/* think: planning before acting; the eye drifts up, thought dots rise. The kit delays the second and third dot with
+   animation-delay; here the delay sits in the shorthand with the same numbers, as the motion rule reads a face's times
+   only beside its keyframes' name. */
+span.face[data-st="think"] .fe{animation:flook 3.2s ease-in-out infinite}
+span.face[data-st="think"] .o-dots{display:block}
+span.face[data-st="think"] .o-dots circle{animation:fdot 1.5s ease-in-out infinite}
+span.face[data-st="think"] .o-dots circle:nth-child(2){animation:fdot 1.5s .2s ease-in-out infinite}
+span.face[data-st="think"] .o-dots circle:nth-child(3){animation:fdot 1.5s .4s ease-in-out infinite}
+/* do and write: on your job; a blue line runs round the frame. write also moves the mouth */
+span.face[data-st="do"] .fr,span.face[data-st="write"] .fr{stroke:var(--aui-blue);stroke-dasharray:24 76;animation:ftrace 1.6s linear infinite}
+span.face[data-st="do"] .fe,span.face[data-st="write"] .fe{transform:translateY(.5px)}
+span.face[data-st="do"] .fbody{animation:fbob 1.6s ease-in-out infinite}
+span.face[data-st="do"] .fit{animation:fbobt 1.6s ease-in-out infinite}
+span.face[data-st="write"] .fm{display:block;animation:ftalk .42s ease-in-out infinite alternate}
+/* solve: a check failed and they are working it out; the eye scans, a slow dashed frame, sparks */
+span.face[data-st="solve"] .fr{stroke:var(--aui-blue);stroke-dasharray:2.2 4.05;animation:ftrace 9s linear infinite}
+span.face[data-st="solve"] .fe{animation:fscan 1.8s ease-in-out infinite}
+span.face[data-st="solve"] .o-spark{display:block;animation:fglow 1.1s ease-in-out infinite}
+/* ask: waits for you; leans in once, the amber frame breathes, a question badge. No bounce. */
+span.face[data-st="ask"] .fr{stroke:var(--aui-amber);animation:fbreath 2.8s ease-in-out infinite}
+span.face[data-st="ask"] .fbody{animation:flean .4s ease-out both}
+span.face[data-st="ask"] .fit{animation:fleant .4s ease-out both}
+span.face[data-st="ask"] .fb,span.face[data-st="ask"] .b-ask{display:block}
+span.face[data-st="ask"] .fb circle{fill:var(--aui-amber)}
+span.face[data-st="ask"] .fb,span.face[data-st="stuck"] .fb{animation:fbadge .3s ease-out both}
+/* done: finished and checked; the frame closes in green and the eye becomes the mark's tick. Plays once. */
+span.face[data-st="done"] .fr{stroke:var(--aui-green);stroke-dasharray:100;animation:fdraw .6s ease-out both}
+span.face[data-st="done"] .fe{display:none}
+span.face[data-st="done"] .fk{display:block;animation:fcheer .45s .35s var(--aui-ease) both}
+span.face[data-st="done"] .fb,span.face[data-st="done"] .b-done{display:block}
+span.face[data-st="done"] .fb circle{fill:var(--aui-green)}
+span.face[data-st="done"] .fb{animation:fcheer .45s .5s var(--aui-ease) both}
+/* stuck: could not finish; red frame and mark, a flat eye, appears and stays still */
+span.face[data-st="stuck"] .fr{stroke:var(--aui-red)}
+span.face[data-st="stuck"] .fe{display:none}
+span.face[data-st="stuck"] .fn{display:block}
+span.face[data-st="stuck"] .fb,span.face[data-st="stuck"] .b-stuck{display:block}
+span.face[data-st="stuck"] .fb circle{fill:var(--aui-red)}
+/* pause: you paused them; grey, eye closed, pause badge, no motion */
+span.face[data-st="pause"]{filter:grayscale(1);opacity:.6}
+span.face[data-st="pause"] .fe,span.face[data-st="rest"] .fe{display:none}
+span.face[data-st="pause"] .fl,span.face[data-st="rest"] .fl{display:block}
+span.face[data-st="pause"] .fb,span.face[data-st="pause"] .b-pause{display:block}
+span.face[data-st="pause"] .fb circle{fill:var(--aui-subtle)}
+span.face[data-st="pause"] .fb path{stroke:var(--ink)}
+/* practice: drafts only; a dashed grey frame, still */
+span.face[data-st="practice"] .fr{stroke:var(--muted);stroke-dasharray:1.6 2.57}
+/* rest: outside working hours; eye closed, a slow z */
+span.face[data-st="rest"] .fbody,span.face[data-st="rest"] .fit{opacity:.8}
+span.face[data-st="rest"] .o-z{display:block;animation:fzz 3s ease-in-out infinite}
+/* The kit's movement setting (data-fm="calm" or "still" on an ancestor) is left out: the app has no Lively, Calm and
+   Still choice yet (the Settings board's, under Appearance), and reduced motion already stills every face. */
+
+/* ---- the app's part: the box a face sits in ------------------------------------------------------------------------
+   Avatar.tsx puts each face in a box the size its caller asked for, which is the footprint the old picture had, so
+   every rule that sizes or places `.ui-av` or `.msg-face` keeps working; the face fills that box and spills over by its
+   negative margin. The box is a block, as the picture was, so the face's own inline box never sits on a line's
+   baseline. Buddy's blue face fills the box as the boards draw it (Report, Updates), with no frame. */
+.ui-av{display:block;flex:none}
+.ui-av>.face{display:block}
+.ui-av>.buddy-face{display:block;width:100%;height:100%}

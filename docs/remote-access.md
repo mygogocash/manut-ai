@@ -3,8 +3,9 @@
 The design for the features the owner pointed at on 25 Nov 2026 in another app's "Sharing and access" and "Labs"
 settings: network access, a tunnel, new devices approved first, permissions, agent activity on a phone, guest links,
 linked environments, a preview tunnel, webhooks held while offline. It was written by a read-only design pass over
-this repository and GoSpark's remote access, which the relay in `apps/api` was lifted from. Nothing here is built yet
-except that relay. The plan's rows are 78a to 78f.
+this repository and GoSpark's remote access, which the relay in `apps/api` was lifted from. Built so far: that relay,
+the channel (78a, `packages/remote-channel`), the Mac's side with Settings › Sharing and access, switched off (78b,
+below), and the read of Tailscale's state (78f's first part, below). The plan's rows are 78a to 78f.
 
 ## The first version
 
@@ -100,8 +101,54 @@ which the repository does not have.
 - Records are authenticated one by one, but the end of a stream is not: a relay that cuts a stream short is noticed
   by the journal's cursors (phase 2), not by the channel.
 
+**What building 78b added** (`apps/desktop/src/remote/`, built switched off):
+
+- **The pieces.** `link.ts` (the relay socket), `keys.ts` with `remote_keys.rs` (the keychain item), `pairing.ts` (one
+  pairing at a time), `serve.ts` (the six requests), `project.ts` (what a phone is shown), `journal.ts` (catch-up),
+  `host.ts` (all of them together), `fromStore.ts` (the store's chats and actions), `fromShell.ts` (the keychain, the
+  page's socket, the health probe), `state.ts` (the switch, the consent and the page's view), and Settings › Sharing and
+  access (`src/settings/RemotePage.tsx`). Nothing opens a socket or makes a key until the switch is turned on after the
+  consent sheet; the app turns it back on at launch only for a person who did (`resumeRemote`).
+- **The keychain item** (account `remote`) is one JSON document: the relay key as its JWK's `d`, `x` and `y`, and per
+  phone its id, name, `pairedAt`, `lastSeen`, K (64 hex digits), door token hash, passkey credential id and public key
+  (base64url) and counter. The page reads it once, imports the relay key and each K as keys script cannot read back,
+  and changes it only through `remote_keys_set_host`, `_add_device`, `_touch_device` and `_remove_device`, which check
+  every field, refuse a second relay key and a passkey that belongs to another phone, and never take a counter back.
+- **Messages inside a pairing channel**, after the grant (the package's 82 bytes): the Mac sends
+  `{"t":"passkey","challenge","rp":{"id"},"user"}`; the phone answers `{"t":"registered","name","credentialId",
+  "clientDataJSON","authenticatorData"}` (base64url); the Mac answers `{"t":"paired"}` or `{"t":"refused","reason"}`
+  and closes the stream. Only then is the phone kept, its own door registered and the pairing door revoked. The phone's
+  name arrives only here, so the Mac's field reads "Type the four digits your phone shows." without it.
+- **Messages inside a session** are JSON with a number `id` the phone picks: `list`, `open` (`chat`), `catchup`
+  (`chat`, `cursor`), `allow` (`chat`, `ask`, `revision`; then again with `option: "once"` and the passkey's `answer`
+  to the challenge), `reply` (`chat`, `ask`, `revision`, and `no: true` or `answer`, or `answers` for an interview),
+  `stop` (`chat`). The Mac answers `chats`, `chat` (a view and a cursor), `events`, `challenge`, `done` or
+  `refused` (`request`, `reason`), and pushes `event` for each change of a chat the phone has open. Anything else is
+  refused by name: `stays_on_mac` for Always allow, the session, a folder, the dial, pairing, Unpair, the switch and the
+  consent; `unknown_request` for the rest. The challenge binds the device, `["<chat>","<ask>"]` as JSON, the revision
+  and `once`.
+- **Revisions.** The store's approvals carry none, so the Mac counts them for a phone: 1 when an ask is first shown, one
+  more whenever what it shows changes. An Allow or a No on another revision is refused as `changed`, also when the ask
+  changed while the person looked at Face ID.
+- **What a phone sees** is masked with `lib/secrets.ts`, the command included (the card masks it too), and shown whole.
+  An ask the card marks as needing an app update, or that the person may only pass on to the shop's owner, offers
+  nothing; an approval offers at most Allow once and No.
+- **The relay's state.** The API's public `/v1/health` now says `relay: "on"` or `"off"`. After a socket that never came
+  up, the link asks it through the shell (the page may open sockets to the API origin but send it no plain request):
+  off is "not available yet" and a try every 15 minutes, as is a socket closed with 4503 or 4429.
+- **At most seven phones**, so the relay's eight devices always leave one for the pairing door.
+- **Tested** against a fake relay and a bare socket in the desktop's tests, and through the real relay object in
+  `apps/api/test/remote-mac.test.ts`, where a scan of every message either side sent or received finds no chat or ask
+  words, no phone name and no key.
+- **Not observed: the page's socket while the window is hidden or the Mac is locked.** The desktop's tests drive the
+  link with a fake socket and the API's with workerd's; neither is the app's WebKit view, and no window was opened for
+  this item. WebKit may slow a hidden page's timers, which would stretch the 50-second ping past the relay's patience
+  for an idle socket only if Cloudflare closes idle sockets sooner than a slowed timer fires; that is to be checked in
+  phase 2 with the window hidden for an hour and the Mac locked, watching the relay's `lastHostSeen`. If it does not
+  hold, `link.ts` moves into the Rust shell as planned.
+
 **Lifted from GoSpark:** `docs/relay-protocol-v1.md` and `docs/security/remote-relay-threat-model.md` (this
-repository's relay code cites both, and neither is in `docs/` here yet); `GoGoCode/Remote/RemoteEventJournal.swift`
+repository's relay code cites both; copied into `docs/` by 78b, each with a note on where this app differs); `GoGoCode/Remote/RemoteEventJournal.swift`
 (the last 500 events or 1 MB a chat, so a phone catches up or gets the whole chat again); `docs/remote.md`'s rules (the
 view clears 15 minutes after the Mac last confirmed it, and links in replies never open directly); and
 `docs/plans/worker-apns-spike-probe.ts` for the signed token Web Push needs. GoSpark's TLS with a shared key cannot be
@@ -144,7 +191,7 @@ tailnet first and starts the relay if the tailnet has not answered in 1.5 second
 handshake proved with K wins, and a phone has one session across both roads. With the relay switched off, a phone on
 the tailnet still pairs and works, so this road needs no server of ours.
 
-**What Settings says**, from a read-only `tailscale.rs` that only ever runs `tailscale status --json`:
+**What Settings says**, from a read-only `tailscale.rs` that only ever runs `tailscale status --json --peers=false`:
 
 - "Tailscale isn't installed."
 - "Open Tailscale and sign in."
@@ -154,6 +201,27 @@ the tailnet still pairs and works, so this road needs no server of ours.
 
 Manut never runs `serve` before HTTPS is on for the tailnet, because `serve` would send the person to a page that
 turns it on.
+
+**Built: the read (78f's first part, 26 Nov 2026).** `apps/desktop/src-tauri/src/tailscale.rs`, the command
+`tailscale_state`, and `apps/desktop/src/remote/tailscale.ts`, which reads it and holds the four lines above in all four
+dictionaries (`tailscale.*`). Nothing shows them yet: the Sharing and access page is 78b's.
+
+- It runs exactly `tailscale status --json --peers=false` (the flag is in the CLI's own help on 1.104.7, so the answer
+  holds no other device), with no shell, at most 5 seconds and 1 MiB read. The CLI is looked for in PATH's absolute
+  folders, then `/usr/local/bin/tailscale`, `/opt/homebrew/bin/tailscale` and
+  `/Applications/Tailscale.app/Contents/MacOS/Tailscale`. On this Mac the first of those is Tailscale's own two-line
+  script that runs the app's binary with the same arguments.
+- Ready needs all of: `BackendState` exactly `Running`; `CurrentTailnet.MagicDNSEnabled` true (read by name on
+  1.104.7's answer: a name that does not resolve on a phone is no use, whatever its certificate); `MagicDNSSuffix` under
+  `ts.net`; `Self.DNSName`, its trailing dot dropped and lowercased, plain DNS labels (letters, digits, hyphens, none
+  starting or ending with a hyphen, at most 253 bytes) under that suffix; and that name among `CertDomains`.
+- A CLI that is missing is "isn't installed". One that fails, exits non-zero, does not answer in time, answers more than
+  the cap or answers what is not read, and any state but `Running`, is "Open Tailscale and sign in". A running answer
+  that fails any other check is the HTTPS line. Nothing is ever ready by default.
+- Only the state and, when ready, the name leave the shell: the parser reads only the five fields above, so addresses,
+  the user, keys and peers never become values. The page checks the name again by the same rule.
+- Tested with a stand-in CLI whose call log holds only `status --json --peers=false`; on this Mac, with Tailscale
+  stopped, the real read says `signed_out`.
 
 **No shortcut for "the tailnet is already private".** Pairing, K and the decision challenge are the same on this road.
 A tailnet holds teammates' devices, shared devices and compromised ones; its access rules change; TLS ends in

@@ -4,6 +4,7 @@
 // environment answers until the owner opens them. Both run on the app's own runtime, so the page asks for it
 // (`__MANUT_IN_PROCESS__`, src/lib/bridge.ts): the suite's server is built for the mock bridge, which makes no shops.
 import { expect, test, type Page } from "@playwright/test";
+import { openHood } from "./start";
 
 const PORT = Number(process.env.MANUT_PORT || 5307);
 
@@ -34,6 +35,7 @@ test.beforeEach(async ({ page }) => {
 async function openDeveloper(page: Page) {
   await page.goto("/");
   await page.getByTestId("nav-settings").click();
+  await openHood(page);
   await page.getByTestId("settings-nav-developer").click();
   await expect(page.getByTestId("make-shop")).toBeVisible();
 }

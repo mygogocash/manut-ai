@@ -62,6 +62,9 @@
   // artifactLinks on, and no page is served anywhere until the var
   // ARTIFACT_ORIGIN names a host of the links' own, never this one. No
   // environment sets ARTIFACT_LINKS or ARTIFACT_ORIGIN (docs/turning-on.md).
+  // Skill links (item 84) are the same links for bundles of skills, behind
+  // skillLinks as well (default the var SKILL_LINKS, which no environment
+  // sets), so pages can be allowed and skills not.
   "main": "src/index.ts",
   "compatibility_date": "2026-09-16",
   // One origin for the pilot (docs/pilot-api.md): this Worker is the front

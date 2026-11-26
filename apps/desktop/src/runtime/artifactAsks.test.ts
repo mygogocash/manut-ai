@@ -3,8 +3,9 @@
 // and only once. Everything else (no answer yet, a no, a withdrawn or expired ask, an ask of the other kind, an id never opened) gives
 // nothing to publish or remove.
 import { beforeEach, describe, expect, it } from "vitest";
-import { answerArtifactAsk, artifactAskRecord, ASK_WAITS_MS, askToRemove, askToShare, resetArtifactAsks, takeSettled, withdrawArtifactAsk } from "./artifactAsks";
+import { answerArtifactAsk, artifactAskRecord, ASK_WAITS_MS, askToRemove, askToShare, askToShareSkills, resetArtifactAsks, reviewOf, takeSettled, withdrawArtifactAsk } from "./artifactAsks";
 import type { RemovePlan, SharePlan } from "./artifacts";
+import type { SkillsPlan } from "./skillBundle";
 
 const PAGE: SharePlan = { shop: "pilot:shop-a", title: "Menu", kind: "html", text: "<h1>Somtam</h1>", bytes: 15 };
 const LINK: RemovePlan = { shop: "pilot:shop-a", id: "art-1", title: "Menu", url: "https://links.example/a/x.y" };
@@ -75,5 +76,52 @@ describe("asking before a link is removed", () => {
     expect(await takeSettled(id, "publish")).toBeNull();
     expect(await takeSettled(id, "remove")).toEqual(LINK);
     expect(await takeSettled(id, "remove")).toBeNull();
+  });
+});
+
+describe("asking before a bundle of skills is published (item 84)", () => {
+  const BUNDLE: SkillsPlan = {
+    shop: "pilot:shop-a",
+    title: "promptpay",
+    skills: [{ name: "promptpay", files: [{ path: "SKILL.md", text: "---\nname: promptpay\n---\n" }, { path: "scripts/qr.sh", text: "#!/bin/sh\n" }] }],
+    bytes: 90,
+    scripts: ["promptpay/scripts/qr.sh"],
+  };
+
+  it("is a public post whose detail is the exact bundle, and whose yes waits until every file was opened", async () => {
+    const id = await askToShareSkills(BUNDLE);
+    const record = await artifactAskRecord(id);
+    expect(record?.request.kind).toBe("public_post");
+    expect(record?.request.detail).toEqual({ what: "skills", plan: BUNDLE });
+    // an unreviewed bundle cannot reach a yes: nothing is decided, and the ask keeps waiting
+    expect(await answerArtifactAsk(id, true)).toEqual({ ok: false, refused: "not_reviewed" });
+    expect((await artifactAskRecord(id))?.status).toBe("pending");
+    expect(await takeSettled(id, "skills")).toBeNull();
+    const review = reviewOf(id)!;
+    review.open("promptpay/SKILL.md");
+    // a file the ask did not show counts for nothing
+    review.open("promptpay/other.md");
+    expect(await answerArtifactAsk(id, true)).toEqual({ ok: false, refused: "not_reviewed" });
+    review.open("promptpay/scripts/qr.sh");
+    expect(await answerArtifactAsk(id, true)).toEqual({ ok: true, yes: true });
+    expect(await takeSettled(id, "skills")).toEqual(BUNDLE);
+    expect(await takeSettled(id, "skills")).toBeNull();
+    // never handed to the page publish or a removal
+    expect(await takeSettled(id, "publish")).toBeNull();
+  });
+
+  it("takes the tick instead of opening every file, and a no needs no review", async () => {
+    const ticked = await askToShareSkills(BUNDLE);
+    reviewOf(ticked)!.tick(true);
+    expect(await answerArtifactAsk(ticked, true)).toEqual({ ok: true, yes: true });
+    const untick = await askToShareSkills(BUNDLE);
+    reviewOf(untick)!.tick(true);
+    reviewOf(untick)!.tick(false);
+    expect(await answerArtifactAsk(untick, true)).toEqual({ ok: false, refused: "not_reviewed" });
+    const declined = await askToShareSkills(BUNDLE);
+    expect(await answerArtifactAsk(declined, false)).toEqual({ ok: true, yes: false });
+    expect(await takeSettled(declined, "skills")).toBeNull();
+    // a page plan's ask has no review to wait for
+    expect(reviewOf(await askToShare(PAGE))).toBeNull();
   });
 });

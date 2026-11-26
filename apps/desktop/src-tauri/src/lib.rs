@@ -32,6 +32,7 @@ mod power;
 mod review;
 mod preview;
 mod providers;
+mod remote_keys;
 #[cfg(all(test, unix))]
 mod pty_bench;
 mod running;
@@ -40,6 +41,8 @@ mod sessions;
 mod source_tools;
 mod shop_cache;
 mod shop_cache_key;
+mod skill_links;
+mod tailscale;
 mod tasks;
 mod term_history;
 mod term_import;
@@ -595,6 +598,48 @@ async fn shop_cache_seal_key_clear() -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(shop_cache_key::clear).await.map_err(|_| "keychain".to_string())?
 }
 
+/// What the keychain keeps for reaching this Mac from a phone (remote_keys.rs): the relay key and the paired phones, as
+/// the JSON document the page reads once and imports at once as keys script cannot read back; null when none is kept.
+/// `unavailable` on a computer with no keychain support, where the page keeps nothing. Reading makes nothing.
+#[tauri::command]
+async fn remote_keys_read() -> Result<Option<String>, String> {
+    let text = tauri::async_runtime::spawn_blocking(remote_keys::read).await.map_err(|_| "keychain".to_string())??;
+    Ok(text.map(|t| t.as_str().to_owned()))
+}
+
+/// Keeps the Mac's relay key, made by the page once the person turned the switch on. Refused (`exists`) when one is kept.
+#[tauri::command]
+async fn remote_keys_set_host(host: remote_keys::HostKey) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || remote_keys::change(|doc| remote_keys::with_host(doc, host)))
+        .await
+        .map_err(|_| "keychain".to_string())?
+}
+
+/// Keeps a newly paired phone. Refused for a malformed record (`invalid`), an id or a passkey already kept (`exists`,
+/// `credential_taken`), and past seven phones (`full`).
+#[tauri::command]
+async fn remote_keys_add_device(device: remote_keys::Device) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || remote_keys::change(|doc| remote_keys::with_device(doc, device)))
+        .await
+        .map_err(|_| "keychain".to_string())?
+}
+
+/// Notes when a phone was last seen and its passkey's counter, which may not go down (`counter`).
+#[tauri::command]
+async fn remote_keys_touch_device(id: String, last_seen: u64, sign_count: u32) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || remote_keys::change(|doc| remote_keys::with_touch(doc, &id, last_seen, sign_count)))
+        .await
+        .map_err(|_| "keychain".to_string())?
+}
+
+/// Forgets a phone at Unpair, its K and passkey with it.
+#[tauri::command]
+async fn remote_keys_remove_device(id: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || remote_keys::change(|doc| Ok(remote_keys::without_device(doc, &id))))
+        .await
+        .map_err(|_| "keychain".to_string())?
+}
+
 /// Keystrokes (and pastes) from the terminal view into session `id`.
 #[tauri::command]
 async fn session_write(shell: State<'_, Shell>, id: u32, data: String) -> Result<(), String> {
@@ -633,10 +678,12 @@ async fn session_close_all(shell: State<'_, Shell>) -> Result<(), String> {
 /// Start allow-listed agent `agent` in folder `cwd` as a chat: its structured mode (the fixed arguments in
 /// the allow-list), with events for the chat view on `on_event` and, once, `{event:"exit", code, error}`.
 /// Only an agent id, a folder, optionally a Claude Code session id or Codex thread id, optionally the account a
-/// restarted session ran with, and the SESSIONS id (`s<digits>`, whose attachment folder a Claude Code chat may
-/// read) cross from the UI.
+/// restarted session ran with, the SESSIONS id (`s<digits>`, whose attachment folder a Claude Code chat may
+/// read) and the permission mode the chat starts in (one the agent offers, `agent_chat::start_mode`; none: its careful
+/// one) cross from the UI.
 #[tauri::command]
-async fn chat_start(shell: State<'_, Shell>, agent: String, cwd: String, resume: Option<String>, account: Option<String>, session: Option<String>, suggest: Option<bool>, on_event: Channel<serde_json::Value>) -> Result<u32, String> {
+#[allow(clippy::too_many_arguments)]
+async fn chat_start(shell: State<'_, Shell>, agent: String, cwd: String, resume: Option<String>, account: Option<String>, session: Option<String>, suggest: Option<bool>, mode: Option<String>, on_event: Channel<serde_json::Value>) -> Result<u32, String> {
     let chats = shell.chats.clone();
     tauri::async_runtime::spawn_blocking(move || {
         // The same account as a terminal session of this agent: its home variable, or nothing ("This computer"), with the
@@ -651,7 +698,7 @@ async fn chat_start(shell: State<'_, Shell>, agent: String, cwd: String, resume:
             ("claude", Some(s)) => user_home().and_then(|h| session_files::session_dir(&h, s)).ok(),
             _ => None,
         };
-        chats.start_agent_with(&agent, std::path::Path::new(&cwd), resume.as_deref(), &account_env, files.as_deref(), suggest.unwrap_or(false), move |out| {
+        chats.start_agent_with(&agent, std::path::Path::new(&cwd), resume.as_deref(), &account_env, files.as_deref(), suggest.unwrap_or(false), mode.as_deref(), move |out| {
             let _ = on_event.send(match out {
                 ChatOut::Event(e) => e,
                 ChatOut::Exit(code, error) => serde_json::json!({"event": "exit", "code": code, "error": error}),
@@ -853,6 +900,69 @@ async fn agent_config_list(cwd: Option<String>) -> Result<Vec<agent_config::Agen
     .map_err(|e| e.to_string())
 }
 
+/// Sharing skills by a link (item 84, skill_links.rs): the person's own skill folders `folders` of `agent` (`claude` or `codex`,
+/// by folder name as Settings › MCP and Skills lists them), read so the page can show every file before anything is asked. Only
+/// reads, and nothing is followed through a link. Rejects `bad_agent`, `no_skills`, or `<why>:<folder>`.
+#[tauri::command]
+async fn skill_bundle_read(agent: String, folders: Vec<String>) -> Result<Vec<skill_links::ReadSkill>, String> {
+    let home = user_home()?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let roots = agent_config::home_skill_roots(&home, &agent, &|k| std::env::var(k).ok());
+        if roots.is_empty() {
+            return Err("bad_agent".to_string());
+        }
+        if folders.is_empty() || folders.len() > skill_links::MAX_SKILLS {
+            return Err("no_skills".to_string());
+        }
+        folders.iter().map(|f| skill_links::read_skill(&roots, f).map_err(|e| format!("{e}:{f}"))).collect()
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Installing skills from a link (skill_links.rs): the bundle at `link`, fetched only when it is on `origin`, the artifact origin
+/// the API named (`other_host` before anything is fetched otherwise), held to the bundle rules again and kept here by id.
+#[tauri::command]
+async fn skill_link_read(installs: State<'_, Arc<skill_links::Installs>>, link: String, origin: String) -> Result<skill_links::LinkRead, String> {
+    let l = Arc::clone(&installs);
+    tauri::async_runtime::spawn_blocking(move || {
+        let bundle = skill_links::read_link(&link, &origin, &api_link::fetch_link)?;
+        let read = l.keep_read(bundle.clone());
+        Ok(skill_links::LinkRead { read, title: bundle.title, skills: bundle.skills })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// The ask to install skills `names` of kept bundle `read` for `agent`, into that agent's own skills folder. Writes nothing;
+/// rejects `exists:<name>` for a skill it has, `link_root`, `bad_bundle:<why>`, `not_found` or `expired`.
+#[tauri::command]
+async fn skill_install_ask(installs: State<'_, Arc<skill_links::Installs>>, read: String, names: Vec<String>, agent: String) -> Result<skill_links::InstallAsk, String> {
+    let home = user_home()?;
+    let l = Arc::clone(&installs);
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = agent_config::install_root(&home, &agent, &|k| std::env::var(k).ok()).ok_or("bad_agent")?;
+        l.ask(&home, &agent, &root, &read, &names)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// The person's answer to install ask `id`, once approval-core settled it on the page: a No writes nothing, a Yes writes what the
+/// ask named, once, with no executable bit, running nothing. Only the id and the answer cross.
+#[tauri::command]
+async fn skill_install_settle(installs: State<'_, Arc<skill_links::Installs>>, id: String, yes: bool) -> Result<skill_links::InstallDone, String> {
+    let l = Arc::clone(&installs);
+    tauri::async_runtime::spawn_blocking(move || l.settle(&id, yes)).await.map_err(|e| e.to_string())?
+}
+
+/// Takes a waiting install ask back, so a later answer to it writes nothing.
+#[tauri::command]
+async fn skill_install_withdraw(installs: State<'_, Arc<skill_links::Installs>>, id: String) -> Result<(), String> {
+    installs.withdraw(&id);
+    Ok(())
+}
+
 /// Settings › Workflows (item 77b): the workflow files in `~/.manut/workflows/`, read now (workflows.rs). Only reads: a file
 /// the shell cannot read is listed with why, never changed.
 #[tauri::command]
@@ -866,6 +976,15 @@ async fn workflows_read() -> Result<workflows::Folder, String> {
 async fn workflows_folder() -> Result<String, String> {
     let home = user_home()?;
     tauri::async_runtime::spawn_blocking(move || workflows::make(&home).map(|p| p.to_string_lossy().into_owned())).await.map_err(|e| e.to_string())?
+}
+
+/// Settings › Workflows (item 91): whether a workflow's project is a folder a run may start in (workflows.rs `project`): its real
+/// path, or a short code (`missing`, `link`, `too_broad`, `app_folder`, `not_repo`, `no_git`). Asked when the person allows a
+/// workflow and again before every run. Only reads, and asks git nothing but where its top folder is.
+#[tauri::command]
+async fn workflows_project(project: String) -> Result<String, String> {
+    let home = user_home()?;
+    tauri::async_runtime::spawn_blocking(move || workflows::project(&home, &project).map_err(str::to_string)).await.map_err(|e| e.to_string())?
 }
 
 /// Settings › Worktrees: the folder the person chose for lanes' folders, checked and made (lane.rs `check_lanes_root`): its real
@@ -1407,6 +1526,7 @@ pub fn run() {
             app.manage(Arc::new(gh_me::Me::default()));
             // the asks that push a lane and open or merge its pull request, each settled once (review.rs)
             app.manage(Arc::new(review::Ledger::default()));
+            app.manage(Arc::new(skill_links::Installs::default()));
             // free space on the home folder's volume, read once a minute (disk.rs)
             app.manage(disk::Disk::start(app.handle().clone(), user_home().ok()));
             // close = hide to the tray / menu bar, and the keep-awake assertion's worker (tray.rs, power.rs)
@@ -1554,7 +1674,13 @@ fn commands(invoke: tauri::ipc::Invoke) -> bool {
         lane_root_check,
         workflows_read,
         workflows_folder,
+        workflows_project,
         agent_config_list,
+        skill_bundle_read,
+        skill_link_read,
+        skill_install_ask,
+        skill_install_settle,
+        skill_install_withdraw,
         lane_release,
         lane_clean_merged,
         source_pull,
@@ -1606,6 +1732,11 @@ fn commands(invoke: tauri::ipc::Invoke) -> bool {
         shop_cache_clear,
         shop_cache_seal_key,
         shop_cache_seal_key_clear,
+        remote_keys_read,
+        remote_keys_set_host,
+        remote_keys_add_device,
+        remote_keys_touch_device,
+        remote_keys_remove_device,
         term_link::term_link_take,
         disk::disk_watch,
         turn_files::turn_files_take,
@@ -1626,7 +1757,8 @@ fn commands(invoke: tauri::ipc::Invoke) -> bool {
         voice::voice_listen,
         voice::voice_stop,
         computer::computer_status,
-        computer::computer_open
+        computer::computer_open,
+        tailscale::tailscale_state
     ];
     answer(invoke)
 }

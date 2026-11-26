@@ -67,7 +67,7 @@ export interface Pulled {
 }
 
 /** The codes `source_pull` answers, each with words of its own (`pull.why.<code>`). */
-export const PULL_CODES = ["pulled", "current", "not_a_repository", "lane", "git_missing", "config", "busy", "detached", "no_upstream", "not_default", "unread", "changes", "ahead", "fetch_failed", "diverged", "failed"] as const;
+export const PULL_CODES = ["pulled", "current", "not_a_repository", "lane", "git_missing", "config", "busy", "detached", "no_upstream", "not_default", "submodules", "unread", "changes", "ahead", "fetch_failed", "diverged", "failed"] as const;
 export type PullCode = (typeof PULL_CODES)[number];
 
 /** The shell's answer, or null for one that is not a pull's. */

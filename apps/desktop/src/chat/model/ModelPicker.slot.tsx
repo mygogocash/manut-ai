@@ -1,11 +1,13 @@
-// Header right: the ONE control. `● <Model> | <Reasoning> ⌄` opens a popover with the providers' models
-// and a reasoning control. Changes go to `chat.set_model` for the bot's main chat; when the bridge refuses
+// A member's model and reasoning: `● <Model> | <Reasoning> ⌄` opens a popover with the providers' models and a
+// reasoning control. It sits in the chat box (item 85f moved it there from the header, beside where item 80 put
+// Buddy's), as a quiet button whose menu opens above the box. Changes go to `chat.set_model` for the bot's main chat; when the bridge refuses
 // (e.g. `unsupported`) the old value stays and a one-line note says to change it in Hermes.
 // The list has a search field (focused on open; Up/Down/Enter pick, Esc closes) and one chip per vendor.
 // A bot Hermes says cannot answer (ready.ts, the chat's connect block) has a gray dot, not the green one, and an
 // empty list says so instead of "No models match": a new user sent here by the installer has nothing to pick yet.
 import { useEffect, useMemo, useRef, useState } from "react";
 import "./model.css";
+import "../box/box.css";
 import type { SlotProps } from "../../features";
 import { getStore, useStore } from "../../state/store";
 import { ChevronDown, ModelIcon, Popover, SearchIcon } from "../../ui";
@@ -21,7 +23,7 @@ export const slot = "modelPicker";
 
 type Change = { model?: string; provider?: string; reasoning?: string };
 
-export default function ModelPicker({ bot, chat }: SlotProps["modelPicker"]) {
+export default function ModelPicker({ bot, chat, inBox = false }: SlotProps["modelPicker"]) {
   const s = useStore();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -107,11 +109,11 @@ export default function ModelPicker({ bot, chat }: SlotProps["modelPicker"]) {
   });
 
   return (
-    <div className="mp-wrap">
+    <div className={inBox ? "bx-w" : "mp-wrap"}>
       <button
         ref={pillRef}
         type="button"
-        className={`mp${open ? " on" : ""}`}
+        className={`mp${inBox ? " bx-pick" : ""}${open ? " on" : ""}`}
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="dialog"
         aria-expanded={open}
@@ -147,7 +149,8 @@ export default function ModelPicker({ bot, chat }: SlotProps["modelPicker"]) {
         }}
         label={t("mp.title")}
         width={320}
-        className="mp-pop"
+        side={inBox ? "top" : "bottom"}
+        className={inBox ? "mp-pop bx-pop" : "mp-pop"}
       >
         <div data-testid="model-pop" aria-busy={busy}>
           <label className="mp-search">

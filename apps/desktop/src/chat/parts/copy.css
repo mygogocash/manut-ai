@@ -61,7 +61,7 @@
 .msg-line > .msg-prompt {
   position: static;
   flex: none;
-  margin: calc((var(--fs-msg) * var(--lh-msg) + 18px - 22px) / 2) 0 0;
+  margin: calc((var(--you-line) - 22px) / 2) 0 0;
 }
 
 /* a code block's own, in its top right corner */

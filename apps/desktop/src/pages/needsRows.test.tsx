@@ -1,5 +1,6 @@
-// The Needs you list as the design canvas's ask (Approvals.dc.html) draws it: who asks and what they do, what is asked with
-// the exact action under it, which kind, since when it waits, and Look first. Drawn with react-dom/server from the rows it is
+// The Needs you list as the design canvas's ask (Approvals.dc.html) draws it: one card an ask, with who asks and what they
+// do, since when it waits (one time), which kind as its amber mark, what is asked with the exact action under it, and Look
+// first. Drawn with react-dom/server from the rows it is
 // given; the last test builds the rows from the app's own store on the demo runtime.
 import { isValidElement, type ReactElement, type ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -40,7 +41,7 @@ describe("an ask on Needs you", () => {
     asked: "09:14",
   });
 
-  it("says who asks and what they do, what is asked with its exact action under it, since when it waits and how long ago", () => {
+  it("says who asks and what they do, what is asked with its exact action under it, and since when it waits, one time only", () => {
     setLang("en");
     const html = renderToString(<NeedsView rows={[full]} />);
     const text = words(html);
@@ -49,7 +50,11 @@ describe("an ask on Needs you", () => {
     expect(text).toContain("Nam · Sales chat · Waiting since 09:14");
     // an ask from one of several shops names its shop beside who asks
     expect(words(renderToString(<NeedsView rows={[{ ...full, who: "Buddy", role: undefined, shop: "Ran Pa Noi" }]} />))).toContain("Buddy · Ran Pa Noi · Waiting since 09:14");
-    expect(text).toContain("Approve 3m");
+    // one time: when it was asked, not also how long ago
+    expect(text).not.toContain("3m");
+    // the kind is the card's amber mark, not a button
+    expect(html).toMatch(/<span class="tag warn">Approve<\/span>/);
+    expect(html.match(/<button/g)).toHaveLength(2);
   });
 
   it("falls back to the ask's one line when the row has no card words, and leaves out what it does not know", () => {
@@ -57,7 +62,8 @@ describe("an ask on Needs you", () => {
     const html = renderToString(<NeedsView rows={[row({ text: "Allow `ls`?" })]} />);
     expect(html).toContain("<code>ls</code>");
     expect(html).not.toContain('class="act"');
-    expect(words(html)).toContain("Nam Approve 3m");
+    // with no time it was asked, the one time is how long ago
+    expect(words(html)).toContain("Nam · 3m Approve");
     expect(words(html)).not.toContain("Waiting since");
   });
 
