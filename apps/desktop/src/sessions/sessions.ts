@@ -70,7 +70,6 @@ import { busyMate, continuedDraft, laneFree, type ContinuePick } from "./continu
 import { parseCommands, type AgentCommand } from "../chat/parts/commands";
 import { noteMcpSeen } from "../settings/mcp/agentConfig";
 import { t as tr, type Key } from "../i18n";
-import { sandboxSaid } from "../appStore";
 import { recordError } from "../report/errors";
 import { notesSaid } from "./projectNotes";
 import { windowWatched, type SessionNote } from "../lib/notify";
@@ -79,6 +78,8 @@ import { watchOpenFolder } from "./revealOpen";
 import { getSplit, groupOf, leaveIn, setSplit } from "./splitState";
 import { folderGroups, getFolderPrefs, orderFolders, pathKey, ranElsewhere, revealFolder as openFolderGroup, setFolderGone } from "./folders";
 import { broughtBackNote, REWINDS, rewoundNote, TurnBook, turnTitle } from "./rewind";
+import { NO_RULES, signedOutSaid, errText } from "./sessionErrors";
+export { NO_RULES, signedOutSaid } from "./sessionErrors";
 import type { ModelOption, SessionsState, AgentLive, Term, TermIo, ChatProc } from "./sessionTypes";
 export type { ModelOption, SessionsState, AgentLive } from "./sessionTypes";
 
@@ -168,36 +169,6 @@ const titleKey = (r: SessionRec) => (r.agentSession ? `${r.agent}:${r.agentSessi
 
 /** Agents whose own session files carry a conversation title the bridge can read (`cli.title`). */
 const TITLED: readonly AgentId[] = ["claude", "codex"];
-
-/** The shell's own words when it will not start OpenCode (`NO_RULES` in acp_chat.rs, kept equal by a test); for Kilo
- *  Code the same sentence names Kilo Code (`no_rules`). */
-export const NO_RULES = "OpenCode did not start because Manut AI could not confirm it would keep your own OpenCode permission rules.";
-
-/** The shell's own sentence for an Agent Client Protocol agent that is not signed in (`signed_out` in acp_chat.rs,
- *  the command between backticks; a test keeps the two equal). */
-const SIGNED_OUT = /^(.+) is not signed in\. Run `([^`]+)` in a terminal and sign in\.$/;
-
-/** `text` as a person reads it: the shell's not-signed-in sentence is said in their language with the command as
- *  plain words (no backticks); anything else is returned as it is. */
-export const signedOutSaid = (text: string): string => {
-  const m = SIGNED_OUT.exec(text.trim());
-  return m ? tr("ss.signedOut", { agent: m[1], cmd: m[2] }) : text;
-};
-
-const errText = (e: unknown) =>
-  signedOutSaid(
-    // (a terminal the App Store edition's sandbox refused is said in plain words, src/appStore.ts)
-    sandboxSaid(
-      typeof e === "string"
-        ? e
-        : e instanceof Error
-          ? e.message
-          : typeof e === "object" && e && "message" in e
-            ? String((e as { message: unknown }).message)
-            : String(e),
-      tr,
-    ),
-  );
 
 const readOpens = () => {
   try {
