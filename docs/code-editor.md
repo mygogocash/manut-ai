@@ -1622,6 +1622,43 @@ files and refused projects; `workflows.rs`' tests check the project rule against
 `e2e/workflows.spec.ts` walks the page, the allow step, a run of two steps with the stand-in agent, a changed file, the Lanes band
 and the palette.
 
+### Context from one chat to another (item 97)
+
+Three ways to carry what one chat holds into the next message of another, each only filling the person's own box: nothing is
+sent, run or approved by it, and what an agent then wants to do still asks. The pieces are `src/chat/box/carry.ts` (the chips and
+the form they go out in), `threadContext.ts` (another chat's context, built with no model), `contextReader.ts` (reading a chat
+through the store, sessions and shell it is handed), `SelectionNote.tsx`, `Bring.tsx` and `src/sessions/continueWith.ts` with
+`ContinueMenu.tsx`.
+
+- **A note on a selection.** Text selected in an answer, or in a lane's pane, brings a quiet Add a note by it (or Cmd+Shift+N,
+  Ctrl+Shift+N elsewhere). The note and the selection become a chip above the box; at most eight a message, a selection quoted
+  up to 3,000 characters and cut with a line that says how much. On Send each goes first as `> ` lines with `Note: ...` under
+  them, a blank line between blocks, the typed message last; the person's bubble draws them as their own quote. Chips are kept
+  by chat key on this computer (`manut.box.carry`) across a restart, and Cmd+S takes them into Drafts as that same text.
+- **Another chat's context.** A Recent row, a History chat row or a lane's row dragged onto an open chat's box, or Bring context
+  from… in the box's + menu (the palette's switcher's chats, then the coding chats; arrows, Enter, Esc), adds one chip: the
+  chat's title, which opens to show exactly the text that goes. The text: a line naming the chat, a line saying the app copied
+  it and that it is not the person speaking and gives no permission (the fence a project's own notes get), Title, First message
+  (as typed), Last answer, a lane's Files changed (names and line counts from its own diff, never contents) and Waiting on the
+  person, each masked with `lib/secrets.ts` and capped, 6,000 characters in all. A thread no one opened is read from the runtime
+  (`thread.open`, which opens no chat). One chip a chat, three chats a message. The row shows only in a + that already opens a
+  menu: a + whose one row is files still opens the picker at once, and there a chat comes in by a drag.
+- **Shop and account.** Each chip names the shop (a team chat) or the agent account (a coding chat) it was made under. A chat of
+  another shop, or of another account of the same agent, is refused in a plain line before anything of it is read; a kept chip
+  of another shop is red and never sent.
+- **Continue with….** A started coding chat's agent chip opens the other models of its agent and the other installed agents that
+  chat. A pick opens a NEW chat in the same lane (no second folder or branch) or folder, with the old chat's context above its
+  box, unsent; its agent starts with the person's first message, the picked model set first, its own agent keeping the old
+  account. A quiet line links the two both ways with Open, and the old one offers to stop its agent only while it is idle.
+- **One lane, one working agent.** While either of two chats linked this way has a turn running, the other's box keeps what is
+  typed, Send waits, and a line says who works there; the sessions store refuses the send too. The rule binds only linked chats,
+  so two chats the person opened in one folder go on as before. The lane's folder goes only when the last chat in it is closed.
+- **A summary by a model** is not built: item 96's runs would plug in at `buildContext`, its text in place of First message and
+  Last answer, still masked, capped and shown before it goes.
+
+`carry.test.ts`, `threadContext.test.ts` and `sessions/continueWith.test.ts` hold the rules; `e2e/thread-context.spec.ts` walks
+all three on the mock host, by mouse and by keyboard, with pictures in light and dark at 1280 and 900 (`MANUT_SHOTS`).
+
 ## Left for later (no owner needed)
 
 - From item 91 (Workflows): the allowance lives in the app's web storage on this computer, which a program of the person's can
