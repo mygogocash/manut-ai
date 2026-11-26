@@ -1177,6 +1177,15 @@ another's files or the developer's folder.
   install, a generated file) happens by itself. The chat says it as the lane starts: where Kit works, how many of the
   developer's changed files did not come along, and that nothing is installed there yet. The app installs nothing; Kit may,
   and the dial asks first, as for any install.
+- **A helper lane** (item 102f, `src-tauri/src/lane_helper.rs`; [several agents](several-agents.md), R8) is the one lane
+  made otherwise: from a snapshot of its lead lane's folder, so it starts with the lead's uncommitted work and new files
+  (never what git ignores). The lead's index is copied to a temporary index of the shell's own and the snapshot written there
+  (`git add -A`, `write-tree`, `commit-tree` on top of the lead's HEAD as "Manut AI"), kept by
+  `refs/manut/helpers/<job>/<folder>`; the lead's index, HEAD, branch, stash and files never change. The helper lane is a
+  worktree beside the lead's folder on `<lead's branch>-help-<n>` at that commit, its record naming its job, its lead and the
+  ref, and is listed and removed as any lane (Remove takes the ref with the record). Its agent settings come from the
+  developer's folder, never from the lead's copy. The page calls `lane_helper_worktree` with the lead lane's folder and the
+  job's id only.
 - **When a folder goes.** When its session is closed (the chat is deleted), once its agent stopped, and Settings › Worktrees'
   "Remove the folder when its chat is deleted" is on (it is, by default), `lane_release` removes it only if nothing in it is
   changed or new, git is not partway through a rebase, merge, cherry-pick, revert or bisect there, every commit on its branch

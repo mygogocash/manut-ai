@@ -27,6 +27,7 @@ mod lane;
 mod lane_clean;
 mod lane_config;
 mod lane_diff;
+mod lane_helper;
 mod outside_use;
 mod past_chats;
 mod import_past;
@@ -997,6 +998,19 @@ async fn lane_worktree(cwd: String, names: Vec<String>, start: Option<lane::Star
     tauri::async_runtime::spawn_blocking(move || lane::make_with(&home, std::path::Path::new(&cwd), &names, &start)).await.map_err(|e| e.to_string())?
 }
 
+/// A helper lane's own working folder (item 102f, lane_helper.rs; docs/several-agents.md R8): a snapshot of the lead lane's
+/// folder `lead` as it is now (its files staged or not and its new files git does not ignore, taken with an index file of the
+/// shell's own, so the lead's index, HEAD, branch, stash and files never change), kept under the app's own ref and checked out
+/// in a new worktree beside the lead's, on a branch named from the lead's (`kit/<words>-help-1`), its record naming job `job`
+/// and the lead. The page names only a lane the app made and a job's id: the folder, the branch and the ref are the shell's.
+/// Nothing is pushed, and no agent starts. A refusal is a short code (`bad_job`, `not_a_lane`, `lead_is_helper`, `busy`,
+/// `no_commit`, `taken`, `no_folder`, `git_missing`, a chosen folder's own) or git's own last line, with nothing made.
+#[tauri::command]
+async fn lane_helper_worktree(lead: String, job: String) -> Result<lane::Made, String> {
+    let home = user_home()?;
+    tauri::async_runtime::spawn_blocking(move || lane_helper::make(&home, &lead, &job)).await.map_err(|e| e.to_string())?
+}
+
 /// Settings › MCP and Skills: the MCP servers and skills Claude Code and Codex have, by name and where each comes from, read
 /// from their own files for the person's own home and, when given, the project folder `cwd` (agent_config.rs). Only reads,
 /// and names only: never a command, an argument, an environment value, a header or an address.
@@ -1937,6 +1951,7 @@ fn commands(invoke: tauri::ipc::Invoke) -> bool {
         term_share_take,
         session_branch,
         lane_worktree,
+        lane_helper_worktree,
         lane_list,
         lane_projects,
         lane_remove,
