@@ -3426,12 +3426,14 @@ export const en = {
   "computer.bounds": "What your agent may do",
   "computer.looks": "Look: only at the apps you allow, chat by chat. The first look at an app asks you on a card, and that yes lasts until the chat ends. Other apps' window titles are not shown.",
   "computer.acts": "Act: every click, typing, key press or menu choice asks you first on a card that says what and where, with the exact text, and runs once. Never several under one yes, and nothing while the screen is locked.",
-  "computer.never": "Never: Manut AI's own windows, System Settings, Keychain Access and Passwords, the Mac's password and permission prompts, and what a password field holds.",
+  "computer.never": "Never: Manut AI's own windows and its pages in any browser, System Settings, Keychain Access and Passwords, the parts of macOS that are not apps you open (its password, Touch ID and permission prompts, alerts and helpers), and what a password field holds.",
   "computer.unsigned": "This copy of Manut AI is not signed with a Developer ID, so macOS forgets both permissions after each update. After updating, turn Manut AI off and on again in each pane.",
   "computer.notMac": "Computer use is on the Mac only for now.",
   "computer.ask.look": "Let your agent look at {app} in this chat?",
   "computer.ask.click": "Click {control} in {app}?",
   "computer.ask.set": "Type into {control} in {app}?",
+  "computer.ask.replace": "Replace everything in {control} ({n} characters) in {app}?",
+  "computer.ask.replaceOne": "Replace everything in {control} (1 character) in {app}?",
   "computer.ask.key": "Press {keys} in {app}?",
   "computer.ask.menu": "Choose {menu} in {app}?",
   "computer.ask.app": "App: {app}",
@@ -3442,6 +3444,7 @@ export const en = {
   "computer.ask.keys": "Keys: {keys}",
   "computer.ask.menuPath": "Menu: {menu}",
   "computer.ask.text": "Text: {text}",
+  "computer.ask.replaceText": "Replace with: {text}",
   "computer.ask.lookNote": "It may read the text and controls of {app}'s windows and take their picture until this chat ends. Never what a password field holds.",
   // Tailscale (item 78f, docs/remote-access.md, "The second road: Tailscale"): what Settings, Sharing and access will say
   // about Tailscale on this Mac, as src-tauri/src/tailscale.rs reads it (src/remote/tailscale.ts). Nothing shows them yet.
