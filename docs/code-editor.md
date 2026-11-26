@@ -1138,7 +1138,14 @@ helper or a status line program in a chat the app starts, where the agent has a 
   instruction files"). Checked on this Mac with OpenCode 2.3.0: `opencode debug config --standalone` in a folder with an
   `opencode.json` and a `.opencode` folder lists both as sources without it and neither with it, while the person's own
   configuration and an inline `OPENCODE_CONFIG_CONTENT` stay. A person's variable of that name is refused on Settings ›
-  Providers, as the app's own, and the app's value goes last.
+  Providers, as the app's own, and the app's value goes last. Since item 114 the inline value (after the ask rules) also says
+  `"formatter": false` and `"lsp": false`: OpenCode runs formatters after its write, edit and patch tools and language servers
+  for the files it touches, and both find and run the project's own tools and configs (a project-local Prettier, an ESLint
+  config), so the person's own config switching them on would still run the project's code with no card. Both keys take
+  `false` as "disabled" in OpenCode's own schema (1.x: "Omit or set to false to disable"; 2.3.0's config reader takes a boolean
+  for each, and `opencode debug config --standalone` on this Mac lists the inline value with both after the person's own
+  config, where a later `false` wins). Only a managed or organisation config, which OpenCode reads after it, could switch them
+  on again.
 
 **What a developer loses inside an app chat.** Claude Code: the project's `.claude/settings.json` and
 `.claude/settings.local.json` no longer apply, so their hooks, their allow, ask and deny rules (a team's deny rules
@@ -1146,7 +1153,9 @@ included), `env`, `defaultMode`, plugins (`enabledPlugins`) and model; the proje
 approved ones; the project's CLAUDE.md, `.claude/CLAUDE.md`, `.claude/rules`, CLAUDE.md files in the folders above it and
 `CLAUDE.local.md` are not read; the project's skills, commands and subagents are not offered; a "don't ask again" Claude Code
 writes to the local file is not read back. Buddy's chat, in its own empty folder, no longer reads a CLAUDE.md in the folders
-above it (`~/CLAUDE.md`). OpenCode: the project's `opencode.json` and `.opencode` folder, and its instruction files. What stays,
+above it (`~/CLAUDE.md`). OpenCode: the project's `opencode.json` and `.opencode` folder, and its instruction files; and
+since item 114 the formatters and language servers the person's own config switches on (files the agent writes are not
+formatted for it, and it gets no diagnostics from a language server). What stays,
 as a terminal would have it: the person's own settings, CLAUDE.md, rules, skills, commands, subagents and the plugins their
 own settings turn on, the MCP servers in `~/.claude.json` and their claude.ai connectors (read whatever the sources, Agent SDK
 page), managed settings, and auto memory. Kit's dial and the cards are unchanged. A developer who wants a project's own setup

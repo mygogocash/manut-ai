@@ -276,7 +276,7 @@ fn ask_rules(listing: &str, primary: &str, asked: &[(&str, &str)], fold: bool) -
             format!("{}:{{\"permission\":{{{}}}}}", q(&agent.name), tools.join(","))
         })
         .collect::<Vec<_>>();
-    let value = format!("{{\"agent\":{{{}}}}}", agents.join(","));
+    let value = format!("{{\"agent\":{{{}}}{PROJECT_CODE_OFF}}}", agents.join(","));
     // The agent replaces `{file:…}` and `{env:…}` (also written `${…}`) inside this value with a file's
     // content or a variable, though it left the same text literal in the project file it came from: no value at all
     // when an agent's name or a pattern holds the start of one, so the agent is not listed again with it.
@@ -285,6 +285,16 @@ fn ask_rules(listing: &str, primary: &str, asked: &[(&str, &str)], fold: bool) -
 
 /// How a reference to a file or to an environment variable starts in OpenCode's config text.
 const CONFIG_TOKENS: [&str; 2] = ["{file:", "{env:"];
+
+/// Item 114: what the value also says, after the ask rules. OpenCode runs formatters after its write, edit and patch tools
+/// and language servers for the files it touches, and both find and run the project's own tools and their configs (a
+/// project-local Prettier, an ESLint config), so a chat would run the project's code with no card even though the project's
+/// own config is left out (`OPENCODE_DISABLE_PROJECT_CONFIG`): the person's own config can switch them on. OpenCode's config
+/// takes `false` for both as "disabled" (its 1.x schema, "Omit or set to false to disable"; 2.3.0's parser takes a boolean
+/// for each, and a later `false` wins over an earlier `true`). Its own documents come before this value; only a managed or
+/// organisation config, which comes after, could switch them on again. A person loses, in an app chat, the formatting of the
+/// files the agent writes and the language servers' diagnostics the agent reads; a terminal keeps both.
+const PROJECT_CODE_OFF: &str = ",\"formatter\":false,\"lsp\":false";
 
 /// The two listings (`first` without `rules`, `listing` with them set) as far as manut's own rules cannot explain a
 /// difference: `rules` is what `first` gives, both name the same agents in the same order, each with the same mode,
@@ -1248,7 +1258,9 @@ fn decide_on(rules: &[(String, String, String)], tool: &str, input: &str, fold: 
         // the very rules the recording started OpenCode with
         let p = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests").join("fixtures").join("acp").join("opencode-rules.json");
         let all: Value = serde_json::from_str(&std::fs::read_to_string(p).unwrap()).unwrap();
-        assert_eq!(rules, s(&all[case], "env_sent"), "{case}");
+        // (and, since item 114, formatters and language servers switched off after them)
+        let sent = s(&all[case], "env_sent");
+        assert_eq!(rules, format!("{}{PROJECT_CODE_OFF}}}", &sent[..sent.len() - 1]), "{case}");
         // OpenCode, started with these rules, resolved exactly them, and nothing in bash or edit is allowed unasked
         assert!(opencode_kept(&base, &rules, &in_manut), "{case}");
         assert!(!opencode_kept(&base, &rules, &base), "{case}: without the rules OpenCode runs tools unasked");
@@ -1307,6 +1319,22 @@ fn decide_on(rules: &[(String, String, String)], tool: &str, input: &str, fold: 
     #[test]
     fn real_opencode_rules_with_nothing_set_everything_asks() {
         check_rules("none", &[("bash", "echo hi", "allow", "ask"), ("bash", "rm -rf x", "allow", "ask"), ("edit", "a.md", "allow", "ask")]);
+    }
+
+    /// Item 114: OpenCode runs formatters after its write, edit and patch tools, and language servers for the files it
+    /// touches, and both find the project's own tools (a project-local Prettier and its config, an ESLint config): code of
+    /// the project's that runs without a card. The person's own config may switch them on even with the project's left out,
+    /// so the value the chat starts with switches both off, in the keys OpenCode's config takes for that ("Omit or set to
+    /// false to disable", its 1.x schema; `formatter: false` and `lsp: false` in 2.3.0's, read back with `debug config`).
+    #[test]
+    fn the_value_a_chat_starts_with_switches_off_formatters_and_language_servers() {
+        let (base, in_manut, _) = rules_case("none");
+        let rules = opencode_ask(&base).unwrap();
+        let v: Value = serde_json::from_str(&rules).unwrap();
+        assert_eq!((&v["formatter"], &v["lsp"]), (&Value::Bool(false), &Value::Bool(false)), "{rules}");
+        // the ask rules are as before, and still read back as kept
+        assert!(v["agent"]["build"]["permission"]["bash *"].is_object());
+        assert!(opencode_kept(&base, &rules, &in_manut));
     }
 
     #[test]
@@ -1626,8 +1654,8 @@ fn decide_on(rules: &[(String, String, String)], tool: &str, input: &str, fold: 
         let person = [rule("*", "*", "allow"), rule("Bash", "*", "deny"), rule("Edit", "*", "allow"), rule("Edit", "*.key", "deny")];
         let first = listing(&[("build (primary)", &person)]);
         let rules = opencode_ask_on(&first, true).unwrap();
-        assert_eq!(rules, r#"{"agent":{"build":{"permission":{"bash *":{"*":"deny"},"bash ":{"*":"deny"},"bash ?*":{"*":"deny"},"edit *":{"*":"ask","*.key":"deny"},"edit ":{"*":"deny"},"edit ?*":{"*":"deny"}}}}}"#);
-        assert_eq!(opencode_ask_on(&first, false).unwrap(), r#"{"agent":{"build":{"permission":{"bash *":{"*":"ask"},"bash ":{"*":"deny"},"bash ?*":{"*":"deny"},"edit *":{"*":"ask"},"edit ":{"*":"deny"},"edit ?*":{"*":"deny"}}}}}"#);
+        assert_eq!(rules, r#"{"agent":{"build":{"permission":{"bash *":{"*":"deny"},"bash ":{"*":"deny"},"bash ?*":{"*":"deny"},"edit *":{"*":"ask","*.key":"deny"},"edit ":{"*":"deny"},"edit ?*":{"*":"deny"}}}},"formatter":false,"lsp":false}"#);
+        assert_eq!(opencode_ask_on(&first, false).unwrap(), r#"{"agent":{"build":{"permission":{"bash *":{"*":"ask"},"bash ":{"*":"deny"},"bash ?*":{"*":"deny"},"edit *":{"*":"ask"},"edit ":{"*":"deny"},"edit ?*":{"*":"deny"}}}},"formatter":false,"lsp":false}"#);
         let own = |fold: bool| if fold { vec![rule("bash *", "*", "deny"), rule("edit *", "*", "ask"), rule("edit *", "*.key", "deny")] } else { vec![rule("bash *", "*", "ask"), rule("edit *", "*", "ask")] };
         for fold in [true, false] {
             let rules = opencode_ask_on(&first, fold).unwrap();
