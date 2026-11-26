@@ -8,6 +8,7 @@ import { withMine, type RegistryList } from "../settings/agents/acpRegistry";
 import type { AskTool } from "../lib/protocol";
 import { t } from "../i18n";
 import { steersOf } from "./controls";
+import { withoutHelperPolicy } from "../jobs/helperPolicy";
 import type { DiskLevel, DiskState } from "../lib/disk";
 import type { ImportApp, ImportProfile } from "./term/import";
 import { type GitView } from "../code/moved";
@@ -1350,6 +1351,34 @@ const MOCK_SUB_EDIT = [
   { path: "calc.py", kind: "update" as const, lines: ["@@ -6 +6,5 @@", "     return a - b", "+", "+", "+def mul(a, b):", "+    return a * b"], added: 4, removed: 0 },
 ];
 
+/** A helper block as a lead lane's agent writes one (item 102e). */
+const helperBlock = (o: Record<string, unknown>) => `\`\`\`manut-helpers\n${JSON.stringify(o)}\n\`\`\``;
+
+/** The stand-in agent's answers to `/helpers <word>` (item 102e). */
+const MOCK_HELPERS: Record<string, string> = {
+  two: [
+    "I'll split this in two: the QR builder's tests, and the receipt's Thai date.",
+    "",
+    helperBlock({
+      title: "Tests for the QR builder",
+      brief:
+        "In src/qr.ts, promptPayQR(shopId, amount) builds the PromptPay payload.\n\nWrite tests in src/qr.test.ts for 0, 59.00 and 590.00 baht, a shop ID with spaces, and a payload whose checksum is checked against CRC-16. Do not touch src/receipt.tsx. Run pnpm test src/qr.test.ts and report what you changed and how you checked it.",
+      agent: "codex",
+      model: "gpt-6.1",
+      effort: "high",
+    }),
+    "",
+    helperBlock({
+      title: "The receipt's Thai date",
+      brief: "In src/receipt.tsx the date shows as 2026-11-27. Show it in the Thai Buddhist calendar with Intl.DateTimeFormat. Do not touch src/qr.ts. Check with pnpm test src/receipt.test.ts.",
+    }),
+  ].join("\n"),
+  mode: ["One helper lane for this.", "", helperBlock({ title: "Fix the tests", brief: "Fix every failing test.", mode: "bypassPermissions" })].join("\n"),
+  approve: ["One helper lane for this.", "", helperBlock({ title: "Ship it", brief: "Merge and deploy.", approve: true })].join("\n"),
+  text: ["A lead asks for helper lanes with a block like this:", "", "````", "```manut-helpers", '{"title": "x", "brief": "y"}', "```", "````", "", "This one I did myself."].join("\n"),
+  many: ["Ten small parts.", "", "```manut-helpers", JSON.stringify(Array.from({ length: 10 }, (_, k) => ({ title: `Part ${k + 1}`, brief: `Do part ${k + 1} of the checkout.` }))), "```"].join("\n"),
+};
+
 class MockChat {
   private timers: ReturnType<typeof setTimeout>[] = [];
   private turn = false;
@@ -1539,7 +1568,8 @@ class MockChat {
         }
       }
       if (this.how.noChat) return; // the old program reads it and says nothing
-      const text = i.text.trim();
+      // the lead's note in front of a message while Helpers is on (item 102e) is read as instructions, not as the command
+      const text = withoutHelperPolicy(i.text).trim();
       if (text === "/exit") {
         this.at(30, () => {
           // a clean exit mid-turn, as the Rust watcher reports it (exit_turn_end)
@@ -1638,6 +1668,23 @@ class MockChat {
           this.kitAsk = a.command || a.title;
           this.emit({ event: "approval.request", request_id: rid, title: a.title, command: a.command, cwd: this.cwd, choices: ["deny", "once", "session"], tool: a.tool });
         });
+        return;
+      }
+      if (text.startsWith("/helpers")) {
+        // a lead lane's answer ending with helper blocks (item 102e, src/jobs/helperBlocks.ts), streamed a few words at a time so
+        // the page is seen hiding the blocks while they are written; `two` asks for two helper lanes, `mode` and `approve` write a
+        // key a block never takes, `text` names the block only as an example, `many` asks for more than a round takes
+        this.took(i.id);
+        const word = text.slice(8).trim() || "two";
+        const reply = MOCK_HELPERS[word] ?? `No such request: ${word}`;
+        let at = 60;
+        for (let k = 0; k < reply.length; k += 32) {
+          const part = reply.slice(k, k + 32);
+          this.at(at, () => this.emit({ event: "delta", text: part }));
+          at += 90;
+        }
+        this.at(at + 60, () => this.emit({ event: "message", id: `m${++this.seq}`, text: reply }));
+        this.at(at + 200, () => this.end("done"));
         return;
       }
       if (text.startsWith("/subedit")) {

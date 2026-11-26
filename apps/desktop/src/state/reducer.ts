@@ -22,7 +22,7 @@ import type {
   ShopLeft,
   ShopRow,
 } from "../lib/protocol";
-import { hideSplitBlocks, threadKey, type ThreadRow } from "../threads/types";
+import { threadKey, type ThreadRow } from "../threads/types";
 import {
   isMenuPage,
   type PanelTabId,
@@ -35,6 +35,8 @@ import {
   type BriefNoticeItem,
   type ThreadLinkItem,
   type ThreadRouteItem,
+  type HelpersAskItem,
+  type Turn,
   type Chat,
   type ReplyChip,
   type Theme,
@@ -43,7 +45,8 @@ import {
   type Ui,
   type AppState,
 } from "./types";
-import { activityText, THINKING, THINKING_MAX, parsePlan, answerSoFar } from "./activity";
+import { activityText, THINKING, THINKING_MAX, parsePlan, answerSoFar, shownText } from "./activity";
+import { hasHelperBlock, hideHelperBlocks, streamingHelpers } from "../jobs/helperBlocks";
 import {
   emptyChat,
   shopAskFields,
@@ -183,7 +186,11 @@ export type Action =
   /** A link line or a route card under the main-chat answer `message` of `bot` (once per id). */
   | { type: "thread.note"; bot: string; message: string; item: ThreadLinkItem | ThreadRouteItem }
   /** The person answered a route card. */
-  | { type: "thread.routed"; bot: string; id: string; done?: "sent" | "kept"; error?: string };
+  | { type: "thread.routed"; bot: string; id: string; done?: "sent" | "kept"; error?: string }
+  /** A lead lane's Start helpers card, at the end of its chat (item 102e, src/jobs/leadLanes.ts). */
+  | { type: "helpers.ask"; bot: string; item: HelpersAskItem }
+  /** What became of a Start helpers card: started, Not now, or gone (the person wrote again). Only an open card changes. */
+  | { type: "helpers.done"; bot: string; id: string; done: NonNullable<HelpersAskItem["done"]> };
 
 /** The bots whose "will brief you here" line was already shown (`localStorage["manut.briefNoticed"]`). */
 export function briefNoticed(): string[] {
@@ -203,6 +210,19 @@ function saveBriefNoticed(bots: string[]): void {
   }
 }
 
+/** While a lead lane's answer streams with a helper block in it (item 102e), the hidden block's place in the activity line: how many
+ *  helper lanes it asks for so far, from the whole helpers written yet (`streamingHelpers`). Nothing starts from it. Any other turn,
+ *  or an answer with no block, is as it was. */
+function askingHelpers(t: Turn): Turn {
+  if (!t.helpers || !t.streaming.includes("```")) return t;
+  const text = t.streaming.slice(t.cut ?? 0);
+  if (!hasHelperBlock(text)) return t;
+  const so = streamingHelpers(text);
+  const n = so.kind === "helpers" || so.kind === "partial" ? so.helpers.length : 0;
+  const status = n === 0 ? tr("helpers.writing") : n === 1 ? tr("helpers.writing.one") : tr("helpers.writing.many", { n });
+  return t.status === status ? t : { ...t, status };
+}
+
 function reduceEvent(state: AppState, ev: BridgeEvent, now: number): AppState {
   if (ev.session && ev.event !== "folder.closed") {
     if (ev.event === "bot.status") return state; // a folder chat's turn never moves the bot's own status
@@ -218,7 +238,10 @@ function reduceEvent(state: AppState, ev: BridgeEvent, now: number): AppState {
         const early = c.early && now - c.early.at <= EARLY_STATUS_MS ? c.early.text : "";
         // its turn started: the bot has the person's last sent message
         const got = markRead(c, lastSent(c)?.id, now);
-        return { ...newTurn(endTurn(got, now, "done"), bot, now, early)[0], early: null, pendingTurn: null, steeredUnread: undefined, steerAck: null };
+        const started = newTurn(endTurn(got, now, "done"), bot, now, early)[0];
+        // a lead lane's turn with Helpers on: its helper blocks are hidden and read by the app (item 102e)
+        const turn = ev.helpers === true ? patchTurn(started, (t) => ({ ...t, helpers: true })) : started;
+        return { ...turn, early: null, pendingTurn: null, steeredUnread: undefined, steerAck: null };
       });
     case "status": {
       // the agent's own retry of this turn: the line says which try, in the person's language
@@ -257,7 +280,7 @@ function reduceEvent(state: AppState, ev: BridgeEvent, now: number): AppState {
         return patchTurn(c, (t) => ({
           ...t,
           status: activityText(ev.name, ev.detail),
-          ...(ask ? { askNote: hideSplitBlocks(t.streaming.slice(t.cut ?? 0).trim()) } : {}),
+          ...(ask ? { askNote: shownText(t, t.streaming.slice(t.cut ?? 0).trim()) } : {}),
           // what was written before this call was commentary on it, not the answer
           cut: t.streaming.length,
           steps: [
@@ -287,24 +310,30 @@ function reduceEvent(state: AppState, ev: BridgeEvent, now: number): AppState {
         patchTurn(c, (t) => (t.skills.includes(ev.name) ? t : { ...t, skills: [...t.skills, ev.name] })),
       );
     case "delta":
-      return touchChat(state, bot, (c) => patchTurn(c, (t) => ({ ...t, streaming: t.streaming + ev.text })));
+      return touchChat(state, bot, (c) => patchTurn(c, (t) => askingHelpers({ ...t, streaming: t.streaming + ev.text })));
     case "message": {
+      // a lead lane's answer that was only helper blocks (item 102e): nothing to show, and nothing unread
+      const onlyBlocks = !!state.chats[bot]?.turn?.helpers && !hideHelperBlocks(ev.text);
       const next = touchChat(state, bot, (c) => {
         // the answer came: a steer Hermes took by now runs in this turn or right after it (never dropped by a Stop)
         const read = c.steeredUnread ? consumeSteers(c, c.steeredUnread) : c;
         // a steer read before this answer, with no note since: the answer is the bot's first word on it
         const acked = read.steerAck ? ackSteer(read, ev.text) : read;
         const cleared = patchTurn({ ...acked, steeredUnread: undefined, steerAck: null }, (t) => ({ ...t, streaming: "", cut: undefined }));
-        const msg: MessageItem = { kind: "assistant", id: ev.id, ts: now / 1000, text: ev.text, ...(ev.watch ? { watch: ev.watch } : {}) };
+        // a lead lane's helper blocks never stay in the answer kept (item 102e): the app has read them for its card. An answer that
+        // was only blocks leaves no bubble.
+        const text = c.turn?.helpers ? hideHelperBlocks(ev.text) : ev.text;
         const exists = cleared.items.some((i) => i.kind === "assistant" && i.id === ev.id);
+        if (onlyBlocks && !exists) return cleared;
+        const msg: MessageItem = { kind: "assistant", id: ev.id, ts: now / 1000, text, ...(ev.watch ? { watch: ev.watch } : {}) };
         const slot = answerSlot(cleared);
         const items = exists
-          ? cleared.items.map((i) => (i.kind === "assistant" && i.id === ev.id ? { ...i, text: ev.text } : i))
+          ? cleared.items.map((i) => (i.kind === "assistant" && i.id === ev.id ? { ...i, text } : i))
           : [...cleared.items.slice(0, slot), msg, ...cleared.items.slice(slot)];
         return withItems(cleared, items);
       });
       const existed = state.chats[bot]?.items.some((i) => i.kind === "assistant" && i.id === ev.id);
-      return existed ? next : bumpUnread(next, bot);
+      return existed || onlyBlocks ? next : bumpUnread(next, bot);
     }
     case "approval.request":
       return touchChat(state, bot, (c) => {
@@ -380,7 +409,7 @@ function reduceEvent(state: AppState, ev: BridgeEvent, now: number): AppState {
         let base = c;
         // A done turn that streamed text but never sent the final message: keep what was said.
         // Only what came after the latest tool call: the text before it was commentary on that call, not the answer.
-        const said = c.turn ? hideSplitBlocks(c.turn.streaming.slice(c.turn.cut ?? 0).trim()) : "";
+        const said = c.turn ? shownText(c.turn, c.turn.streaming.slice(c.turn.cut ?? 0).trim()) : "";
         if (ev.outcome === "done" && c.turn && said) {
           const text = said;
           const slot = answerSlot(c);
@@ -554,6 +583,16 @@ export function reduce(state: AppState, a: Action): AppState {
         }
         return withItems(c, [...c.items.slice(0, at), a.item, ...c.items.slice(at)]);
       });
+    case "helpers.ask":
+      // a lead lane's Start helpers card, after the answer that asked (item 102e)
+      return touchChat(state, a.bot, (c) => (c.items.some((i) => i.id === a.item.id) ? c : withItems(c, [...c.items, a.item])));
+    case "helpers.done":
+      return touchChat(state, a.bot, (c) =>
+        withItems(
+          c,
+          c.items.map((i) => (i.kind === "helpersAsk" && i.id === a.id && !i.done ? { ...i, done: a.done } : i)),
+        ),
+      );
     case "thread.routed":
       return touchChat(state, a.bot, (c) =>
         withItems(

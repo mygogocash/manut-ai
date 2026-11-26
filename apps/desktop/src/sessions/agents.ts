@@ -399,6 +399,9 @@ export interface SessionRec {
   /** A lane a workflow started (src/workflows/): the workflow's name. Nobody may be watching it, so Kit's dial reads its asks at
    *  the most careful level, Asks every time, with no kept rule, whatever the project's dial says. Saved with the session. */
   workflow?: string;
+  /** Helpers is on in this lane's box (item 102e, src/jobs/leadLanes.ts): its agent is told how to ask for helper lanes, and a request
+   *  becomes a Start helpers card. Only a lane's chat with a folder of its own may have it. Saved with the session. */
+  helpers?: true;
   /** Continue with… (item 97, continueWith.ts): the link id of the chat this one continues, and of the chat that continues this
    *  one, each shown as a quiet line linking the other. */
   continuedFrom?: string;

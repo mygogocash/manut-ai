@@ -1,0 +1,80 @@
+/* The Start helpers card (HelpersCard.tsx), one of the ask cards' family (chat/cards/cards.css: .card, .card-title, .card-acts,
+   .card-btn, the settled .card-line): what it asks as the card's title, then one row per helper lane with its brief whole in the
+   kit's quiet panel, the card's lines in the muted second colour, and Not now and Start helpers. It takes the plan card's width,
+   since every brief is read whole. */
+.hl-card {
+  width: 76%;
+}
+.hl-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.hl-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+/* Helper 1 · Codex · gpt-6.1 · high: the number in ink, where it runs in the muted second line, whole */
+.hl-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: var(--aui-muted);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.hl-n {
+  color: var(--ink);
+  font-weight: 500;
+}
+/* a helper lane the app already knows will not start says so in the warning colour, never red: nothing went wrong yet */
+.hl-row.off .hl-agent {
+  color: var(--aui-warning);
+}
+.hl-title {
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+/* The brief, whole and with its lines, in the kit's quiet panel (.codeb) as a plan is; a long one scrolls inside it, with the
+   thin always-drawn bar of the command block (cards.css .card-cmd). */
+.hl-brief {
+  max-height: 220px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--rad-lg);
+  background: var(--soft);
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.hl-brief::-webkit-scrollbar {
+  width: 6px;
+}
+.hl-brief::-webkit-scrollbar-track {
+  background: transparent;
+}
+.hl-brief::-webkit-scrollbar-thumb {
+  border-radius: 3px;
+  background: var(--scrollbar);
+}
+.hl-lines,
+.hl-held {
+  margin: 0;
+  color: var(--aui-muted);
+  font-size: 13px;
+}
+/* The Helpers switch in a lane's box (HelpersSwitch.tsx): the approval level's quiet word (sessions.css .ss-pick); on, it is in ink
+   on the raised ground, so the box says at a glance that the agent may ask for helper lanes. */
+.ss-pick.bx-helpers.on {
+  background: var(--raise2);
+  color: var(--ink);
+}

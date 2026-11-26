@@ -135,6 +135,18 @@ describe("resume snapshot", () => {
     expect(parseResume(JSON.stringify(buildResume(input(), T)))!.sessions[0].workflow).toBeUndefined();
   });
 
+  it("keeps the Helpers switch of a lane with a folder of its own, and of nothing else (item 102e)", () => {
+    const lane = { name: "kit/promptpay-qr", base: "main", dir: "/h/.manut/lanes/web-app/promptpay-qr", worktree: "/h/.manut/lanes/web-app/promptpay-qr" };
+    const good = buildResume(input({ sessions: [{ ...input().sessions[0], lane, helpers: true }] }), T);
+    expect(parseResume(JSON.stringify(good))!.sessions[0].helpers).toBe(true);
+    const back = (s: Record<string, unknown>) => parseResume(JSON.stringify({ ...good, sessions: [{ ...good.sessions[0], ...s }] }))!.sessions[0].helpers;
+    // not true itself, or a lane with no folder of its own, or no lane at all: off, as Helpers may only be on in a lane's chat
+    expect(back({ helpers: "yes" })).toBeUndefined();
+    expect(back({ lane: { name: "kit/x", base: "main" } })).toBeUndefined();
+    expect(back({ lane: undefined })).toBeUndefined();
+    expect(parseResume(JSON.stringify(buildResume(input(), T)))!.sessions[0].helpers).toBeUndefined();
+  });
+
   it("keeps that an ended session's CLI could not continue its conversation, and only for an ended one", () => {
     const good = buildResume(input(), T);
     const raw = (resumeFailed: unknown, running: boolean) => JSON.stringify({ ...good, sessions: [{ ...good.sessions[2], running, resumeFailed }] });

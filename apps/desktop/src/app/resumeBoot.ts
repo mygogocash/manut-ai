@@ -70,6 +70,8 @@ function snapshot(): ResumeSnap {
         ...(r.lane ? { lane: r.lane } : {}),
         // a workflow's lane stays careful after a restart (src/workflows/)
         ...(r.workflow ? { workflow: r.workflow } : {}),
+        // the Helpers switch stays as the person left it (item 102e)
+        ...(r.helpers ? { helpers: true as const } : {}),
         // Continue with's links both ways, and a continued chat's model still to set (item 97)
         ...(r.continuedFrom ? { continuedFrom: r.continuedFrom } : {}),
         ...(r.continuedIn ? { continuedIn: r.continuedIn } : {}),
