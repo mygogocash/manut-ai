@@ -1,7 +1,7 @@
 # Several agents on one job (item 102)
 
 The design for plan item 102 (`docs/plan.md`; `docs/t3code-parity.md`, "Orchestration", group 3 of its order: "must be
-designed first because it can act for the person"). Status on 27 Nov 2026: design, with slice 102a built (Ask several agents: the + menu row, its panel, one send starting one lane for each row, the job saved with each session and its row in the Lanes band; see "Phases and slices"). The rest is not built. It covers three
+designed first because it can act for the person"). Status on 27 Nov 2026: design, with slice 102a built (Ask several agents: the + menu row, its panel, one send starting one lane for each row, the job saved with each session and its row in the Lanes band), slice 102d (the helper lanes' rules, pure) and slice 102f (a helper lane made from a snapshot of its lead's folder, in the shell); see "Phases and slices". The rest is not built. It covers three
 things:
 
 1. **Ask several agents.** One message from the person starts lanes on different agents and models side by side, and their
@@ -374,7 +374,7 @@ mid-round, nothing lands or is sent until the person presses. [102j]
 
 | What is there | Its part here |
 | --- | --- |
-| Lanes (`lane.rs`, `laneBranch.ts`, `sessions.ts` `start`) | Every agent here is one. Ask several uses them as they are; a helper lane starts from the lead's snapshot (a new way for `lane::make_with` to start) on a branch named from the lead's (`kit/<lead words>-help-1`) |
+| Lanes (`lane.rs`, `laneBranch.ts`, `sessions.ts` `start`) | Every agent here is one. Ask several uses them as they are; a helper lane starts from the lead's snapshot (`lane_helper.rs`, built in 102f) on a branch named from the lead's (`kit/<lead words>-help-1`) |
 | Worktrees (Settings › Worktrees) | Helper lanes are made where lanes are made, under the same prefix, and listed and removed as lanes are |
 | `startWorkflowLane`, `SessionRec.workflow` | The form for a lane the app makes beside the person's drafts, never opened in front of them. `SessionRec.job` and `SessionRec.helperOf` are saved the same way, so a restart keeps the job |
 | Workflows | They start no helpers: a workflow's lane has no Helpers switch, and Ask several is not a workflow step in this design |
@@ -457,6 +457,18 @@ the screens are built on tested ground.
   (temporary index, a commit under the app's own refs), named from the lead's branch, with the record naming its job and
   lead. Rust tests against temporary repositories. Safety test: the lead's `git status --porcelain`, its index file's bytes,
   HEAD and stash list are identical before and after; ignored files are not copied.
+  **Built 27 Nov 2026** (`src-tauri/src/lane_helper.rs` and its tests; `lane_helper_worktree` in `src-tauri/src/lib.rs`;
+  `docs/decisions/102f-helper-snapshot.md`). GoSpark's `captureTree` and `commitTree`: the lead's index copied byte for byte
+  to a temporary index of the shell's own, `git add -A`, `write-tree`, `commit-tree` on top of the lead's HEAD as "Manut AI",
+  kept by `refs/manut/helpers/<job>/<folder>`, then `git worktree add -b <lead>-help-<n>` at that commit, beside the lead's
+  folder, with the record naming the job, the lead and the ref (`Record::helper`; its `base` is the lead's branch, its `at`
+  the snapshot). The page names only the lead lane's folder and the job; the shell picks the folder, the branch and the ref,
+  and starts no agent. Refusals, with nothing made: `bad_job`, `not_a_lane` (a folder the app did not make, or one git cannot
+  read), `lead_is_helper`, `busy`, `no_commit`, `taken`, a chosen folder's codes, or git's own line after a failed step took
+  back the folder, the branch, the ref and the record. Settled on the way: the safety test also holds every file of the
+  lead's folder and its own git folder byte for byte; the agent settings come from the developer's folder, never the lead's
+  copy (R3); each helper lane takes its own snapshot when it is made; a helper lane reads as no commits of its own
+  (`Git::ahead` counts from the snapshot), and `lane::remove` takes its ref with its record.
 - **102g. Landing (shell).** `lane_land`: the lock per lead folder, the snapshot before writing, the patch with build
   output cut, the outside-the-project refusal, the masker's read, `git apply --3way`, the kept patch at 0600, Take back.
   Rust tests against temporary repositories. Safety tests: two landings at once run one after the other; a patch that will

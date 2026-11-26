@@ -307,8 +307,10 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    recommendations, in `docs/decisions/102-several-agents.md`, for the owner) and 102d (its pure rules). Then 102a
    (ask several agents). Then 133 (motion-lists and resilience fixed; CI now four
    shards of three Playwright workers, since four on a 4-CPU runner made specs flaky). Then 102e (the helper blocks and the
-   Start helpers card, which starts nothing yet). Running: 102f (a helper lane from a snapshot) and 134 (the join
-   page's countdown test). Needs the owner from 101b: Grok signed in and `permission_mode = "ask"`
+   Start helpers card, which starts nothing yet). Then 134 (the join page's countdown test, which owns its clock now).
+   Then 102f (a helper lane from a snapshot). At 04:00 on 27 Nov the first account reached its weekly limit (resets
+   30 Nov 17:00) with 102b, 102k and 135 mid-work; the owner signed in another account and they were sent on in their
+   own threads. Needs the owner from 101b: Grok signed in and `permission_mode = "ask"`
    under `[ui]` in `~/.grok/config.toml` (it says always-approve, so Grok chats are refused), and Muse Code's CLI. From 101e: all 325 Codex sessions on the owner's Mac are compressed, so
    only Claude Code's conversations are offered until 106b. Needs the owner from 101a: Cursor's Approval mode set to Allowlist (it is Run Everything, so Cursor
    chats are refused), and a Cursor plan with messages left to record a real tool call. GitHub reported 7 Dependabot alerts on `main` (2 critical) at that push, for the owner to look at.
@@ -694,9 +696,6 @@ Every switch that turns a built part on, and what each needs from the owner, is 
 
 ## Known flaky tests (they fail only under heavy load)
 
-- `apps/web` `test/JoinPage.test.tsx`, "counts down to a new code from when the answer arrived": could not find "You
-  can ask for a new code in 0:42." in item 133's run 45882648481 (attempt 1), a branch that changes no web code;
-  passed on the re-run. A countdown read against the clock: if it fails again, give it fake time.
 - `apps/api` `test/task-companies.test.ts` ("non-members cannot wait on company tasks...", "deleting a company
   releases its tasks...") and `test/auth-email.test.ts` ("gives Apple's session in every way..."): timed out at 5 s in
   item 104's run 45873764860 (with a `rows.filter is not a function` uncaught in workerd), a branch that changes no API
@@ -717,7 +716,7 @@ Every switch that turns a built part on, and what each needs from the owner, is 
 - `apps/web` `test/ShopDataTab.test.tsx`, "says when the API could not be reached": failed once in a loaded full run.
 - Failed once each in a loaded gate on 26 Nov and passed alone: `apps/desktop` `src/i18n/literals.test.ts`,
   `src/lib/notify.device.test.ts`, `src/lib/notify.ask.test.ts`; `apps/web` `test/macRemote.test.ts`,
-  `test/MakeRoutineForm.test.tsx`, `test/JoinPage.test.tsx` ("counts down to a new code"). Each is a 5 second limit
+  `test/MakeRoutineForm.test.tsx`. Each is a 5 second limit
   reached at a load of 30, not yet read further.
 - `apps/desktop` `src/sessions/term/kitty-placeholders.test.ts`: failed once in item 124's loaded gate on 26 Nov
   (`expected [] to deeply equal [[32, 2, 2, 16]]`) and passed alone.
@@ -733,8 +732,6 @@ Every switch that turns a built part on, and what each needs from the owner, is 
   `outpost::item::tests::keeps_this_macs_outpost_in_its_own_keychain_item_beside_the_session`: six failed once on 25
   Nov with `Err("keychain")` in a suite that took ten minutes, while the Mac slept between dark wakes; alone the same
   tree passed. The gate now runs the Rust suite a second time by itself.
-- `apps/web` `test/JoinPage.test.tsx`, "counts down to a new code from when the answer arrived": failed once in a loaded
-  gate on 25 Nov (it looks for the exact second, 0:42) and passed alone and in the next whole run.
 - `apps/api` `test/model-alerts.test.ts` ("notes 80% and then 100%"), `test/google-books.test.ts` ("makes the sheet once") and
   `test/approvals-route.test.ts` ("lists the session's open approvals"): all three passed five seconds in one CI run on
   `7ef8505` (25 Nov) and passed on the next commit; each has thirty seconds since.
