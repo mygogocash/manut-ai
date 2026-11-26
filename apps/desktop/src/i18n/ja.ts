@@ -3,6 +3,7 @@ import type { Key } from "./index";
 import { ab } from "./ja/ab";
 import { acc } from "./ja/acc";
 import { acct } from "./ja/acct";
+import { acpreg } from "./ja/acpreg";
 import { act } from "./ja/act";
 import { ag } from "./ja/ag";
 import { art } from "./ja/art";
@@ -160,6 +161,7 @@ export const ja: Record<Key, string> = {
   ...ab,
   ...acc,
   ...acct,
+  ...acpreg,
   ...act,
   ...ag,
   ...art,

@@ -3,6 +3,7 @@ import type { Key } from "./index";
 import { ab } from "./zh/ab";
 import { acc } from "./zh/acc";
 import { acct } from "./zh/acct";
+import { acpreg } from "./zh/acpreg";
 import { act } from "./zh/act";
 import { ag } from "./zh/ag";
 import { art } from "./zh/art";
@@ -160,6 +161,7 @@ export const zh: Record<Key, string> = {
   ...ab,
   ...acc,
   ...acct,
+  ...acpreg,
   ...act,
   ...ag,
   ...art,

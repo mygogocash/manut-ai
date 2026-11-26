@@ -4,6 +4,7 @@
 import { ab } from "./en/ab";
 import { acc } from "./en/acc";
 import { acct } from "./en/acct";
+import { acpreg } from "./en/acpreg";
 import { act } from "./en/act";
 import { ag } from "./en/ag";
 import { art } from "./en/art";
@@ -161,6 +162,7 @@ export const en = {
   ...ab,
   ...acc,
   ...acct,
+  ...acpreg,
   ...act,
   ...ag,
   ...art,

@@ -3,6 +3,7 @@ mod acp_agents;
 mod api_link;
 mod acp_chat;
 mod acp_mcp;
+mod acp_registry;
 mod agent_chat;
 mod agent_config;
 mod app_menu;
@@ -383,6 +384,22 @@ async fn custom_agent_bot_preview(label: String, program: String, args: Vec<Stri
     tauri::async_runtime::spawn_blocking(move || custom_agents::bot_preview_here(&label, &program, &args, &install).map_err(|w| format!("why:{}", w.code())))
         .await
         .map_err(|e| e.to_string())?
+}
+
+/// Settings › Providers › From the ACP registry (item 101c): the pinned registry's agents, each offered, already there,
+/// the person's own, or not offered with its reason. Reads the compiled-in copy and manut's own agents file; fetches
+/// nothing.
+#[tauri::command]
+async fn acp_registry_list() -> Result<acp_registry::RegistryList, String> {
+    tauri::async_runtime::spawn_blocking(acp_registry::list_here).await.map_err(|e| e.to_string())
+}
+
+/// The confirm card for registry entry `id`: drafted as a bot's draft is (the custom-agent checks, no shell, interpreter
+/// or built-in program) with the exact command and where it comes from. Writes nothing; only the card's Add
+/// (`custom_agent_confirm`) does. A refusal is `why:<code>`.
+#[tauri::command]
+async fn acp_registry_preview(id: String) -> Result<acp_registry::RegistryPreview, String> {
+    tauri::async_runtime::spawn_blocking(move || acp_registry::preview_here(&id)).await.map_err(|e| e.to_string())?
 }
 
 /// The remove confirm: agent `id` leaves manut's own file (a broken entry too).
@@ -1890,6 +1907,8 @@ fn commands(invoke: tauri::ipc::Invoke) -> bool {
         custom_agent_bot_preview,
         custom_agent_confirm,
         custom_agent_remove,
+        acp_registry_list,
+        acp_registry_preview,
         session_start,
         shell_start,
         shells_available,

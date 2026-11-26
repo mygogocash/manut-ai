@@ -1,0 +1,28 @@
+import type { acpreg as en } from "../en/acpreg";
+
+export const acpreg: Record<keyof typeof en, string> = {
+  "acpreg.title": "ACP 레지스트리에서",
+  "acpreg.hint": "Agent Client Protocol 레지스트리에 있는 에이전트예요. Manut AI에 함께 들어 있는 사본에서 읽어요. 추가…를 누르면 저장하기 전에 실행할 내용을 그대로 보여 줘요. Manut AI는 아무것도 설치하지 않고 이 목록을 내려받지도 않아요.",
+  "acpreg.search": "레지스트리 검색",
+  "acpreg.loading": "레지스트리를 읽는 중…",
+  "acpreg.none": "레지스트리에 맞는 에이전트가 없어요.",
+  "acpreg.add": "추가…",
+  "acpreg.addOf": "{name} 추가…",
+  "acpreg.there": "프로바이더에 {name}(으)로 있어요",
+  "acpreg.yours": "{name}(으)로 추가됨",
+  "acpreg.quarantine": "레지스트리 자체 검사에서 보류됨: {why}",
+  "acpreg.platform": "이 컴퓨터에서는 쓸 수 없어요",
+  "acpreg.env": "{names} 설정이 필요한데, Manut AI는 설정하지 않아요",
+  "acpreg.start": "Manut AI가 확인하지 않은 옵션으로 시작해요",
+  "acpreg.bin": "실행할 명령을 알 수 없어요",
+  "acpreg.interp": "레지스트리가 프로그램으로 셸이나 인터프리터를 지정했어요.",
+  "acpreg.gone": "이 레지스트리 항목은 지금 추가할 수 없어요.",
+  "acpreg.pinned": "ACP 레지스트리 {tag}, {date} 게시",
+  "acpreg.cardFrom": "ACP 레지스트리({tag})에서: {name} {version}",
+  "acpreg.cardInstall": "먼저 터미널에서 직접 설치하세요. Manut AI는 이 명령을 실행하지 않아요:",
+  "acpreg.cardDownload": "직접 내려받아 압축을 풀고 {program}을(를) 검색 경로에 두세요. Manut AI는 내려받지 않아요:",
+  "acpreg.cardSource": "출처: {url}",
+  "acpreg.cardLicense": "라이선스: {license}",
+  "acpreg.change": "변경…",
+  "acpreg.cardSum": "SHA-256 {sum}",
+};
