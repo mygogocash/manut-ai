@@ -1934,6 +1934,7 @@ export const zh: Record<Key, string> = {
   "kit.say.wipe": "删除整个项目。",
   "kit.say.push": "把 Kit 的分支发送到远程。",
   "kit.say.pr": "创建拉取请求。",
+  "kit.say.mr": "创建合并请求。",
   "kit.say.live": "上线。顾客将能看到。",
   "kit.say.thisMac": "在项目之外改动这台 Mac。",
   "kit.say.send": "向另一台电脑发送内容。",

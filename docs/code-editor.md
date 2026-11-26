@@ -1364,7 +1364,18 @@ the head commit shown and the request read again before it runs. Same `Plan::Mer
 **A chat's own pull request** (`code/chatPull.ts`). When a Claude Code or Codex chat ends a command the dial reads as a push with
 `gh pr create` in it, the last github.com pull request address in its output is read, the chat's folder's remote must name that
 repository, and one `gh pr view` must say the branch is that repository's own. The chat's header then names the request, the
-request's row names the chat, and the chat's Lanes row shows it as a lane's row does. Of this run; nothing is written.
+request's row names the chat, and the chat's Lanes row shows it as a lane's row does. Of this run; nothing is written. Since item
+100b the dial reads `glab mr create` as a push too (`kit.say.mr`, "Opens a merge request."; with an address among its words, and
+for every other glab command, it is a program the dial has not read), and a merge request address on a host with `gitlab` among
+its names (`https://gitlab.com/<group>/<project>/-/merge_requests/<n>`; glab prints it last, alone off a terminal) is linked by
+the same checks, the view being `glab mr view`.
+
+**GitLab's merge methods** (item 100b, `pulls.rs` `gl_methods_argv`, `parse_gl_methods`). The list's Merge step and
+`ask_merge_pull` read the project with `glab api --method GET projects/<group%2Fproject>` and offer: a merge unless its
+`squash_option` is `always`; a squash unless it is `never`; a rebase only when its `merge_method` is `rebase_merge` or `ff`, the two
+GitLab's merge methods page offers a rebase for. Anything else is not read and all three are offered, for GitLab to refuse. glab is
+not on this Mac (26 Nov 2026), so the flags are from GitLab's pages for `glab api` and `glab mr merge`, and the answer is read as
+the Projects API's object. A lane's own Merge step is unchanged and still offers all three, as for GitHub.
 
 **Watching costs little.** The page reads the lists once when shown, then at most once a minute while shown and in front, never
 while hidden. The shell gives a list read within 55 seconds again, and before reading a GitHub list again asks `gh api --method

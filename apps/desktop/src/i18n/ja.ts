@@ -1934,6 +1934,7 @@ export const ja: Record<Key, string> = {
   "kit.say.wipe": "プロジェクト全体を削除します。",
   "kit.say.push": "Kit のブランチをリモートに送ります。",
   "kit.say.pr": "プルリクエストを開きます。",
+  "kit.say.mr": "マージリクエストを開きます。",
   "kit.say.live": "公開します。お客さまが見られるようになります。",
   "kit.say.thisMac": "プロジェクトの外で、この Mac を変えます。",
   "kit.say.send": "ほかのコンピュータに何かを送ります。",

@@ -1934,6 +1934,7 @@ export const ko: Record<Key, string> = {
   "kit.say.wipe": "프로젝트 전체를 삭제해요.",
   "kit.say.push": "Kit의 브랜치를 원격으로 보내요.",
   "kit.say.pr": "풀 리퀘스트를 열어요.",
+  "kit.say.mr": "머지 리퀘스트를 열어요.",
   "kit.say.live": "공개해요. 고객이 볼 수 있어요.",
   "kit.say.thisMac": "프로젝트 밖에서 이 Mac을 바꿔요.",
   "kit.say.send": "다른 컴퓨터로 무언가를 보내요.",

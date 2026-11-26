@@ -1945,6 +1945,7 @@ export const en = {
   "kit.say.wipe": "Deletes the whole project.",
   "kit.say.push": "Sends Kit's branch to the remote.",
   "kit.say.pr": "Opens a pull request.",
+  "kit.say.mr": "Opens a merge request.",
   "kit.say.live": "Puts it live. Customers can see it.",
   "kit.say.thisMac": "Changes this Mac outside the project.",
   "kit.say.send": "Sends something to another computer.",

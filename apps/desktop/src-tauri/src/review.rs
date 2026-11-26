@@ -771,8 +771,8 @@ impl Ledger {
     /// - The request is read now. Its branch must be this very repository's own (`other_repo` for a fork's, item 86), and when a
     ///   lane of the app's is on that branch (its folder still here), the ask is that lane's own Merge ([`Ledger::ask_merge`]),
     ///   with every check of its tip.
-    /// - Otherwise the request must be able to merge now, with a method the repository allows (`method_not_allowed`, when GitHub
-    ///   says so; GitLab's is the host's to refuse), and the ask names its repository and branch, the method and exactly the
+    /// - Otherwise the request must be able to merge now, with a method the repository allows (`method_not_allowed`, when GitHub's
+    ///   repository or GitLab's project says so), and the ask names its repository and branch, the method and exactly the
     ///   message. The merge is bound to the head commit shown, and just before it runs the request is read again, as a lane's is.
     ///
     /// Writes nothing: only [`Ledger::settle`] with its id and a Yes runs it.
@@ -808,16 +808,19 @@ impl Ledger {
         if let Some(why) = &p.cannot {
             return Err(format!("cannot_merge:{why}"));
         }
-        if source == Source::Github {
-            let allowed = crate::pulls::methods_argv(&repo)
-                .ok()
-                .and_then(|a| tasks::run_env_for(&cli, &a, true, &[], &[], CLI_LIMIT).ok())
-                .filter(|r| r.code == Some(0))
-                .map(|r| crate::pulls::parse_methods(&r.out))
-                .unwrap_or_default();
-            if !allowed.allows(method.word()) {
-                return Err("method_not_allowed".into());
-            }
+        // the methods the repository allows, as the list read them: GitHub's repository settings, GitLab's project (item 100b)
+        let argv = match source {
+            Source::Github => crate::pulls::methods_argv(&repo),
+            Source::Gitlab => crate::pulls::gl_methods_argv(&repo),
+        };
+        let allowed = argv
+            .ok()
+            .and_then(|a| tasks::run_env_for(&cli, &a, true, &[], &[], CLI_LIMIT).ok())
+            .filter(|r| r.code == Some(0))
+            .map(|r| if source == Source::Github { crate::pulls::parse_methods(&r.out) } else { crate::pulls::parse_gl_methods(&r.out) })
+            .unwrap_or_default();
+        if !allowed.allows(method.word()) {
+            return Err("method_not_allowed".into());
         }
         let remote = Git::new(home).ok().and_then(|g| remote_name(&g, dir)).unwrap_or_default();
         self.merge_ask(source, repo, remote, &cli, view, p, method, credits, None)
@@ -1032,8 +1035,8 @@ pub(crate) mod tests {
 
     /// A stand-in CLI at `home/bin/<name>`: it writes each call's argv to `home/<name>.log` (the words split by NUL, the calls by
     /// 0x1e), answers `auth status` with `auth` as its exit code, prints a pull request's address for a create, prints
-    /// `home/<name>-view.json` for a view and `home/<name>-repo.json` for a repository's view (failing when there is none), and says
-    /// yes to a merge.
+    /// `home/<name>-view.json` for a view, `home/<name>-repo.json` for a repository's view and `home/<name>-api.json` for `api --method`
+    /// (each failing when there is none), and says yes to a merge.
     pub(crate) fn stand_in(home: &Path, name: &str, auth: i32) -> PathBuf {
         let bin = home.join("bin");
         fs::create_dir_all(&bin).unwrap();
@@ -1041,10 +1044,11 @@ pub(crate) mod tests {
         let log = home.join(format!("{name}.log"));
         let view = home.join(format!("{name}-view.json"));
         let script = format!(
-            "#!/bin/sh\nprintf '%s\\0' \"$@\" >> '{log}'\nprintf '\\036' >> '{log}'\ncase \"$1 $2\" in\n\"auth status\") exit {auth};;\n\"pr create\") echo 'https://github.com/o/r/pull/7'; exit 0;;\n\"mr create\") echo 'https://gitlab.com/g/p/-/merge_requests/4'; exit 0;;\n\"pr view\"|\"mr view\") cat '{view}'; exit 0;;\n\"repo view\") cat '{repo}' || exit 1; exit 0;;\n\"repo create\") echo 'https://github.com/you/shop-site'; exit 0;;\n\"pr merge\"|\"mr merge\") exit 0;;\nesac\nexit 2\n",
+            "#!/bin/sh\nprintf '%s\\0' \"$@\" >> '{log}'\nprintf '\\036' >> '{log}'\ncase \"$1 $2\" in\n\"auth status\") exit {auth};;\n\"pr create\") echo 'https://github.com/o/r/pull/7'; exit 0;;\n\"mr create\") echo 'https://gitlab.com/g/p/-/merge_requests/4'; exit 0;;\n\"pr view\"|\"mr view\") cat '{view}'; exit 0;;\n\"repo view\") cat '{repo}' || exit 1; exit 0;;\n\"repo create\") echo 'https://github.com/you/shop-site'; exit 0;;\n\"api --method\") cat '{api}' || exit 1; exit 0;;\n\"pr merge\"|\"mr merge\") exit 0;;\nesac\nexit 2\n",
             log = log.display(),
             view = view.display(),
-            repo = home.join(format!("{name}-repo.json")).display()
+            repo = home.join(format!("{name}-repo.json")).display(),
+            api = home.join(format!("{name}-api.json")).display()
         );
         fs::write(&p, script).unwrap();
         #[cfg(unix)]
@@ -1620,6 +1624,32 @@ pub(crate) mod tests {
         assert_eq!(l.ask_merge_pull(&home, &folder, "github", "o/r", 7, "merge", false), Err("method_not_allowed".into()));
         assert_eq!(l.ask_merge_pull(&home, &folder, "github", "o/r", 7, "squash", false).map(|a| a.method), Ok("squash".into()));
         assert!(writes(&home, "gh").is_empty());
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn a_gitlab_request_from_the_list_is_asked_only_with_a_method_its_project_allows() {
+        let Some((home, d)) = crate::lane::tests::repo("review-gl-methods") else { return };
+        sh(&d, &["remote", "add", "origin", "https://gitlab.com/g/p.git"]);
+        let l = ledger(&home);
+        let folder = d.to_string_lossy().into_owned();
+        let head = "c".repeat(40);
+        let view = serde_json::json!({"iid": 7, "title": "Add QR", "description": "", "state": "opened", "draft": false, "detailed_merge_status": "mergeable", "source_branch": "fix/qr", "target_branch": "main", "sha": head, "source_project_id": 3, "target_project_id": 3, "web_url": "https://gitlab.com/g/p/-/merge_requests/7"});
+        fs::write(home.join("glab-view.json"), view.to_string()).unwrap();
+        // a project that squashes never and merges fast-forward only
+        fs::write(home.join("glab-api.json"), r#"{"merge_method": "ff", "squash_option": "never"}"#).unwrap();
+        assert_eq!(l.ask_merge_pull(&home, &folder, "gitlab", "g/p", 7, "squash", false), Err("method_not_allowed".into()));
+        assert_eq!(l.ask_merge_pull(&home, &folder, "gitlab", "g/p", 7, "rebase", false).map(|a| a.method), Ok("rebase".into()));
+        // a project of plain merge commits offers no rebase
+        fs::write(home.join("glab-api.json"), r#"{"merge_method": "merge", "squash_option": "default_off"}"#).unwrap();
+        assert_eq!(l.ask_merge_pull(&home, &folder, "gitlab", "g/p", 7, "rebase", false), Err("method_not_allowed".into()));
+        assert_eq!(l.ask_merge_pull(&home, &folder, "gitlab", "g/p", 7, "squash", false).map(|a| a.method), Ok("squash".into()));
+        // the project not read: all three are asked, for GitLab to refuse
+        fs::remove_file(home.join("glab-api.json")).unwrap();
+        assert!(l.ask_merge_pull(&home, &folder, "gitlab", "g/p", 7, "rebase", false).is_ok());
+        let api: Vec<Vec<String>> = calls(&home, "glab").into_iter().filter(|c| c[0] == "api").collect();
+        assert!(api.iter().all(|c| c == &["api", "--method", "GET", "projects/g%2Fp"]), "{api:?}");
+        assert!(writes(&home, "glab").iter().all(|c| c[0] == "api"), "{:?}", writes(&home, "glab"));
         let _ = fs::remove_dir_all(home);
     }
 
