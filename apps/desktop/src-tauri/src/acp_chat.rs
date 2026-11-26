@@ -1,6 +1,7 @@
 //! One chat adapter for every agent that speaks the Agent Client Protocol (ACP: JSON-RPC 2.0, one object per
-//! line on stdio), plus a row per agent: OpenCode (`opencode acp`, [`ACP_AGENTS`], with its own rule check) and the
-//! generic agents of [`crate::acp_agents::ACP_LIST`] (Gemini CLI, Qwen Code, Kimi Code, Copilot CLI, Cline).
+//! line on stdio), plus a row per agent: OpenCode (`opencode acp`, [`ACP_AGENTS`], with its own rule check), Grok
+//! (`grok agent stdio`, [`ACP_AGENTS`], item 101b, held to its asking mode and its own settings) and the generic agents of
+//! [`crate::acp_agents::ACP_LIST`] (Gemini CLI, Qwen Code, Kimi Code, Copilot CLI, Cline, Cursor, Antigravity).
 //!
 //! - start: `initialize` with the client's file-system and terminal capabilities OFF, so the agent uses its
 //!   own tools and manut reads and writes nothing new; then `session/resume` when the agent offers it and manut
@@ -15,7 +16,7 @@
 //!   A Stop while a card is open answers `cancelled` and expires the card. A request that offers several `allow_once`
 //!   answers is a question (Cursor asks its own questions this way): it becomes a question card whose choices are those
 //!   answers, and skipping it picks the request's `reject_once`.
-//! - A row with [`AcpAgent::asks_in`] (Cursor, Antigravity) is held to the session modes in which its agent asks before
+//! - A row with [`AcpAgent::asks_in`] (Cursor, Antigravity, Grok) is held to the session modes in which its agent asks before
 //!   acting: when the agent reports any other mode (Antigravity's `accept-edits` or `auto`, set as its default in its own
 //!   settings, or a switch of its own), manut sets the row's first mode back before any message is sent, stops a running
 //!   turn, and sends nothing until the agent confirms it.
@@ -24,9 +25,13 @@
 //! - An unknown request from the agent gets a JSON-RPC error answer so the agent never waits on manut; unknown
 //!   notifications, fields and lines are ignored and nothing raw reaches the chat.
 //!
+//! - A row with [`AcpAgent::settings`] (Cursor, Grok) starts only while the agent's own settings files leave it asking
+//!   ([`settings_allow`]), and one with [`AcpAgent::ask_switches`] (Grok) is never sent a message that starts with its own
+//!   command that turns its asks off.
+//!
 //! Checked against OpenCode 1.19.5 (`tests/fixtures/acp/opencode-*.jsonl`, recorded from real runs); Antigravity 1.5.18
-//! and Cursor Agent 2026.11.22 through real turns (`agy-*.jsonl`, `cursor-*.jsonl`, item 101a); the other generic agents
-//! up to their signed-out `session/new` (`<agent>-signed-out.jsonl`).
+//! and Cursor Agent 2026.11.22 through real turns (`agy-*.jsonl`, `cursor-*.jsonl`, item 101a); Grok Build 1.0.93 and the
+//! other generic agents up to their signed-out `session/new` (`<agent>-signed-out.jsonl`).
 
 use std::collections::HashMap;
 use std::time::Instant;

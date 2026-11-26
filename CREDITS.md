@@ -68,6 +68,13 @@ hold. From `AntigravitySession.swift`, Antigravity's own input names (`CommandLi
 not); from `ACPSession.swift`, that an agent's `session/new` reports its modes and models both as `modes` and `models`
 and as configuration options, and that a mode is set with `session/set_config_option` or else `session/set_mode`.
 
+GoSpark again (at `a7537c80`, the same checkout, 27 Nov 2026) for Grok as a chat (item 101b, `apps/desktop/src-tauri/src/acp_chat.rs`
+and `sessions.rs`): no code, the facts its adapters hold. From `ACPSession.swift`, that Grok's ACP server is `grok agent
+stdio` and is started supervised as `grok --permission-mode default agent stdio`; from `ACPToolMapping.swift`, that Grok
+names a call's tool in `_meta["x.ai/tool"]` (`kind`, else `name`: `bash`, `search_replace`, `write_file`, `edit_file`,
+`read_file`) rather than in `kind`; and from its migration plan (`docs/plans/migrate-from-grok-muse-2026-09-25.md`), what
+Muse Code is and where it keeps its settings and sessions.
+
 Libraries added for one feature are named here too: `qrcode` 1.5.4 (MIT, soldair/node-qrcode), already the web app's,
 pinned in the desktop for the pairing code's QR image (`apps/desktop/src/remote/QrCode.tsx`, lifted from
 `apps/web/src/ops/QrCode.tsx`); only its `create` is used, which returns the modules and reaches no network; `objc2-speech`, `objc2-avf-audio` and `objc2-av-foundation`

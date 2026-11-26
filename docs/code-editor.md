@@ -499,9 +499,9 @@ The Code page's + menu (the Terminals header's +, the empty section's New sessio
 ⌘T) offers each coding agent two ways, as the owner chose on 25 November (item 66). Under its folder chip:
 
 - **Chat with Kit**, first: one row for each installed agent that runs as the app's chat (`chatAgents`: Claude Code, Codex, OmO,
-  pi, oh-my-pi, OpenCode, DeepSeek Harness, the ACP agents (Cursor and Antigravity among them since item 74) and a person's
-  own, in the menu's order), with the account a new session runs as. An agent turned off on Settings › Providers is in neither
-  part of the menu (`offeredAgents`), and the shell would refuse its start anyway (see [Providers](#providers-each-agents-settings)). Never Grok, which has no chat here, and never oh-my-hermes. Picking one opens its New session chat in the
+  pi, oh-my-pi, Grok (since item 101b), OpenCode, DeepSeek Harness, the ACP agents (Cursor and Antigravity among them since
+  item 74) and a person's own, in the menu's order), with the account a new session runs as. An agent turned off on Settings ›
+  Providers is in neither part of the menu (`offeredAgents`), and the shell would refuse its start anyway (see [Providers](#providers-each-agents-settings)). Never oh-my-hermes. Picking one opens its New session chat in the
   folder the chip names (`draftChat`), as a chat whatever way the draft last kept for that agent. Nothing runs until the first
   message: it names the lane's branch, the shell makes the lane's folder (see [Where a lane works](#where-a-lane-works)), and the
   agent starts there. The chat then has the pane beside it, and the Code page's Lanes band lists the lane; TERMINALS does not.
@@ -519,7 +519,7 @@ The Code page's + menu (the Terminals header's +, the empty section's New sessio
   says "Not signed in" beside the name, and its tooltip says to sign in with the agent's own command in a terminal
   (`claude auth login`, `codex login`) and that it can still start. The row stays pickable: signing in is the person's own
   step, and what the app read can be a minute old. The app reads it only for the account a new session runs as (the Accounts
-  watcher's copy, `signedOut.ts`): Claude Code and Codex by the CLI's own status command, Grok (a terminal row only) by the
+  watcher's copy, `signedOut.ts`): Claude Code and Codex by the CLI's own status command, Grok by the
   bridge's state, as Settings › Providers › Accounts words it. No agent is run to find out. For every other agent, and in a
   browser, the app cannot tell and shows nothing new. Since item 74 the desktop app's shell keeps the accounts list, so
   Practice and Connected read Claude Code's and Codex's sign-in too.
@@ -552,7 +552,8 @@ start, so a file changed by hand never starts what the page would refuse.
 - **The list.** Every agent the app offers (the built-ins, the ACP agents, a person's own), each with its version (the
   program's own `--version`, for the agents whose flag was read here: Claude Code, Codex, OpenCode, Gemini CLI, Grok, Cursor,
   Antigravity), whether it is installed, whether it is signed in where the app can read that (Claude Code and Codex, through
-  the account new sessions use; Cursor and Antigravity through their own status commands, item 101a; no check is made up
+  the account new sessions use; Cursor and Antigravity through their own status commands, item 101a, and Grok through its
+  `models`, item 101b; no check is made up
   for any other agent) and a switch. oh-my-hermes, offered nowhere, is not
   listed. Pressing a row opens its settings under it.
 - **Off.** Offered nowhere: neither part of the + menu, the empty section's tooltip, a new draft, Buddy (which says where to turn
@@ -588,7 +589,7 @@ start, so a file changed by hand never starts what the page would refuse.
   | OpenCode | `--auto`, `--yolo`, `--dangerously-skip-permissions` |
   | Gemini CLI | `-y`/`--yolo`, `--approval-mode`, `--allowed-tools`, `--policy`, `--admin-policy`, `--skip-trust`, `-s`/`--sandbox`, `--include-directories` |
   | oh-my-pi | `--auto-approve`, `--approval-mode`, `--yolo`, `--plan-yolo`, `--plan-yolo-into`, `--add-dir`, `--config`, `--profile`, `--allow-home`, `--hook`, `-e`/`--extension`, `--trusted-extension`, `--plugin-dir` |
-  | Grok | `--always-approve`, `--allow` (and its `--allowedTools`, `--allowed-tools`), `--permission-mode`, `--sandbox`, `--add-dir`, `--agents` |
+  | Grok | `--always-approve` and its other name `--yolo` (item 101b), `--allow` (and its `--allowedTools`, `--allowed-tools`), `--permission-mode`, `--sandbox`, `--add-dir`, `--agents` |
   | Cursor | `-f`/`--force`, `--yolo`, `--auto-review`, `--sandbox`, `--approve-mcps`, `--trust`, `--add-dir`, `--plugin-dir` |
   | Antigravity | `--dangerously-skip-permissions`, `--mode`, `--settings`, `--add-dir`, `--sandbox` |
 
@@ -672,6 +673,51 @@ start, so a file changed by hand never starts what the page would refuse.
     versions, and Report a problem reads them the same way.
   - Not done: Antigravity's thinking level (`thought_level`) has no switch here, as for the other ACP agents. Cursor's ask
     path was checked against its bundle, not a real tool call, since its account could not run one here.
+- **Grok as a chat (item 101b).** Grok Build was a terminal only. It now opens as a chat too, through the same generic ACP
+  adapter, as `grok --permission-mode default agent stdio` (its ACP server, "Run the agent over stdio"; the mode named before
+  it as GoSpark's ACP adapter starts Grok supervised), and its chat continues with `session/resume`, which its `initialize`
+  offers. A session opened as a terminal runs its own TUI as before, and a Grok session saved while Grok was a terminal only
+  comes back as that terminal. Grok was not signed in on this Mac, so it ran here only up to its signed-out `session/new`
+  (`tests/fixtures/acp/grok-signed-out.jsonl`); no message was sent. What holds it to asking, all of it read from Grok Build
+  1.0.93's own documentation (`~/.grok/docs/user-guide/`), its help, its binary's strings and its session logs here:
+  - **Its settings, read before the start.** Grok's permission mode (ask, auto-review, always-approve) is not a session mode:
+    a session starts in what its settings say ("Permission mode new sessions start in"), and its own logs here show this
+    Mac's sessions running with always-approve on. So a Grok chat starts only when every file Grok reads for it leaves it
+    asking (`acp_chat::GROK_SETTINGS`): `[ui] permission_mode` (or its old name `approval_mode`) absent, `ask` or
+    `default`, and `[ui] yolo` absent or false, in `config.toml`, `managed_config.toml` and `requirements.toml` in
+    `$GROK_HOME` (else `~/.grok`; an added account's home moves it) and in `/etc/grok`, and in the `GROK_CONFIG` and
+    `GROK_CONFIG_PATH` overlays; and a Claude `defaultMode` (which Grok also reads) absent, `default` or `plan` in
+    `~/.claude/settings.json` and `settings.local.json`, in every folder's `.claude/` from the chat's up, and in Claude's
+    managed settings. Anything else, or a file that cannot be read, refuses the start with a sentence naming
+    `permission_mode` and Claude's `defaultMode`. This Mac's own `config.toml` says `always-approve` today, so a Grok chat
+    does not start here until it says `ask`. The flag on the command line is kept as well: Grok documents flags as winning
+    over its files, but that it holds over `always-approve` could not be checked without a sign-in.
+  - **Its mode.** Its row asks in `default` only (`asks_in`). Grok's ACP sessions report `default` and `plan` (its own logs
+    here); its plan mode writes its plan file without a card, and on some of its tool sets any Markdown file, so a switch to
+    plan (which Grok asks for first) is set back with `session/set_mode`, the running turn stops, and the chat says so.
+  - **Its switches.** A message that starts with `/always-approve`, `/auto-review`, `/auto` (which "still runs the same
+    toggle") or `/yolo` is never sent, and the chat's command list leaves them out. `_meta.yoloMode` is never sent. Grok's own
+    notice that always-approve or auto-review came on (`x.ai/yolo_mode_changed`, its shape read from its binary, not seen)
+    stops the turn and sends nothing more.
+  - **Cards.** Grok names a call's tool in `_meta["x.ai/tool"]` rather than `kind` (as GoSpark's `ACPToolMapping` reads it),
+    so the card and the step read it there (`bash` runs a command, `search_replace`, `write_file` and `edit_file` change a
+    file, `read_file` reads one). Kit's dial reads ACP's own `kind` alone, so such a call asks. "Allow always" and Grok's
+    "Enable always-approve mode" (an `allow_always`) are never offered.
+  - **Sign-in.** Settings › Providers and Report a problem read `grok models`, whose first line says how Grok is signed in;
+    only the answer is kept.
+  - Not done or not checked: a real Grok turn, card and permission options (no sign-in); whether a request ever offers two
+    `allow_once` answers (the adapter would show them as a question); a project's own `.grok/config.toml` and
+    `.claude/settings*.json` allow rules, which apply as in Grok itself (below); a subagent definition with its own
+    `permissionMode`; macOS device management (`ai.x.grok`) and a default Grok's servers send, which no file holds; the
+    person's extra arguments on Settings › Providers are Grok's TUI's and go after `stdio`, where `agent stdio` takes none.
+- **Muse Code (item 101b): not offered.** Meta's Muse Code is the `muse` CLI (GoSpark's migration plan,
+  `docs/plans/migrate-from-grok-muse-2026-09-25.md`, and its `docs/migration.md`): settings in `$XDG_CONFIG_HOME/muse/settings.json`,
+  sessions in `$XDG_DATA_HOME/muse/sessions`, and a server mode, `muse serve`, which speaks its own protocol (MSP,
+  `meta-models/muse-code-sdk`'s `schema/msp/msp.d.ts`), not ACP. No `muse` is installed on this Mac (not on `PATH`, not in
+  `~/.local/bin`, Homebrew or npm); the `Muse` app in `/Applications` is Meta's chat app (`com.meta.endo`), which carries no
+  CLI, and `~/.config/muse/settings.json` holds only a hooks manager's three keys. So whether it has a mode in which it asks
+  before acting could not be read, and no adapter was guessed. It needs the owner: an install of the CLI, or its
+  documentation for MSP's approvals.
 
 `providers.rs`' tests pin each check, the order of a start's arguments and that a value never leaves; `agent_chat.rs`'
 `providers_settings_reach_a_chat_and_never_weaken_its_start` and `sessions.rs`' terminal twin start a stand-in program and
@@ -1748,11 +1794,13 @@ held by the source list (neither can run a program or allow a tool on its own).
 | Cline | `.cline/hooks/`, `.clinerules` | none found (`--hooks-dir` only adds) | open |
 | Cursor | `.cursor/cli.json` (`permissions.allow`), `.cursor/hooks.json` (needs workspace trust), `.cursor/mcp.json` (needs approval) | none found; `--trust` is the opposite and is refused | open |
 | Antigravity | not read: its hooks, MCP and project pages were not reached | `--include-default-customizations=false` is untested | open |
+| Grok | `.grok/config.toml` (`[permission]` rules, MCP servers, plugins, and `[env]` in a trusted folder), `.claude/settings.json` and `.claude/settings.local.json` up to the repository's root (permission rules, `defaultMode`), `.mcp.json`, and hooks, project skills and `AGENTS.md` after folder trust | folder trust (`--trust`, `GROK_FOLDER_TRUST`), whose `0` lets all of them in and is refused as a variable; none found that leaves out a project's permission rules | a `defaultMode` that skips asks refuses the start (item 101b); a project's allow rules: open |
 | pi | `.pi/extensions` (code), `.pi/settings.json` (`packages`, `extensions`), loaded after project trust (`defaultProjectTrust`, agent-folder settings only) | none for the rpc mode found | open (not installed here) |
 | oh-my-pi | `.omp/` hooks and extensions, `.omp/mcp.json` | `--no-extensions` also drops the person's own; `--approval-mode` unconfirmed against project settings | open |
 | OmO, DeepSeek Harness, a person's own agent | not read (not installed here, or the person's) | | open |
 
-Grok runs only as its own terminal, where its own prompts apply. `docs/decisions.md` has the call (item 89).
+Grok ran only as its own terminal until item 101b, where its own prompts apply. As a chat it reads a project's own files as
+in the row below; `docs/decisions/101b-grok-muse-chat.md` has the calls.
 
 ### A project's own instructions, as text
 
