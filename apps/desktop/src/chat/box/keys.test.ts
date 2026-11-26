@@ -6,9 +6,11 @@ import { setLang } from "../../i18n";
 import {
   AFTER_SEND_KEY,
   FOLLOW_UP_KEY,
+  FOLLOW_UP_USUAL,
   afterSend,
   followUp,
   keysCaption,
+  pickedFollowUp,
   reloadBoxKeys,
   sendKey,
   setAfterSend,
@@ -95,10 +97,29 @@ describe("Home's box: send and open, or send and stay", () => {
 });
 
 describe("an open chat while its answer runs: wait for it, or add it now", () => {
-  it("by default Enter waits and Cmd+Enter adds it now, for an agent that can take it", () => {
-    expect(followUp()).toBe("queue");
-    expect(whileRunning("enter", true)).toBe("queue");
-    expect(whileRunning("cmd", true)).toBe("steer");
+  it("until the person picks, each kind of chat does what it always did: a team member takes it in now, a coding chat waits", () => {
+    withStorage();
+    reloadBoxKeys();
+    expect(pickedFollowUp()).toBeNull();
+    expect(FOLLOW_UP_USUAL).toEqual({ member: "steer", code: "queue" });
+    expect(followUp("member")).toBe("steer");
+    expect(followUp("code")).toBe("queue");
+    // so Enter in a member's chat adds it now and Cmd+Enter waits, and a coding chat is the other way round
+    expect(whileRunning("enter", true, followUp("member"))).toBe("steer");
+    expect(whileRunning("cmd", true, followUp("member"))).toBe("queue");
+    expect(whileRunning("enter", true, followUp("code"))).toBe("queue");
+    expect(whileRunning("cmd", true, followUp("code"))).toBe("steer");
+  });
+
+  it("a pick in Settings is for both kinds of chat, and Usual gives each its own way back", () => {
+    withStorage();
+    reloadBoxKeys();
+    setFollowUp("queue");
+    expect([followUp("member"), followUp("code")]).toEqual(["queue", "queue"]);
+    setFollowUp("steer");
+    expect([followUp("member"), followUp("code")]).toEqual(["steer", "steer"]);
+    setFollowUp(null);
+    expect([followUp("member"), followUp("code")]).toEqual(["steer", "queue"]);
   });
 
   it("the setting swaps the two", () => {
@@ -118,9 +139,18 @@ describe("an open chat while its answer runs: wait for it, or add it now", () =>
     setFollowUp("steer");
     expect(m.get(FOLLOW_UP_KEY)).toBe("steer");
     reloadBoxKeys();
-    expect(followUp()).toBe("steer");
+    expect(pickedFollowUp()).toBe("steer");
+    // waiting is a pick like any other: it is kept, since it is not what a team member's chat does by itself
     setFollowUp("queue");
+    expect(m.get(FOLLOW_UP_KEY)).toBe("queue");
+    reloadBoxKeys();
+    expect(pickedFollowUp()).toBe("queue");
+    setFollowUp(null);
     expect(m.has(FOLLOW_UP_KEY)).toBe(false);
+    // anything else saved there reads as no pick
+    m.set(FOLLOW_UP_KEY, "interrupt");
+    reloadBoxKeys();
+    expect(pickedFollowUp()).toBeNull();
   });
 
   it("the line under the box says what Enter does now, and what Cmd+Enter does instead", () => {

@@ -2,8 +2,9 @@
 // while a turn runs is steered into it at once (chat.steer, no interrupt). Where Hermes refuses the steer it is held in
 // manut and goes out with chat.send when the turn ends, in order, exactly once; its ↵ buttons send it now (one
 // interrupt), steer it again, edit or delete it. Holds across a reconnect, a bot switch and Stop. Most stores here run
-// on Add it now (`followUp: () => "steer"`), as every chat did before item 95; the last block runs on the default, Wait
-// for it, where Enter holds the message and Cmd+Enter (`how: "steer"`) steers that one in.
+// on Add it now (`followUp: () => "steer"`), which is also what a team member's chat does while the person has picked
+// nothing; the last block runs on a pick of Wait for it, where Enter holds the message and Cmd+Enter (`how: "steer"`)
+// steers that one in.
 import { describe, expect, it } from "vitest";
 import { answerSlot, createStore, heldDrafts, initialState, reduce, reduceQueue, type AppState, type BridgeLike, type Chat } from "./store";
 import type { BridgeEvent } from "../lib/protocol";
@@ -578,9 +579,9 @@ describe("steer queue: review fixes", () => {
   });
 });
 
-describe("item 95: wait for the answer by default; Cmd+Enter adds one message now", () => {
-  /** A store on kami with a turn running that takes steers, on Settings' default (Wait for it). */
-  async function waiting(follow?: () => "queue" | "steer") {
+describe("item 95: Settings on Wait for it; Cmd+Enter adds one message now", () => {
+  /** A store on kami with a turn running that takes steers, on a pick of Wait for it; `null` is no pick at all. */
+  async function waiting(follow: (() => "queue" | "steer") | null = () => "queue") {
     const f = fake();
     let clock = T0;
     const store = createStore(f.bridge, { now: () => (clock += 10), ...(follow ? { followUp: follow } : {}) });
@@ -588,6 +589,16 @@ describe("item 95: wait for the answer by default; Cmd+Enter adds one message no
     f.emit({ event: "turn.start", bot: "kami" });
     return { f, a: store.actions, chat: () => store.getState().chats.kami };
   }
+
+  it("with no pick a team member's chat takes it in at once, as it did before there was a choice", async () => {
+    const { f, a, chat } = await waiting(null);
+    await a.send("and the docs");
+    await tick();
+    expect(f.calls.filter((c) => c.op === "chat.steer").map((c) => c.params)).toEqual([{ bot: "kami", text: "and the docs" }]);
+    expect(chat().items.find((i) => i.kind === "user" && i.text === "and the docs")).toMatchObject({ steered: true });
+    await turn(f);
+    expect(f.sends()).toEqual([]);
+  });
 
   it("Enter (no `how`): held with the ↵ ↓ × buttons, no chat.steer, and sent once after the turn", async () => {
     const { f, a, chat } = await waiting();

@@ -4,10 +4,11 @@
 // - Home's box (the New page, where a chat starts): Enter sends and opens the chat it started, as it always has, and
 //   Cmd+Enter sends and leaves the person on Home, with a quiet line that says so and opens it. "After sending from New"
 //   swaps the two.
-// - An open chat while its answer runs: Enter does "While an answer is running" (wait for the answer to finish, which is
-//   how a message typed then has always waited, or hand it to the running answer now), and Cmd+Enter does the other for
-//   that one message. An agent that has no way to take a message mid-answer waits with either key, and the line under the
-//   box says so. With no answer running both keys simply send.
+// - An open chat while its answer runs: Enter does "While an answer is running" (wait for the answer to finish, or hand it
+//   to the running answer now), and Cmd+Enter does the other for that one message. Until the person picks one, each kind
+//   of chat does what it did before there was a choice (`FOLLOW_UP_USUAL`): a team member takes the message in at once,
+//   as a messenger does, and a coding chat holds it until the answer is done. An agent that has no way to take a message
+//   mid-answer waits with either key, and the line under the box says so. With no answer running both keys simply send.
 //
 // Cmd is the Command key on a Mac and Ctrl elsewhere, as every other shortcut of the app (app/shortcuts.ts). The idea of
 // a send key that does the other thing for one message, and of a default for it, is T3 Code's (pingdotgg/t3code, commit
@@ -27,9 +28,12 @@ export const FOLLOW_UP_KEY = "manut.box.followUp";
 
 /** Opening the chat is what Enter on Home has always done. */
 export const AFTER_SEND_DEFAULT: AfterSend = "open";
-/** Waiting is what a message typed during an answer has always done in a coding chat, and it changes nothing the agent is
- *  in the middle of, so it is the quiet default; handing it in is one key away. */
-export const FOLLOW_UP_DEFAULT: FollowUp = "queue";
+/** Where a chat box is: a team member's chat and its threads, or a coding chat. */
+export type BoxKind = "member" | "code";
+/** What a message typed during an answer did in each kind of chat before there was a choice, and still does until the person
+ *  picks one in Settings: a team member takes it in at once (messenger style: it keeps working and takes the message in, no
+ *  interrupt), and a coding chat holds it until the answer is done. The setting changes nothing by being there. */
+export const FOLLOW_UP_USUAL: Readonly<Record<BoxKind, FollowUp>> = { member: "steer", code: "queue" };
 
 const read = <T extends string>(key: string, values: readonly T[], fallback: T): T => {
   try {
@@ -41,13 +45,18 @@ const read = <T extends string>(key: string, values: readonly T[], fallback: T):
 };
 
 let after: AfterSend = read(AFTER_SEND_KEY, ["open", "stay"], AFTER_SEND_DEFAULT);
-let follow: FollowUp = read(FOLLOW_UP_KEY, ["queue", "steer"], FOLLOW_UP_DEFAULT);
+/** The person's own pick for both kinds of chat, or null while they have picked none. */
+const readPicked = (): FollowUp | null => {
+  const v = read<FollowUp | "">(FOLLOW_UP_KEY, ["queue", "steer"], "");
+  return v === "" ? null : v;
+};
+let follow: FollowUp | null = readPicked();
 const listeners = new Set<() => void>();
 const tell = () => listeners.forEach((l) => l());
 
-const save = (key: string, value: string, fallback: string) => {
+const save = (key: string, value: string | null, fallback: string | null) => {
   try {
-    if (value === fallback) localStorage.removeItem(key);
+    if (value === null || value === fallback) localStorage.removeItem(key);
     else localStorage.setItem(key, value);
   } catch {
     /* no storage: the choice holds for this run */
@@ -55,7 +64,11 @@ const save = (key: string, value: string, fallback: string) => {
 };
 
 export const afterSend = (): AfterSend => after;
-export const followUp = (): FollowUp => follow;
+/** What a message typed during an answer does in a chat of `kind` when its sender did not say: the person's pick, else what
+ *  that kind of chat has always done. */
+export const followUp = (kind: BoxKind): FollowUp => follow ?? FOLLOW_UP_USUAL[kind];
+/** The person's pick in Settings, or null while each kind of chat does its usual. */
+export const pickedFollowUp = (): FollowUp | null => follow;
 
 export function setAfterSend(next: AfterSend): void {
   if (next === after) return;
@@ -64,17 +77,18 @@ export function setAfterSend(next: AfterSend): void {
   tell();
 }
 
-export function setFollowUp(next: FollowUp): void {
+/** `null` goes back to each kind of chat's usual. */
+export function setFollowUp(next: FollowUp | null): void {
   if (next === follow) return;
   follow = next;
-  save(FOLLOW_UP_KEY, next, FOLLOW_UP_DEFAULT);
+  save(FOLLOW_UP_KEY, next, null);
   tell();
 }
 
 /** Tests: read both choices again from storage. */
 export function reloadBoxKeys(): void {
   after = read(AFTER_SEND_KEY, ["open", "stay"], AFTER_SEND_DEFAULT);
-  follow = read(FOLLOW_UP_KEY, ["queue", "steer"], FOLLOW_UP_DEFAULT);
+  follow = readPicked();
   tell();
 }
 
@@ -83,7 +97,10 @@ const subscribe = (l: () => void) => {
   return () => void listeners.delete(l);
 };
 export const useAfterSend = (): AfterSend => useSyncExternalStore(subscribe, afterSend, afterSend);
-export const useFollowUp = (): FollowUp => useSyncExternalStore(subscribe, followUp, followUp);
+const memberFollowUp = () => followUp("member");
+const codeFollowUp = () => followUp("code");
+export const useFollowUp = (kind: BoxKind): FollowUp => useSyncExternalStore(subscribe, kind === "code" ? codeFollowUp : memberFollowUp, kind === "code" ? codeFollowUp : memberFollowUp);
+export const usePickedFollowUp = (): FollowUp | null => useSyncExternalStore(subscribe, pickedFollowUp, pickedFollowUp);
 
 // ---- keys ---------------------------------------------------------------------------------------------------------
 
@@ -117,7 +134,7 @@ export function staysHome(key: "enter" | "cmd", pref: AfterSend = after): boolea
 
 /** An open chat with an answer running: whether this message waits for the answer or goes into it now. Enter does the
  *  setting and Cmd+Enter the other; an agent that cannot take a message mid-answer always waits. */
-export function whileRunning(key: "enter" | "cmd", steers: boolean, pref: FollowUp = follow): FollowUp {
+export function whileRunning(key: "enter" | "cmd", steers: boolean, pref: FollowUp): FollowUp {
   if (!steers) return "queue";
   if (key === "enter") return pref;
   return pref === "queue" ? "steer" : "queue";
@@ -127,7 +144,7 @@ export function whileRunning(key: "enter" | "cmd", steers: boolean, pref: Follow
 export const modLabel = (mac = onMac()): string => (mac ? "⌘" : "Ctrl+");
 
 /** The line under a chat box while its answer runs: what Enter does now, and what Cmd+Enter does instead. */
-export function keysCaption(steers: boolean, agent: string, pref: FollowUp = follow, mac = onMac()): string {
+export function keysCaption(steers: boolean, agent: string, pref: FollowUp, mac = onMac()): string {
   const mod = modLabel(mac);
   if (!steers) return t("box.keys.noSteer", { agent, mod });
   return t(pref === "queue" ? "box.keys.queue" : "box.keys.steer", { mod });

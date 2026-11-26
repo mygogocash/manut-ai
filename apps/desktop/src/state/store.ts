@@ -2524,7 +2524,7 @@ export function createStore(bridge: BridgeLike, opts: StoreOptions = {}): Store 
    *  turn ends. Where it cannot be steered (files, a Reply there target, a `/` command Hermes runs itself, no turn yet,
    *  the bridge coming back, a refused steer ahead of it) it is held whatever `how` says. False when nothing runs
    *  there: send it now. */
-  const followUpOf = opts.followUp ?? savedFollowUp;
+  const followUpOf = opts.followUp ?? (() => savedFollowUp("member"));
   const holdIfBusy = (key: string, id: string, p: { text: string; wire: string; reply_to?: string; files?: OutFile[] }, row: Extract<Action, { type: "local.user" }>, how?: FollowUp) => {
     if (!mustHold(state, key)) return false;
     held.set(id, { bot: key, ...p });

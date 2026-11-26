@@ -1054,7 +1054,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     const lid = `local-s${++localSeq}`;
     if (mustHoldHere(id, key)) {
       hold(id, key, lid, { kind: "send", text: t, id: lid }, () => st.dispatch({ type: "local.user", bot: key, id: lid, text: t, now: Date.now(), held: true }));
-      if ((how ?? savedFollowUp()) === "steer" && chatOf(key)?.turn && chatOf(key)?.queue?.[0] === lid) await queuePick(id, lid, "steer");
+      if ((how ?? savedFollowUp("code")) === "steer" && chatOf(key)?.turn && chatOf(key)?.queue?.[0] === lid) await queuePick(id, lid, "steer");
       return true;
     }
     st.dispatch({ type: "local.user", bot: key, id: lid, text: t, now: Date.now() });

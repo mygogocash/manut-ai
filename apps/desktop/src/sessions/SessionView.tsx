@@ -211,6 +211,8 @@ function ChatPane({ rec, chatKey }: { rec: SessionRec; chatKey: string }) {
         onSendFiles={takesFiles ? (t, files, how) => (clearSuggestion(chatKey), getSessions().sendFiles(rec.id, t, files, how)) : undefined}
         // only the agents with a mid-turn input of their own take a message into a running answer (controls.ts STEERS)
         steers={steersOf(rec.agent)}
+        // a coding chat holds a message typed mid-answer until the person picks otherwise (chat/box/keys.ts FOLLOW_UP_USUAL)
+        boxKind="code"
         // its account at its limit: Send at the reset keeps what is typed (chat/box/later.ts)
         limit={limitOffer}
         onStop={() => void getSessions().interrupt(rec.id)}

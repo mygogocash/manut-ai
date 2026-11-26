@@ -18,7 +18,7 @@ import { addAt, matchMembers, mentionAt, putMention, withAction, withFolders, ty
 import { FolderChips, MentionPicker } from "../box/BoxParts";
 import { useBoxVoice } from "../box/Voice";
 import { voiceOffered } from "../../voice/engine";
-import { keysCaption, sendKey, stashKey, useFollowUp, whileRunning, type FollowUp } from "../box/keys";
+import { keysCaption, sendKey, stashKey, useFollowUp, whileRunning, type BoxKind, type FollowUp } from "../box/keys";
 import { filesOf, stashDraft, takeHanded } from "../../app/stash";
 
 const MAX_H = 200;
@@ -69,6 +69,7 @@ export function Composer({
   onSuggestionTaken,
   voice = false,
   steers = true,
+  boxKind = "member",
   limit,
 }: {
   bot: Bot;
@@ -124,6 +125,8 @@ export function Composer({
   /** This chat's agent can take a message mid-answer (a steer). Without one, a message typed during an answer always
    *  waits, with Enter or Cmd+Enter, and the line under the box says so. */
   steers?: boolean;
+  /** A team member's chat (the default) or a coding chat: what a message typed mid-answer does until the person picks (chat/box/keys.ts). */
+  boxKind?: BoxKind;
   /** The account this chat runs on is at its limit (item 95, chat/box/later.ts): until when, and how to keep what is
    *  typed to send then. `onWait` is false when a message already waits in this chat. */
   limit?: { until: string; onWait: (text: string) => boolean } | null;
@@ -468,7 +471,7 @@ export function Composer({
   useEffect(() => () => latest.current.forEach((c) => c.url && URL.revokeObjectURL(c.url)), []);
 
   const overlay = useDropZone(wrap, !offline && !!onSendFiles, add);
-  const follow = useFollowUp();
+  const follow = useFollowUp(boxKind);
 
   /** Send with Enter or Cmd+Enter (`key`): while an answer runs they choose between waiting for it and adding it now. */
   const send = async (key: "enter" | "cmd" = "enter") => {

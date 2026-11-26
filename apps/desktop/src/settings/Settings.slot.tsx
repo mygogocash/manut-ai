@@ -35,7 +35,7 @@ import { SourceControlPage } from "./SourceControlPage";
 import { ArtifactLinksPage } from "./ArtifactLinksPage";
 import { RemotePage } from "./RemotePage";
 import { setSuggestOn, useSuggestOn } from "../lib/suggest";
-import { modLabel, setAfterSend, setFollowUp, useAfterSend, useFollowUp, type AfterSend, type FollowUp } from "../chat/box/keys";
+import { modLabel, setAfterSend, setFollowUp, useAfterSend, usePickedFollowUp, type AfterSend, type FollowUp } from "../chat/box/keys";
 import { VoicePage } from "./VoicePage";
 import { ComputerPage } from "./ComputerPage";
 import { McpSkillsPage } from "./mcp/McpSkillsPage";
@@ -686,18 +686,20 @@ function AfterSendSeg() {
   );
 }
 
-/** Settings › General › Chat box › While an answer is running (item 95): what Enter does with a message typed then. */
+/** Settings › General › Chat box › While an answer is running (item 95): what Enter does with a message typed then. "Usual" is
+ *  where it starts and changes nothing: a team member takes it in now and a coding chat waits, as each did before the choice. */
 function FollowUpSeg() {
-  const v = useFollowUp();
+  const v = usePickedFollowUp();
   return (
     <Modes
       label={t("box.follow")}
-      value={v}
+      value={v ?? "usual"}
       options={[
+        { value: "usual", label: t("box.followUsual") },
         { value: "queue", label: t("box.followQueue") },
         { value: "steer", label: t("box.followSteer") },
       ]}
-      onChange={(x) => setFollowUp(x as FollowUp)}
+      onChange={(x) => setFollowUp(x === "usual" ? null : (x as FollowUp))}
       testId="set-follow-up"
     />
   );
