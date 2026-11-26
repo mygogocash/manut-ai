@@ -594,21 +594,15 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
-## The ACP registry on Settings › Providers
+## Android notification tones
 
-Settings › Providers › From the ACP registry (item 101c) lists the agents of one release of the Agent Client Protocol's
-agent registry, whose `registry.json` the shell carries byte for byte (`src-tauri/acp-registry/registry.json`, its source,
-release and SHA-256 in `pin.json` beside it) and reads to show each agent's name, description, version and how it is
-installed. The agents it lists are their makers' and keep their own licences; the app installs and downloads none of
-them. The list's search is lifted from T3 Code.
+The five selectable notification tones in Settings › General › Sounds (Heaven, Highwire, Iridium, Krypton and Kzurb Sonar) are from the Android Open Source Project (`platform/frameworks/base/data/sounds`), pinned at revision `1cdfff555f4a21f71ccc978290e2e212e2f8b168`. The source package declares `Android-Apache-2.0` in `data/sounds/Android.bp`. We took them from GoSpark (our own earlier app, at `a7537c80`), which had converted each OGG to 16-bit AIFF without musical edits; here each AIFF was converted again to 16-bit PCM WAV with macOS `afconvert`, keeping its sample rate and channels (`src/assets/sounds/`). Highwire and Kzurb Sonar credit Dr. MAD in their original metadata. The source and output SHA-256 of each file are in `src/assets/sounds/AndroidSoundSources.json`. Android and the sound names identify the source; no endorsement is implied. All five are bundled in the app; none is downloaded.
 
-### ACP registry (agentclientprotocol/registry)
+Source: https://android.googlesource.com/platform/frameworks/base/+/1cdfff555f4a21f71ccc978290e2e212e2f8b168/data/sounds/
 
-Source: <https://github.com/agentclientprotocol/registry>, release `v2026.11.26-3667256` (commit
-`36672565f76e7fb9796eb15182e0e14fb9e77c33`), asset `registry.json`, and `quarantine.json` at that commit. No NOTICE file
-is published with it.
+### Apache License, Version 2.0
 
-```
+
                                  Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -659,7 +653,7 @@ is published with it.
       "Contribution" shall mean any work of authorship, including
       the original version of the Work and any modifications or additions
       to that Work or Derivative Works thereof, that is intentionally
-      submitted to the Licensor for inclusion in the Work by the copyright owner
+      submitted to Licensor for inclusion in the Work by the copyright owner
       or by an individual or Legal Entity authorized to submit on behalf of
       the copyright owner. For the purposes of this definition, "submitted"
       means any form of electronic, verbal, or written communication sent
@@ -785,7 +779,46 @@ is published with it.
       of your accepting any such warranty or additional liability.
 
    END OF TERMS AND CONDITIONS
-```
+
+   APPENDIX: How to apply the Apache License to your work.
+
+      To apply the Apache License to your work, attach the following
+      boilerplate notice, with the fields enclosed by brackets "[]"
+      replaced with your own identifying information. (Don't include
+      the brackets!)  The text should be enclosed in the appropriate
+      comment syntax for the file format. We also recommend that a
+      file or class name and description of purpose be included on the
+      same "printed page" as the copyright notice for easier
+      identification within third-party archives.
+
+   Copyright [yyyy] [name of copyright owner]
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+
+## The ACP registry on Settings › Providers
+
+Settings › Providers › From the ACP registry (item 101c) lists the agents of one release of the Agent Client Protocol's
+agent registry, whose `registry.json` the shell carries byte for byte (`src-tauri/acp-registry/registry.json`, its source,
+release and SHA-256 in `pin.json` beside it) and reads to show each agent's name, description, version and how it is
+installed. The agents it lists are their makers' and keep their own licences; the app installs and downloads none of
+them. The list's search is lifted from T3 Code.
+
+### ACP registry (agentclientprotocol/registry)
+
+Source: <https://github.com/agentclientprotocol/registry>, release `v2026.11.26-3667256` (commit
+`36672565f76e7fb9796eb15182e0e14fb9e77c33`), asset `registry.json`, and `quarantine.json` at that commit. No NOTICE file
+is published with it. Under the Apache License, Version 2.0, reproduced in full under Android notification tones above
+(the registry's own `LICENSE` is that text without its appendix).
 
 ### T3 Code (pingdotgg/t3code)
 

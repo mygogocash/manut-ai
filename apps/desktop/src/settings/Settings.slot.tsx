@@ -18,6 +18,7 @@ import { appSounds, setSoundsEnabled, soundsEnabled } from "../lib/sounds";
 import { LANG_NAMES, LANGS, t, type Key, type Lang } from "../i18n";
 import { Avatar, ModelIcon, SourceIcon } from "../ui";
 import { Modes } from "../ui/Modes";
+import { SoundsRows } from "./SoundsRows";
 import { reasoningLabel } from "../chat/model/levels";
 import { Appearance } from "./Appearance";
 import { APP_PAGES, EVERYDAY_PAGES, HOOD_PAGES, LIST_ICON, inHood } from "./pages";
@@ -784,14 +785,19 @@ function GeneralPage() {
           <NotifyErrorsSeg />
         </Row>
         <OutsideRows />
-        <Row title={t("sounds.title")} hint={t("sounds.hint")}>
-          <SoundsSeg />
-        </Row>
         <Row title={t("disk.setting")} hint={t("disk.settingHint")}>
           <DiskWarnSeg />
         </Row>
       </div>
       <OutsideNotes />
+      {/* The sounds (item 131): the app's quiet sounds, then GoSpark's chimes with their own switches */}
+      <div className="st-gh">{t("sounds.group")}</div>
+      <div className="st-grp" data-testid="set-sounds">
+        <Row title={t("sounds.title")} hint={t("sounds.hint")}>
+          <SoundsSeg />
+        </Row>
+        <SoundsRows />
+      </div>
       {/* The chat box's keys (item 95), beside its other choices: each has the default nobody needs to change. */}
       <div className="st-gh">{t("box.group")}</div>
       <div className="st-grp" data-testid="set-box">

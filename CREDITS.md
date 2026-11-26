@@ -68,6 +68,15 @@ hold. From `AntigravitySession.swift`, Antigravity's own input names (`CommandLi
 not); from `ACPSession.swift`, that an agent's `session/new` reports its modes and models both as `modes` and `models`
 and as configuration options, and that a mode is set with `session/set_config_option` or else `session/set_mode`.
 
+GoSpark again (at `a7537c80`, read in the checkout on the owner's Mac on 26 Nov 2026) for the sounds (item 131,
+`apps/desktop/src/sound/`, `docs/sounds.md`): the notes, partials, envelopes, durations and volumes of `ToneSynth.swift`,
+`FinishChime.swift`, `SettleChime.swift`, `EffortChime.swift` and `TooltipSound.swift`, ported to Web Audio with their
+numbers unchanged; and the five selectable notification tones (Heaven, Highwire, Iridium, Krypton, Kzurb Sonar) from the
+Android Open Source Project (`platform/frameworks/base` at `1cdfff555f4a21f71ccc978290e2e212e2f8b168`, Apache-2.0;
+Highwire and Kzurb Sonar credit Dr. MAD), which GoSpark had converted to AIFF and `afconvert` turned into WAV here
+(`apps/desktop/src/assets/sounds/`; their hashes are in `AndroidSoundSources.json` and the licence is in
+`apps/desktop/THIRD_PARTY_NOTICES.md`).
+
 The Agent Client Protocol's agent registry (Apache-2.0, `agentclientprotocol/registry`, release `v2026.11.26-3667256` at
 commit `36672565f76e7fb9796eb15182e0e14fb9e77c33`) for Settings › Providers › From the ACP registry (item 101c): its
 published `registry.json` is pinned byte for byte in `apps/desktop/src-tauri/acp-registry/` with its `quarantine.json`

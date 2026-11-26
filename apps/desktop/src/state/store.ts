@@ -128,13 +128,24 @@ export function soundOf(a: Action, state: AppState, board: SoundBoard): void {
   else if (a.type === "conn" && a.status !== "open") board.unsettle();
   else if (a.type === "event") {
     const ev = a.ev.session ? { ...a.ev, bot: folderKey(a.ev.bot, a.ev.session) } : a.ev;
+    if (ev.event === "turn.start") turnStarts.set(ev.bot, (turnStarts.get(ev.bot) ?? 0) + 1);
     const s = soundFor(ev, {
       watching: (key) => watchingChat(state, key),
       open: (key, id) => selectAsks(state).some((x) => x.bot === key && x.item.request_id === id),
     });
-    if (s) board.offer(s.sound, s.ask ? { chat: ev.bot, id: s.ask } : undefined);
+    // a finish is named by its chat and its turn, so a turn that ends twice (a replay, a reconnect) chimes once
+    if (s) board.offer(s.sound, s.ask ? { chat: ev.bot, id: s.ask } : s.sound === "finish" ? { chat: ev.bot, id: finishKey(ev.bot) } : undefined);
   }
 }
+
+/** How many turns each chat has started, so the end of one turn is named by it. */
+const turnStarts = new Map<string, number>();
+let finishesWithoutStart = 0;
+/** The name of the finish of `bot`'s running turn: its turn's number, or a fresh one for an adapter that sends no start. */
+const finishKey = (bot: string): string => {
+  const n = turnStarts.get(bot);
+  return n ? `turn:${n}` : `finish:${++finishesWithoutStart}`;
+};
 
 /** Rings with no words wait for the question that says what they want (notify.ts `createNoteGate`). */
 const noteGate = createNoteGate();
