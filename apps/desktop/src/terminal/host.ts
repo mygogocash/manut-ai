@@ -5,6 +5,7 @@
 
 import { mockPtyOut, nextMockPty } from "../sessions/fg";
 import { setThisHost } from "../sessions/term/engine-marks";
+import { inTauri } from "../lib/tauri";
 
 export interface ShellStarted {
   id: number;
@@ -269,7 +270,6 @@ export class MockShellHost implements ShellHost {
   }
 }
 
-const inTauri = () => typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 let host: ShellHost | null = null;
 export function getShellHost(): ShellHost {
   return (host ??= inTauri() ? new TauriShellHost() : new MockShellHost());

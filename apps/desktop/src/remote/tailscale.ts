@@ -8,6 +8,7 @@
 //
 // In a plain browser (dev, e2e) with `window.__manutTailscale` set, that value stands in for the shell's answer.
 import { t, type Lang } from "../i18n";
+import { inTauri } from "../lib/tauri";
 
 /** Tailscale on this Mac: not installed, not running and signed in, running without MagicDNS and HTTPS for this Mac,
  *  or ready under `name` (`mac.tail1234.ts.net`). */
@@ -36,7 +37,6 @@ export function tailscaleState(raw: unknown): TailscaleState {
   }
 }
 
-const inTauri = () => typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 type Globals = { __manutTailscale?: unknown };
 const standIn = (): unknown => (typeof window === "undefined" ? undefined : (window as unknown as Globals).__manutTailscale);
 

@@ -1,3 +1,4 @@
+import { inTauri } from "../lib/tauri";
 // Where the workflow files are read (item 77b). In the desktop app: the shell's `workflows_read`, which reads `~/.manut/workflows/`
 // and never writes there, and `workflows_folder`, which makes the folder for Show folder (src-tauri/src/workflows.rs). In a plain
 // browser (dev, e2e against the mock bridge) there is no shell: a mock lists the files a test puts in
@@ -67,7 +68,6 @@ export function readShellFolder(v: unknown): ShellFolder {
   return { path, state: o.state as FolderState, files, more: typeof o.more === "number" && o.more > 0 ? o.more : 0 };
 }
 
-const inTauri = () => typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
 export class TauriWorkflowsHost implements WorkflowsHost {
   readonly kind = "tauri" as const;

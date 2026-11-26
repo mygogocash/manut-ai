@@ -4,6 +4,7 @@
 // through `window.__manutMockRunning` (and the mock preview adds its fake run to, code/previewHost.ts) and records every
 // call in `window.__manutRunningCalls`.
 import type { RunningRow } from "./model";
+import { inTauri } from "../lib/tauri";
 
 /** `stopping`: the command and what it started were told to end. `gone`: it had ended already. */
 export type StopAnswer = "stopping" | "gone";
@@ -20,7 +21,6 @@ export interface RunningHost {
   stop(target: RunningTarget): Promise<StopAnswer>;
 }
 
-const inTauri = () => typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
 const num = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
 

@@ -7,6 +7,7 @@
 // stubbed shell): the page then runs the desktop's own host against it, as it runs against the real shell.
 import { MockRunningHost, getRunningHost } from "../running/host";
 import { readProject, START_WAIT_MS, type PreviewProject } from "./previewRun";
+import { inTauri } from "../lib/tauri";
 
 /** What a running preview says: lines it printed (stdout and stderr, as they arrived), and once, how it ended. */
 export type PreviewEvent = { event: "lines"; lines: string[] } | { event: "exit"; code: number | null; stopped: boolean };
@@ -26,7 +27,6 @@ export interface PreviewHost {
   open(url: string): Promise<void>;
 }
 
-const inTauri = () => typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
 /** An event as the shell sent it, or null when it is not one: a line that is not text is dropped rather than shown wrong. */
 export function readEvent(v: unknown): PreviewEvent | null {

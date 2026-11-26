@@ -8,6 +8,7 @@
 import { maskSecrets } from "../lib/secrets";
 import type { CliSource, CliStatus, GhAccount, GhAccounts, MeFailKind, MeItem, MePage, MeSection, MergeMethods, OtherBoard, OtherRemote, PullBoard, PullDetail, PullRow, TaskDetail, TaskFilter, TaskItem, TaskKind, TaskPage, TaskRemote } from "./types";
 import { PAGE } from "./types";
+import { inTauri } from "../lib/tauri";
 
 /** A "나" list that failed, with why (`rate`: GitHub's rate limit, `auth`: sign in again, `other`). */
 export class MeFail extends Error {
@@ -314,7 +315,6 @@ export class MaskingTaskHost implements TaskHost {
   }
 }
 
-const inTauri = () => typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
 let host: TaskHost | null = null;
 export function taskHost(): TaskHost {
