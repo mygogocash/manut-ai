@@ -55,7 +55,8 @@ app's content policy already lets it reach `wss://*.manut.xyz`, and the store an
 - `serve.ts`: the only code that turns a phone's request into a store action, and only for six allowed requests.
 - `project.ts`: what the phone sees, masked with `lib/secrets.ts`.
 - Keys live in a new keychain item (account `remote`), read and written by a new `remote_keys.rs` with `api_link.rs`'s
-  `read_item` and `write_item`, and imported by the page so script cannot read them back, as `shop-cache-key` is.
+  `read_item` and `write_item`. The relay key's private half stays in the shell, which makes it and signs with it;
+  each phone's K is imported by the page so script cannot read it back, as `shop-cache-key` is.
 - No listener and no open port.
 
 If the page's socket is held back while the window is hidden or the Mac is locked (to be checked in phase 2),
@@ -116,9 +117,25 @@ needs a QR reader, which the repository does not have: the browser's own is used
   consent sheet; the app turns it back on at launch only for a person who did (`resumeRemote`).
 - **The keychain item** (account `remote`) is one JSON document: the relay key as its JWK's `d`, `x` and `y`, and per
   phone its id, name, `pairedAt`, `lastSeen`, K (64 hex digits), door token hash, passkey credential id and public key
-  (base64url) and counter. The page reads it once, imports the relay key and each K as keys script cannot read back,
-  and changes it only through `remote_keys_set_host`, `_add_device`, `_touch_device` and `_remove_device`, which check
-  every field, refuse a second relay key and a passkey that belongs to another phone, and never take a counter back.
+  (base64url) and counter. The shell checks every field, refuses a second relay key and a passkey that belongs to
+  another phone, and never takes a counter back.
+- **What the page may hold of it** (third review, 26 Nov 2026). A script injected into the main window can call every
+  command the page can, so the shell hands out as little as the page needs:
+  - The relay key's private half never reaches the page. The shell makes the key (`remote_host_make`, with Security's
+    own generator, on a key never put in any keychain but the item) and signs the relay's challenge itself
+    (`remote_host_sign`), and signs nothing but `gospark-relay-v1|host|<this key's host id>|<a 32-byte nonce>`. The
+    page's read (`remote_keys_read`) carries only the public half.
+  - Each phone's K is in that read only while the shell's own switch is on (`remote_switch`, turned on by the page after
+    the consent and off with the switch); the page imports it at once as a key script cannot read back.
+  - A phone is added (`remote_keys_add_device`) only while the shell has a pairing open (`remote_pairing`, opened while
+    a code is shown, at most five minutes, only while the switch is on), one phone a pairing. A counter moves
+    (`_touch_device`) only while the switch is on. Unpair (`_remove_device`) is never held back.
+  - Not closed: the shell cannot tell the page from a script in it. A script that turns the shell's switch on and opens
+    a pairing first still gets K and can still add a phone, and while it runs it can have the shell sign a relay
+    challenge. What it can no longer do is read the relay key, or read K or add a phone with one call while the switch
+    is off. Closing the rest needs either a confirmation the shell shows itself (a native window the page cannot
+    press) before a phone is added, or the session handshake moved into the shell so K never reaches the page; both
+    are the owner's call.
 - **Messages inside a pairing channel**, after the grant (the package's 82 bytes): the Mac sends
   `{"t":"passkey","challenge","rp":{"id"},"user"}`; the phone answers `{"t":"registered","name","credentialId",
   "clientDataJSON","authenticatorData"}` (base64url); the Mac answers `{"t":"paired"}` or `{"t":"refused","reason"}`

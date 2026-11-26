@@ -119,6 +119,12 @@ export class PairingDoor {
       this.#show({ phase: "failed", reason: "full" });
       return false;
     }
+    // The shell takes a new phone only while it has a pairing open, so a script in the page cannot add one on its own.
+    try {
+      await this.#deps.vault.openPairing();
+    } catch {
+      return false;
+    }
     const createdAt = this.#deps.now();
     const offer = newPairingOffer(this.#deps.hostId, this.#deps.random ?? systemRandom);
     let link: string;
@@ -133,6 +139,7 @@ export class PairingDoor {
       offer.secret.fill(0);
       offer.doorToken.fill(0);
     }
+    // Another pairing started meanwhile: the window the shell opened is that one's.
     if (this.#open) return false;
     const open: Open = {
       doorId: offer.doorId,
@@ -326,6 +333,7 @@ export class PairingDoor {
   #end(open: Open, reason: PairingFailure | null): void {
     if (this.#open !== open) return;
     this.#open = null;
+    this.#deps.vault.closePairing();
     if (open.timer !== null) this.#deps.timers.clear(open.timer);
     this.#deps.revokeDevice(open.doorId);
     if (open.stream !== null) this.#deps.closeStream(open.stream);

@@ -162,7 +162,11 @@ export class RemoteMac {
       this.#changed();
       return;
     }
-    const vault = await RemoteVault.open(this.#deps.keyring, true).catch(() => null);
+    // The shell's own switch goes on first: until then it makes no key and gives no K.
+    const vault = await this.#deps.keyring
+      .setSwitch(true)
+      .then(() => RemoteVault.open(this.#deps.keyring, true))
+      .catch(() => null);
     if (generation !== this.#generation) return;
     if (!vault?.identity) {
       // No keychain (not macOS, the browser preview) or one that refused: nothing can be kept, so nothing is opened.
@@ -253,6 +257,8 @@ export class RemoteMac {
     }
     this.#linkState = "stopped";
     this.#pairingView = { phase: "idle" };
+    // The shell's switch goes off too: no K, no signature and no new phone until it is turned on again.
+    void this.#deps.keyring.setSwitch(false).catch(() => undefined);
     this.#changed();
   }
 

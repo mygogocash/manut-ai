@@ -5,16 +5,30 @@
 //! secret every session of that phone is proved with, as 64 lowercase hex digits), the hash of its relay door token, and
 //! its passkey (credential id, public key and signature counter). Never in a file and never in a log.
 //!
-//! The page (src/remote/keys.ts) reads it with `remote_keys_read` and imports the relay key and each K at once as keys
-//! script cannot read back, as it does the shop cache's key (shop_cache_key.rs); it changes it only through the four
-//! narrow commands below, so it never has to hold a secret in order to write the document back. Every field's form is
-//! checked here before anything is written, a second relay key is refused (so two windows can never replace the key the
-//! relay knows the Mac by), a phone whose passkey already belongs to another is refused (the remote channel's caller duty,
-//! packages/remote-channel/README.md), and a passkey's counter never goes down. Nothing here makes a key: the page makes
-//! the relay key and K, and only once the person has turned "Reach this Mac from your phone" on. macOS only for now:
-//! elsewhere the commands answer `unavailable`, and the page keeps nothing.
+//! The page (src/remote/keys.ts) reads it with `remote_keys_read` and changes it only through narrow commands, so it
+//! never has to hold a secret in order to write the document back. Every field's form is checked here before anything is
+//! written, a second relay key is refused (so two windows can never replace the key the relay knows the Mac by), a phone
+//! whose passkey already belongs to another is refused (the remote channel's caller duty,
+//! packages/remote-channel/README.md), and a passkey's counter never goes down.
+//!
+//! A script injected into the main window can call every command the page can (third review, 26 Nov 2026), so the shell
+//! hands out as little as the page needs, and only while it needs it:
+//! - The relay key's private half never leaves the shell. The shell makes the key (`make_host`, with the system's own
+//!   generator) and signs the relay's challenge itself (`sign_host`), and signs nothing but that challenge for this key's
+//!   host id. The page is given the public half.
+//! - Each phone's K is in the page's read only while the shell's own switch is on (`Gate`), which the page turns on after
+//!   the person's consent and off with the switch; the page imports it at once as a key script cannot read back.
+//! - A phone is added only while the shell has a pairing open (at most five minutes, opened only while the switch is on),
+//!   one phone a pairing, and a counter only moves while the switch is on. Unpair is never held back.
+//! The shell cannot tell the page from a script in it, so a script that turns the switch on and opens a pairing first
+//! still gets K and can still add a phone; what it can no longer do is read the relay key, or read K or add a phone with
+//! one plain call while the switch is off. macOS only for now: elsewhere the commands answer `unavailable`, and the page
+//! keeps nothing.
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use std::sync::{Mutex, MutexGuard};
+use std::time::{Duration, Instant};
 use zeroize::{Zeroize, Zeroizing};
 
 /// The keychain item's account, beside `session` (api_link.rs), `outpost` and `shop-cache-key`.
@@ -132,6 +146,230 @@ pub fn valid_doc(doc: &Doc) -> bool {
         })
 }
 
+/// The relay key as the page is given it: its public half, never `d`.
+#[derive(Serialize, Clone, PartialEq, Debug)]
+pub struct HostPublic {
+    pub x: String,
+    pub y: String,
+}
+
+/// One phone as the page is given it: K only while the switch is on.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PageDevice<'a> {
+    id: &'a str,
+    name: &'a str,
+    paired_at: u64,
+    last_seen: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    k: Option<&'a str>,
+    token_hash: &'a str,
+    credential_id: &'a str,
+    public_key: &'a str,
+    sign_count: u32,
+}
+
+#[derive(Serialize)]
+struct PageDoc<'a> {
+    v: u32,
+    host: Option<HostPublic>,
+    devices: Vec<PageDevice<'a>>,
+}
+
+/// What the page is given of the document: never the relay key's private half, and each phone's K only `with_k` (the
+/// switch on). In a buffer wiped when dropped.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn page_text(doc: &Doc, with_k: bool) -> Result<Zeroizing<String>, &'static str> {
+    let page = PageDoc {
+        v: doc.v,
+        host: doc.host.as_ref().map(|h| HostPublic { x: h.x.clone(), y: h.y.clone() }),
+        devices: doc
+            .devices
+            .iter()
+            .map(|d| PageDevice {
+                id: &d.id,
+                name: &d.name,
+                paired_at: d.paired_at,
+                last_seen: d.last_seen,
+                k: if with_k { Some(&d.k) } else { None },
+                token_hash: &d.token_hash,
+                credential_id: &d.credential_id,
+                public_key: &d.public_key,
+                sign_count: d.sign_count,
+            })
+            .collect(),
+    };
+    serde_json::to_string(&page).map(Zeroizing::new).map_err(|_| "invalid")
+}
+
+const B64URL: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+
+/// base64url without padding (RFC 4648 section 5), as the item, the page and the relay write keys and signatures.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn b64url(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let n = (u32::from(chunk[0]) << 16) | (u32::from(*chunk.get(1).unwrap_or(&0)) << 8) | u32::from(*chunk.get(2).unwrap_or(&0));
+        for i in 0..=chunk.len() {
+            out.push(B64URL[((n >> (18 - 6 * i)) & 63) as usize] as char);
+        }
+    }
+    out
+}
+
+/// The bytes of base64url text without padding, in a buffer wiped when dropped; `None` for anything else, a text whose
+/// last character carries bits it should not included.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn from_b64url(text: &str) -> Option<Zeroizing<Vec<u8>>> {
+    if text.len() % 4 == 1 {
+        return None;
+    }
+    let mut out = Zeroizing::new(Vec::with_capacity(text.len() * 3 / 4));
+    let (mut acc, mut bits) = (0u32, 0u32);
+    for b in text.bytes() {
+        let v = match b {
+            b'A'..=b'Z' => b - b'A',
+            b'a'..=b'z' => b - b'a' + 26,
+            b'0'..=b'9' => b - b'0' + 52,
+            b'-' => 62,
+            b'_' => 63,
+            _ => return None,
+        };
+        acc = (acc << 6) | u32::from(v);
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((acc >> bits) as u8);
+            acc &= (1 << bits) - 1;
+        }
+    }
+    if acc != 0 {
+        return None;
+    }
+    Some(out)
+}
+
+/// The host id the relay names the Mac by: the base64url SHA-256 of the relay key's uncompressed public point.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn host_id(x: &str, y: &str) -> Option<String> {
+    let (x, y) = (from_b64url(x)?, from_b64url(y)?);
+    if x.len() != 32 || y.len() != 32 {
+        return None;
+    }
+    let mut hash = Sha256::new();
+    hash.update([0x04]);
+    hash.update(&*x);
+    hash.update(&*y);
+    Some(b64url(&hash.finalize()))
+}
+
+/// The one message the relay key signs: the relay's challenge for this Mac (`challengeMessage` in src/remote/link.ts,
+/// `verifyHostHello` in apps/api/src/relay.ts), its host id and the relay's 32-byte nonce, and nothing else.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn is_relay_challenge(message: &str, host_id: &str) -> bool {
+    let parts: Vec<&str> = message.split('|').collect();
+    parts.len() == 4 && parts[0] == "gospark-relay-v1" && parts[1] == "host" && parts[2] == host_id && is_b64url(parts[3], 43, 43)
+}
+
+/// An ECDSA signature as DER (`SEQUENCE { INTEGER r, INTEGER s }`, RFC 3279), as Security's X9.62 algorithms give it,
+/// as the raw `r || s` the relay verifies (Web Crypto's form); `None` for anything that is not exactly that.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn der_to_raw(der: &[u8]) -> Option<[u8; 64]> {
+    let (&tag, rest) = der.split_first()?;
+    let (&len, mut body) = rest.split_first()?;
+    if tag != 0x30 || len >= 0x80 || usize::from(len) != body.len() {
+        return None;
+    }
+    let mut out = [0u8; 64];
+    for half in 0..2 {
+        let (&t, rest) = body.split_first()?;
+        let (&l, rest) = rest.split_first()?;
+        let l = usize::from(l);
+        if t != 0x02 || l == 0 || l > 33 || rest.len() < l {
+            return None;
+        }
+        let (int, rest) = rest.split_at(l);
+        let int = if l == 33 {
+            if int[0] != 0 {
+                return None;
+            }
+            &int[1..]
+        } else {
+            int
+        };
+        out[half * 32 + 32 - int.len()..half * 32 + 32].copy_from_slice(int);
+        body = rest;
+    }
+    body.is_empty().then_some(out)
+}
+
+/// How long a pairing may add its phone: the code's two minutes, then two for the phone's passkey, and one to spare.
+pub const PAIRING_WINDOW: Duration = Duration::from_secs(5 * 60);
+
+/// The shell's own record of "Reach this Mac from your phone" and of a pairing under way. The page sets both, after the
+/// person's consent and while a code is shown; the shell cannot tell the page from a script in it, but nothing secret is
+/// read, and no phone added, without them.
+#[derive(Debug)]
+pub struct Gate {
+    on: bool,
+    pairing_until: Option<Instant>,
+}
+
+impl Gate {
+    pub const fn new() -> Self {
+        Gate { on: false, pairing_until: None }
+    }
+
+    /// Off closes any pairing too.
+    pub fn set_switch(&mut self, on: bool) {
+        self.on = on;
+        if !on {
+            self.pairing_until = None;
+        }
+    }
+
+    pub fn is_on(&self) -> bool {
+        self.on
+    }
+
+    pub fn require_on(&self) -> Result<(), &'static str> {
+        if self.on { Ok(()) } else { Err("off") }
+    }
+
+    /// Opens a pairing for `PAIRING_WINDOW` (only while on), or closes it.
+    pub fn set_pairing(&mut self, open: bool, now: Instant) -> Result<(), &'static str> {
+        if !open {
+            self.pairing_until = None;
+            return Ok(());
+        }
+        self.require_on()?;
+        self.pairing_until = Some(now + PAIRING_WINDOW);
+        Ok(())
+    }
+
+    /// Spends the open pairing for one phone: refused with none open, one past its time, or the switch off.
+    pub fn take_pairing(&mut self, now: Instant) -> Result<(), &'static str> {
+        let until = self.pairing_until.take();
+        match until {
+            Some(until) if self.on && now < until => Ok(()),
+            _ => Err("no_pairing"),
+        }
+    }
+}
+
+impl Default for Gate {
+    fn default() -> Self {
+        Gate::new()
+    }
+}
+
+static GATE: Mutex<Gate> = Mutex::new(Gate::new());
+
+/// The app's one gate.
+pub fn gate() -> MutexGuard<'static, Gate> {
+    GATE.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 /// The document an item holds, or `None` for an item that is missing or that this build cannot read: a damaged item
 /// is never half read, and the next key the page keeps replaces it.
 pub fn parse(text: &str) -> Option<Doc> {
@@ -194,12 +432,53 @@ pub fn without_device(mut doc: Doc, id: &str) -> Doc {
     doc
 }
 
-/// What the item holds now, as text for the page, or `None`.
+/// What the item holds now, as the page is given it (`page_text`: no `d`, K only while the switch is on), or `None`.
 pub fn read() -> Result<Option<Zeroizing<String>>, String> {
+    let with_k = gate().is_on();
     #[cfg(target_os = "macos")]
-    return mac::read(&crate::api_link::mac::default_keychain()?).map_err(String::from);
+    return mac::read(&crate::api_link::mac::default_keychain()?, with_k).map_err(String::from);
+    #[cfg(not(target_os = "macos"))]
+    return {
+        let _ = with_k;
+        Err("unavailable".into())
+    };
+}
+
+/// Makes the relay key in the shell and keeps it, once, only while the switch is on. Refused (`exists`) when one is kept.
+pub fn make_host() -> Result<(), String> {
+    gate().require_on()?;
+    #[cfg(target_os = "macos")]
+    return {
+        let host = relay_key::make()?;
+        change(|doc| with_host(doc, host))
+    };
     #[cfg(not(target_os = "macos"))]
     return Err("unavailable".into());
+}
+
+/// The relay's challenge signed with the relay key, as base64url of the raw signature; only while the switch is on, and
+/// only that challenge (`is_relay_challenge`).
+pub fn sign_host(message: &str) -> Result<String, String> {
+    gate().require_on()?;
+    #[cfg(target_os = "macos")]
+    return mac::sign_relay(&crate::api_link::mac::default_keychain()?, message).map_err(String::from);
+    #[cfg(not(target_os = "macos"))]
+    return {
+        let _ = message;
+        Err("unavailable".into())
+    };
+}
+
+/// Keeps a newly paired phone, spending the open pairing first.
+pub fn add_device(device: Device) -> Result<(), String> {
+    gate().take_pairing(Instant::now())?;
+    change(|doc| with_device(doc, device))
+}
+
+/// Notes a phone seen and its counter, only while the switch is on.
+pub fn touch_device(id: &str, last_seen: u64, sign_count: u32) -> Result<(), String> {
+    gate().require_on()?;
+    change(|doc| with_touch(doc, id, last_seen, sign_count))
 }
 
 /// Runs one change on the held document and writes it back.
@@ -213,9 +492,96 @@ pub fn change(edit: impl FnOnce(Doc) -> Result<Doc, &'static str>) -> Result<(),
     };
 }
 
+/// The relay key's operations, done in the shell so its private half never reaches the page: making it with the system's
+/// own generator, and signing with it. Through Security's `SecKey`, on keys that are never put in any keychain.
+#[cfg(target_os = "macos")]
+pub mod relay_key {
+    use super::{b64url, der_to_raw, from_b64url, HostKey};
+    use core_foundation::base::TCFType;
+    use core_foundation::data::CFData;
+    use core_foundation::dictionary::CFDictionary;
+    use core_foundation::error::CFError;
+    use core_foundation::string::CFString;
+    use security_framework::key::{Algorithm, GenerateKeyOptions, KeyType, SecKey};
+    use security_framework_sys::item::{kSecAttrKeyClass, kSecAttrKeyClassPrivate, kSecAttrKeyClassPublic, kSecAttrKeyType, kSecAttrKeyTypeECSECPrimeRandom};
+    use security_framework_sys::key::SecKeyCreateWithData;
+    use zeroize::Zeroizing;
+
+    /// A new P-256 key, as the JWK fields the item keeps.
+    pub fn make() -> Result<HostKey, &'static str> {
+        let mut options = GenerateKeyOptions::default();
+        options.set_key_type(KeyType::ec_sec_prime_random()).set_size_in_bits(256);
+        let key = SecKey::new(&options).map_err(|_| "keychain")?;
+        let data = key.external_representation().ok_or("keychain")?;
+        // ANSI X9.63: 04 || X || Y || D.
+        let bytes = Zeroizing::new(data.bytes().to_vec());
+        if bytes.len() != 97 || bytes[0] != 0x04 {
+            return Err("keychain");
+        }
+        Ok(HostKey { d: b64url(&bytes[65..97]), x: b64url(&bytes[1..33]), y: b64url(&bytes[33..65]) })
+    }
+
+    /// A key from its X9.63 bytes (`04 || X || Y`, and `|| D` for the private half).
+    fn import(bytes: &[u8], private: bool) -> Result<SecKey, &'static str> {
+        let class = if private { unsafe { kSecAttrKeyClassPrivate } } else { unsafe { kSecAttrKeyClassPublic } };
+        let attributes = unsafe {
+            CFDictionary::from_CFType_pairs(&[
+                (CFString::wrap_under_get_rule(kSecAttrKeyType), CFString::wrap_under_get_rule(kSecAttrKeyTypeECSECPrimeRandom)),
+                (CFString::wrap_under_get_rule(kSecAttrKeyClass), CFString::wrap_under_get_rule(class)),
+            ])
+        };
+        let data = CFData::from_buffer(bytes);
+        let mut error = std::ptr::null_mut();
+        let key = unsafe { SecKeyCreateWithData(data.as_concrete_TypeRef(), attributes.as_concrete_TypeRef(), &mut error) };
+        if key.is_null() {
+            if !error.is_null() {
+                drop(unsafe { CFError::wrap_under_create_rule(error) });
+            }
+            return Err("invalid");
+        }
+        Ok(unsafe { SecKey::wrap_under_create_rule(key) })
+    }
+
+    /// `message` signed with `host`, as the raw `r || s` the relay verifies.
+    pub fn sign(host: &HostKey, message: &[u8]) -> Result<[u8; 64], &'static str> {
+        let mut bytes = Zeroizing::new(Vec::with_capacity(97));
+        bytes.push(0x04);
+        for part in [&host.x, &host.y, &host.d] {
+            let part = from_b64url(part).filter(|b| b.len() == 32).ok_or("invalid")?;
+            bytes.extend_from_slice(&part);
+        }
+        let key = import(&bytes, true)?;
+        let der = key.create_signature(Algorithm::ECDSASignatureMessageX962SHA256, message).map_err(|_| "keychain")?;
+        der_to_raw(&der).ok_or("keychain")
+    }
+
+    /// Whether `raw` is `x`, `y`'s signature over `message`, for tests.
+    #[cfg(test)]
+    pub fn verify(x: &str, y: &str, message: &[u8], raw: &[u8; 64]) -> bool {
+        let mut point = vec![0x04];
+        point.extend_from_slice(&from_b64url(x).unwrap());
+        point.extend_from_slice(&from_b64url(y).unwrap());
+        let Ok(key) = import(&point, false) else { return false };
+        let integer = |bytes: &[u8]| {
+            let mut b: Vec<u8> = bytes.iter().copied().skip_while(|&v| v == 0).collect();
+            if b.first().is_none_or(|&v| v & 0x80 != 0) {
+                b.insert(0, 0);
+            }
+            let mut out = vec![0x02, b.len() as u8];
+            out.extend(b);
+            out
+        };
+        let mut body = integer(&raw[..32]);
+        body.extend(integer(&raw[32..]));
+        let mut der = vec![0x30, body.len() as u8];
+        der.extend(body);
+        key.verify_signature(Algorithm::ECDSASignatureMessageX962SHA256, message, &der).unwrap_or(false)
+    }
+}
+
 #[cfg(target_os = "macos")]
 pub mod mac {
-    use super::{parse, write_text, Doc, ACCOUNT};
+    use super::{b64url, host_id, is_relay_challenge, page_text, parse, relay_key, write_text, Doc, ACCOUNT};
     use crate::api_link::mac::{read_item, write_item};
     use security_framework::os::macos::keychain::SecKeychain;
     use std::sync::Mutex;
@@ -224,13 +590,26 @@ pub mod mac {
     /// Reading the document and writing it back are one step under this lock, so two changes at once never lose one.
     static LOCK: Mutex<()> = Mutex::new(());
 
-    pub fn read(keychain: &SecKeychain) -> Result<Option<Zeroizing<String>>, &'static str> {
+    /// The item as the page is given it: no `d`, and K only `with_k`.
+    pub fn read(keychain: &SecKeychain, with_k: bool) -> Result<Option<Zeroizing<String>>, &'static str> {
         let _lock = LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let Some(held) = read_item(keychain, ACCOUNT)? else { return Ok(None) };
         match parse(&held) {
-            Some(doc) => write_text(&doc).map(Some),
+            Some(doc) => page_text(&doc, with_k).map(Some),
             None => Ok(None),
         }
+    }
+
+    /// The relay's challenge signed with the kept relay key; refused for any other message.
+    pub fn sign_relay(keychain: &SecKeychain, message: &str) -> Result<String, &'static str> {
+        let _lock = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let doc = read_item(keychain, ACCOUNT)?.and_then(|held| parse(&held)).ok_or("no_key")?;
+        let host = doc.host.as_ref().ok_or("no_key")?;
+        let id = host_id(&host.x, &host.y).ok_or("invalid")?;
+        if !is_relay_challenge(message, &id) {
+            return Err("not_a_challenge");
+        }
+        relay_key::sign(host, message.as_bytes()).map(|raw| b64url(&raw))
     }
 
     pub fn change(keychain: &SecKeychain, edit: impl FnOnce(Doc) -> Result<Doc, &'static str>) -> Result<(), &'static str> {
@@ -366,6 +745,102 @@ mod tests {
         assert!(write_text(&twice).is_err());
     }
 
+    /// The relay vectors' host id and challenge (apps/api/test/fixtures/relay-v1-vectors.json), whose key is `host()`.
+    const HOST_ID: &str = "GnOvYLqZ2OHWO6ttlRtTcGTPJe7LvdxH1_QGvKsS3b8";
+    const NONCE: &str = "x-zdxt1ft5j89tFMjyzj8E5P3egK4zsukMoSWAXYFWs";
+    const SIGNATURE: &str = "pzraaa8GE5yaccH-AkRN1OUQlkn3HPZgTkYoQa7k_EiXSaxVC6K5dQiSsmRVDOZQD7QIFNLpMIluj6gGoMBOuw";
+
+    #[test]
+    fn names_the_host_and_reads_base64url_as_the_relay_does() {
+        assert_eq!(host_id(X, Y).as_deref(), Some(HOST_ID));
+        assert_eq!(host_id("short", Y), None);
+        for bytes in [&b""[..], &b"f"[..], &b"fo"[..], &b"foo"[..], &b"foob"[..], &[0xff, 0xfe, 0xfd, 0xfc][..]] {
+            assert_eq!(from_b64url(&b64url(bytes)).as_deref().map(Vec::as_slice), Some(bytes));
+        }
+        assert_eq!(b64url(&[0xfb, 0xff]), "-_8");
+        for bad in ["a", "ab=", "a+b", "a/b", "AB", "-_9"] {
+            assert!(from_b64url(bad).is_none(), "{bad}");
+        }
+        let message = format!("gospark-relay-v1|host|{HOST_ID}|{NONCE}");
+        assert!(is_relay_challenge(&message, HOST_ID));
+        assert!(!is_relay_challenge(&message, &"A".repeat(43)));
+    }
+
+    #[test]
+    fn reads_a_der_signature_as_the_raw_one_the_relay_verifies() {
+        // r with its high bit set (a zero first in DER), s short (zeros first in raw).
+        let mut der = vec![0x30, 0x43, 0x02, 0x21, 0x00];
+        der.extend([0x80; 32]);
+        der.extend([0x02, 0x1e]);
+        der.extend([0x11; 30]);
+        let raw = der_to_raw(&der).unwrap();
+        assert_eq!(&raw[..32], &[0x80; 32]);
+        assert_eq!(&raw[32..34], &[0, 0]);
+        assert_eq!(&raw[34..], &[0x11; 30]);
+        for bad in [vec![], vec![0x31, 0x00], vec![0x30, 0x02, 0x02, 0x00], der[..der.len() - 1].to_vec(), [&der[..], &[0]].concat()] {
+            assert!(der_to_raw(&bad).is_none(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn hands_the_page_no_private_key_and_k_only_while_on() {
+        let doc = with_device(with_host(Doc::default(), host()).unwrap(), device(1)).unwrap();
+        let on = page_text(&doc, true).unwrap();
+        let off = page_text(&doc, false).unwrap();
+        for text in [on.as_str(), off.as_str()] {
+            assert!(!text.contains(D) && !text.contains("\"d\""), "{text}");
+            assert!(text.contains(X) && text.contains(Y) && text.contains("\"pairedAt\""), "{text}");
+        }
+        assert!(on.contains(&device(1).k));
+        assert!(!off.contains(&device(1).k) && !off.contains("\"k\""));
+    }
+
+    #[test]
+    fn adds_a_phone_only_through_one_open_pairing_while_on() {
+        let t0 = Instant::now();
+        let mut gate = Gate::new();
+        assert_eq!(gate.take_pairing(t0), Err("no_pairing"));
+        assert_eq!(gate.set_pairing(true, t0), Err("off"));
+        assert_eq!(gate.require_on(), Err("off"));
+        gate.set_switch(true);
+        assert_eq!(gate.take_pairing(t0), Err("no_pairing"));
+        gate.set_pairing(true, t0).unwrap();
+        assert_eq!(gate.take_pairing(t0), Ok(()));
+        // One phone a pairing.
+        assert_eq!(gate.take_pairing(t0), Err("no_pairing"));
+        // Not past its five minutes.
+        gate.set_pairing(true, t0).unwrap();
+        assert_eq!(gate.take_pairing(t0 + PAIRING_WINDOW), Err("no_pairing"));
+        // Closed, or the switch turned off, it adds nothing, and off is off until turned on again.
+        gate.set_pairing(true, t0).unwrap();
+        gate.set_pairing(false, t0).unwrap();
+        assert_eq!(gate.take_pairing(t0), Err("no_pairing"));
+        gate.set_pairing(true, t0).unwrap();
+        gate.set_switch(false);
+        gate.set_switch(true);
+        assert_eq!(gate.take_pairing(t0), Err("no_pairing"));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn makes_and_signs_with_a_p256_key_the_relay_verifies() {
+        // The relay vectors' own signature, made by Web Crypto, checks out against their key: the raw form is read right.
+        let raw: [u8; 64] = from_b64url(SIGNATURE).unwrap().as_slice().try_into().unwrap();
+        let message = format!("gospark-relay-v1|host|{HOST_ID}|{NONCE}");
+        assert!(relay_key::verify(X, Y, message.as_bytes(), &raw));
+        assert!(!relay_key::verify(X, Y, b"another message", &raw));
+        // A signature of the shell's, with the vectors' key and with a key it made, checks out the same way.
+        let signed = relay_key::sign(&host(), message.as_bytes()).unwrap();
+        assert!(relay_key::verify(X, Y, message.as_bytes(), &signed));
+        let made = relay_key::make().unwrap();
+        assert!(valid_host(&made));
+        assert_ne!(made, relay_key::make().unwrap());
+        let signed = relay_key::sign(&made, b"hello").unwrap();
+        assert!(relay_key::verify(&made.x, &made.y, b"hello", &signed));
+        assert!(!relay_key::verify(X, Y, b"hello", &signed));
+        assert_eq!(relay_key::sign(&host_with(|h| h.d = "short".into()), b"x"), Err("invalid"));
+    }
+
     #[cfg(not(target_os = "macos"))]
     #[test]
     fn has_no_keychain_outside_macos_yet() {
@@ -375,7 +850,12 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     mod keychain {
-        use super::super::{mac, parse, with_device, with_host, with_touch, without_device, ACCOUNT};
+        use super::super::{mac, parse, with_device, with_host, with_touch, without_device, write_text, ACCOUNT};
+        /// What the item keeps, whole and checked (None for a damaged one), for the tests that look at what was kept;
+        /// the page's own read is `mac::read`.
+        fn read(keychain: &security_framework::os::macos::keychain::SecKeychain) -> Result<Option<zeroize::Zeroizing<String>>, &'static str> {
+            Ok(read_item(keychain, ACCOUNT)?.and_then(|held| parse(&held)).map(|doc| write_text(&doc).unwrap()))
+        }
         use super::{device, device_with, host, host_with};
         use crate::api_link::mac as session;
         use crate::api_link::mac::{read_item, write_item};
@@ -389,17 +869,55 @@ mod tests {
             session::write(&s.keychain, SESSION).unwrap();
             write_item(&s.keychain, "shop-cache-key", &"a".repeat(64)).unwrap();
             // Nothing is made by a read.
-            assert!(mac::read(&s.keychain).unwrap().is_none());
+            assert!(read(&s.keychain).unwrap().is_none());
             assert!(read_item(&s.keychain, ACCOUNT).unwrap().is_none());
             mac::change(&s.keychain, |doc| with_host(doc, host())).unwrap();
             mac::change(&s.keychain, |doc| with_device(doc, device(1))).unwrap();
-            let text = mac::read(&s.keychain).unwrap().expect("kept");
+            let text = read(&s.keychain).unwrap().expect("kept");
             let doc = parse(&text).unwrap();
             assert_eq!(doc.host, Some(host()));
             assert_eq!(doc.devices, vec![device(1)]);
             // The items beside it are untouched.
             assert_eq!(session::read(&s.keychain).unwrap().as_deref(), Some(SESSION));
             assert_eq!(read_item(&s.keychain, "shop-cache-key").unwrap().as_deref().map(String::as_str), Some("a".repeat(64).as_str()));
+        }
+
+        /// The page is never handed the relay key's private half: a script injected into the window could read every
+        /// answer the page gets.
+        #[test]
+        fn hands_the_page_no_relay_private_key() {
+            let s = scratch("remote-keys-page");
+            mac::change(&s.keychain, |doc| with_host(doc, host())).unwrap();
+            mac::change(&s.keychain, |doc| with_device(doc, device(1))).unwrap();
+            let text = mac::read(&s.keychain, true).unwrap().expect("kept");
+            assert!(!text.contains(super::D), "the relay key's private half reached the page");
+            assert!(text.contains(&device(1).k), "K while the switch is on");
+            let off = mac::read(&s.keychain, false).unwrap().expect("kept");
+            assert!(!off.contains(super::D) && !off.contains(&device(1).k), "{}", off.as_str());
+            assert!(off.contains(super::X) && off.contains(&device(1).id));
+        }
+
+        /// The shell signs the relay's challenge for its own key, as the relay checks it, and nothing else.
+        #[test]
+        fn signs_the_relay_challenge_and_nothing_else() {
+            let s = scratch("remote-keys-sign");
+            let challenge = format!("gospark-relay-v1|host|{}|{}", super::HOST_ID, super::NONCE);
+            assert_eq!(mac::sign_relay(&s.keychain, &challenge), Err("no_key"));
+            mac::change(&s.keychain, |doc| with_host(doc, host())).unwrap();
+            let signature = mac::sign_relay(&s.keychain, &challenge).unwrap();
+            let raw: [u8; 64] = super::super::from_b64url(&signature).unwrap().as_slice().try_into().unwrap();
+            assert!(super::super::relay_key::verify(super::X, super::Y, challenge.as_bytes(), &raw));
+            for other in [
+                format!("gospark-relay-v1|host|{}|{}", "A".repeat(43), super::NONCE),
+                format!("gospark-relay-v1|host|{}|{}x", super::HOST_ID, super::NONCE),
+                format!("gospark-relay-v1|host|{}|{}|more", super::HOST_ID, super::NONCE),
+                format!("gospark-relay-v1|phone|{}|{}", super::HOST_ID, super::NONCE),
+                format!("gospark-relay-v1|host|{}|+{}", super::HOST_ID, &super::NONCE[1..]),
+                "anything at all".to_string(),
+                String::new(),
+            ] {
+                assert_eq!(mac::sign_relay(&s.keychain, &other), Err("not_a_challenge"), "{other}");
+            }
         }
 
         #[test]
@@ -420,11 +938,11 @@ mod tests {
             let s = scratch("remote-keys-forget");
             mac::change(&s.keychain, |doc| with_device(doc, device(1))).unwrap();
             mac::change(&s.keychain, |doc| with_touch(doc, &device(1).id, 7, 3)).unwrap();
-            let doc = parse(&mac::read(&s.keychain).unwrap().unwrap()).unwrap();
+            let doc = parse(&read(&s.keychain).unwrap().unwrap()).unwrap();
             assert_eq!((doc.devices[0].last_seen, doc.devices[0].sign_count), (Some(7), 3));
             assert_eq!(mac::change(&s.keychain, |doc| with_touch(doc, &device(1).id, 8, 2)), Err("counter"));
             mac::change(&s.keychain, |doc| Ok(without_device(doc, &device(1).id))).unwrap();
-            let text = mac::read(&s.keychain).unwrap().unwrap();
+            let text = read(&s.keychain).unwrap().unwrap();
             assert!(parse(&text).unwrap().devices.is_empty());
             assert!(!text.contains(&device(1).k), "K is gone from the item");
         }
@@ -433,9 +951,9 @@ mod tests {
         fn treats_a_damaged_item_as_none_and_replaces_it_on_the_next_change() {
             let s = scratch("remote-keys-damaged");
             write_item(&s.keychain, ACCOUNT, "{\"v\":1,\"host\":null,\"devices\":[{\"id\":\"x\"}]}").unwrap();
-            assert!(mac::read(&s.keychain).unwrap().is_none());
+            assert!(read(&s.keychain).unwrap().is_none());
             mac::change(&s.keychain, |doc| with_host(doc, host())).unwrap();
-            assert_eq!(parse(&mac::read(&s.keychain).unwrap().unwrap()).unwrap().host, Some(host()));
+            assert_eq!(parse(&read(&s.keychain).unwrap().unwrap()).unwrap().host, Some(host()));
         }
 
         #[test]
@@ -447,7 +965,7 @@ mod tests {
                     scope.spawn(move || mac::change(keychain, |doc| with_device(doc, device(n))).unwrap());
                 }
             });
-            let doc = parse(&mac::read(keychain).unwrap().unwrap()).unwrap();
+            let doc = parse(&read(keychain).unwrap().unwrap()).unwrap();
             assert_eq!(doc.devices.len(), 6);
         }
     }
