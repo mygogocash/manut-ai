@@ -118,6 +118,7 @@ import {
   answerSlot,
   applyOpened,
 } from "./helpers";
+import { setChatRoute, chatRoute, folderKey, isSessionChat, chatTarget } from "./chatRoutes";
 
 export { BUBBLE_STYLES, PALETTES, MENU_PAGES, isMenuPage } from "./types";
 export type {
@@ -129,6 +130,8 @@ export type {
 export { activityText, WORKING, THINKING, PENDING_TURN_MS, THINKING_MAX, parsePlan, liveLabel, answerSoFar, turnHasActivity } from "./activity";
 export { DEFAULT_LOOK, LOOK_VERSION, parseLook, savedLook, ROSTER_KEY, seedRoster, readTheme, initialState } from "./prefs";
 export { SUB_STEPS, subagentEnded, answerSlot, replyOf, replyChipFor } from "./helpers";
+export { setChatRoute, chatRoute, folderKey, isSessionChat, chatTarget } from "./chatRoutes";
+export type { ChatRoute } from "./chatRoutes";
 
 /** The person answered a card: the running turn's "Waiting for approval / your answer" goes back to what the turn
  *  was doing (its latest step), or to the plain working line, unless another card still waits. */
@@ -236,45 +239,6 @@ export type Action =
   | { type: "thread.note"; bot: string; message: string; item: ThreadLinkItem | ThreadRouteItem }
   /** The person answered a route card. */
   | { type: "thread.routed"; bot: string; id: string; done?: "sent" | "kept"; error?: string };
-
-// ---- chats that are not a bot's main chat ------------------------------------------------------
-//
-// SESSIONS chats reuse this reducer and the bot chat's timeline, cards and composer under their own key:
-// `fold:<bot>:<id>` for a Hermes chat in a folder (bridge `folder.open`, events tagged `session`) and
-// `agent:<id>` for a Claude Code / Codex / pi chat run by the desktop shell. A route says where the
-// person's answers go.
-
-export interface ChatRoute {
-  send(text: string): Promise<void>;
-  interrupt(): Promise<void>;
-  approve(requestId: string, choice: ApprovalChoice): Promise<void>;
-  /** A text answer, or (Hermes folder chats) an interview's answers per question id. */
-  clarify(requestId: string, answer: string | ClarifyAnswers): Promise<void>;
-  /** Name for notifications. */
-  label: string;
-  /** Show this chat (a notification was clicked). */
-  open(): void;
-}
-
-const chatRoutes = new Map<string, ChatRoute>();
-/** Register (or with null, remove) where chat `key`'s answers go. */
-export function setChatRoute(key: string, route: ChatRoute | null): void {
-  if (route) chatRoutes.set(key, route);
-  else chatRoutes.delete(key);
-}
-export const chatRoute = (key: string): ChatRoute | undefined => chatRoutes.get(key);
-/** Key of a folder chat's events. */
-export const folderKey = (bot: string, session: string) => `fold:${bot}:${session}`;
-/** True for a SESSIONS chat key (not a bot's main chat). */
-export const isSessionChat = (key: string) => key.startsWith("fold:") || key.startsWith("agent:");
-/** Where a Hermes chat's words go on the bridge: a bot's main chat (`<bot>`) or its folder chat / thread
- *  (`fold:<bot>:<session>`, the bridge's `session=`). The steer queue sends, steers and stops through this. */
-export function chatTarget(key: string): { bot: string; session?: string } {
-  if (!key.startsWith("fold:")) return { bot: key };
-  const rest = key.slice(5);
-  const at = rest.indexOf(":");
-  return { bot: rest.slice(0, at), session: rest.slice(at + 1) };
-}
 
 /** The bots whose "will brief you here" line was already shown (`localStorage["manut.briefNoticed"]`). */
 export function briefNoticed(): string[] {
