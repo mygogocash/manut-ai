@@ -87,17 +87,46 @@ export const askOfItem = (chat: string, item: ApprovalItem): EventOf<"approval.r
 
 /** Per chat: the folders its shell may be in besides the session's (null: one that cannot be known). */
 const folders = new Map<string, (string | null)[]>();
-/** Per ask: the folders it was read with as it arrived, so its card reads it as the dial did. */
-const readWith = new Map<string, (string | null)[]>();
+/** Per ask: the folders and the branch it was read with as it arrived, so its card reads it as the dial did. */
+const readWith = new Map<string, { from: (string | null)[]; branch: string | undefined }>();
+
+// ---- the branch a push that names none is read with (item 120) ---------------------------------------------------------
+//
+// The sessions store reads the branch checked out when a chat starts and when a turn ends. A step the dial lets run may
+// switch it in between (`git switch main`, a rename, a command nobody can read, a tool the dial does not read), and the
+// session's next `git push` would then be read as a push of the branch read before. So such a step makes the branch
+// unknown for the chat until it is read again from disk, and a push that names no branch is read with none: live, which
+// asks. A step the dial stopped never ran, and moves nothing.
+
+/** Per chat: how many steps that may move the branch have been let run, and whether one has since the last read. */
+const moved = new Map<string, number>();
+const stale = new Set<string>();
+
+function noteMoved(chat: string): void {
+  moved.set(chat, (moved.get(chat) ?? 0) + 1);
+  stale.add(chat);
+}
+
+/** Before the branch of chat `chat`'s folder is read from disk: what `afterBranchRead` is given once it has been. */
+export const beforeBranchRead = (chat: string): number => moved.get(chat) ?? 0;
+
+/** The branch of chat `chat`'s folder was read from disk after `token` (`beforeBranchRead`): it is known again, unless a step
+ *  that may move it was let run while it was read. */
+export function afterBranchRead(chat: string, token: number): void {
+  if ((moved.get(chat) ?? 0) === token) stale.delete(chat);
+}
+
+/** The branch an ask of chat `chat` is read with: none while a step that may have moved it has run since it was read. */
+const branchOf = (ctx: AskContext): string | undefined => (stale.has(ctx.chat) ? undefined : ctx.branch);
 
 /** Whether an ask is a shell command, read or not: one the dial cannot read may still move the shell. */
 const isCommand = (ev: EventOf<"approval.request">) =>
   ev.tool ? ev.tool.kind === "command" || /^bash$/i.test(ev.tool.name ?? "") : ev.title === "Run this command?";
 
-function readIn(ev: EventOf<"approval.request">, ctx: AskContext, from: readonly (string | null)[]): AskRead | null {
+function readIn(ev: EventOf<"approval.request">, ctx: AskContext, from: readonly (string | null)[], branch: string | undefined = branchOf(ctx)): AskRead | null {
   if (ev.outdated) return null;
   const project = projectFor(ctx);
-  return readAsk(wordsOf(ev), { cwd: ev.cwd || ctx.root, root: ctx.root, home: ctx.home ?? undefined, allowed: project.folders, branch: ctx.branch, from });
+  return readAsk(wordsOf(ev), { cwd: ev.cwd || ctx.root, root: ctx.root, home: ctx.home ?? undefined, allowed: project.folders, branch, from });
 }
 
 /** A name standing for a read of what is saved that could not be made: never shown, only counted, so the dial asks. */
@@ -143,17 +172,21 @@ export function kitAnswer(
   saved?: SavedKeys | null,
 ): { choice: ApprovalChoice; answer: KitAnswer } | null {
   const from = folders.get(ctx.chat) ?? [];
-  readWith.set(askKey(ctx.chat, ev.request_id), from);
-  const read = readIn(ev, ctx, from);
+  const branch = branchOf(ctx);
+  readWith.set(askKey(ctx.chat, ev.request_id), { from, branch });
+  const read = readIn(ev, ctx, from, branch);
   if (!read) {
-    // a command the dial cannot read, which the person may allow, leaves the shell where nobody can say
+    // a command the dial cannot read, which the person may allow, leaves the shell where nobody can say; and any ask it
+    // cannot read (a command, a tool of an MCP server's) may move the branch checked out
     if (!ev.outdated && isCommand(ev)) folders.set(ctx.chat, [null]);
+    if (!ev.outdated) noteMoved(ctx.chat);
     return null;
   }
   const project = projectFor(ctx);
   const weighed = keysFor(read, ctx.chat, saved);
   const d = decideAsk(read, project, weighed, now);
   if (read.what === "command" && read.ends && d.answer !== "blocked") folders.set(ctx.chat, foldersAfter(from, { ends: read.ends, ...(read.resets ? { resets: read.resets } : {}) }));
+  if (d.answer !== "blocked" && (read.movesHead || read.action === "unknown" || read.action === "live")) noteMoved(ctx.chat);
   let out: { choice: ApprovalChoice; answer: KitAnswer } | null = null;
   if (d.answer === "alone" && ev.choices.includes("once")) {
     const byLevel = decideAsk(read, { ...project, rules: [] }, weighed, now).answer === "alone";
@@ -190,8 +223,9 @@ const sameDir = (a: string, b: string) => a.replace(/[\\/]+$/, "") === b.replace
 /** Kit's reading of ask `ev` for its card. `packageJson` is the text of package.json in the folder the session works in
  *  (`ctx.root`), when the app has read it: a script run in that folder then shows what the script runs. */
 export function kitCard(ev: EventOf<"approval.request">, ctx: AskContext, packageJson?: string | null): KitCard | null {
-  const from = readWith.get(askKey(ctx.chat, ev.request_id)) ?? folders.get(ctx.chat) ?? [];
-  const read = readIn(ev, ctx, from);
+  const was = readWith.get(askKey(ctx.chat, ev.request_id));
+  const from = was?.from ?? folders.get(ctx.chat) ?? [];
+  const read = readIn(ev, ctx, from, was ? was.branch : branchOf(ctx));
   if (!read) return null;
   const project = projectFor(ctx);
   const keys = keysIn(ctx.chat);
@@ -246,6 +280,8 @@ export function resetKitAsks(): void {
   keys.clear();
   folders.clear();
   readWith.clear();
+  moved.clear();
+  stale.clear();
   resetPreview();
   version++;
 }

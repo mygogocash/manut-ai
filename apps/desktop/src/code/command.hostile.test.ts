@@ -868,6 +868,112 @@ describe("C5: git pointed at another folder, and a program named by a path (item
   });
 });
 
+describe("D1: a push read with a branch the line has moved away from (item 120)", () => {
+  const level = (line: string, where: Where = at) => {
+    const c = readCommand(line, where);
+    return kitDecide({ action: c.action, outside: c.outside.length > 0 }, "everything_in_project", ON_THIS_MAC, 0).answer;
+  };
+  /** Steps that may leave the folder on another branch, or the rest of the line in another repository. */
+  const MOVERS = [
+    "git switch main", "git switch -c kit/y", "git switch -C kit/y", "git switch --detach", "git switch -", "git checkout main",
+    "git checkout -b kit/y", "git checkout -B kit/y", "git checkout -", "git checkout --detach", "git branch -m main",
+    "git branch -M kit/x main", "git branch --move main", "git bisect start", "git rebase main", "git rebase -i main",
+    "git -C . switch main", "git --no-pager checkout main", "gh pr checkout 12", "git symbolic-ref HEAD refs/heads/main",
+    "git update-ref --no-deref HEAD main", "git worktree move a b", "git stash branch main", "git clone https://example.com/x.git",
+    "sh -c 'git switch main'", "command git switch main", "time git checkout main", "find . -maxdepth 0 -exec git switch main \\;",
+  ];
+  /** Steps that move the shell into a folder that may be another repository: a push after them runs there. */
+  const INTO = ["cd vendor/lib", "cd apps/web", "cd ./vendor/lib/", `cd ${root}/vendor/lib`];
+  /** Pushes that name no branch, or name the branch checked out (HEAD, `@`, and `head`, which macOS's disk finds as HEAD). */
+  const PUSHES = ["git push", "git push -u origin", "git push origin", "git push origin HEAD", "git push --set-upstream origin HEAD", "git push origin @", "git push origin head", "git push origin Head"];
+
+  it("never reads a push of the branch checked out as the session's branch once a step before or beside it may have moved it", () => {
+    const wrong: string[] = [];
+    for (const m of MOVERS)
+      for (const p of PUSHES)
+        for (const line of [`${m} && ${p}`, `${m}; ${p}`, `${m}\n${p}`, `${m} || ${p}`, `${m} | ${p}`, `${p} | ${m}`, `${p} & ${m}`, `${m} & ${p}`])
+          if (level(line) === "alone") wrong.push(line);
+    for (const m of INTO) for (const p of [...PUSHES, "git push origin kit/promptpay-qr", "gh pr create -t x -b y"]) for (const line of [`${m} && ${p}`, `${m}; ${p}`, `${m}\n${p}`]) if (level(line) === "alone") wrong.push(line);
+    expect(wrong).toEqual([]);
+    // a `cd` that cannot have run first leaves the push in the session's folder: `||` runs it only after a `cd` that failed
+    expect(level("cd vendor/lib || git push")).toBe("alone");
+  });
+
+  it("reads a push or a pull request from another folder of the project as one of a repository that is not known", () => {
+    expect(level("git push", { ...at, cwd: `${root}/vendor/lib` })).toBe("ask");
+    expect(level("git push origin HEAD", { ...at, from: [`${root}/vendor/lib`] })).toBe("ask");
+    // a folder inside the project may be another repository, with a remote of its own
+    expect(level("cd vendor/lib && git push origin kit/promptpay-qr")).toBe("ask");
+    expect(level("git push origin kit/promptpay-qr", { ...at, from: [`${root}/vendor/lib`] })).toBe("ask");
+    expect(level("cd vendor/lib && gh pr create -t x -b y")).toBe("ask");
+    // and a pull request opened on a repository the words name
+    expect(level("gh pr create -R someone/else -t x -b y")).toBe("ask");
+    expect(level("gh pr create --repo=someone/else -t x -b y")).toBe("ask");
+    expect(level("gh pr create -t x -b y")).toBe("alone");
+    // the plain twins: a push of the session's branch from its own folder still goes alone
+    for (const p of PUSHES) expect([p, level(p)]).toEqual([p, "alone"]);
+    expect(level("git status && git push")).toBe("alone");
+    expect(level("git add -A && git commit -m x && git push -u origin kit/promptpay-qr")).toBe("alone");
+  });
+
+  it("reads the branch a push sends to from its own words", () => {
+    /** A push, the branch the session is on, and what it reads as. */
+    const ROWS: [line: string, branch: string, as: KitAction][] = [
+      ["git push origin @", "main", "live"],
+      ["git push origin head", "main", "live"],
+      ["git push origin HEAD", "main", "live"],
+      ["git push origin @", "kit/promptpay-qr", "push"],
+      // `:` and `+:` push every branch both sides have, main among them
+      ["git push origin :", "kit/promptpay-qr", "live"],
+      ["git push origin +:", "kit/promptpay-qr", "live"],
+      // a pattern pushes every branch it matches
+      ["git push origin 'refs/heads/*:refs/heads/*'", "kit/promptpay-qr", "live"],
+      ["git push origin 'kit/*'", "kit/promptpay-qr", "live"],
+      // git finds `heads/main` on the remote as refs/heads/main
+      ["git push origin HEAD:heads/main", "kit/promptpay-qr", "live"],
+      ["git push origin kit/x:refs/heads/main", "kit/promptpay-qr", "live"],
+      ["git push origin refs/heads/main", "kit/promptpay-qr", "live"],
+      ["git push origin HEAD:refs/remotes/origin/main", "kit/promptpay-qr", "live"],
+      ["git push origin :main", "kit/promptpay-qr", "live"],
+      // every branch, an option the server reads (GitLab merges with one), remote branches removed, submodules pushed
+      ["git push --branches origin", "kit/promptpay-qr", "live"],
+      ["git push --branch origin", "kit/promptpay-qr", "live"],
+      ["git push -o merge_request.merge_when_pipeline_succeeds origin kit/promptpay-qr", "kit/promptpay-qr", "live"],
+      ["git push --push-option=ci.skip origin kit/promptpay-qr", "kit/promptpay-qr", "live"],
+      ["git push --prune origin kit/promptpay-qr", "kit/promptpay-qr", "live"],
+      ["git push --recurse-submodules=on-demand origin kit/promptpay-qr", "kit/promptpay-qr", "live"],
+      // the plain twins
+      ["git push origin kit/promptpay-qr", "kit/promptpay-qr", "push"],
+      ["git push origin HEAD:kit/promptpay-qr", "main", "push"],
+      ["git push --recurse-submodules=check origin kit/promptpay-qr", "kit/promptpay-qr", "push"],
+      ["git push -u origin HEAD", "kit/promptpay-qr", "push"],
+    ];
+    const wrong = ROWS.filter(([line, branch, as]) => readCommand(line, { ...at, branch }).action !== as).map(([line, branch, as]) => `${line} on ${branch}: ${readCommand(line, { ...at, branch }).action}, not ${as}`);
+    expect(wrong).toEqual([]);
+  });
+
+  it("asks before a branch is given an upstream, which decides where a later push that names no branch sends", () => {
+    counted += holds([
+      ["git branch -u origin/main", "git branch kit/y", "change"],
+      ["git branch --set-upstream-to=origin/main", "git branch -m kit/z", "change"],
+      ["git branch --track kit/y origin/main", "git branch kit/y main", "change"],
+      ["git switch -c kit/y --track origin/main", "git switch -c kit/y", "change"],
+      ["git switch -t origin/main", "git switch kit/y", "change"],
+      ["git checkout -b kit/y -t origin/main", "git checkout -b kit/y", "change"],
+      ["git checkout --track origin/main", "git checkout kit/y", "change"],
+    ]);
+    for (const line of ["git branch -u origin/main", "git switch -c kit/y --track origin/main"]) expect([line, level(line)]).toEqual([line, "ask"]);
+  });
+
+  it("says which lines may move the branch checked out, for the session's next push", () => {
+    const wrong: string[] = [];
+    for (const m of [...MOVERS, ...INTO]) if (!readCommand(m, at).movesHead) wrong.push(`not said: ${m}`);
+    for (const plain of ["git status", "git add -A", "git commit -m x", "git push origin kit/promptpay-qr", "pnpm test", "ls", "git log --oneline", "git diff HEAD~1", "git fetch", "git stash", "git stash pop", "git merge main", "git pull"])
+      if (readCommand(plain, at).movesHead) wrong.push(`said: ${plain}`);
+    expect(wrong).toEqual([]);
+  });
+});
+
 describe("everyday commands", () => {
   /** What a developer and an agent run all day, each as it read before item 112 (only `cdk synth`, now a build, moved).
    *  None of these may start to ask because a hostile line beside it does. */

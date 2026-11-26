@@ -48,6 +48,8 @@ export interface AskRead {
    *  (`foldersAfter` in ./command). */
   ends?: (string | null)[];
   resets?: string;
+  /** For a command: once it has run, the branch checked out may not be the one read before it (item 120). */
+  movesHead?: boolean;
 }
 
 const RUN = "Run this command?";
@@ -99,7 +101,7 @@ function listed(paths: string[], where: Where): string {
 }
 
 /** Where a command leaves its shell, for the session's next command. */
-const folders = (c: ReadCommand): Pick<AskRead, "ends" | "resets"> => ({ ends: c.ends, ...(c.resets ? { resets: c.resets } : {}) });
+const folders = (c: ReadCommand): Pick<AskRead, "ends" | "resets" | "movesHead"> => ({ ends: c.ends, ...(c.resets ? { resets: c.resets } : {}), movesHead: c.movesHead });
 
 /** `v` when it is text that is not blank. */
 const text = (v: unknown): string | null => (typeof v === "string" && v.trim() !== "" ? v : null);

@@ -390,6 +390,35 @@ A jq or yq filter that prints the environment (`env`, `$ENV`, yq's `env(NAME)` a
 a field or key called env is only a name. jq's `--arg`, `--argjson`, `--slurpfile` and `--rawfile` are read with their
 two values, so the word after them is not taken for the filter.
 
+#### The branch a push sends (item 120)
+
+A push that names no branch (`git push`, `git push -u origin`, `git push origin HEAD`, and `@` or `head` in any letter case,
+which macOS's disk finds as HEAD) sends the branch checked out. The app reads that branch from disk when a chat starts and
+when a turn ends; since item 120 the dial does not trust it in between:
+
+- **A step that may move it makes it unknown.** A switch, a checkout, a branch made, renamed or given an upstream, a
+  rebase, a bisect, `update-ref`, `worktree`, `stash branch`, `gh pr checkout`, a clone or an init, a command nobody can
+  read, a shell left in another folder, and any ask the dial does not read (a tool of an MCP server's) leave the chat's
+  branch unknown until it is read from disk again. Such a push then reads as live and asks. A step the dial stopped
+  never ran and moves nothing.
+- **The same line.** A push in a line that holds such a step anywhere, before it, beside it in a pipeline or in the
+  background, is read with no branch.
+- **Read again as the push arrives.** A push the dial would let go alone waits for a read of the branch from disk, beside
+  the read of what it saves: one a job left running or a project's own code switched is not missed.
+- **Another folder.** A push or a pull request from any folder but the one whose branch was read may be another
+  repository's (a folder of the project can hold one), and asks.
+- **From its own words.** A push that names its branch is read by the branch it sends to: the destination, else the
+  source; `heads/main` and `refs/heads/main` are main; `:` and `+:` push every branch both sides have and a pattern every
+  branch it matches, so both go live; any other namespace (`refs/remotes/`, `refs/for/`) is not known. `--branches` (the
+  alias of `--all`), `--prune`, `--recurse-submodules` but `=check` or `=no`, and a push option (`-o`, which GitLab reads
+  to merge a request when its pipeline passes) go live, and a pull request on a repository the words name (`-R`) asks.
+
+A branch given an upstream (`git branch -u`, `--set-upstream-to`, `--track` or `-t` on `branch`, `switch` and
+`checkout`) asks, as `git remote set-url` does: with `push.default=upstream` a later push that names no branch sends to
+it. Not read: what the person's own git settings already make such a push send (`push.default=matching` pushes every
+branch both sides have, `upstream` the branch it tracks, `remote.<name>.push` maps a branch elsewhere), and the upstream
+git sets by itself for a branch made from a remote one. A lane's branch is made with `--no-track`.
+
 #### Files a change to which always asks (item 88)
 
 An edit inside the project goes alone at Edits alone, except to a file that makes a program run later or changes what an

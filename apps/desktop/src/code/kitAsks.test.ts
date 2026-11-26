@@ -16,7 +16,7 @@ const FAKE_KEY = "sk-FAKE0000000000000000TEST";
 /** What the stand-in shell's read of the session's folder finds in what a commit or a push would save (`SessionHost.laneKeys`). */
 type Saved = () => Promise<{ files: string[]; unread: boolean } | null>;
 
-async function session(saved: Saved = async () => ({ files: [], unread: false })) {
+async function session(saved: Saved = async () => ({ files: [], unread: false }), branch: () => string = () => "kit/promptpay-qr") {
   (globalThis as { localStorage?: unknown }).localStorage = { getItem: () => null, setItem: () => {}, removeItem: () => {} };
   const sinks = new Map<number, (e: ChatEvent) => void>();
   const inputs: ChatInput[] = [];
@@ -30,7 +30,7 @@ async function session(saved: Saved = async () => ({ files: [], unread: false })
     write: async () => {},
     resize: async () => {},
     close: async () => {},
-    branch: async () => "kit/promptpay-qr",
+    branch: async () => branch(),
     laneKeys: () => saved(),
     chatStart: async (_a: string, _c: string, on: (e: ChatEvent) => void) => {
       sinks.set(1, on);
@@ -276,6 +276,78 @@ describe("Kit's dial on what the shell names of an ask", () => {
     // a folder inside the project is carried, and the session's own is still read: a shell back there is never missed
     expect((await s.ask("b8", "Run this command?", "cd src", bash("cd src"))).resolved).toBe("once");
     expect((await s.ask("b9", "Run this command?", "cat ../.ssh/id_rsa", bash("cat ../.ssh/id_rsa"))).resolved).toBe("deny");
+  });
+});
+
+// Item 120: the branch a push that names none is read with was read only when a turn ended or the chat started, so a
+// switch earlier in the same turn left the dial reading a push of main as one of the lane's own branch.
+describe("Kit's dial on a push of the branch checked out, across one turn (item 120)", () => {
+  beforeEach(() => {
+    resetKitProjects();
+    resetKitAsks();
+    updateKitProjects((p) => setLevel(p, ROOT, "everything_in_project"));
+  });
+  afterEach(() => {
+    resetKitProjects();
+    resetKitAsks();
+  });
+  const RUN = "Run this command?";
+  const PUSHES = ["git push", "git push -u origin", "git push origin HEAD", "git push origin @"];
+  const tick = () => new Promise((r) => setTimeout(r, 0));
+  const endTurn = async (s: Awaited<ReturnType<typeof session>>) => {
+    s.emit({ event: "turn.end", outcome: "done" } as unknown as ChatEvent);
+    for (let i = 0; i < 4; i++) await tick();
+  };
+
+  it("asks before such a push once a step of the turn may have switched the branch, until it is read again from disk", async () => {
+    let on = "kit/promptpay-qr";
+    const s = await session(undefined, () => on);
+    expect((await s.ask("p0", RUN, "git push")).resolved).toBe("once");
+    for (const [n, mover] of ["git switch main", "git checkout -b kit/y", "git branch -m main", "gh pr checkout 12"].entries()) {
+      expect([mover, (await s.ask(`m${n}`, RUN, mover)).resolved]).toEqual([mover, "once"]);
+      // the switch has not run yet (or ran beside the push): the disk still says the lane's branch, and the push asks
+      for (const [k, p] of PUSHES.entries()) expect([mover, p, (await s.ask(`p${n}-${k}`, RUN, p)).resolved]).toEqual([mover, p, undefined]);
+      // a push that names the lane's branch is not read with the branch checked out, and goes
+      expect((await s.ask(`n${n}`, RUN, "git push origin kit/promptpay-qr")).resolved).toBe("once");
+      await endTurn(s);
+      expect([mover, (await s.ask(`a${n}`, RUN, "git push")).resolved]).toEqual([mover, "once"]);
+    }
+    // read again on main: a push of the branch checked out goes live, and asks
+    expect((await s.ask("m9", RUN, "git switch main")).resolved).toBe("once");
+    on = "main";
+    await endTurn(s);
+    expect((await s.ask("p9", RUN, "git push")).resolved).toBeUndefined();
+  });
+
+  it("reads the branch from disk again as such a push arrives, so a switch no ask showed is not missed", async () => {
+    let on = "kit/promptpay-qr";
+    const s = await session(undefined, () => on);
+    expect((await s.ask("q0", RUN, "git push")).resolved).toBe("once");
+    // a job left running, or a test's own code, switched the folder: no ask showed it
+    on = "main";
+    expect((await s.ask("q1", RUN, "git push")).resolved).toBeUndefined();
+    expect((await s.ask("q2", RUN, "git push origin HEAD")).resolved).toBeUndefined();
+    // a read that fails leaves the branch unknown, and the push asks
+    on = "kit/promptpay-qr";
+    const t = await session(undefined, () => {
+      throw new Error("an older shell");
+    });
+    expect((await t.ask("q3", RUN, "git push")).resolved).toBeUndefined();
+  });
+
+  it("counts an ask it cannot read, or a command nobody can read, as one that may have switched the branch", async () => {
+    const s = await session();
+    // a tool of an MCP server's, which the dial does not read: the person may allow it
+    expect((await s.ask("u1", "Allow mcp__git__git_checkout?", "main")).resolved).toBeUndefined();
+    expect((await s.ask("u2", RUN, "git push")).resolved).toBeUndefined();
+    await endTurn(s);
+    expect((await s.ask("u3", RUN, "git push")).resolved).toBe("once");
+    expect((await s.ask("u4", RUN, "sh -c 'git switch main'")).resolved).toBeUndefined();
+    expect((await s.ask("u5", RUN, "git push")).resolved).toBeUndefined();
+    // a step the dial stopped never ran, and moves nothing
+    await endTurn(s);
+    expect((await s.ask("u6", RUN, "cd /w/elsewhere && git switch main")).resolved).toBe("deny");
+    expect((await s.ask("u7", RUN, "git push")).resolved).toBe("once");
   });
 });
 

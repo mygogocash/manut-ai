@@ -58,6 +58,10 @@ export interface ReadCommand {
   /** The line is only a `cd` to the project's or the session's folder, written in full: after it, that is where the
    *  shell is. */
   resets?: string;
+  /** Once it has run, the branch checked out in the project's folder may not be the one read before it (item 120): a step
+   *  switches, renames or detaches it, may leave the shell in another folder, or cannot be read at all. The session's next
+   *  push that names no branch is then read with none, until the branch is read again from disk. */
+  movesHead: boolean;
 }
 
 // ---- paths --------------------------------------------------------------------------------------------------------
@@ -424,6 +428,8 @@ interface Verdict {
   filtered?: true;
   /** After it, the folder the shell is in cannot be known (`cd -`, `pushd`, `popd`, `source`, `eval`). */
   lost?: true;
+  /** It may switch, rename or detach the branch checked out, or make another repository to work in (item 120). */
+  moves?: true;
 }
 
 const say = (key: Key, vars?: Say["vars"]): Say => (vars ? { key, vars } : { key });
@@ -625,6 +631,9 @@ function packageManager(words: string[], where: Where): Verdict {
 
 /** The main branch's usual names: a push to one goes live. */
 const MAIN = new Set(["main", "master", "trunk", "production", "prod", "release", "live", "stable", "gh-pages"]);
+/** Names git reads as the branch checked out: HEAD, `@`, and `head` in any letter case, which a disk that ignores letter case
+ *  (macOS's) finds as HEAD (item 120; tried with git 2.54). */
+const HEAD_NAME = /^(head|@)$/i;
 /** git's options before its subcommand that change nothing about what it runs: anything else (`-c`, `--exec-path`,
  *  `--git-dir`, …) can make a read run a program, or read another repository, so it is not read in advance. */
 const GIT_GLOBAL_SAFE = new Set(["--no-pager", "-P", "--no-optional-locks", "--literal-pathspecs", "--no-replace-objects"]);
@@ -777,6 +786,11 @@ function git(words: string[], where: Where): Verdict {
   const history = () => v("read", say("kit.say.history"));
   const change = () => v("change", say("kit.say.change"), head);
   const del = (s: Say = say("kit.say.delete")) => v("delete", s, "exact");
+  // what may switch, rename or detach the branch checked out, or set where it is pushed (item 120)
+  const moving = (r: Verdict): Verdict => ({ ...r, moves: true });
+  // A branch's upstream is a setting: with the person's `push.default=upstream` a later push that names no branch sends to
+  // it, main among them (item 120), as where a remote points decides where every push sends.
+  if (["branch", "switch", "checkout"].includes(sub) && has(args, "--track", "-t", ...(sub === "branch" ? ["-u", "--set-upstream-to"] : []))) return { ...unknownProgram("git"), moves: true };
   switch (sub) {
     case "status":
     case "diff":
@@ -809,7 +823,7 @@ function git(words: string[], where: Where): Verdict {
     case "archive":
       return has(args, "--remote") ? unknownProgram("git") : history();
     case "bisect":
-      return rest[0] === "run" ? unknownProgram("git") : change();
+      return rest[0] === "run" ? unknownProgram("git") : moving(change());
     case "reflog":
       return has(args, "expire", "delete") ? del() : history();
     case "commit":
@@ -817,8 +831,8 @@ function git(words: string[], where: Where): Verdict {
       // message would leave with the next push
       return v("change", say("kit.say.commit"), head, { saves: true, text: textAfter(words, ["-m", "--message", "--author", "--date", "-C", "-c", "--fixup", "--squash"]) });
     case "switch":
-      if (has(args, "--force", "-f", "--discard-changes")) return del(say("kit.say.discard"));
-      return { ...change(), text: textAfter(words, ["-c", "--create", "-C", "--force-create"]) };
+      if (has(args, "--force", "-f", "--discard-changes")) return moving(del(say("kit.say.discard")));
+      return moving({ ...change(), text: textAfter(words, ["-c", "--create", "-C", "--force-create"]) });
     case "add":
     case "mv":
     case "merge":
@@ -828,13 +842,16 @@ function git(words: string[], where: Where): Verdict {
     case "pull":
     case "init":
     case "notes":
-    case "clone":
-      return { ...change(), text: textAfter(words, ["-m", "--message", "-b", "--branch", "-c", "--config", "--origin", "-o"]) };
+    case "clone": {
+      const r = { ...change(), text: textAfter(words, ["-m", "--message", "-b", "--branch", "-c", "--config", "--origin", "-o"]) };
+      // a rebase leaves the branch detached while it stops, and a clone or an init makes another repository to work in
+      return ["rebase", "init", "clone"].includes(sub) ? moving(r) : r;
+    }
     case "checkout": {
-      if (has(args, "--force", "-f")) return del(say("kit.say.discard"));
-      if (hasExactly(args, "-b", "-B", "--orphan")) return change();
+      if (has(args, "--force", "-f")) return moving(del(say("kit.say.discard")));
+      if (hasExactly(args, "-b", "-B", "--orphan")) return moving(change());
       const discards = args.includes("--") || rest.some((w) => w === "." || /\.[^./\\]+$/.test(w.split(/[\\/]/).pop() ?? ""));
-      return discards ? del(say("kit.say.discard")) : change();
+      return moving(discards ? del(say("kit.say.discard")) : change());
     }
     case "restore":
       return hasExactly(args, "--staged", "-S") && !has(args, "--worktree", "-W") ? change() : del(say("kit.say.discard"));
@@ -852,10 +869,11 @@ function git(words: string[], where: Where): Verdict {
     case "filter-repo":
       return del();
     case "update-ref":
-      return has(args, "-d") ? del() : change();
+      return moving(has(args, "-d") ? del() : change());
     case "branch":
       if (has(args, "-d", "-D", "--delete")) return del();
-      return onlyLists(args, "branch") ? history() : change();
+      // a branch made, moved, renamed or given another upstream: a rename of the one checked out is what HEAD then names
+      return onlyLists(args, "branch") ? history() : moving(change());
     case "tag":
       if (has(args, "-d", "--delete")) return del();
       return onlyLists(args, "tag") ? history() : { ...change(), text: textAfter(words, ["-m", "--message"]) };
@@ -865,14 +883,16 @@ function git(words: string[], where: Where): Verdict {
       const act = words[head] ?? "";
       if (["drop", "clear"].includes(act)) return del();
       if (["list", "show"].includes(act)) return history();
-      return { ...change(), text: textAfter(words, ["-m", "--message"]) };
+      // `stash branch` makes a branch and checks it out
+      const r = { ...change(), text: textAfter(words, ["-m", "--message"]) };
+      return act === "branch" ? moving(r) : r;
     }
     case "worktree":
-      if (["remove", "prune"].includes(rest[0] ?? "")) return del();
-      return rest[0] === "list" ? history() : change();
+      if (["remove", "prune"].includes(rest[0] ?? "")) return moving(del());
+      return rest[0] === "list" ? history() : moving(change());
     case "submodule":
       if (rest[0] === "foreach") return unknownProgram("git");
-      return rest[0] === "status" || !rest.length ? history() : change();
+      return rest[0] === "status" || !rest.length ? history() : moving(change());
     case "remote":
       if (["remove", "rm"].includes(rest[0] ?? "")) return del();
       return !rest.length || ["show", "get-url"].includes(rest[0] ?? "") ? history() : change();
@@ -899,16 +919,34 @@ function push(words: string[], head: number, where: Where): Verdict {
   // where it sends: the remote it names, or one given by `--repo`; an address the agent wrote is no remote of the project's
   const repo = [words[ops[0]] ?? "", ...args.filter((w) => isOpt(w, "--repo") && w.includes("=")).map((w) => w.slice(w.indexOf("=") + 1)), ...args.flatMap((w, i) => (w === "--repo" ? [args[i + 1] ?? ""] : []))];
   if (repo.some(gitAddress)) return { ...sends(), saves: true };
+  // From another folder than the one whose branch was read, it may be another repository's push: a folder of the project
+  // can hold a repository of its own, with a remote of its own (item 120).
+  if (!samePath(where.cwd || where.root, where.root)) return { ...live(), saves: true };
   const refs = ops.slice(1).map((i) => words[i]);
+  const branch = where.branch ?? "";
+  /** The branch a refspec sends to, from its own words (item 120): its destination, else its source; the branch checked out
+   *  for HEAD, `@` and `head` in any letter case (macOS's disk finds that as HEAD); "" when it cannot be said. `:` alone
+   *  pushes every branch both sides have and a pattern every branch it matches. git finds a destination on the remote by
+   *  its end too (`heads/main` is refs/heads/main), so only a branch's own name is read as one: any other namespace
+   *  (`refs/remotes/`, `refs/for/`, `refs/tags/`) is not known. */
   const target = (ref: string) => {
     const r = ref.replace(/^\+/, "");
-    const dst = r.includes(":") ? r.slice(r.indexOf(":") + 1) : r;
-    const name = dst === "HEAD" || dst === "" ? (where.branch ?? "") : dst;
-    return name.replace(/^refs\/heads\//, "");
+    if (r === ":" || r.includes("*")) return "";
+    const colon = r.indexOf(":");
+    const dst = colon >= 0 ? r.slice(colon + 1) : r;
+    if (dst === "") return "";
+    const name = HEAD_NAME.test(dst) ? branch : dst;
+    if (name.startsWith("refs/")) return name.startsWith("refs/heads/") ? name.slice("refs/heads/".length) : "";
+    return name.replace(/^heads\//, "");
   };
   // a push that names no branch sends the one checked out: live when that is the main branch, or not known
-  const names = refs.length ? refs.map(target) : [where.branch ?? ""];
-  if (has(args, "--tags", "--follow-tags", "--mirror", "--all") || names.some((n) => !n || MAIN.has(n))) return { ...live(), saves: true };
+  const names = refs.length ? refs.map(target) : [branch];
+  // every branch (`--all` and its alias `--branches`), every tag, a mirror, remote branches removed, the submodules'
+  // commits pushed to their own remotes, or an option for the server, which GitLab reads to merge a request as its
+  // pipeline passes
+  const submodules = args.some((w) => isOpt(w, "--recurse-submodules") && !/^--[^=]*=(check|no)$/.test(w));
+  if (has(args, "--tags", "--follow-tags", "--mirror", "--all", "--branches", "--prune", "-o", "--push-option") || submodules || names.some((n) => !n || MAIN.has(n)))
+    return { ...live(), saves: true };
   if (has(args, "--delete", "-d") || refs.some((r) => r.startsWith(":"))) return v("delete", say("kit.say.delete"), "exact", { saves: true });
   if (has(args, "--force", "-f", "--force-with-lease", "--force-if-includes") || refs.some((r) => r.startsWith("+"))) return v("delete", say("kit.say.discard"), "exact", { saves: true });
   return v("push", say("kit.say.push"), head, { saves: true });
@@ -932,7 +970,7 @@ const ghElsewhere = (words: string[]) =>
     return repo !== null && (URL_LIKE.test(repo) || repo.split("/").length > 2);
   });
 
-function gh(words: string[]): Verdict {
+function gh(words: string[], where: Where): Verdict {
   const [, area, act] = words;
   const head = 3;
   // `gh api` is a web client: what it asks GitHub, or the host `--hostname` names, is up to the words
@@ -943,12 +981,19 @@ function gh(words: string[]): Verdict {
   const reads = ["list", "view", "status", "checks", "diff"];
   switch (area) {
     case "pr":
-      if (act === "create") return v("push", say("kit.say.pr"), head, { saves: true, text });
+      if (act === "create") {
+        // a request on a repository the words name, or one opened from another folder than the session's, which may be
+        // another repository (item 120)
+        if (words.some((w) => w === "-R" || /^-R./.test(w) || isOpt(w, "--repo"))) return { ...sends(), saves: true };
+        if (!samePath(where.cwd || where.root, where.root)) return { ...live(), saves: true };
+        return v("push", say("kit.say.pr"), head, { saves: true, text });
+      }
       if (act === "merge") return live();
-      if (act === "checkout") return v("change", say("kit.say.change"), head);
+      // it checks out the request's branch (item 120)
+      if (act === "checkout") return v("change", say("kit.say.change"), head, { moves: true });
       return reads.includes(act ?? "") ? v("read", say("kit.say.history")) : sends();
     case "repo":
-      if (act === "clone") return v("change", say("kit.say.change"), head);
+      if (act === "clone") return v("change", say("kit.say.change"), head, { moves: true });
       return ["view", "list"].includes(act ?? "") ? v("read", say("kit.say.history")) : sends();
     case "release":
       return ["list", "view"].includes(act ?? "") ? v("read", say("kit.say.history")) : live();
@@ -1640,7 +1685,7 @@ function classify(words: string[], where: Where): Verdict {
   }
   if (["pnpm", "npm", "yarn", "bun"].includes(name)) return packageManager(words, where);
   if (name === "git") return (git(words, where));
-  if (name === "gh") return (gh(words));
+  if (name === "gh") return gh(words, where);
   if (["grep", "egrep", "fgrep"].includes(name)) return (search(words, "grep"));
   if (["rg", "ag"].includes(name)) return (search(words, "rg"));
   if (name === "find") return find(words, where);
@@ -1914,7 +1959,7 @@ function find(words: string[], where: Where): Verdict {
   const whole = strictest([v("read", say("kit.say.read")), ...parts]);
   // `-delete` with a test on the name or the age, wherever it comes in the words, deletes only what matches: its folders
   // are where it looks, not what it deletes
-  return { ...whole, text, ...(whole === own && filtered ? { filtered: true as const } : {}) };
+  return { ...whole, text, ...(whole === own && filtered ? { filtered: true as const } : {}), ...(parts.some((p) => p.moves) ? { moves: true as const } : {}) };
 }
 
 function strictest(list: Verdict[]): Verdict {
@@ -2021,6 +2066,7 @@ export function readCommand(line: string, where: Where): ReadCommand {
     say: worst.say,
     ends: distinct(reads.flatMap((r) => r.ends)),
     ...(resets ? { resets } : {}),
+    movesHead: reads.some((r) => r.movesHead),
   };
 }
 
@@ -2050,6 +2096,12 @@ function readFrom({ cmds, opaque }: Lexed, where: Where, start: string | null): 
   let wipes = false;
   /** A step that changes something names a path in git's own folder, or another whose change always asks. */
   let gitOwn = false;
+  // A step anywhere in the line that may switch the branch checked out (item 120): a push in the same line is read with no
+  // branch, whether it comes after the step or beside it in a pipeline or in the background, where it may run after it.
+  const lineMoves = cmds.some((c) => {
+    const at = c.words.findIndex((w) => !ASSIGNMENT.test(w));
+    return at >= 0 && classify(c.words.slice(at), { ...where, cwd: session }).moves === true;
+  });
 
   /** One simple command read in the folder of `f`: what it moves the shell to, or that the folder is lost after it. */
   const readOne = (c: Simple, f: Flow): { to?: { dir: string; written: string }; lost?: true } => {
@@ -2070,7 +2122,10 @@ function readFrom({ cmds, opaque }: Lexed, where: Where, start: string | null): 
       verdicts.push(v("unknown", say("kit.say.opaque")));
       return {};
     }
-    const classified = classify(words, { ...where, cwd });
+    // the branch was read in the project's folder: a push from any other, or after a step that may have moved it, names
+    // none (item 120)
+    const branch = !lineMoves && !unknownHere && samePath(cwd, where.root) ? where.branch : undefined;
+    const classified = classify(words, { ...where, cwd, branch });
     // reaching another computer is not reading or changing the project, whatever the program
     const read = RANK[classified.action] < RANK.unknown && reachesOut(words, classified) ? { ...sends(), text: classified.text } : classified;
     // writing the output into a file changes the project, whatever the program is
@@ -2188,7 +2243,10 @@ function readFrom({ cmds, opaque }: Lexed, where: Where, start: string | null): 
   if (only && ruleable && !opaque && !outside.length && !only.redirects.length && !ASSIGNMENT.test(only.words[0] ?? "") && whole.head !== undefined) {
     rule = whole.head === "exact" ? { words: [...only.words], exact: true, action } : { words: only.words.slice(0, whole.head), action };
   }
-  return { action, outside, saves, rule, say: s, ends };
+  // after it, the branch checked out may not be the one read before (item 120): a step that may move it, one nobody can
+  // read, or a shell left in another folder
+  const movesHead = lineMoves || RANK[action] >= RANK.unknown || ends.some((e) => e === null || !samePath(e, where.root));
+  return { action, outside, saves, rule, say: s, ends, movesHead };
 }
 
 /** A package manager's own subcommands: none of them runs a script of the project's by its name. */
