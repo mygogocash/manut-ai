@@ -698,12 +698,6 @@ Every switch that turns a built part on, and what each needs from the owner, is 
   releases its tasks...") and `test/auth-email.test.ts` ("gives Apple's session in every way..."): timed out at 5 s in
   item 104's run 45873764860 (with a `rows.filter is not a function` uncaught in workerd), a branch that changes no API
   code; all passed on the next run. If they time out again, look at that uncaught error first.
-- `apps/desktop/e2e/motion-lists.spec.ts`, its Home test: failed on its test and its retry in item 132's run
-  45859860218 (four workers a shard), passed 8 of 8 alone and in every run since. With the resilience spec above, the
-  second spec to fail twice in one run since item 129; if either fails twice again, fix it rather than re-run.
-- `apps/desktop/e2e/resilience.spec.ts` ("bridge lost mid-turn"): failed on its test and its retry in shard 2 of
-  item 101a's first CI run (45851189647), the first runs with four Playwright workers a shard (item 129); passed alone
-  and on the re-run. If it fails twice again, fix it rather than re-run: it may be the four workers' load.
 - `apps/desktop` `src/sessions/term/engine-osc52.test.ts`: builds clipboard-sized strings, can pass 5 seconds.
 - `apps/desktop` `src/lib/sounds.test.ts` and `apps/web` `test/RoutinesView.test.tsx` ("pauses everyone in practice"): each
   failed once in the gate of 25 Nov at load 7 with a helper's gate beside it (the second waited past testing-library's one
