@@ -82,6 +82,8 @@ export interface SavedSession {
   continuedIn?: string;
   /** A continued chat's model picked in Continue with: set as its agent starts, before the first message goes. */
   modelWant?: string;
+  /** The job (Ask several agents, item 102a) whose one message started this lane. */
+  job?: string;
 }
 
 export interface SavedLane {
@@ -157,7 +159,7 @@ function parseSession(v: unknown): SavedSession | null {
   if (typeof v.exitCode === "number" || v.exitCode === null) out.exitCode = v.exitCode;
   const error = str(v.error, MAX_TEXT);
   if (error) out.error = error;
-  for (const k of ["agentSession", "account", "bot", "model", "title", "modelTitle", "agentTitle", "promptTitle", "mode", "effort", "workflow", "continuedFrom", "continuedIn", "modelWant"] as const) {
+  for (const k of ["agentSession", "account", "bot", "model", "title", "modelTitle", "agentTitle", "promptTitle", "mode", "effort", "workflow", "continuedFrom", "continuedIn", "modelWant", "job"] as const) {
     const s = str(v[k], 200);
     if (s) out[k] = s;
   }

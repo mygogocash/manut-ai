@@ -297,18 +297,21 @@ jobs:
     # Each shard's Playwright workers, each against a stand-in of its own (apps/desktop/playwright.config.ts). The split
     # reads the same number, so it plays out the order in which Playwright hands the shard's files to them.
     env:
-      MANUT_E2E_WORKERS: "4"
+      MANUT_E2E_WORKERS: "3"
     strategy:
       # A shard that fails says nothing about the others, so none of them is cancelled for it. Adding a shard is one
       # more number here and in the all-shards job's --shards below (e2e-shards.test.mjs checks that they agree); the
       # split takes the matrix's own size.
       fail-fast: false
       matrix:
-        shard: [1, 2, 3]
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # What the runner has, in the log, since item 133 had to guess it from the repository being public.
+      - name: Say what the runner has
+        run: echo "cpus $(nproc), $(free -m | awk '/Mem:/ {print $2}') MB of memory, load $(cut -d' ' -f1-3 /proc/loadavg)"
       - uses: ./.github/actions/setup-workspace
       # Chromium only: the one WebKit spec runs on macOS alone and skips itself here. Its Ubuntu packages are cached:
       # on 26 Nov 2026 the mirror held one shard or two of a run for up to five minutes in three runs of four.
@@ -382,7 +385,7 @@ jobs:
       # --strict fails the job on a failed test, an error outside the tests, an unreadable report, or fewer than nine
       # shards' reports. A flaky test (one that passed on its retry) is counted and named but does not fail it.
       - name: Write the counts of all shards to the job summary
-        run: node .github/scripts/playwright-summary.mjs --title "Desktop Playwright, all shards" --shards 3 --strict "$RUNNER_TEMP/playwright-results"
+        run: node .github/scripts/playwright-summary.mjs --title "Desktop Playwright, all shards" --shards 4 --strict "$RUNNER_TEMP/playwright-results"
       # A shard can fail outside its tests (its install, a step before the suite) and still have left a report, so the
       # shards' own result is checked too.
       - name: Check every shard passed

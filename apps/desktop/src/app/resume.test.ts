@@ -349,3 +349,12 @@ describe("update confirm: the running line", () => {
     );
   });
 });
+
+describe("a job's lanes (Ask several agents, item 102a)", () => {
+  it("keeps the job a lane belongs to, so the lanes one message started are still one job after a restart", () => {
+    const good = buildResume(input({ sessions: [{ ...input().sessions[0], job: "jk7m2" }] }), T);
+    expect(parseResume(JSON.stringify(good))!.sessions[0].job).toBe("jk7m2");
+    expect(parseResume(JSON.stringify({ ...good, sessions: [{ ...good.sessions[0], job: 7 }] }))!.sessions[0].job).toBeUndefined();
+    expect(parseResume(JSON.stringify(buildResume(input(), T)))!.sessions[0].job).toBeUndefined();
+  });
+});

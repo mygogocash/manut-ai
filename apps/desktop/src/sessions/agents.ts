@@ -408,6 +408,9 @@ export interface SessionRec {
   continuedIn?: string;
   /** A continued chat's model picked in Continue with: set as its agent starts, before the first message goes. */
   modelWant?: string;
+  /** Ask several agents (item 102a, src/jobs/ask.ts): the id of the job whose one message started this lane. Every lane of a job
+   *  is an ordinary lane started in its agent's Ask mode; the id only groups them in the Lanes band. Saved with the session. */
+  job?: string;
 }
 
 /** How long a TERMINALS card's second line may be (the card truncates it further with an ellipsis). */
