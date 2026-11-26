@@ -23,6 +23,7 @@ import { useSyncExternalStore } from "react";
 import { hhmm } from "../app/time";
 import { changes } from "../lib/changes";
 import { pad } from "../lib/pad";
+import { playSettle } from "../sound";
 
 export const ROWS_KEY = "manut.sidebar.rows";
 
@@ -422,6 +423,9 @@ export function actOnRows(keys: readonly string[], action: RowAction, name: stri
   const kind = undoKind(action);
   const before = changedFrom(was, next, keys);
   if (kind && Object.keys(before).length) setUndo({ id: ++undoSeq, kind, name, before, at: now, until: now + UNDO_MS });
+  // Done for now ticks once, however many rows it put away, and only when it changed one (GoSpark's settle chime). What
+  // settles by itself (`settleRows`) is silent: the person did not do it.
+  if (action.do === "settle" && Object.keys(before).length) void playSettle();
 }
 
 /** Take back the action Undo holds: each row it touched gets exactly the mark it had. False when there is none. */

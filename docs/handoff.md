@@ -299,8 +299,8 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    On the evening of 26 Nov the lead moved to a new Claude Code session. Item 129 merged (each Playwright worker has
    its own stand-in; three CI shards of four workers). Item 101 is split into 101a to 101e (rows in `docs/plan.md`);
    101a (Cursor and Antigravity as chats) and 101e (the first-launch offer to bring over Claude Code and Codex work)
-   merged. Running: 101b (Grok and Muse Code as chats), 131 (GoSpark's sounds) and 132 (GoSpark's effort card), the
-   last two asked for by the owner that night. From 101e: all 325 Codex sessions on the owner's Mac are compressed, so
+   merged, then 131 (GoSpark's sounds, asked for by the owner that night; the owner should listen to them on a real
+   Mac). Running: 101b (Grok and Muse Code as chats), 101c (the ACP registry) and 132 (GoSpark's effort card). From 101e: all 325 Codex sessions on the owner's Mac are compressed, so
    only Claude Code's conversations are offered until 106b. Needs the owner from 101a: Cursor's Approval mode set to Allowlist (it is Run Everything, so Cursor
    chats are refused), and a Cursor plan with messages left to record a real tool call. GitHub reported 7 Dependabot alerts on `main` (2 critical) at that push, for the owner to look at.
    The canvas sources moved to `~/Developer/manut-ai-artifacts` (the owner is deleting the GoSpark folders; the

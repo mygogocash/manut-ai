@@ -37,7 +37,7 @@ async function openZh(page: Page) {
 async function englishLeft(page: Page, root: string): Promise<string[]> {
   return page.evaluate((sel) => {
     const KEEP =
-      /^(manut|Manut AI|OMH|Hermes|Kami|Friren|Frieren|Hermes Bot|OMH TUI|English|한국어|日本語|中文|Claude( Code)?|Codex|OmO|DSH|pi|omp|oh-my-pi|oh-my-hermes|Grok|Gemini( CLI)?|OpenAI|Worktrees|ChatGPT|CLIProxyAPI|Slack|Discord|Telegram|Cron|GitHub|GitLab|Linear|API|ID|PR|CI|Esc|Ctrl\+?.*|⌘.*|Max \d+x|Pro|Plus)$/;
+      /^(manut|Manut AI|OMH|Hermes|Kami|Friren|Frieren|Hermes Bot|OMH TUI|English|한국어|日本語|中文|Claude( Code)?|Codex|OmO|DSH|pi|omp|oh-my-pi|oh-my-hermes|Grok|Gemini( CLI)?|OpenAI|Worktrees|ChatGPT|CLIProxyAPI|Slack|Discord|Telegram|Cron|GitHub|GitLab|Linear|API|ID|PR|CI|Esc|Ctrl\+?.*|⌘.*|Max \d+x|Pro|Plus|Heaven|Highwire|Iridium|Krypton|Kzurb Sonar)$/;
     // commands (`hermes auth add …`, `npm i -g …`), paths, ids and model or provider names stay as written
     const isData = (s: string) =>
       /[@/\\:]|^\d|^[a-z0-9._-]+$|^v?\d+(\.\d+)+/.test(s) ||

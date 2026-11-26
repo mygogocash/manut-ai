@@ -1,0 +1,54 @@
+{
+  "source": "https://android.googlesource.com/platform/frameworks/base",
+  "revision": "1cdfff555f4a21f71ccc978290e2e212e2f8b168",
+  "license": "Apache-2.0",
+  "conversion": "GoSpark's 16-bit AIFF (itself converted from the OGG with no musical edits) to 16-bit little-endian PCM WAV with macOS afconvert: afconvert -f WAVE -d LEI16 in.aiff out.wav. Sample rate and channels kept.",
+  "taken_from": "mygogocash/gospark at a7537c80, GoGoCode/Resources/Sounds/",
+  "sounds": [
+    {
+      "name": "Heaven",
+      "path": "data/sounds/notifications/Heaven.ogg",
+      "sourceSHA256": "aba59ee256c2f319b406bd93c7b87ebe27efab87c3b5511570c24c7d79e2102a",
+      "aiffSHA256": "895ada679c5eafef1f32d818c06d2b02e5341a415624d05badf0c862c0b34aa8",
+      "file": "Tone-Heaven.wav",
+      "fileSHA256": "00fec794aa8ed6cb937813315731e13a912a9d2f00e4d8e403b284d0066cf8e9",
+      "artist": null
+    },
+    {
+      "name": "Highwire",
+      "path": "data/sounds/newwavelabs/Highwire.ogg",
+      "sourceSHA256": "dc283d99ec002a10e1eb757ca6034a7b1087be5e5790472546fea9e16555ac5c",
+      "aiffSHA256": "8fec62169aafe9b827510d25c5ce0db648f282febe3473b30593c65303f704dd",
+      "file": "Tone-Highwire.wav",
+      "fileSHA256": "e7625ce058646f84970c94350d4914e62c280a3f93ca40484a9345725a556a2b",
+      "artist": "Dr. MAD"
+    },
+    {
+      "name": "Iridium",
+      "path": "data/sounds/notifications/ogg/Iridium.ogg",
+      "sourceSHA256": "e2bd12d8083f6de999a1642f09dd7042631819af025e975be4f2878881cc3db8",
+      "aiffSHA256": "799742847459bea6458e709f2be55b8eff299b892294f986b15ce8e39cfd1426",
+      "file": "Tone-Iridium.wav",
+      "fileSHA256": "c68408b1402c0d6c0b4ce3c403e5cfa8692e377a79a8c637b3f40c128890f0c9",
+      "artist": null
+    },
+    {
+      "name": "Krypton",
+      "path": "data/sounds/notifications/ogg/Krypton.ogg",
+      "sourceSHA256": "d3d7defda92a4470dc1118d1ed82f1bb3c6d3d6843c49f81171ace0d3429d64c",
+      "aiffSHA256": "b84354880758cb0904d03d4a955193d2bf8de447b8886367eb72de738bdabaa6",
+      "file": "Tone-Krypton.wav",
+      "fileSHA256": "967b7a6e2faf464e50b05208df3e573d2dfd1b55af74c5098056aad3b312393d",
+      "artist": null
+    },
+    {
+      "name": "KzurbSonar",
+      "path": "data/sounds/newwavelabs/KzurbSonar.ogg",
+      "sourceSHA256": "3cd58c925644d7681be3215ecac5e13b4a5f242a70d15b593d9dcc21872a6b6d",
+      "aiffSHA256": "5f8d7272549453b9013b4652e3480008f70f9f1a537d29b366177aa0f445a884",
+      "file": "Tone-KzurbSonar.wav",
+      "fileSHA256": "28462258d6948b1e9d0df32a2cd0857b909d89876bd493760712649ed0b0d22e",
+      "artist": "Dr. MAD"
+    }
+  ]
+}
