@@ -212,8 +212,9 @@ fn take(dir: &Path, rel: &str, shown: &str) -> Got {
     if !opened.file_type().is_file() || !same_file(&looked, &opened) || second_name(&opened) {
         return Got::Left(Why::Link, shown.to_string());
     }
-    // the path, resolved now, is still the one looked at: no folder on the way became a link
-    if at.canonicalize().ok().as_deref() != Some(at.as_path()) {
+    // the path, resolved now, is still the one looked at: no folder on the way became a link. A disk that ignores letter
+    // case answers `CLAUDE.md` with its `claude.md` and resolves to that spelling, which is the same file, not a link.
+    if !at.canonicalize().is_ok_and(|real| real.as_os_str().eq_ignore_ascii_case(at.as_os_str())) {
         return Got::Left(Why::Link, shown.to_string());
     }
     let mut bytes = Vec::new();
@@ -841,6 +842,25 @@ mod tests {
         for x in [away, d, d2, d3, d4, d5] {
             let _ = fs::remove_dir_all(x);
         }
+    }
+
+    /// On a disk that ignores letter case (a Mac's, by default) a `claude.md` answers for CLAUDE.md, as it does for Claude
+    /// Code, and is read as the file it is, not named as a link because it resolves to its own spelling.
+    #[test]
+    fn a_differently_cased_name_on_a_disk_that_ignores_case_is_read_not_called_a_link() {
+        let d = repo("case");
+        put(&d, "claude.md", "Lower case.\n");
+        if !d.join("CLAUDE.md").exists() {
+            // a disk that keeps case apart: CLAUDE.md is simply not there
+            assert!(read(Agent::Claude, &d, None).1.read.is_empty());
+            let _ = fs::remove_dir_all(d);
+            return;
+        }
+        let (_, f) = read(Agent::Claude, &d, None);
+        assert_eq!(paths(&f), ["CLAUDE.md"]);
+        assert_eq!(f.read[0].text, "Lower case.\n");
+        assert!(f.left.is_empty(), "{:?}", f.left);
+        let _ = fs::remove_dir_all(d);
     }
 
     /// A pipe or a device named CLAUDE.md is no file to read: it is passed over at once, never waited on.
