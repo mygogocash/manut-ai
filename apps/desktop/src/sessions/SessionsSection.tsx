@@ -38,6 +38,8 @@ import { CUE_PX, useEdgeFade } from "../sidebar/edgeFade";
 import { getHost, type PastChat } from "./host";
 import { getSessions, useSessions } from "./sessions";
 import { pickTitle } from "./titles";
+import { useTitleModel } from "../lib/titleModel";
+import { wantsTitle } from "./titleWords";
 import { onOpenNewSessionMenu, useShells, type NewMenuStart } from "./newMenu";
 import { onTermSettings, readTermSettings } from "./term/settings";
 import { TermLinkGone } from "./termLinkOpen";
@@ -1185,12 +1187,12 @@ export function rowMenuItems(rec: Pick<SessionRec, "cwd" | "agentSession">): Row
 }
 /** A TERMINALS row's menu: Rename, Reveal, Open in the system terminal, Copy link (its `manut://terminal/…`),
  *  New terminal here, Close. */
-export function termMenuItems(rec: Pick<SessionRec, "cwd" | "linkId">, mark?: PlaceMark | null): RowAction[] {
+export function termMenuItems(rec: Pick<SessionRec, "cwd" | "linkId">, mark?: PlaceMark | null, again = false): RowAction[] {
   // Pin and Done for now come after Rename when the row's marks are given (item 76; a terminal has no Snooze or Archive)
   const marks: RowAction[] = mark === undefined ? [] : (rowChoices("terminal", mark ?? undefined) as RowAction[]);
-  return ["rename", ...marks, ...(rec.cwd ? (["reveal", "terminal"] as const) : []), ...(rec.linkId ? (["link"] as const) : []), "here", "close"];
+  return ["rename", ...(again ? (["retitle"] as const) : []), ...marks, ...(rec.cwd ? (["reveal", "terminal"] as const) : []), ...(rec.linkId ? (["link"] as const) : []), "here", "close"];
 }
-export type RowAction = "rename" | "reveal" | "terminal" | "copy" | "link" | "here" | "close" | "pin" | "unpin" | "settle" | "wake";
+export type RowAction = "rename" | "retitle" | "reveal" | "terminal" | "copy" | "link" | "here" | "close" | "pin" | "unpin" | "settle" | "wake";
 
 /** \"Show in Finder\" on macOS, \"Show in Explorer\" on Windows, \"Show in file manager\" elsewhere. */
 const revealWord = () => {
@@ -1200,6 +1202,7 @@ const revealWord = () => {
 
 const ROW_ACTION_LABEL: Record<RowAction, () => string> = {
   rename: () => t("ss.rename"),
+  retitle: () => t("titles.again"),
   reveal: revealWord,
   terminal: () => t("ss.menu.terminal"),
   copy: () => t("ss.menu.copyId"),
@@ -1213,6 +1216,7 @@ const ROW_ACTION_LABEL: Record<RowAction, () => string> = {
 };
 const ROW_ACTION_ID: Record<RowAction, string> = {
   rename: "session-rename",
+  retitle: "session-retitle",
   reveal: "session-reveal",
   terminal: "session-system-terminal",
   copy: "session-copy-id",
@@ -1393,11 +1397,13 @@ const TermRow = memo(function TermRow({ rec, agents, unseen, active, ticking, on
   // a CLI runs in it: the card's thin amber lane on its left edge (the folder summary's "running" counts the same)
   const running = live && markAgent !== null;
   const rowMark = useRowMarks()[sessionRowKey(rec.id)];
-  const actions = termMenuItems(rec, rowMark ?? null);
+  const titleSettings = useTitleModel();
+  const actions = termMenuItems(rec, rowMark ?? null, rec.status !== "draft" && wantsTitle(rec, titleSettings, true));
   const pick = (a: RowAction) => {
     const sx = getSessions();
     if (a === "pin" || a === "unpin" || a === "settle" || a === "wake") markRow(sessionRowKey(rec.id), { do: a });
     else if (a === "rename") setEditing(true);
+    else if (a === "retitle") void sx.rewriteTitle(rec.id);
     else if (a === "reveal") void sx.revealFolder(rec.id);
     else if (a === "terminal") void sx.openTerminal(rec.id);
     else if (a === "link") void sx.copyLink(rec.id);
