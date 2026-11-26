@@ -3974,4 +3974,6 @@ export const ja: Record<Key, string> = {
   "prs.detail": "プルリクエスト #{n}",
   "review.why.not_this_project": "そのプルリクエストはこのプロジェクトのリポジトリのものではないため、ここからはマージしません。",
   "review.why.method_not_allowed": "このリポジトリはこの方法でのマージを許可していません。別の方法を選んでください。",
+  "prs.chat": "チャット「{title}」から",
+  "prs.openChat": "チャット「{title}」を開く",
 };

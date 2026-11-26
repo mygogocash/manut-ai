@@ -15,7 +15,11 @@ import { t, type Key } from "../i18n";
 import { CloseIcon, IconButton, PrIcon, Spinner } from "../ui";
 import { openExternal } from "../lib/openExternal";
 import { addedFolders, pathKey, useFolderPrefs } from "../sessions/folders";
-import { useSessions } from "../sessions/sessions";
+import { getSessions, useSessions } from "../sessions/sessions";
+import { folderName } from "../sessions/agents";
+import { pickTitle } from "../sessions/titles";
+import { getStore } from "../state/store";
+import { chatOfPull, useChatPullsVersion } from "../code/chatPull";
 import { codeProjects } from "../code/KitPanel";
 import { useLaneProjects } from "../code/KeptLanes";
 import { PullMerge, type MergeHost } from "../code/PullMerge";
@@ -53,12 +57,14 @@ export interface PullsListViewProps {
   selected: string | null;
   /** Whether a row is a lane's request. */
   isLane: (row: BoardRow) => boolean;
+  /** The title of the chat that opened a row's request itself (code/chatPull.ts), or null. */
+  chatOf?: (row: BoardRow) => string | null;
   onOpen: (row: BoardRow) => void;
   onRetry: () => void;
   now?: number;
 }
 
-export function PullsListView({ state, noProjects, selected, isLane, onOpen, onRetry, now }: PullsListViewProps) {
+export function PullsListView({ state, noProjects, selected, isLane, chatOf, onOpen, onRetry, now }: PullsListViewProps) {
   if (noProjects) return <p className="prs-none" data-testid="prs-noprojects">{t("prs.noProjects")}</p>;
   if (state.repos !== null && state.repos.length === 0) return <p className="prs-none" data-testid="prs-norepos">{t("prs.noRepos")}</p>;
   if (state.at === null)
@@ -90,7 +96,7 @@ export function PullsListView({ state, noProjects, selected, isLane, onOpen, onR
             <span className="prs-count">{g.rows.length}</span>
           </div>
           {g.rows.map((row) => (
-            <PullRowView key={rowKey(row)} row={row} on={selected === rowKey(row)} lane={isLane(row)} onOpen={onOpen} now={now} />
+            <PullRowView key={rowKey(row)} row={row} on={selected === rowKey(row)} lane={isLane(row)} chat={chatOf?.(row) ?? null} onOpen={onOpen} now={now} />
           ))}
         </section>
       ))}
@@ -98,7 +104,7 @@ export function PullsListView({ state, noProjects, selected, isLane, onOpen, onR
   );
 }
 
-function PullRowView({ row, on, lane, onOpen, now }: { row: BoardRow; on: boolean; lane: boolean; onOpen: (row: BoardRow) => void; now?: number }) {
+function PullRowView({ row, on, lane, chat, onOpen, now }: { row: BoardRow; on: boolean; lane: boolean; chat: string | null; onOpen: (row: BoardRow) => void; now?: number }) {
   const p = row.pull;
   const checks = checksWord(p);
   const review = reviewWord(p);
@@ -127,6 +133,12 @@ function PullRowView({ row, on, lane, onOpen, now }: { row: BoardRow; on: boolea
               <span data-testid="prs-lane">{t("prs.lane")}</span>
             </>
           )}
+          {chat !== null && (
+            <>
+              {" · "}
+              <span data-testid="prs-chat">{t("prs.chat", { title: chat })}</span>
+            </>
+          )}
         </span>
       </span>
     </button>
@@ -139,11 +151,14 @@ export interface PullDetailViewProps {
   error: string | null;
   /** What the merge part draws (PullMerge), so a test can draw the detail alone. */
   merge?: ReactNode;
+  /** The chat that opened the request itself, and what opens it. */
+  chat?: string | null;
+  onOpenChat?: () => void;
   onClose: () => void;
   onOpenUrl: (url: string) => void;
 }
 
-export function PullDetailView({ row, detail, error, merge, onClose, onOpenUrl }: PullDetailViewProps) {
+export function PullDetailView({ row, detail, error, merge, chat = null, onOpenChat, onClose, onOpenUrl }: PullDetailViewProps) {
   const p = detail?.pull ?? row.pull;
   const host = SOURCE_NAME[row.source];
   const shown = detail?.files ?? [];
@@ -174,6 +189,13 @@ export function PullDetailView({ row, detail, error, merge, onClose, onOpenUrl }
         </span>
         {reviewWord(p) && ` · ${reviewWord(p)}`}
       </p>
+      {chat !== null && (
+        <p className="l2 prs-sub">
+          <button type="button" className="lk" onClick={onOpenChat} data-testid="prs-open-chat">
+            {t("prs.openChat", { title: chat })}
+          </button>
+        </p>
+      )}
       <div className="prs-acts">
         {p.same === false ? (
           <p className="l2" data-testid="prs-fork">
@@ -235,7 +257,7 @@ export function PullDetailView({ row, detail, error, merge, onClose, onOpenUrl }
 }
 
 /** A request opened in the app: its detail and its methods read from `host`, its Merge asked through `merge`. */
-function PullDetailPane({ host, merge, row, worktree, onClose, onMerged }: { host: TaskHost; merge: MergeHost; row: BoardRow; worktree: string | null; onClose: () => void; onMerged: () => void }) {
+function PullDetailPane({ host, merge, row, worktree, chat, onClose, onMerged }: { host: TaskHost; merge: MergeHost; row: BoardRow; worktree: string | null; chat: { id: string; title: string } | null; onClose: () => void; onMerged: () => void }) {
   const [detail, setDetail] = useState<PullDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [methods, setMethods] = useState<MergeMethods | null>(null);
@@ -263,6 +285,8 @@ function PullDetailPane({ host, merge, row, worktree, onClose, onMerged }: { hos
       detail={detail}
       error={error}
       merge={<PullMerge host={merge} row={row} worktree={worktree} methods={methodsOf(methods)} onMerged={onMerged} />}
+      chat={chat?.title ?? null}
+      onOpenChat={() => chat && getStore().actions.openSession(chat.id)}
       onClose={onClose}
       onOpenUrl={(url) => void openExternal(url).catch(() => undefined)}
     />
@@ -311,14 +335,25 @@ export function PullsView({ host, merge }: { host: TaskHost; merge: MergeHost })
     const repo = state.folders[pathKey(rec.cwd)];
     if (repo && rec.lane?.name && rec.lane.worktree) lanes.set(`${repo}\n${rec.lane.name}`, rec.lane.worktree);
   }
+  // the chats that opened a request themselves (code/chatPull.ts), by their key
+  useChatPullsVersion();
+  const chats = new Map<string, { id: string; title: string }>();
+  for (const rec of ss.list) {
+    const key = getSessions().chatKey(rec.id);
+    if (key) chats.set(key, { id: rec.id, title: pickTitle(rec, folderName(rec.cwd)).title });
+  }
+  const chatOf = (row: BoardRow) => {
+    const key = chatOfPull(row.source, row.repo, row.pull.number);
+    return key ? (chats.get(key) ?? null) : null;
+  };
   const laneOf = (row: BoardRow): string | null => (row.pull.same === true && row.pull.head ? (lanes.get(`${repoKey(row.source, row.repo)}\n${row.pull.head}`) ?? null) : null);
   const open = sel ? state.rows.find((r) => rowKey(r) === sel) : undefined;
   return (
     <div className={`prs${open ? " has-detail" : ""}`} data-testid="prs">
       <div className="prs-main" role="region" aria-label={t("prs.list")} data-testid="prs-list" aria-busy={state.loading}>
-        <PullsListView state={state} noProjects={projects.length === 0} selected={open ? sel : null} isLane={(r) => laneOf(r) !== null} onOpen={(r) => setSel(rowKey(r))} onRetry={() => void watch.read()} />
+        <PullsListView state={state} noProjects={projects.length === 0} selected={open ? sel : null} isLane={(r) => laneOf(r) !== null} chatOf={(r) => chatOf(r)?.title ?? null} onOpen={(r) => setSel(rowKey(r))} onRetry={() => void watch.read()} />
       </div>
-      {open && <PullDetailPane host={host} merge={merge} row={open} worktree={laneOf(open)} onClose={() => setSel(null)} onMerged={() => void watch.read()} />}
+      {open && <PullDetailPane host={host} merge={merge} row={open} worktree={laneOf(open)} chat={chatOf(open)} onClose={() => setSel(null)} onMerged={() => void watch.read()} />}
     </div>
   );
 }

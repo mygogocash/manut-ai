@@ -56,6 +56,16 @@ describe("the list", () => {
     expect(html.match(/data-testid="prs-lane"/g)?.length).toBe(1);
   });
 
+  it("names the chat that opened a request itself, on its row and in its detail", () => {
+    const text = words(list({ chatOf: (r) => (r.pull.number === 42 ? "Order total" : null) }));
+    expect(text).toContain(t("prs.chat", { title: "Order total" }));
+    expect(text.split(t("prs.chat", { title: "Order total" })).length).toBe(2);
+    const html = renderToString(<PullDetailView row={row(pull(42))} detail={null} error={null} chat="Order total" onOpenChat={noop} onClose={noop} onOpenUrl={noop} />);
+    expect(html).toContain('data-testid="prs-open-chat"');
+    expect(words(html)).toContain(t("prs.openChat", { title: "Order total" }));
+    expect(renderToString(<PullDetailView row={row(pull(42))} detail={null} error={null} onClose={noop} onOpenUrl={noop} />)).not.toContain("prs-open-chat");
+  });
+
   it("colours a check only by what it means", () => {
     expect(checksWord(pull(1)).tone).toBe("ok");
     expect(checksWord(pull(1, { checks: { passed: 1, failed: 1, pending: 1, total: 3 } }))).toEqual({ text: t("prs.checks.failing", { n: 1 }), tone: "fail" });

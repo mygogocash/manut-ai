@@ -3974,4 +3974,6 @@ export const ko: Record<Key, string> = {
   "prs.detail": "풀 리퀘스트 #{n}",
   "review.why.not_this_project": "그 풀 리퀘스트는 이 프로젝트의 저장소에 있지 않아서 여기서 병합하지 않아요.",
   "review.why.method_not_allowed": "이 저장소는 이 방식의 병합을 허용하지 않습니다. 다른 방식을 고르세요.",
+  "prs.chat": "채팅 '{title}'에서",
+  "prs.openChat": "채팅 '{title}' 열기",
 };

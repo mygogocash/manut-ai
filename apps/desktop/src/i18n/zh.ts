@@ -3953,7 +3953,7 @@ export const zh: Record<Key, string> = {
   "prs.review.approved": "已批准",
   "prs.review.changes": "被要求修改",
   "prs.review.required": "需要审查",
-  "prs.lane": "通道的",
+  "prs.lane": "泳道的",
   "prs.none": "你的项目里没有打开的拉取请求。",
   "prs.noRepos": "你的项目还没有一个在 GitHub 或 GitLab 上。有了之后，它的拉取请求会显示在这里。",
   "prs.noProjects": "在代码页面打开一个项目，它的拉取请求就会显示在这里。",
@@ -3974,4 +3974,6 @@ export const zh: Record<Key, string> = {
   "prs.detail": "拉取请求 #{n}",
   "review.why.not_this_project": "那个拉取请求不在这个项目的仓库里，所以不会从这里合并。",
   "review.why.method_not_allowed": "这个仓库不允许用这种方式合并。请选择另一种方式。",
+  "prs.chat": "来自聊天「{title}」",
+  "prs.openChat": "打开聊天「{title}」",
 };

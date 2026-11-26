@@ -4012,4 +4012,6 @@ export const en = {
   "prs.detail": "Pull request #{n}",
   "review.why.not_this_project": "That pull request is not in this project's repository, so it is not merged from here.",
   "review.why.method_not_allowed": "The repository does not allow merging this way. Choose another way.",
+  "prs.chat": "From the chat {title}",
+  "prs.openChat": "Open the chat {title}",
 };

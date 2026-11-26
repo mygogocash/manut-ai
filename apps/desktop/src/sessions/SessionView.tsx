@@ -53,6 +53,9 @@ import { TermShareCards } from "./TermShareCard";
 import { LanePane } from "../code/LanePane";
 import { LaneReview } from "../code/Review";
 import { isLaneChat } from "../code/laneStore";
+import { chatPullOf, useChatPullsVersion, type ChatPull } from "../code/chatPull";
+import { usePullsVersion } from "../tasks/pulls";
+import { showBoardPull } from "../tasks/state";
 import { Icon } from "../ui/icons";
 import { chatScope } from "../chat/box/scope";
 import { AgentContinue, ContinueLines, useLaneWait } from "./ContinueMenu";
@@ -427,6 +430,26 @@ function Context({ rec, account }: { rec: SessionRec; account?: string }) {
 }
 
 const BranchIcon = () => <Icon name="git-branch" />;
+
+/** The pull request the chat opened itself (item 100, code/chatPull.ts), after the agent on the header's second line: pressed, it
+ *  opens in Tasks › Pull requests. Nothing when the chat opened none. */
+export function ChatPullView({ pull, onOpen }: { pull: ChatPull | null; onOpen: (p: ChatPull) => void }) {
+  if (!pull) return null;
+  return (
+    <>
+      {" · "}
+      <button type="button" className="lk ss-head-pr" title={t("lane.prTip")} onClick={() => onOpen(pull)} data-testid="session-pull" data-state={pull.state}>
+        {t("lane.pr", { n: pull.number, state: t(`tasks.st.${pull.state}` as Key) })}
+      </button>
+    </>
+  );
+}
+
+function ChatPullLink({ chatKey }: { chatKey: string | null | undefined }) {
+  useChatPullsVersion();
+  usePullsVersion();
+  return <ChatPullView pull={chatPullOf(chatKey)} onOpen={(p) => showBoardPull(p.source, p.repo, p.number) && getStore().actions.openTasks()} />;
+}
 
 /** The rest of the line under a running chat: the folder's git branch (none outside a repository) and how full the
  *  context is, both as the shell and the agent reported them. */
@@ -865,6 +888,7 @@ export function SessionView() {
             <span data-testid="session-cwd">{tildePath(rec.cwd, ss.home)}</span>
             {" · "}
             <span data-testid="session-agent">{label}</span>
+            <ChatPullLink chatKey={chatKey} />
           </span>
           <span className="ss-head-now">
             <span
