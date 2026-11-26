@@ -148,6 +148,11 @@ fn pull_into(home: &Path, cwd: &Path, out: &mut Pulled) -> &'static str {
     if !git.run(&top, &["merge-base", "--is-ancestor", &head, &tip]).is_ok_and(|r| r.code == Some(0)) {
         return "diverged";
     }
+    // the `.lfsconfig` the incoming commit brings, which git-lfs reads once the fast-forward has written it (item 118)
+    if let Some(setting) = lane::lfsconfig_at(&|args: &[&str]| git.run(&top, args).ok(), &format!("{tip}:.lfsconfig")) {
+        out.setting = setting;
+        return "config";
+    }
     // read again just before the one write: the fetch took time, and the person may have started something since, or anything
     // may have written the repository's config, which every lane's agent shares (item 118)
     if let Some(setting) = git.config_risk(&top) {
@@ -544,6 +549,24 @@ mod tests {
         assert!(!marker.exists(), "a program ran: {}", fs::read_to_string(&marker).unwrap_or_default());
         assert_eq!(sh(&d, &["rev-parse", "HEAD"]), mine);
         assert!(!d.join("r0.txt").exists());
+        let _ = fs::remove_dir_all(home);
+    }
+
+    /// Item 118: a commit the pull would bring can add a `.lfsconfig`, which git-lfs reads as soon as the fast-forward writes it
+    /// (git-lfs-config(5)). The incoming commit's own file is read before the one write, and the pull stops at it, named.
+    #[test]
+    fn a_pull_stops_at_an_lfsconfig_the_incoming_commit_brings() {
+        let Some((home, d)) = repo("pull-lfsconfig") else { return };
+        let bare = with_origin(&home, &d);
+        let other = home.join("other");
+        sh(&home, &["clone", "-q", bare.to_str().unwrap(), other.to_str().unwrap()]);
+        commit_in(&other, ".lfsconfig", "[lfs]\n\turl = https://elsewhere.example/x\n");
+        sh(&other, &["push", "-q", "origin", "main"]);
+        let mine = sh(&d, &["rev-parse", "HEAD"]);
+        let got = pull(&home, &d);
+        assert_eq!((got.done, got.why.as_str(), got.setting.as_str()), (false, "config", ".lfsconfig:lfs.url"), "{got:?}");
+        assert_eq!(sh(&d, &["rev-parse", "HEAD"]), mine);
+        assert!(!d.join(".lfsconfig").exists());
         let _ = fs::remove_dir_all(home);
     }
 

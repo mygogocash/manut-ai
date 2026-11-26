@@ -305,7 +305,11 @@ pub(crate) struct Git {
 /// condition holds (`onbranch:`, `gitdir:`, `gitdir/i:`, `hasconfig:remote.*.url:`), and the read lists only the include's own
 /// key wherever it does not, so a file that names a filter only on a lane's branch or in a lane's git folder was hidden from
 /// the read made in the developer's folder. The app cannot read what an included file would say in every folder git runs in,
-/// so any include stops automatic work, whatever its condition.
+/// so any include stops automatic work, whatever its condition. And every `lfs.*` key, with `remote.<name>.lfsurl` and
+/// `.lfspushurl`: git-lfs, run by the LFS filter `git lfs install` puts in the person's own global config, reads the
+/// repository's config too (git-lfs-config(5)), and some of its keys name a program (`lfs.customtransfer.<name>.path` and
+/// `.args`, `lfs.standalonetransferagent`, `lfs.extension.<name>.clean` and `.smudge`) or another address (`lfs.url`,
+/// `lfs.pushurl`, `lfs.<url>.access`). The `.lfsconfig` git-lfs also reads from the tree is read by [`lfsconfig_risk`].
 ///
 /// What the app's own runs switch off instead is not listed: hooks (`core.hooksPath`), `core.fsmonitor`, an external diff and
 /// a text conversion (`--no-ext-diff --no-textconv` on every diff), a signature check's `gpg.program`
@@ -328,12 +332,12 @@ fn runs_or_redirects(key: &str, value: &str) -> bool {
         "core" => !sub && matches!(name, "sshcommand" | "gitproxy" | "askpass" | "alternaterefscommand" | "protecthfs" | "protectntfs"),
         // every key of these: each says where a fetch goes, what it trusts or what it sends, or is a program
         "credential" | "url" | "ssh" | "protocol" => true,
-        // another file of settings, read only where its condition holds (item 118)
-        "include" | "includeif" => true,
+        // another file of settings, read only where its condition holds; and every setting git-lfs reads (item 118)
+        "include" | "includeif" | "lfs" => true,
         // and every http key but the few that only pace a transfer (`HTTP_PACING`): a repository often has one of those set
         // for a large push, and it sends a fetch nowhere else and changes nothing it trusts or sends
         "http" => !HTTP_PACING.contains(&name),
-        "remote" => sub && (matches!(name, "uploadpack" | "receivepack" | "vcs" | "proxy" | "proxyauthmethod") || (matches!(name, "url" | "pushurl") && helper(value))),
+        "remote" => sub && (matches!(name, "uploadpack" | "receivepack" | "vcs" | "proxy" | "proxyauthmethod" | "lfsurl" | "lfspushurl") || (matches!(name, "url" | "pushurl") && helper(value))),
         "fetch" | "transfer" => !sub && name == "bundleuri",
         "submodule" => sub && name == "update" && value.trim_start().starts_with('!'),
         _ => false,
@@ -344,8 +348,8 @@ fn runs_or_redirects(key: &str, value: &str) -> bool {
 /// (`scoped`: each entry is its scope, then `key\nvalue`) or of `git config --list --local --includes -z` (every entry the
 /// repository's own). Only the repository's own scopes count (`local`, `worktree`, and the files they include): the person's
 /// global and system settings are theirs, and run in their terminal too. A subsection that is an address (`url.<base>`,
-/// `credential.<url>`, `http.<url>`) or a condition that can hold one (`includeif.hasconfig:remote.*.url:<address>`) is shown
-/// as `*`, since it can hold a token, and the rest passes the one masker.
+/// `credential.<url>`, `http.<url>`, `lfs.<url>`) or a condition that can hold one
+/// (`includeif.hasconfig:remote.*.url:<address>`) is shown as `*`, since it can hold a token, and the rest passes the one masker.
 pub(crate) fn risky_setting(listing: &str, scoped: bool) -> Option<String> {
     risky_by(listing, scoped, runs_or_redirects)
 }
@@ -374,7 +378,7 @@ fn risky_by(listing: &str, scoped: bool, risky: fn(&str, &str) -> bool) -> Optio
         if risky(key, value) {
             let lower = key.to_ascii_lowercase();
             let shown = match lower.split_once('.') {
-                Some((section @ ("url" | "credential" | "http" | "includeif"), rest)) if rest.contains('.') => format!("{section}.*.{}", rest.rsplit('.').next().unwrap_or("")),
+                Some((section @ ("url" | "credential" | "http" | "includeif" | "lfs"), rest)) if rest.contains('.') => format!("{section}.*.{}", rest.rsplit('.').next().unwrap_or("")),
                 _ => key.to_string(),
             };
             return Some(tasks::mask_secrets(&shown));
@@ -405,7 +409,59 @@ pub(crate) fn config_risk_by(run: &Runner, cwd: &Path) -> Option<String> {
     if let Some(s) = listing_risk(run, None, runs_or_redirects) {
         return Some(s);
     }
-    submodule_risk(run, cwd).map(|s| tasks::one_line(tasks::mask_secrets(&s), 200))
+    submodule_risk(run, cwd).or_else(|| lfsconfig_risk(run, cwd)).map(|s| tasks::one_line(tasks::mask_secrets(&s), 200))
+}
+
+/// The largest `.lfsconfig` read: one is a few lines. A bigger file is `.lfsconfig:?`.
+const LFSCONFIG_BYTES: u64 = 64 * 1024;
+
+/// The setting of the repository's own `.lfsconfig` that [`runs_or_redirects`] names, shown `.lfsconfig:<setting>` (item
+/// 118). git never reads that file, but git-lfs does, run by the LFS filter in the person's own global config: from the work
+/// tree, else the index, else HEAD (git-lfs-config(5)). All three are read, since which one git-lfs takes depends on the
+/// moment (a checkout writes the work tree's last). A file in the work tree that is a link, larger than
+/// [`LFSCONFIG_BYTES`] or that git cannot read is `.lfsconfig:?`, as is a work tree git cannot name.
+fn lfsconfig_risk(run: &Runner, cwd: &Path) -> Option<String> {
+    let top = run(&["rev-parse", "--show-toplevel"]).filter(|r| r.code == Some(0)).map(|r| r.out.lines().next().unwrap_or("").trim().to_string());
+    let Some(top) = top.filter(|t| !t.is_empty()) else { return Some(".lfsconfig:?".into()) };
+    let file = from_cwd(cwd, &top).join(".lfsconfig");
+    match fs::symlink_metadata(&file) {
+        Ok(md) if md.file_type().is_symlink() || !md.is_file() || md.len() > LFSCONFIG_BYTES => return Some(".lfsconfig:?".into()),
+        Ok(_) => {
+            let path = file.to_string_lossy();
+            let listed = run(&["config", "--file", &path, "--list", "-z"]).filter(|r| r.code == Some(0));
+            match listed {
+                Some(r) => {
+                    if let Some(s) = risky_by(&r.out, false, runs_or_redirects) {
+                        return Some(format!(".lfsconfig:{s}"));
+                    }
+                }
+                None => return Some(".lfsconfig:?".into()),
+            }
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(_) => return Some(".lfsconfig:?".into()),
+    }
+    lfsconfig_at(run, ":.lfsconfig").or_else(|| lfsconfig_at(run, "HEAD:.lfsconfig"))
+}
+
+/// The setting [`runs_or_redirects`] names in the `.lfsconfig` that `spec` names (`:.lfsconfig` for the index's,
+/// `<commit>:.lfsconfig` for a commit's), shown `.lfsconfig:<setting>`; None when there is no such file or it names nothing.
+/// The automatic pull reads the commit it would move to this way before it writes anything (item 118).
+pub(crate) fn lfsconfig_at(run: &Runner, spec: &str) -> Option<String> {
+    let Some(found) = run(&["rev-parse", "--verify", "--quiet", spec]) else { return Some(".lfsconfig:?".into()) };
+    let id = found.out.trim();
+    if found.code != Some(0) || id.is_empty() {
+        // no such file there
+        return None;
+    }
+    if !id.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Some(".lfsconfig:?".into());
+    }
+    let blob = format!("--blob={id}");
+    match run(&["config", &blob, "--list", "-z"]).filter(|r| r.code == Some(0)) {
+        Some(r) => risky_by(&r.out, false, runs_or_redirects).map(|s| format!(".lfsconfig:{s}")),
+        None => Some(".lfsconfig:?".into()),
+    }
 }
 
 /// What one config listing says (see [`config_risk_by`]): the repository's own, or with `git_dir` another git folder's (a
@@ -588,9 +644,18 @@ impl Git {
             // (`--ignore-submodules=all` on status and diff, `--no-recurse-submodules` on the fetch); these two are the
             // defaults for anything that does not, by `git help config`.
             argv.extend(["-c".into(), "submodule.recurse=false".into(), "-c".into(), "diff.ignoreSubmodules=all".into()]);
+            // No housekeeping (item 118): `git merge` runs `git maintenance run --auto` after the pull's fast-forward (seen with
+            // `GIT_TRACE` on git 2.54), which the repository's own `gc.*` and `maintenance.*` steer (what it prunes, and when).
+            // The app's own work never needs it, and the person's next git in a terminal does it as before.
+            argv.extend(["-c".into(), "maintenance.auto=false".into(), "-c".into(), "gc.auto=0".into()]);
         }
         argv.extend(args.iter().map(|a| (*a).to_string()));
         let mut env: Vec<(&str, &str)> = vec![("GIT_TERMINAL_PROMPT", "0"), ("LC_ALL", "C"), ("GIT_OPTIONAL_LOCKS", "0")];
+        if self.automatic {
+            // the LFS filter in the person's own config downloads nothing for a checkout the app makes by itself: git-lfs then
+            // writes the pointer file as it is (git-lfs-config(5), item 118)
+            env.push(("GIT_LFS_SKIP_SMUDGE", "1"));
+        }
         env.extend_from_slice(extra);
         tasks::run_env_for(&self.exe, &argv, true, &env, &REDIRECTS, limit)
     }
@@ -2248,6 +2313,131 @@ pub(crate) mod tests {
         assert_eq!(sh(wt, &["status", "--porcelain", "--untracked-files=all"]), "");
         assert_eq!(sh(wt, &["rev-parse", "HEAD"]), sh(&d, &["rev-parse", "HEAD"]));
         assert!(!marker.exists());
+        let _ = fs::remove_dir_all(home);
+    }
+
+    /// Item 118 (fourth security review, 26 Nov 2026). git-lfs, run by the LFS filter in a person's own global config, reads the
+    /// repository's `lfs.*` settings too (git-lfs-config(5): "any file supported by `git config -l`"), and some name a program
+    /// (`lfs.customtransfer.<name>.path` and `.args`, `lfs.standalonetransferagent`, `lfs.extension.<name>.clean` and `.smudge`)
+    /// or another address (`lfs.url`, `lfs.pushurl`, `remote.<name>.lfsurl` and `.lfspushurl`). Every `lfs` key stops automatic
+    /// work, a subsection shown as `*` since `lfs.<url>.access` holds an address.
+    #[test]
+    fn every_lfs_setting_of_the_repository_s_own_stops_automatic_work() {
+        let entry = |scope: &str, kv: &str| format!("{scope}\0{kv}\0");
+        for (kv, shown) in [
+            ("lfs.url\nhttps://elsewhere.example/x", "lfs.url"),
+            ("lfs.pushurl\nhttps://elsewhere.example/x", "lfs.pushurl"),
+            ("lfs.customtransfer.x.path\n/tmp/x", "lfs.*.path"),
+            ("lfs.customtransfer.x.args\n-c x", "lfs.*.args"),
+            ("lfs.customtransfer.x.concurrent\nfalse", "lfs.*.concurrent"),
+            ("lfs.standalonetransferagent\nx", "lfs.standalonetransferagent"),
+            ("lfs.extension.x.clean\nx %f", "lfs.*.clean"),
+            ("lfs.extension.x.smudge\nx %f", "lfs.*.smudge"),
+            ("lfs.extension.x.priority\n0", "lfs.*.priority"),
+            ("lfs.https://ghp_abcdefghijklmnopqrstuvwxyz0123456789@lfs.example/.access\nbasic", "lfs.*.access"),
+            ("lfs.storage\n/tmp/x", "lfs.storage"),
+            ("lfs.fetchinclude\n*", "lfs.fetchinclude"),
+            ("lfs.skipdownloaderrors\ntrue", "lfs.skipdownloaderrors"),
+            ("remote.origin.lfsurl\nhttps://elsewhere.example/x", "remote.origin.lfsurl"),
+            ("remote.origin.lfspushurl\nhttps://elsewhere.example/x", "remote.origin.lfspushurl"),
+        ] {
+            assert_eq!(risky_setting(&entry("local", kv), true).as_deref(), Some(shown), "{kv}");
+            assert_eq!(risky_setting(&entry("worktree", kv), true).as_deref(), Some(shown), "{kv}");
+            assert_eq!(risky_setting(&format!("{kv}\0"), false).as_deref(), Some(shown), "{kv}");
+            assert_eq!(risky_setting(&entry("global", kv), true), None, "{kv}");
+        }
+        // the person's own LFS filter, which `git lfs install` writes to their global config, stays theirs
+        assert_eq!(risky_setting(&entry("global", "filter.lfs.smudge\ngit-lfs smudge -- %f"), true), None);
+    }
+
+    /// Item 118: git-lfs also reads `.lfsconfig` from the work tree, else the index, else HEAD (git-lfs-config(5)), so a
+    /// repository's own file can name another address for its downloads. Each of the three is read as the repository's config
+    /// is, named `.lfsconfig:<setting>`; one that cannot be read, or is a link, is `.lfsconfig:?`.
+    #[test]
+    fn an_lfsconfig_in_the_work_tree_the_index_or_head_is_read_as_the_repository_s_own_config() {
+        let Some((home, d)) = repo("lfsconfig") else { return };
+        let git = Git::automatic(&home).unwrap();
+        let lfs = d.join(".lfsconfig");
+        let named = ".lfsconfig:lfs.url";
+        // in the work tree, read from its top folder and from one inside it
+        fs::write(&lfs, "[lfs]\n\turl = https://elsewhere.example/x\n").unwrap();
+        assert_eq!(git.config_risk(&d).as_deref(), Some(named));
+        assert_eq!(git.config_risk(&d.join("apps/web")).as_deref(), Some(named));
+        // staged and gone from the work tree: the index's
+        sh(&d, &["add", ".lfsconfig"]);
+        fs::remove_file(&lfs).unwrap();
+        assert_eq!(git.config_risk(&d).as_deref(), Some(named));
+        // committed, and gone from the index too: HEAD's
+        sh(&d, &["commit", "-q", "-m", "lfs"]);
+        sh(&d, &["rm", "-q", "--cached", ".lfsconfig"]);
+        assert_eq!(git.config_risk(&d).as_deref(), Some(named));
+        sh(&d, &["reset", "-q", "--hard"]);
+        // each key git-lfs takes from the file, one only an older git-lfs read there, an include, and a file git cannot read
+        for (text, named) in [
+            ("[remote \"origin\"]\n\tlfsurl = https://elsewhere.example/x\n", ".lfsconfig:remote.origin.lfsurl"),
+            ("[lfs \"https://elsewhere.example/\"]\n\taccess = basic\n", ".lfsconfig:lfs.*.access"),
+            ("[core]\n\tsshCommand = x\n", ".lfsconfig:core.sshcommand"),
+            ("[include]\n\tpath = more\n", ".lfsconfig:include.path"),
+            ("[lfs\nnot a config\n", ".lfsconfig:?"),
+        ] {
+            fs::write(&lfs, text).unwrap();
+            assert_eq!(git.config_risk(&d).as_deref(), Some(named), "{text}");
+        }
+        // a link is not followed
+        #[cfg(unix)]
+        {
+            fs::remove_file(&lfs).unwrap();
+            fs::write(home.join("elsewhere.cfg"), "[user]\n\tname = x\n").unwrap();
+            std::os::unix::fs::symlink(home.join("elsewhere.cfg"), &lfs).unwrap();
+            assert_eq!(git.config_risk(&d).as_deref(), Some(".lfsconfig:?"));
+            fs::remove_file(&lfs).unwrap();
+        }
+        // gone from all three, and a file with nothing git-lfs reads: nothing stops
+        sh(&d, &["rm", "-q", "--cached", "--ignore-unmatch", ".lfsconfig"]);
+        sh(&d, &["commit", "-q", "-m", "no lfs"]);
+        assert_eq!(git.config_risk(&d), None);
+        fs::write(&lfs, "# nothing here\n").unwrap();
+        assert_eq!(git.config_risk(&d), None);
+        let _ = fs::remove_dir_all(home);
+    }
+
+    /// Item 118: a lane made with nobody there from the remote's latest commit reads the `.lfsconfig` that commit brings from
+    /// inside its new folder, before anything is checked out, though the developer's own commit has none.
+    #[test]
+    fn a_lane_made_with_nobody_there_from_the_remote_reads_the_lfsconfig_its_commit_brings() {
+        let Some((home, d)) = repo("lfs-remote") else { return };
+        let bare = with_origin(&home, &d);
+        let other = home.join("other");
+        sh(&home, &["clone", "-q", bare.to_str().unwrap(), other.to_str().unwrap()]);
+        commit_in(&other, ".lfsconfig", "[lfs]\n\turl = https://elsewhere.example/x\n");
+        sh(&other, &["push", "-q", "origin", "main"]);
+        let start: Start = serde_json::from_value(serde_json::json!({ "remote": true, "unattended": true })).unwrap();
+        assert_eq!(Git::automatic(&home).unwrap().config_risk(&d), None);
+        let got = make_with(&home, &d, &names(&["kit/nightly"]), &start);
+        assert_eq!(got, Err("config:.lfsconfig:lfs.url".to_string()));
+        assert_eq!(sh(&d, &["branch", "--list", "kit/*"]), "");
+        assert!(!home.join(".manut/lanes/web-app/nightly").exists() && !home.join(".manut/lanes/web-app/nightly.json").exists());
+        let _ = fs::remove_dir_all(home);
+    }
+
+    /// Item 118: every git the app starts by itself tells git-lfs to download nothing for a checkout (`GIT_LFS_SKIP_SMUDGE=1`,
+    /// git-lfs-config(5)) and starts no housekeeping, which a repository's `gc.*` and `maintenance.*` steer (`git merge` runs
+    /// `git maintenance run --auto` after a fast-forward, seen with `GIT_TRACE` on git 2.54). A git the person started by a
+    /// press runs as in a terminal.
+    #[test]
+    fn the_app_s_own_git_tells_git_lfs_to_download_nothing_and_starts_no_housekeeping() {
+        let Some((home, d)) = repo("lfs-env") else { return };
+        sh(&d, &["config", "maintenance.auto", "true"]);
+        sh(&d, &["config", "gc.auto", "1"]);
+        // what a program git starts sees: the variable, and the settings every git it starts reads
+        let said = |git: &Git, cmd: &str| git.run(&d, &["-c", &format!("alias.said=!{cmd}"), "said"]).map(|r| r.out.trim().to_string()).unwrap();
+        let auto = Git::automatic(&home).unwrap();
+        assert_eq!(said(&auto, "printenv GIT_LFS_SKIP_SMUDGE"), "1");
+        assert_eq!(said(&auto, "git config --get maintenance.auto"), "false");
+        assert_eq!(said(&auto, "git config --get gc.auto"), "0");
+        let mine = Git::new(&home).unwrap();
+        assert_eq!(said(&mine, "printenv GIT_LFS_SKIP_SMUDGE"), "");
+        assert_eq!(said(&mine, "git config --get maintenance.auto"), "true");
         let _ = fs::remove_dir_all(home);
     }
 

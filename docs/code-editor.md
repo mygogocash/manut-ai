@@ -1082,6 +1082,61 @@ What a person sees: a project whose own config has any include is not pulled by 
 its Diff falls back, and a workflow by the clock is skipped, each with the include named, in the words the other settings
 already use.
 
+**git-lfs, and the other helpers a repository's config can aim** (item 118). The person's own global settings stay theirs,
+but some programs a person commonly has set up globally then read the repository's settings as well. git-lfs is one:
+`git lfs install` puts its filter in the person's global config, and git-lfs reads its settings from every file `git config
+-l` reads, the repository's included, and also from a `.lfsconfig` in the work tree, else the index, else HEAD, from which
+it takes only a short list of keys (git-lfs-config(5), read from git-lfs's own manual; git-lfs is not installed on the Mac
+this was built on, so nothing was run). Some of its keys name a program (`lfs.customtransfer.<name>.path` and `.args`, the
+latter expanded by a shell, `lfs.standalonetransferagent`, `lfs.extension.<name>.clean` and `.smudge`), some another
+address (`lfs.url`, `lfs.pushurl`, `lfs.<url>.access`, `remote.<name>.lfsurl` and `.lfspushurl`). Now:
+
+- Every `lfs.*` key in the repository's own scopes, and `remote.<name>.lfsurl` and `.lfspushurl`, stops automatic work, a
+  subsection shown as `*` (`lfs.<url>.access` holds an address).
+- `.lfsconfig` is read from all three places git-lfs reads it, with the same rule, and named `.lfsconfig:<setting>`: the
+  work tree's file (a link, a file over 64 KB or one git cannot read is `.lfsconfig:?`), the index's and HEAD's
+  (`git config --blob`). Every key in it counts, not only the ones git-lfs takes today, since an older git-lfs took more.
+  The automatic pull also reads the `.lfsconfig` of the commit it would move to before its one write, and a lane made with
+  nobody there reads its own commit's from inside its new folder, so a lane started from the remote's newest commit is read
+  too.
+- Every git the app starts by itself runs with `GIT_LFS_SKIP_SMUDGE=1`, so the person's LFS filter downloads nothing for a
+  checkout the app makes: it writes the pointer file as it is. One consequence a person can see: after an automatic pull that
+  brought a changed LFS file, that file is a pointer until they run `git lfs pull` (git counts the folder as clean, so nothing
+  is lost). A lane the person starts, and anything after a press, downloads as in a terminal.
+
+The rest of the class, read in `git help config` (git 2.54) for a section whose keys a commonly installed helper or git itself
+reads, that a repository's config can aim, and whether any automatic run of the app reaches it:
+
+- `gc.*` and `maintenance.*`: reached. `git merge` runs `git maintenance run --auto` after the pull's fast-forward (seen with
+  `GIT_TRACE`), and the repository's settings steer what it prunes and when (its hook, `pre-auto-gc`, was already off). Every
+  automatic run now passes `-c maintenance.auto=false -c gc.auto=0`, as hooks are switched off, rather than refusing a
+  repository that tunes them: the app's own work never needs housekeeping, and the person's next git in a terminal does it.
+- `gpg.*` (`gpg.program`, `gpg.ssh.program`, `gpg.ssh.defaultKeyCommand`, `gpg.x509.program`): read only to sign or verify. No
+  automatic run makes a commit or a tag, `git log` runs only for a draft the person asked for, and the pull's write passes
+  `--no-verify-signatures`. Not reached.
+- `diff.<driver>.*` and `diff.external`: every automatic diff passes `--no-ext-diff --no-textconv`, `git status` uses no diff
+  driver, and the pull's write passes `--no-stat`. Not reached (a submodule's are refused, see "Submodules").
+- `merge.<driver>.*`: a merge driver runs only for a real merge; the pull is `--ff-only`. Not reached.
+- `mergetool.*`, `difftool.*`, `sendemail.*`, `browser.*`, `web.*`, `man.*`, `instaweb.*`, `interactive.diffFilter`: read only by
+  `git mergetool`, `git difftool`, `git send-email`, `git web--browse`, `git help`, `git instaweb` and `git add -p`, which
+  nothing automatic runs. Not reached.
+- `pager.*` and `core.pager`: a pager starts only when git's output is a terminal; the app's runs read it through a pipe (a
+  pager named by a repository did not start for `git log` through a pipe, checked). Not reached.
+- `core.editor` and `sequence.editor`: an editor starts only for a message or a list to edit; no automatic command needs one
+  (fetch, a fast-forward, a checkout, removing a worktree, deleting a branch, status, diff and reads). Not reached.
+- `alias.*`: the app runs git's own commands by name, and an alias that hides one is ignored (`git help config`). Not reached.
+- `trailer.<token>.command` and `.cmd`: run by `git interpret-trailers` and `git commit --trailer`, which nothing automatic
+  runs. Not reached.
+- `uploadpack.*`: read by the side that sends a fetch, the remote's; `uploadpack.packObjectsHook`, the one that runs a program,
+  is taken only from the person's own (protected) config. The repository's `remote.<name>.uploadpack` is refused as before.
+  Not reached.
+- `receive.*`: read by the side a push goes to; nothing automatic pushes. Not reached.
+- `core.hooksPath` and `core.fsmonitor`: overridden by `-c` on every run, as before.
+- `credential.*`, `http.*`, `url.*`, `ssh.*`, `core.sshCommand` and the rest of item 114's families: refused, as before.
+- Other filters a person sets up: git-crypt and git-annex write their filters into the repository's own config, which is
+  refused (`filter.<driver>.*`). Not confirmed: git-annex's own repository settings (`annex.*`), since git-annex is not
+  installed here either; a git-annex filter in the person's global config would read them, as git-lfs reads `lfs.*`.
+
 **Submodules** (item 90). A git that goes into a submodule reads that submodule's own config (`.git/modules/<name>/config`,
 nested ones too) and attributes, which none of the above reached, so a folder someone sent with a submodule whose config names a
 clean filter ran it within a minute of being opened. Two guards now:
