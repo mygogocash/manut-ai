@@ -54,7 +54,7 @@ describe("a title written by a model (item 96)", () => {
   });
 
   it("offers Write the title again after Rename only when it can", () => {
-    expect(termMenuItems({ cwd: "", linkId: undefined }, undefined, true)).toEqual(["rename", "title", "here", "close"]);
+    expect(termMenuItems({ cwd: "", linkId: undefined }, undefined, true)).toEqual(["rename", "retitle", "here", "close"]);
     expect(termMenuItems({ cwd: "", linkId: undefined })).toEqual(["rename", "here", "close"]);
   });
 });
