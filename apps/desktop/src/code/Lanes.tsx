@@ -278,7 +278,7 @@ function LaneItem({ row, now, onOpen, onPull, backOpen, onBack, below, place, ma
 /** A lane's menu (Pin, Snooze, Done for now, Archive): the one part of a row that keeps state, so the rest of the view stays a
  *  function of its props. It draws the quiet "more" button, and a right-click anywhere on the row opens the menu too. */
 export function LaneMore({ row, mark }: { row: LaneRow; mark: RowMark | undefined }) {
-  const menu = useRowMenu({ rowKey: laneKey(row), kind: "lane", mark, name: row.title });
+  const menu = useRowMenu({ rowKey: laneKey(row), kind: "lane", mark, name: row.title, working: row.status === "working" });
   const here = useRef<HTMLSpanElement>(null);
   const open = menu.open;
   useEffect(() => {
@@ -302,6 +302,7 @@ export function LaneMore({ row, mark }: { row: LaneRow; mark: RowMark | undefine
 /** Words for where a put-away lane is: Snoozed until a time, or Archived. */
 function awayWord(mark: RowMark | undefined, now: number): string {
   if (mark?.archived !== undefined) return t("row.archived");
+  if (mark?.untilDone !== undefined) return t("row.snoozedDone");
   return mark?.snoozed !== undefined ? t("row.snoozed", { when: untilWord(mark.snoozed, now) }) : "";
 }
 
@@ -311,7 +312,7 @@ export function LanesView({ rows, now, onOpen, onPull, onNew, backOpen = null, o
   // pinned on top, in the order pinned, then the rest, then the settled ones, small and quiet. Snoozed and archived lanes are put
   // away: a line under the list counts them and opens them. A lane that asks something is never put away (rows.ts `placeOf`).
   const places = arrange(
-    rows.map((r) => ({ key: laneKey(r), needs: r.status === "needs_you", r })),
+    rows.map((r) => ({ key: laneKey(r), needs: r.status === "needs_you", working: r.status === "working", r })),
     marks,
     now,
   );

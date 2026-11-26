@@ -1,7 +1,7 @@
 // Keeps the row marks (rows.ts) true to what happens in the app, from the one place that sees it all (the sidebar mounts it):
 //  - an ask (an approval or a question) of a snoozed or settled row clears its mark at once, so the row is back where it was and
 //    stays back after the ask is answered; a terminal that rang does the same;
-//  - opening a settled row brings it back;
+//  - opening a settled row brings it back, and a row snoozed until it finishes is back once its turn has ended (item 94);
 //  - a snooze that has run out is dropped when its time comes, so the row returns on time with no other event; and
 //  - the marks of a lane or terminal session the person closed go with it (item 94: only one this run saw open, since the marks
 //    are kept across a restart and the sessions' list comes back after this first draws).
@@ -10,7 +10,7 @@ import { useEffect } from "react";
 import { getSessions, useSessions } from "../sessions/sessions";
 import { selectSidebarBots, selectAsks, useStore } from "../state/store";
 import { rowStatus } from "../threads/ThreadTree";
-import { isSessionKey, markRow, nextWake, sessionRowKey, sweepRows, threadRowKey, useRowMarks, wakeRows } from "./rows";
+import { finishRows, isSessionKey, markRow, nextWake, sessionRowKey, sweepRows, threadRowKey, useRowMarks, wakeRows } from "./rows";
 
 /** The longest a timer may wait (a browser keeps the delay in 31 bits). */
 const LONGEST = 2_147_483_647;
@@ -55,6 +55,19 @@ export function RowsWatcher() {
   useEffect(() => {
     if (needKey) wakeRows(needKey.split("\n"));
   }, [needKey, marks]);
+
+  // the rows listed now whose turn is not running: a snooze until it finishes ends for them (a row not listed yet, as after a restart
+  // before the threads are read, keeps its snooze until it is)
+  const resting = [
+    ...members.flatMap((bot) => (s.threads[bot] ?? []).filter((row) => rowStatus(s, bot, row) !== "running").map((row) => threadRowKey(bot, row.thread))),
+    ...ss.list.filter((r) => {
+      const chat = getSessions().chatKey(r.id);
+      return !(chat && s.chats[chat]?.turn);
+    }).map((r) => sessionRowKey(r)),
+  ].join("\n");
+  useEffect(() => {
+    if (resting) finishRows(resting.split("\n"));
+  }, [resting, marks]);
 
   // the row open in the main column
   const openRec = s.ui.view === "session" && s.ui.session ? ss.list.find((r) => r.id === s.ui.session) : undefined;

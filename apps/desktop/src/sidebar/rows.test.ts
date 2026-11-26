@@ -1,7 +1,7 @@
 // The row marks (item 76): reading a saved record (an older build's, one with a field this build does not know, a broken one), the
 // places a row goes, that an ask always brings a snoozed or settled row back, and what is kept across a restart. Item 94: undo.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { actOnRows, applyRow, applyRows, arrange, changedFrom, getRowMarks, getRowUndo, markRow, nextWake, parseRowMarks, placeOf, resetRowMarks, restoreRows, ROWS_KEY, setRowMarks, snoozeUntil, sweep, threadRowKey, sessionRowKey, undoRows, UNDO_MS, wakeAll, wakeRows, type RowAction, type RowMark, type RowMarks } from "./rows";
+import { actOnRows, applyRow, applyRows, arrange, changedFrom, finishAll, pickedTime, getRowMarks, getRowUndo, markRow, nextWake, parseRowMarks, placeOf, resetRowMarks, restoreRows, ROWS_KEY, setRowMarks, snoozeUntil, sweep, threadRowKey, sessionRowKey, undoRows, UNDO_MS, wakeAll, wakeRows, type RowAction, type RowMark, type RowMarks } from "./rows";
 
 const HOUR = 3_600_000;
 const T = threadRowKey("buddy", "t1");
@@ -233,5 +233,51 @@ describe("undo (item 94)", () => {
     // nothing to put back: the same object
     expect(restoreRows(marks, { [B]: marks[B] })).toBe(marks);
     expect(changedFrom(marks, applyRows(marks, [A, B], { do: "settle" }, 1), [A, B])).toEqual({ [B]: { pinned: 4 } });
+  });
+});
+
+describe("snooze until a picked time, or until it finishes (item 94)", () => {
+  const NOW = new Date(2026, 10, 26, 14, 30).getTime();
+  const K = "thread:buddy:k";
+
+  it("takes a real time ahead from the date and time fields, and nothing else", () => {
+    expect(pickedTime("2026-11-27", "09:30", NOW)).toBe(new Date(2026, 10, 27, 9, 30).getTime());
+    expect(pickedTime("2026-11-26", "15:00", NOW)).toBe(new Date(2026, 10, 26, 15).getTime());
+    // passed, or now
+    expect(pickedTime("2026-11-26", "14:30", NOW)).toBeNull();
+    expect(pickedTime("2026-11-25", "09:00", NOW)).toBeNull();
+    // a date that does not exist, or a malformed field
+    expect(pickedTime("2027-02-31", "09:00", NOW)).toBeNull();
+    for (const [d, tm] of [["", "09:00"], ["2026-11-27", ""], ["27/11/2026", "09:00"], ["2026-11-27", "9:00"], ["2026-11-27", "25:00"]]) expect(pickedTime(d!, tm!, NOW), `${d} ${tm}`).toBeNull();
+  });
+
+  it("is snoozed while its turn runs and back once it ends", () => {
+    const marks = applyRow({}, K, { do: "snoozeTurn" }, NOW);
+    expect(marks).toEqual({ [K]: { untilDone: NOW } });
+    expect(placeOf(marks[K], false, NOW, true)).toBe("snoozed");
+    expect(placeOf(marks[K], false, NOW, false)).toBe("normal");
+    // the watcher clears it for a row whose turn is not running, and leaves every other mark alone
+    const others: RowMarks = { ...marks, a: { snoozed: NOW + HOUR }, b: { settled: true } };
+    expect(finishAll(others, [K, "a", "b"])).toEqual({ a: { snoozed: NOW + HOUR }, b: { settled: true } });
+    expect(finishAll(others, ["a"])).toBe(others);
+  });
+
+  it("is woken at once by an ask, whether snoozed until a picked time or until it finishes", () => {
+    const picked = applyRow({}, K, { do: "snooze", until: pickedTime("2026-11-27", "09:30", NOW)! }, NOW);
+    const turn = applyRow({}, K, { do: "snoozeTurn" }, NOW);
+    for (const m of [picked, turn]) {
+      expect(placeOf(m[K], true, NOW, true)).toBe("normal");
+      expect(wakeAll(m, [K], NOW)).toEqual({});
+    }
+  });
+
+  it("reads and keeps a snooze until it finishes, and undoes it as a snooze", () => {
+    expect(parseRowMarks(JSON.stringify({ [K]: { untilDone: 5 } }))).toEqual({ [K]: { untilDone: 5 } });
+    expect(parseRowMarks(JSON.stringify({ [K]: { untilDone: 5, settled: true } }))).toEqual({ [K]: { untilDone: 5 } });
+    resetRowMarks({ [K]: { pinned: 1 } });
+    actOnRows([K], { do: "snoozeTurn" }, "k", NOW);
+    expect(getRowUndo()?.kind).toBe("snooze");
+    undoRows();
+    expect(getRowMarks()).toEqual({ [K]: { pinned: 1 } });
   });
 });

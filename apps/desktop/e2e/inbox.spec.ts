@@ -74,6 +74,33 @@ for (const theme of ["light", "dark"] as const) {
       await expect(page.getByTestId("row-undo-toast")).toHaveCount(0);
     });
 
+    test("Snooze until a picked time: a time that has passed is refused, a later one puts the row away", async ({ page }) => {
+      await begin(page, theme);
+      const row = recent(page, "Check the books");
+      await row.hover();
+      await row.getByTestId("row-more").click();
+      await page.getByTestId("row-snooze").click();
+      // no turn runs in this chat, so there is no Until it finishes
+      await expect(page.getByTestId("row-snooze-done")).toHaveCount(0);
+      await page.getByTestId("row-snooze-pick").click();
+      await expect(page.getByTestId("row-pick-date")).toBeFocused();
+      await page.getByTestId("row-pick-date").fill("2020-01-01");
+      await page.getByTestId("row-pick-go").click();
+      await expect(page.getByTestId("row-pick-late")).toBeVisible();
+      await shot(page, `snooze-pick-${theme}`);
+      const tomorrow = await page.evaluate(() => {
+        const d = new Date(Date.now() + 86_400_000);
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      });
+      await page.getByTestId("row-pick-date").fill(tomorrow);
+      await page.getByTestId("row-pick-time").fill("09:30");
+      await page.getByTestId("row-pick-go").click();
+      await expect(row).toHaveCount(0);
+      await expect(page.getByTestId("row-undo-toast")).toContainText("Snoozed: Check the books");
+      await page.getByTestId("row-undo").click();
+      await expect(row).toHaveCount(1);
+    });
+
     test("⌘Z in the chat box leaves a row's mark alone", async ({ page }) => {
       await begin(page, theme);
       const row = recent(page, "The 12.12 teaser");

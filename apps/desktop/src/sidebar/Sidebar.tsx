@@ -55,12 +55,14 @@ export interface RecentItem {
   place?: "pinned" | "settled";
   /** The row's key for its menu (rows.ts); a row without one has no menu. */
   rowKey?: string;
+  /** Its turn runs: Snooze also offers "Until it finishes" (item 94). */
+  working?: boolean;
 }
 
 /** One chat of Recent: the row, and the menu of what can be done to it (Pin, Snooze, Done for now, Archive). */
 function RecentRow({ item }: { item: RecentItem }) {
   const marks = useRowMarks();
-  const menu = useRowMenu({ rowKey: item.rowKey ?? "", kind: "chat", mark: item.rowKey ? marks[item.rowKey] : undefined, name: item.title });
+  const menu = useRowMenu({ rowKey: item.rowKey ?? "", kind: "chat", mark: item.rowKey ? marks[item.rowKey] : undefined, name: item.title, working: item.working });
   return (
     <li className={`rec-li${item.place ? ` ${item.place}` : ""}${menu.isOpen ? " menu-open" : ""}`} data-place={item.place} data-flip={item.key} data-row-key={item.rowKey} onContextMenu={item.rowKey ? menu.onContextMenu : undefined}>
       <button type="button" className="rec" title={item.title} onClick={item.open} data-testid="menu-recent">
@@ -207,13 +209,14 @@ export function Sidebar() {
   const members = selectSidebarBots(s).map((b) => b.name);
   const untitled = t("thread.untitled");
   const marks = useRowMarks();
-  const parts = recentParts(s.threads, members, marks, (bot, row) => rowStatus(s, bot, row) === "needs_you", Date.now());
-  const item = (place: RecentItem["place"]) => (r: { bot: string; thread: string; title: string }): RecentItem => ({
+  const parts = recentParts(s.threads, members, marks, (bot, row) => rowStatus(s, bot, row) === "needs_you", Date.now(), 3, { working: (bot, row) => rowStatus(s, bot, row) === "running" });
+  const item = (place: RecentItem["place"]) => (r: { bot: string; thread: string; title: string; working?: boolean }): RecentItem => ({
     key: `${r.bot}:${r.thread}`,
     title: r.title || untitled,
     open: () => void s.openThread(r.bot, r.thread),
     place,
     rowKey: threadRowKey(r.bot, r.thread),
+    working: r.working,
   });
   const recent = [...parts.pinned.map(item("pinned")), ...parts.recent.map(item(undefined)), ...parts.settled.map(item("settled"))];
   // New (and the brand mark) opens Home; every other row opens its own page.

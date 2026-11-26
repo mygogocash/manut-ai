@@ -106,14 +106,14 @@ export function historyDays(s: AppState & Actions, query: string, nowMs: number,
     .filter((e) => matchWords({ title: e.row.title, preview: e.row.preview, who: nameOf(e.bot) }, query, untitled))
     .map((e) => ({ e, status: rowStatus(s, e.bot, e.row) }))
     // an archived chat leaves the list and is found in the Archive under it (historyArchive)
-    .filter((x) => placeOf(marks[threadRowKey(x.e.bot, x.e.row.thread)], x.status === "needs_you", nowMs) !== "archived")
+    .filter((x) => placeOf(marks[threadRowKey(x.e.bot, x.e.row.thread)], x.status === "needs_you", nowMs, x.status === "running") !== "archived")
     .map(({ e, status }) => ({
       ts: e.ts,
       row: {
         key: `${e.bot}:${e.row.thread}`,
         rowKey: threadRowKey(e.bot, e.row.thread),
         mark: marks[threadRowKey(e.bot, e.row.thread)],
-        place: placeOf(marks[threadRowKey(e.bot, e.row.thread)], status === "needs_you", nowMs),
+        place: placeOf(marks[threadRowKey(e.bot, e.row.thread)], status === "needs_you", nowMs, status === "running"),
         bot: e.bot,
         title: e.row.title || untitled,
         who: nameOf(e.bot),
@@ -177,6 +177,7 @@ export function historyArchive(s: AppState & Actions, marks: RowMarks, nowMs: nu
 function markWord(r: HistoryRowView, nowMs: number): { text: string; tip?: string } | null {
   if (r.place === "pinned") return { text: t("row.pinned") };
   if (r.place === "snoozed" && r.mark?.snoozed !== undefined) return { text: t("row.snoozed", { when: untilWord(r.mark.snoozed, nowMs) }), tip: t("row.snoozedTip") };
+  if (r.place === "snoozed" && r.mark?.untilDone !== undefined) return { text: t("row.snoozedDone"), tip: t("row.snooze.doneTip") };
   if (r.place === "settled") return { text: t("row.settled") };
   return null;
 }
@@ -185,7 +186,7 @@ function markWord(r: HistoryRowView, nowMs: number): { text: string; tip?: strin
  *  it is its own element and `HistoryView` stays a function of its props. */
 export function HistoryMore({ row }: { row: HistoryRowView }) {
   const marks = useRowMarks();
-  const menu = useRowMenu({ rowKey: row.rowKey ?? "", kind: "chat", mark: marks[row.rowKey ?? ""], name: row.title });
+  const menu = useRowMenu({ rowKey: row.rowKey ?? "", kind: "chat", mark: marks[row.rowKey ?? ""], name: row.title, working: row.status === "running" });
   return (
     <>
       <MoreButton name={row.title} onOpen={menu.open} className="hist-more" />

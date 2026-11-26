@@ -86,6 +86,8 @@ export interface RecentThread {
   thread: string;
   title: string;
   ts: number;
+  /** Its turn runs now (item 94). */
+  working?: boolean;
 }
 
 /** The `n` threads of the listed members with the newest activity, newest first. */
@@ -112,9 +114,12 @@ export function recentParts(
   needs: (bot: string, row: ThreadRow) => boolean,
   now: number,
   n = 3,
+  /** `working`: the thread's turn runs (a snooze until it finishes waits for that, item 94). */
+  opts: { working?: (bot: string, row: ThreadRow) => boolean } = {},
 ): RecentParts {
-  const all = threadsNewestFirst(threads, members).map((e) => ({ key: threadRowKey(e.bot, e.row.thread), needs: needs(e.bot, e.row), e }));
+  const working = opts.working ?? (() => false);
+  const all = threadsNewestFirst(threads, members).map((e) => ({ key: threadRowKey(e.bot, e.row.thread), needs: needs(e.bot, e.row), working: working(e.bot, e.row), e }));
   const places = arrange(all, marks, now);
-  const of = (x: (typeof all)[number]): RecentThread => ({ bot: x.e.bot, thread: x.e.row.thread, title: x.e.row.title, ts: x.e.ts });
+  const of = (x: (typeof all)[number]): RecentThread => ({ bot: x.e.bot, thread: x.e.row.thread, title: x.e.row.title, ts: x.e.ts, working: x.working });
   return { pinned: places.pinned.map(of), recent: places.normal.slice(0, n).map(of), settled: places.settled.slice(0, n).map(of) };
 }

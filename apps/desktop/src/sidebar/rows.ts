@@ -28,6 +28,8 @@ export const ROWS_KEY = "manut.sidebar.rows";
 export interface RowMark {
   pinned?: number;
   snoozed?: number;
+  /** Snoozed until its turn ends (item 94): the time it was snoozed. It is back when the turn ends, or at once when it asks. */
+  untilDone?: number;
   settled?: true;
   archived?: number;
 }
@@ -60,9 +62,11 @@ export function parseRowMarks(raw: string | null): Record<string, RowMark> {
       const mark: RowMark = {};
       const pinned = num(r.pinned);
       const snoozed = num(r.snoozed);
+      const untilDone = num(r.untilDone);
       const archived = num(r.archived);
       if (pinned !== undefined) mark.pinned = pinned;
       if (snoozed !== undefined) mark.snoozed = snoozed;
+      if (untilDone !== undefined) mark.untilDone = untilDone;
       if (r.settled === true) mark.settled = true;
       if (archived !== undefined) mark.archived = archived;
       if (Object.keys(mark).length) out[key] = one(mark);
@@ -74,38 +78,45 @@ export function parseRowMarks(raw: string | null): Record<string, RowMark> {
   return out;
 }
 
-/** A row is in one place: when a record carries several (a hand-edited one), the strongest wins: archived, then pinned, snoozed, settled. */
+/** A row is in one place: when a record carries several (a hand-edited one), the strongest wins: archived, then pinned, snoozed
+ *  (until a time, then until its turn ends), settled. */
 function one(m: RowMark): RowMark {
   if (m.archived !== undefined) return { archived: m.archived };
   if (m.pinned !== undefined) return { pinned: m.pinned };
   if (m.snoozed !== undefined) return { snoozed: m.snoozed };
+  if (m.untilDone !== undefined) return { untilDone: m.untilDone };
   return m.settled ? { settled: true } : {};
 }
+
+/** Whether a row is snoozed (until a time, or until its turn ends): what an ask wakes. */
+const away = (m: RowMark | undefined): boolean => !!m && (m.snoozed !== undefined || m.untilDone !== undefined || m.settled === true);
 
 export type RowPlace = "pinned" | "normal" | "settled" | "snoozed" | "archived";
 
 /** Where a row goes now. `needs`: an approval or question of it waits on the person. Archived stays archived (the person put it
- *  away; Needs you still lists its ask), but a snoozed or settled row that needs the person is back in its normal place. */
-export function placeOf(mark: RowMark | undefined, needs: boolean, now: number): RowPlace {
+ *  away; Needs you still lists its ask), but a snoozed or settled row that needs the person is back in its normal place. `working`:
+ *  its turn runs, which a snooze until it finishes waits for; a row snoozed so that is not working (any more) is back. */
+export function placeOf(mark: RowMark | undefined, needs: boolean, now: number, working = false): RowPlace {
   if (!mark) return "normal";
   if (mark.archived !== undefined) return "archived";
   if (mark.pinned !== undefined) return "pinned";
   if (needs) return "normal";
   if (mark.snoozed !== undefined && mark.snoozed > now) return "snoozed";
+  if (mark.untilDone !== undefined) return working ? "snoozed" : "normal";
   return mark.settled ? "settled" : "normal";
 }
 
 /** `items` split into the places, each in the order given, except the pinned, which are in the order they were pinned (first
  *  pinned on top). */
-export function arrange<T extends { key: string; needs?: boolean }>(items: readonly T[], marks: RowMarks, now: number): Record<RowPlace, T[]> {
+export function arrange<T extends { key: string; needs?: boolean; working?: boolean }>(items: readonly T[], marks: RowMarks, now: number): Record<RowPlace, T[]> {
   const out: Record<RowPlace, T[]> = { pinned: [], normal: [], settled: [], snoozed: [], archived: [] };
-  for (const it of items) out[placeOf(marks[it.key], !!it.needs, now)].push(it);
+  for (const it of items) out[placeOf(marks[it.key], !!it.needs, now, !!it.working)].push(it);
   out.pinned.sort((a, b) => (marks[a.key]?.pinned ?? 0) - (marks[b.key]?.pinned ?? 0));
   return out;
 }
 
 /** A change to one row. */
-export type RowAction = { do: "pin" } | { do: "unpin" } | { do: "snooze"; until: number } | { do: "settle" } | { do: "wake" } | { do: "open" } | { do: "archive" } | { do: "restore" };
+export type RowAction = { do: "pin" } | { do: "unpin" } | { do: "snooze"; until: number } | { do: "snoozeTurn" } | { do: "settle" } | { do: "wake" } | { do: "open" } | { do: "archive" } | { do: "restore" };
 
 /** `marks` with `action` done to `key` at `now`. The same object back when nothing changes. */
 export function applyRow(marks: RowMarks, key: string, action: RowAction, now: number): RowMarks {
@@ -121,12 +132,15 @@ export function applyRow(marks: RowMarks, key: string, action: RowAction, now: n
     case "snooze":
       next = was?.archived !== undefined ? was : { snoozed: action.until };
       break;
+    case "snoozeTurn":
+      next = was?.archived !== undefined || was?.untilDone !== undefined ? was : { untilDone: now };
+      break;
     case "settle":
       // settling a settled row changes nothing (and so holds nothing to undo)
       next = was?.archived !== undefined || was?.settled ? was : { settled: true };
       break;
     case "wake":
-      next = was && (was.snoozed !== undefined || was.settled) ? null : was ?? null;
+      next = away(was) ? null : was ?? null;
       break;
     case "open":
       // opening a settled row brings it back; a snooze waits for its time or an ask
@@ -179,6 +193,7 @@ export interface RowUndo {
 
 /** The kind of undo an action is, or null for one that is not undone (unpin, bring back, open, restore). */
 export function undoKind(action: RowAction): UndoKind | null {
+  if (action.do === "snoozeTurn") return "snooze";
   return action.do === "pin" || action.do === "snooze" || action.do === "settle" || action.do === "archive" ? action.do : null;
 }
 
@@ -214,6 +229,13 @@ export function sweep(marks: RowMarks, now: number, alive: (key: string) => bool
   return kept.length === Object.keys(marks).length ? marks : Object.fromEntries(kept);
 }
 
+/** `marks` without the snoozes until a turn ends of the rows in `done`: rows listed now whose turn is not running (item 94). */
+export function finishAll(marks: RowMarks, done: readonly string[]): RowMarks {
+  let out = marks;
+  for (const k of done) if (out[k]?.untilDone !== undefined) out = applyRow(out, k, { do: "wake" }, 0);
+  return out;
+}
+
 /** When the next snooze ends after `now` (ms), or null when none is running. */
 export function nextWake(marks: RowMarks, now: number): number | null {
   let at: number | null = null;
@@ -232,6 +254,24 @@ export function snoozeUntil(id: SnoozeId, now: number): number {
   const toMonday = ((8 - d.getDay()) % 7) || 7;
   return new Date(d.getFullYear(), d.getMonth(), d.getDate() + toMonday, 9).getTime();
 }
+
+/** The time a person picked in the snooze menu's date and time fields (`2026-11-27`, `09:30`), on this computer's clock, or null
+ *  when it is not a real time ahead of `now`: a malformed field, a date that does not exist (31 February), a time a clock change
+ *  skips, or a time that has passed. Lifted from T3 Code's `resolveCustomSnooze` (pingdotgg/t3code, MIT License,
+ *  `packages/client-runtime/src/state/threadSettled.ts`). */
+export function pickedTime(date: string, time: string, now: number): number | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{2}:\d{2}$/.test(time)) return null;
+  const at = new Date(`${date}T${time}:00`);
+  // a date that rolled over, or a local time that does not exist, reads back differently
+  if (dayField(at) !== date || timeField(at) !== time) return null;
+  const ms = at.getTime();
+  return Number.isFinite(ms) && ms > now ? ms : null;
+}
+const pad = (n: number, w = 2) => String(n).padStart(w, "0");
+/** A day as a date field holds it (`2026-11-27`), on this computer's clock. */
+export const dayField = (d: Date): string => `${pad(d.getFullYear(), 4)}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+/** A time as a time field holds it (`09:30`). */
+export const timeField = (d: Date): string => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 
 /** A time ahead as the day's time, with the weekday when it is not today ("09:00", "Thu 09:00"). */
 export function untilWord(at: number, now: number): string {
@@ -317,6 +357,8 @@ const subscribeUndo = (fn: () => void) => {
 export const useRowUndo = (): RowUndo | null => useSyncExternalStore(subscribeUndo, getRowUndo, getRowUndo);
 /** Clear the snoozed and settled marks of `keys` (a no-op when none has one). */
 export const wakeRows = (keys: readonly string[], now: number = Date.now()): void => setRowMarks(wakeAll(load(), keys, now));
+/** Bring back the rows of `keys` snoozed until their turn ended, now that it has (a no-op when none is). */
+export const finishRows = (keys: readonly string[]): void => setRowMarks(finishAll(load(), keys));
 /** Drop what `sweep` says. */
 export const sweepRows = (alive: (key: string) => boolean, now: number = Date.now()): void => setRowMarks(sweep(load(), now, alive));
 /** A test starts from none. */
