@@ -551,8 +551,11 @@ and no other agent here has been checked. The setting says so.
 - **The run** (`src-tauri/src/title_run.rs`, commands `title_run` and `title_cancel`): `claude -p` with `--tools ""`, `--strict-mcp-config`
   and no MCP config, `--disable-slash-commands`, `--permission-mode default`, `--no-session-persistence`, `--setting-sources user`, and the
   chosen `--model` and `--effort` (each checked). It starts as a chat does (the allow-list, the child `PATH`, the account's home) in the
-  empty folder `~/.manut/titles`. The text goes in on standard input, masked and cut to 6,000 characters. One run at a time, 45 seconds, four
-  starts a minute, cancel by key. The answer is cleaned and only returned. Its rate-limit event reaches the usage the meter reads.
+  empty folder `~/.manut/titles`. The text goes in on standard input, masked and cut to 6,000 characters, inside a fence one backtick
+  longer than any run of backticks it holds, so nothing in it can close the fence (item 117). One run at a time, 45 seconds, four
+  starts a minute, cancel by key. The answer is cleaned and only returned: since item 117 a title and a description are plain words
+  only, with every image, link target, bare address and HTML tag dropped (`plain`), so a description cannot make GitHub fetch an
+  address that carries a private diff's words when the pull request is shown. Its rate-limit event reaches the usage the meter reads.
 - **A chat's title** (`sessions/titleWords.ts`): after a turn ends done, from the first message and first answer. It becomes
   `SessionRec.modelTitle`, which `pickTitle` ranks below a name the person gave and above the agent's title and the summary. A result that
   arrives after a rename is dropped. Row menu › Write the title again asks for another, and is offered only for a chat the person has not
