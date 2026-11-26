@@ -42,6 +42,7 @@ import {
 import { OpError } from "../mock/host";
 import type { FetchLike } from "./shell";
 import type { Departure, ShopAnswer } from "./shops";
+import { isObj } from "../../lib/guards";
 
 /** The shop's sign-ins: `GET` lists them, `POST` adds one. */
 export const SIGN_INS_PATH = "/v1/vault/sign-ins";
@@ -54,7 +55,6 @@ export const RENAME_PATH = "/v1/vault/outposts/rename";
 export const REMOVE_PATH = "/v1/vault/outposts/remove";
 
 type Obj = Record<string, unknown>;
-const isObj = (v: unknown): v is Obj => !!v && typeof v === "object" && !Array.isArray(v);
 const text = (v: unknown, max: number): v is string => typeof v === "string" && v.length > 0 && v.length <= max;
 /** An ISO time from the API in seconds, as the protocol counts; null for null, undefined for anything else. */
 function seconds(v: unknown): number | null | undefined {

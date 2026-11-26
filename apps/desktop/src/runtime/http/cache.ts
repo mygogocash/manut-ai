@@ -34,6 +34,7 @@ import { decodeApprovals, shownRecord, type ShopApproval } from "./approvals";
 import { importSealKey, open, seal } from "./seal";
 import { sha256Hex } from "./sha256";
 import type { Attention, ShopAction, ShopAttempt, ShopDraft, ShopPart, ShopSchedule, ShopSnapshot, ShopTask, ShopTeam, ShopWork, TeamRoutine } from "./shop";
+import { isObj } from "../../lib/guards";
 
 /** 6 since the file is sealed (seal.ts); what it keeps is 5's. A file of any earlier version, which kept the read in
  *  plain text, is deleted unread, never shown, and the next good read writes this version in its place. 5 came from the
@@ -214,7 +215,6 @@ function approvalOf(a: ShopApproval) {
 }
 
 type Obj = Record<string, unknown>;
-const isObj = (v: unknown): v is Obj => !!v && typeof v === "object" && !Array.isArray(v);
 const isStr = (v: unknown): v is string => typeof v === "string";
 const isId = (v: unknown): v is string => typeof v === "string" && v.length > 0;
 const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);

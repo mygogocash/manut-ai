@@ -6,6 +6,7 @@
 //   for webhook deliveries a workflow ignores; a workflow here skips a time only when the app was closed or the Mac asleep, which
 //   50 covers for weeks of a daily one.
 import { useSyncExternalStore } from "react";
+import { changes } from "../lib/changes";
 
 export interface WorkflowSettings {
   on: boolean;
@@ -40,7 +41,7 @@ export function parseWorkflowSettings(text: string | null): WorkflowSettings {
   return { on: o.on === true, skippedKept: keptOk(o.skippedKept) ? o.skippedKept : WORKFLOW_DEFAULTS.skippedKept };
 }
 
-const listeners = new Set<() => void>();
+const listeners = changes();
 let cache: { text: string | null; value: WorkflowSettings } | null = null;
 
 export function workflowSettings(): WorkflowSettings {
@@ -57,12 +58,11 @@ export function setWorkflowSettings(patch: Partial<WorkflowSettings>): void {
   } catch {
     /* no storage: the choice holds for nothing, and the switch reads off */
   }
-  listeners.forEach((l) => l());
+  listeners.emit();
 }
 
 export function onWorkflowSettings(l: () => void): () => void {
-  listeners.add(l);
-  return () => listeners.delete(l);
+  return listeners.subscribe(l);
 }
 
 export function useWorkflowSettings(): WorkflowSettings {

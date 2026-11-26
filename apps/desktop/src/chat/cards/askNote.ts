@@ -3,11 +3,12 @@
 // forward on that card (store.ts `approveFromNotification`), and the card reads the words from here. By the request's id
 // with its revision, the card's own. A card's own button press clears it: what the person does there is the news then.
 import { useSyncExternalStore } from "react";
+import { changes } from "../../lib/changes";
 
 const notes = new Map<string, string>();
-const subs = new Set<() => void>();
+const subs = changes();
 const emit = () => {
-  for (const fn of [...subs]) fn();
+  subs.emitSnapshot();
 };
 
 /** Remember the words for request `requestId`. */
@@ -26,8 +27,7 @@ export const askNoteOf = (requestId: string): string | null => notes.get(request
 export function useAskNote(requestId: string): string | null {
   return useSyncExternalStore(
     (fn) => {
-      subs.add(fn);
-      return () => subs.delete(fn);
+      return subs.subscribe(fn);
     },
     () => askNoteOf(requestId),
     // the page is never rendered on a server; a test that renders to a string reads the same words

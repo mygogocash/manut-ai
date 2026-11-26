@@ -11,6 +11,7 @@ import { PROVIDER_NAME } from "../sidebar/usageFormat";
 import { t } from "../i18n";
 import { AgentIcon } from "../ui/AgentIcon";
 import { OUTSIDE_TOOLS, outsideHost, outsideUseOn, skippedCount, startedIds, tokenText, watchOutsideUse, type OutsideHost, type OutsideReport, type OutsideTool } from "./outside";
+import { errText } from "../lib/errText";
 
 const REFRESH_MS = 120_000;
 const ROWS_MAX = 200;
@@ -18,7 +19,6 @@ let nextScan = 1;
 
 export type Read = { report: OutsideReport } | { error: string };
 
-const errText = (e: unknown) => (typeof e === "object" && e && "message" in e ? String((e as { message: unknown }).message) : String(e));
 
 export function OutsideUse({
   list,

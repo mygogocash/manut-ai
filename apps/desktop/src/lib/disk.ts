@@ -7,6 +7,7 @@
 import { useSyncExternalStore } from "react";
 import { t } from "../i18n";
 import type { Note } from "./notify";
+import { changes } from "./changes";
 
 export type DiskLevel = "ok" | "low" | "critical";
 
@@ -61,21 +62,20 @@ export interface DiskHost {
 
 const OK: DiskState = { level: "ok", free_bytes: 0, volume: "" };
 let now: DiskState = OK;
-const subs = new Set<() => void>();
+const subs = changes();
 
 function set(s: DiskState | null | undefined): void {
   if (!s || (s.level !== "ok" && s.level !== "low" && s.level !== "critical")) return;
   if (s.level === now.level && s.free_bytes === now.free_bytes && s.volume === now.volume) return;
   now = { level: s.level, free_bytes: Number(s.free_bytes) || 0, volume: String(s.volume ?? "") };
-  for (const f of subs) f();
+  subs.emit();
 }
 
 /** The current reading (the chip). */
 export function useDisk(): DiskState {
   return useSyncExternalStore(
     (f) => {
-      subs.add(f);
-      return () => subs.delete(f);
+      return subs.subscribe(f);
     },
     () => now,
     () => now,

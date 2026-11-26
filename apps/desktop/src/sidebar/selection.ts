@@ -7,6 +7,7 @@
 // there. It lives in memory only: a selection is of the moment. The rules are here, apart from the markup, so they can be tested
 // without a page.
 import { useSyncExternalStore } from "react";
+import { changes } from "../lib/changes";
 
 export interface Selection {
   scope: string;
@@ -59,20 +60,19 @@ export function actsOn(sel: Selection, scope: string, key: string): readonly str
 // ---- the store ----------------------------------------------------------------------------------------------------
 
 let current: Selection = NONE;
-const listeners = new Set<() => void>();
+const listeners = changes();
 
 export const getSelection = (): Selection => current;
 export function setSelection(next: Selection): void {
   const n = next.keys.length ? next : NONE;
   if (n === current) return;
   current = n;
-  for (const l of listeners) l();
+  listeners.emit();
 }
 export const clearSelection = (): void => setSelection(NONE);
 
 const subscribe = (l: () => void) => {
-  listeners.add(l);
-  return () => void listeners.delete(l);
+  return listeners.subscribe(l);
 };
 export const useSelection = (): Selection => useSyncExternalStore(subscribe, getSelection, getSelection);
 

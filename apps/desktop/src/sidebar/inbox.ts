@@ -9,6 +9,7 @@
 //
 // One small record on this computer (`manut.sidebar.inbox`); anything missing or malformed reads as the default.
 import { useSyncExternalStore } from "react";
+import { changes } from "../lib/changes";
 
 export const INBOX_KEY = "manut.sidebar.inbox";
 
@@ -48,7 +49,7 @@ function read(): InboxSettings {
 }
 
 let now = read();
-const listeners = new Set<() => void>();
+const listeners = changes();
 
 export const getInbox = (): InboxSettings => now;
 
@@ -61,17 +62,16 @@ export function setInbox(patch: Partial<InboxSettings>): void {
   } catch {
     /* no storage: it holds for this run */
   }
-  for (const l of listeners) l();
+  listeners.emit();
 }
 
 /** Tests: read the settings again from storage. */
 export function reloadInbox(): void {
   now = read();
-  for (const l of listeners) l();
+  listeners.emit();
 }
 
 const subscribe = (l: () => void) => {
-  listeners.add(l);
-  return () => void listeners.delete(l);
+  return listeners.subscribe(l);
 };
 export const useInbox = (): InboxSettings => useSyncExternalStore(subscribe, getInbox, getInbox);

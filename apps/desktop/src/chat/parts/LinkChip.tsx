@@ -15,13 +15,14 @@ import { findTermLinks } from "../../sessions/termLink";
 import { TermLinkChip } from "./TermLinkChip";
 import "./links.css";
 import { t } from "../../i18n";
+import { changes } from "../../lib/changes";
 
 // ---- channel names the bot already knows (links.places, read once per bot) ---------------------------
 
 const EMPTY: LinkPlaces = { slack: {}, discord: {} };
 const places = new Map<string, LinkPlaces>();
 const asked = new Set<string>();
-const listeners = new Set<() => void>();
+const listeners = changes();
 let version = 0;
 
 function currentBot(): string | null {
@@ -40,15 +41,14 @@ function ask(bot: string) {
     .then((p) => {
       places.set(bot, p ?? EMPTY);
       version += 1;
-      for (const f of listeners) f();
+      listeners.emit();
     });
 }
 
 function usePlaces(needed: boolean): LinkPlaces {
   useSyncExternalStore(
     (f) => {
-      listeners.add(f);
-      return () => listeners.delete(f);
+      return listeners.subscribe(f);
     },
     () => version,
     () => version,

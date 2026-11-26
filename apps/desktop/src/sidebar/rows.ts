@@ -21,6 +21,8 @@
 //    on reading, never an error.
 import { useSyncExternalStore } from "react";
 import { hhmm } from "../app/time";
+import { changes } from "../lib/changes";
+import { pad } from "../lib/pad";
 
 export const ROWS_KEY = "manut.sidebar.rows";
 
@@ -351,7 +353,6 @@ export function pickedTime(date: string, time: string, now: number): number | nu
   const ms = at.getTime();
   return Number.isFinite(ms) && ms > now ? ms : null;
 }
-const pad = (n: number, w = 2) => String(n).padStart(w, "0");
 /** A day as a date field holds it (`2026-11-27`), on this computer's clock. */
 export const dayField = (d: Date): string => `${pad(d.getFullYear(), 4)}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 /** A time as a time field holds it (`09:30`). */
@@ -366,7 +367,7 @@ export function untilWord(at: number, now: number): string {
 // ---- the store ----------------------------------------------------------------------------------------------------
 
 let marks: RowMarks | null = null;
-const listeners = new Set<() => void>();
+const listeners = changes();
 
 function load(): RowMarks {
   if (!marks) {
@@ -391,7 +392,7 @@ export function setRowMarks(next: RowMarks): void {
   } catch {
     /* no storage */
   }
-  for (const fn of listeners) fn();
+  listeners.emit();
 }
 
 /** Do `action` to row `key`. */
@@ -400,9 +401,9 @@ export const markRow = (key: string, action: RowAction, now: number = Date.now()
 let undo: RowUndo | null = null;
 let undoSeq = 0;
 let undoTimer: ReturnType<typeof setTimeout> | null = null;
-const undoListeners = new Set<() => void>();
+const undoListeners = changes();
 const undoChanged = () => {
-  for (const fn of undoListeners) fn();
+  undoListeners.emit();
 };
 function setUndo(next: RowUndo | null): void {
   if (undoTimer !== null) clearTimeout(undoTimer);
@@ -435,8 +436,7 @@ export function undoRows(): boolean {
 /** The action Undo holds, or null once its few seconds are over. */
 export const getRowUndo = (): RowUndo | null => undo;
 const subscribeUndo = (fn: () => void) => {
-  undoListeners.add(fn);
-  return () => void undoListeners.delete(fn);
+  return undoListeners.subscribe(fn);
 };
 export const useRowUndo = (): RowUndo | null => useSyncExternalStore(subscribeUndo, getRowUndo, getRowUndo);
 /** Clear the snoozed and settled marks of `keys` (a no-op when none has one). */
@@ -449,11 +449,10 @@ export const sweepRows = (alive: (key: string) => boolean, now: number = Date.no
 export function resetRowMarks(next: RowMarks = {}): void {
   marks = next;
   setUndo(null);
-  for (const fn of listeners) fn();
+  listeners.emit();
 }
 
 const subscribe = (fn: () => void) => {
-  listeners.add(fn);
-  return () => void listeners.delete(fn);
+  return listeners.subscribe(fn);
 };
 export const useRowMarks = (): RowMarks => useSyncExternalStore(subscribe, getRowMarks, getRowMarks);

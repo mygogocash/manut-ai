@@ -7,6 +7,7 @@
 // setting says so. A title it writes never replaces a name the person gave (sessions/titles.ts), and nothing is written to a
 // pull request until the person has read it and pressed the button of the ask (code/Review.tsx).
 import { useSyncExternalStore } from "react";
+import { changes } from "./changes";
 
 export const TITLE_MODEL_KEY = "manut.titleModel";
 
@@ -50,7 +51,7 @@ function read(): string | null {
   }
 }
 
-const listeners = new Set<() => void>();
+const listeners = changes();
 let cache: { text: string | null; value: TitleModel } | null = null;
 
 export function titleModel(): TitleModel {
@@ -65,14 +66,13 @@ export function setTitleModel(patch: Partial<TitleModel>): void {
   } catch {
     /* no storage: nothing is kept, so it stays off */
   }
-  listeners.forEach((l) => l());
+  listeners.emit();
 }
 
 export function useTitleModel(): TitleModel {
   return useSyncExternalStore(
     (l) => {
-      listeners.add(l);
-      return () => void listeners.delete(l);
+      return listeners.subscribe(l);
     },
     titleModel,
     titleModel,

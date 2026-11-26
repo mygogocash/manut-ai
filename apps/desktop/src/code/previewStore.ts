@@ -22,6 +22,7 @@ import {
   type PreviewProject,
   type PreviewRun,
 } from "./previewRun";
+import { changes } from "../lib/changes";
 
 export interface PreviewRecord {
   /** The lane's own folder it reads and runs in. */
@@ -52,7 +53,7 @@ const realClock: PreviewClock = { now: () => Date.now(), setTimer: (fn, ms) => s
 
 const records = new Map<string, PreviewRecord>();
 const waits = new Map<string, unknown>();
-const listeners = new Set<() => void>();
+const listeners = changes();
 let version = 0;
 let tokens = 0;
 let clock = realClock;
@@ -61,7 +62,7 @@ const host = (): PreviewHost => hostOverride ?? getPreviewHost();
 
 const changed = () => {
   version++;
-  listeners.forEach((l) => l());
+  listeners.emit();
 };
 const patch = (key: string, next: Partial<PreviewRecord>) => {
   records.set(key, { ...(records.get(key) ?? EMPTY), ...next });
@@ -197,8 +198,7 @@ export function chatOfPreview(id: number): string | null {
 }
 
 const subscribe = (l: () => void) => {
-  listeners.add(l);
-  return () => listeners.delete(l);
+  return listeners.subscribe(l);
 };
 
 /** The lane's preview, drawn again as it changes. */

@@ -6,6 +6,7 @@ import { useEffect, useSyncExternalStore } from "react";
 import type { AgentRunSummary } from "../lib/runs";
 import { sortRuns } from "../lib/runs";
 import { getStore, onBridgeEvent } from "../state/store";
+import { changes } from "../lib/changes";
 
 /** How often the runs re-read while one is live (ms). */
 export const LIVE_POLL_MS = 3000;
@@ -20,9 +21,9 @@ export interface BotRuns {
 const EMPTY: BotRuns = { runs: null, error: null };
 const entries = new Map<string, BotRuns>();
 const inflight = new Map<string, Promise<void>>();
-const listeners = new Set<() => void>();
+const listeners = changes();
 
-const emit = () => listeners.forEach((l) => l());
+const emit = () => listeners.emit();
 const set = (bot: string, e: BotRuns) => {
   entries.set(bot, e);
   emit();
@@ -54,8 +55,7 @@ export function refreshRuns(bot: string): Promise<void> {
 export function useBotRuns(bot: string): BotRuns {
   return useSyncExternalStore(
     (fn) => {
-      listeners.add(fn);
-      return () => listeners.delete(fn);
+      return listeners.subscribe(fn);
     },
     () => entries.get(bot) ?? EMPTY,
     // the same reading when the shell is drawn outside a browser (the smoke test renders it to a string)

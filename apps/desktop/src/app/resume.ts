@@ -7,6 +7,7 @@ import type { PanelTabId, Ui } from "../state/store";
 import { continues, isAgentId, type AgentId } from "../sessions/agents";
 import { isLinkId } from "../sessions/termLink";
 import { cleanShellId } from "../sessions/term/settings";
+import { isObj } from "../lib/guards";
 
 export const RESUME_KEY = "manut.resume";
 export const RESUME_VERSION = 1;
@@ -106,7 +107,6 @@ export interface ResumeSnap {
   sessions: SavedSession[];
 }
 
-const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const str = (v: unknown, max = 4096): string | undefined => (typeof v === "string" && v && v.length <= max ? v : undefined);
 const cut = (s: string, max: number) => (s.length > max ? s.slice(0, max) : s);
 const withoutMessages = ({ messages: _, ...s }: SavedSession): SavedSession => s;

@@ -7,6 +7,7 @@ import { useSyncExternalStore } from "react";
 import { kitLevelOf, mayAlwaysAllow, type KitAction, type KitLevel } from "@manut/member-grants";
 import { isTildePath, pathKey } from "../sessions/folders";
 import { insideProject, type Rule } from "./command";
+import { changes } from "../lib/changes";
 
 export const KIT_KEY = "manut.kit.projects";
 
@@ -127,7 +128,7 @@ export function parseProjects(raw: string | null): Projects {
 
 // ---- the store ----------------------------------------------------------------------------------------------------
 
-const listeners = new Set<() => void>();
+const listeners = changes();
 let cache: Projects | null = null;
 
 const storage = (): Storage | undefined => (typeof localStorage === "undefined" ? undefined : localStorage);
@@ -153,12 +154,11 @@ export function updateKitProjects(f: (p: Projects) => Projects): void {
   } catch {
     /* no storage: the change holds for this run */
   }
-  listeners.forEach((l) => l());
+  listeners.emit();
 }
 
 const subscribe = (l: () => void) => {
-  listeners.add(l);
-  return () => listeners.delete(l);
+  return listeners.subscribe(l);
 };
 
 /** Every project's settings, read again when they change. */

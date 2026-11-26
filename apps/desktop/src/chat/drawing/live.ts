@@ -3,10 +3,11 @@
 // lets its place go. Kept in memory only, so nothing about a shown drawing survives a restart.
 import { useSyncExternalStore } from "react";
 import { LIVE_MAX, nextLive } from "./drawingDoc";
+import { changes } from "../../lib/changes";
 
 let live: string[] = [];
-const subs = new Set<() => void>();
-const emit = () => subs.forEach((f) => f());
+const subs = changes();
+const emit = () => subs.emit();
 
 /** `id`'s drawing is shown: it becomes the newest, and the oldest past the limit go still. */
 export function claimLive(id: string): void {
@@ -25,8 +26,7 @@ export function releaseLive(id: string): void {
 export const liveNow = (): readonly string[] => live;
 
 const subscribe = (f: () => void) => {
-  subs.add(f);
-  return () => void subs.delete(f);
+  return subs.subscribe(f);
 };
 
 /** Whether `id`'s drawing has a live frame now. */
