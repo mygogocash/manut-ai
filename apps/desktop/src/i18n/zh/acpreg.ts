@@ -1,0 +1,28 @@
+import type { acpreg as en } from "../en/acpreg";
+
+export const acpreg: Record<keyof typeof en, string> = {
+  "acpreg.title": "来自 ACP 注册表",
+  "acpreg.hint": "Agent Client Protocol 注册表中列出的智能体，读取自 Manut AI 自带的副本。点击“添加…”会在保存之前显示它将运行的确切内容。Manut AI 不安装任何东西，也从不下载这个列表。",
+  "acpreg.search": "搜索注册表",
+  "acpreg.loading": "正在读取注册表…",
+  "acpreg.none": "注册表中没有匹配的智能体。",
+  "acpreg.add": "添加…",
+  "acpreg.addOf": "添加 {name}…",
+  "acpreg.there": "已在提供方中，名为 {name}",
+  "acpreg.yours": "已添加为 {name}",
+  "acpreg.quarantine": "已被注册表自身的检查搁置：{why}",
+  "acpreg.platform": "不适用于这台电脑",
+  "acpreg.env": "需要设置 {names}，Manut AI 不会设置",
+  "acpreg.start": "启动时带有 Manut AI 未检查过的选项",
+  "acpreg.bin": "不知道要运行的命令",
+  "acpreg.interp": "注册表把 shell 或解释器指定为它的程序。",
+  "acpreg.gone": "现在无法添加这个注册表条目。",
+  "acpreg.pinned": "ACP 注册表 {tag}，发布于 {date}",
+  "acpreg.cardFrom": "来自 ACP 注册表（{tag}）：{name} {version}",
+  "acpreg.cardInstall": "请先在终端里自行安装。Manut AI 从不运行这条命令：",
+  "acpreg.cardDownload": "请自行下载并解压，然后把 {program} 放到搜索路径中。Manut AI 从不下载它：",
+  "acpreg.cardSource": "来源：{url}",
+  "acpreg.cardLicense": "许可证：{license}",
+  "acpreg.change": "修改…",
+  "acpreg.cardSum": "SHA-256 {sum}",
+};

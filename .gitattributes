@@ -1,0 +1,3 @@
+# The ACP registry's pinned copy is kept byte for byte: pin.json holds its SHA-256 and a Rust test holds the file to it
+# (item 101c), so no checkout may change its line endings.
+apps/desktop/src-tauri/acp-registry/registry.json -text

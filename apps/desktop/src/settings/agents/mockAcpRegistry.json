@@ -1,0 +1,1031 @@
+{
+  "agents": [
+    {
+      "archive": "",
+      "args": [],
+      "authors": [
+        "ACRE / Agoragentic"
+      ],
+      "description": "Agent marketplace with 174+ AI capabilities. Browse, invoke, and pay for agent services settled in USDC on Base L2.",
+      "id": "agoragentic-acp",
+      "install": "",
+      "label": "",
+      "license": "MIT",
+      "name": "Agoragentic",
+      "note": "Postinstall script",
+      "program": "",
+      "repository": "https://github.com/rhein1/agoragentic-integrations",
+      "sha256": "",
+      "state": "quarantine",
+      "version": "1.3.0",
+      "via": "",
+      "website": "https://agoragentic.com"
+    },
+    {
+      "archive": "https://github.com/tao12345666333/amp-acp/releases/download/v0.13.0/amp-acp-darwin-aarch64.tar.gz",
+      "args": [],
+      "authors": [
+        "tao12345666333"
+      ],
+      "description": "ACP wrapper for Amp - the frontier coding agent",
+      "id": "amp-acp",
+      "install": "",
+      "label": "Amp",
+      "license": "Apache-2.0",
+      "name": "Amp",
+      "note": "",
+      "program": "amp-acp",
+      "repository": "https://github.com/tao12345666333/amp-acp",
+      "sha256": "ca3315e3e54ea85c7e5db09d19a1908cd2ea149c8e83a728cefb814c7a490edf",
+      "state": "offered",
+      "version": "0.13.0",
+      "via": "binary",
+      "website": ""
+    },
+    {
+      "archive": "",
+      "args": [],
+      "authors": [
+        "Google LLC"
+      ],
+      "description": "Google’s AI coding agent",
+      "id": "antigravity-acp",
+      "install": "",
+      "label": "",
+      "license": "proprietary",
+      "name": "Google Antigravity",
+      "note": "Antigravity",
+      "program": "",
+      "repository": "",
+      "sha256": "",
+      "state": "there",
+      "version": "1.5.2",
+      "via": "",
+      "website": "https://antigravity.google/docs/ide/extensions"
+    },
+    {
+      "archive": "",
+      "args": [
+        "--acp"
+      ],
+      "authors": [
+        "Augment Code <support@augmentcode.com>"
+      ],
+      "description": "Augment Code's powerful software agent, backed by industry-leading context engine",
+      "id": "auggie",
+      "install": "npm install -g @augmentcode/auggie@0.37.0",
+      "label": "Auggie CLI",
+      "license": "proprietary",
+      "name": "Auggie CLI",
+      "note": "AUGMENT_DISABLE_AUTO_UPDATE",
+      "program": "auggie",
+      "repository": "https://github.com/augmentcode/auggie",
+      "sha256": "",
+      "state": "env",
+      "version": "0.37.0",
+      "via": "npx",
+      "website": "https://www.augmentcode.com/"
+    },
+    {
+      "archive": "https://github.com/autohandai/code-cli/releases/download/v0.9.12/autohand-macos-arm64.tar.gz",
+      "args": [
+        "--acp"
+      ],
+      "authors": [
+        "Autohand AI"
+      ],
+      "description": "Autohand Code CLI with native ACP support",
+      "id": "autohand",
+      "install": "",
+      "label": "Autohand Code",
+      "license": "Apache-2.0",
+      "name": "Autohand Code",
+      "note": "",
+      "program": "autohand",
+      "repository": "https://github.com/autohandai/code-cli",
+      "sha256": "31c671b6c2537af93e06a49448262a64b6153dab96277af144030f9d6fd79737",
+      "state": "offered",
+      "version": "0.9.12",
+      "via": "binary",
+      "website": "https://github.com/autohandai/code-cli/blob/main/docs/guides/ACP.md"
+    },
+    {
+      "archive": "",
+      "args": [
+        "acp"
+      ],
+      "authors": [
+        "IBM"
+      ],
+      "description": "IBM Bob is your AI-Powered Development Partner",
+      "id": "bob",
+      "install": "npm install -g @ibm/bob@2.1.0",
+      "label": "Bob",
+      "license": "proprietary",
+      "name": "Bob",
+      "note": "",
+      "program": "bob",
+      "repository": "",
+      "sha256": "",
+      "state": "offered",
+      "version": "2.1.0",
+      "via": "npx",
+      "website": "https://bob.ibm.com"
+    },
+    {
+      "archive": "",
+      "args": [],
+      "authors": [
+        "Anthropic",
+        "Zed Industries",
+        "JetBrains"
+      ],
+      "description": "ACP wrapper for Anthropic's Claude",
+      "id": "claude-acp",
+      "install": "",
+      "label": "",
+      "license": "proprietary",
+      "name": "Claude Agent",
+      "note": "Claude Code",
+      "program": "",
+      "repository": "https://github.com/agentclientprotocol/claude-agent-acp",
+      "sha256": "",
+      "state": "there",
+      "version": "0.113.0",
+      "via": "",
+      "website": ""
+    },
+    {
+      "archive": "",
+      "args": [],
+      "authors": [
+        "Cline Bot Inc."
+      ],
+      "description": "Autonomous coding agent CLI - capable of creating/editing files, running commands, using the browser, and more",
+      "id": "cline",
+      "install": "",
+      "label": "",
+      "license": "Apache-2.0",
+      "name": "Cline",
+      "note": "Cline",
+      "program": "",
+      "repository": "https://github.com/cline/cline",
+      "sha256": "",
+      "state": "there",
+      "version": "3.0.76",
+      "via": "",
+      "website": "https://cline.bot/cli"
+    },
+    {
+      "archive": "",
+      "args": [
+        "--acp"
+      ],
+      "authors": [
+        "Tencent Cloud"
+      ],
+      "description": "Tencent Cloud's official intelligent coding tool",
+      "id": "codebuddy-code",
+      "install": "npm install -g @tencent-ai/codebuddy-code@2.187.0",
+      "label": "Codebuddy Code",
+      "license": "Proprietary",
+      "name": "Codebuddy Code",
+      "note": "",
+      "program": "codebuddy-code",
+      "repository": "",
+      "sha256": "",
+      "state": "offered",
+      "version": "2.187.0",
+      "via": "npx",
+      "website": "https://www.codebuddy.cn/cli/"
+    },
+    {
+      "archive": "",
+      "args": [],
+      "authors": [
+        "OpenAI",
+        "JetBrains s.r.o",
+        "Zed Industries"
+      ],
+      "description": "ACP adapter for OpenAI's coding assistant",
+      "id": "codex-acp",
+      "install": "",
+      "label": "",
+      "license": "Apache-2.0",
+      "name": "Codex",
+      "note": "Codex",
+      "program": "",
+      "repository": "https://github.com/agentclientprotocol/codex-acp",
+      "sha256": "",
+      "state": "there",
+      "version": "2.12.1",
+      "via": "",
+      "website": ""
+    },
+    {
+      "archive": "https://sfc-repo.snowflakecomputing.com/cortex-code-cli/a4643c4278/1.0.73%2B180523.e6179a031de9/coco-1.0.73%2B180523.e6179a031de9-darwin-arm64.tar.gz",
+      "args": [
+        "acp",
+        "serve"
+      ],
+      "authors": [
+        "Snowflake"
+      ],
+      "description": "Snowflake's Cortex Code coding agent",
+      "id": "cortex-code",
+      "install": "",
+      "label": "Cortex Code",
+      "license": "proprietary",
+      "name": "Cortex Code",
+      "note": "",
+      "program": "cortex",
+      "repository": "https://docs.snowflake.com/en/user-guide/cortex-code/cortex-code",
+      "sha256": "",
+      "state": "offered",
+      "version": "1.0.73",
+      "via": "binary",
+      "website": ""
+    },
+    {
+      "archive": "https://github.com/Corust-ai/corust-agent-release/releases/download/v0.6.0/agent-darwin-arm64.tar.gz",
+      "args": [],
+      "authors": [
+        "Corust AI <support@corust.ai>"
+      ],
+      "description": "Co-building with a seasoned Rust partner.",
+      "id": "corust-agent",
+      "install": "",
+      "label": "Corust Agent",
+      "license": "GPL-3.0-or-later",
+      "name": "Corust Agent",
+      "note": "",
+      "program": "corust-agent-acp",
+      "repository": "https://github.com/Corust-ai/corust-agent-release",
+      "sha256": "",
+      "state": "offered",
+      "version": "0.6.0",
+      "via": "binary",
+      "website": "https://corust.ai/"
+    },
+    {
+      "archive": "https://github.com/crow-cli/crow-cli/releases/download/v0.1.49/crow-cli-darwin-aarch64.tar.gz",
+      "args": [
+        "acp"
+      ],
+      "authors": [
+        "Thomas Wood"
+      ],
+      "description": "Minimal ACP Native Coding Agent",
+      "id": "crow-cli",
+      "install": "",
+      "label": "crow-cli",
+      "license": "MIT",
+      "name": "crow-cli",
+      "note": "",
+      "program": "crow-cli",
+      "repository": "https://github.com/crow-cli/crow-cli",
+      "sha256": "e57bec141681d0843990ab2d536467a42cf33b4fe10a3374c152b83eb200cccd",
+      "state": "offered",
+      "version": "0.1.49",
+      "via": "binary",
+      "website": "https://crow-ai.dev"
+    },
+    {
+      "archive": "",
+      "args": [],
+      "authors": [
+        "Cursor"
+      ],
+      "description": "Cursor's coding agent",
+      "id": "cursor",
+      "install": "",
+      "label": "",
+      "license": "proprietary",
+      "name": "Cursor",
+      "note": "Cursor",
+      "program": "",
+      "repository": "",
+      "sha256": "",
+      "state": "there",
+      "version": "2026.11.22",
+      "via": "",
+      "website": "https://cursor.com/docs/cli/acp"
+    },
+    {
+      "archive": "",
+      "args": [],
+      "authors": [
+        "LangChain"
+      ],
+      "description": "Batteries-included AI coding and general purpose agent powered by LangChain.",
+      "id": "deepagents",
+      "install": "",
+      "label": "",
+      "license": "MIT",
+      "name": "DeepAgents",
+      "note": "Missing npm dependency",
+      "program": "",
+      "repository": "https://github.com/langchain-ai/deepagentsjs",
+      "sha256": "",
+      "state": "quarantine",
+      "version": "0.1.7",
+      "via": "",
+      "website": "https://docs.langchain.com/oss/javascript/deepagents/overview"
+    },
+    {
+      "archive": "https://static.devin.ai/cli/3000.15.14/devin-3000.15.14-aarch64-apple-darwin.tar.gz",
+      "args": [
+        "acp"
+      ],
+      "authors": [
+        "Cognition"
+      ],
+      "description": "Devin CLI coding agent by Cognition",
+      "id": "devin",
+      "install": "",
+      "label": "Devin",
+      "license": "proprietary",
+      "name": "Devin",
+      "note": "",
+      "program": "devin",
+      "repository": "https://github.com/CognitionAI/devin-cli",
+      "sha256": "",
+      "state": "offered",
+      "version": "3000.15.14",
+      "via": "binary",
+      "website": "https://docs.devin.ai/cli"
+    },
+    {
+      "archive": "",
+      "args": [
+        "acp"
+      ],
+      "authors": [
+        "ArcShips"
+      ],
+      "description": "A coding agent that puts leading models at your command.",
+      "id": "dimcode",
+      "install": "npm install -g dimcode@0.5.35",
+      "label": "DimCode",
+      "license": "proprietary",
+      "name": "DimCode",
+      "note": "",
+      "program": "dimcode",
+      "repository": "",
+      "sha256": "",
+      "state": "offered",
+      "version": "0.5.35",
+      "via": "npx",
+      "website": "https://dimagent.cn/"
+    },
+    {
+      "archive": "",
+      "args": [
+        "--acp"
+      ],
+      "authors": [
+        "Dirac Delta Labs"
+      ],
+      "description": "Reduces API costs by more than 50%, produces better and faster work. Uses Hash anchored parallel edits, AST manipulation and a whole lot of neat optimizations. Fully Open Source.",
+      "id": "dirac",
+      "install": "npm install -g dirac-cli@0.6.2",
+      "label": "Dirac",
+      "license": "Apache-2.0",
+      "name": "Dirac",
+      "note": "",
+      "program": "dirac",
+      "repository": "https://github.com/dirac-run/dirac",
+      "sha256": "",
+      "state": "offered",
+      "version": "0.6.2",
+      "via": "npx",
+      "website": "https://dirac.run"
+    },
+    {
+      "archive": "",
+      "args": [
+        "exec",
+        "--output-format",
+        "acp-daemon"
+      ],
+      "authors": [
+        "Factory AI"
+      ],
+      "description": "Factory Droid - AI coding agent powered by Factory AI",
+      "id": "factory-droid",
+      "install": "npm install -g droid@1.21.1",
+      "label": "Factory Droid",
+      "license": "proprietary",
+      "name": "Factory Droid",
+      "note": "DROID_DISABLE_AUTO_UPDATE, FACTORY_DROID_AUTO_UPDATE_ENABLED",
+      "program": "droid",
+      "repository": "",
+      "sha256": "",
+      "state": "env",
+      "version": "1.21.1",
+      "via": "npx",
+      "website": "https://factory.ai/product/cli"
+    },
+    {
+      "archive": "",
+      "args": [],
+      "authors": [
+        "enquiries@fast-agent.ai"
+      ],
+      "description": "Code and build agents with comprehensive multi-provider support",
+      "id": "fast-agent",
+      "install": "",
+      "label": "",
+      "license": "Apache 2.0",
+      "name": "fast-agent",
+      "note": "fast-agent-acp wheel ships no fast_agent_acp module; launcher conflicts with fast-agent-mcp",
+      "program": "",
+      "repository": "https://github.com/evalstate/fast-agent",
+      "sha256": "",
+      "state": "quarantine",
+      "version": "0.10.66",
+      "via": "",
+      "website": "https://fast-agent.ai"
+    },
+    {
+      "archive": "",
+      "args": [],
+      "authors": [
+        "Google"
+      ],
+      "description": "Google's official CLI for Gemini",
+      "id": "gemini",
+      "install": "",
+      "label": "",
+      "license": "Apache-2.0",
+      "name": "Gemini CLI",
+      "note": "Gemini CLI",
+      "program": "",
+      "repository": "https://github.com/google-gemini/gemini-cli",
+      "sha256": "",
+      "state": "there",
+      "version": "0.71.1",
+      "via": "",
+      "website": "https://geminicli.com"
+    },
+    {
+      "archive": "",
+      "args": [],
+      "authors": [
+        "GitHub"
+      ],
+      "description": "GitHub's AI pair programmer",
+      "id": "github-copilot-cli",
+      "install": "",
+      "label": "",
+      "license": "proprietary",
+      "name": "GitHub Copilot",
+      "note": "Copilot CLI",
+      "program": "",
+      "repository": "https://github.com/github/copilot-cli",
+      "sha256": "",
+      "state": "there",
+      "version": "1.0.116",
+      "via": "",
+      "website": "https://github.com/features/copilot/cli/"
+    },
+    {
+      "archive": "",
+      "args": [],
+      "authors": [
+        "Stefan de Vogelaere"
+      ],
+      "description": "ACP agent powered by Zhipu AI's GLM Coding Plan models (glm-5.1, glm-5-turbo, glm-4.7, glm-4.5-air). Supports streaming, tool calls, mid-session model switching, image input via Z.AI Coding Plan Vision MCP, and session load/fork/resume with on-disk persistence.",
+      "id": "glm-acp-agent",
+      "install": "npm install -g glm-acp-agent@1.17.1",
+      "label": "GLM Agent",
+      "license": "Apache-2.0",
+      "name": "GLM Agent",
+      "note": "",
+      "program": "glm-acp-agent",
+      "repository": "https://github.com/stefandevo/glm-acp-agent",
+      "sha256": "",
+      "state": "offered",
+      "version": "1.17.1",
+      "via": "npx",
+      "website": ""
+    },
+    {
+      "archive": "https://github.com/block/goose/releases/download/v1.61.1/goose-aarch64-apple-darwin.tar.bz2",
+      "args": [
+        "acp"
+      ],
+      "authors": [
+        "Block"
+      ],
+      "description": "A local, extensible, open source AI agent that automates engineering tasks",
+      "id": "goose",
+      "install": "",
+      "label": "goose",
+      "license": "Apache-2.0",
+      "name": "goose",
+      "note": "",
+      "program": "goose",
+      "repository": "https://github.com/block/goose",
+      "sha256": "1da551c55be746369e4af58bc6eb5e9dd67fb5ce682cb8683246e0c7dda1d0dc",
+      "state": "offered",
+      "version": "1.61.1",
+      "via": "binary",
+      "website": "https://block.github.io/goose/"
+    },
+    {
+      "archive": "",
+      "args": [],
+      "authors": [
+        "xAI"
+      ],
+      "description": "xAI's coding agent and CLI",
+      "id": "grok-build",
+      "install": "",
+      "label": "",
+      "license": "proprietary",
+      "name": "Grok Build",
+      "note": "Grok",
+      "program": "",
+      "repository": "",
+      "sha256": "",
+      "state": "there",
+      "version": "1.0.94",
+      "via": "",
+      "website": "https://x.ai/cli"
+    },
+    {
+      "archive": "https://github.com/burin-labs/harn/releases/download/v0.10.202/harn-aarch64-apple-darwin.tar.gz",
+      "args": [
+        "serve",
+        "acp"
+      ],
+      "authors": [
+        "Burin Labs"
+      ],
+      "description": "Harn runs .harn agent pipelines as a native ACP coding agent over stdio.",
+      "id": "harn",
+      "install": "",
+      "label": "Harn",
+      "license": "Apache-2.0",
+      "name": "Harn",
+      "note": "",
+      "program": "harn",
+      "repository": "https://github.com/burin-labs/harn",
+      "sha256": "06730908c8e1778d85c1d1c74bde9f550a8ecc58046aef03ce4306fc39e659bf",
+      "state": "offered",
+      "version": "0.10.202",
+      "via": "binary",
+      "website": "https://harnlang.com"
+    },
+    {
+      "archive": "https://github.com/JetBrains/junie-acp-release/releases/download/4171.4/junie-release-4171.4-macos-aarch64.zip",
+      "args": [
+        "--acp=true"
+      ],
+      "authors": [
+        "JetBrains"
+      ],
+      "description": "AI Coding Agent by JetBrains",
+      "id": "junie",
+      "install": "",
+      "label": "Junie",
+      "license": "proprietary",
+      "name": "Junie",
+      "note": "",
+      "program": "junie",
+      "repository": "https://github.com/JetBrains/junie-acp-release",
+      "sha256": "",
+      "state": "offered",
+      "version": "4171.4.0",
+      "via": "binary",
+      "website": "https://junie.jetbrains.com"
+    },
+    {
+      "archive": "",
+      "args": [
+        "acp"
+      ],
+      "authors": [
+        "Kilo Code"
+      ],
+      "description": "The open source coding agent",
+      "id": "kilo",
+      "install": "npm install -g @kilocode/cli@7.8.32",
+      "label": "Kilo",
+      "license": "MIT",
+      "name": "Kilo",
+      "note": "kilo",
+      "program": "kilo",
+      "repository": "https://github.com/Kilo-Org/kilocode",
+      "sha256": "",
+      "state": "refused",
+      "version": "7.8.32",
+      "via": "npx",
+      "website": "https://kilo.ai/"
+    },
+    {
+      "archive": "https://github.com/getkimchi/kimchi/releases/download/v1.42.2/kimchi_darwin_arm64.tar.gz",
+      "args": [
+        "--mode",
+        "acp"
+      ],
+      "authors": [
+        "Kimchi"
+      ],
+      "description": "Coding agent powered by multi-model orchestration",
+      "id": "kimchi",
+      "install": "",
+      "label": "Kimchi",
+      "license": "Apache-2.0",
+      "name": "Kimchi",
+      "note": "",
+      "program": "kimchi",
+      "repository": "https://github.com/getkimchi/kimchi",
+      "sha256": "21245ae47be50c83cbf6bc3b5a711cf0f0deb9d1982e4580a593f86517691b4c",
+      "state": "offered",
+      "version": "1.42.2",
+      "via": "binary",
+      "website": "https://kimchi.dev"
+    },
+    {
+      "archive": "",
+      "args": [],
+      "authors": [
+        "Moonshot AI"
+      ],
+      "description": "Archived by Moonshot AI. Use Kimi Code instead",
+      "id": "kimi",
+      "install": "",
+      "label": "",
+      "license": "MIT",
+      "name": "Kimi CLI (Legacy)",
+      "note": "Kimi Code",
+      "program": "",
+      "repository": "https://github.com/MoonshotAI/kimi-cli",
+      "sha256": "",
+      "state": "there",
+      "version": "1.52.0",
+      "via": "",
+      "website": "https://moonshotai.github.io/kimi-cli/"
+    },
+    {
+      "archive": "",
+      "args": [],
+      "authors": [
+        "Moonshot AI"
+      ],
+      "description": "Moonshot AI's next-gen coding agent",
+      "id": "kimi-code",
+      "install": "",
+      "label": "",
+      "license": "MIT",
+      "name": "Kimi Code",
+      "note": "Kimi Code",
+      "program": "",
+      "repository": "https://github.com/MoonshotAI/kimi-code",
+      "sha256": "",
+      "state": "there",
+      "version": "2.8.1",
+      "via": "",
+      "website": "https://moonshotai.github.io/kimi-code/"
+    },
+    {
+      "archive": "https://prod.download.cli.kiro.dev/stable/3.6.2/kirocli-universal-darwin.tar.gz",
+      "args": [
+        "acp"
+      ],
+      "authors": [
+        "Amazon"
+      ],
+      "description": "The Kiro coding agent",
+      "id": "kiro",
+      "install": "",
+      "label": "Kiro CLI",
+      "license": "proprietary",
+      "name": "Kiro CLI",
+      "note": "",
+      "program": "kiro-cli",
+      "repository": "https://github.com/kirodotdev/Kiro",
+      "sha256": "d752571286636c5f69a6115d39c92e3ffb83ce91a6f6061ef19e12f280b50c21",
+      "state": "offered",
+      "version": "3.6.2",
+      "via": "binary",
+      "website": "https://kiro.dev/docs/cli/acp/"
+    },
+    {
+      "archive": "",
+      "args": [
+        "acp"
+      ],
+      "authors": [
+        "MiniMax"
+      ],
+      "description": "MiniMax Code is an AI coding agent with Agent Client Protocol support.",
+      "id": "minimax-code",
+      "install": "npm install -g @minimax-ai/code-acp@0.7.10",
+      "label": "MiniMax Code",
+      "license": "MIT",
+      "name": "MiniMax Code",
+      "note": "",
+      "program": "code-acp",
+      "repository": "",
+      "sha256": "",
+      "state": "offered",
+      "version": "0.7.10",
+      "via": "npx",
+      "website": "https://agent.minimax.io"
+    },
+    {
+      "archive": "",
+      "args": [],
+      "authors": [
+        "femto"
+      ],
+      "description": "An enhanced AI code assistant built on the Minion framework with rich development tools",
+      "id": "minion-code",
+      "install": "",
+      "label": "",
+      "license": "AGPL-3.0",
+      "name": "Minion Code",
+      "note": "Python dependency issue",
+      "program": "",
+      "repository": "https://github.com/femto/minion-code",
+      "sha256": "",
+      "state": "quarantine",
+      "version": "0.1.44",
+      "via": "",
+      "website": ""
+    },
+    {
+      "archive": "https://github.com/mistralai/mistral-vibe/releases/download/v3.1.4/vibe-acp-darwin-aarch64-3.1.4.tar.gz",
+      "args": [],
+      "authors": [
+        "Mistral AI"
+      ],
+      "description": "Mistral's open-source coding assistant",
+      "id": "mistral-vibe",
+      "install": "",
+      "label": "Mistral Vibe",
+      "license": "Apache-2.0",
+      "name": "Mistral Vibe",
+      "note": "",
+      "program": "vibe-acp",
+      "repository": "https://github.com/mistralai/mistral-vibe",
+      "sha256": "4492735d66b615cb321e19e762199df957744ff9f8e7cccaf39fbebd55cad8a0",
+      "state": "offered",
+      "version": "3.1.4",
+      "via": "binary",
+      "website": "https://mistral.ai/products/vibe"
+    },
+    {
+      "archive": "https://lookaside.facebook.com/lookaside/muse/download/?channel=muse&version=1.4.24-R9131.1&file=muse-aarch64-macos",
+      "args": [
+        "acp"
+      ],
+      "authors": [
+        "Meta"
+      ],
+      "description": "Meta's coding agent, built for Muse Spark",
+      "id": "muse-code",
+      "install": "",
+      "label": "Muse Code",
+      "license": "proprietary",
+      "name": "Muse Code",
+      "note": "MUSE_EXPERIMENTAL_ACP",
+      "program": "muse",
+      "repository": "",
+      "sha256": "51224e835fccf2ba8c1abe9c2957b187252050a0b7315e0b1ee4cdcd2f090494",
+      "state": "env",
+      "version": "1.4.24",
+      "via": "binary",
+      "website": "https://dev.meta.ai/docs/muse-code"
+    },
+    {
+      "archive": "",
+      "args": [
+        "acp"
+      ],
+      "authors": [
+        "Compass AI"
+      ],
+      "description": "Nova by Compass AI - a fully-fledged software engineer at your command",
+      "id": "nova",
+      "install": "npm install -g @compass-ai/nova@1.1.69",
+      "label": "Nova",
+      "license": "proprietary",
+      "name": "Nova",
+      "note": "",
+      "program": "nova",
+      "repository": "https://github.com/Compass-Agentic-Platform/nova",
+      "sha256": "",
+      "state": "offered",
+      "version": "1.1.69",
+      "via": "npx",
+      "website": "https://www.compassap.ai/portfolio/nova.html"
+    },
+    {
+      "archive": "",
+      "args": [],
+      "authors": [
+        "Anomaly"
+      ],
+      "description": "The open source coding agent",
+      "id": "opencode",
+      "install": "",
+      "label": "",
+      "license": "MIT",
+      "name": "OpenCode",
+      "note": "OpenCode",
+      "program": "",
+      "repository": "https://github.com/anomalyco/opencode",
+      "sha256": "",
+      "state": "there",
+      "version": "2.4.2",
+      "via": "",
+      "website": "https://opencode.ai"
+    },
+    {
+      "archive": "",
+      "args": [],
+      "authors": [
+        "Anomaly"
+      ],
+      "description": "Compatibility entry for existing opencode-v2 installations. Select OpenCode (opencode) for new installations.",
+      "id": "opencode-v2",
+      "install": "",
+      "label": "",
+      "license": "MIT",
+      "name": "OpenCode (legacy ID)",
+      "note": "OpenCode",
+      "program": "",
+      "repository": "https://github.com/anomalyco/opencode",
+      "sha256": "",
+      "state": "there",
+      "version": "2.4.2",
+      "via": "",
+      "website": "https://opencode.ai"
+    },
+    {
+      "archive": "",
+      "args": [],
+      "authors": [
+        "Sergii Kozak <svkozak@gmail.com>"
+      ],
+      "description": "ACP adapter for pi coding agent",
+      "id": "pi-acp",
+      "install": "",
+      "label": "",
+      "license": "MIT",
+      "name": "pi ACP",
+      "note": "pi",
+      "program": "",
+      "repository": "https://github.com/svkozak/pi-acp",
+      "sha256": "",
+      "state": "there",
+      "version": "0.0.35",
+      "via": "",
+      "website": ""
+    },
+    {
+      "archive": "https://downloads.poolside.ai/pool/v1.0.16/pool-darwin-arm64.tar.gz",
+      "args": [
+        "acp"
+      ],
+      "authors": [
+        "Poolside <feedback@poolside.ai>"
+      ],
+      "description": "Poolside's coding agent",
+      "id": "poolside",
+      "install": "",
+      "label": "Poolside",
+      "license": "proprietary",
+      "name": "Poolside",
+      "note": "",
+      "program": "pool-darwin-arm64",
+      "repository": "https://github.com/poolsideai/pool",
+      "sha256": "0932af3eb2b57a863acacb664ec8b2b1d3a76c2570a788b086001608cc585f74",
+      "state": "offered",
+      "version": "1.0.16",
+      "via": "binary",
+      "website": "https://poolside.ai"
+    },
+    {
+      "archive": "",
+      "args": [
+        "--acp"
+      ],
+      "authors": [
+        "Qoder AI"
+      ],
+      "description": "AI coding assistant with agentic capabilities",
+      "id": "qoder",
+      "install": "npm install -g @qoder-ai/qodercli@1.1.99",
+      "label": "Qoder CLI",
+      "license": "proprietary",
+      "name": "Qoder CLI",
+      "note": "",
+      "program": "qodercli",
+      "repository": "",
+      "sha256": "",
+      "state": "offered",
+      "version": "1.1.99",
+      "via": "npx",
+      "website": "https://qoder.com"
+    },
+    {
+      "archive": "",
+      "args": [],
+      "authors": [
+        "Alibaba Qwen Team"
+      ],
+      "description": "Alibaba's Qwen coding assistant",
+      "id": "qwen-code",
+      "install": "",
+      "label": "",
+      "license": "Apache-2.0",
+      "name": "Qwen Code",
+      "note": "Qwen Code",
+      "program": "",
+      "repository": "https://github.com/QwenLM/qwen-code",
+      "sha256": "",
+      "state": "there",
+      "version": "0.28.6",
+      "via": "",
+      "website": "https://qwenlm.github.io/qwen-code-docs/en/users/overview"
+    },
+    {
+      "archive": "",
+      "args": [],
+      "authors": [
+        "smbCloud"
+      ],
+      "description": "Local-first coding agent. Runs entirely on your machine with optional on-device LLM inference via Onde.",
+      "id": "sigit",
+      "install": "npm install -g @smbcloud/sigit@1.7.10",
+      "label": "siGit Code",
+      "license": "Apache-2.0",
+      "name": "siGit Code",
+      "note": "",
+      "program": "sigit",
+      "repository": "https://github.com/getsigit/sigit",
+      "sha256": "",
+      "state": "offered",
+      "version": "1.7.10",
+      "via": "npx",
+      "website": "https://github.com/getsigit/sigit"
+    },
+    {
+      "archive": "https://github.com/stakpak/agent/releases/download/v0.3.88/stakpak-darwin-aarch64.tar.gz",
+      "args": [
+        "acp"
+      ],
+      "authors": [
+        "Stakpak Team <contact@stakpak.dev>"
+      ],
+      "description": "Open-source DevOps agent in Rust with enterprise-grade security",
+      "id": "stakpak",
+      "install": "",
+      "label": "Stakpak",
+      "license": "Apache-2.0",
+      "name": "Stakpak",
+      "note": "",
+      "program": "stakpak",
+      "repository": "https://github.com/stakpak/agent",
+      "sha256": "",
+      "state": "offered",
+      "version": "0.3.88",
+      "via": "binary",
+      "website": "https://stakpak.dev"
+    },
+    {
+      "archive": "",
+      "args": [],
+      "authors": [
+        "vinhnx"
+      ],
+      "description": "An open-source coding agent with LLM-native code understanding and robust shell safety. Supports multiple LLM providers with automatic failover and efficient context management.",
+      "id": "vtcode",
+      "install": "",
+      "label": "",
+      "license": "MIT",
+      "name": "VT Code",
+      "note": "Missing windows builds",
+      "program": "",
+      "repository": "https://github.com/vinhnx/VTCode",
+      "sha256": "",
+      "state": "quarantine",
+      "version": "0.96.14",
+      "via": "",
+      "website": "https://github.com/vinhnx/VTCode/blob/main/docs/guides/zed-acp.md"
+    }
+  ],
+  "pin": {
+    "commit": "36672565f76e7fb9796eb15182e0e14fb9e77c33",
+    "published": "2026-11-26T15:22:17Z",
+    "sha256": "9f081a5d1490e239a9091526341ca7ccddd9f43625d21887697655bc62c922d8",
+    "source": "https://github.com/agentclientprotocol/registry/releases/download/v2026.11.26-3667256/registry.json",
+    "tag": "v2026.11.26-3667256"
+  },
+  "skipped": 0
+}

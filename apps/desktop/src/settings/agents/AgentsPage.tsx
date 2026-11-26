@@ -3,13 +3,18 @@
 // saved from the form: Save opens a confirm card that shows the exact command manut will run (the shell resolves it
 // now), Cancel first and Add second, and only Add asks the shell to write the entry (src-tauri/src/custom_agents.rs).
 // Removing asks once, then each open session of that agent ends. "Ask the bot" only puts a request in the current bot's
-// composer; the bot's reply can hold a draft whose chip opens this same card (AgentConfirmCard).
+// composer; the bot's reply can hold a draft whose chip opens this same card (AgentConfirmCard). Under them, the ACP
+// registry's agents (item 101c, RegistryList): Add… asks the shell for this same card, pre-filled from the registry's
+// pinned copy and drafted as a bot's draft is, with where the agent comes from and how the person installs it; Change…
+// opens the form with the same values, and Add is the same one call that writes.
 import { useEffect, useState } from "react";
 import "./agents.css";
 import { AgentMark } from "../../sessions/AgentMark";
 import { getHost } from "../../sessions/host";
 import { getSessions, useSessions } from "../../sessions/sessions";
 import { agentsPageModel, cardCommand, EMPTY_FORM, whyText, type CustomForm, type CustomList, type CustomPreview } from "../../sessions/custom";
+import { registryError, type RegistryList as Registry, type RegistryOffer, type RegistrySource } from "./acpRegistry";
+import { RegistryList } from "./RegistryList";
 import { t, tx, type Key } from "../../i18n";
 import { holdImeEnter } from "../../lib/ime";
 import { getStore } from "../../state/store";
@@ -23,12 +28,23 @@ export function YourAgents({ onChanged }: { onChanged?: () => void }) {
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
   const [removing, setRemoving] = useState<{ id: string; label: string } | null>(null);
+  const [registry, setRegistry] = useState<Registry | null>(null);
+  const [query, setQuery] = useState("");
 
   const reload = async () => {
     try {
       setCustom(await getHost().customList());
     } catch (e) {
       setErr(whyText(e));
+    }
+    // the registry's rows say which agents are already the person's own, so they are read again with the file
+    const host = getHost();
+    if (host.acpRegistry) {
+      try {
+        setRegistry(await host.acpRegistry());
+      } catch (e) {
+        setErr(registryError(e));
+      }
     }
   };
   useEffect(() => {
@@ -50,6 +66,26 @@ export function YourAgents({ onChanged }: { onChanged?: () => void }) {
     } finally {
       setBusy(false);
     }
+  };
+  /** A registry entry's Add…: the shell drafts the same card from the pinned copy; nothing is written. */
+  const fromRegistry = async (o: RegistryOffer) => {
+    const host = getHost();
+    if (!host.acpRegistryPreview) return;
+    setBusy(true);
+    setErr("");
+    try {
+      setCard(await host.acpRegistryPreview(o.id));
+    } catch (e) {
+      setErr(registryError(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  /** The card's Change…: the Add agent form with the registry's values, for the person to change before Save. */
+  const change = (c: CustomPreview) => {
+    setForm({ label: c.entry.label, program: c.entry.program, args: c.entry.args.join(" "), install: c.entry.install });
+    setCard(null);
+    setErr("");
   };
   /** The card's Add: the one call that writes. */
   const add = async () => {
@@ -210,15 +246,32 @@ export function YourAgents({ onChanged }: { onChanged?: () => void }) {
         </p>
       )}
 
-      {card && <AgentConfirmCard card={card} busy={busy} onCancel={() => setCard(null)} onAdd={() => void add()} />}
+      {getHost().acpRegistry && <RegistryList list={registry} query={query} onQuery={setQuery} busy={busy} onAdd={(o) => void fromRegistry(o)} />}
+
+      {card && <AgentConfirmCard card={card} busy={busy} onCancel={() => setCard(null)} onAdd={() => void add()} onChange={card.registry ? () => change(card) : undefined} />}
     </div>
   );
 }
 
 /** The confirm card: the exact command manut will run, Cancel first and Add second. The same card opens from the Add
- *  agent form and from a bot's draft in the chat (chat/parts/AgentChip.tsx); a draft's card names the bot that
- *  proposed it. The card writes nothing itself: its Add is the caller's one call to `customConfirm`. */
-export function AgentConfirmCard({ card, busy, onCancel, onAdd }: { card: CustomPreview; busy: boolean; onCancel: () => void; onAdd: () => void }) {
+ *  agent form, from a bot's draft in the chat (chat/parts/AgentChip.tsx) and from the ACP registry; a draft's card names
+ *  the bot that proposed it, a registry entry's says where it comes from and how the person installs it (Manut AI never
+ *  runs or downloads it), with Change… to the form. The card writes nothing itself: its Add is the caller's one call to
+ *  `customConfirm`. */
+export function AgentConfirmCard({
+  card,
+  busy,
+  onCancel,
+  onAdd,
+  onChange,
+}: {
+  card: CustomPreview;
+  busy: boolean;
+  onCancel: () => void;
+  onAdd: () => void;
+  /** a registry entry's card: open the form with its values */
+  onChange?: () => void;
+}) {
   return (
     <div className="ag-scrim" onClick={onCancel}>
       <div
@@ -245,17 +298,51 @@ export function AgentConfirmCard({ card, busy, onCancel, onAdd }: { card: Custom
             {t("ag.notFound", { program: card.entry.program })}
           </p>
         )}
+        {card.registry && <RegistryFrom src={card.registry} program={card.entry.program} />}
         <p className="ag-quiet">{t("ag.cardFolder")}</p>
         <p className="ag-quiet">{t("ag.cardApprovals")}</p>
         <div className="ag-acts">
           <button type="button" className="st-btn" autoFocus onClick={onCancel} data-testid="agent-confirm-cancel">
             {t("ag.cancel")}
           </button>
+          {onChange && (
+            <button type="button" className="st-btn" onClick={onChange} data-testid="agent-confirm-change">
+              {t("acpreg.change")}
+            </button>
+          )}
           <button type="button" className="st-btn ag-primary" disabled={busy} onClick={onAdd} data-testid="agent-confirm-add">
             {t("ag.addBtn")}
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** Where a registry entry comes from and how the person installs it: an install line or an archive to download, each
+ *  shown to copy and never run or fetched by the app, then its source and licence as the registry gives them. */
+function RegistryFrom({ src, program }: { src: RegistrySource; program: string }) {
+  return (
+    <div className="ag-reg" data-testid="agent-confirm-registry">
+      <p className="ag-quiet">{t("acpreg.cardFrom", { tag: src.tag, name: src.name, version: src.version })}</p>
+      {src.install ? (
+        <>
+          <p>{t("acpreg.cardInstall")}</p>
+          <code className="ag-card-cmd" data-testid="agent-confirm-install">
+            {src.install}
+          </code>
+        </>
+      ) : src.archive ? (
+        <>
+          <p>{t("acpreg.cardDownload", { program })}</p>
+          <code className="ag-card-cmd" data-testid="agent-confirm-archive">
+            {src.archive}
+          </code>
+          {src.sha256 && <code className="ag-card-cmd ag-reg-sum">{t("acpreg.cardSum", { sum: src.sha256 })}</code>}
+        </>
+      ) : null}
+      {(src.repository || src.website) && <p className="ag-quiet">{t("acpreg.cardSource", { url: src.repository || src.website })}</p>}
+      {src.license && <p className="ag-quiet">{t("acpreg.cardLicense", { license: src.license })}</p>}
     </div>
   );
 }

@@ -1,0 +1,40 @@
+{
+  "source": "https://github.com/agentclientprotocol/registry/releases/download/v2026.11.26-3667256/registry.json",
+  "tag": "v2026.11.26-3667256",
+  "commit": "36672565f76e7fb9796eb15182e0e14fb9e77c33",
+  "published": "2026-11-26T15:22:17Z",
+  "sha256": "9f081a5d1490e239a9091526341ca7ccddd9f43625d21887697655bc62c922d8",
+  "license": "Apache-2.0",
+  "quarantine": {
+    "agoragentic-acp": "Postinstall script",
+    "deepagents": "Missing npm dependency",
+    "fast-agent": "fast-agent-acp wheel ships no fast_agent_acp module; launcher conflicts with fast-agent-mcp",
+    "minion-code": "Python dependency issue",
+    "vtcode": "Missing windows builds"
+  },
+  "bins": {
+    "agoragentic-mcp@1.3.0": "agoragentic-mcp",
+    "@augmentcode/auggie@0.37.0": "auggie",
+    "@ibm/bob@2.1.0": "bob",
+    "@agentclientprotocol/claude-agent-acp@0.113.0": "claude-agent-acp",
+    "cline@3.0.76": "cline",
+    "@tencent-ai/codebuddy-code@2.187.0": "codebuddy-code",
+    "@agentclientprotocol/codex-acp@2.12.1": "codex-acp",
+    "deepagents-acp@0.1.7": "deepagents-acp",
+    "dimcode@0.5.35": "dimcode",
+    "dirac-cli@0.6.2": "dirac",
+    "droid@1.21.1": "droid",
+    "@google/gemini-cli@0.71.1": "gemini",
+    "@github/copilot@1.0.116": "copilot",
+    "glm-acp-agent@1.17.1": "glm-acp-agent",
+    "@xai-official/grok@1.0.94": "grok",
+    "@kilocode/cli@7.8.32": "kilo",
+    "@moonshot-ai/kimi-code@2.8.1": "kimi",
+    "@minimax-ai/code-acp@0.7.10": "code-acp",
+    "@compass-ai/nova@1.1.69": "nova",
+    "pi-acp@0.0.35": "pi-acp",
+    "@qoder-ai/qodercli@1.1.99": "qodercli",
+    "@qwen-code/qwen-code@0.28.6": "qwen",
+    "@smbcloud/sigit@1.7.10": "sigit"
+  }
+}
