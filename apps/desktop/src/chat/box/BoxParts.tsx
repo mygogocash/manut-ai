@@ -6,11 +6,10 @@ import "../parts/attach.css";
 import "./box.css";
 import { t } from "../../i18n";
 import { folderLabel, type Member } from "./context";
+import { Icon } from "../../ui/icons";
 
 const FolderMark = () => (
-  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" aria-hidden="true">
-    <path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4.4l2 2h8.6A1.5 1.5 0 0 1 21 9.5v8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z" />
-  </svg>
+  <Icon name="folder" />
 );
 
 /** The folders named for the next message: the folder's own name, its whole path as the tooltip, and × to leave it out. */

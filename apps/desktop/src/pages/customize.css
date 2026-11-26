@@ -196,6 +196,18 @@
   padding: 16px;
   border-left: 1px solid var(--line);
 }
+/* A narrow window, as the canvas's Layout board says (BrandLayout, "Under 920"): the facts and the routines wrap when the
+   main column is under 440 + 340, which with the 196px menu is a window under 976. The facts keep their own height, the
+   routines follow with their edge moved to the top, and nothing is stretched to fill a strip (item 85i, finding 20). */
+@media (max-width: 975px) {
+  .brain {
+    align-content: flex-start;
+  }
+  .brain:not(.conn) .side2 {
+    border-left: 0;
+    border-top: 1px solid var(--line);
+  }
+}
 /* The desktop's own: the header is as tall as the button it holds, so the heading does not drop when the button appears once the
    routines have been read. */
 .brain .rhead {

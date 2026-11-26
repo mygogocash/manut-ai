@@ -89,7 +89,7 @@ describe("the + menu's Chat with Kit", () => {
 describe("the + that opens it", () => {
   it("is named New session, since the menu starts a chat with Kit as well as a terminal", () => {
     const out = renderToString(createElement(SessionsHeader));
-    expect(out).toContain('aria-label="New session"');
+    expect(out).toContain('aria-label="New chat or terminal"');
     expect(out).not.toContain("New terminal");
   });
 });

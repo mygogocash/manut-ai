@@ -253,10 +253,10 @@ for (const theme of ["dark", "light"] as const) {
     await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
     const none = page.getByTestId("session-none");
     const start = none.getByTestId("session-start");
-    await expect(start).toHaveText("New session");
+    await expect(start).toHaveText("New chat or terminal");
     await expect(start.locator("svg")).toHaveCount(1); // the + icon
     // one row and nothing else: no hint line, no agent strip; the installed coding agents (not omh) in its tooltip
-    await expect(none).toHaveText("New session");
+    await expect(none).toHaveText("New chat or terminal");
     await expect(page.getByTestId("session-start-agents")).toHaveCount(0);
     await expect(start).toHaveAttribute("title", "Run a coding agent in a folder, as a chat. Claude Code, Codex, pi, oh-my-pi");
     expect((await none.boundingBox())!.height).toBeLessThanOrEqual(32);

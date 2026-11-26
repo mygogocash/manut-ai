@@ -1,18 +1,10 @@
-// Settings > General > Appearance: theme, colour set, bubble style and text size, with a live preview.
+// Settings > General > Appearance: theme, bubble style and text size, with a live preview. There is no colour to pick:
+// the brand's colours are everyone's ("no accent for the person to pick", docs/design-audit.md, item 85i).
 // The choices only change how manut looks on this computer (saved in localStorage); nothing goes to Hermes.
-import { useStore, PALETTES, BUBBLE_STYLES, type BubbleStyle, type Palette, type TextSize, type Theme } from "../state/store";
+import { useStore, BUBBLE_STYLES, type BubbleStyle, type TextSize, type Theme } from "../state/store";
 import { Modes } from "../ui/Modes";
 import { t, tx, type Key } from "../i18n";
 
-// OMH is the brand's own set and keeps its name in every language
-const PALETTE_NAME: Record<Exclude<Palette, "manut">, Key> = {
-  graphite: "look.graphite",
-  ocean: "look.ocean",
-  forest: "look.forest",
-  sunset: "look.sunset",
-  rose: "look.rose",
-};
-const paletteName = (p: Palette) => (p === "manut" ? "Manut AI" : t(PALETTE_NAME[p]));
 const BUBBLE_NAME: Record<BubbleStyle, Key> = { soft: "look.soft", solid: "look.solid", open: "look.open" };
 const BUBBLE_HINT: Record<BubbleStyle, Key> = { soft: "look.softHint", solid: "look.solidHint", open: "look.openHint" };
 const THEMES: { value: Theme; label: Key }[] = [
@@ -56,31 +48,6 @@ export function Appearance() {
           </div>
           <div className="st-v">
             <Modes label={t("look.theme")} value={s.ui.theme} options={opts(THEMES)} onChange={(v) => s.setTheme(v as Theme)} testId="theme-seg" />
-          </div>
-        </div>
-        <div className="st-row ap-row-col">
-          <div className="st-k">
-            <b>{t("look.colour")}</b>
-            <span>{t("look.colourHint")}</span>
-          </div>
-          <div className="ap-sw" role="radiogroup" aria-label={t("look.colour")} data-testid="palette">
-            {PALETTES.map((p) => {
-              const on = look.palette === p;
-              return (
-                <button
-                  key={p}
-                  type="button"
-                  role="radio"
-                  aria-checked={on}
-                  className={`ap-swb${on ? " on" : ""}`}
-                  onClick={() => s.setLook({ palette: p })}
-                  data-testid={`palette-${p}`}
-                >
-                  <span className="ap-swc" data-palette={p} />
-                  {paletteName(p)}
-                </button>
-              );
-            })}
           </div>
         </div>
         <div className="st-row">

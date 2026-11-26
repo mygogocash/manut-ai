@@ -98,6 +98,16 @@ describe("the activity log while it waits and when it cannot be shown", () => {
     expect(html).not.toContain('data-testid="act-row"');
   });
 
+  it("says in the system-states board's words that the page did not load, with Try again, and keeps a raw error under Details (item 85i)", () => {
+    const html = draw({ load: { kind: "unavailable", code: "internal", message: "TypeError: cannot read properties of undefined" } });
+    expect(html).toContain('data-testid="act-failed"');
+    expect(html).not.toContain('data-testid="act-unavailable"');
+    expect(html).toMatch(/<div class="banner err" role="alert"><span class="grow">This page did not load. Nothing was changed.<\/span><button[^>]*data-testid="act-failed-retry"[^>]*>Try again<\/button>/);
+    // the raw words only inside a shut Details, never as the page's text
+    expect(html).toMatch(/<details class="failed-d"><summary>Details<\/summary><code data-testid="act-failed-details">TypeError: cannot read properties of undefined<\/code><\/details>/);
+    expect(html.split("TypeError").length - 1).toBe(1);
+  });
+
   it("says what will be here when the shop has no activity at all", () => {
     const html = draw({ load: { kind: "ready", value: { events: [], keptMonths: 12 } } });
     expect(html).toContain('data-testid="act-empty"');

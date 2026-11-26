@@ -70,6 +70,9 @@ test("a deep link to a developer page opens the hood with that page chosen: the 
   const key = await mod(page);
   await page.keyboard.press(`${key}+k`);
   await page.getByTestId("palette-input").fill("settings terminal");
+  // the list has taken the words before Enter picks its first row: on a loaded machine the press could land on the list
+  // as it was before them, whose first row is New (seen in a batch at load 8.7, 26 Nov)
+  await expect(page.getByTestId("palette-row").first()).toHaveText("Settings › Terminal");
   await page.keyboard.press("Enter");
   await expect(page.getByTestId("settings-page-terminal")).toBeVisible();
   await expect(page.getByTestId("settings-hood")).toHaveAttribute("aria-expanded", "true");

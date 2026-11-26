@@ -38,6 +38,7 @@ import {
   type DoneHere,
   type HomeMode,
 } from "./home";
+import { Icon } from "../ui/icons";
 
 /** One ask as its Needs you row shows it. */
 export interface HomeAskRow {
@@ -114,24 +115,17 @@ export interface HomeViewProps {
 /** The canvas's send arrow, routines calendar and settled tick, on its 16-unit grid (menuPages.css gives `.ic`). */
 function SendGlyph() {
   return (
-    <svg className="ic" viewBox="0 0 16 16" aria-hidden="true">
-      <path d="M8 13V3M4 7l4-4 4 4" />
-    </svg>
+    <Icon name="arrow-up" />
   );
 }
 function CalendarGlyph() {
   return (
-    <svg className="ic" viewBox="0 0 16 16" aria-hidden="true">
-      <rect x="2.5" y="3.5" width="11" height="10" rx="2" />
-      <path d="M2.5 7h11M5.5 2v3M10.5 2v3" />
-    </svg>
+    <Icon name="calendar" />
   );
 }
 function TickGlyph() {
   return (
-    <svg className="ic" viewBox="0 0 16 16" aria-hidden="true">
-      <path d="M3.5 8.5l3 3 6-7" />
-    </svg>
+    <Icon name="check" />
   );
 }
 

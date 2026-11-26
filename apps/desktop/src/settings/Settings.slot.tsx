@@ -41,6 +41,7 @@ import { ComputerPage } from "./ComputerPage";
 import { McpSkillsPage } from "./mcp/McpSkillsPage";
 import { WorkflowsPage } from "../workflows/WorkflowsPage";
 import { APP_PAGES, EVERYDAY_PAGES, HOOD_PAGES, inHood } from "./pages";
+import { Icon } from "../ui/icons";
 
 export const slot = "settings";
 
@@ -81,11 +82,7 @@ function useHood(current: string): [boolean, () => void] {
 }
 
 /** The disclosure's chevron, in the canvas's icon style (16px, a 1.4 line). */
-const HoodChevron = () => (
-  <svg className="st-ic st-hood-ic" viewBox="0 0 16 16" aria-hidden="true">
-    <path d="M4.5 6.5L8 10l3.5-3.5" />
-  </svg>
-);
+const HoodChevron = () => <Icon name="chevron-down" className="st-ic st-hood-ic" />;
 
 
 const STATUS: Record<string, Key> = { online: "bot.online", offline: "bot.offline", starting: "bot.starting" };

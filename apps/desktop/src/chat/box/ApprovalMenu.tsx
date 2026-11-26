@@ -9,12 +9,11 @@ import { ChevronDown, Popover } from "../../ui";
 import { CheckIcon } from "../model/CheckIcon";
 import { t } from "../../i18n";
 import { modeHint, modeLabel } from "../../sessions/controls";
+import { Icon } from "../../ui/icons";
 
 /** A small shield: what the word beside it is about (who may act before asking). */
 export const ShieldIcon = () => (
-  <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" aria-hidden="true">
-    <path d="M8 1.8 13 3.6v3.9c0 3.1-2.1 5.6-5 6.7-2.9-1.1-5-3.6-5-6.7V3.6z" />
-  </svg>
+  <Icon name="shield" />
 );
 
 export interface ApprovalMenuProps {

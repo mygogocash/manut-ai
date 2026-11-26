@@ -21,6 +21,7 @@ import { isLive, refreshRuns, useBotRuns } from "./live";
 import { hermesOnly } from "../sessions/agents";
 import { useSessions } from "../sessions/sessions";
 import "./runs.css";
+import { Icon } from "../ui/icons";
 
 const act = () => getStore().actions;
 
@@ -176,11 +177,7 @@ function parentsOf(run: RunDetail["run"], id: string) {
   return (all.get(id) ?? []).map((p) => byId.get(p)!);
 }
 
-const Chevron = ({ up }: { up: boolean }) => (
-  <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-    <path d={up ? "M6 15l6-6 6 6" : "M6 9l6 6 6-6"} />
-  </svg>
-);
+const Chevron = ({ up }: { up: boolean }) => <Icon name={up ? "chevron-up" : "chevron-down"} />;
 
 export function RunsTab({ bot }: { bot: Bot }) {
   const s = useStore();
@@ -210,9 +207,7 @@ export function RunsTab({ bot }: { bot: Bot }) {
           <span className="rn-count">{runs.length}</span>
         )}
         <button type="button" className="pn-ref" onClick={() => setN((x) => x + 1)} title={t("plans.refresh")} aria-label={t("plans.refresh")}>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" width="12" height="12">
-            <path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7" />
-          </svg>
+          <Icon name="circle-arrows" />
         </button>
       </div>
       {runs.length === 0 && !selected && (

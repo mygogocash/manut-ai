@@ -94,9 +94,9 @@ test("the background menu makes a folder group that survives a reload; the heade
   await background(page);
   const menu = page.getByTestId("sessions-context-menu");
   await expect(menu).toBeVisible();
-  await expect(menu.getByRole("menuitem")).toHaveText(["New session", "New folder…"]);
+  await expect(menu.getByRole("menuitem")).toHaveText(["New chat or terminal", "New folder…"]);
   await shot(page, "folder-create-menu-en");
-  const newSession = menu.getByRole("menuitem", { name: "New session", exact: true });
+  const newSession = menu.getByRole("menuitem", { name: "New chat or terminal", exact: true });
   const newFolder = page.getByTestId("sessions-new-folder");
   await expect(newSession).toBeFocused();
   await page.keyboard.press("ArrowDown");
@@ -395,9 +395,9 @@ for (const [lang, words] of Object.entries(GONE_WORDS)) {
 }
 
 const WORDS: Record<string, { menu: string[]; remove: string; empty: string }> = {
-  ko: { menu: ["새 세션", "새 폴더…"], remove: "목록에서 빼기", empty: "터미널이 없어요 · 우클릭해서 열어요" },
-  ja: { menu: ["新しいセッション", "新しいフォルダ…"], remove: "リストから外す", empty: "ターミナルなし · 右クリックで追加" },
-  zh: { menu: ["新建会话", "新建文件夹…"], remove: "从列表中移除", empty: "暂无终端 · 右键新建" },
+  ko: { menu: ["새 채팅 또는 터미널", "새 폴더…"], remove: "목록에서 빼기", empty: "터미널이 없어요 · 우클릭해서 열어요" },
+  ja: { menu: ["新しいチャットかターミナル", "新しいフォルダ…"], remove: "リストから外す", empty: "ターミナルなし · 右クリックで追加" },
+  zh: { menu: ["新建聊天或终端", "新建文件夹…"], remove: "从列表中移除", empty: "暂无终端 · 右键新建" },
 };
 
 for (const [lang, words] of Object.entries(WORDS)) {

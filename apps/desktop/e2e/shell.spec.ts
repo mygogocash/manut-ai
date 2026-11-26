@@ -57,8 +57,8 @@ test("sidebar lists the mock bots and search filters them", async ({ page }) => 
   await expect(side.getByText("manut", { exact: true })).toBeVisible();
   for (const nav of ["Settings", "You"]) await expect(side.getByText(nav, { exact: true })).toBeVisible();
   // Automations (with every bot's job count) and Plugins open their pages
-  await expect(side.getByTestId("nav-automations")).toHaveText("Automations6");
-  await expect(side.getByTestId("nav-plugins")).toHaveText("Plugins");
+  await expect(side.getByTestId("nav-automations")).toHaveText("Routines6");
+  await expect(side.getByTestId("nav-plugins")).toHaveText("Skills and tools");
   for (const id of ["nav-automations", "nav-plugins"]) await expect(side.getByTestId(id)).toBeEnabled();
   // Kami starts running in the mock -> live ring around its face
   await expect(page.getByTestId("bot-kami").getByTestId("live-ring")).toBeVisible();

@@ -389,8 +389,9 @@ export interface Peek {
 }
 
 export type Theme = "system" | "dark" | "light";
-/** Colour set for bubbles, links and the accent points (send, badges, live dots). The logo never changes. */
-export type Palette = "manut" | "graphite" | "ocean" | "forest" | "sunset" | "rose";
+/** The colour set: the brand's, for everyone (item 85i: "no accent for the person to pick"). A look saved with one of the
+ *  five sets the app once offered (graphite, ocean, forest, sunset, rose) is read, found not to be one, and read as this. */
+export type Palette = "manut";
 /** soft = both sides in tinted bubbles; solid = your bubble in the accent colour; open = the bot writes on the page
  *  and only your messages are bubbles (the default since item 85f: the Chat board's look). */
 export type BubbleStyle = "soft" | "solid" | "open";
@@ -401,7 +402,7 @@ export interface Look {
   bubbles: BubbleStyle;
   text: TextSize;
 }
-export const PALETTES: Palette[] = ["manut", "graphite", "ocean", "forest", "sunset", "rose"];
+export const PALETTES: Palette[] = ["manut"];
 
 /** The pages of the side menu (src/sidebar/menu.ts) that fill the main column, in the menu's order: Home, which the New
  *  row and the brand mark open and where the app starts, then each row's own page. They are places of their own, like

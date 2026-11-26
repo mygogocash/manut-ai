@@ -88,7 +88,7 @@ test("Settings › Providers holds Accounts: one plain header line, CLIs on this
   await expect(page.getByTestId("settings-nav-accounts")).toHaveCount(0);
   // the menu's account row is current while Settings is open, as on the design canvas's Settings board
   await expect(page.getByTestId("nav-settings")).toHaveAttribute("aria-current", "page");
-  await expect(page.getByTestId("accounts-lead")).toHaveText("Logins Manut AI uses when it runs Claude Code, Codex or pi for you. Bots are set up under Bots.");
+  await expect(page.getByTestId("accounts-lead")).toHaveText("Logins Manut AI uses when it runs Claude Code, Codex or pi for you. Your team is set up under Team members.");
   // the coding CLIs found here, then the GitHub accounts Tasks › Me reads as (GithubAccounts.tsx)
   await expect(page.locator(".acc-g")).toHaveCount(4);
   await expect(page.locator(".acc-g .acc-gh b")).toHaveText(["Claude Code", "Codex", "pi", "GitHub"]);

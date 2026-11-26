@@ -98,7 +98,7 @@ export function ThinkingText({ text }: { text: string }) {
       <button type="button" className="th-h" aria-expanded={open} onClick={() => setOpen((o) => !o)} data-testid="thinking-toggle">
         {t("think.label")}
         <span className="th-chev" aria-hidden>
-          <ChevronRight size={9} />
+          <ChevronRight />
         </span>
       </button>
       {open && (

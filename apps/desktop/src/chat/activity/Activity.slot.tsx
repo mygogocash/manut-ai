@@ -181,7 +181,7 @@ export function StepRow({ step, live, now, io }: { step: Step; live: boolean; no
       </span>
       {opens && (
         <span className="act-chev" aria-hidden>
-          <ChevronRight size={9} />
+          <ChevronRight />
         </span>
       )}
     </div>
@@ -265,7 +265,7 @@ export default function Activity({ bot, item, live }: SlotProps["activity"]) {
         )}
         {canOpen && (
           <span className="act-chev" aria-hidden>
-            <ChevronRight size={10} />
+            <ChevronRight />
           </span>
         )}
       </button>

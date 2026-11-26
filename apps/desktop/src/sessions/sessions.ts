@@ -62,6 +62,7 @@ import { ASK_MODE, modesOf, steersOf } from "./controls";
 import { parseCommands, type AgentCommand } from "../chat/parts/commands";
 import { noteMcpSeen } from "../settings/mcp/agentConfig";
 import { t as tr, type Key } from "../i18n";
+import { notesSaid } from "./projectNotes";
 import { windowWatched, type SessionNote } from "../lib/notify";
 import { createCloseGrace, graceMs, restoreSplitIn, type SplitWas } from "./closeGrace";
 import { watchOpenFolder } from "./revealOpen";
@@ -683,6 +684,14 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
           const key = keys.get(id);
           const names = ev.names.filter((n): n is string => typeof n === "string").join(", ");
           if (key && names) store().dispatch({ type: "system.note", bot: key, text: tr("ss.mcpDiffers", { names }), now: Date.now() });
+        }
+        // the project's own instructions the shell read and handed to the agent as text (item 93, projectNotes.ts): said
+        // once in the chat, so a restart that hands over the same files adds nothing
+        if (ev.kind === "instructions") {
+          const key = keys.get(id);
+          const text = notesSaid(ev);
+          const said = key ? (store().getState().chats[key]?.items ?? []).some((i) => i.kind === "system" && i.text === text) : true;
+          if (key && text && !said) store().dispatch({ type: "system.note", bot: key, text, now: Date.now() });
         }
         return;
       case "exit": {

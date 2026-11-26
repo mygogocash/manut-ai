@@ -27,7 +27,7 @@
 }
 .omhp-wrap > .omhp-sub {
   margin-top: -4px;
-  color: var(--quiet);
+  color: var(--muted);
 }
 .omhp-t {
   min-width: 0;
@@ -60,7 +60,7 @@
   border: 0;
   border-radius: 4px;
   background: none;
-  color: var(--quiet);
+  color: var(--muted);
   cursor: pointer;
 }
 .omhp-x:hover {
