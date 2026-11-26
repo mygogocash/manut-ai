@@ -1641,6 +1641,9 @@ function classify(words: string[], where: Where): Verdict {
   if (["pnpm", "npm", "yarn", "bun"].includes(name)) return packageManager(words, where);
   if (name === "git") return (git(words, where));
   if (name === "gh") return (gh(words));
+  // `glab mr create` opens a merge request as `gh pr create` opens a pull request (item 100b): a push, in its words. With an
+  // address among its words it may talk to any host, and every other glab is a program the dial has not read.
+  if (name === "glab") return words[1] === "mr" && words[2] === "create" && !words.some((w) => URL_LIKE.test(w)) ? v("push", say("kit.say.mr"), 3, { saves: true, text: textAfter(words, ["-t", "--title", "-d", "--description", "-m", "--message"]) }) : unknownProgram(name);
   if (["grep", "egrep", "fgrep"].includes(name)) return (search(words, "grep"));
   if (["rg", "ag"].includes(name)) return (search(words, "rg"));
   if (name === "find") return find(words, where);

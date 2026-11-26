@@ -165,3 +165,53 @@ describe("the list of every project's requests", () => {
     expect(masked.items[0].title).not.toContain(fake);
   });
 });
+
+describe("other hosts, read only (item 100b)", () => {
+  const azure = { host: "azure" as const, name: "Azure DevOps", repo: "Shop Site/site" };
+  const gitea = { host: "gitea" as const, name: "gitea.example.com", repo: "baanmali/app" };
+
+  it("asks the other hosts' reader only for a folder not on GitHub or GitLab, and lists what it answers in the same order", async () => {
+    const { host, board } = fakeHost({ "github:shop/site": [pull(41)] }, { "/a/site": { source: "github", repo: "shop/site" } });
+    const otherRemote = vi.fn(async (cwd: string) => (cwd === "/b/az" ? azure : cwd === "/c/gt" ? gitea : null));
+    const otherBoard = vi.fn(async (cwd: string) =>
+      cwd === "/b/az" ? { ...azure, items: [pull(31, { review: "changes" }), pull(32, { review: "approved" })], more: false, at: 1 } : cwd === "/c/gt" ? { ...gitea, items: [pull(7, { state: "draft" })], more: false, at: 1 } : null,
+    );
+    Object.assign(host, { otherRemote, otherBoard });
+    const w = new BoardWatch(host, () => true, () => 1);
+    await w.setProjects(["/a/site", "/b/az", "/c/gt", "/d/none"]);
+    // a GitHub project's folder is never asked of the other hosts' reader
+    expect(otherRemote.mock.calls.map((c) => c[0])).toEqual(["/b/az", "/c/gt", "/d/none"]);
+    const s = w.get();
+    expect(s.otherRepos.map((r) => `${r.host}:${r.repo}:${r.folder}`)).toEqual(["azure:Shop Site/site:/b/az", "gitea:baanmali/app:/c/gt"]);
+    expect(s.others.map((r) => `${r.host}:${r.pull.number}`)).toEqual(["azure:32", "azure:31", "gitea:7"]);
+    expect(s.rows.map((r) => r.pull.number)).toEqual([41]);
+    expect(board).toHaveBeenCalledTimes(1);
+    // nothing of another host's is noted for a lane's row
+    expect(pullFor("github", "Shop Site/site", "b31") ?? null).toBeNull();
+  });
+
+  it("a host whose CLI is not here gives nothing and no error; a list that fails says so", async () => {
+    const { host } = fakeHost({}, {});
+    Object.assign(host, {
+      otherRemote: vi.fn(async (cwd: string) => (cwd === "/b/az" ? azure : null)),
+      otherBoard: vi.fn(async () => Promise.reject(new Error("az: ERROR: TF400813: not authorized"))),
+    });
+    const w = new BoardWatch(host, () => true, () => 1);
+    await w.setProjects(["/b/az", "/d/none"]);
+    expect(w.get().errors).toEqual([{ source: "azure", repo: "Shop Site/site", error: "az: ERROR: TF400813: not authorized" }]);
+    const { host: bare } = fakeHost({}, {});
+    const w2 = new BoardWatch(bare, () => true, () => 1);
+    await w2.setProjects(["/b/az"]);
+    expect(w2.get().others).toEqual([]);
+    expect(w2.get().errors).toEqual([]);
+  });
+
+  it("passes another host's titles through the app's one masker", async () => {
+    const inner = {
+      otherRemote: async () => azure,
+      otherBoard: async () => ({ ...azure, items: [pull(31, { title: "Read the total ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789" })], more: false, at: 1 }),
+    } as unknown as TaskHost;
+    const b = await new MaskingTaskHost(inner).otherBoard!("/b/az");
+    expect(b?.items[0].title).not.toContain("ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789");
+  });
+});

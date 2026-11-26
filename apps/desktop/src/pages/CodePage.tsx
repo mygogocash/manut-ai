@@ -4,14 +4,17 @@
 // on the empty part opens), then the Tasks row (src/tasks/TasksBar.tsx) that opens the Tasks page, and last how much of
 // each coding tool's plan is used (src/sidebar/Usage.tsx), which sat in the side menu's foot until item 85i and is one
 // click from it here. A session opened from here fills the main column, and the menu keeps marking Code while it does.
+// New project (item 100b) sits in the page's top bar: it opens its panel at the top of the column (src/code/NewProject.tsx).
 import { useCallback, useState } from "react";
 import { t } from "../i18n";
 import "../sessions/sessions.css";
 import { SESSIONS_ENTRY } from "../sessions/entry";
 import { SessionBackgroundMenu } from "../sessions/SessionBackgroundMenu";
-import { SessionList, SessionsHeader } from "../sessions/SessionsSection";
+import { listFolder, SessionList, SessionsHeader } from "../sessions/SessionsSection";
 import { TasksBar } from "../tasks/TasksBar";
 import { KitPanel } from "../code/KitPanel";
+import { NewProject } from "../code/NewProject";
+import { getHost } from "../sessions/host";
 import { MenuPageFrame } from "./MenuPage";
 import { can } from "../runtime";
 import { Usage } from "../sidebar/Usage";
@@ -25,10 +28,24 @@ const sessionBackground = (target: EventTarget) =>
 export function CodePage() {
   const [menu, setMenu] = useState<{ x: number; y: number; focus: HTMLElement } | null>(null);
   const closeMenu = useCallback(() => setMenu(null), []);
-  const { list } = useSessions();
+  const { list, home } = useSessions();
+  const [making, setMaking] = useState(false);
+  const host = getHost();
+  const offerNew = SESSIONS_ENTRY && !!host.projectNew;
   return (
-    <MenuPageFrame page="code" title={t("menu.code")}>
+    <MenuPageFrame
+      page="code"
+      title={t("menu.code")}
+      acts={
+        offerNew ? (
+          <button type="button" className="btn" aria-expanded={making} onClick={() => setMaking((v) => !v)} title={t("proj.newTip")} data-testid="np-open">
+            {t("proj.new")}
+          </button>
+        ) : undefined
+      }
+    >
       <div className="col">
+        {offerNew && <NewProject host={host} home={home} open={making} onClose={() => setMaking(false)} onMade={listFolder} />}
         {SESSIONS_ENTRY && <KitPanel />}
         {SESSIONS_ENTRY && (
           // It keeps the sidebar section's test id, so what found TERMINALS there finds it here.

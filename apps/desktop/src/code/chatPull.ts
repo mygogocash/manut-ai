@@ -9,8 +9,11 @@
 //
 // Read only: nothing here asks the host for anything but the folder's remote and one view of the address the command printed.
 // The links are of this run, as the lanes' pull requests are (tasks/pulls.ts): a request's state is not something to show from
-// last week. Only github.com is read: the dial reads `gh` sent to another host as a step that sends, never as a pull request,
-// and `glab mr create` is a program it does not know.
+// last week. GitHub's requests are read on github.com only: the dial reads `gh` sent to another host as a step that sends, never as
+// a pull request. GitLab's (item 100b): a `glab mr create` the dial read as a push, whose output names a merge request on a host
+// with `gitlab` among its names (`https://gitlab.com/<group>/<project>/-/merge_requests/<n>`, the hosts Tasks reads a remote of),
+// is linked the same way, after the same checks: the chat's remote names that project, and one `glab mr view` says the branch is
+// the project's own.
 import { useSyncExternalStore } from "react";
 import type { TaskHost } from "../tasks/host";
 import { mergedFor, pullFor, remoteOf, type LanePull } from "../tasks/pulls";
@@ -31,24 +34,31 @@ export interface ChatPull {
 }
 
 const ADDRESS = /https:\/\/github\.com\/([A-Za-z0-9._-]{1,100})\/([A-Za-z0-9._-]{1,100})\/pull\/(\d{1,9})(?![\w/])/g;
+/** A merge request's address: a host with `gitlab` among its names, the project's path (two to six names, as Tasks reads a GitLab
+ *  remote), `/-/merge_requests/<n>`. */
+const GL_ADDRESS = /https:\/\/((?:[A-Za-z0-9-]{1,63}\.)*gitlab(?:\.[A-Za-z0-9-]{1,63})+)\/((?:[A-Za-z0-9._-]{1,100}\/){1,5}[A-Za-z0-9._-]{1,100})\/-\/merge_requests\/(\d{1,9})(?![\w/])/g;
 
-/** The last pull request address on github.com in `output` (gh prints the new request's address last), or null. */
+const nameOk = (w: string) => !w.startsWith(".") && !w.startsWith("-");
+
+/** The last pull request address on github.com, or merge request address on a GitLab host, in `output` (gh and glab print the
+ *  new request's address last), or null. */
 export function pullAddress(output: string): { source: CliSource; repo: string; number: number; url: string } | null {
-  let last: RegExpExecArray | null = null;
-  for (const m of stripAnsi(output).matchAll(ADDRESS)) last = m;
-  if (!last) return null;
-  const [, owner, name, n] = last;
-  if (owner.startsWith(".") || owner.startsWith("-") || name.startsWith(".") || name.startsWith("-")) return null;
-  const number = Number(n);
+  const text = stripAnsi(output);
+  let last: { source: CliSource; repo: string; n: string; url: string; at: number } | null = null;
+  for (const m of text.matchAll(ADDRESS)) last = { source: "github", repo: `${m[1]}/${m[2]}`, n: m[3], url: `https://github.com/${m[1]}/${m[2]}/pull/${m[3]}`, at: m.index ?? 0 };
+  for (const m of text.matchAll(GL_ADDRESS))
+    if (!last || (m.index ?? 0) > last.at) last = { source: "gitlab", repo: m[2], n: m[3], url: `https://${m[1]}/${m[2]}/-/merge_requests/${m[3]}`, at: m.index ?? 0 };
+  if (!last || !last.repo.split("/").every(nameOk)) return null;
+  const number = Number(last.n);
   if (!Number.isSafeInteger(number) || number <= 0) return null;
-  return { source: "github", repo: `${owner}/${name}`, number, url: `https://github.com/${owner}/${name}/pull/${number}` };
+  return { source: last.source, repo: last.repo, number, url: last.url };
 }
 
-/** Whether `command` opens a pull request as Kit's dial reads it: a step that sends (a push, or a push that goes live), with
- *  `gh pr create` among its commands. */
+/** Whether `command` opens a pull or merge request as Kit's dial reads it: a step that sends (a push, or a push that goes live),
+ *  with `gh pr create` or `glab mr create` among its commands. */
 export function opensPull(command: string, where: Where): boolean {
   const c = readCommand(command, where);
-  return (c.action === "push" || c.action === "live") && /(^|[\s;&|(])gh\s+pr\s+create(\s|$)/.test(command);
+  return (c.action === "push" || c.action === "live") && /(^|[\s;&|(])(gh\s+pr|glab\s+mr)\s+create(\s|$)/.test(command);
 }
 
 // ---- the links ---------------------------------------------------------------------------------------------------------

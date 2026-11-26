@@ -27,6 +27,8 @@ mod lane_config;
 mod lane_diff;
 mod outside_use;
 mod past_chats;
+mod new_project;
+mod project_icon;
 mod project_notes;
 mod platform;
 mod outpost;
@@ -34,6 +36,7 @@ mod power;
 mod review;
 mod preview;
 mod pulls;
+mod pulls_other;
 mod providers;
 mod remote_keys;
 #[cfg(all(test, unix))]
@@ -918,6 +921,30 @@ async fn pulls_methods(boards: State<'_, Arc<pulls::Boards>>, source: String, re
     tauri::async_runtime::spawn_blocking(move || b.methods(src, &repo)).await.map_err(|e| e.to_string())?
 }
 
+/// Pull requests on other hosts (item 100b, pulls_other.rs): the Azure DevOps, Gitea or Forgejo repository the project at `cwd` is
+/// in, read from its git config, when that host's CLI is installed (and, for Gitea, signed in to the server); null otherwise.
+#[tauri::command]
+async fn pulls_other_remote(others: State<'_, Arc<pulls_other::Others>>, cwd: String) -> Result<Option<pulls_other::OtherRemote>, String> {
+    let o = Arc::clone(&others);
+    tauri::async_runtime::spawn_blocking(move || o.found(&cwd).map(|f| f.remote())).await.map_err(|e| e.to_string())
+}
+
+/// Pull requests on other hosts: the project at `cwd`'s open requests there, through that host's own CLI; null when it is on none
+/// of them or the CLI is not here. Only reads: no merge, no write.
+#[tauri::command]
+async fn pulls_other_board(others: State<'_, Arc<pulls_other::Others>>, cwd: String) -> Result<Option<pulls_other::OtherBoard>, String> {
+    let o = Arc::clone(&others);
+    tauri::async_runtime::spawn_blocking(move || o.board(&cwd)).await.map_err(|e| e.to_string())?
+}
+
+/// A project's own icon (item 100b, project_icon.rs): the picture its folder keeps in one of a few known places, as a `data:`
+/// address of an image's type, or null. Only reads; never through a link, never outside the folder, at most 64 KiB.
+#[tauri::command]
+async fn project_icon(icons: State<'_, Arc<project_icon::Icons>>, cwd: String) -> Result<Option<String>, String> {
+    let i = Arc::clone(&icons);
+    tauri::async_runtime::spawn_blocking(move || i.icon(&cwd)).await.map_err(|e| e.to_string())
+}
+
 /// The git branch of a session's folder, from its `.git/HEAD` only (no program runs); "" outside a repository.
 #[tauri::command]
 async fn session_branch(cwd: String) -> Result<String, String> {
@@ -1131,6 +1158,23 @@ async fn review_ask_merge_pull(asks: State<'_, Arc<review::Ledger>>, folder: Str
     let home = user_home()?;
     let l = Arc::clone(&asks);
     tauri::async_runtime::spawn_blocking(move || l.ask_merge_pull(&home, &folder, &source, &repo, number, &method, credits.unwrap_or(false))).await.map_err(|e| e.to_string())?
+}
+
+/// A new project (item 100b, new_project.rs): the folder at `path` in the person's home, made when it is not there (refused when it
+/// is there with anything in it), with git started in it by the app's own git (no hook, no template). Writes only on this Mac.
+#[tauri::command]
+async fn project_new(path: String) -> Result<new_project::Made, String> {
+    let home = user_home()?;
+    tauri::async_runtime::spawn_blocking(move || new_project::make(&home, &path)).await.map_err(|e| e.to_string())?
+}
+
+/// The ask to make the GitHub repository `name` from the new project at `folder`, private unless `public` (review.rs `ask_repo`):
+/// the exact `gh repo create` line, or why it cannot be made. Writes nothing; pushes nothing, ever.
+#[tauri::command]
+async fn review_ask_repo(asks: State<'_, Arc<review::Ledger>>, folder: String, name: String, public: bool) -> Result<review::Ask, String> {
+    let home = user_home()?;
+    let l = Arc::clone(&asks);
+    tauri::async_runtime::spawn_blocking(move || l.ask_repo(&home, &folder, &name, public)).await.map_err(|e| e.to_string())?
 }
 
 /// The person's answer to ask `id`, once approval-core settled it on the page (review.rs `settle`): a No runs nothing, a Yes runs
@@ -1655,6 +1699,10 @@ pub fn run() {
             // the asks that push a lane and open or merge its pull request, each settled once (review.rs)
             app.manage(Arc::new(review::Ledger::default()));
             app.manage(Arc::new(pulls::Boards::default()));
+            // pull requests on Azure DevOps, Gitea and Forgejo, read only (pulls_other.rs)
+            app.manage(Arc::new(pulls_other::Others::default()));
+            // the projects' own icons, kept by size and modified time (project_icon.rs)
+            app.manage(Arc::new(project_icon::Icons::default()));
             app.manage(Arc::new(skill_links::Installs::default()));
             // free space on the home folder's volume, read once a minute (disk.rs)
             app.manage(disk::Disk::start(app.handle().clone(), user_home().ok()));
@@ -1819,6 +1867,8 @@ fn commands(invoke: tauri::ipc::Invoke) -> bool {
         review_ask_open,
         review_ask_merge,
         review_ask_merge_pull,
+        review_ask_repo,
+        project_new,
         review_settle,
         review_withdraw,
         session_main_moved,
@@ -1855,6 +1905,9 @@ fn commands(invoke: tauri::ipc::Invoke) -> bool {
         pulls_board,
         pulls_view,
         pulls_methods,
+        pulls_other_remote,
+        pulls_other_board,
+        project_icon,
         gh_accounts,
         source_tools,
         tasks_me,

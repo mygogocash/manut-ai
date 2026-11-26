@@ -125,3 +125,53 @@
 .review .lk:hover {
   color: var(--ink);
 }
+
+/* New project (NewProject.tsx, item 100b): the same panel and ask, at the top of the Code page's column. Its fields stand 40px as
+   the kit's fields do, the folder's with Choose beside it; who can see the repository is two plain lines to pick from. */
+.review.np {
+  margin: 0;
+}
+.review.np input[type="text"] {
+  min-height: 40px;
+  padding: 0 10px;
+}
+.review .np-pick {
+  display: flex;
+  gap: 8px;
+}
+.review .np-pick input {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--aui-font-mono);
+  font-size: 13px;
+}
+.review .np-pick .btn {
+  min-height: 40px;
+}
+.review .np-who {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.review .np-who legend {
+  margin-bottom: 4px;
+  padding: 0;
+}
+.review .np-opt {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+.review .np-opt input {
+  margin: 0;
+}/* second lines are grey, and a choice is drawn in ink: colour is kept for its four meanings */
+.review.np .mut,
+.review.np dt {
+  color: var(--muted);
+}
+.review .np-opt input {
+  accent-color: var(--aui-primary);
+}

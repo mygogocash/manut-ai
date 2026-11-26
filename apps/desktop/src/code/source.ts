@@ -155,10 +155,44 @@ export function readAsk(v: unknown): ReviewAsk | null {
   };
 }
 
-/** What a settled ask did (`review_settle`): `declined` (nothing ran), `opened`, `merged`, or `failed` at `step` (`check`, `push`,
- *  `create`, `merge`) with the CLI's own line. `pushed`: the branch reached the remote. */
+/** A new project (item 100b, src-tauri/src/new_project.rs `Made`): its folder as the shell made it, and its name. */
+export interface NewProjectMade {
+  folder: string;
+  name: string;
+  /** The folder was there already, empty, and only git was started in it. */
+  existed: boolean;
+}
+
+export function readMadeProject(v: unknown): NewProjectMade | null {
+  if (!isObj(v) || !str(v.folder).startsWith("/") || !str(v.name)) return null;
+  return { folder: str(v.folder), name: str(v.name), existed: v.existed === true };
+}
+
+/** The shell's ask to make a new project's repository on GitHub (review.rs `ask_repo`, kind `repo`): the name, the folder, who can
+ *  see it, and `plan`, the exact command a Yes runs. It pushes nothing. */
+export interface RepoAsk {
+  id: string;
+  kind: "repo";
+  repo: string;
+  folder: string;
+  visibility: "private" | "public";
+  remote: string;
+  plan: string;
+}
+
+export function readRepoAsk(v: unknown): RepoAsk | null {
+  if (!isObj(v) || !/^[0-9a-f]{32}$/.test(str(v.id)) || v.kind !== "repo" || v.source !== "github") return null;
+  const visibility = v.visibility === "private" || v.visibility === "public" ? v.visibility : null;
+  const plan = str(v.plan);
+  // an ask that does not say exactly what runs is not shown
+  if (!visibility || !str(v.repo) || !str(v.folder) || !plan.startsWith("gh repo create ")) return null;
+  return { id: str(v.id), kind: "repo", repo: str(v.repo), folder: str(v.folder), visibility, remote: str(v.remote), plan };
+}
+
+/** What a settled ask did (`review_settle`): `declined` (nothing ran), `opened`, `merged`, `created` (a new project's repository),
+ *  or `failed` at `step` (`check`, `push`, `create`, `merge`) with the CLI's own line. `pushed`: the branch reached the remote. */
 export interface ReviewDone {
-  outcome: "declined" | "opened" | "merged" | "failed";
+  outcome: "declined" | "opened" | "merged" | "created" | "failed";
   pushed: boolean;
   url: string;
   number: number;
@@ -168,7 +202,7 @@ export interface ReviewDone {
 
 export function readDone(v: unknown): ReviewDone | null {
   if (!isObj(v)) return null;
-  const outcome = v.outcome === "declined" || v.outcome === "opened" || v.outcome === "merged" || v.outcome === "failed" ? v.outcome : null;
+  const outcome = v.outcome === "declined" || v.outcome === "opened" || v.outcome === "merged" || v.outcome === "created" || v.outcome === "failed" ? v.outcome : null;
   if (!outcome) return null;
   const url = str(v.url);
   return { outcome, pushed: v.pushed === true, url: /^https:\/\/\S+$/.test(url) ? url : "", number: num(v.number), step: str(v.step), error: str(v.error) };

@@ -1620,6 +1620,13 @@ body.split-dragging .xterm {
   overflow: visible;
   color: #d9a03a;
 }
+/* a project's own icon (item 100b): its picture as it is, at the folder glyph's size, with a hair of rounding */
+.tg-ic .proj-ic {
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+  border-radius: 3px;
+}
 .tg-n {
   font-size: 12px;
   font-weight: 600;
