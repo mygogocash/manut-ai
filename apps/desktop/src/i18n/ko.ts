@@ -48,6 +48,7 @@ import { head } from "./ko/head";
 import { history } from "./ko/history";
 import { home } from "./ko/home";
 import { id } from "./ko/id";
+import { imp } from "./ko/imp";
 import { inbox } from "./ko/inbox";
 import { job } from "./ko/job";
 import { key } from "./ko/key";
@@ -203,6 +204,7 @@ export const ko: Record<Key, string> = {
   ...history,
   ...home,
   ...id,
+  ...imp,
   ...inbox,
   ...job,
   ...key,

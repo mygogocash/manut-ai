@@ -48,6 +48,7 @@ import { head } from "./zh/head";
 import { history } from "./zh/history";
 import { home } from "./zh/home";
 import { id } from "./zh/id";
+import { imp } from "./zh/imp";
 import { inbox } from "./zh/inbox";
 import { job } from "./zh/job";
 import { key } from "./zh/key";
@@ -203,6 +204,7 @@ export const zh: Record<Key, string> = {
   ...history,
   ...home,
   ...id,
+  ...imp,
   ...inbox,
   ...job,
   ...key,

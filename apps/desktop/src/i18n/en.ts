@@ -49,6 +49,7 @@ import { head } from "./en/head";
 import { history } from "./en/history";
 import { home } from "./en/home";
 import { id } from "./en/id";
+import { imp } from "./en/imp";
 import { inbox } from "./en/inbox";
 import { job } from "./en/job";
 import { key } from "./en/key";
@@ -204,6 +205,7 @@ export const en = {
   ...history,
   ...home,
   ...id,
+  ...imp,
   ...inbox,
   ...job,
   ...key,
