@@ -491,6 +491,8 @@ export const STATES: PageState[] = [
     page: "app",
     name: "your Mac: scan or paste the code",
     path: "/app/#mac",
+    // The camera row settles once the browser has said whether it reads QR codes: Scan, or the words saying it cannot.
+    reach: (page) => page.getByRole("button", { name: "Scan", exact: true }).or(page.getByText("This browser can't read a code")).waitFor(),
     shows: "Scan the code on your Mac",
     buttons: ["Pair"],
   },
