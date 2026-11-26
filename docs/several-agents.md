@@ -1,7 +1,7 @@
 # Several agents on one job (item 102)
 
 The design for plan item 102 (`docs/plan.md`; `docs/t3code-parity.md`, "Orchestration", group 3 of its order: "must be
-designed first because it can act for the person"). Status on 27 Nov 2026: design, with slice 102a built (Ask several agents: the + menu row, its panel, one send starting one lane for each row, the job saved with each session and its row in the Lanes band), slice 102d (the helper lanes' rules, pure) and slice 102f (a helper lane made from a snapshot of its lead's folder, in the shell); see "Phases and slices". The rest is not built. It covers three
+designed first because it can act for the person"). Status on 27 Nov 2026: design, with slice 102a built (Ask several agents: the + menu row, its panel, one send starting one lane for each row, the job saved with each session and its row in the Lanes band), slice 102d (the helper lanes' rules, pure), slice 102f (a helper lane made from a snapshot of its lead's folder, in the shell) and slice 102g (a helper lane's work landed in its lead's folder, and Take back, in the shell); see "Phases and slices". The rest is not built. It covers three
 things:
 
 1. **Ask several agents.** One message from the person starts lanes on different agents and models side by side, and their
@@ -332,8 +332,9 @@ ends, and never runs 3; the person's own new lane starts at once while 2 helpers
 - One landing at a time per lead folder (a lock in the shell, as `lane.rs` holds `WRITING`), and only while no turn of the
   lead runs and no ask of the lead waits, so the lead's agent never edits a file the landing is writing.
 - Before it writes, the lead's folder is kept as a snapshot, which Take back this landing restores.
-- `git apply --3way` in the lead's folder. It stages what it applies there (`--3way` implies `--index`, git 2.54's
-  manual); that index is the lead lane's, never the developer's. Conflicts left as markers count as landed and are named.
+- `git apply --3way` in the lead's folder, against a throwaway copy of the lead's index (GoSpark's `Git.apply`; as built in
+  102g, where the design had it stage into the lead lane's own index), so the lead's index never changes and the developer's
+  is never reached. Conflicts left as markers count as landed and are named.
 - A patch that will not apply is kept owner-read-only (0600) at `~/.manut/patches/<job>/<helper>.patch`; the lead's folder
   is unchanged; the row offers Show patch.
 - Nothing lands in the developer's own folder, which still changes only when they merge or switch.
@@ -473,6 +474,21 @@ the screens are built on tested ground.
   output cut, the outside-the-project refusal, the masker's read, `git apply --3way`, the kept patch at 0600, Take back.
   Rust tests against temporary repositories. Safety tests: two landings at once run one after the other; a patch that will
   not apply leaves the lead's folder and index byte for byte as they were.
+  **Built 27 Nov 2026** (`src-tauri/src/lane_land.rs` and its tests; `read_files`, `write_files` and `tree_of` in
+  `turn_files.rs`; `lane_land` and `lane_take_back` in `src-tauri/src/lib.rs`; `docs/decisions/102g-helper-landing.md`).
+  GoSpark's `BuddyLand`, `BuddyCheckoutGate` and `Git.apply`, rewritten in Rust. The page names only a helper lane; the shell
+  reads its lead, job and snapshot from its record. Under the lead's lock (a helper lane's snapshot of the lead and a lane's
+  removal wait for it too): the helper lane's folder as git would write it, committed or not; build output cut in a copy of
+  its index (a folder of `turn_files::REBUILT` or GoSpark's caches that the snapshot holds nothing in, and `.DS_Store`); the
+  patch written by `git diff-tree --binary --full-index --no-renames` to a 0600 file; the masker's read (`keys`, the work
+  still lands); a patch from another repository, naming a file outside the lead's project or a name the app cannot hold kept
+  untried; the files the patch names kept byte for byte (Rewind's raw blobs) under `refs/manut/landings/<job>/<folder>`;
+  `git apply --3way` against a throwaway copy of the lead's index; a refusal kept at `~/.manut/patches/<job>/<folder>.patch`
+  (0600) with the lead untouched; a record in `~/.manut/landings/`. Take back (`lane_take_back`) puts those files back byte
+  for byte, only while nothing in the lead's folder changed since. Settled on the way: the lead's own index never changes; one
+  landing per helper lane until it is taken back; a repository whose own config names a clean filter or a merge driver is not
+  landed in (`config:<setting>`); removing a helper lane forgets its landing and keeps its patch; whether the lead is idle is
+  the page's to check (102i).
 - **102h. Running helper lanes.** The queue and the cap, starting each helper in Ask mode with the dial's ceiling, the
   budget's notes and stops, the Helpers card with the person's Stop, the link lines, the Lanes band's indented rows, Needs
   you's names, the idle process ended. Tests: sessions store tests with the stand-in agent and a stand-in clock, the e2e

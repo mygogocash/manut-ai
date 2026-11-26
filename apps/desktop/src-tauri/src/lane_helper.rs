@@ -98,8 +98,8 @@ pub(crate) fn drop_ref(git: &Git, cwd: &Path, name: &str, at: &str) {
 }
 
 /// A temporary index file of this module's own: taken away, with the lock file git keeps beside it, when it goes, whatever
-/// happened.
-struct TempIndex(PathBuf);
+/// happened. A landing (`lane_land.rs`, item 102g) uses the same kind, for the same reasons.
+pub(crate) struct TempIndex(pub(crate) PathBuf);
 
 impl Drop for TempIndex {
     fn drop(&mut self) {
@@ -109,7 +109,7 @@ impl Drop for TempIndex {
 }
 
 /// A name no other temporary index of this process has, now or earlier: two snapshots taken at once never share a file.
-fn fresh_name() -> String {
+pub(crate) fn fresh_name() -> String {
     static N: AtomicU64 = AtomicU64::new(0);
     let nanos = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
     format!("index-{}-{}-{nanos}", std::process::id(), N.fetch_add(1, Ordering::Relaxed))
@@ -117,7 +117,7 @@ fn fresh_name() -> String {
 
 /// Copies the file `from` to the new file `to`, readable by this account only from the moment it exists. A file or link
 /// already at `to` is never written through.
-fn copy_private(from: &Path, to: &Path) -> io::Result<()> {
+pub(crate) fn copy_private(from: &Path, to: &Path) -> io::Result<()> {
     let mut src = fs::File::open(from)?;
     let mut o = fs::OpenOptions::new();
     o.write(true).create_new(true);
@@ -127,15 +127,23 @@ fn copy_private(from: &Path, to: &Path) -> io::Result<()> {
     io::copy(&mut src, &mut dst).map(|_| ())
 }
 
-/// The snapshot of the lead lane's folder `lwt` (its worktree's top) as a commit on top of `head`, its HEAD's commit: see the
-/// module's own words. Err is git's own last line, or what could not be done.
-fn snapshot(git: &Git, home: &Path, lwt: &Path, head: &str, message: &str) -> Result<String, String> {
-    let index = git.line(lwt, &["rev-parse", "--git-path", "index"]).filter(|l| !l.is_empty()).ok_or("git could not name the lane's index")?;
-    let index = lane::from_cwd(lwt, &index);
+/// The app's own folder for temporary index files (and a landing's patch while it is made): `~/.manut/helper-index`, made for
+/// this account only.
+pub(crate) fn temp_dir(home: &Path) -> Result<PathBuf, String> {
     let dir = home.join(".manut").join("helper-index");
     lane::own_dir(&home.join(".manut"))?;
     lane::own_dir(&dir)?;
-    let tmp = TempIndex(dir.join(fresh_name()));
+    Ok(dir)
+}
+
+/// The folder `wt` (a worktree's top) as git would write it, in a temporary index of this module's own: a byte copy of the
+/// folder's own index (or `head`'s tree when it has none), with every file git does not ignore written into it (`git add -A`):
+/// steps 1 and 2 of the module's own words. The index (taken away when it goes) and its tree. A landing captures a helper lane's
+/// folder and its lead's this way too (item 102g). Err is git's own last line, or what could not be done.
+pub(crate) fn capture(git: &Git, home: &Path, wt: &Path, head: &str) -> Result<(TempIndex, String), String> {
+    let index = git.line(wt, &["rev-parse", "--git-path", "index"]).filter(|l| !l.is_empty()).ok_or("git could not name the lane's index")?;
+    let index = lane::from_cwd(wt, &index);
+    let tmp = TempIndex(temp_dir(home)?.join(fresh_name()));
     let tmp_s = tmp.0.to_string_lossy().into_owned();
     // a split index is written whole into the copy, so nothing of it is written beside the lead's own
     let env = [("GIT_INDEX_FILE", tmp_s.as_str()), ("GIT_LITERAL_PATHSPECS", "1")];
@@ -151,16 +159,32 @@ fn snapshot(git: &Git, home: &Path, lwt: &Path, head: &str, message: &str) -> Re
         Ok(m) if m.is_file() => copy_private(&index, &tmp.0).map_err(|e| e.to_string())?,
         Ok(_) => return Err("the lane's index is not a file".into()),
         Err(e) if e.kind() == io::ErrorKind::NotFound => {
-            checked(git.run_with(lwt, &["-c", "core.splitIndex=false", "read-tree", head], tasks::TIMEOUT, &env))?;
+            checked(git.run_with(wt, &["-c", "core.splitIndex=false", "read-tree", head], tasks::TIMEOUT, &env))?;
         }
         Err(e) => return Err(e.to_string()),
     }
     // a file it has to read for the first time is hashed, which takes longer than a read on a large project
-    checked(git.run_with(lwt, &["-c", "core.splitIndex=false", "add", "-A", "--", "."], lane::SLOW, &env))?;
-    let tree = checked(git.run_with(lwt, &["-c", "core.splitIndex=false", "write-tree"], tasks::TIMEOUT, &env))?;
+    checked(git.run_with(wt, &["-c", "core.splitIndex=false", "add", "-A", "--", "."], lane::SLOW, &env))?;
+    let tree = checked(git.run_with(wt, &["-c", "core.splitIndex=false", "write-tree"], tasks::TIMEOUT, &env))?;
     if !full_id(&tree) {
         return Err("git printed no tree".into());
     }
+    Ok((tmp, tree))
+}
+
+/// The snapshot of the lead lane's folder `lwt` (its worktree's top) as a commit on top of `head`, its HEAD's commit: see the
+/// module's own words. The copy of the index goes as soon as the tree is written. Err is git's own last line, or what could
+/// not be done.
+fn snapshot(git: &Git, home: &Path, lwt: &Path, head: &str, message: &str) -> Result<String, String> {
+    let (_index, tree) = capture(git, home, lwt, head)?;
+    let checked = |ran: Result<tasks::Ran, String>| -> Result<String, String> {
+        let ran = ran?;
+        if ran.code == Some(0) {
+            Ok(ran.out.lines().next().unwrap_or("").trim().to_string())
+        } else {
+            Err(tasks::error_line(&ran.err))
+        }
+    };
     // the app's own name, and never a signature (`--no-gpg-sign`): a signing program could wait for a passphrase
     let commit = checked(git.run_with(lwt, &["commit-tree", &tree, "-p", head, "--no-gpg-sign", "-m", message], tasks::TIMEOUT, &IDENTITY))?;
     if !full_id(&commit) {
@@ -184,10 +208,7 @@ fn take_back(git: &Git, lwt: &Path, wt: &Path, name: &str, at: &str) -> bool {
             return false;
         }
     }
-    let branch_ref = format!("refs/heads/{name}");
-    if git.line(lwt, &["rev-parse", "--verify", "--quiet", &branch_ref]).as_deref() == Some(at) {
-        let _ = git.run(lwt, &["branch", "-D", name]);
-    }
+    lane::take_back_branch(git, lwt, name, at);
     true
 }
 
@@ -254,9 +275,16 @@ pub fn make(home: &Path, lead: &str, job: &str) -> Result<Made, String> {
     let names = helper_names(&rec.branch);
     let prefix_name = lane::prefix_of(&rec.branch);
     // the snapshot is taken before the turn below, as a lane's fetch is: it can take a while, and writes nothing a lane's
-    // making or removing reads
+    // making or removing reads. It waits for a landing in the lead to finish and holds the next one off while it reads, so a
+    // helper lane never starts from a folder half way through a patch (GoSpark's `BuddyCheckoutGate`, item 102g)
     let message = format!("Manut AI: {} as it was, for a helper lane of job {job}", rec.branch);
-    let at = snapshot(&git, home, &lwt, &head, &message)?;
+    let at = {
+        let lock = crate::lane_land::lead_lock(&rec.worktree);
+        let _landing = lock.lock().unwrap_or_else(|e| e.into_inner());
+        #[cfg(test)]
+        lane::between::at("helper-snapshot", &lwt);
+        snapshot(&git, home, &lwt, &head, &message)?
+    };
 
     let _turn = lane::WRITING.lock().unwrap_or_else(|e| e.into_inner());
     let exists = git.taken(&lwt, prefix_name)?;
@@ -329,30 +357,30 @@ pub fn make(home: &Path, lead: &str, job: &str) -> Result<Made, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::lane::tests::{commit_in, names, repo, sh};
     use crate::lane::{RemoveAsk, Start};
     use std::collections::BTreeMap;
 
     /// A home folder, the test repository in it, and a lane `kit/promptpay-qr` made from it: the lead.
-    fn lead(name: &str) -> Option<(PathBuf, PathBuf, PathBuf)> {
+    pub(crate) fn lead(name: &str) -> Option<(PathBuf, PathBuf, PathBuf)> {
         let (home, d) = repo(name)?;
         let made = lane::make(&home, &d, &names(&["kit/promptpay-qr"])).unwrap();
         Some((home, d, PathBuf::from(made.worktree)))
     }
 
-    fn s(p: &Path) -> String {
+    pub(crate) fn s(p: &Path) -> String {
         p.to_string_lossy().into_owned()
     }
 
-    fn text(dir: &Path, rel: &str) -> String {
+    pub(crate) fn text(dir: &Path, rel: &str) -> String {
         fs::read_to_string(dir.join(rel)).unwrap_or_else(|e| panic!("{rel}: {e}"))
     }
 
     /// Every file under `dir`, ignored ones and a worktree's own `.git` file included, with its bytes. A repository's `.git`
     /// folder is left out: the objects and refs a helper lane needs are written there, as for any lane.
-    fn files(dir: &Path) -> BTreeMap<String, Vec<u8>> {
+    pub(crate) fn files(dir: &Path) -> BTreeMap<String, Vec<u8>> {
         fn walk(top: &Path, dir: &Path, out: &mut BTreeMap<String, Vec<u8>>) {
             for e in fs::read_dir(dir).unwrap().flatten() {
                 let p = e.path();
@@ -375,16 +403,16 @@ mod tests {
     /// runs), what `git status --porcelain` says (with no optional lock, so the read itself never writes the index), HEAD and
     /// its commit, the stash list, and every file's bytes.
     #[derive(Debug, PartialEq)]
-    struct Seen {
-        index: Vec<u8>,
-        status: String,
-        head: String,
-        commit: String,
-        stash: String,
-        files: BTreeMap<String, Vec<u8>>,
+    pub(crate) struct Seen {
+        pub(crate) index: Vec<u8>,
+        pub(crate) status: String,
+        pub(crate) head: String,
+        pub(crate) commit: String,
+        pub(crate) stash: String,
+        pub(crate) files: BTreeMap<String, Vec<u8>>,
     }
 
-    fn seen(dir: &Path) -> Seen {
+    pub(crate) fn seen(dir: &Path) -> Seen {
         let index = lane::from_cwd(dir, &sh(dir, &["rev-parse", "--git-path", "index"]));
         let bytes = fs::read(&index).unwrap();
         let got = Seen {
@@ -400,7 +428,7 @@ mod tests {
     }
 
     /// `now` against `was`, field by field, so a failure names what changed (a file by its path) rather than printing both.
-    fn same(now: &Seen, was: &Seen, what: &str) {
+    pub(crate) fn same(now: &Seen, was: &Seen, what: &str) {
         assert!(now.index == was.index, "{what}: the index file's bytes changed");
         assert_eq!((&now.status, &now.head, &now.commit, &now.stash), (&was.status, &was.head, &was.commit, &was.stash), "{what}");
         let changed: Vec<&String> = now.files.keys().chain(was.files.keys()).filter(|k| now.files.get(*k) != was.files.get(*k)).collect();

@@ -381,6 +381,14 @@ fn runs_in_a_submodule(key: &str, value: &str) -> bool {
     runs_or_redirects(key, value) || lower == "diff.external" || driver
 }
 
+/// A merge driver's program in the repository's own config (`merge.<driver>.driver`), which git runs for a file whose
+/// attributes name that driver when it merges it. Only a landing merges (`git apply --3way`, item 102g, `lane_land.rs`): the
+/// app's other automatic work never does, so [`runs_or_redirects`] does not list it.
+fn runs_a_merge_driver(key: &str, _value: &str) -> bool {
+    let lower = key.to_ascii_lowercase();
+    lower.strip_prefix("merge.").and_then(|rest| rest.strip_suffix(".driver")).is_some_and(|name| !name.is_empty())
+}
+
 /// [`risky_setting`], with `risky` saying which settings count.
 fn risky_by(listing: &str, scoped: bool, risky: fn(&str, &str) -> bool) -> Option<String> {
     let mut parts = listing.split('\0').filter(|p| !p.is_empty());
@@ -643,6 +651,13 @@ impl Git {
     /// has no work tree, so its submodules are the ones read with `wt`.
     pub(crate) fn lane_config_risk(&self, wt: &Path, repo: &Path) -> Option<String> {
         self.config_risk(wt).or_else(|| listing_risk(&|args: &[&str]| self.run(repo, args).ok(), None, runs_or_redirects))
+    }
+
+    /// What stops a landing in the lane folder `wt` of the repository whose git folder is `repo` (item 102g): what stops any
+    /// automatic work there ([`Git::lane_config_risk`]), and a merge driver's program in the repository's own config, which the
+    /// landing's three-way apply would run ([`runs_a_merge_driver`]).
+    pub(crate) fn landing_config_risk(&self, wt: &Path, repo: &Path) -> Option<String> {
+        self.lane_config_risk(wt, repo).or_else(|| listing_risk(&|args: &[&str]| self.run(wt, args).ok(), None, runs_a_merge_driver))
     }
 
     /// `git -C <cwd> <args>`, at most `limit`.
@@ -1382,6 +1397,10 @@ pub fn remove(home: &Path, worktree: &str, ask: &RemoveAsk) -> Result<Removed, S
     let parent = wt.parent().ok_or("not_a_lane")?.to_path_buf();
     let git = Git::new(home)?;
     let _turn = WRITING.lock().unwrap_or_else(|e| e.into_inner());
+    // never while a helper lane's work lands in this folder, or this helper lane's work lands in its lead (item 102g): a folder
+    // is not taken away half way through a patch, and a landing does not read a folder that is going
+    let lead = crate::lane_land::lead_lock(rec.helper.as_ref().map_or(rec.worktree.as_str(), |h| h.lead.as_str()));
+    let _landing = lead.lock().unwrap_or_else(|e| e.into_inner());
     let repo = real(Path::new(&rec.repo));
     let exists = fs::symlink_metadata(&wt).map(|m| m.is_dir()).unwrap_or(false);
     if exists {
@@ -1422,9 +1441,14 @@ pub fn remove(home: &Path, worktree: &str, ask: &RemoveAsk) -> Result<Removed, S
         }
     }
     let _ = fs::remove_file(&rec_path);
-    // a helper lane's snapshot goes with its record: nothing lands from a lane the app no longer knows (item 102f)
+    // a helper lane's snapshot goes with its record: nothing lands from a lane the app no longer knows (item 102f), and its
+    // landing can no longer be named to take it back, so what was kept for that goes too (item 102g). A kept patch stays: it may
+    // be the only copy of the helper lane's work now
     if let Some(h) = &rec.helper {
         crate::lane_helper::drop_ref(&git, &repo, &h.snapshot, &rec.at);
+        if let Some(folder) = wt.file_name().and_then(|f| f.to_str()) {
+            crate::lane_land::forget(home, &git, &repo, &h.job, folder);
+        }
     }
     // the project's folder goes when it holds no other lane (a folder with anything in it stays)
     let _ = fs::remove_dir(&parent);
