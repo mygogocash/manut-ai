@@ -364,10 +364,11 @@ test("the language picker switches at once (ko, ja); both pages translate and sh
   await seg.getByRole("radio", { name: "한국어" }).click();
   expect(await page.evaluate(() => localStorage.getItem("manut.lang"))).toBe("ko");
   await page.getByTestId("menu-customize").click();
-  await expect(page.getByTestId("nav-automations")).toContainText("자동화");
+  // Customize's entry is "All routines" since item 85i
+  await expect(page.getByTestId("nav-automations")).toContainText("모든 루틴");
   await page.getByTestId("nav-automations").click();
   const auto = page.getByTestId("automations");
-  await expect(auto.getByTestId("header")).toContainText("봇이 정해진 시간에 혼자 하는 일");
+  await expect(auto.getByTestId("header")).toContainText("팀이 정해진 시간에 혼자 하는 일");
   await expect(page.getByTestId("auto-summary")).toHaveText("실패 1 · 멈춤 1");
   await expect(page.getByTestId("auto-row-a1f0c2d9e801").locator(".au-sched")).toHaveText("평일 09:00");
   await expect(page.getByTestId("auto-row-b7e41d0c22aa").locator(".au-sched")).toHaveText("30분마다");
@@ -387,11 +388,12 @@ test("the language picker switches at once (ko, ja); both pages translate and sh
   await page.reload();
   await chatOpen(page);
   await page.getByTestId("menu-customize").click();
-  await expect(page.getByTestId("nav-plugins")).toContainText("플러그인");
+  // "Skills and tools" since item 85i
+  await expect(page.getByTestId("nav-plugins")).toContainText("기술과 도구");
   await page.getByTestId("nav-settings").click();
   await page.getByTestId("language").getByRole("radio", { name: "日本語" }).click();
   await openCustomize(page, "automations");
-  await expect(page.getByTestId("automations").getByTestId("header")).toContainText("オートメーション");
+  await expect(page.getByTestId("automations").getByTestId("header")).toContainText("ルーティン");
   await page.getByTestId("auto-row-a1f0c2d9e801").click();
   await expect(page.getByTestId("auto-run")).toHaveText("今すぐ実行");
   expect(await page.getByTestId("automations").innerText()).not.toMatch(RAW_KEY);

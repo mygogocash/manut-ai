@@ -60,6 +60,8 @@ test("the panel button holds the header's right end: closed it opens Plans, open
   await expect(page.getByTestId("window")).toHaveClass(/\bpanel-open\b/);
   await expect(page.getByTestId("panel-tab-runs")).toHaveAttribute("aria-selected", "true");
   await expect(btn).toHaveAttribute("aria-pressed", "true");
+  // its grey fades in with the Press's move (src/theme/motion.css), so it is read once that has ended
+  await motionDone(page);
   const on = await btn.evaluate((e) => ({ bg: getComputedStyle(e).backgroundColor, img: getComputedStyle(e).backgroundImage }));
   expect(on.img).toBe("none");
   expect(on.bg).not.toBe("rgba(0, 0, 0, 0)");

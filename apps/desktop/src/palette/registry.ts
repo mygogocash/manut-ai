@@ -10,6 +10,7 @@ import { APP_PAGES } from "../settings/pages";
 import { MENU_ROWS, rowPage, type MenuRow } from "../sidebar/menu";
 import type { Places } from "./places";
 import type { IconName } from "../ui/icons";
+import type { EditorInfo } from "../code/editor";
 
 /** What the registry needs of the app: plain data and the functions the app's own buttons call. */
 export interface PaletteCtx {
@@ -21,6 +22,8 @@ export interface PaletteCtx {
   /** Settings › People is offered for this shop */
   people: boolean;
   places: Places;
+  /** the editor "Open in" uses now (the saved choice, else the first installed), or null while none is installed */
+  editor?: EditorInfo | null;
   openPage(page: MenuPage): void;
   /** History with `query` in its search box and the focus there */
   openHistory(query: string): void;
@@ -110,6 +113,18 @@ export const ACTIONS: ActionDef[] = [
     id: "new-lane",
     elsewhere: "lane-new",
     offer: (c) => (c.places.lane ? [{ id: "do:new-lane", label: t("lane.new"), icon: "plus", run: () => c.places.lane!.newLane() }] : []),
+  },
+  {
+    // the Code page's open project, opened in the person's editor: the same call as a lane's menu (code/editor.ts)
+    id: "open-editor-project",
+    elsewhere: "openFolderInEditor(getHost(), root",
+    offer: (c) => (c.editor && c.places.editorProject ? [{ id: "do:open-editor:project", label: t("editor.openProject", { name: c.editor.label }), icon: "code", run: () => c.places.editorProject!.open() }] : []),
+  },
+  {
+    // the open session or lane: a session row's menu and a lane's menu offer the same
+    id: "open-editor-session",
+    elsewhere: "lane-open-editor",
+    offer: (c) => (c.editor && c.places.editorSession ? [{ id: "do:open-editor:session", label: t("editor.openSession", { name: c.editor.label }), icon: "code", run: () => c.places.editorSession!.open() }] : []),
   },
   {
     id: "microphone",

@@ -3796,10 +3796,10 @@ fn add_dir_args(program: &OsString, dir: &Path) -> Vec<OsString> {
 /// How long an agent's rule listing ([`RuleProbe`]) may take before the chat is refused.
 const RULES_DEADLINE: Duration = Duration::from_secs(30);
 
-/// `probe`'s variable and value for a chat of the program `argv` in `cwd`: the program's fixed rule listing runs on
-/// pipes with no input, with the same `PATH` and account variable the chat gets; `probe.build` turns its output into
-/// the value, and a second listing with the value set must satisfy `probe.kept`. Any doubt (the variable already set
-/// in manut's own environment, a failed or slow listing, output it cannot read, rules that did not hold) is
+/// `probe`'s variable and value for a chat of the program `argv` in `cwd`: the program's fixed rule listings run on
+/// pipes with no input, with the same `PATH` and account variable the chat gets, and [`crate::acp_chat::probe_rules`]
+/// reads them (the first form whose output it can read, listed again with the value set, kept). Any doubt (the variable
+/// already set in manut's own environment, failed or slow listings, output it cannot read, rules that did not hold) is
 /// [`no_rules`] (with the agent's name, `label`), and the chat does not start.
 ///
 /// `notes`: the project's instructions file for OpenCode (item 93, [`crate::project_notes`]). It joins the value as an
@@ -3812,9 +3812,9 @@ fn agent_rules(probe: &RuleProbe, label: &str, argv: &[OsString], cwd: &Path, pa
     if std::env::var_os(probe.var).is_some() {
         return Err(no_rules(label));
     }
-    let mut argv = argv.to_vec();
-    argv.extend(probe.args.iter().map(OsString::from));
-    let list = |env: &[(String, String)]| -> Option<String> {
+    let list = |args: &[&str], env: &[(String, String)]| -> Option<String> {
+        let mut argv = argv.to_vec();
+        argv.extend(args.iter().map(OsString::from));
         let mut cmd = command_for(&argv, cwd, Some(path_env.clone()), env).ok()?;
         cmd.stdin(Stdio::null());
         let child = cmd.spawn().ok()?;
@@ -3834,18 +3834,7 @@ fn agent_rules(probe: &RuleProbe, label: &str, argv: &[OsString], cwd: &Path, pa
             _ => None,
         }
     };
-    let first = list(account_env).ok_or_else(|| no_rules(label))?;
-    let value = (probe.build)(&first).ok_or_else(|| no_rules(label))?;
-    let sent = match notes {
-        Some(f) => crate::acp_chat::with_instructions(&value, f).ok_or_else(|| no_rules(label))?,
-        None => value.clone(),
-    };
-    let mut env = account_env.to_vec();
-    env.push((probe.var.to_string(), sent.clone()));
-    match list(&env) {
-        Some(again) if (probe.kept)(&first, &value, &again) => Ok((probe.var.to_string(), sent)),
-        _ => Err(no_rules(label)),
-    }
+    crate::acp_chat::probe_rules(probe, account_env, &list, notes).ok_or_else(|| no_rules(label))
 }
 
 /// Computer use for a chat of Claude Code that is starting (`on`): when the hub runs and macOS has given the app
@@ -4474,7 +4463,8 @@ mod tests {
         fn kept(_first: &str, rules: &str, again: &str) -> bool {
             again.trim() == format!("kept {rules}")
         }
-        let probe = RuleProbe { args: &[], var: "MANUT_TEST_RULES_VAR", build, kept };
+        const FORMS: &[crate::acp_chat::ProbeForm] = &[crate::acp_chat::ProbeForm { args: &[], build, kept }];
+        let probe = RuleProbe { forms: FORMS, var: "MANUT_TEST_RULES_VAR" };
         let tmp = std::env::temp_dir().canonicalize().unwrap();
         let argv: Vec<OsString> = vec!["/bin/sh".into(), "-c".into(), script.into()];
         agent_rules(&probe, "OpenCode", &argv, &tmp, &std::env::var_os("PATH").unwrap(), &[], None)
@@ -4496,6 +4486,158 @@ mod tests {
         }
     }
 
+    /// Item 114: OpenCode 2.3.0, as recorded on this Mac (`tests/fixtures/acp/opencode2-rules.json`), one case of it. A
+    /// stand-in answers as it did: `agent list` prints the help and ends with code 1, `debug agents --standalone` lists the
+    /// agents as JSON, and with the rule variable set lists them with the rules OpenCode was started with.
+    #[cfg(unix)]
+    fn opencode_2_3(case: &str, second: &str) -> (std::path::PathBuf, String, Vec<OsString>) {
+        let p = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests").join("fixtures").join("acp").join("opencode2-rules.json");
+        let all: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(p).unwrap()).unwrap();
+        // a folder of its own for every call: the tests run at once in one process
+        static CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!("manut-oc23-{case}-{}-{n}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let dir = dir.canonicalize().unwrap();
+        let text = |k: &str| all[case][k].as_str().unwrap_or_default().to_string();
+        std::fs::write(dir.join("help"), all["agent_list"].as_str().unwrap()).unwrap();
+        std::fs::write(dir.join("base"), text("debug_agents")).unwrap();
+        std::fs::write(dir.join("second"), if second.is_empty() { text("debug_agents_in_manut") } else { second.to_string() }).unwrap();
+        let d = dir.display();
+        // every listing the stand-in is asked for is noted, so a test sees which forms ran
+        let script = format!(
+            r#"echo "$*" >> '{d}/asked'; case "$*" in "debug agents --standalone") if [ -n "$OPENCODE_CONFIG_CONTENT" ]; then printf '%s' "$OPENCODE_CONFIG_CONTENT" > '{d}/listed-with'; cat '{d}/second'; else cat '{d}/base'; fi;; *) cat '{d}/help'; exit 1;; esac"#
+        );
+        (dir, text("env_sent"), vec!["/bin/sh".into(), "-c".into(), script.into(), "sh".into()])
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn an_opencode_that_lists_its_agents_the_2_3_way_starts_with_its_own_rules_kept() {
+        let row = acp_agent("opencode").unwrap();
+        let probe = row.rules.as_ref().unwrap();
+        for case in ["none", "pattern-deny", "allow", "string-deny", "star-deny"] {
+            let (dir, sent, argv) = opencode_2_3(case, "");
+            assert_eq!(agent_rules(probe, row.label, &argv, &dir, &std::env::var_os("PATH").unwrap(), &[], None), Ok((probe.var.to_string(), sent)), "{case}");
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+
+    /// The rest of the class: a 2.3 listing the rules were not kept in refuses the chat, and so does one of either form that
+    /// cannot be read. A listing whose rules were read but not kept never moves on to the other form.
+    #[test]
+    #[cfg(unix)]
+    fn an_opencode_2_3_that_did_not_keep_the_rules_or_cannot_be_read_does_not_start() {
+        let row = acp_agent("opencode").unwrap();
+        let probe = row.rules.as_ref().unwrap();
+        let p = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests").join("fixtures").join("acp").join("opencode2-rules.json");
+        let all: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(p).unwrap()).unwrap();
+        let base = all["none"]["debug_agents"].as_str().unwrap().to_string();
+        let kept = all["none"]["debug_agents_in_manut"].as_str().unwrap_or_default().to_string();
+        let mut later_allow: serde_json::Value = serde_json::from_str(&kept).unwrap_or_default();
+        if let Some(perms) = later_allow.get_mut(0).and_then(|a| a.get_mut("permissions")).and_then(|p| p.as_array_mut()) {
+            perms.push(serde_json::json!({"action": "shell", "resource": "*", "effect": "allow"}));
+        }
+        for (what, second) in [
+            ("the rules not taken: the same listing again", base.clone()),
+            ("an allow put back after the rules", later_allow.to_string()),
+            ("a listing that is not JSON", "Error: something went wrong".to_string()),
+            ("an empty list", "[]".to_string()),
+        ] {
+            let (dir, _, argv) = opencode_2_3("none", &second);
+            assert_eq!(agent_rules(probe, row.label, &argv, &dir, &std::env::var_os("PATH").unwrap(), &[], None), Err(no_rules(row.label)), "{what}");
+            let asked = std::fs::read_to_string(dir.join("asked")).unwrap_or_default();
+            assert!(!asked.contains("agent list"), "{what}: the other form was tried after rules that were not kept: {asked}");
+            let _ = std::fs::remove_dir_all(dir);
+        }
+        // neither form readable: an agent whose listings both fail
+        for (what, first) in [("not JSON", "Error: Config file is not valid JSON"), ("no build agent", r#"[{"id":"builder","mode":"primary","permissions":[]}]"#), ("an effect it does not know", r#"[{"id":"build","mode":"primary","permissions":[{"action":"*","resource":"*","effect":"maybe"}]}]"#), ("no permissions", r#"[{"id":"build","mode":"primary"}]"#), ("a mode it does not know", r#"[{"id":"build","mode":"primary","permissions":[]},{"id":"x","mode":"new-mode","permissions":[]}]"#)] {
+            let (dir, _, argv) = opencode_2_3("none", "");
+            std::fs::write(dir.join("base"), first).unwrap();
+            assert_eq!(agent_rules(probe, row.label, &argv, &dir, &std::env::var_os("PATH").unwrap(), &[], None), Err(no_rules(row.label)), "{what}");
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+
+    /// An older OpenCode (1.x), which has no `debug agents` but `agent list`, still starts with its rules kept: the stand-in
+    /// answers the new listing with an error, and the old one with the recorded 1.19.5 listings.
+    #[test]
+    #[cfg(unix)]
+    fn an_older_opencode_that_lists_its_agents_with_agent_list_still_starts() {
+        let row = acp_agent("opencode").unwrap();
+        let probe = row.rules.as_ref().unwrap();
+        let p = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests").join("fixtures").join("acp").join("opencode-rules.json");
+        let all: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(p).unwrap()).unwrap();
+        let dir = std::env::temp_dir().join(format!("manut-oc119-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let dir = dir.canonicalize().unwrap();
+        std::fs::write(dir.join("base"), all["pattern-deny"]["agent_list"].as_str().unwrap()).unwrap();
+        std::fs::write(dir.join("second"), all["pattern-deny"]["agent_list_in_manut"].as_str().unwrap()).unwrap();
+        let d = dir.display();
+        let script = format!(
+            r#"case "$*" in "agent list") if [ -n "$OPENCODE_CONFIG_CONTENT" ]; then cat '{d}/second'; else cat '{d}/base'; fi;; *) echo "Unknown command: $*" >&2; exit 1;; esac"#
+        );
+        let argv: Vec<OsString> = vec!["/bin/sh".into(), "-c".into(), script.into(), "sh".into()];
+        let got = agent_rules(probe, row.label, &argv, &dir, &std::env::var_os("PATH").unwrap(), &[], None);
+        assert!(got.as_ref().is_ok_and(|(var, value)| var == probe.var && value.contains("\"bash *\"")), "{got:?}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// The join of item 93 and item 114: OpenCode 2.3.0 (its recorded listings) with the project's instructions file. The value
+    /// OpenCode is listed again with, and then started with, holds all three parts in one object: the ask rules, the formatter
+    /// and language server switches, and the one `instructions` entry; the rules are checked as sent. A second listing that
+    /// did not keep the rules refuses the start, the instructions entry or not; and so does the older form, the same way.
+    #[test]
+    #[cfg(unix)]
+    fn opencode_2_3_with_an_instructions_file_is_checked_with_the_whole_value_it_starts_with() {
+        const FILE: &str = "/home/me/.manut/project-notes/1-2-3.md";
+        let row = acp_agent("opencode").unwrap();
+        let probe = row.rules.as_ref().unwrap();
+        let path = std::env::var_os("PATH").unwrap();
+        for case in ["none", "pattern-deny"] {
+            let (dir, rules, argv) = opencode_2_3(case, "");
+            let got = agent_rules(probe, row.label, &argv, &dir, &path, &[], Some(Path::new(FILE))).unwrap();
+            let v: serde_json::Value = serde_json::from_str(&got.1).unwrap();
+            assert!(v["agent"]["build"]["permission"]["shell *"].is_object(), "{case}: the ask rules");
+            assert_eq!((&v["formatter"], &v["lsp"]), (&json!(false), &json!(false)), "{case}: the switches");
+            assert_eq!(v["instructions"], json!([FILE]), "{case}: the one instructions entry");
+            // the rules text byte for byte, then the entry: exactly what the listing was made with and what starts
+            assert_eq!(got.1, crate::acp_chat::with_instructions(&rules, Path::new(FILE)).unwrap(), "{case}");
+            assert_eq!(std::fs::read_to_string(dir.join("listed-with")).unwrap(), got.1, "{case}: listed again with another value");
+            let _ = std::fs::remove_dir_all(dir);
+        }
+        // the second listing did not keep the rules: the same listing back, as if the value had been dropped
+        let p = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests").join("fixtures").join("acp").join("opencode2-rules.json");
+        let all: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(p).unwrap()).unwrap();
+        let (dir, _, argv) = opencode_2_3("none", all["none"]["debug_agents"].as_str().unwrap());
+        assert_eq!(agent_rules(probe, row.label, &argv, &dir, &path, &[], Some(Path::new(FILE))), Err(no_rules(row.label)));
+        assert!(!std::fs::read_to_string(dir.join("asked")).unwrap_or_default().contains("agent list"));
+        let _ = std::fs::remove_dir_all(dir);
+        // a path the value cannot carry refuses before anything is listed again
+        let (dir, _, argv) = opencode_2_3("none", "");
+        assert_eq!(agent_rules(probe, row.label, &argv, &dir, &path, &[], Some(Path::new("/x/{file:/etc/passwd}/1.md"))), Err(no_rules(row.label)));
+        assert!(!dir.join("listed-with").exists());
+        let _ = std::fs::remove_dir_all(dir);
+        // the older form (1.19.5's recorded listings) carries the same entry after its own rules and switches
+        let p = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests").join("fixtures").join("acp").join("opencode-rules.json");
+        let old: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(p).unwrap()).unwrap();
+        let dir = std::env::temp_dir().join(format!("manut-oc119-notes-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let dir = dir.canonicalize().unwrap();
+        std::fs::write(dir.join("base"), old["pattern-deny"]["agent_list"].as_str().unwrap()).unwrap();
+        std::fs::write(dir.join("second"), old["pattern-deny"]["agent_list_in_manut"].as_str().unwrap()).unwrap();
+        let d = dir.display();
+        let script = format!(
+            r#"case "$*" in "agent list") if [ -n "$OPENCODE_CONFIG_CONTENT" ]; then printf '%s' "$OPENCODE_CONFIG_CONTENT" > '{d}/listed-with'; cat '{d}/second'; else cat '{d}/base'; fi;; *) exit 1;; esac"#
+        );
+        let argv: Vec<OsString> = vec!["/bin/sh".into(), "-c".into(), script.into(), "sh".into()];
+        let got = agent_rules(probe, row.label, &argv, &dir, &path, &[], Some(Path::new(FILE))).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&got.1).unwrap();
+        assert!(v["agent"]["build"]["permission"]["bash *"].is_object() && v["formatter"] == json!(false) && v["lsp"] == json!(false) && v["instructions"] == json!([FILE]), "{}", got.1);
+        assert_eq!(std::fs::read_to_string(dir.join("listed-with")).unwrap(), got.1);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
     /// Item 93: OpenCode's instructions file joins the rule value as its `instructions` entry before the second listing, so
     /// the rules are checked with the very value OpenCode gets, and `kept` still compares the rules alone.
     #[test]
@@ -4508,7 +4650,8 @@ mod tests {
         fn kept(_first: &str, rules: &str, again: &str) -> bool {
             rules == r#"{"agent":{}}"# && again.trim() == format!("kept {}", crate::acp_chat::with_instructions(rules, Path::new(FILE)).unwrap())
         }
-        let probe = RuleProbe { args: &[], var: "MANUT_TEST_RULES_VAR", build, kept };
+        const FORMS: &[crate::acp_chat::ProbeForm] = &[crate::acp_chat::ProbeForm { args: &[], build, kept }];
+        let probe = RuleProbe { forms: FORMS, var: "MANUT_TEST_RULES_VAR" };
         let tmp = std::env::temp_dir().canonicalize().unwrap();
         let script = r#"if [ -n "$MANUT_TEST_RULES_VAR" ]; then echo "kept $MANUT_TEST_RULES_VAR"; else echo 'rules: {"agent":{}}'; fi"#;
         let argv: Vec<OsString> = vec!["/bin/sh".into(), "-c".into(), script.into()];

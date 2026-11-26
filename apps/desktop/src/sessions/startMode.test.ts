@@ -89,4 +89,9 @@ test("a lane's MCP server the shell did not start because its entry differs is n
   t.sinks.get(1)!({ event: "session.note", kind: "mcp_differs", names: [7, null] });
   t.sinks.get(1)!({ event: "session.note", kind: "mcp_differs" });
   expect(notes().length).toBe(before + 1);
+  // item 114: one the shell did not start because it would run the lane's own files is named with that reason
+  t.sinks.get(1)!({ event: "session.note", kind: "mcp_lane_files", names: ["local-tools"] });
+  expect(notes().slice(before + 1)).toEqual([
+    "Not started in this lane: local-tools. It runs files from the lane's own folder, which the lane's agent can change. It starts in a chat in your project folder.",
+  ]);
 });

@@ -18,6 +18,8 @@ import { getWorkflows, useWorkflows } from "../workflows/runner";
 import { standingOf } from "../workflows/allow";
 import { useWorkflowSettings } from "../workflows/settings";
 import { usePlaces } from "./places";
+import { useEditorChoice } from "../code/editor";
+import { getHost } from "../sessions/host";
 import { keyResult } from "./filter";
 import { buildGroups, flat, type Group } from "./groups";
 import type { PaletteCtx, Row } from "./registry";
@@ -119,6 +121,7 @@ export function PaletteView(p: PaletteViewProps) {
 function OpenPalette({ leaving }: { leaving: boolean }) {
   const s = useStore();
   const places = usePlaces();
+  const editor = useEditorChoice(getHost());
   const { jobs } = useJobList();
   const wf = useWorkflows();
   const wfOn = useWorkflowSettings().on;
@@ -138,6 +141,7 @@ function OpenPalette({ leaving }: { leaving: boolean }) {
       buddy: leadBot && leadBot.status !== "offline" && !leadBot.host ? { name: leadBot.name, displayName: leadBot.display_name } : null,
       people: peopleOffered(),
       places,
+      editor,
       openPage: (page) => s.openPage(page),
       openHistory: (q) => s.openPage("history", { find: true, query: q }),
       openSettings: (page) => s.openSettings(page),
@@ -163,7 +167,7 @@ function OpenPalette({ leaving }: { leaving: boolean }) {
       : [];
     return buildGroups(ctx, query, chats);
     // the store's state is the whole of what these rows read
-  }, [s, places, jobs, query, wf, wfOn]);
+  }, [s, places, editor, jobs, query, wf, wfOn]);
   const rows = flat(groups);
   const at = Math.min(cursor, Math.max(0, rows.length - 1));
 

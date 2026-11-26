@@ -1185,7 +1185,10 @@ body.row-dragging .bot-w .bot-new {
 .row-menu {
   position: fixed;
   z-index: 40;
-  width: 168px;
+  /* 168px, wider only for a longer word (Open in Visual Studio Code, item 107) */
+  width: max-content;
+  min-width: 168px;
+  max-width: 260px;
   background: var(--pop);
   border: 1px solid var(--line);
   border-radius: var(--r);
