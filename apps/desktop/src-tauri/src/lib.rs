@@ -33,6 +33,7 @@ mod outpost;
 mod power;
 mod review;
 mod preview;
+mod pulls;
 mod providers;
 mod remote_keys;
 #[cfg(all(test, unix))]
@@ -892,6 +893,31 @@ async fn tasks_remote(cwd: String) -> Result<Option<tasks::Remote>, String> {
     Ok(tasks::folder_remote(std::path::Path::new(&cwd)))
 }
 
+/// Pull requests (item 100): `repo`'s open pull / merge requests with their checks, review and conflict, for the page to sort by
+/// how ready each is to merge (pulls.rs). Only reads, through the person's own `gh` or `glab`.
+#[tauri::command]
+async fn pulls_board(boards: State<'_, Arc<pulls::Boards>>, source: String, repo: String) -> Result<pulls::Board, String> {
+    let src = tasks::Source::parse(&source)?;
+    let b = Arc::clone(&boards);
+    tauri::async_runtime::spawn_blocking(move || b.board(src, &repo)).await.map_err(|e| e.to_string())?
+}
+
+/// Pull requests: one request opened in the app, its description, checks and changed files with their counts. Only reads.
+#[tauri::command]
+async fn pulls_view(boards: State<'_, Arc<pulls::Boards>>, source: String, repo: String, number: u64) -> Result<pulls::PullDetail, String> {
+    let src = tasks::Source::parse(&source)?;
+    let b = Arc::clone(&boards);
+    tauri::async_runtime::spawn_blocking(move || b.detail(src, &repo, number)).await.map_err(|e| e.to_string())?
+}
+
+/// Pull requests: the merge methods `repo` allows (GitHub's answer; all three otherwise). Only reads.
+#[tauri::command]
+async fn pulls_methods(boards: State<'_, Arc<pulls::Boards>>, source: String, repo: String) -> Result<pulls::Methods, String> {
+    let src = tasks::Source::parse(&source)?;
+    let b = Arc::clone(&boards);
+    tauri::async_runtime::spawn_blocking(move || b.methods(src, &repo)).await.map_err(|e| e.to_string())?
+}
+
 /// The git branch of a session's folder, from its `.git/HEAD` only (no program runs); "" outside a repository.
 #[tauri::command]
 async fn session_branch(cwd: String) -> Result<String, String> {
@@ -1094,6 +1120,17 @@ async fn review_ask_merge(asks: State<'_, Arc<review::Ledger>>, worktree: String
     let home = user_home()?;
     let l = Arc::clone(&asks);
     tauri::async_runtime::spawn_blocking(move || l.ask_merge(&home, &worktree, number, &method, credits.unwrap_or(false))).await.map_err(|e| e.to_string())?
+}
+
+/// The ask to merge request `number` of `repo` from the Pull requests list (item 100; review.rs `ask_merge_pull`): `folder` is
+/// the project it was listed for, whose remote must name `repo`. A lane's request is asked as the lane's own Merge; any other the
+/// same way, naming its repository and branch. Writes nothing.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+async fn review_ask_merge_pull(asks: State<'_, Arc<review::Ledger>>, folder: String, source: String, repo: String, number: u64, method: String, credits: Option<bool>) -> Result<review::Ask, String> {
+    let home = user_home()?;
+    let l = Arc::clone(&asks);
+    tauri::async_runtime::spawn_blocking(move || l.ask_merge_pull(&home, &folder, &source, &repo, number, &method, credits.unwrap_or(false))).await.map_err(|e| e.to_string())?
 }
 
 /// The person's answer to ask `id`, once approval-core settled it on the page (review.rs `settle`): a No runs nothing, a Yes runs
@@ -1617,6 +1654,7 @@ pub fn run() {
             app.manage(Arc::new(gh_me::Me::default()));
             // the asks that push a lane and open or merge its pull request, each settled once (review.rs)
             app.manage(Arc::new(review::Ledger::default()));
+            app.manage(Arc::new(pulls::Boards::default()));
             app.manage(Arc::new(skill_links::Installs::default()));
             // free space on the home folder's volume, read once a minute (disk.rs)
             app.manage(disk::Disk::start(app.handle().clone(), user_home().ok()));
@@ -1780,6 +1818,7 @@ fn commands(invoke: tauri::ipc::Invoke) -> bool {
         title_cancel,
         review_ask_open,
         review_ask_merge,
+        review_ask_merge_pull,
         review_settle,
         review_withdraw,
         session_main_moved,
@@ -1813,6 +1852,9 @@ fn commands(invoke: tauri::ipc::Invoke) -> bool {
         tasks_list,
         tasks_view,
         tasks_remote,
+        pulls_board,
+        pulls_view,
+        pulls_methods,
         gh_accounts,
         source_tools,
         tasks_me,

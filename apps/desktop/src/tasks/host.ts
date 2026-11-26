@@ -6,7 +6,7 @@
 // only an account id (`<login>@<host>`), a section word and a page number; a non-active account's token never
 // reaches the page (the shell reads it for one `gh` call and drops it).
 import { maskSecrets } from "../lib/secrets";
-import type { CliSource, CliStatus, GhAccount, GhAccounts, MeFailKind, MeItem, MePage, MeSection, TaskDetail, TaskFilter, TaskItem, TaskKind, TaskPage, TaskRemote } from "./types";
+import type { CliSource, CliStatus, GhAccount, GhAccounts, MeFailKind, MeItem, MePage, MeSection, MergeMethods, PullBoard, PullDetail, PullRow, TaskDetail, TaskFilter, TaskItem, TaskKind, TaskPage, TaskRemote } from "./types";
 import { PAGE } from "./types";
 
 /** A "나" list that failed, with why (`rate`: GitHub's rate limit, `auth`: sign in again, `other`). */
@@ -40,6 +40,13 @@ export interface TaskHost {
   /** One page of a "나" section as `account`; fails with a MeFail. `fresh` (⟳, window focus): read again past a
    *  short gap instead of the minute's answer. */
   me(account: string, section: MeSection, page: number, fresh?: boolean): Promise<MePage>;
+  /** Pull requests (item 100, src-tauri/src/pulls.rs): `repo`'s open requests with their checks, review and conflict. Only reads;
+   *  the shell gives a list read within the minute again without asking the host. */
+  board?(source: CliSource, repo: string): Promise<PullBoard>;
+  /** One request opened in the app: description, checks, changed files and counts. Only reads. */
+  pullView?(source: CliSource, repo: string, number: number): Promise<PullDetail>;
+  /** The merge methods `repo` allows. Only reads. */
+  methods?(source: CliSource, repo: string): Promise<MergeMethods>;
 }
 
 class TauriTaskHost implements TaskHost {
@@ -69,6 +76,18 @@ class TauriTaskHost implements TaskHost {
     const { invoke } = await this.core();
     return invoke<MePage>("tasks_me", { account, section, page, fresh }).catch((e) => Promise.reject(failOf(e)));
   }
+  async board(source: CliSource, repo: string) {
+    const { invoke } = await this.core();
+    return invoke<PullBoard>("pulls_board", { source, repo });
+  }
+  async pullView(source: CliSource, repo: string, number: number) {
+    const { invoke } = await this.core();
+    return invoke<PullDetail>("pulls_view", { source, repo, number });
+  }
+  async methods(source: CliSource, repo: string) {
+    const { invoke } = await this.core();
+    return invoke<MergeMethods>("pulls_methods", { source, repo });
+  }
 }
 
 // ---- Mock -----------------------------------------------------------------------------------
@@ -93,6 +112,12 @@ export interface MockTasks {
     /** `<login>@<host>` -> why every list of that account fails */
     fail?: Record<string, { kind: MeFailKind; line: string }>;
   };
+  /** Pull requests: `<source>:<repo>` -> every open request the list reads */
+  boards?: Record<string, PullRow[]>;
+  /** `<source>:<repo>:<number>` -> the request's detail beside its row (else none) */
+  pullDetails?: Record<string, Partial<Omit<PullDetail, "pull">>>;
+  /** `<source>:<repo>` -> the merge methods it allows (else all three, not read) */
+  methods?: Record<string, MergeMethods>;
 }
 
 export type MockTaskCall =
@@ -101,7 +126,10 @@ export type MockTaskCall =
   | { op: "view"; source: CliSource; repo: string; kind: TaskKind; number: number; account?: string }
   | { op: "remote"; cwd: string }
   | { op: "ghAccounts"; fresh: boolean }
-  | { op: "me"; account: string; section: MeSection; page: number; fresh: boolean };
+  | { op: "me"; account: string; section: MeSection; page: number; fresh: boolean }
+  | { op: "board"; source: CliSource; repo: string }
+  | { op: "pullView"; source: CliSource; repo: string; number: number }
+  | { op: "methods"; source: CliSource; repo: string };
 
 type G = { __manutTasks?: MockTasks; __manutTaskCalls?: MockTaskCall[] };
 
@@ -162,11 +190,30 @@ class MockTaskHost implements TaskHost {
     const base = section === "mentions" ? 30 : 50;
     return { items: all.slice(page * base, (page + 1) * base), more: all.length > (page + 1) * base };
   }
+  async board(source: CliSource, repo: string): Promise<PullBoard> {
+    this.log({ op: "board", source, repo });
+    await new Promise((r) => setTimeout(r, 30));
+    const err = this.data.errors?.[`${source}:${repo}`];
+    if (err) throw new Error(err);
+    return { items: this.data.boards?.[`${source}:${repo}`] ?? [], more: false, at: Math.floor(Date.now() / 1000) };
+  }
+  async pullView(source: CliSource, repo: string, number: number): Promise<PullDetail> {
+    this.log({ op: "pullView", source, repo, number });
+    await new Promise((r) => setTimeout(r, 30));
+    const pull = (this.data.boards?.[`${source}:${repo}`] ?? []).find((p) => p.number === number);
+    if (!pull) throw new Error(`no #${number}`);
+    const d = this.data.pullDetails?.[`${source}:${repo}:${number}`] ?? {};
+    return { pull, body: d.body ?? "", checks: d.checks ?? [], files: d.files ?? [], additions: d.additions ?? null, deletions: d.deletions ?? null, changed: d.changed ?? null };
+  }
+  async methods(source: CliSource, repo: string): Promise<MergeMethods> {
+    this.log({ op: "methods", source, repo });
+    return this.data.methods?.[`${source}:${repo}`] ?? { merge: true, squash: true, rebase: true, read: false };
+  }
 }
 
 // ---- Masking --------------------------------------------------------------------------------
 
-const maskItem = (i: TaskItem): TaskItem => ({ ...i, title: maskSecrets(i.title), labels: i.labels.map((l) => ({ ...l, name: maskSecrets(l.name) })) });
+const maskItem = <T extends TaskItem>(i: T): T => ({ ...i, title: maskSecrets(i.title), labels: i.labels.map((l) => ({ ...l, name: maskSecrets(l.name) })) });
 
 /** A failed call as an Error whose message has no token-like string in it. */
 const masked = (e: unknown) => new Error(maskSecrets(e instanceof Error ? e.message : String(e)));
@@ -208,6 +255,20 @@ export class MaskingTaskHost implements TaskHost {
       return Promise.reject(new MeFail(f.kind, maskSecrets(f.message)));
     });
     return { ...p, items: p.items.map((i) => ({ ...i, title: maskSecrets(i.title), labels: i.labels.map((l) => ({ ...l, name: maskSecrets(l.name) })) })) };
+  }
+  async board(source: CliSource, repo: string): Promise<PullBoard> {
+    if (!this.inner.board) throw new Error("no_shell");
+    const b = await this.inner.board(source, repo).catch((e) => Promise.reject(masked(e)));
+    return { ...b, items: b.items.map(maskItem) };
+  }
+  async pullView(source: CliSource, repo: string, number: number): Promise<PullDetail> {
+    if (!this.inner.pullView) throw new Error("no_shell");
+    const d = await this.inner.pullView(source, repo, number).catch((e) => Promise.reject(masked(e)));
+    return { ...d, pull: maskItem(d.pull), body: maskSecrets(d.body), checks: d.checks.map((c) => ({ ...c, name: maskSecrets(c.name) })), files: d.files.map((f) => ({ ...f, path: maskSecrets(f.path) })) };
+  }
+  methods(source: CliSource, repo: string): Promise<MergeMethods> {
+    if (!this.inner.methods) return Promise.resolve({ merge: true, squash: true, rebase: true, read: false });
+    return this.inner.methods(source, repo).catch((e) => Promise.reject(masked(e)));
   }
 }
 

@@ -64,6 +64,8 @@ const WHY_CODES = [
   "not_pushed",
   "bad_method",
   "bad_number",
+  "not_this_project",
+  "method_not_allowed",
 ] as const;
 
 /** Why a pull request cannot merge now, as the shell says it (`cannot_merge:<why>`). */
@@ -118,6 +120,8 @@ export interface ReviewViewProps {
   /** Back from the ask to what it was made from: the ask is taken back first. */
   onChange?: () => void;
   onOpenUrl?: (url: string) => void;
+  /** The merge methods the repository allows (the Pull requests list reads them, item 100); none: all three. */
+  methods?: readonly MergeMethod[];
 }
 
 function TextBox({ text, testId }: { text: string; testId: string }) {
@@ -302,7 +306,7 @@ export function ReviewView(p: ReviewViewProps) {
           <label>
             <span>{t("review.merge.method")}</span>
             <select value={s.method} onChange={(e) => p.onMethod?.(e.currentTarget.value as MergeMethod)} data-testid="review-method-pick">
-              {MERGE_METHODS.map((m) => (
+              {(p.methods?.length ? MERGE_METHODS.filter((m) => p.methods!.includes(m)) : MERGE_METHODS).map((m) => (
                 <option key={m} value={m}>
                   {t(`review.method.${m}` as Key)}
                 </option>
