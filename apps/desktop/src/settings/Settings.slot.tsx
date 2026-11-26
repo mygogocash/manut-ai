@@ -35,6 +35,7 @@ import { SourceControlPage } from "./SourceControlPage";
 import { ArtifactLinksPage } from "./ArtifactLinksPage";
 import { RemotePage } from "./RemotePage";
 import { setSuggestOn, useSuggestOn } from "../lib/suggest";
+import { TITLE_EFFORTS, TITLE_MODELS, setTitleModel, useTitleModel } from "../lib/titleModel";
 import { VoicePage } from "./VoicePage";
 import { ComputerPage } from "./ComputerPage";
 import { McpSkillsPage } from "./mcp/McpSkillsPage";
@@ -666,6 +667,43 @@ function SuggestToggle() {
   return <Toggle on={on} label={t("suggest.title")} onChange={setSuggestOn} testId="set-suggest" />;
 }
 
+/** Settings › General › Titles and words (lib/titleModel.ts, item 96): off until the person turns it on, since each title is an extra
+ *  request on their own plan; the model and the effort that write them. */
+export function TitlesRows() {
+  const m = useTitleModel();
+  return (
+    <>
+      <div className="st-gh">{t("titles.group")}</div>
+      <div className="st-grp" data-testid="set-titles">
+        <Row title={t("titles.on.title")} hint={t("titles.on.hint")}>
+          <Toggle on={m.on} label={t("titles.on.title")} onChange={(on) => setTitleModel({ on })} testId="set-titles-on" />
+        </Row>
+        <Row title={t("titles.model")} hint={t("titles.model.hint")}>
+          <select className="dev-in" value={m.model} aria-label={t("titles.model")} onChange={(e) => setTitleModel({ model: e.currentTarget.value as (typeof TITLE_MODELS)[number] })} data-testid="set-titles-model">
+            {TITLE_MODELS.map((v) => (
+              <option key={v} value={v}>
+                {t(`titles.model.${v || "default"}` as Key)}
+              </option>
+            ))}
+          </select>
+        </Row>
+        <Row title={t("titles.effort")}>
+          <select className="dev-in" value={m.effort} aria-label={t("titles.effort")} onChange={(e) => setTitleModel({ effort: e.currentTarget.value as (typeof TITLE_EFFORTS)[number] })} data-testid="set-titles-effort">
+            {TITLE_EFFORTS.map((v) => (
+              <option key={v} value={v}>
+                {t(`titles.effort.${v || "default"}` as Key)}
+              </option>
+            ))}
+          </select>
+        </Row>
+        <Row title={t("suggest.agents")} hint={t("titles.agentsHint")}>
+          <Value>{t("suggest.agentsValue")}</Value>
+        </Row>
+      </div>
+    </>
+  );
+}
+
 function GeneralPage() {
   const s = useStore();
   const h = s.hello;
@@ -712,6 +750,7 @@ function GeneralPage() {
           <Value>{t("suggest.agentsValue")}</Value>
         </Row>
       </div>
+      <TitlesRows />
       <div className="st-grp">
         <Row title={t("tasks.barSetting")} hint={t("tasks.barSettingHint")}>
           <TasksBarToggle />
