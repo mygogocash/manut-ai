@@ -47,6 +47,7 @@ import { head } from "./ja/head";
 import { history } from "./ja/history";
 import { home } from "./ja/home";
 import { id } from "./ja/id";
+import { imp } from "./ja/imp";
 import { inbox } from "./ja/inbox";
 import { job } from "./ja/job";
 import { key } from "./ja/key";
@@ -201,6 +202,7 @@ export const ja: Record<Key, string> = {
   ...history,
   ...home,
   ...id,
+  ...imp,
   ...inbox,
   ...job,
   ...key,

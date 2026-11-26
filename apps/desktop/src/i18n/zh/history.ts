@@ -12,4 +12,5 @@ export const history: Record<keyof typeof en, string> = {
   "history.lane.all": "全部",
   "history.archive": "归档",
   "history.archiveN": "归档 ({n})",
+  "history.pastMore": "显示已导入项目中 Claude Code 和 Codex 各自最新的 {n} 个对话。",
 };

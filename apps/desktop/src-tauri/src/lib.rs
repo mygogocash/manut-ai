@@ -28,6 +28,7 @@ mod lane_config;
 mod lane_diff;
 mod outside_use;
 mod past_chats;
+mod import_past;
 mod new_project;
 mod project_icon;
 mod project_notes;
@@ -1523,6 +1524,28 @@ async fn past_chats_list(agent: String, cwds: Vec<String>) -> Result<Vec<past_ch
     tauri::async_runtime::spawn_blocking(move || past_chats::list(&past_home(&agent, None)?, &agent, &cwds)).await.map_err(|e| e.to_string())?
 }
 
+/// The newest conversations Claude Code or Codex keeps across the folders brought over (item 101e), for History: bounded by `max`
+/// whatever the number of folders (past_chats.rs `recent`), read-only (rule 30).
+#[tauri::command]
+async fn past_chats_recent(agent: String, cwds: Vec<String>, max: usize) -> Result<Vec<past_chats::PastChat>, String> {
+    tauri::async_runtime::spawn_blocking(move || past_chats::recent(&past_home(&agent, None)?, &agent, &cwds, max)).await.map_err(|e| e.to_string())?
+}
+
+/// What could be brought over from Claude Code and Codex (item 101e, import_past.rs): the folders they worked in that are still on
+/// this Mac, with their conversations counted, newest first, and what was skipped. Read from the homes past chats reads, with its
+/// readers; writes nothing, and only folders and counts come back. The page asks nothing but this.
+#[tauri::command]
+async fn import_past_scan() -> Result<import_past::Found, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let home = user_home()?;
+        let claude = past_home("claude", None).ok();
+        let codex = past_home("codex", None).ok();
+        Ok(import_past::scan(&home, claude.as_deref(), codex.as_deref(), &import_past::Limits::default()))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// What Claude Code or Codex used in sessions outside Manut AI, read from the tool's own files on this Mac (item 106,
 /// `outside_use.rs`): numbers, dates and a project folder's name, never a path above it or a word of a conversation. The
 /// page names the tool and the ids of the sessions it started (matched, never opened) and a number to cancel by; the folders
@@ -1904,6 +1927,8 @@ fn commands(invoke: tauri::ipc::Invoke) -> bool {
         editors_installed,
         session_open_in_editor,
         past_chats_list,
+        past_chats_recent,
+        import_past_scan,
         outside_use_scan,
         outside_use_cancel,
         past_chat_messages,
