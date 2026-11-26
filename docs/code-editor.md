@@ -167,7 +167,8 @@ The states whose rules are pure functions, with their tests, then the screens th
   message, from the list in `src/lib/agentCredits.json`; `src/lib/sourceControl.ts` keeps the page's choices.
 - Workflows (item 77b, see [Workflows](#workflows)): `src-tauri/src/workflows.rs` reads `~/.manut/workflows/`; `src/workflows/` checks each
   file, runs it as a lane step by step (`sessions.ts` `startWorkflowLane`), keeps its history and its clock, and draws Settings ›
-  Workflows; the palette's "Run workflow" presses its Run now.
+  Workflows; the palette's "Run workflow" presses its Run now. Item 91: a run starts only from the exact text the person allowed
+  (`workflows/allow.ts`), in the top folder of a git repository the shell checked (`workflows.rs` `project`), in a lane of its own.
 - The stand-in coding agent (`sessions/host.ts`) answers `/kit install`, `test`, `edit`, `outside`, `key`, `shop`, `merge`,
   `commit` and `deploy`, and the mock host answers what git would say for the canvas's project (`code/mockMoved.ts`), so each
   state can be seen in a browser; `e2e/kit-code.spec.ts` and `e2e/kit-preview-moved.spec.ts` walk them. It also answers
@@ -1303,11 +1304,41 @@ own, and the app's other files are JSON (decisions, 25 Nov 2026).
 100, each with its text or why it did not read it: a name that is not plain, a link (never read through one, nor a folder that is
 one), over 64 KB, not UTF-8. Dot-files, subfolders and other files are left alone. `workflows/file.ts` checks every field; the page
 lists a file that is not a workflow with its first reason in words, and a second workflow of the same name as a duplicate of the
-first. The app never writes, renames or removes a file there; Show folder (`workflows_folder`) only makes the folder.
+first. The app never writes, renames or removes a file there; Show folder (`workflows_folder`) only makes the folder. A file any of
+whose text holds a character the card cannot show as an agent reads it is refused whole (item 91): controls other than a line
+break or a tab, format characters (zero-width marks and joiners, text-direction overrides and isolates, the invisible tag
+letters, a soft hyphen), private-use and unassigned code points and lone surrogates. So what the person reads is all the agent
+is sent.
 
-**A run.** Run now (or the clock) reads the folder again, and the run starts a lane the way a person's own lane starts
-(`startWorkflowLane` in `sessions/sessions.ts`): a New session chat on the workflow's agent in its project, started by `start` with
-step 1 as its first message, so it has a branch and a folder of its own and is listed in the Lanes band. It is made beside the
+**Allowing it (item 91).** Anything that can write in `~/.manut/workflows` (the person, another program of theirs, an agent) can
+write a workflow, so a file runs only once the person has read it. Each card shows, under "Steps and project", every step's text
+in full and in order (kept as written, line breaks included, never cut), the project's whole folder and the agent, with "Allow
+this workflow to run" under them. The panel is open by itself while the workflow is not allowed, and stays in the page, hidden,
+while closed. The press allows the text the card drew: what is kept is the SHA-256 of the file's exact text (`file.ts` `digest`)
+and the project's real path from the shell's check, in `localStorage` `manut.workflows.allowed` beside the other Settings
+choices, never in the workflows folder. When the folder holds anything else for that file by the time the press lands, nothing is
+kept. "Stop allowing" takes it back. A record that cannot be read, or an entry that is not exactly an allowance, allows nothing.
+A new file, a renamed one, one that took another workflow's name (`0-x.json` sorting first makes the allowed file a duplicate,
+which runs neither) and one whose text changed in any way, a space included, are not allowed: Run now cannot be pressed, the card
+says "Not allowed to run yet ..." or "This workflow's file changed. Look at it again.", and the palette does not offer it. The
+Workflows switch is still the master switch.
+
+**Its project (item 91).** The shell checks the project when the person allows the workflow and again before every run
+(`workflows_project`, `workflows.rs` `project`). It must be the top folder of a git repository (`.git` right in it, and `git
+rev-parse --show-toplevel`, run as the app's automatic work runs git, naming that same folder), written as its real path (a link
+on the way, or letters the disk writes differently, is refused), and not the home folder, a disk's top (no folder above it, or on
+another disk than the one above), a folder that holds the home folder or the app's own folder (wherever `~/.manut` really is),
+or anything inside the app's own folder or a lane's folder. Each refusal is a short code the card says in words (`missing`,
+`link`, `too_broad`, `app_folder`, `not_repo`, `no_git`); no answer, or one the page does not know, is `unchecked` and allows
+nothing. A project whose real path is not the one allowed does not run (`moved`).
+
+**A run.** Run now (or the clock) reads the folder again, and only while that file is exactly the text allowed and its project
+passes the shell's check again does the run start a lane the way a person's own lane starts (`startWorkflowLane` in
+`sessions/sessions.ts`): a New session chat on the workflow's agent in the project's checked real path, started by `start` with
+step 1 as its first message, so it has a branch and a folder of its own and is listed in the Lanes band. The steps it sends are
+the ones read from that same text. A workflow's lane that could not get a branch and folder of its own (no lane maker, git
+refusing, an agent that is not a chat) starts no agent at all: `start` closes the session and `startWorkflowLane` answers
+`no_lane`. Each run that did not start, by the clock or by a press, is kept as skipped with why, and the card says it. It is made beside the
 person's drafts and never in place of one, is not opened in front of them, changes neither how they last opened the agent nor
 their last folder, and is named after the workflow. When a step's turn ends `done`, the next step goes through `send`, as the
 person's next message would, until the last.
@@ -1347,19 +1378,28 @@ skipped runs up to Settings' "Skipped runs kept" (0 to 500, default 50; 0 keeps 
 the app closed in the middle of says "The app closed while it ran" when the app opens again. The page shows each workflow's newest
 10.
 
-**The command palette** lists "Run workflow: <name>" for each workflow whose Run now can be pressed now. It opens Settings › Workflows
+**The command palette** lists "Run workflow: <name>" for each workflow whose Run now can be pressed now (on, allowed as the file is
+now, and not running). It opens Settings › Workflows
 and presses that Run now, so it adds no power of its own (`palette/registry.ts`, held to the button by `registry.test.ts`), and
 "Settings › Workflows" is in its Go to list as every Settings page is.
 
-**Files.** `src-tauri/src/workflows.rs` (the folder, with its tests); `src/workflows/file.ts` (the file and its checks),
-`schedule.ts` (the clock), `history.ts` (the runs and their bounds), `settings.ts` (the switch and Skipped runs kept), `runner.ts`
-(runs, the clock's ticks, the store the page reads), `host.ts` (the shell, and a mock for a browser seeded through
-`window.__manutMockWorkflows`), `words.ts`, `WorkflowsPage.tsx` and `workflows.css`; `sessions/sessions.ts` (`startWorkflowLane`,
-`onChatEvent`). `runner.test.ts` drives runs through a real sessions store and app store with the lanes' stand-in shell, and
-`e2e/workflows.spec.ts` walks the page, a run of two steps with the stand-in agent, the Lanes band and the palette.
+**Files.** `src-tauri/src/workflows.rs` (the folder and the project's check, with their tests); `src/workflows/file.ts` (the file
+and its checks), `allow.ts` (what the person allowed), `schedule.ts` (the clock), `history.ts` (the runs and their bounds),
+`settings.ts` (the switch and Skipped runs kept), `runner.ts` (runs, the clock's ticks, the store the page reads), `host.ts` (the
+shell, and a mock for a browser seeded through `window.__manutMockWorkflows`, whose `projects` says what the stand-in shell answers
+for a project), `words.ts`, `WorkflowsPage.tsx` and `workflows.css`; `sessions/sessions.ts` (`startWorkflowLane`, `onChatEvent`).
+`runner.test.ts` drives runs through a real sessions store and app store with the lanes' stand-in shell, with tables of changed
+files and refused projects; `workflows.rs`' tests check the project rule against real folders and repositories; and
+`e2e/workflows.spec.ts` walks the page, the allow step, a run of two steps with the stand-in agent, a changed file, the Lanes band
+and the palette.
 
 ## Left for later (no owner needed)
 
+- From item 91 (Workflows): the allowance lives in the app's web storage on this computer, which a program of the person's can
+  reach as it can any of their files; the dial must ask before any agent writes under `~/.manut` or the app's own storage (named
+  in item 91's report). Between the run's check of the project and git making the lane, a folder swapped for a link would be read
+  by git as it is then: a link to a folder that is no repository makes no lane, so nothing runs, but a link to another repository
+  would make the lane from that one. On Windows a disk's top is known only as a drive's root (no mount check), untried.
 - From item 77b (Workflows): a New workflow form that writes a file (today a person writes the file, or asks an agent to); a run
   that goes on after the app restarts (today it ends as "The app closed while it ran"); a run on another project's lane settings
   (the dial is always Asks every time); a workflow's own steps that branch, wait or ask the person (T3 Code's `ask` and `step`):

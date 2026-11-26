@@ -978,6 +978,15 @@ async fn workflows_folder() -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || workflows::make(&home).map(|p| p.to_string_lossy().into_owned())).await.map_err(|e| e.to_string())?
 }
 
+/// Settings › Workflows (item 91): whether a workflow's project is a folder a run may start in (workflows.rs `project`): its real
+/// path, or a short code (`missing`, `link`, `too_broad`, `app_folder`, `not_repo`, `no_git`). Asked when the person allows a
+/// workflow and again before every run. Only reads, and asks git nothing but where its top folder is.
+#[tauri::command]
+async fn workflows_project(project: String) -> Result<String, String> {
+    let home = user_home()?;
+    tauri::async_runtime::spawn_blocking(move || workflows::project(&home, &project).map_err(str::to_string)).await.map_err(|e| e.to_string())?
+}
+
 /// Settings › Worktrees: the folder the person chose for lanes' folders, checked and made (lane.rs `check_lanes_root`): its real
 /// path, or a short code (`bad_root`, `root_too_broad`, `root_in_checkout`, `root_unwritable`).
 #[tauri::command]
@@ -1665,6 +1674,7 @@ fn commands(invoke: tauri::ipc::Invoke) -> bool {
         lane_root_check,
         workflows_read,
         workflows_folder,
+        workflows_project,
         agent_config_list,
         skill_bundle_read,
         skill_link_read,

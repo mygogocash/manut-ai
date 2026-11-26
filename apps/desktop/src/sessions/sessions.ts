@@ -422,20 +422,21 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
    *  the session's agent works there: several lanes work at once without touching each other's files, and the developer's
    *  folder (its branch, index, stash and HEAD) never changes because of a lane. Never fatal and never pushed: a lane with no
    *  folder (no repository, a shell older than lanes' folders, git refusing) works in the session's folder, and its row shows
-   *  no branch. The chat says where the lane works and what did not come along. */
-  const startLane = async (id: string) => {
+   *  no branch. The chat says where the lane works and what did not come along. True when the lane has a folder of its own: a
+   *  workflow's lane starts only then (item 91, `start`). */
+  const startLane = async (id: string): Promise<boolean> => {
     const r = rec(id);
-    if (!r?.cwd || !host.laneWorktree) return;
+    if (!r?.cwd || !host.laneWorktree) return false;
     try {
       const current = await host.branch(r.cwd);
       const ws = worktreeSettings();
       const plan = planLaneBranch({ title: r.title || r.promptTitle || "", current, prefix: ws.prefix });
-      if (plan.kind === "none") return;
+      if (plan.kind === "none") return false;
       const made = await host.laneWorktree(r.cwd, plan.names, startOf(ws));
       if (!rec(id)) {
         // closed while its folder was made: the folder goes as a close takes it (nothing is in it yet)
         void letLaneGo({ name: made.branch, base: made.base, dir: made.dir, worktree: made.worktree });
-        return;
+        return false;
       }
       patchRec(id, { lane: { name: made.branch, base: made.base, dir: made.dir, worktree: made.worktree } });
       const key = keys.get(id);
@@ -451,6 +452,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
         said.push(tr("lane.note.install"));
         store().dispatch({ type: "system.note", bot: key, text: said.join(" "), now: Date.now() });
       }
+      return true;
     } catch (e) {
       /* no folder of its own. A folder the person chose that cannot be used now is said: the lane then works in the session's
          folder, not where they asked, and nothing is made anywhere else. */
@@ -459,6 +461,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
       if (key && /^root_|^bad_root$/.test(code)) {
         store().dispatch({ type: "system.note", bot: key, text: `${tr("worktrees.root.chat")} ${tr(`worktrees.root.${code}` as Key)}`, now: Date.now() });
       }
+      return false;
     }
   };
 
@@ -1285,9 +1288,11 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
    * drafts, never in place of one, is not opened in front of them, and changes neither how they last opened the agent nor their
    * last folder. It is named after the workflow, marked `workflow` (Kit's dial asks before every change in it, whatever the
    * project's dial says) and starts in its agent's Ask mode. `made` hears its id before anything runs, so no event of its first
-   * turn is missed. False when it did not start.
+   * turn is missed. `failed` when it did not start; `no_lane` when no branch and folder of its own could be made (item 91): then
+   * no agent was started and the session is gone, since a lane working in the project's own folder is not one a workflow may
+   * have.
    */
-  const startWorkflowLane = async (p: { agent: AgentId; cwd: string; workflow: string; first: string; made?: (id: string) => void }): Promise<boolean> => {
+  const startWorkflowLane = async (p: { agent: AgentId; cwd: string; workflow: string; first: string; made?: (id: string) => void }): Promise<"started" | "failed" | "no_lane"> => {
     const id = `s${++seq}`;
     const ask = ASK_MODE[p.agent];
     const r: SessionRec = {
@@ -1305,9 +1310,10 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     set({ list: [r, ...state.list] });
     p.made?.(id);
     const started = await start(id, p.first);
+    if (laneless.delete(id)) return "no_lane";
     const key = keys.get(id);
     if (started && key) store().dispatch({ type: "system.note", bot: key, text: tr("wf.lane.note", { name: p.workflow }), now: Date.now() });
-    return started;
+    return started ? "started" : "failed";
   };
 
   /** New session here: a draft with session `id`'s agent and folder (an open draft takes them instead). */
@@ -1478,6 +1484,15 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
    * once). A draft opened as a terminal (the agent's own, or the person's pick) starts the program in the folder and
    * is sent nothing. From here the agent, folder and way of opening are fixed.
    */
+  /** Workflow lanes `start` closed before their agent started, because no lane of their own could be made (item 91). */
+  const laneless = new Set<string>();
+  /** A workflow's lane with no branch and folder of its own: it never starts its agent, and goes (`close`, nothing is in it). */
+  const refuseLaneless = (id: string): false => {
+    laneless.add(id);
+    close(id);
+    return false;
+  };
+
   const start = async (id: string, first?: string, startedAs?: string, files: OutFile[] = []): Promise<boolean> => {
     const r0 = rec(id);
     if (!r0 || r0.status !== "draft" || !r0.cwd) return false;
@@ -1487,6 +1502,8 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     // a workflow's lane is a chat whatever way the person last opened its agent
     const open = r.workflow ? "chat" : draftOpen(r.agent, state.agents, state.opens);
     const mode = sessionMode(state.agents, { agent: r.agent, open });
+    // a workflow runs only in a lane of its own, which only a chat has
+    if (r.workflow && mode !== "chat") return refuseLaneless(id);
     const text = first?.trim() ?? "";
     // the first message's files are saved before anything starts: one that cannot be leaves the draft as it was
     // (its chips stay)
@@ -1538,7 +1555,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
       registerRoute(id);
       openChat(id);
       if (!text && !withFiles) {
-        await startLane(id);
+        if (!(await startLane(id)) && r.workflow) return refuseLaneless(id);
         await startAgentChat(id);
         return true;
       }
@@ -1547,8 +1564,8 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
       const key = keys.get(id)!;
       const lid = withFiles ? showWithFiles(id, key, text, withFiles) : `local-s${++localSeq}`;
       if (!withFiles) st.dispatch({ type: "local.user", bot: key, id: lid, text, now: Date.now() });
-      // the lane's own branch is there before the agent has a chance to change a file
-      await startLane(id);
+      // the lane's own branch is there before the agent has a chance to change a file; a workflow's agent starts only in one
+      if (!(await startLane(id)) && r.workflow) return refuseLaneless(id);
       await startAgentChat(id);
       try {
         await input(id, withFiles ? { ...withFiles.input, id: lid } : { kind: "send", text, id: lid });
