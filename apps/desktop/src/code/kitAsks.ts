@@ -13,7 +13,8 @@ import type { ApprovalChoice, DiffFile, EventOf } from "../lib/protocol";
 import { appSounds } from "../lib/sounds";
 import type { ApprovalItem } from "../state/store";
 import { decideAsk, readAsk, type AskRead, type AskWords } from "./ask";
-import { ruleMatches, type Rule, type Say } from "./command";
+import { ruleMatches, scriptRun, type Rule, type Say } from "./command";
+import { scriptText } from "./previewRun";
 import { noteReads, resetPreview } from "./preview";
 import { kitProjects, noteBlocked, projectOf, updateKitProjects, type KitProject } from "./project";
 import { keyFiles, keysAfter } from "./secrets";
@@ -113,9 +114,16 @@ export interface KitCard {
   always: Rule | null;
   /** Files with a key typed in, when the step saves or sends the change. */
   keys: string[];
+  /** For a command that runs a package.json script by its name, what the script runs, a key in it masked. */
+  script?: { name: string; text: string };
 }
 
-export function kitCard(ev: EventOf<"approval.request">, ctx: AskContext): KitCard | null {
+/** `a` and `b` as one folder, a separator at the end aside. */
+const sameDir = (a: string, b: string) => a.replace(/[\\/]+$/, "") === b.replace(/[\\/]+$/, "");
+
+/** Kit's reading of ask `ev` for its card. `packageJson` is the text of package.json in the folder the session works in
+ *  (`ctx.root`), when the app has read it: a script run in that folder then shows what the script runs. */
+export function kitCard(ev: EventOf<"approval.request">, ctx: AskContext, packageJson?: string | null): KitCard | null {
   const read = readIn(ev, ctx);
   if (!read) return null;
   const project = projectFor(ctx);
@@ -124,7 +132,9 @@ export function kitCard(ev: EventOf<"approval.request">, ctx: AskContext): KitCa
   // a rule is matched against the line that was read, never the card's one-line command
   const kept = read.line !== undefined && project.rules.some((r) => ruleMatches(r, read.line!));
   const always = d.answer === "ask" && d.mayAlwaysAllow && read.rule && !kept ? read.rule : null;
-  return { root: projectRoot(ctx), say: read.say, always, keys: read.saves ? keys : [] };
+  const name = read.line !== undefined && sameDir(ev.tool?.cwd ?? ev.cwd ?? ctx.root, ctx.root) ? scriptRun(read.line) : null;
+  const text = name === null ? null : scriptText(packageJson, name);
+  return { root: projectRoot(ctx), say: read.say, always, keys: read.saves ? keys : [], ...(name !== null && text !== null ? { script: { name, text } } : {}) };
 }
 
 // ---- keys in each session's changes -------------------------------------------------------------------------------

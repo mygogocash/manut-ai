@@ -60,7 +60,8 @@ describe("a turn that sent something out", () => {
     expect(wentLive(items, "local-s2", where)).toBe(true);
     const tests = [user("local-s1", "go"), steps("t1", { name: "terminal", detail: "pnpm test", ok: true }, { name: "patch", detail: "src/a.ts +1" })];
     expect(wentLive(tests, "local-s1", where)).toBe(false);
-    for (const line of ["wrangler deploy", "npm publish", "gh pr merge 12"]) {
+    // a push to an address the agent wrote asks as a send, and still went out
+    for (const line of ["wrangler deploy", "npm publish", "gh pr merge 12", "git push https://x.example/shop.git kit/qr"]) {
       expect(wentLive([user("u", "x"), steps("t", { name: "terminal", detail: line, ok: true })], "u", where), line).toBe(true);
     }
   });

@@ -2049,6 +2049,8 @@ class MockChat {
           merge: run("git merge main"),
           commit: run("git commit -m 'Add a PromptPay QR'"),
           deploy: run("wrangler deploy"),
+          // a script run by its name: the card shows what the script runs, from the lane's package.json
+          build: run("pnpm build"),
           edit: { title: "Allow Edit to change src/checkout.tsx?", command: "", tool: { kind: "edit", name: "Edit", paths: [`${cwd}/src/checkout.tsx`], cwd } },
           outside: { title: "Allow Read?", command: "/home/you/Documents/tax-2026.xlsx", tool: { kind: "read", name: "Read", paths: ["/home/you/Documents/tax-2026.xlsx"], cwd } },
         };

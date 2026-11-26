@@ -200,6 +200,58 @@ then `git push origin main` asks at every level; by its card it read as the test
 match the whole line; a long list of files is read whole, with where a move takes a file; and a file change that
 deletes a file is a delete, which only Everything in this project lets Kit do alone.
 
+#### What a read or a check never is (item 88)
+
+A read or a check goes alone at every level, so `src/code/command.ts` calls nothing one that writes a file, runs another
+program or reaches the network. What it does not understand is `unknown`, and asks:
+
+- **Every form of an option.** An option is recognised as its program reads it: alone, with `=value`, with its value
+  joined (`-ofile`), bundled after other short options (`-fsSLo`), or as any start of a long option's name (git and GNU
+  getopt take one). A path joined to a short option, or after `=` in any word, is checked against the project like any
+  other. An option that makes a step looser (a dry run, a list) counts only written in full and never beside a `--no-`
+  word that takes it back.
+- **Only known options for some.** git fetch, git config, git branch and git tag lists, make, just, task and the
+  package managers' own options are read from a list; any other option, and a `NAME=value` after make or just, asks.
+- **Checks.** A test run, a lint or a type check is no check with an option that loads a program, names a settings file
+  not named as one, writes a report or snapshot, deletes a folder (`pytest --basetemp`) or sends output to a service; the
+  same holds for words a package manager hands to a script (`pnpm test --…`).
+- **The network is not a read.** curl, wget (only `curl --version` and `--help` stay reads), `gh api`, gh pointed at
+  another host, a fetch, pull, clone or push to an address rather than a remote's name, a registry named on the command
+  line and a package named by its address all ask, as anything that sends does. `git fetch` from a remote the project
+  has stays a read.
+- **What cannot be read in advance.** xargs (the words it adds are not known), awk with any redirect or pipe after a
+  print, gawk's `@`, a program that sets ARGV or reads ENVIRON, unpacking an archive, applying a patch, making a link
+  (a later change to its path lands where it leads), `git clean -x`, zsh's `=word` and `>!`, and `>& file` read as the
+  file it is.
+
+`command.hostile.test.ts` holds 170 such lines, each beside the plain line it imitates, which reads as it did.
+
+#### Files a change to which always asks (item 88)
+
+An edit inside the project goes alone at Edits alone, except to a file that makes a program run later or changes what an
+agent may do. A change, a new file, a move into or out of, or a delete of any of these is `unknown` and asks at every
+level (`guardedPath`): by any file tool, by the words a shell writes on an ask, and by a command through a word, an
+option's joined value, a redirect or the folder it went into first.
+
+- The settings, instructions, skills and plugins of every agent the app starts (`.mcp.json`, `.claude/`, `CLAUDE.md`,
+  `.codex/`, `AGENTS.md`, `.agents/`, `.cursor/`, `.gemini/`, `GEMINI.md`, `.qwen/`, `opencode.json`, `.opencode/`,
+  `.pi/`, `.clinerules`, `.github/` and the like).
+- Files a tool on the person's side runs by itself: `.envrc`, `.husky/`, a hooks folder, `.npmrc`, `.yarnrc*` and
+  `.yarn/`, `.pnpmfile.*`, `bunfig.toml`, `pnpm-workspace.yaml`, `.vscode/`, `.idea/`, `.devcontainer/`, `.cargo/`, CI
+  files, pre-commit, lefthook and lint-staged settings, `.gitmodules`.
+- `package.json`, `Makefile`, `justfile`, `Taskfile.yml` and the like, whose scripts a check and Preview's Start run by a
+  name that says nothing of them.
+- The app's own storage: all of `~/.manut` but the folder the session itself works in when that is a lane's own
+  (exactly two names below `~/.manut/lanes`), and the web view's data and caches under `~/Library`.
+
+A path is compared after `.` and `..` are taken out, from the project's folder, by name whatever its letter case as
+macOS's disk compares it; a Windows name's trailing dots, its stream and its short form count too. Nothing is looked up
+on disk, so a link the person made before is not followed; a link Kit makes asks. Reading these files does not ask.
+
+Kit's card and Preview's Start show what a package.json script runs (`The build script runs: vite build`), from the
+lane's own package.json with any key masked. A session in the developer's own folder shows the name alone, since the
+shell reads only a lane's folder.
+
 ### Starting a lane
 
 The Code page's + menu (the Terminals header's +, the empty section's New session, the background menu's New session, ⌘N and

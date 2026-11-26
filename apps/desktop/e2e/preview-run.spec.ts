@@ -77,6 +77,8 @@ test("names the command first; Start runs it in the lane's own folder on samples
   await expect(page.getByTestId("lane-preview")).toHaveAttribute("data-phase", "idle");
   await expect(page.getByTestId("lane-preview")).toContainText("Start runs this in the lane's own folder, with a sample for each secret:");
   await expect(page.getByTestId("lane-preview-command")).toHaveText("$ pnpm run dev");
+  // the script's name says nothing of what it runs: its text from package.json is under it
+  await expect(page.getByTestId("lane-preview-script")).toHaveText("The dev script runs: vite");
   await expect(page.getByTestId("lane-preview-start")).toHaveText("Start");
   // the folder's .env.example names the shop ID and a Stripe key: their names, never a value
   await expect(page.getByTestId("lane-preview-samples")).toHaveText("Secrets run on samples: PROMPTPAY_SHOP_ID and STRIPE_SECRET_KEY.");
