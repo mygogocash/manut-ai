@@ -61,6 +61,13 @@ the consent kept with the version of its words (`RemoteRelayConsent.swift`, `Sha
 reworded for this app with the operator's sentence left for the owner; and `docs/relay-protocol-v1.md` and
 `docs/security/remote-relay-threat-model.md`, copied into `docs/` with a note on where this app differs.
 
+GoSpark again (at `a7537c80`, read in the checkout on the owner's Mac on 26 Nov 2026) for Cursor and Antigravity as chats
+(item 101a, `apps/desktop/src-tauri/src/acp_chat.rs`, `ask_tool.rs`, `providers.rs`): no code, the facts its adapters
+hold. From `AntigravitySession.swift`, Antigravity's own input names (`CommandLine`, `TargetFile`, `AbsolutePath`,
+`Query`, `Url`) and reading its sign-in from `agy models` (a list of model ids when signed in, the words that mean it is
+not); from `ACPSession.swift`, that an agent's `session/new` reports its modes and models both as `modes` and `models`
+and as configuration options, and that a mode is set with `session/set_config_option` or else `session/set_mode`.
+
 Libraries added for one feature are named here too: `qrcode` 1.5.4 (MIT, soldair/node-qrcode), already the web app's,
 pinned in the desktop for the pairing code's QR image (`apps/desktop/src/remote/QrCode.tsx`, lifted from
 `apps/web/src/ops/QrCode.tsx`); only its `create` is used, which returns the modules and reaches no network; `objc2-speech`, `objc2-avf-audio` and `objc2-av-foundation`

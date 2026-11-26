@@ -525,6 +525,16 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
         }
         // the project's own instructions the shell read and handed to the agent as text (item 93, projectNotes.ts): said
         // once in the chat, so a restart that hands over the same files adds nothing
+        // an agent held to its asking modes reported another (acp_chat.rs, item 101a): what the shell set it back to, or
+        // that it would not go back and gets nothing more
+        if (ev.kind === "asks_mode") {
+          const key = keys.get(id);
+          const agent = typeof ev.agent === "string" ? ev.agent : agentDef(rec(id)?.agent ?? "claude").label;
+          const mode = typeof ev.mode === "string" ? ev.mode : "";
+          const to = typeof ev.to === "string" ? ev.to : "";
+          const said = ev.ok === true ? tr("ss.asksModeSet", { agent, mode, to }) : tr("ss.asksModeKept", { agent, mode });
+          if (key && mode) store().dispatch({ type: "system.note", bot: key, text: said, now: Date.now() });
+        }
         if (ev.kind === "instructions") {
           const key = keys.get(id);
           const text = notesSaid(ev);

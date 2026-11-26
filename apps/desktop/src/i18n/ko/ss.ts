@@ -133,4 +133,8 @@ export const ss: Record<keyof typeof en, string> = {
   "ss.dshOld": "이 DSH 세션은 deepseek-bot으로 실행됐어요 (Manut AI 0.2.4). 이제 DSH는 DeepSeek Harness예요. 다시 시작을 누르면 이 폴더에서 시작해요.",
   "ss.gone": "{agent}는 이제 Manut AI에서 제공하지 않아요",
   "ss.dshApp": " (또는 CLI가 들어 있는 DeepSeek Harness 앱)",
+  // Cursor and Antigravity as chats (item 101a): an agent that would not ask before it acts
+  "ss.noAsks": "{agent} 자체 설정이 묻지 않고 명령을 실행하고 파일을 바꾸도록 되어 있어 시작하지 않았어요. {agent} 설정에서 Approval mode를 Allowlist로 바꾼 뒤 채팅을 다시 시작하세요.",
+  "ss.asksModeSet": "{agent}이(가) 실행 전에 묻지 않는 {mode} 모드여서 Manut AI가 {to}(으)로 바꿨어요.",
+  "ss.asksModeKept": "{agent}이(가) 실행 전에 묻지 않는 {mode} 모드에 그대로 있어서 Manut AI는 더 이상 아무것도 보내지 않아요. 이 채팅을 닫고 새로 시작하세요.",
 };

@@ -552,7 +552,8 @@ start, so a file changed by hand never starts what the page would refuse.
 - **The list.** Every agent the app offers (the built-ins, the ACP agents, a person's own), each with its version (the
   program's own `--version`, for the agents whose flag was read here: Claude Code, Codex, OpenCode, Gemini CLI, Grok, Cursor,
   Antigravity), whether it is installed, whether it is signed in where the app can read that (Claude Code and Codex, through
-  the account new sessions use; no check is made up for any other agent) and a switch. oh-my-hermes, offered nowhere, is not
+  the account new sessions use; Cursor and Antigravity through their own status commands, item 101a; no check is made up
+  for any other agent) and a switch. oh-my-hermes, offered nowhere, is not
   listed. Pressing a row opens its settings under it.
 - **Off.** Offered nowhere: neither part of the + menu, the empty section's tooltip, a new draft, Buddy (which says where to turn
   it on). The shell refuses its start before any program is looked up: terminals and chats (`sessions::launch_with`), Buddy
@@ -639,7 +640,38 @@ start, so a file changed by hand never starts what the page would refuse.
   and ask the client with `session/request_permission` before acting (Cursor's documentation, cursor.com/docs/cli/acp, and
   its bundle, which asks before a write, a delete, a read, a command and an MCP tool unless `--force`; Antigravity's help,
   whose `--dangerously-skip-permissions` is what turns its requests off, and its binary). So both are rows of `ACP_LIST`,
-  continued with `session/load`. Not run as a chat for this item: no message was sent to either.
+  continued with `session/load` (Cursor) or `session/resume` (Antigravity offers it, and the adapter takes it first).
+- **Cursor and Antigravity as chats (item 101a).** Each ran here as a chat, two short messages each (Antigravity 1.5.18:
+  "ok", then `pwd` asked for, allowed and run in the chat's folder; Cursor Agent 2026.11.22: its account's plan had run out,
+  which it says in its own reply), recorded in `src-tauri/tests/fixtures/acp/agy-*.jsonl` and `cursor-1-plan-limit.jsonl`.
+  What the generic ACP adapter (`acp_chat.rs`) does for them:
+  - **Modes.** Each row lists the session modes in which its agent asks (`asks_in`): Cursor's `agent`, `plan` and `ask`;
+    Antigravity's `default` only, since its `accept-edits` approves edits and its `auto` approves edits and "safe" commands
+    unasked, and its default mode is a setting of its own. When the agent reports any other mode, when the conversation
+    opens or later, the adapter sets the row's first mode back (its `mode` option, else `session/set_mode`), stops a running
+    turn and expires its cards, and sends nothing until the agent confirms; the chat says so once. An agent that will not
+    go back gets nothing more, and the chat says to start a new one.
+  - **Cursor's own settings.** Cursor's ACP server reads the person's permissions from `cli-config.json` (in
+    `CURSOR_CONFIG_DIR`, else `$XDG_CONFIG_HOME/cursor`, else `~/.cursor`), and its `approvalMode` of `unrestricted` (Run
+    Everything) runs every command and change unasked, whatever the mode. So a Cursor chat starts only when that file is
+    absent or its `approvalMode` is absent or `allowlist`; anything else (Auto-review, Run Everything, a file that cannot
+    be read) refuses the start with a sentence that says to set Approval mode to Allowlist. Read once at the start: a change
+    to the file while the chat runs is not seen. A project's `.cursor/cli.json` cannot set the mode (its schema holds only
+    `permissions`).
+  - **Cards.** Antigravity names its command `CommandLine` and its folder `Cwd`, and its files `TargetFile` or
+    `AbsolutePath`; the card and Kit's dial read them. Its request ids are strings, answered as given. Cursor's requests
+    carry no input: a command is the title between backticks, shown whole on the card, and Kit's dial, which never reads a
+    title, asks; a change names its file in the diff it carries, which both read. "Allow always" is never offered.
+  - **Questions.** Cursor asks its own questions as a permission request whose answers are several `allow_once` options and
+    whose "Skip" is a `reject_once`; that becomes a question card with those answers. An answer that is none of them is
+    refused and the card stays.
+  - **A loaded conversation.** Cursor continues with `session/load`, which replays the conversation before it answers; the
+    replay is not shown as the reply of a message sent meanwhile.
+  - **Sign-in.** Settings › Providers reads Cursor's `status --format json` (only whether it is signed in, and the email)
+    and Antigravity's `models` (signed in when it lists models; it has no status command), one at a time after the
+    versions, and Report a problem reads them the same way.
+  - Not done: Antigravity's thinking level (`thought_level`) has no switch here, as for the other ACP agents. Cursor's ask
+    path was checked against its bundle, not a real tool call, since its account could not run one here.
 
 `providers.rs`' tests pin each check, the order of a start's arguments and that a value never leaves; `agent_chat.rs`'
 `providers_settings_reach_a_chat_and_never_weaken_its_start` and `sessions.rs`' terminal twin start a stand-in program and

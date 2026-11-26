@@ -16,7 +16,7 @@ import { type KeptLane, type LaneCleaned, type LaneMade, type LaneReleased, type
 import { type AgentConfig } from "../settings/mcp/agentConfig";
 import { type InstallAsk, type InstallDone, type LinkRead, type ReadSkill } from "../runtime/skillBundle";
 import { type MergeMethod, type NewProjectMade, type Pulled, type RepoAsk, type ReviewAsk, type ReviewDone, type ReviewDraft, type SourceTools } from "../code/source";
-import { type ProviderPatch, type ProviderView } from "../settings/providers/model";
+import { type ProviderPatch, type ProviderView, type SignIn } from "../settings/providers/model";
 import { type ImportFound } from "../importPast/offer";
 import { inTauri } from "../lib/tauri";
 import { TauriHost } from "./host.tauri";
@@ -305,6 +305,9 @@ export interface SessionHost extends HistoryHost {
   providerSave?(id: string, patch: ProviderPatch): Promise<ProviderView>;
   /** The version agent `id`'s program prints (the token only), or null. */
   providerVersion?(id: string): Promise<string | null>;
+  /** Agent `id`'s sign-in as its own status command says it (Cursor, Antigravity: `signinAgent`), or null when it says
+   *  nothing. Never a token: whether it is signed in, and an email at most. */
+  providerSignin?(id: string): Promise<SignIn | null>;
   /** Settings › Agents: the person's own agents, read and checked by the shell from manut's own file, and the broken
    *  entries. */
   customList(): Promise<CustomList>;

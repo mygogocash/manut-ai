@@ -298,8 +298,9 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    Merging also switched on Dependabot, whose pull requests target main.
    On the evening of 26 Nov the lead moved to a new Claude Code session. Item 129 merged (each Playwright worker has
    its own stand-in; three CI shards of four workers). Item 101 is split into 101a to 101e (rows in `docs/plan.md`);
-   101a (Cursor and Antigravity as chats) and 101e (the first-launch offer to bring over Claude Code and Codex work)
-   are running. GitHub reported 7 Dependabot alerts on `main` (2 critical) at that push, for the owner to look at.
+   101a (Cursor and Antigravity as chats) merged; 101e (the first-launch offer to bring over Claude Code and Codex
+   work) is in CI. Needs the owner from 101a: Cursor's Approval mode set to Allowlist (it is Run Everything, so Cursor
+   chats are refused), and a Cursor plan with messages left to record a real tool call. GitHub reported 7 Dependabot alerts on `main` (2 critical) at that push, for the owner to look at.
    The canvas sources move out of `~/Developer/gospark-main` (the owner is deleting the GoSpark folders): see the
    path in "Where everything is" once moved.
    Running at 14:15: items 100b, 119, 120 and 121, each a subagent in its own `cc-item…` worktree.
@@ -682,6 +683,9 @@ Every switch that turns a built part on, and what each needs from the owner, is 
 
 ## Known flaky tests (they fail only under heavy load)
 
+- `apps/desktop/e2e/resilience.spec.ts` ("bridge lost mid-turn"): failed on its test and its retry in shard 2 of
+  item 101a's first CI run (45851189647), the first runs with four Playwright workers a shard (item 129); passed alone
+  and on the re-run. If it fails twice again, fix it rather than re-run: it may be the four workers' load.
 - `apps/desktop` `src/sessions/term/engine-osc52.test.ts`: builds clipboard-sized strings, can pass 5 seconds.
 - `apps/desktop` `src/lib/sounds.test.ts` and `apps/web` `test/RoutinesView.test.tsx` ("pauses everyone in practice"): each
   failed once in the gate of 25 Nov at load 7 with a helper's gate beside it (the second waited past testing-library's one

@@ -133,7 +133,7 @@ interface Rules {
   allow: string[];
   vars: string[];
 }
-const TABLE = RULES as { rules: Rules[]; appVars: string[]; homeVars: Record<string, string>; versionAgents: string[] };
+const TABLE = RULES as { rules: Rules[]; appVars: string[]; homeVars: Record<string, string>; versionAgents: string[]; signinAgents: string[] };
 export const MAX_ARGS = 16;
 export const ARG_MAX = 512;
 export const MAX_VARS = 32;
@@ -142,6 +142,9 @@ export const MAX_VARS = 32;
 export const rulesOf = (id: string): Rules | undefined => TABLE.rules.find((r) => r.id === id);
 export const homeVarOf = (id: string): string | undefined => TABLE.homeVars[id];
 export const versionAgent = (id: string): boolean => TABLE.versionAgents.includes(id);
+/** The agents whose sign-in the shell reads with their own status command (Cursor, Antigravity: `SIGNIN_AGENTS` in
+ *  providers.rs, item 101a); Claude Code's and Codex's come from the accounts. */
+export const signinAgent = (id: string): boolean => TABLE.signinAgents.includes(id);
 
 /** The option an argument names and whether it is long: `--name[=v]` or `-x[=v]`; null for anything else. */
 export function optionOf(a: string): [string, boolean] | null {
@@ -276,7 +279,8 @@ export interface SignIn {
 }
 
 /** The row's line under the name: turned off, not installed, its set path no longer a program, else the sign-in when
- *  the app can read one (Claude Code, Codex), else installed. An agent with no check of its own gets none. */
+ *  the app can read one (Claude Code, Codex, Cursor, Antigravity), else installed. An agent with no check of its own gets
+ *  none. */
 export function statusLine(v: ProviderView, signin: SignIn | null | undefined, plan: (p?: string | null) => string): { text: string; tone: "off" | "warn" | "ok" | "quiet" } {
   if (v.off) return { text: t("prov.offLine"), tone: "off" };
   if (v.path && !v.path_ok) return { text: t("prov.pathGone"), tone: "warn" };

@@ -14,7 +14,7 @@ import { MOCK_MOVED, MOCK_MOVED_ROOT } from "../code/mockMoved";
 import { type KeptLane, type LaneCleaned, type LaneMade, type LaneReleased, type LaneRemoveAsk, type LaneRemoved } from "../code/laneBranch";
 import { readAgentConfig, type AgentConfig } from "../settings/mcp/agentConfig";
 import { readPulled, readTools, type MergeMethod, type NewProjectMade, type Pulled, type RepoAsk, type ReviewAsk, type ReviewDone, type ReviewDraft, type SourceTools } from "../code/source";
-import { checkArgs, checkVars, homeVarOf, rulesOf, versionAgent, type ProviderPatch, type ProviderView } from "../settings/providers/model";
+import { checkArgs, checkVars, homeVarOf, rulesOf, signinAgent, versionAgent, type ProviderPatch, type ProviderView, type SignIn } from "../settings/providers/model";
 import { NO_SKIPS, type ImportFound } from "../importPast/offer";
 import type { ChatInput, ChatEvent, PastChat, ConvState, PastMsg, BuddyChatInput, BuddyHost, TitleRequest, TitleWords, SessionHost } from "./host";
 
@@ -278,6 +278,8 @@ export type MockGlobals = MockTurnGlobals & {
   __manutProviders?: Record<string, MockProvider>;
   /** e2e: programs the mock finds on the search path, bare name -> where (absolute paths: any of the values) */
   __manutMockPrograms?: Record<string, string>;
+  /** Settings › Providers: what Cursor's and Antigravity's status commands say, by agent id (null: they say nothing) */
+  __manutMockSignins?: Record<string, SignIn | null>;
   /** e2e: custom agents the mock treats as signed out (the others answer) */
   __manutMockCustomSignedOut?: AgentId[];
   /** e2e: CLIs that are not on this computer: a terminal of one is refused, as the shell refuses it */
@@ -412,7 +414,7 @@ export class MockHost implements SessionHost, BuddyHost {
       takes_args: builtin && !!rulesOf(a.id),
       takes_vars: builtin && a.id !== "dsh",
       version: versionAgent(a.id),
-      signin: a.id === "claude" || a.id === "codex",
+      signin: a.id === "claude" || a.id === "codex" || signinAgent(a.id),
       chat: found && (a.mode ?? "chat") === "chat" && a.id !== "dsh" ? [found, ...(custom ? (a.acp?.args ?? []) : fixed), ...(custom ? [] : args)].join(" ") : null,
       terminal: found && !custom && a.id !== "dsh" ? [found, ...args].join(" ") : null,
     };
@@ -465,6 +467,15 @@ export class MockHost implements SessionHost, BuddyHost {
     }
     this.g.__manutProviders = { ...(this.g.__manutProviders ?? {}), [id]: next };
     return this.providerView((await this.agents()).find((x) => x.id === id)!);
+  }
+  /** Cursor's and Antigravity's sign-in as their status commands would say it: signed in, unless a test set
+   *  `__manutMockSignins` (an id to its answer, null for one that says nothing). */
+  async providerSignin(id: string): Promise<SignIn | null> {
+    const a = (await this.agents()).find((x) => x.id === id);
+    if (!a?.path || !signinAgent(id)) return null;
+    const set = this.g.__manutMockSignins;
+    if (set && id in set) return set[id] ?? null;
+    return { logged_in: true, email: null };
   }
   async providerVersion(id: string): Promise<string | null> {
     const a = (await this.agents()).find((x) => x.id === id);
