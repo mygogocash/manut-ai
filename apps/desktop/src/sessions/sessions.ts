@@ -38,17 +38,17 @@ import { getShellHost, learnThisHost } from "../terminal/host";
 import { onSessionFg } from "./fg";
 import { termActs } from "./termActivity";
 import { isLinkId, LINK_COPIED_EVENT, newLinkId, termLinkUrl } from "./termLink";
-import { acpRow, agentDef, agentLabel, continues, draftAgent, draftFolder, draftOpen, hermesOnly, idInUse, installLine, isBuiltin, isGone, isShell, isTerminalRec, LAST_LINE_MAX, refusedResume, SHELL, termEnd, termMarkAgent, lastPrintedLine, OPEN_KEY, setsUpScreen, UI_BYTES, opensAs, parseOpens, parseRecent, pushRecent, RECENT_KEY, registerAcp, sessionMode, type AgentId, type OpenAs, type Unseen, type SessionRec } from "./agents";
+import { acpRow, agentDef, agentLabel, continues, draftAgent, draftFolder, draftOpen, hermesOnly, idInUse, installLine, isBuiltin, isGone, isShell, isTerminalRec, LAST_LINE_MAX, refusedResume, SHELL, termEnd, termMarkAgent, lastPrintedLine, OPEN_KEY, setsUpScreen, UI_BYTES, opensAs, pushRecent, RECENT_KEY, registerAcp, sessionMode, type AgentId, type OpenAs, type Unseen, type SessionRec } from "./agents";
 import { clearSuggestion, noteSuggestion } from "../chat/suggestion";
 import { suggestOn, suggestWorks } from "../lib/suggest";
 import { acceptTitle, chatMaterial, titleRequest, wantsTitle, whyKey } from "./titleWords";
 import { titleModel } from "../lib/titleModel";
-import { NAME_MAX, parseTitles, promptTitle, putTitle, TITLES_KEY } from "./titles";
+import { NAME_MAX, promptTitle, putTitle, TITLES_KEY } from "./titles";
 import { getDraft, setDraft as setUnsent } from "../app/drafts";
 import { getHost, type ChatEvent, type ChatInput, type ConvState, type PastChat, type SessionHost } from "./host";
 import { localBot } from "../peers/peerKey";
 import { askOpen, folderKey, getStore, notifySessionEvent, notifySessionNote, onBridgeEvent, selectAsks, setChatRoute, setSessionKeyLookup, type ApprovalItem, type OutFile, type SentFile, type Store } from "../state/store";
-import { blobType, bytesOf, inlinePicture, parseSentFiles, pathsTyped, putSentFiles, SENT_FILES_KEY, shellQuote, wireText, type SavedFile, type SentFilesBook } from "./attach";
+import { blobType, bytesOf, inlinePicture, pathsTyped, putSentFiles, SENT_FILES_KEY, shellQuote, wireText, type SavedFile, type SentFilesBook } from "./attach";
 import type { AccountCli, AccountGroup, ApprovalChoice, BridgeEvent, ClarifyAnswers, DiffFile, EventOf, Msg } from "../lib/protocol";
 import { settleApproval } from "../chat/cards/respond";
 import { afterBranchRead, beforeBranchRead, kitAnswer, noteChange, savesAlone } from "../code/kitAsks";
@@ -79,6 +79,7 @@ import { getSplit, groupOf, leaveIn, setSplit } from "./splitState";
 import { folderGroups, getFolderPrefs, orderFolders, pathKey, ranElsewhere, revealFolder as openFolderGroup, setFolderGone } from "./folders";
 import { broughtBackNote, REWINDS, rewoundNote, TurnBook, turnTitle } from "./rewind";
 import { NO_RULES, signedOutSaid, errText } from "./sessionErrors";
+import { readRecent, readSentFiles, readTitles, titleKey, TITLED, readOpens } from "./sessionBooks";
 export { NO_RULES, signedOutSaid } from "./sessionErrors";
 import type { ModelOption, SessionsState, AgentLive, Term, TermIo, ChatProc } from "./sessionTypes";
 export type { ModelOption, SessionsState, AgentLive } from "./sessionTypes";
@@ -139,44 +140,6 @@ const loadXterm = () =>
   (xtermLoad ??= Promise.all([import("@xterm/xterm"), import("@xterm/addon-fit"), import("@xterm/xterm/css/xterm.css"), termFontsReady()]).then(
     ([x, f]) => (xtermMods = [x, f]),
   ));
-
-const readRecent = () => {
-  try {
-    return parseRecent(typeof localStorage !== "undefined" ? localStorage.getItem(RECENT_KEY) : null);
-  } catch {
-    return [];
-  }
-};
-
-/** The names the person gave sessions, kept on this computer by the agent's own conversation id. */
-/** Files sent in session chats (saved paths), so their bubbles show them again after a restart. */
-const readSentFiles = (): SentFilesBook => {
-  try {
-    return parseSentFiles(typeof localStorage !== "undefined" ? localStorage.getItem(SENT_FILES_KEY) : null);
-  } catch {
-    return {};
-  }
-};
-
-const readTitles = () => {
-  try {
-    return parseTitles(typeof localStorage !== "undefined" ? localStorage.getItem(TITLES_KEY) : null);
-  } catch {
-    return {};
-  }
-};
-const titleKey = (r: SessionRec) => (r.agentSession ? `${r.agent}:${r.agentSession}` : null);
-
-/** Agents whose own session files carry a conversation title the bridge can read (`cli.title`). */
-const TITLED: readonly AgentId[] = ["claude", "codex"];
-
-const readOpens = () => {
-  try {
-    return parseOpens(typeof localStorage !== "undefined" ? localStorage.getItem(OPEN_KEY) : null);
-  } catch {
-    return {};
-  }
-};
 
 /** `pulls`: the Tasks host a chat's own pull request is read through (item 100, code/chatPull.ts); none reads nothing. */
 export function createSessions(host: SessionHost, store: () => Store = getStore, accounts: () => AccountGroup[] | null = () => null, pulls: () => Pick<TaskHost, "remote" | "view"> | null = () => null) {
