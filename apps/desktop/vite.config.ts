@@ -1,7 +1,10 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import { dictionariesAsOneModule } from "./src/i18n/oneModule";
 export default defineConfig({
-  plugins: [react()],
+  // The dev server sends each language's dictionary as one module, not one per area file (src/i18n/oneModule.ts says
+  // why). The unit tests read the area files as they are.
+  plugins: [react(), ...(process.env.VITEST ? [] : [dictionariesAsOneModule()])],
   clearScreen: false,
   server: { port: 5207, strictPort: true },
   // The Mac App Store edition (docs/app-store.md) is built with MANUT_APP_STORE=1, which the shell's build.rs reads too.
