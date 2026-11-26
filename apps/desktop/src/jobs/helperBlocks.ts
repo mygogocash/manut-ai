@@ -78,18 +78,29 @@ export type HelperOutcome =
 // front, its info word, and the rest of its line; a closing fence of the same character, at least as long, with nothing after it.
 const FENCE = /^( {0,3})(`{3,}|~{3,})[ \t]*([^\s`]*)[ \t]*(.*?)\s*$/;
 const CLOSE = /^ {0,3}(`{3,}|~{3,})[ \t]*$/;
-/** A whole block on one line: ```` ```manut-helpers {...}``` ````, as the fork reads its own blocks. */
-const INLINE = /^ {0,3}(`{3,})(manut-helpers|helpers)[ \t]+([{[].*[}\]])[ \t]*\1[ \t]*$/;
-
-const isHelperWord = (info: string): boolean => (HELPER_FENCES as readonly string[]).includes(info);
+/** A whole block on one line: ```` ```manut-helpers {...}``` ````, as the fork reads its own blocks. One pattern for each set of
+ *  words that open a block, made once: the helper blocks' and item 102k's reach blocks (`reachBlocks.ts`) share this walk. */
+const inlines = new Map<string, RegExp>();
+const inlineFor = (words: readonly string[]): RegExp => {
+  const k = words.join("\n");
+  let re = inlines.get(k);
+  if (!re) {
+    const alt = words.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
+    re = new RegExp(`^ {0,3}(\`{3,})(${alt})[ \\t]+([{[].*[}\\]])[ \\t]*\\1[ \\t]*$`);
+    inlines.set(k, re);
+  }
+  return re;
+};
 const strip = (line: string): string => line.replace(/\r$/, "");
 const closes = (line: string | undefined, fence: string): boolean => {
   const c = line === undefined ? null : CLOSE.exec(strip(line));
   return !!c && c[1][0] === fence[0] && c[1].length >= fence.length;
 };
 
-/** One helper block: the lines it covers, `[from, to)`, its JSON, and whether its closing fence came. */
-interface Block {
+/** One block of the app's own: the word that opened it, the lines it covers, `[from, to)`, its JSON, and whether its closing
+ *  fence came. */
+export interface FencedBlock {
+  readonly word: string;
   readonly from: number;
   readonly to: number;
   readonly body: string;
@@ -116,19 +127,22 @@ function blockEnd(lines: readonly string[], open: number, fence: string): number
   return lines.length;
 }
 
-/** Every top-level helper block of `text`, in written order. A fence inside a `>` quote, inside another fence (a ```` or ~~~ fence
- *  quoting a block as an example), or that does not start its line is the answer's text, not a block (the fork's walk). A backtick
- *  fence line with more backticks after its info word is an inline code span, as Markdown reads it, unless it is a whole one-line
- *  block. A helper word with words after it (```` ```helpers are how you ask ````) opens an ordinary code block, not a request. */
-function scan(text: string): { lines: string[]; blocks: Block[] } {
+/** Every top-level block of `text` opened by one of `words`, in written order. A fence inside a `>` quote, inside another fence (a
+ *  ```` or ~~~ fence quoting a block as an example), or that does not start its line is the answer's text, not a block (the fork's
+ *  walk). A backtick fence line with more backticks after its info word is an inline code span, as Markdown reads it, unless it is
+ *  a whole one-line block. A block's word with words after it (```` ```helpers are how you ask ````) opens an ordinary code block,
+ *  not a request. The helper blocks walk with `HELPER_FENCES`; item 102k's reach blocks (`reachBlocks.ts`) with their own words. */
+export function fencedBlocks(text: string, words: readonly string[]): { lines: string[]; blocks: FencedBlock[] } {
   const lines = text.split("\n");
-  const blocks: Block[] = [];
-  if (!HELPER_FENCES.some((w) => text.includes(w))) return { lines, blocks };
+  const blocks: FencedBlock[] = [];
+  if (!words.some((w) => text.includes(w))) return { lines, blocks };
+  const isWord = (info: string): boolean => words.includes(info);
+  const inlineRe = inlineFor(words);
   for (let i = 0; i < lines.length; ) {
     const line = strip(lines[i]);
-    const inline = INLINE.exec(line);
+    const inline = inlineRe.exec(line);
     if (inline) {
-      blocks.push({ from: i, to: i + 1, body: inline[3], closed: true });
+      blocks.push({ word: inline[2], from: i, to: i + 1, body: inline[3], closed: true });
       i += 1;
       continue;
     }
@@ -138,8 +152,8 @@ function scan(text: string): { lines: string[]; blocks: Block[] } {
       continue;
     }
     const [, , fence, info, rest] = m;
-    // a helper fence with nothing after its word, or with the JSON starting there (whose strings may hold backticks)
-    const helper = isHelperWord(info) && (!rest || /^[{[]/.test(rest));
+    // a block's fence with nothing after its word, or with the JSON starting there (whose strings may hold backticks)
+    const helper = isWord(info) && (!rest || /^[{[]/.test(rest));
     if (!helper && fence[0] === "`" && rest.includes("`")) {
       i += 1; // an inline code span, not a fence
       continue;
@@ -148,7 +162,7 @@ function scan(text: string): { lines: string[]; blocks: Block[] } {
       // the JSON may start on the opening line, as the fork's blocks allow; the rest of the block follows it
       const end = blockEnd(lines, i, fence);
       const body = [rest, ...lines.slice(i + 1, end).map(strip)].filter((l, k) => k > 0 || l).join("\n");
-      blocks.push({ from: i, to: Math.min(end + 1, lines.length), body, closed: end < lines.length });
+      blocks.push({ word: info, from: i, to: Math.min(end + 1, lines.length), body, closed: end < lines.length });
       i = end + 1;
       continue;
     }
@@ -160,6 +174,9 @@ function scan(text: string): { lines: string[]; blocks: Block[] } {
   return { lines, blocks };
 }
 
+/** The helper blocks of `text`. */
+const scan = (text: string) => fencedBlocks(text, HELPER_FENCES);
+
 // ---------------------------------------------------------------------------------------------------------------------------
 // Reading one block
 // ---------------------------------------------------------------------------------------------------------------------------
@@ -170,7 +187,7 @@ const cut = (s: string, max: number): string => (s.length <= max ? s : `${s.slic
 
 /** One helper from one JSON object, or why it cannot be one. Strict where GoSpark is lenient: GoSpark skips an entry with no prompt
  *  and ignores keys it does not know; here either refuses the request (R3). */
-function helperFrom(entry: unknown): HelperBrief | HelperRefusal {
+export function helperFrom(entry: unknown): HelperBrief | HelperRefusal {
   if (!isPlainObject(entry)) return { why: "shape" };
   for (const key of Object.keys(entry)) if (!(HELPER_KEYS as readonly string[]).includes(key)) return { why: "key", key: cut(oneLine(key), 40) };
   for (const key of HELPER_KEYS) if (key in entry && typeof entry[key] !== "string") return { why: "value", key };
@@ -189,7 +206,7 @@ function helperFrom(entry: unknown): HelperBrief | HelperRefusal {
   return { title, brief, ...names };
 }
 
-const isRefusal = (v: HelperBrief | HelperRefusal): v is HelperRefusal => "why" in v;
+export const isRefusal = (v: HelperBrief | HelperRefusal): v is HelperRefusal => "why" in v;
 
 /** One block's JSON: a list of helpers or one helper object (GoSpark's `parse`). Either every helper in it is read, or the block
  *  is refused with the first reason found. */
@@ -299,8 +316,12 @@ export const hasHelperBlock = (text: string): boolean => scan(text).blocks.lengt
 
 /** Whether `text` ends in a helper block, closed or still being written, with nothing but blank lines after it. What is written
  *  before such a block is whole lines, though `hideHelperBlocks` trims the line end that said so. */
-export function endsInHelperBlock(text: string): boolean {
-  const { lines, blocks } = scan(text);
+export const endsInHelperBlock = (text: string): boolean => endsInFenced(text, HELPER_FENCES);
+
+/** Whether `text` ends in a top-level block opened by one of `words`, closed or still being written, with nothing but blank lines
+ *  after it. */
+export function endsInFenced(text: string, words: readonly string[]): boolean {
+  const { lines, blocks } = fencedBlocks(text, words);
   const last = blocks[blocks.length - 1];
   return !!last && lines.slice(last.to).every((l) => !l.trim());
 }
@@ -309,8 +330,12 @@ export function endsInHelperBlock(text: string): boolean {
  *  from its fence to the end (GoSpark's `displayText` and `withoutDelegationBlock`, with the fork's walk). The same while the
  *  answer streams and once it is over: only a fence that opens its own line at the top level is a block, so a sentence that names
  *  the fence keeps every word after it. Blank lines left three deep are made two, and the ends trimmed, as `hideSplitBlocks` does. */
-export function hideHelperBlocks(text: string): string {
-  const { lines, blocks } = scan(text);
+export const hideHelperBlocks = (text: string): string => hideFenced(text, HELPER_FENCES);
+
+/** `text` with every top-level block opened by one of `words` taken out, and one still open cut from its fence to the end, as
+ *  `hideHelperBlocks` does for the helper blocks. */
+export function hideFenced(text: string, words: readonly string[]): string {
+  const { lines, blocks } = fencedBlocks(text, words);
   if (!blocks.length) return text;
   const keep: string[] = [];
   let b = 0;

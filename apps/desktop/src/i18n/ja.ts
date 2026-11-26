@@ -100,6 +100,7 @@ import { prov } from "./ja/prov";
 import { prs } from "./ja/prs";
 import { pull } from "./ja/pull";
 import { pv } from "./ja/pv";
+import { reach } from "./ja/reach";
 import { resume } from "./ja/resume";
 import { review } from "./ja/review";
 import { risk } from "./ja/risk";
@@ -260,6 +261,7 @@ export const ja: Record<Key, string> = {
   ...prs,
   ...pull,
   ...pv,
+  ...reach,
   ...resume,
   ...review,
   ...risk,

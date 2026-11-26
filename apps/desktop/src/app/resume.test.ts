@@ -147,6 +147,20 @@ describe("resume snapshot", () => {
     expect(parseResume(JSON.stringify(buildResume(input(), T)))!.sessions[0].helpers).toBeUndefined();
   });
 
+  it("keeps a chat's \"Kit may reach\" list, each chat checked as it is read back (item 102k)", () => {
+    const reach = [
+      { n: 1, ref: { kind: "session", id: "s4" }, link: "abc123", title: "Receipt layout", scope: { account: "claude:work" } },
+      { n: 3, ref: { kind: "thread", bot: "buddy", thread: "t1" }, title: "Orders", scope: { shop: "baanmali" } },
+    ];
+    const good = buildResume(input({ sessions: [{ ...input().sessions[0], reach } as never] }), T);
+    expect(parseResume(JSON.stringify(good))!.sessions[0].reach).toEqual(reach);
+    const back = (r: unknown) => parseResume(JSON.stringify({ ...good, sessions: [{ ...good.sessions[0], reach: r }] }))!.sessions[0].reach;
+    // a chat that cannot be read is left out, the rest kept; nothing readable: no list at all
+    expect(back([...reach, { n: 4, ref: { kind: "nope" }, title: "x", scope: {} }, { n: 5, ref: { kind: "session", id: "s9" }, title: "y", scope: { shop: 1 } }])).toEqual(reach);
+    expect(back("all of them")).toBeUndefined();
+    expect(parseResume(JSON.stringify(buildResume(input(), T)))!.sessions[0].reach).toBeUndefined();
+  });
+
   it("keeps that an ended session's CLI could not continue its conversation, and only for an ended one", () => {
     const good = buildResume(input(), T);
     const raw = (resumeFailed: unknown, running: boolean) => JSON.stringify({ ...good, sessions: [{ ...good.sessions[2], running, resumeFailed }] });
