@@ -66,7 +66,7 @@ for (const theme of ["dark", "light"] as const) {
     await shot(page, "mode", theme);
     await page.keyboard.press("Escape");
 
-    // reasoning effort: the model menu (before: models only)
+    // reasoning effort: the effort card the model chip opens (item 132)
     await page.getByTestId("model-pill").click();
     await expect(page.getByTestId("model-pop")).toBeVisible();
     await shot(page, "effort", theme);

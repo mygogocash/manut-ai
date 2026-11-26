@@ -68,6 +68,13 @@ hold. From `AntigravitySession.swift`, Antigravity's own input names (`CommandLi
 not); from `ACPSession.swift`, that an agent's `session/new` reports its modes and models both as `modes` and `models`
 and as configuration options, and that a mode is set with `session/set_config_option` or else `session/set_mode`.
 
+GoSpark again (at `a7537c80`, read in the checkout on the owner's Mac on 26 Nov 2026) for the chat box's effort card
+(item 132, `apps/desktop/src/chat/box/EffortCard.tsx`, `effort.ts`, `ultrathink.ts`): `ModelEffortButton`,
+`EffortSliderCard`, `EffortSlider`, `EffortBrand` and `visibleEfforts` / `defaultEffort` from
+`GoGoCode/Views/Composer/EffortSlider.swift`, and `UltrathinkDraft.swift`, ported to React and this app's tokens with
+their rules (the title words, the default, the nearest stop, the brand at the top level, and when the Ultrathink line may
+be added or taken out); its sizes and spacing are GoSpark's, its moves the Motion board's.
+
 Libraries added for one feature are named here too: `qrcode` 1.5.4 (MIT, soldair/node-qrcode), already the web app's,
 pinned in the desktop for the pairing code's QR image (`apps/desktop/src/remote/QrCode.tsx`, lifted from
 `apps/web/src/ops/QrCode.tsx`); only its `create` is used, which returns the modules and reaches no network; `objc2-speech`, `objc2-avf-audio` and `objc2-av-foundation`
