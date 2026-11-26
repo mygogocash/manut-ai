@@ -141,9 +141,9 @@ describe("a job that runs its specs in several projects", () => {
 });
 
 describe("the note under the title", () => {
-  it("is the desktop's sentence unless one is given, and can be left out", () => {
+  it("is the default sentence unless one is given, and can be left out", () => {
     const file = join(run("note", [report({ expected: 3 })]), "playwright-results-1.json");
-    assert.match(summarise(file), /^### Desktop Playwright\n\nThis job may fail without failing the run while the inherited specs are brought up to date\.\n\n\| Passed/);
+    assert.match(summarise(file), /^### Desktop Playwright\n\nA failing test fails the run\. A test that passed only when run again is counted as flaky\.\n\n\| Passed/);
     assert.match(summarise("--note", "A failing test fails the run.", file), /^### Desktop Playwright\n\nA failing test fails the run\.\n\n\| Passed/);
     const none = summarise("--title", "Web on phones", "--note", "", file);
     assert.match(none, /^### Web on phones\n\n\| Passed/);

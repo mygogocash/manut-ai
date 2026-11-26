@@ -197,6 +197,12 @@ describe("this repository", () => {
     assert.match(job("e2e-summary"), new RegExp(`playwright-summary\\.mjs .*--shards ${shards.length} `));
   });
 
+  it("fails the run when a shard fails: neither the shards nor their summary may fail quietly", () => {
+    assert.doesNotMatch(job("e2e"), /continue-on-error/);
+    assert.doesNotMatch(job("e2e-summary").replace(/\n {6}- name: Fetch the shards' reports\n(?: {8}.*\n)*/, "\n"), /continue-on-error/);
+    assert.match(job("e2e-summary"), /--strict/);
+  });
+
   it("has a usable timings file, and puts every spec file there is in exactly one of ci.yml's shards", () => {
     const { timings, problem } = readTimings(join(SPEC_DIR, "timings.json"));
     assert.equal(problem, undefined);

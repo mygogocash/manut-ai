@@ -13,6 +13,9 @@ const mock = Number(process.env.MANUT_MOCK_PORT || 5308);
 export default defineConfig({
   testDir: "e2e",
   timeout: 30_000,
+  // On CI a failed test runs once more: a one-off slow start on a shared runner then shows as flaky in the shard's
+  // summary instead of failing the run, and a real failure fails twice. On a person's machine it fails at once.
+  retries: process.env.CI ? 1 : 0,
   // One mock bridge holds shared state (calls log, running turn): spec files must not run against it at once.
   workers: 1,
   use: {

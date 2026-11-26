@@ -25,7 +25,7 @@ import { basename, join } from "node:path";
 
 const args = process.argv.slice(2);
 let title = "Desktop Playwright";
-let note = "This job may fail without failing the run while the inherited specs are brought up to date.";
+let note = "A failing test fails the run. A test that passed only when run again is counted as flaky.";
 let expectedShards = 0;
 let strict = false;
 const inputs = [];
