@@ -1,5 +1,5 @@
 export const acc = {
-  "acc.headerLine": "Logins Manut AI uses when it runs Claude Code, Codex or pi for you. Your team is set up under {bots}.",
+  "acc.headerLine": "Logins Manut AI uses when it runs Claude Code, Codex, Grok or pi for you. Your team is set up under {bots}.",
   "acc.autoSwitch": "Auto-switch",
   "acc.autoSwitchOf": "Auto-switch {cli}",
   "acc.autoSwitchLine": "When this account hits its limit, new turns use the next one.",
@@ -27,6 +27,11 @@ export const acc = {
   "acc.removeConfirm": "Remove {name} from Manut AI? Its sign-in on this computer is deleted too.",
   "acc.removeBtn": "Remove",
   "acc.addSoonTip": "Manut AI cannot add a second {cli} account yet. The {cli} login on this computer is the one Manut AI uses.",
+  "acc.piTitle": "Sign in to pi as {name}",
+  "acc.piLine": "Open pi as this account, type /login there and pick your provider, then come back here.",
+  "acc.piOpen": "Open pi",
+  "acc.piDone": "Done",
+  "acc.addConfirm": "Add",
   "acc.add": "+ Add account",
   "acc.soon": "Soon",
   "acc.namePh": "Name, optional (e.g. Work)",

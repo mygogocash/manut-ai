@@ -86,13 +86,15 @@ pub fn own_home_env(home: &Path, cli: &str) -> Vec<(String, String)> {
     vec![(var.to_string(), h)]
 }
 
-/// The Accounts CLI a SESSIONS agent signs in as: claude, codex and grok map 1:1. omh has no login of its own,
-/// and pi / omp sessions do not take an account yet, so those start with the CLI's own home.
+/// The Accounts CLI a SESSIONS agent signs in as: claude, codex, grok and pi map 1:1 (grok and pi since item 101d). omh has
+/// no login of its own, and oh-my-pi keeps its sign-in in a database a stat cannot tell, so those start with the CLI's own
+/// home.
 pub fn session_cli(agent: &str) -> Option<&'static str> {
     match agent {
         "claude" => Some("claude"),
         "codex" => Some("codex"),
         "grok" => Some("grok"),
+        "pi" => Some("pi"),
         _ => None,
     }
 }
@@ -156,6 +158,10 @@ pub fn shared_names(cli: &str) -> &'static [&'static str] {
     match cli {
         "claude" => &["skills", "commands", "agents", "output-styles", "rules", "workflows", "plugins", "CLAUDE.md"],
         "codex" => &["AGENTS.md", "AGENTS.override.md", "skills", "prompts", "plugins"],
+        // Grok Build (its own `14-headless-mode.md` file-locations table, `08-skills.md` and `01-getting-started.md`): the
+        // global rules, user skills, slash commands and personas. Never its `config.toml` (the permission mode, and MCP
+        // credentials), `auth.json` or `mcp_credentials.json`. pi shares nothing: its layout was not readable here (item 101d).
+        "grok" => &["AGENTS.md", "skills", "commands", "personas"],
         _ => &[],
     }
 }
@@ -414,6 +420,10 @@ pub fn fixed_args(cli: &str, step: Step) -> Option<&'static [&'static str]> {
         ("codex", Step::Status) => Some(&["login", "status"]),
         ("codex", Step::Login) => Some(&["login"]),
         ("codex", Step::Version) => Some(&["--version"]),
+        // Grok Build's own sign-in (`grok login`, its `02-authentication.md`: browser by default, writes `$GROK_HOME/auth.json`)
+        // and `--version`. pi signs in with its `/login` slash command inside its own terminal, so it has no line here.
+        ("grok", Step::Login) => Some(&["login"]),
+        ("grok", Step::Version) => Some(&["--version"]),
         _ => None,
     }
 }
@@ -755,6 +765,13 @@ pub fn status(home: &Path, cli: &str, id: &str) -> Result<Option<LoginStatus>, S
                 Ok(Some(codex_status_from_file(&codex_home.join("auth.json"))))
             }
         }
+        // Grok and pi have no status command the app can run per folder: the account's own `auth.json`, a stat only
+        "grok" | "pi" => {
+            let own = own_home_env(home, cli);
+            let dir = if id == "default" { crate::past_chats::cli_home(home, cli, &own, &host_env).ok_or("no home")? } else { account_dir(home, cli, id)? };
+            let (signed, _) = signed_in_here(cli, &dir, &dir.join(".claude.json"));
+            Ok(Some(LoginStatus { logged_in: signed, ..Default::default() }))
+        }
         _ => Ok(None),
     }
 }
@@ -772,7 +789,7 @@ pub fn status(home: &Path, cli: &str, id: &str) -> Result<Option<LoginStatus>, S
 
 /// The CLIs the shell lists accounts for: the ones whose own sign-in it runs ([`fixed_args`] `Login`) and whose status it
 /// reads.
-pub const LISTED_CLIS: [&str; 2] = ["claude", "codex"];
+pub const LISTED_CLIS: [&str; 4] = ["claude", "codex", "pi", "grok"];
 
 /// One account row, in the bridge's shape (`Account` in src/lib/protocol.ts). Never a token: an email at most.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -808,7 +825,9 @@ fn is_real_dir(p: &Path) -> bool {
 /// macOS Claude Code keeps the key itself in the keychain, so this is the account's own identity file, not the key.
 pub fn signed_in_here(cli: &str, cli_home: &Path, claude_json: &Path) -> (bool, String) {
     match cli {
-        "codex" => (std::fs::symlink_metadata(cli_home.join("auth.json")).map(|m| m.is_file()).unwrap_or(false), String::new()),
+        // Grok's `grok login` writes `auth.json` in `$GROK_HOME`, and pi's `/login` in `PI_CODING_AGENT_DIR`: each folder is
+        // asked about its own file, so one account's sign-in is never read as another's (item 101d)
+        "codex" | "grok" | "pi" => (std::fs::symlink_metadata(cli_home.join("auth.json")).map(|m| m.is_file()).unwrap_or(false), String::new()),
         "claude" => {
             let v = std::fs::symlink_metadata(claude_json)
                 .ok()
@@ -1239,10 +1258,13 @@ mod tests {
         let home = session_home("sess", r#"{"claude":"work","codex":"default","grok":"gone","pi":"p"}"#, &[("claude", "work"), ("pi", "p")]);
         let work = home.join(".manut").join("accounts").join("claude").join("work").to_string_lossy().into_owned();
         assert_eq!(session_env(&home, "claude"), vec![("CLAUDE_CONFIG_DIR".to_string(), work)]);
-        // "This computer", a folder that is gone, an agent without accounts (pi / omp for now, omh never)
-        for agent in ["codex", "grok", "pi", "omp", "omh", "bash"] {
+        // "This computer", a folder that is gone, an agent without accounts (oh-my-pi, omh)
+        for agent in ["codex", "grok", "omp", "omh", "bash"] {
             assert_eq!(session_env(&home, agent), vec![], "{agent}");
         }
+        // pi takes an account since item 101d
+        let p = home.join(".manut").join("accounts").join("pi").join("p").to_string_lossy().into_owned();
+        assert_eq!(session_env(&home, "pi"), vec![("PI_CODING_AGENT_DIR".to_string(), p)]);
         // nothing chosen, or an active.json that is not ours to trust
         for active in ["", "{}", "[]", r#"{"claude":"../../x"}"#, r#"{"claude":{"id":"work"}}"#, r#"{"claude":"Work"}"#] {
             let h = session_home("sess-bad", active, &[("claude", "work")]);
@@ -1265,7 +1287,7 @@ mod tests {
             assert_eq!(session_env_for(&home, "claude", acct), vec![("CLAUDE_CONFIG_DIR".to_string(), dir("claude", "work"))], "{acct:?}");
         }
         // agents without accounts never get one
-        for agent in ["pi", "omp", "omh", "bash"] {
+        for agent in ["omp", "omh", "bash"] {
             assert_eq!(session_env_for(&home, agent, Some("work")), vec![], "{agent}");
         }
         let _ = std::fs::remove_dir_all(home);
@@ -1297,7 +1319,9 @@ mod tests {
                 n += usize::from(fixed_args(cli, step).is_some());
             }
         }
-        assert_eq!(n, 7, "only the seven commands above");
+        assert_eq!(fixed_args("grok", Step::Login), Some(&["login"][..]));
+        assert_eq!(fixed_args("grok", Step::Version), Some(&["--version"][..]));
+        assert_eq!(n, 9, "only the nine commands above");
         assert!(fixed_args("pi", Step::Login).is_none() && fixed_args("omp", Step::Login).is_none());
     }
 
@@ -1678,9 +1702,11 @@ trust_level = "trusted"
             }
         }
         // the CLIs whose home is not split stay as they are
-        for cli in ["grok", "pi", "omp", "gemini"] {
+        for cli in ["pi", "omp", "gemini"] {
             assert!(shared_names(cli).is_empty(), "{cli}");
         }
+        // Grok shares what its own documentation calls user configuration, and never its `config.toml` (the permission mode)
+        assert_eq!(shared_names("grok"), ["AGENTS.md", "skills", "commands", "personas"]);
         assert_eq!(claude_settings_copy("[1]"), None);
         assert_eq!(claude_settings_copy(r#"{"env":{"A":"1"},"model":"x"}"#).as_deref(), Some("{\n  \"model\": \"x\"\n}"));
     }
@@ -1745,7 +1771,7 @@ trust_level = "trusted"
         std::fs::write(home.join(".codex").join("auth.json"), format!(r#"{{"tokens":{{"access_token":"{SECRET}"}}}}"#)).unwrap();
         std::fs::write(home.join(".claude.json"), format!(r#"{{"oauthAccount":{{"emailAddress":"me@example.com","accessToken":"{SECRET}"}}}}"#)).unwrap();
         let g = list(&home, &|_| true, &none);
-        assert_eq!(g.iter().map(|g| g.cli).collect::<Vec<_>>(), ["claude", "codex"]);
+        assert_eq!(g.iter().map(|g| g.cli).collect::<Vec<_>>(), ["claude", "codex", "pi", "grok"]);
         assert_eq!((g[0].accounts[0].state, g[0].accounts[0].email.as_str()), ("ready", "me@example.com"));
         assert_eq!(g[1].accounts[0].state, "ready");
         assert!(!serde_json::to_string(&g).unwrap().contains(SECRET));
@@ -1761,7 +1787,7 @@ trust_level = "trusted"
         assert!(add(&home, "claude", "work").unwrap_err().contains("already exists"));
         assert_eq!(add(&home, "claude", "!!").unwrap().0, "account-2");
         assert_eq!(add(&home, "claude", "Default").unwrap().0, "account-3");
-        for bad in ["gemini", "pi", "../x", ""] {
+        for bad in ["gemini", "omp", "../x", ""] {
             assert!(add(&home, bad, "x").is_err(), "{bad}");
         }
         let g = list(&home, &|_| true, &none);
@@ -1839,5 +1865,129 @@ trust_level = "trusted"
         #[cfg(unix)]
         assert_eq!(std::fs::read_link(dir.join("skills")).unwrap(), mine.canonicalize().unwrap().join("skills"));
         std::fs::remove_dir_all(&home).unwrap();
+    }
+
+    // ---- Grok and pi accounts (item 101d) -------------------------------------------------------------------------
+
+    /// Grok and pi are listed, added, named, picked and removed by the shell as Claude Code and Codex are, each account is
+    /// read as signed in from its own folder's `auth.json` (a stat: the file is never opened), and a token in one account's
+    /// folder is never read, nor shown, for another.
+    #[test]
+    fn grok_and_pi_accounts_are_kept_like_the_others_and_never_read_across_folders() {
+        let home = list_home("grok-pi");
+        let none = |_: &str| None;
+        std::fs::create_dir_all(home.join(".grok")).unwrap();
+        std::fs::write(home.join(".grok").join("auth.json"), format!(r#"{{"access_token":"{SECRET}"}}"#)).unwrap();
+        let g = list(&home, &|_| true, &none);
+        assert_eq!(g.iter().map(|g| g.cli).collect::<Vec<_>>(), ["claude", "codex", "pi", "grok"]);
+        let grok = g.iter().find(|g| g.cli == "grok").unwrap();
+        let pi = g.iter().find(|g| g.cli == "pi").unwrap();
+        assert_eq!((grok.accounts[0].id.as_str(), grok.accounts[0].state), ("default", "ready"), "the person's own ~/.grok");
+        assert_eq!((pi.accounts[0].id.as_str(), pi.accounts[0].state), ("default", "login"));
+
+        for cli in ["grok", "pi"] {
+            let (work, work_dir) = add(&home, cli, "Work").unwrap();
+            let (play, _) = add(&home, cli, "Play").unwrap();
+            assert_eq!((work.as_str(), play.as_str()), ("work", "play"));
+            assert_eq!(work_dir, home.join(".manut").join("accounts").join(cli).join("work"));
+            // Work signs in (its own auth.json); Play and "This computer" are not read as signed in because of it
+            std::fs::write(work_dir.join("auth.json"), format!(r#"{{"access_token":"{SECRET}","refresh_token":"{SECRET}"}}"#)).unwrap();
+            assert!(status(&home, cli, "work").unwrap().unwrap().logged_in, "{cli}");
+            assert!(!status(&home, cli, "play").unwrap().unwrap().logged_in, "{cli}");
+            let g = list(&home, &|_| true, &none);
+            let rows: Vec<(&str, &str)> = g.iter().find(|g| g.cli == cli).unwrap().accounts.iter().filter(|r| r.id != "default").map(|r| (r.id.as_str(), r.state)).collect();
+            assert_eq!(rows, [("play", "login"), ("work", "ready")], "{cli}");
+            let shown = serde_json::to_string(&g).unwrap() + &format!("{:?}", status(&home, cli, "work"));
+            assert!(!shown.contains(SECRET), "{cli}: a token reached what the page is given");
+            // each account's session gets its own folder, and only that one
+            assert_eq!(account_env(&home, cli, "play").unwrap()[0].1, home.join(".manut/accounts").join(cli).join("play").to_string_lossy());
+            // pick, name, a signed-in account is not discarded, then removed
+            set_active(&home, cli, "work").unwrap();
+            assert_eq!(active_account(&home, cli), "work");
+            set_label(&home, cli, "work", "Team").unwrap();
+            assert!(discard(&home, cli, "work").unwrap_err().contains("signed in"));
+            discard(&home, cli, "play").unwrap();
+            remove(&home, cli, "work").unwrap();
+            assert_eq!(active_account(&home, cli), "default");
+        }
+        // oh-my-pi and Gemini CLI are still not kept here
+        for cli in ["omp", "gemini"] {
+            assert!(add(&home, cli, "x").is_err(), "{cli}");
+        }
+        let _ = std::fs::remove_dir_all(home);
+    }
+
+    /// A new or restarted session of Grok or pi runs as the account it was given (`session_cli`), and a pi terminal opened to
+    /// sign an account in gets that account's folder in `PI_CODING_AGENT_DIR` and nothing of the person's own home.
+    #[test]
+    fn grok_and_pi_sessions_take_an_account_and_keep_it_after_a_restart() {
+        let home = session_home("gp", r#"{"grok":"work","pi":"work"}"#, &[("grok", "work"), ("grok", "old"), ("pi", "work")]);
+        let dir = |cli: &str, id: &str| home.join(".manut").join("accounts").join(cli).join(id).to_string_lossy().into_owned();
+        assert_eq!(session_cli("grok"), Some("grok"));
+        assert_eq!(session_cli("pi"), Some("pi"));
+        assert_eq!(session_cli("omp"), None);
+        assert_eq!(session_env(&home, "grok"), vec![("GROK_HOME".to_string(), dir("grok", "work"))]);
+        assert_eq!(session_env(&home, "pi"), vec![("PI_CODING_AGENT_DIR".to_string(), dir("pi", "work"))]);
+        // restarted: the account it ran with, while its folder exists, else the one picked now; "This computer" stays so
+        assert_eq!(session_env_for(&home, "grok", Some("old")), vec![("GROK_HOME".to_string(), dir("grok", "old"))]);
+        assert_eq!(session_env_for(&home, "pi", Some("gone")), vec![("PI_CODING_AGENT_DIR".to_string(), dir("pi", "work"))]);
+        assert_eq!(session_env_for(&home, "pi", Some("default")), vec![]);
+        assert_eq!(session_env_for(&home, "grok", Some("../work")), vec![("GROK_HOME".to_string(), dir("grok", "work"))]);
+        let _ = std::fs::remove_dir_all(home);
+    }
+
+    /// Grok's sign-in runs `grok login` with the account's `GROK_HOME`; pi has no line to run (its sign-in is `/login` inside
+    /// its own terminal), so asking for one is refused before any program is looked for.
+    #[test]
+    fn grok_signs_in_with_its_own_login_in_the_account_folder_and_pi_runs_nothing() {
+        let home = list_home("grok-login");
+        let (id, dir) = add(&home, "grok", "Work").unwrap();
+        // the fixed command's env is the account's folder and nothing of another one
+        let env: Vec<(String, String)> = account_env(&home, "grok", &id).unwrap();
+        assert_eq!(env, vec![("GROK_HOME".to_string(), dir.to_string_lossy().into_owned())]);
+        assert_eq!(fixed_args("grok", Step::Login), Some(&["login"][..]));
+        assert_eq!(command_for(&home, "pi", "work", Step::Login).unwrap_err(), "not something Manut AI runs");
+        assert_eq!(command_for(&home, "pi", "work", Step::Status).unwrap_err(), "not something Manut AI runs");
+        let logins = Logins::new();
+        assert_eq!(logins.start(&home, "grok", "default", |_| {}).unwrap_err(), "bad account id");
+        assert_eq!(logins.start(&home, "grok", "gone", |_| {}).unwrap_err(), "no such account folder");
+        let _ = std::fs::remove_dir_all(home);
+    }
+
+    /// An added Grok account gets the person's global rules, skills, commands and personas as links, and never `config.toml`
+    /// (its permission mode), `auth.json` or `mcp_credentials.json`; pi's account gets nothing.
+    #[cfg(unix)]
+    #[test]
+    fn an_added_grok_account_shares_configuration_and_never_the_sign_in_or_the_permission_mode() {
+        let home = list_home("grok-share");
+        let put = |rel: &str, text: &str| {
+            let p = home.join(rel);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, text).unwrap();
+        };
+        put(".grok/AGENTS.md", "rules\n");
+        put(".grok/skills/review/SKILL.md", "---\nname: review\n---\n");
+        put(".grok/commands/ship.md", "ship\n");
+        put(".grok/config.toml", "[ui]\npermission_mode = \"always-approve\"\n");
+        put(".grok/auth.json", &format!(r#"{{"access_token":"{SECRET}"}}"#));
+        put(".grok/mcp_credentials.json", &format!(r#"{{"x":"{SECRET}"}}"#));
+        put(".pi/agent/skills/x/SKILL.md", "x");
+        let (_, gdir) = add(&home, "grok", "work").unwrap();
+        let (_, pdir) = add(&home, "pi", "work").unwrap();
+        let own = home.join(".grok").canonicalize().unwrap();
+        let s = share(&home, "grok", "work", &own).unwrap();
+        assert_eq!(s.linked, ["AGENTS.md", "skills", "commands"]);
+        for gone in ["config.toml", "auth.json", "mcp_credentials.json"] {
+            assert!(std::fs::symlink_metadata(gdir.join(gone)).is_err(), "{gone} reached the account");
+        }
+        assert_eq!(std::fs::read_link(gdir.join("skills")).unwrap(), own.join("skills"));
+        let own_pi = home.join(".pi/agent").canonicalize().unwrap();
+        assert!(share(&home, "pi", "work", &own_pi).unwrap().linked.is_empty());
+        assert!(std::fs::read_dir(&pdir).unwrap().all(|e| e.unwrap().file_name() == "account.json"));
+        // prepare finds the person's own Grok home the same way a session would
+        let env = session_env_for(&home, "grok", Some("work"));
+        prepare(&home, "grok", &env);
+        assert!(std::fs::symlink_metadata(gdir.join("commands")).is_ok());
+        let _ = std::fs::remove_dir_all(home);
     }
 }
