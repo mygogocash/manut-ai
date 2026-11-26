@@ -91,6 +91,14 @@ names a call's tool in `_meta["x.ai/tool"]` (`kind`, else `name`: `bash`, `searc
 `read_file`) rather than in `kind`; and from its migration plan (`docs/plans/migrate-from-grok-muse-2026-09-25.md`), what
 Muse Code is and where it keeps its settings and sessions.
 
+GoSpark again (at `a7537c80`, the same checkout, 27 Nov 2026) for the helper lanes' rules (item 102d,
+`apps/desktop/src/jobs/rules.ts`): Buddy's round queue (`BuddyBatchQueue` in `GoGoCode/Models/BuddyBatching.swift`), its budget
+(`BuddyBudget` in `GoGoCode/Models/Buddy.swift`, with how `ThreadRuntime.swift`, `OpenAICompatibleSession.swift` and
+`APIKeyToolTally` apply it, and `BuddyHangWatchdog.answeredGrace`), its head cap (`BuddyHeadCap`), its landing predicates
+(`BuddyLanding`), what `BuddyPrompts.reportMessage` tells the lead about each head, and `BuddyFailureClass` with its fragments,
+ported to TypeScript with their numbers; and their tests (`BuddyBatchingTests`, `BuddyHeadCapTests`, `BuddyReportTests`,
+`BuddyFailureClassTests`, `BuddyBudgetTests`, the tally in `APIKeyToolsTests`), ported case by case as tables in `rules.test.ts`.
+
 The Agent Client Protocol's agent registry (Apache-2.0, `agentclientprotocol/registry`, release `v2026.11.26-3667256` at
 commit `36672565f76e7fb9796eb15182e0e14fb9e77c33`) for Settings › Providers › From the ACP registry (item 101c): its
 published `registry.json` is pinned byte for byte in `apps/desktop/src-tauri/acp-registry/` with its `quarantine.json`

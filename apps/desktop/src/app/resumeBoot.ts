@@ -74,6 +74,8 @@ function snapshot(): ResumeSnap {
         ...(r.continuedFrom ? { continuedFrom: r.continuedFrom } : {}),
         ...(r.continuedIn ? { continuedIn: r.continuedIn } : {}),
         ...(r.modelWant ? { modelWant: r.modelWant } : {}),
+        // the lanes one Ask several message started stay one job after a restart (item 102a)
+        ...(r.job ? { job: r.job } : {}),
       })),
       messages: (id) => {
         const key = ss.chatKey(id);

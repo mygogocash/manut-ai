@@ -447,7 +447,10 @@ test("Accounts: every leading mark sits in one 16px slot, one column", async ({ 
     }),
   );
   expect(marks.length).toBeGreaterThanOrEqual(6); // three headings and their rows
-  for (const [w, h] of marks) expect([w, h]).toEqual([16, 16]);
+  // to the nearest hundredth of a pixel: Linux Chromium on CI lays a mark out 15.9998779296875px tall at some row
+  // offsets (run 45878646292), which is 16px on any screen; a mark of 15 or 17 still fails
+  const px = (n: number) => Math.round(n * 100) / 100;
+  for (const [w, h] of marks) expect([px(w), px(h)]).toEqual([16, 16]);
   expect(new Set(marks.map(([, , c]) => Math.round(c))).size).toBe(1);
 });
 
