@@ -1,7 +1,8 @@
 # Handoff: where the build stands (23 Nov 2026, about 14:45 Bangkok)
 
 Written so a new session in any tool can continue without the earlier conversations. Read `CLAUDE.md` first
-(rules and the owner's standing permissions), then this file, `docs/plan.md` and `docs/decisions.md`.
+(rules and the owner's standing permissions), then this file, `docs/plan.md` and `docs/decisions/` (since item 128,
+one file per item beside `archive.md`, which holds every decision made before; its `README.md` says how to add one).
 
 ## What this is
 
@@ -210,7 +211,8 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    The owner asked on 25 Nov, after the first release, for the smaller desktop items that need no decision (items 68 to
    71 in `docs/plan.md`), and reported that Buddy "doesn't response" in Practice mode, where it gave a sample answer
    (item 67). Two helpers run at a time, each on its own branch from `pilot/week-1`; review each, merge it after the
-   full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
+   full root gate, check its decisions are in its own `docs/decisions/<item>-<short-name>.md` (since item 128; before
+   then the lead added them to `docs/decisions.md`) and mark both trackers in `docs/plan.md`:
    Late on 25 Nov the owner said the account had credits to spare for the next 22 hours and to use them, and set the
    session's goal: every feature highlighted on 25 Nov, then whatever needs nothing from the owner, and an app that
    feels premium and quiet, with motion on its states and details (the canvas's Motion board is the rule:

@@ -3,11 +3,12 @@
 
 Usage: keep-both.py <file> [<file> ...]
 
-It is for the files two items nearly always both add to: the rows at the top of docs/decisions.md, new keys at the end of
-the four dictionaries in apps/desktop/src/i18n, an import or a page in a Settings list. It refuses a file where keeping
-both would be wrong or cannot be told:
+It is for the files two items nearly always both add to: new keys at the end of the four dictionaries in
+apps/desktop/src/i18n, an import or a page in a Settings list, and rows of a decisions table. Since item 128 decisions are
+one file per item (docs/decisions/README.md), so a decisions table conflicts only when two items share a file. It refuses
+a file where keeping both would be wrong or cannot be told:
 
-- docs/decisions.md: every conflicting line must be a table row.
+- a decisions table (docs/decisions.md, or any .md under docs/decisions/): every conflicting line must be a table row.
 - a dictionary (i18n/*.ts): every conflicting line must be a key, a comment or blank, and no key may end up twice.
 - any other file: only with --any, after you have read the conflict yourself. Two functions added at one place share the
   closing brace after the marker, and a sentence both sides extended needs joining by hand: this script does neither.
@@ -30,7 +31,7 @@ for name in args:
         print(f"{name}: no conflict")
         continue
     lines = [line for ours, theirs in blocks for line in (ours + theirs).splitlines()]
-    if name.endswith("decisions.md"):
+    if name.endswith(".md") and "decisions" in name:
         bad = [line for line in lines if not line.startswith("| ")]
     elif "/i18n/" in name:
         bad = [line for line in lines if line.strip() and not re.match(r'\s*("[^"]+":|//|/\*|\*)', line)]

@@ -1,6 +1,6 @@
 ---
 name: lead-merge
-description: The lead's routine for one plan item in Manut AI - start a helper's worktree, gate its branch, merge it, mark it and clean up. Use when a helper reports an item finished, when starting a new item, or when a merge conflicts in docs/decisions.md or the dictionaries.
+description: The lead's routine for one plan item in Manut AI - start a helper's worktree, gate its branch, merge it, mark it and clean up. Use when a helper reports an item finished, when starting a new item, or when a merge conflicts in the decisions or the dictionaries.
 ---
 
 # Merging an item as the lead
@@ -39,8 +39,14 @@ Read its report for what it did NOT do or could not check, then:
 2. Merge the lead's branch into the item's (`git merge --no-edit feat/continue-pilot-week-1` in the item's worktree).
    Conflicts are nearly always two items adding at one place:
    ```bash
-   .claude/skills/lead-merge/scripts/keep-both.py docs/decisions.md apps/desktop/src/i18n/{en,ja,ko,zh}.ts
+   .claude/skills/lead-merge/scripts/keep-both.py apps/desktop/src/i18n/{en,ja,ko,zh}.ts
    ```
+   Decisions no longer conflict: since item 128 each item writes its own `docs/decisions/<item>-<short-name>.md`, and
+   `docs/decisions.md` and `docs/decisions/archive.md` are frozen. A branch made before item 128 still adds rows to
+   `docs/decisions.md`: keep the lead's short note there (`git checkout --theirs docs/decisions.md`, since the lead's
+   branch is the one merged in), and put the branch's own rows, `git diff <merge base> <item branch> -- docs/decisions.md |
+   sed -n 's/^+| /| /p'`, at the top of a new `docs/decisions/<item>-<short-name>.md` under the README's heading and
+   table head.
    Read any other conflict yourself. Two functions added at one place share the closing brace after the marker; a
    sentence both sides extended is joined by hand.
 3. Gate the merged branch: `.claude/skills/lead-merge/scripts/gate.sh <item worktree>`. It installs, runs every
