@@ -67,6 +67,15 @@ describe("what a step does", () => {
     expect(read("gh pr create --title x").say).toEqual({ key: "kit.say.pr" });
   });
 
+  it("glab mr create opens a merge request, a push as gh pr create is; any other glab is not read (item 100b)", () => {
+    const c = read('glab mr create --title "PromptPay QR" --description "Adds a QR." --yes');
+    expect(c).toMatchObject({ action: "push", saves: true, outside: [], say: { key: "kit.say.mr" } });
+    expect(c.rule).toEqual({ words: ["glab", "mr", "create"], action: "push" });
+    // an address among its words may send it to any host, and glab's other commands are not read
+    for (const line of ["glab mr create --repo https://gitlab.example.com/g/p --fill", "glab mr merge 12", "glab api projects/1", "glab mr list", "glab repo delete g/p"])
+      expect([line, action(line)]).toEqual([line, "unknown"]);
+  });
+
   it("going live is anything customers can see", () => {
     for (const line of ["git push origin main", "git push origin HEAD:master", "git push --tags", "gh pr merge 12 --squash", "npm publish", "pnpm publish", "pnpm run deploy", "pnpm deploy", "wrangler deploy", "npx wrangler deploy --env production", "vercel --prod", "vercel", "netlify deploy --prod", "firebase deploy", "fly deploy", "docker push shop/web", "make deploy", "gh release create v1.2.0", "cargo publish"])
       expect([line, action(line)]).toEqual([line, "live"]);

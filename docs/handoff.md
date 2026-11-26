@@ -285,7 +285,17 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    command had become visible, and then a fake key block could hide a line that runs) and found and fixed two app
    races through CI's browser shards: the command palette's highlight jumping under a resting mouse, and a page opened
    during start-up being taken away. CI's browser shards must be read after every push (see above).
-   Nothing runs in the background now.
+   A FIFTH security read reported at 14:10 on 26 Nov: two high (a push after a branch switch could go alone; a masked
+   value on a card could still hide words that run) and several medium, fixed as items 120 and 121. On the owner's
+   word the app is also going to the Mac App Store in GoSpark's listing (item 119), and the GitHub 0.1.2 waits for the
+   Apple Developer ID secrets, to go out as a pre-release (owner, 26 Nov).
+   Running at 14:15: items 100b, 119, 120 and 121, each a subagent in its own `cc-item…` worktree.
+   By 15:35 on 26 Nov items 100b, 119 (the App Store edition), 120 (the fifth read's dial fixes) and 123 (the App
+   Privacy draft) are merged. Item 121 (what an ask shows) is reviewed and in its gate; 122 (icon-led menus and
+   provider logos) and 124 (deleting an account inside the app, Guideline 5.1.1(v)) are running. The App Store
+   upload waits for the owner's privacy and support links, the owner's answers to the App Privacy draft's open
+   questions, and item 124's API in production (the owner's deploy). Joining 120 with 100b, the lead held 100b's
+   GitLab test to 120's own-branch rule.
    Next, needing no owner: a fifth security read over items 116 to 118 and the new surfaces of 97, 98 and 100; item
    100b (other hosts, a new project with an ask, project icons); item 101 (more agents, first-launch import); items
    102 to 105. Needing the owner: 106b (a zstd dependency to read Codex's compressed sessions), 99 and 111 (themes,

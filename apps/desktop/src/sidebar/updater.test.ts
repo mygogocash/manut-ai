@@ -40,6 +40,22 @@ describe("the shell's updater config", () => {
     expect(conf.bundle.createUpdaterArtifacts).toBe(true);
     expect(shellFile("capabilities/default.json").permissions).toContain("updater:default");
   });
+
+  it("the Mac App Store overlay makes no updater files and builds the listing's app (docs/app-store.md)", () => {
+    const store = shellFile("tauri.appstore.conf.json");
+    expect(store.bundle.createUpdaterArtifacts).toBe(false);
+    expect(store.identifier).toBe("co.gogocash.gogocode");
+    expect(store.productName).toBe("Manut AI");
+    // above the record's Mac 1.1.1; the build number is a UTC timestamp the script passes (scripts/appstore-mac.sh)
+    expect(store.version).toBe("2.0.0");
+    expect(store.bundle.macOS.bundleVersion).toBeUndefined();
+    // filed under Business, with Developer Tools the listing's second category in App Store Connect (owner, 26 Nov)
+    expect(store.bundle.category).toBe("Business");
+    expect(store.bundle.macOS.entitlements).toBe("./AppStore.entitlements");
+    expect(store.bundle.macOS.signingIdentity).toMatch(/^Apple Distribution: .*\(N66J8AA6TA\)$/);
+    // the GitHub build is untouched: its own file still names its own app
+    expect(conf.identifier).toBe("xyz.manut.desktop");
+  });
 });
 
 const MIN = 60_000;
@@ -231,6 +247,18 @@ describe("an app left open keeps looking for a newer release", () => {
     expect(host).not.toBeNull();
     expect(await host!.check()).toBeNull();
     expect(sent).toEqual(["plugin:updater|check"]);
+  });
+
+  it("asks nothing in the Mac App Store edition, inside Tauri or with e2e's stand-in host (Guideline 2.4.5(vii))", async () => {
+    const sent: string[] = [];
+    vi.stubGlobal("window", { __TAURI_INTERNALS__: { invoke: async (cmd: string) => (sent.push(cmd), null) } });
+    expect(updateHost(true)).toBeNull();
+    vi.stubGlobal("window", { __manutUpdateHost: { check: async () => null, relaunch: async () => {} } });
+    expect(updateHost(true)).toBeNull();
+    // the page's own reading: e2e's stand-in for the edition turns it on, never off
+    vi.stubGlobal("__manutAppStore", true);
+    expect(updateHost()).toBeNull();
+    expect(sent).toEqual([]);
   });
 
   it("does not check while an install runs, and stops for good when the button is gone", async () => {

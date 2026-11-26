@@ -11,6 +11,12 @@
 //! carry `detailed_merge_status`, `has_conflicts`, `draft` and `target_branch` but no pipeline (GitLab's merge requests API);
 //! glab is not on the Mac this was built on, so its answer is read as the API's object, as tasks.rs and review.rs read it.
 //!
+//! GitLab's merge methods (item 100b) come from the project itself: `glab api --method GET projects/<group%2Fproject>` answers
+//! GitLab's project object (GitLab's Projects API), whose `merge_method` is `merge`, `rebase_merge` or `ff` and whose
+//! `squash_option` is `never`, `always`, `default_on` or `default_off`. glab was not on this Mac on 26 Nov 2026 either, so its
+//! flags are from GitLab's own pages for `glab api` (an endpoint path, URL-encoded paths allowed, `-X/--method`, run outside a
+//! checkout against its default host, as every `--repo` here is) and `glab mr merge` (`--squash`, `--rebase`, `--sha`).
+//!
 //! Watching costs little (item 100, part 3). A list read within [`KEEP_BOARD`] is given again without asking. After that, for
 //! GitHub, the shell first asks whether the list changed: `gh api --include` of the repository's open pull requests (REST),
 //! with `If-None-Match` and the ETag the last answer gave. GitHub answers an unchanged list `304 Not Modified`, which does not
@@ -188,10 +194,39 @@ pub fn detail_argv(source: Source, repo: &str, number: u64) -> Result<Vec<String
     })
 }
 
-/// The argv (after `gh`) that reads which merge methods a GitHub repository allows. GitLab has none here.
+/// The argv (after `gh`) that reads which merge methods a GitHub repository allows.
 pub fn methods_argv(repo: &str) -> Result<Vec<String>, String> {
     let repo = check_repo(Source::Github, repo)?;
     Ok(vec![s("repo"), s("view"), repo, s("--json"), s(GH_METHODS)])
+}
+
+/// The argv (after `glab`) that reads a GitLab project, whose `merge_method` and `squash_option` say which merges it allows: a
+/// GET of `projects/<path>`, the path's `/` written `%2F` as GitLab's API takes it. Every part is a checked name, so nothing else
+/// needs escaping.
+pub fn gl_methods_argv(repo: &str) -> Result<Vec<String>, String> {
+    let repo = check_repo(Source::Gitlab, repo)?;
+    Ok(vec![s("api"), s("--method"), s("GET"), format!("projects/{}", repo.replace('/', "%2F"))])
+}
+
+/// What a GitLab project's `merge_method` and `squash_option` allow of the three merges here (each is `glab mr merge`, with
+/// `--squash` or `--rebase` or neither):
+///
+/// - a merge without squashing, unless squashing is `always` (GitLab then squashes every merge, so the message shown would not be
+///   the one made);
+/// - a squash, unless squashing is `never`;
+/// - a rebase only under `rebase_merge` or `ff`, the two methods whose merge requests GitLab offers to rebase (its merge methods
+///   page names a rebase for no other).
+///
+/// Any other answer is not read: all three are offered, for the host to refuse.
+pub fn parse_gl_methods(out: &str) -> Methods {
+    let Ok(v) = serde_json::from_str::<Value>(out.trim()) else { return Methods::default() };
+    let word = |k: &str| v.get(k).and_then(Value::as_str).unwrap_or("");
+    let method = word("merge_method");
+    let squash = word("squash_option");
+    if !["merge", "rebase_merge", "ff"].contains(&method) || !["never", "always", "default_on", "default_off"].contains(&squash) {
+        return Methods::default();
+    }
+    Methods { merge: squash != "always", squash: squash != "never", rebase: method != "merge", read: true }
 }
 
 /// What `gh repo view --json mergeCommitAllowed,...` answered. Anything else is not read: all three are offered.
@@ -234,6 +269,11 @@ fn gl_pull(v: &Value) -> Pull {
     }
     let conflict = status == "conflict" || v.get("has_conflicts").and_then(Value::as_bool).unwrap_or(false);
     Pull { item, review: review.into(), conflict, base: tasks::one_line(tasks::text(v, "target_branch"), 250) }
+}
+
+/// Seconds since 1970 now, as a board's `at` says it.
+pub(crate) fn now() -> i64 {
+    now_secs()
 }
 
 fn now_secs() -> i64 {
@@ -398,13 +438,13 @@ impl Boards {
         parse_detail(source, &self.answer(source, &argv)?)
     }
 
-    /// The merge methods `repo` allows: GitHub's answer, else (GitLab, or an answer not read) all three, for the host to refuse.
+    /// The merge methods `repo` allows: GitHub's or GitLab's answer, else (an answer not read) all three, for the host to refuse.
     pub fn methods(&self, source: Source, repo: &str) -> Result<Methods, String> {
         check_repo(source, repo)?;
-        if source != Source::Github {
-            return Ok(Methods::default());
-        }
-        Ok(self.answer(source, &methods_argv(repo)?).map(|out| parse_methods(&out)).unwrap_or_default())
+        Ok(match source {
+            Source::Github => self.answer(source, &methods_argv(repo)?).map(|out| parse_methods(&out)).unwrap_or_default(),
+            Source::Gitlab => self.answer(source, &gl_methods_argv(repo)?).map(|out| parse_gl_methods(&out)).unwrap_or_default(),
+        })
     }
 }
 
@@ -496,6 +536,32 @@ pub(crate) mod tests {
         assert_eq!(parse_methods("not json"), Methods::default());
         assert_eq!(parse_methods(r#"{"mergeCommitAllowed": false, "squashMergeAllowed": false, "rebaseMergeAllowed": false}"#), Methods::default());
         assert!(Methods::default().allows("rebase") && !Methods::default().allows("fast-forward"));
+    }
+
+    #[test]
+    fn gitlab_s_methods_are_read_from_the_project_s_merge_method_and_squash_option() {
+        assert_eq!(gl_methods_argv("shop/sub/site").unwrap(), ["api", "--method", "GET", "projects/shop%2Fsub%2Fsite"]);
+        assert!(gl_methods_argv("--x/y").is_err() && gl_methods_argv("a").is_err());
+        let gl = |m: &str, sq: &str| parse_gl_methods(&format!(r#"{{"id": 7, "path_with_namespace": "shop/site", "merge_method": "{m}", "squash_option": "{sq}"}}"#));
+        let three = |m: &Methods| (m.merge, m.squash, m.rebase, m.read);
+        assert_eq!(three(&gl("merge", "default_off")), (true, true, false, true));
+        assert_eq!(three(&gl("merge", "never")), (true, false, false, true));
+        assert_eq!(three(&gl("rebase_merge", "always")), (false, true, true, true));
+        assert_eq!(three(&gl("ff", "default_on")), (true, true, true, true));
+        // an answer not read: all three, for the host to refuse
+        assert_eq!(gl("squash_merge", "never"), Methods::default());
+        assert_eq!(gl("merge", ""), Methods::default());
+        assert_eq!(parse_gl_methods("not json"), Methods::default());
+    }
+
+    #[test]
+    fn gitlab_s_methods_are_asked_of_glab_and_only_read() {
+        let dir = temp("gl-methods");
+        let glab = stand_in(&dir, r#"case "$1" in api) printf '{"merge_method":"ff","squash_option":"never"}'; exit 0;; esac; exit 2"#);
+        let b = Boards::with(dir.join("none"), glab, Duration::ZERO);
+        assert_eq!(b.methods(Source::Gitlab, "shop/site").unwrap(), Methods { merge: true, squash: false, rebase: true, read: true });
+        assert_eq!(log_lines(&dir), vec!["api --method GET projects/shop%2Fsite ".to_string()]);
+        let _ = fs::remove_dir_all(dir);
     }
 
     /// A stand-in `gh` at `dir/gh` that answers a list from `dir/list.json`, logging each call to `dir/gh.log`.

@@ -7,6 +7,7 @@
 // `ComputerView` draws a given state so a test can draw each one (ComputerPage.test.tsx); `ComputerPage` reads and acts.
 import { useCallback, useEffect, useState } from "react";
 import { t } from "../i18n";
+import { isAppStore } from "../appStore";
 import { computerOffered, getComputerShell, statusLine, type ComputerStatus, type Pane } from "../computer/computer";
 import { Row } from "./DevRow";
 
@@ -19,6 +20,8 @@ export interface ComputerViewProps {
   failed?: boolean;
   onOpen: (pane: Pane) => void;
   onRecheck: () => void;
+  /** The Mac App Store edition, whose sandbox refuses what computer use needs (docs/app-store.md). */
+  appStore?: boolean;
 }
 
 export function ComputerView(p: ComputerViewProps) {
@@ -38,6 +41,12 @@ export function ComputerView(p: ComputerViewProps) {
   return (
     <div className="st-page" data-testid="computer-page">
       <div className="st-gh st-gh0">{t("set.computer")}</div>
+      {p.appStore && (
+        // the page stays, so a person sees what the feature is; the sandbox's refusal is said first (app_store.rs)
+        <div className="st-note" data-testid="computer-store">
+          {t("computer.store")}
+        </div>
+      )}
       <div className="st-grp">
         <Row title={t("computer.title")} hint={s ? t(statusLine(s)) : p.failed ? t("computer.failed") : t("computer.checking")}>
           <span className="st-pair">
@@ -85,7 +94,7 @@ export function ComputerView(p: ComputerViewProps) {
       <div className="st-note" data-testid="computer-never">
         {t("computer.never")}
       </div>
-      {s && !s.signed && (
+      {s && !s.signed && !p.appStore && (
         <div className="st-note" data-testid="computer-unsigned">
           {t("computer.unsigned")}
         </div>
@@ -117,5 +126,5 @@ export function ComputerPage() {
     window.addEventListener("focus", read);
     return () => window.removeEventListener("focus", read);
   }, [offered, read]);
-  return <ComputerView offered={offered} status={status} failed={failed} onOpen={(pane) => void getComputerShell().open(pane).catch(() => undefined)} onRecheck={read} />;
+  return <ComputerView offered={offered} status={status} failed={failed} onOpen={(pane) => void getComputerShell().open(pane).catch(() => undefined)} onRecheck={read} appStore={isAppStore()} />;
 }

@@ -13,6 +13,7 @@ import { AgentMark } from "../../sessions/AgentMark";
 import { getHost } from "../../sessions/host";
 import { getSessions } from "../../sessions/sessions";
 import { installLine } from "../../sessions/agents";
+import { isAppStore } from "../../appStore";
 import { Toggle } from "../../pages/kit";
 import { t } from "../../i18n";
 import { holdImeEnter } from "../../lib/ime";
@@ -233,7 +234,14 @@ export function ProviderDetail({ v, version, signin, onSaved }: { v: ProviderVie
           <b>{t("prov.status")}</b>
           <span data-testid="provider-detail-status">{status.text}</span>
           {version && <span>{t("prov.version", { v: version })}</span>}
-          {v.found ? <span className="prov-mono">{t("prov.foundAt", { path: v.found })}</span> : installLine(v.id) && <span className="prov-mono">{t("prov.install", { cmd: installLine(v.id) })}</span>}
+          {v.found ? (
+            <span className="prov-mono">{t("prov.foundAt", { path: v.found })}</span>
+          ) : installLine(v.id) ? (
+            <span className="prov-mono">{t("prov.install", { cmd: installLine(v.id) })}</span>
+          ) : (
+            // the App Store edition offers no install line (Guideline 2.4.5), and says why
+            isAppStore() && <span data-testid="provider-install-store">{t("prov.installStore")}</span>
+          )}
           {v.signin ? null : v.found && <span className="prov-quiet">{t("prov.cannotTell")}</span>}
         </div>
       </div>

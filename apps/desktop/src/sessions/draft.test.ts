@@ -64,7 +64,7 @@ describe("draft defaults", () => {
     expect(none.shown).toHaveLength(16);
     expect(none.more).toEqual([]);
     // the generic ACP agents' install lines come from the shell's rows: 0.2.8's five word for word, then Cursor's and Antigravity's
-    expect(["gemini", "qwen", "kimi", "copilot", "cline", "cursor-agent", "agy"].map(installLine)).toEqual([
+    expect(["gemini", "qwen", "kimi", "copilot", "cline", "cursor-agent", "agy"].map((a) => installLine(a))).toEqual([
       "npm install -g @google/gemini-cli",
       "npm install -g @qwen-code/qwen-code@latest",
       "npm install -g @moonshot-ai/kimi-code",

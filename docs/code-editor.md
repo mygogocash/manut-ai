@@ -126,7 +126,15 @@ The states whose rules are pure functions, with their tests, then the screens th
   each file's diff masked by the shell's twin). A file an added line of which holds a key makes the step ask, whoever wrote it,
   and so does a file it could not read whole (binary, too large, past its budget or its list) or a read that failed or took
   more than five seconds. That read only reaches a folder the app made, so a commit or a push from a session in the
-  developer's own folder always asks. Since item 117 the masker has two forms: `maskSecrets`
+  developer's own folder always asks. Since item 120 three routes that read does not see ask too: a line that writes files
+  beside its commit or push (`cp .env notes.txt && git add notes.txt && git commit …`: the read is made before the line
+  runs; staging what is there, `git rm`, `git mv`, a read or a check beside it are fine, `git add -f` is not), a message or
+  a body read from a file (`git commit -F`, `--file`, `-t`, `--template`, `gh pr create -F`, `--body-file`, `-T`), and a
+  push (or `gh pr create`) whose commits hold a key the folder no longer does. For a push the shell also reads every commit
+  on the lane's branch that no remote-tracking branch holds (`git log` with `--no-ext-diff --no-textconv`, a merge against
+  its first parent, at most 200 commits and 4 MB, within the same budget): a key in an added line, a file's new name or a
+  message makes it ask and is named on the card (a message by its commit's short id); more commits, a binary change, or a
+  read not made in time asks too. A commit is not held up by the history: it sends nothing. Since item 117 the masker has two forms: `maskSecrets`
   for text that never runs, and `maskCommand` for what an ask's card shows, which masks a key and never a substitution, a
   pipe, a second command or a command's own operand (a token-shaped word is a key only as a whole word with a key's
   shape); a private key block keeps its BEGIN and END lines around one masked line only inside a quoted string or a heredoc's
@@ -304,6 +312,25 @@ yq's `load` and its kinds and its `env` read after `eval` or `eval-all` too, and
 plain twin (`kubectl get pods`, `terraform plan`, `docker ps`, `git config --get user.name`, `ps aux`) stays a read.
 `pnpm config list` and a bare `yarn config` now ask.
 
+Since item 120 these ask too: git's own `git config get` with `--regexp` or `--url` (a listing; its other options are read
+from its own list), `kubectl get` or `describe` with `-f`, `--filename`, `-k`, `--kustomize` or `--raw` (a file can name a
+Secret), yq's `load` and `env` and jq's `$ENV` and `env` wherever they stand (after `-o json`, joined to
+`--expression=`), yq's `eval(…)`, which builds an expression as it runs, a jq or yq filter read from a file (`-f`,
+`--from-file`), `helm status` with any output but the table, `terraform show -json` (and tofu's), and
+`pulumi … --show-secrets`. So `kubectl get -f k8s/web.yaml` and `jq --from-file=filter.jq data.json`, plain before, ask.
+
+#### Tags, and a branch moved back (item 120)
+
+A push of a tag goes live, as a release starts from one: `--tags`, `--follow-tags`, `refs/tags/…`, `tags/…`, a name that
+reads as a version (`v2`, `v2.0.0`, `1.4.2`, `desktop-v0.1.1`), and a tag the line or an earlier step of the chat made
+(`git tag nightly`, then `git push origin nightly`). A tag of another name made before the chat is not known by its name.
+`git branch -f`, `-M` and `-C`, `git checkout -B`, `git switch -C` (`--force-create`), `git worktree add -B` or `--force`,
+and `git update-ref` move a branch's tip as `reset --hard` does, so they read as a discard; `-B`, `-C`, `-M` and
+`--force-create` are harsher options a kept rule never covers. A commit named from another before `--` (`HEAD~5`,
+`main^`, `@~2`) is no path, so it is no longer read as a Windows short file name: `git rebase -i HEAD~3`,
+`git reset HEAD~1`, `git revert HEAD~1`, `git cherry-pick main~2`, `git checkout HEAD~1` and the like read as the change
+they are instead of asking.
+
 #### git in another folder, and a program named by a path (item 116)
 
 - **git reads only the project's own folder.** `git -C` naming any folder but the project's (one folder after another
@@ -353,6 +380,15 @@ program is known to take harmlessly (`KNOWN` in `src/code/command.ts`), and any 
 - **A guarded file as an option's value.** On any read or check, an option's value that is a file a change to which
   always asks (`--log CLAUDE.md`, `--x=.husky/pre-commit`) asks; one that only leaves something out
   (`--exclude-dir=.git`) does not, and a file named as an operand (`cat package.json`) stays a read.
+- **An option's value never hides the next option (item 120).** In every allow-list (the checkers', pip's and uv's, a
+  package manager's own, make's, just's and task's, git fetch's, git branch's and git config's) an option that takes a
+  value never takes a next word that starts with `-`: vitest's `--changed`, cargo's `--test`, jest's `--bail` and make's
+  `--jobs` take their value only joined, so `vitest run --changed --inspect=0.0.0.0:9229` ran a debugger on every network
+  while it read as the tests. Options whose value is optional are listed as such from each program's help (vitest 3.2.7's
+  `--changed`, cargo's `-p`, `--bin`, `--example`, `--test`, `--bench` and `--target`, jest's `--bail`, make's `-j` and
+  `-l`, which take a number only). A program whose value is required takes such a word or refuses to start, so reading
+  it as an option only asks more. As a backstop, `--inspect`, `--inspect-brk`, `--inspect-port`, `--inspect-wait`,
+  `--debug-port` and `--debug-brk` make any check ask, in any runner and in what a script is handed.
 
 None of the 221 everyday commands changed. Not yet on a list: the reads that item 112 checked against their manuals
 (cat, ls, head, diff and the like), git's, gh's, docker's, kubectl's, terraform's and helm's reads, the words
@@ -381,6 +417,13 @@ below), but the dial does not rely on any agent:
   brace group that holds a `cd`, or a shell command the dial could not read at all), every later command of the session
   asks, except one that names no file (`pwd`, `echo`, `date` and the like) and a `cd` to a folder written in full, until
   a command that is only `cd` to the project's folder.
+- **A `cd` the reading does not follow (item 120).** A simple command that holds `cd`, `chdir`, `pushd`, `popd`,
+  `source`, `eval` or `trap` anywhere but as text (`! cd x`, `command -p cd x`, `noglob cd x`, `repeat 1 cd x`, `then
+  cd x`, `do cd x`, a function's body), or runs `.` past such words, leaves the folder unknown. A line that defines a
+  function (`f()`, `function f`), an alias or a trap, sets an option of the shell (`setopt`, `shopt`: with zsh's AUTO_CD a
+  folder's bare name is a `cd`), or reads text into the shell (`eval`, `source`, `.`), and any shell
+  command the dial cannot read, may move the shell whenever a later command runs: the folder then stays unknown for the
+  rest of the chat, a `cd` to the project's folder included.
 - **Not seen.** A command an agent runs without asking (its own allow rules) is never read, so a `cd` in it is not
   carried; a shell function or alias from the person's own shell setup that moves the folder, zsh's `AUTO_CD`, and a
   `CDPATH` that sends `cd name` elsewhere are not followed either. With Claude Code these no longer carry past one command.
@@ -394,6 +437,35 @@ Still read as reads or checks, for the owner to decide (a design question, not a
 A jq or yq filter that prints the environment (`env`, `$ENV`, yq's `env(NAME)` and `strenv`) asks, as `printenv` does;
 a field or key called env is only a name. jq's `--arg`, `--argjson`, `--slurpfile` and `--rawfile` are read with their
 two values, so the word after them is not taken for the filter.
+
+#### The branch a push sends (item 120)
+
+A push that names no branch (`git push`, `git push -u origin`, `git push origin HEAD`, and `@` or `head` in any letter case,
+which macOS's disk finds as HEAD) sends the branch checked out. The app reads that branch from disk when a chat starts and
+when a turn ends; since item 120 the dial does not trust it in between:
+
+- **A step that may move it makes it unknown.** A switch, a checkout, a branch made, renamed or given an upstream, a
+  rebase, a bisect, `update-ref`, `worktree`, `stash branch`, `gh pr checkout`, a clone or an init, a command nobody can
+  read, a shell left in another folder, and any ask the dial does not read (a tool of an MCP server's) leave the chat's
+  branch unknown until it is read from disk again. Such a push then reads as live and asks. A step the dial stopped
+  never ran and moves nothing.
+- **The same line.** A push in a line that holds such a step anywhere, before it, beside it in a pipeline or in the
+  background, is read with no branch.
+- **Read again as the push arrives.** A push the dial would let go alone waits for a read of the branch from disk, beside
+  the read of what it saves: one a job left running or a project's own code switched is not missed.
+- **Another folder.** A push or a pull request from any folder but the one whose branch was read may be another
+  repository's (a folder of the project can hold one), and asks.
+- **From its own words.** A push that names its branch is read by the branch it sends to: the destination, else the
+  source; `heads/main` and `refs/heads/main` are main; `:` and `+:` push every branch both sides have and a pattern every
+  branch it matches, so both go live; any other namespace (`refs/remotes/`, `refs/for/`) is not known. `--branches` (the
+  alias of `--all`), `--prune`, `--recurse-submodules` but `=check` or `=no`, and a push option (`-o`, which GitLab reads
+  to merge a request when its pipeline passes) go live, and a pull request on a repository the words name (`-R`) asks.
+
+A branch given an upstream (`git branch -u`, `--set-upstream-to`, `--track` or `-t` on `branch`, `switch` and
+`checkout`) asks, as `git remote set-url` does: with `push.default=upstream` a later push that names no branch sends to
+it. Not read: what the person's own git settings already make such a push send (`push.default=matching` pushes every
+branch both sides have, `upstream` the branch it tracks, `remote.<name>.push` maps a branch elsewhere), and the upstream
+git sets by itself for a branch made from a remote one. A lane's branch is made with `--no-track`.
 
 #### Files a change to which always asks (item 88)
 
@@ -1368,13 +1440,78 @@ the head commit shown and the request read again before it runs. Same `Plan::Mer
 
 **A chat's own pull request** (`code/chatPull.ts`). When a Claude Code or Codex chat ends a command the dial reads as a push with
 `gh pr create` in it, the last github.com pull request address in its output is read, the chat's folder's remote must name that
-repository, and one `gh pr view` must say the branch is that repository's own. The chat's header then names the request, the
-request's row names the chat, and the chat's Lanes row shows it as a lane's row does. Of this run; nothing is written.
+repository, and one `gh pr view` must say the branch is that repository's own. Since item 120 that branch must also be the
+chat's own (a lane's own branch, else the one its folder had when it was read), since the agent writes the output and an
+`echo` beside the command could name a colleague's request, and a `gh pr create --dry-run`, which makes none, links nothing.
+The chat's header then names the request, the request's row names the chat, and the chat's Lanes row shows it as a lane's
+row does. Of this run; nothing is written.
+Since item
+100b the dial reads `glab mr create` as a push too (`kit.say.mr`, "Opens a merge request."; with an address among its words, and
+for every other glab command, it is a program the dial has not read), and a merge request address on a host with `gitlab` among
+its names (`https://gitlab.com/<group>/<project>/-/merge_requests/<n>`; glab prints it last, alone off a terminal) is linked by
+the same checks, the view being `glab mr view`.
+
+**GitLab's merge methods** (item 100b, `pulls.rs` `gl_methods_argv`, `parse_gl_methods`). The list's Merge step and
+`ask_merge_pull` read the project with `glab api --method GET projects/<group%2Fproject>` and offer: a merge unless its
+`squash_option` is `always`; a squash unless it is `never`; a rebase only when its `merge_method` is `rebase_merge` or `ff`, the two
+GitLab's merge methods page offers a rebase for. Anything else is not read and all three are offered, for GitLab to refuse. glab is
+not on this Mac (26 Nov 2026), so the flags are from GitLab's pages for `glab api` and `glab mr merge`, and the answer is read as
+the Projects API's object. A lane's own Merge step is unchanged and still offers all three, as for GitHub.
+
+**Other hosts, read only** (item 100b, `src-tauri/src/pulls_other.rs`, `tasks/board.ts`). A project whose remote is on neither
+GitHub nor GitLab is asked of the other hosts' reader, which reads the folder's remote from its git config and answers only when
+that host's CLI is installed; the page sends only the folder. Its open requests join the same bands, each row naming its host and
+offering only Open on <host> (no detail, no Merge, nothing written):
+
+- Azure DevOps (`https://dev.azure.com/<org>/<project>/_git/<repo>`, its `ssh.dev.azure.com:v3/...` form, and the older
+  `<org>.visualstudio.com`) through `az repos pr list --organization ... --project ... --repository ... --status active --top 51
+  --output json --detect false`, with `AZURE_EXTENSION_USE_DYNAMIC_INSTALL=no` so the CLI installs no extension by itself. The
+  review is read from the reviewers' votes, a conflict from `mergeStatus`; the list carries no checks, so none are shown, and a
+  request's address is made from the organisation, project, repository and id.
+- Gitea and Forgejo through Gitea's own CLI, `gt` (it replaced the archived `tea`): `gt auth status --json=host --no-input` names
+  the servers it is signed in to, at most once a minute, and a remote on one of them (https with the server's base path, or ssh
+  to its host) is listed with `gt pr list --host <server> --repo <owner>/<name> --state open --limit 51 --json=<fields>
+  --no-input`. Whether `gt` serves a Forgejo server is not confirmed; one it is signed in to is listed when its answer reads.
+- Bitbucket is not offered: Atlassian's own CLIs are `acli`, which has no Bitbucket commands, and `twg` (Teamwork Graph), whose
+  documented pages name a pull request query but no output a reader here could rely on; the other Bitbucket CLIs are not
+  Atlassian's.
+
+`az` and `gt` were not on this Mac on 26 Nov 2026: the flags are from Azure CLI's reference and configuration pages and `gt`'s
+manual pages, and the tests read made-up answers in the documented shapes (`tasks_fixtures/az-pr-list.json`, `gt-pr-list.json`).
+A host whose CLI is not here shows nothing and runs nothing; GitHub's and GitLab's projects are never asked of these CLIs.
 
 **Watching costs little.** The page reads the lists once when shown, then at most once a minute while shown and in front, never
 while hidden. The shell gives a list read within 55 seconds again, and before reading a GitHub list again asks `gh api --method
 GET --include -H 'If-None-Match: <ETag>' repos/<r>/pulls?state=open&per_page=51`: a 304 gives the last list again and costs no
 rate limit. The GraphQL list is read only when GitHub says the list changed, a check was still running, or ten minutes passed.
+
+**A project's own icon** (item 100b, `code/ProjectIcon.tsx`, `src-tauri/src/project_icon.rs`). A project's folder header on the
+Code page (TERMINALS) and Kit's band show the picture the folder keeps at the first of `public/favicon.svg`, `favicon.svg`,
+`public/favicon.ico`, `favicon.ico`, `app/icon.png`, `app/favicon.ico`, `src/app/icon.png`, `assets/icon.png`,
+`.github/logo.png`. Only the shell reads it: the folder must be absolute with no `.` or `..` part, every folder on the way and the
+file itself are read with `symlink_metadata` and must not be a link (the file is opened with `O_NOFOLLOW` and its real path must
+be inside the folder's), at most 64 KiB, and only a picture (an SVG with an `<svg` element, a PNG or an ICO by their first
+bytes). It answers a `data:` address of that type, kept by path, size and modified time. The page draws it only as an `<img>`
+(an SVG drawn as an image runs no script and loads no link) and draws nothing for any other address. Without one a folder
+header keeps its folder glyph and Kit's band its name alone, as before. The side menu and the palette list no projects today, so
+neither has a row to draw it on.
+
+**A new project** (item 100b, `code/NewProject.tsx`, `src-tauri/src/new_project.rs`). New project in the Code page's top bar opens
+a panel at the top of the column: a folder path (starting at `~/`, with Choose to pick one in the system's dialog) and Make the
+project. The shell takes only an absolute path with no `.` or `..` part whose nearest existing folder's real path is inside the
+person's home folder (not the home folder itself), refuses a path that is a link, a file, or a folder with anything in it (hidden
+files count), makes the folder, checks its real path once more, and runs `git init --quiet --template=` through `lane::Git` (no
+hook can run; an empty template copies no sample hook and no exclude file, whatever `init.templateDir` says). The page lists the
+folder at once (`listFolder`, what New folder… does). That writes only on this computer.
+
+**Make it on GitHub too** is offered beside what was made, and is the third write behind review.rs's one ask (`ask_repo`): the
+shell checks the folder (in home, a repository's own top whose `.git` is a real folder, no `origin` yet), the name (`name` or
+`owner/name`, letters, digits, `.`, `_`, `-`) and that gh is here and signed in, writes down `gh repo create <name> --private
+--source <folder> --remote origin` (`--public` only when the person picked "Public: anyone on the internet can see it and copy
+it.") and answers the ask with that line (`plan`), which the page shows whole. The page opens it in approval-core; a Yes reaches
+`review_settle` by its id alone, the folder is read again (still a repository with no `origin`, else `changed`), and the line runs
+once. Nothing is pushed: the argv has no `--push`, no step here pushes, and none is offered; the project's first push is the
+person's, and a lane's Put up for review asks for it as always.
 
 ### MCP servers and skills
 

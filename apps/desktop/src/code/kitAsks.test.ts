@@ -8,15 +8,16 @@ import { createStore, type ApprovalItem, type BridgeLike } from "../state/store"
 import type { AskTool, BridgeEvent, EventOf } from "../lib/protocol";
 import { askOfItem, kitAnswer, kitAnswered, kitCard, keysIn, resetKitAsks } from "./kitAsks";
 import { addRule, kitProjects, projectOf, resetKitProjects, setLevel, updateKitProjects } from "./project";
+import type { SavedKeys } from "./secrets";
 
 const bridge: BridgeLike = { connect: async () => undefined, onAny: () => () => {}, onStatus: () => () => {}, request: (async () => ({})) as BridgeLike["request"] };
 const ROOT = "/w/baanmali-preorder";
 const FAKE_KEY = "sk-FAKE0000000000000000TEST";
 
 /** What the stand-in shell's read of the session's folder finds in what a commit or a push would save (`SessionHost.laneKeys`). */
-type Saved = () => Promise<{ files: string[]; unread: boolean } | null>;
+type Saved = () => Promise<SavedKeys | null>;
 
-async function session(saved: Saved = async () => ({ files: [], unread: false })) {
+async function session(saved: Saved = async () => ({ files: [], unread: false, history: { files: [], unread: false } }), branch: () => string = () => "kit/promptpay-qr") {
   (globalThis as { localStorage?: unknown }).localStorage = { getItem: () => null, setItem: () => {}, removeItem: () => {} };
   const sinks = new Map<number, (e: ChatEvent) => void>();
   const inputs: ChatInput[] = [];
@@ -30,7 +31,7 @@ async function session(saved: Saved = async () => ({ files: [], unread: false })
     write: async () => {},
     resize: async () => {},
     close: async () => {},
-    branch: async () => "kit/promptpay-qr",
+    branch: async () => branch(),
     laneKeys: () => saved(),
     chatStart: async (_a: string, _c: string, on: (e: ChatEvent) => void) => {
       sinks.set(1, on);
@@ -276,6 +277,202 @@ describe("Kit's dial on what the shell names of an ask", () => {
     // a folder inside the project is carried, and the session's own is still read: a shell back there is never missed
     expect((await s.ask("b8", "Run this command?", "cd src", bash("cd src"))).resolved).toBe("once");
     expect((await s.ask("b9", "Run this command?", "cat ../.ssh/id_rsa", bash("cat ../.ssh/id_rsa"))).resolved).toBe("deny");
+  });
+});
+
+// Item 120: the branch a push that names none is read with was read only when a turn ended or the chat started, so a
+// switch earlier in the same turn left the dial reading a push of main as one of the lane's own branch.
+describe("Kit's dial on a push of the branch checked out, across one turn (item 120)", () => {
+  beforeEach(() => {
+    resetKitProjects();
+    resetKitAsks();
+    updateKitProjects((p) => setLevel(p, ROOT, "everything_in_project"));
+  });
+  afterEach(() => {
+    resetKitProjects();
+    resetKitAsks();
+  });
+  const RUN = "Run this command?";
+  const PUSHES = ["git push", "git push -u origin", "git push origin HEAD", "git push origin @"];
+  const tick = () => new Promise((r) => setTimeout(r, 0));
+  const endTurn = async (s: Awaited<ReturnType<typeof session>>) => {
+    s.emit({ event: "turn.end", outcome: "done" } as unknown as ChatEvent);
+    for (let i = 0; i < 4; i++) await tick();
+  };
+
+  it("asks before such a push once a step of the turn may have switched the branch, until it is read again from disk", async () => {
+    let on = "kit/promptpay-qr";
+    const s = await session(undefined, () => on);
+    expect((await s.ask("p0", RUN, "git push")).resolved).toBe("once");
+    for (const [n, mover] of ["git switch main", "git checkout -b kit/y", "git branch -m main", "gh pr checkout 12"].entries()) {
+      expect([mover, (await s.ask(`m${n}`, RUN, mover)).resolved]).toEqual([mover, "once"]);
+      // the switch has not run yet (or ran beside the push): the disk still says the lane's branch, and the push asks
+      for (const [k, p] of PUSHES.entries()) expect([mover, p, (await s.ask(`p${n}-${k}`, RUN, p)).resolved]).toEqual([mover, p, undefined]);
+      // a push that names the lane's branch is not read with the branch checked out, and goes
+      expect((await s.ask(`n${n}`, RUN, "git push origin kit/promptpay-qr")).resolved).toBe("once");
+      await endTurn(s);
+      expect([mover, (await s.ask(`a${n}`, RUN, "git push")).resolved]).toEqual([mover, "once"]);
+    }
+    // read again on main: a push of the branch checked out goes live, and asks
+    expect((await s.ask("m9", RUN, "git switch main")).resolved).toBe("once");
+    on = "main";
+    await endTurn(s);
+    expect((await s.ask("p9", RUN, "git push")).resolved).toBeUndefined();
+  });
+
+  it("reads the branch from disk again as such a push arrives, so a switch no ask showed is not missed", async () => {
+    let on = "kit/promptpay-qr";
+    const s = await session(undefined, () => on);
+    expect((await s.ask("q0", RUN, "git push")).resolved).toBe("once");
+    // a job left running, or a test's own code, switched the folder: no ask showed it
+    on = "main";
+    expect((await s.ask("q1", RUN, "git push")).resolved).toBeUndefined();
+    expect((await s.ask("q2", RUN, "git push origin HEAD")).resolved).toBeUndefined();
+    // a read that fails leaves the branch unknown, and the push asks
+    on = "kit/promptpay-qr";
+    const t = await session(undefined, () => {
+      throw new Error("an older shell");
+    });
+    expect((await t.ask("q3", RUN, "git push")).resolved).toBeUndefined();
+  });
+
+  it("counts an ask it cannot read, or a command nobody can read, as one that may have switched the branch", async () => {
+    const s = await session();
+    // a tool of an MCP server's, which the dial does not read: the person may allow it
+    expect((await s.ask("u1", "Allow mcp__git__git_checkout?", "main")).resolved).toBeUndefined();
+    expect((await s.ask("u2", RUN, "git push")).resolved).toBeUndefined();
+    await endTurn(s);
+    expect((await s.ask("u3", RUN, "git push")).resolved).toBe("once");
+    expect((await s.ask("u4", RUN, "sh -c 'git switch main'")).resolved).toBeUndefined();
+    expect((await s.ask("u5", RUN, "git push")).resolved).toBeUndefined();
+    // a step the dial stopped never ran, and moves nothing
+    await endTurn(s);
+    expect((await s.ask("u6", RUN, "cd /w/elsewhere && git switch main")).resolved).toBe("deny");
+    expect((await s.ask("u7", RUN, "git push")).resolved).toBe("once");
+  });
+});
+
+// Item 120: the read of the lane's diff is made before the line runs and sees only the folder against where it started, so a
+// key written and saved by the same line, one added and taken out again in two commits, or one read into a message or a
+// request's body from a file was never seen.
+describe("Kit's dial on a commit or a push whose key the read of the folder does not see (item 120)", () => {
+  beforeEach(() => {
+    resetKitProjects();
+    resetKitAsks();
+    updateKitProjects((p) => setLevel(p, ROOT, "everything_in_project"));
+  });
+  afterEach(() => {
+    resetKitProjects();
+    resetKitAsks();
+  });
+  const RUN = "Run this command?";
+  const clean = { files: [], unread: false, history: { files: [], unread: false } };
+
+  it("asks before a line that writes files and saves them, and before a message or a body read from a file", async () => {
+    const s = await session(async () => clean);
+    for (const [n, line] of [
+      "cp .env notes.txt && git add notes.txt && git commit -m notes && git push origin kit/promptpay-qr",
+      "cp .env n.txt && git add n.txt && git commit -qm a && git rm -q n.txt && git commit -qm b",
+      "git commit --allow-empty -F .env",
+      "gh pr create --title fix --body-file .env",
+      "gh pr create -t fix -F .env",
+    ].entries())
+      expect([line, (await s.ask(`w${n}`, RUN, line)).resolved]).toEqual([line, undefined]);
+    // the plain twins go
+    for (const [n, line] of ["git add -A && git commit -m x", "git commit -m x && git push origin kit/promptpay-qr", "gh pr create -t fix -b body"].entries())
+      expect([line, (await s.ask(`p${n}`, RUN, line)).resolved]).toEqual([line, "once"]);
+  });
+
+  it("asks before a push whose commits hold a key the folder no longer does, in an added line or a message, and names them", async () => {
+    for (const [name, files] of [
+      ["a line", ["notes.txt"]],
+      ["a message", ["1a2b3c4d5e6f"]],
+    ] as const) {
+      resetKitAsks();
+      const s = await session(async () => ({ files: [], unread: false, history: { files: [...files], unread: false } }));
+      const card = await s.ask(`h-${name}`, RUN, "git push origin kit/promptpay-qr");
+      expect([name, card.resolved]).toEqual([name, undefined]);
+      expect(kitCard(asked(`h-${name}`, RUN, "git push origin kit/promptpay-qr"), { chat: s.key, root: ROOT, home: "/w" })?.keys).toEqual([...files]);
+      // a commit sends nothing: what is already in the history is not its to weigh
+      resetKitAsks();
+      const t = await session(async () => ({ files: [], unread: false, history: { files: [...files], unread: false } }));
+      expect([name, (await t.ask(`c-${name}`, RUN, "git commit -m x")).resolved]).toEqual([name, "once"]);
+    }
+  });
+
+  it("asks before a push when the commits it sends could not be read whole, in time, or at all", async () => {
+    for (const [name, saved] of [
+      ["unread", async () => ({ files: [], unread: false, history: { files: [], unread: true } })],
+      ["no history (an older shell)", async () => ({ files: [], unread: false })],
+    ] as const) {
+      resetKitAsks();
+      const s = await session(saved as Saved);
+      expect([name, (await s.ask(`n-${name}`, RUN, "git push")).resolved]).toEqual([name, undefined]);
+      expect([name, (await s.ask(`g-${name}`, RUN, "gh pr create -t x -b y")).resolved]).toEqual([name, undefined]);
+      // a commit does not wait on the history
+      expect([name, (await s.ask(`m-${name}`, RUN, "git commit -m x")).resolved]).toEqual([name, "once"]);
+    }
+  });
+});
+
+// Item 120: a `cd` the reading does not take as one (`! cd`, inside an `if`, in a function then called) left the session's
+// folder where it was, once the person allowed the line; an agent whose shell keeps its folder then wrote in `.git/hooks`.
+describe("Kit's dial after a `cd` it cannot follow (item 120)", () => {
+  beforeEach(() => {
+    resetKitProjects();
+    resetKitAsks();
+    updateKitProjects((p) => setLevel(p, ROOT, "edits_and_safe_commands"));
+  });
+  afterEach(() => {
+    resetKitProjects();
+    resetKitAsks();
+  });
+  const RUN = "Run this command?";
+  const bash = (line: string): AskTool => ({ kind: "command", name: "Bash", line, cwd: ROOT });
+  const write = "printf '#!/bin/sh' > pre-commit";
+
+  it("asks for the next write once a hidden `cd` may have run", async () => {
+    for (const [n, hidden] of ["! cd .git/hooks", "if true; then cd .git/hooks; fi", "command -p cd .git/hooks", "repeat 1 cd .git/hooks"].entries()) {
+      resetKitAsks();
+      const s = await session();
+      expect((await s.ask(`h${n}`, RUN, hidden, bash(hidden))).resolved).toBeUndefined();
+      expect([hidden, (await s.ask(`w${n}`, RUN, write, bash(write))).resolved]).toEqual([hidden, undefined]);
+    }
+  });
+
+  it("keeps the folder unknown after a function, an alias or a trap, even past a `cd` to the project's folder", async () => {
+    for (const [n, defined] of ["f() { cd .git/hooks; }", "alias c='cd .git/hooks'", "trap 'cd .git/hooks' DEBUG"].entries()) {
+      resetKitAsks();
+      const s = await session();
+      expect((await s.ask(`d${n}`, RUN, defined, bash(defined))).resolved).toBeUndefined();
+      expect((await s.ask(`r${n}`, RUN, `cd ${ROOT}`, bash(`cd ${ROOT}`))).resolved).toBe("once");
+      expect([defined, (await s.ask(`w${n}`, RUN, write, bash(write))).resolved]).toEqual([defined, undefined]);
+    }
+    // the plain twin: a `cd` to the project's folder sets it back after an ordinary `cd`
+    resetKitAsks();
+    const s = await session();
+    expect((await s.ask("p1", RUN, "cd src", bash("cd src"))).resolved).toBe("once");
+    expect((await s.ask("p2", RUN, `cd ${ROOT}`, bash(`cd ${ROOT}`))).resolved).toBe("once");
+    expect((await s.ask("p3", RUN, "printf x > notes.md", bash("printf x > notes.md"))).resolved).toBe("once");
+  });
+});
+
+describe("Kit's dial on a tag the session made, pushed in a later ask (item 120)", () => {
+  beforeEach(() => {
+    resetKitProjects();
+    resetKitAsks();
+    updateKitProjects((p) => setLevel(p, ROOT, "everything_in_project"));
+  });
+  afterEach(() => {
+    resetKitProjects();
+    resetKitAsks();
+  });
+
+  it("asks before a push that names the tag by its bare name, and lets the plain branch push go", async () => {
+    const s = await session(async () => ({ files: [], unread: false, history: { files: [], unread: false } }));
+    expect((await s.ask("t1", "Run this command?", "git tag nightly")).resolved).toBe("once");
+    expect((await s.ask("t2", "Run this command?", "git push origin nightly")).resolved).toBeUndefined();
+    expect((await s.ask("t3", "Run this command?", "git push origin kit/promptpay-qr")).resolved).toBe("once");
   });
 });
 
