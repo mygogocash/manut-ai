@@ -1,5 +1,5 @@
 {
-  "//": "The one API test that runs the desktop's own remote code (test/remote-mac.test.ts) is checked here, with the browser's library as the desktop checks that code, since the Workers types and the DOM's cannot be loaded together. The main tsconfig leaves this file out.",
+  "//": "The two API tests that run the desktop's own remote code (test/remote-mac.test.ts), and the web app's phone code against it (test/remote-phone.test.ts), are checked here, with the browser's library as the desktop checks that code, since the Workers types and the DOM's cannot be loaded together. The main tsconfig leaves these files out.",
   "compilerOptions": {
     "target": "ES2022",
     "module": "ESNext",
@@ -10,7 +10,8 @@
     "skipLibCheck": true,
     "noEmit": true,
     "resolveJsonModule": true,
-    "types": []
+    "types": [],
+    "paths": { "@manut/remote-channel": ["../../packages/remote-channel/src/index.ts"] }
   },
-  "files": ["test/remote-mac.test.ts", "test/remote-mac.env.d.ts"]
+  "files": ["test/remote-mac.test.ts", "test/remote-phone.test.ts", "test/remote-mac.env.d.ts"]
 }
