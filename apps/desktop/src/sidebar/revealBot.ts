@@ -1,3 +1,4 @@
+import { prefersReducedMotion } from "../lib/reducedMotion";
 // Clicking a bot (its sidebar row or its dock tile) opens its chat and slides the BOTS region up so that bot's row
 // sits at the region's top with its threads under it (owner, 2026-11-16: "사이드바 위로 스르르륵 올라가서 딱 봇 쪽
 // 스레드 보이게"). Only the BOTS list scrolls; TERMINALS and the dock stay put. ~250 ms ease-out; with reduced
@@ -14,7 +15,6 @@ export function topFor(listTop: number, rowTop: number, scrollTop: number, maxSc
 
 const easeOut = (x: number) => 1 - (1 - x) ** 3;
 
-const reduced = () => typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 /** Whether a top reveal of `bot` was asked for and has not run yet (the sidebar's own nearest-scroll then waits). */
 export const revealPending = (bot: string): boolean => pending === bot;
@@ -32,7 +32,7 @@ export function revealBotTop(bot: string): void {
       const from = list.scrollTop;
       const to = topFor(list.getBoundingClientRect().top, row.getBoundingClientRect().top, from, list.scrollHeight - list.clientHeight);
       list.dataset.reveal = bot;
-      if (to === from || reduced()) {
+      if (to === from || prefersReducedMotion()) {
         list.scrollTop = to;
         list.dataset.revealed = bot;
         return;
