@@ -36,6 +36,7 @@ import { dock } from "./ja/dock";
 import { drafts } from "./ja/drafts";
 import { dw } from "./ja/dw";
 import { editor } from "./ja/editor";
+import { ef } from "./ja/ef";
 import { ew } from "./ja/ew";
 import { failed } from "./ja/failed";
 import { fb } from "./ja/fb";
@@ -192,6 +193,7 @@ export const ja: Record<Key, string> = {
   ...drafts,
   ...dw,
   ...editor,
+  ...ef,
   ...ew,
   ...failed,
   ...fb,

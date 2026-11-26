@@ -77,6 +77,13 @@ Highwire and Kzurb Sonar credit Dr. MAD), which GoSpark had converted to AIFF an
 (`apps/desktop/src/assets/sounds/`; their hashes are in `AndroidSoundSources.json` and the licence is in
 `apps/desktop/THIRD_PARTY_NOTICES.md`).
 
+GoSpark again (at `a7537c80`, read in the checkout on the owner's Mac on 26 Nov 2026) for the chat box's effort card
+(item 132, `apps/desktop/src/chat/box/EffortCard.tsx`, `effort.ts`, `ultrathink.ts`): `ModelEffortButton`,
+`EffortSliderCard`, `EffortSlider`, `EffortBrand` and `visibleEfforts` / `defaultEffort` from
+`GoGoCode/Views/Composer/EffortSlider.swift`, and `UltrathinkDraft.swift`, ported to React and this app's tokens with
+their rules (the title words, the default, the nearest stop, the brand at the top level, and when the Ultrathink line may
+be added or taken out); its sizes and spacing are GoSpark's, its moves the Motion board's.
+
 GoSpark again (at `a7537c80`, the same checkout, 27 Nov 2026) for Grok as a chat (item 101b, `apps/desktop/src-tauri/src/acp_chat.rs`
 and `sessions.rs`): no code, the facts its adapters hold. From `ACPSession.swift`, that Grok's ACP server is `grok agent
 stdio` and is started supervised as `grok --permission-mode default agent stdio`; from `ACPToolMapping.swift`, that Grok

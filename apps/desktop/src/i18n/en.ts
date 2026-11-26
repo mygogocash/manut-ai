@@ -37,6 +37,7 @@ import { dock } from "./en/dock";
 import { drafts } from "./en/drafts";
 import { dw } from "./en/dw";
 import { editor } from "./en/editor";
+import { ef } from "./en/ef";
 import { ew } from "./en/ew";
 import { failed } from "./en/failed";
 import { fb } from "./en/fb";
@@ -193,6 +194,7 @@ export const en = {
   ...drafts,
   ...dw,
   ...editor,
+  ...ef,
   ...ew,
   ...failed,
   ...fb,

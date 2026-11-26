@@ -111,10 +111,11 @@ test("a Claude Code model picked mid-turn shows as next turn's until that turn s
   await page.keyboard.press("Enter");
   await expect(page.getByTestId("session-status")).toHaveText("Working");
   await page.getByTestId("model-pill").click();
+  await page.getByTestId("effort-title").click();
   await page.getByTestId("model-opt").filter({ hasText: "Sonnet 5.5" }).click();
-  await expect(page.getByTestId("model-label")).toHaveText("Opus 5.5");
   await expect(page.getByTestId("model-next")).toHaveText("Next turn: Sonnet 5.5");
   await page.keyboard.press("Escape");
+  await expect(page.getByTestId("model-label")).toHaveText("Opus 5.5");
   await page.getByTestId("stop").click();
   await expect(page.getByTestId("session-status")).toHaveText("Ready");
   await page.getByTestId("composer").fill("again");

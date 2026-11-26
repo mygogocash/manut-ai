@@ -25,6 +25,7 @@ import { useBoxVoice } from "../box/Voice";
 import { voiceOffered } from "../../voice/engine";
 import { keysCaption, sendKey, stashKey, useFollowUp, whileRunning, type BoxKind, type FollowUp } from "../box/keys";
 import { filesOf, stashDraft, takeHanded } from "../../app/stash";
+import { BoxDraftContext } from "../box/boxDraft";
 
 const MAX_H = 200;
 
@@ -768,6 +769,10 @@ export function Composer({
     </button>
   );
 
+  // the controls in the box's row read and write the draft through this (chat/box/boxDraft.ts): the effort card's
+  // Ultrathink row puts its visible line into the text, as a person's own edit would
+  const toolsEl = tools ? <BoxDraftContext.Provider value={{ text, set: edit }}>{tools}</BoxDraftContext.Provider> : null;
+
   return (
     <div
       className="cw"
@@ -854,7 +859,7 @@ export function Composer({
             <div className="composer-row bx-row">
               {attachEl}
               <span className="bx-gap" />
-              {tools}
+              {toolsEl}
               {vc.buttons}
               {buttonEl}
             </div>
@@ -863,7 +868,7 @@ export function Composer({
           <div className="composer-row">
             {attachEl}
             {fieldEl}
-            {tools}
+            {toolsEl}
             {vc.buttons}
             {buttonEl}
           </div>

@@ -186,12 +186,14 @@ test("Esc and Stop send the agent's own interrupt; the model button switches the
   expect((await calls(page)).filter((c) => c.input?.kind === "interrupt")).toHaveLength(1);
 
   await page.getByTestId("model-pill").click();
+  await page.getByTestId("effort-title").click();
   await expect(page.getByTestId("model-opt")).toHaveText(["GPT-6.1 Sol", "GPT-6.1 Terra"]);
   await page.getByTestId("model-opt").nth(1).click();
-  await expect(page.getByTestId("model-label")).toHaveText("GPT-6.1 Terra");
+  await expect(page.getByTestId("effort-model")).toHaveText("GPT-6.1 Terra");
   expect((await calls(page)).find((c) => c.input?.kind === "model")!.input).toEqual({ kind: "model", model: "gpt-6.1-terra" });
   // the model button is the chat box's (item 80): the header keeps the toggle and the panel button (the session's Plans)
   await page.keyboard.press("Escape");
+  await expect(page.getByTestId("model-label")).toHaveText("GPT-6.1 Terra");
   await expect(page.getByTestId("composer-box").getByTestId("model-pill")).toBeVisible();
   expect(await page.locator("[data-testid=head-right] > *").count()).toBe(2);
   await expect(page.locator("[data-testid=head-right] > *").last()).toHaveAttribute("data-testid", "panel-button");
