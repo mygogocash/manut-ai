@@ -301,7 +301,8 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    101a (Cursor and Antigravity as chats) and 101e (the first-launch offer to bring over Claude Code and Codex work)
    merged, then 131 (GoSpark's sounds, asked for by the owner that night; the owner should listen to them on a real
    Mac), then 101b (Grok as a chat; Muse Code needs the owner). Then 132 (GoSpark's effort card, asked for by the owner
-   that night) 101d (Grok and pi accounts) and 101c (the ACP registry). Running: 104 (a snapshot of any app), 102a
+   that night) 101d (Grok and pi accounts), 101c (the ACP registry) and 104 (a snapshot of any app; the owner's steps to try it
+   are 11 to 18 in `docs/computer-use.md`). Running: 102a
    and 102d (from the design `docs/several-agents.md`, whose eight open questions the lead answered provisionally with
    its own recommendations, logged in `docs/decisions/102-several-agents.md`), and 133 (motion-lists steady). Needs the owner from 101b: Grok signed in and `permission_mode = "ask"`
    under `[ui]` in `~/.grok/config.toml` (it says always-approve, so Grok chats are refused), and Muse Code's CLI. From 101e: all 325 Codex sessions on the owner's Mac are compressed, so
@@ -689,6 +690,10 @@ Every switch that turns a built part on, and what each needs from the owner, is 
 
 ## Known flaky tests (they fail only under heavy load)
 
+- `apps/api` `test/task-companies.test.ts` ("non-members cannot wait on company tasks...", "deleting a company
+  releases its tasks...") and `test/auth-email.test.ts` ("gives Apple's session in every way..."): timed out at 5 s in
+  item 104's run 45873764860 (with a `rows.filter is not a function` uncaught in workerd), a branch that changes no API
+  code; all passed on the next run. If they time out again, look at that uncaught error first.
 - `apps/desktop/e2e/motion-lists.spec.ts`, its Home test: failed on its test and its retry in item 132's run
   45859860218 (four workers a shard), passed 8 of 8 alone and in every run since. With the resilience spec above, the
   second spec to fail twice in one run since item 129; if either fails twice again, fix it rather than re-run.
