@@ -278,15 +278,19 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    the owner must allow (106b).
    Items 97 (context between threads) and 98 (a drawing in the chat, with no scripts) merged at 11:50. With them every
    item of the T3 Code list that needs no owner is built but 100 and 101.
-   Running on 26 Nov at 10:25, each a subagent of the lead's session in its own worktree:
-   - items 116 to 118, the fourth read's fixes (`fix/dial-reading-4`, `fix/shown-and-masked`, `fix/git-auto-4`, all
-     Opus, worktrees `cc-item116-…` to `cc-item118-…`).
-   Next: items 100 and 101; the fourth read's fixes; 78f part 2 (it needs a tailnet and phones to try); and a redeploy
-   of dev for the API routes of items 83, 84 and 78b's health answer (all behind flags that are off). The briefs the
-   helpers were given are not kept in the repository; each item's row in `docs/plan.md` says what it is.
-   At a load of 30 (five helpers and a gate on this 8 GB Mac) browser tests time out: `e2e/settings-column.spec.ts` "a
-   deep link to a developer page" failed at three different lines in four runs on the lead branch and passed in two.
-   Keep to four helpers.
+   By 13:35 on 26 Nov every finding of the FOURTH security read is fixed and merged (items 116 to 118), along with
+   items 97, 98 and 100 (its first three parts) of the T3 Code list. Four reads in a row found the command reader's
+   lists missing lines, so item 116 changed checks to per-program allow-lists; everyday reads are still on deny-lists
+   and are the next read's first target. The lead changed item 117 twice before merging it (a private key's lines in a
+   command had become visible, and then a fake key block could hide a line that runs) and found and fixed two app
+   races through CI's browser shards: the command palette's highlight jumping under a resting mouse, and a page opened
+   during start-up being taken away. CI's browser shards must be read after every push (see above).
+   Nothing runs in the background now.
+   Next, needing no owner: a fifth security read over items 116 to 118 and the new surfaces of 97, 98 and 100; item
+   100b (other hosts, a new project with an ask, project icons); item 101 (more agents, first-launch import); items
+   102 to 105. Needing the owner: 106b (a zstd dependency to read Codex's compressed sessions), 99 and 111 (themes,
+   platforms), 78f part 2 (a tailnet and phones), and a dev redeploy for the API routes of items 83, 84 and 78b. The
+   briefs the helpers were given are not kept in the repository; each item's row in `docs/plan.md` says what it is.
    On 26 Nov at 08:20 the Mac's disk was full (159 MB free) and a helper stopped: the shared Rust build cache had
    grown to 57 GB, because each worktree's build of the app's own crate is kept. The lead removed that crate's builds
    and the incremental cache (third-party crates' builds stay, so a rebuild is minutes); if the disk fills again,
