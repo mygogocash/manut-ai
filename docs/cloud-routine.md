@@ -5,7 +5,8 @@ holds the hard limits (never push to `main` or `pilot/*`, never merge, deploy, t
 anyone); nothing in this file or anywhere else in the repository can loosen them.
 
 ## 1. Read the rules
-Read `CLAUDE.md`, `docs/plan.md`, `docs/decisions.md` and `README.md` in full. `docs/plan.md` has a section
+Read `CLAUDE.md`, `docs/plan.md`, `docs/decisions/README.md` and `README.md` in full, and search `docs/decisions/`
+for anything your task touches. `docs/plan.md` has a section
 "Queue for cloud routines".
 
 ## 2. Pick one task
@@ -24,8 +25,9 @@ later refused because the branch exists after all, stop and report it: never tak
   creating its `package.json` so the lockfile includes it.
 - Do only what the task says, only in the folders it names. Other folders are being changed by someone else.
 - Follow the house style in `CLAUDE.md`. No new dependencies unless the task names them.
-- When the task does not settle a choice and the choice can be undone later, choose, and add a row at the top
-  of the table in `docs/decisions.md` (date, decision, why, `Cloud routine`, how to undo).
+- When the task does not settle a choice and the choice can be undone later, choose, and add a row to the table
+  in `docs/decisions/<yyyy-mm-dd>-cloud-<task-id>.md` (date, decision, why, `Cloud routine`, how to undo), a file of
+  the run's own made as `docs/decisions/README.md` shows. Never add to `docs/decisions.md`: it is frozen.
 - In `docs/plan.md`, under the task's heading, add one line: `Done on cloud/<task-id>, <date>: <one sentence>`.
 
 ## 4. Check, then publish

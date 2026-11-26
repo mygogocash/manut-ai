@@ -1,0 +1,26 @@
+import type { rs as en } from "../en/rs";
+
+export const rs: Record<keyof typeof en, string> = {
+  "rs.restart": "다시 시작",
+  "rs.start": "시작",
+  "rs.restarting": "다시 시작하는 중",
+  "rs.starting": "시작하는 중",
+  "rs.cancel": "취소",
+  "rs.anyway": "그래도 다시 시작",
+  "rs.again": "다시 시도",
+  "rs.busyTitle": "{bot}가 일하는 중이에요",
+  "rs.busy1": "실행 중인 작업이 있어요. 지금 다시 시작하면 중단돼요:",
+  "rs.busy": "실행 중인 작업이 {n}개 있어요. 지금 다시 시작하면 모두 중단돼요:",
+  "rs.failed": "{bot}를 다시 시작하지 못했어요.",
+  "rs.w.chat": "대화 한 턴",
+  "rs.w.cron": "예약 작업",
+  "rs.w.cronNamed": "예약 작업 {name}",
+  "rs.w.task": "백그라운드 작업",
+  "rs.w.run": "{name} 실행",
+  "rs.w.other": "기타 작업",
+  "rs.w.otherOf": "{bot}: 기타 작업",
+  "rs.w.more1": "실행 중인 작업이 1개 더 있어요",
+  "rs.w.more": "실행 중인 작업이 {n}개 더 있어요",
+  "rs.w.unsaid": "Hermes가 무슨 작업인지 알려 주지 않았어요.",
+  "rs.w.of": "{bot}: {what}",
+};

@@ -1,0 +1,26 @@
+import type { id as en } from "../en/id";
+
+export const id: Record<keyof typeof en, string> = {
+  "id.changePic": "사진 바꾸기",
+  "id.changePicOf": "{bot} 사진 바꾸기",
+  "id.savingPic": "사진 저장하는 중",
+  "id.defaultFace": "기본 사진 쓰기",
+  "id.rename": "이름 바꾸기",
+  "id.botName": "이름",
+  "id.saving": "저장하는 중…",
+  "id.save": "저장",
+  "id.cancel": "취소",
+  "id.nameHint": "보이는 이름만 바뀌어요. ID는 {id} 그대로예요. 비워 두면 그 이름을 써요.",
+  "id.loading": "불러오는 중",
+  "id.unreadable": "이 봇의 정보를 읽지 못했어요.",
+  "id.elsewhere1": "다른 곳 세션",
+  "id.elsewhere": "다른 곳 세션",
+  "id.skill1": "스킬",
+  "id.skills": "스킬",
+  "id.routine1": "루틴",
+  "id.routines": "루틴",
+  "id.lastActive": "마지막 활동",
+  "id.since": "{date}부터",
+  "id.picKinds": "PNG, JPEG, WebP 사진을 쓰세요",
+  "id.picUnreadable": "그 사진을 읽지 못했어요",
+};

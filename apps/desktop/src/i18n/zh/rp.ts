@@ -1,0 +1,25 @@
+import type { rp as en } from "../en/rp";
+
+export const rp: Record<keyof typeof en, string> = {
+  "rp.lead": "这里会汇总这台电脑上出了什么问题，方便你交给自己的编程智能体处理，或起草一个 issue。除非你选择，否则不会有任何内容离开这台 Mac。",
+  "rp.what": "报告",
+  "rp.reading": "正在读取这台电脑…",
+  "rp.never": "报告只包含版本、各智能体是否已安装和登录、最近的问题和几个开关。不包含账号、邮箱、聊天、提示词或文件内容，密钥和你的主文件夹会被隐藏。",
+  "rp.copy.title": "复制",
+  "rp.copy.hint": "把报告放到剪贴板。",
+  "rp.copied": "已复制",
+  "rp.agent.title": "让我的编程智能体来修",
+  "rp.agent.hint": "开始一个新的编程聊天，报告已在输入框里。你读完后自己点发送。",
+  "rp.agent.none": "这台电脑上没有可以聊天的编程智能体。",
+  "rp.agent.which": "编程智能体",
+  "rp.agent.go": "打开聊天",
+  "rp.folder.choose": "选择文件夹",
+  "rp.folder.in": "在 {path}",
+  "rp.issue.title": "起草 issue",
+  "rp.issue.hint": "在浏览器中打开已填好报告的新 issue 页面。",
+  "rp.issue.none": "此版本没有指定仓库。",
+  "rp.issue.ask": "要在浏览器中打开 {address} 吗？报告文字会放在地址里，你提交后，任何能看到该仓库 issue 的人都能读到。",
+  "rp.issue.open": "打开页面",
+  "rp.issue.cancel": "取消",
+  "rp.refresh": "重新读取",
+};

@@ -111,7 +111,7 @@ A pnpm monorepo. Three apps, a stack of small shared packages.
 | [`apps/web`](apps/web) | The owner's approval page, invite links, the phone web app and the operator console, served from the API's own origin. |
 | [`packages/*`](packages) | The shared rules: approvals that settle once, one event contract for every agent, money and time formatting, notification rules, PromptPay QR, the phone's encrypted channel, the design tokens, and more. |
 
-The plan lives in [`docs/plan.md`](docs/plan.md) and the current state in [`docs/handoff.md`](docs/handoff.md). Every call we made and why is in [`docs/decisions.md`](docs/decisions.md).
+The plan lives in [`docs/plan.md`](docs/plan.md) and the current state in [`docs/handoff.md`](docs/handoff.md). Every call we made and why is in [`docs/decisions/`](docs/decisions/): [`archive.md`](docs/decisions/archive.md) up to 26 Nov 2026, then one file per item.
 
 ## Built different
 

@@ -2,7 +2,7 @@
 
 The working copy of the implementation plan, kept in the repository so any session (on the owner's Mac or a
 cloud routine) can pick up without other context. The full plan is the doc "Manut AI: implementation plan
-(reuse first)". `CLAUDE.md` has the rules; `docs/decisions.md` has every decision.
+(reuse first)". `CLAUDE.md` has the rules; `docs/decisions/` has every decision (`archive.md`, then one file per item).
 
 ## Branches
 

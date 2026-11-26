@@ -1,0 +1,27 @@
+import type { worktrees as en } from "../en/worktrees";
+
+export const worktrees: Record<keyof typeof en, string> = {
+  "worktrees.where.title": "レーンを作る場所",
+  "worktrees.where.hint": "レーンはそれぞれ専用のフォルダで作業します。そのフォルダを置く場所を選びます。すでに作ったレーンはそのまま残ります。",
+  "worktrees.where.default": "既定: {folder}",
+  "worktrees.where.choose": "フォルダを選ぶ",
+  "worktrees.where.reset": "既定に戻す",
+  "worktrees.root.bad_root": "Kit が使えないフォルダです。フォルダの完全なパスを選んでください。",
+  "worktrees.root.root_too_broad": "範囲が広すぎます。ホームフォルダ、ディスクの最上位、または Manut AI 自身のデータです。別のフォルダを選んでください。",
+  "worktrees.root.root_in_checkout": "プロジェクトのファイルの中にあるため、レーンのフォルダがその間に置かれてしまいます。どのプロジェクトにも含まれないフォルダを選んでください。",
+  "worktrees.root.root_unwritable": "Kit はこのフォルダに書き込めません。ファイルを保存できるフォルダを選んでください。",
+  "worktrees.root.chat": "レーン用に選んだフォルダを今は使えないため、レーンは作らず、Kit はこのプロジェクトのフォルダで作業します。設定の Worktrees で変更してください。",
+  "worktrees.remote.title": "リモートから始める",
+  "worktrees.remote.hint": "新しいレーンは、リモートにある基準ブランチの最新コミットから始まります。Kit は先にそのブランチだけを取得し、最大 10 秒待ち、パスワードは尋ねません。取得できない場合や、手元のブランチにリモートにないコミットがある場合は、手元のブランチから始めてその旨を伝えます。",
+  "worktrees.prefix.title": "ブランチの接頭辞",
+  "worktrees.prefix.hint": "すべてのレーンのブランチはこの接頭辞で始まり、Kit のブランチを見分けられます。小文字の単語を 1 つか 2 つ、それぞれスラッシュで終えます（例: kit/、team/ana/）。",
+  "worktrees.prefix.save": "保存",
+  "worktrees.prefix.empty": "接頭辞を入力してください。",
+  "worktrees.prefix.slash": "接頭辞は kit/ のようにスラッシュで終えてください。",
+  "worktrees.prefix.form": "小文字、数字、ハイフンだけを使い、スラッシュで終わる単語を 1 つか 2 つにしてください。",
+  "worktrees.cleanup": "整理",
+  "worktrees.deleted.title": "チャットを削除したらフォルダも削除",
+  "worktrees.deleted.hint": "フォルダの中に変更や新しいものがなく、ブランチのすべてのコミットがリモートにあるときだけ削除します。そうでなければフォルダを残し、レーンの下に表示します。ブランチは必ず残ります。",
+  "worktrees.merged.title": "プルリクエストがマージされたらフォルダを削除",
+  "worktrees.merged.hint": "プロジェクトを開くとき、1 時間に 1 回まで gh または glab でプルリクエストを読みます。コミットが既定のブランチにあり、フォルダの中に変更や新しいものがなく、そのフォルダで作業中のチャットがないときだけ削除します。gh または glab にサインインしていなければ、確認できないと伝えて何もしません。",
+};
