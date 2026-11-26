@@ -3750,7 +3750,7 @@ fn deliver(sink: &ChatSink, events: Vec<Event>) {
 /// The command a chat runs: `argv` in `cwd` on pipes, with the child `PATH` and the chosen account's home
 /// variable (`account_env`, empty for the CLI's own login), the same env a terminal session gets. Nothing
 /// else is added.
-fn command_for(argv: &[OsString], cwd: &Path, path_env: Option<OsString>, account_env: &[(String, String)]) -> Result<Command, String> {
+pub(crate) fn command_for(argv: &[OsString], cwd: &Path, path_env: Option<OsString>, account_env: &[(String, String)]) -> Result<Command, String> {
     let (prog, rest) = argv.split_first().ok_or("empty argv")?;
     let mut cmd = Command::new(prog);
     cmd.args(rest).current_dir(cwd).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
