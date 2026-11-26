@@ -1,0 +1,28 @@
+import type { key as en } from "../en/key";
+
+export const key: Record<keyof typeof en, string> = {
+  "key.openBot": "ボット 1〜9 を開く",
+  "key.search": "コマンドパレット: どこへでも移動、何でも操作",
+  "key.details": "詳細の表示/非表示",
+  "key.settings": "設定",
+  "key.nextAsk": "次の承認または質問",
+  "key.newSession": "新しいチャットかターミナル",
+  "key.cardKeys": "拒否 · 今回のみ許可 · このセッション中は許可（選択中のカード）",
+  "key.stop": "回答中の処理を止める",
+  "key.stepPane": "次 · 前のターミナルペイン",
+  "key.movePane": "ターミナルペインを移動",
+  "key.zoomPane": "ターミナルペインを拡大、またはすべて表示",
+  "key.equalizePanes": "ターミナルペインの大きさをそろえる",
+  "key.termFont": "ターミナルの文字を大きく、小さく、標準の大きさに",
+  "key.termLine": "行頭、行末、行頭まで削除、行末まで削除(ターミナル内)",
+  "key.termWord": "前の単語、次の単語(ターミナル内)",
+  "key.termClear": "ターミナルをクリア",
+  "key.termScroll": "スクロールの先頭、末尾(ターミナル内)",
+  "key.termCopyPaste": "コピー、貼り付け(ターミナル内)",
+  "key.splitPane": "ターミナルを右 · 下に分割",
+  "key.closePane": "ターミナルペインを閉じる。分割がなければセッションを閉じる(元に戻せる)",
+  "key.focusPane": "ターミナルのペイン間を移動",
+  "key.copyLink": "ターミナルのリンクをコピー",
+  "key.sendOther": "その 1 通だけもう一方で送る：ホームにとどまる、または待つ・すぐ加えるのもう一方",
+  "key.stash": "下書きを取っておく（ホームの「下書き」へ）",
+};

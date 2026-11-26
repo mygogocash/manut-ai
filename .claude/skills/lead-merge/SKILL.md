@@ -39,8 +39,22 @@ Read its report for what it did NOT do or could not check, then:
 2. Merge the lead's branch into the item's (`git merge --no-edit feat/continue-pilot-week-1` in the item's worktree).
    Conflicts are nearly always two items adding at one place:
    ```bash
-   .claude/skills/lead-merge/scripts/keep-both.py apps/desktop/src/i18n/{en,ja,ko,zh}.ts
+   .claude/skills/lead-merge/scripts/keep-both.py $(git diff --name-only --diff-filter=U -- apps/desktop/src/i18n)
    ```
+   Since item 128 each language's words are a folder of area files, one per key prefix (`apps/desktop/src/i18n/README.md`),
+   so two items meet only when both add to one area, at the end of its object, or both add an area (its import and
+   spread in `<lang>.ts`); `keep-both.py` keeps both of either. A conflict in `src/i18n/snapshot/*.json` is settled by
+   taking either side and writing it again once the dictionaries are merged: `UPDATE_I18N_SNAPSHOT=1 pnpm
+   --filter @manut/desktop exec vitest run src/i18n/snapshot.test.ts`. A branch made before item 128 adds its keys to
+   the old one-file `en.ts`, `ja.ts`, `ko.ts` and `zh.ts`: take the lead's four (`git checkout --theirs
+   apps/desktop/src/i18n/{en,ja,ko,zh}.ts`), then carry the branch's keys into their areas:
+   ```bash
+   for l in en ja ko zh; do
+     git diff <merge base> <item branch> -- apps/desktop/src/i18n/$l.ts | sed -n 's/^+\( *[/"]\)/\1/p' |
+       .claude/skills/lead-merge/scripts/place-keys.py apps/desktop/src/i18n $l
+   done
+   ```
+   It adds or replaces each key in its area and makes a new area's files; a key the branch removed is yours to remove.
    Decisions no longer conflict: since item 128 each item writes its own `docs/decisions/<item>-<short-name>.md`, and
    `docs/decisions.md` and `docs/decisions/archive.md` are frozen. A branch made before item 128 still adds rows to
    `docs/decisions.md`: keep the lead's short note there (`git checkout --theirs docs/decisions.md`, since the lead's

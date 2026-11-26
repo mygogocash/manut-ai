@@ -1,0 +1,27 @@
+import type { lk as en } from "../en/lk";
+
+export const lk: Record<keyof typeof en, string> = {
+  "lk.links": "링크",
+  "lk.showAll": "전체 {n}개 보기",
+  "lk.thread": "{name} · 스레드",
+  "lk.svcKind": "{svc} {kind}",
+  "lk.k.channel": "채널",
+  "lk.k.message": "메시지",
+  "lk.k.server": "서버",
+  "lk.k.invite": "초대",
+  "lk.k.dms": "DM",
+  "lk.k.thread": "스레드",
+  "lk.k.file": "파일",
+  "lk.k.folder": "폴더",
+  "lk.k.job": "채용 공고",
+  "lk.k.post": "게시물",
+  "lk.k.short": "쇼츠",
+  "lk.k.playlist": "재생목록",
+  "lk.k.video": "동영상",
+  "lk.k.project": "프로젝트",
+  "lk.k.discussion": "토론",
+  "lk.k.releases": "릴리스",
+  "lk.ciRun": "CI 실행",
+  "lk.compare": "비교 {range}",
+  "lk.calEvent": "캘린더 일정",
+};

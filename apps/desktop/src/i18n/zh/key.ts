@@ -1,0 +1,28 @@
+import type { key as en } from "../en/key";
+
+export const key: Record<keyof typeof en, string> = {
+  "key.openBot": "打开第 1–9 个机器人",
+  "key.search": "命令面板：前往任何页面，执行任何操作",
+  "key.details": "显示或隐藏详情",
+  "key.settings": "设置",
+  "key.nextAsk": "下一个审批或问题",
+  "key.newSession": "新建聊天或终端",
+  "key.cardKeys": "拒绝 · 允许一次 · 本会话内允许（当前卡片）",
+  "key.stop": "停止正在生成的回复",
+  "key.stepPane": "下一个 · 上一个终端分屏",
+  "key.movePane": "移动终端分屏",
+  "key.zoomPane": "放大终端分屏,或显示全部",
+  "key.equalizePanes": "均分终端分屏",
+  "key.termFont": "终端文字放大、缩小、恢复默认大小",
+  "key.termLine": "行首、行尾、删除到行首、删除到行尾(终端内)",
+  "key.termWord": "向左一个词、向右一个词(终端内)",
+  "key.termClear": "清空终端",
+  "key.termScroll": "回滚到顶部、底部(终端内)",
+  "key.termCopyPaste": "复制、粘贴(终端内)",
+  "key.splitPane": "向右 · 向下拆分终端",
+  "key.closePane": "关闭终端分屏;未分屏时关闭该会话(可撤销)",
+  "key.focusPane": "在终端分屏间移动",
+  "key.copyLink": "复制终端链接",
+  "key.sendOther": "这一条消息用另一种方式发送：留在主页，或在等待与现在加入之间换成另一种",
+  "key.stash": "把草稿放到主页的草稿里",
+};

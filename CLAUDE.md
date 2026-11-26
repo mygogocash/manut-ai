@@ -29,7 +29,7 @@ skill of anything repetitive). Read the one that fits before doing the work by h
 - `helper`: the standing rules for building one plan item in a worktree. A helper reads it first, so a brief only
   says what to build.
 - `lead-merge`: the lead's routine for an item (start a worktree, gate, merge, mark, clean up), with `gate.sh`,
-  `keep-both.py`, `start-item.sh` and `finish-item.sh`.
+  `keep-both.py`, `place-keys.py` (dictionary lines into their area files), `start-item.sh` and `finish-item.sh`.
 - `release-desktop`: cutting a desktop release and checking its files and signatures (`verify-release.mjs`).
 - `ci-read`: reading the newest CI run, failed browser specs included (`ci-failures.sh`).
 

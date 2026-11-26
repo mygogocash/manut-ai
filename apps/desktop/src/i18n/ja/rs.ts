@@ -1,0 +1,26 @@
+import type { rs as en } from "../en/rs";
+
+export const rs: Record<keyof typeof en, string> = {
+  "rs.restart": "再起動",
+  "rs.start": "起動",
+  "rs.restarting": "再起動中",
+  "rs.starting": "起動中",
+  "rs.cancel": "キャンセル",
+  "rs.anyway": "それでも再起動",
+  "rs.again": "もう一度",
+  "rs.busyTitle": "{bot} は作業中です",
+  "rs.busy1": "実行中の作業があります。いま再起動すると止まります:",
+  "rs.busy": "実行中の作業が {n} 件あります。いま再起動するとすべて止まります:",
+  "rs.failed": "{bot} を再起動できませんでした。",
+  "rs.w.chat": "会話のターン",
+  "rs.w.cron": "予約ジョブ",
+  "rs.w.cronNamed": "予約ジョブ {name}",
+  "rs.w.task": "バックグラウンドのタスク",
+  "rs.w.run": "{name} の実行",
+  "rs.w.other": "その他の作業",
+  "rs.w.otherOf": "{bot}: その他の作業",
+  "rs.w.more1": "ほかに 1 件の作業が実行中です",
+  "rs.w.more": "ほかに {n} 件の作業が実行中です",
+  "rs.w.unsaid": "Hermes は作業の内容を伝えていません。",
+  "rs.w.of": "{bot}: {what}",
+};

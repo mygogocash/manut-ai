@@ -1,0 +1,27 @@
+import type { worktrees as en } from "../en/worktrees";
+
+export const worktrees: Record<keyof typeof en, string> = {
+  "worktrees.where.title": "在哪里创建泳道",
+  "worktrees.where.hint": "每条泳道都在自己的文件夹里工作。选择这些文件夹放在哪里。已经创建的泳道留在原处。",
+  "worktrees.where.default": "默认：{folder}",
+  "worktrees.where.choose": "选择文件夹",
+  "worktrees.where.reset": "使用默认",
+  "worktrees.root.bad_root": "Kit 无法使用这个文件夹。请选择完整的文件夹路径。",
+  "worktrees.root.root_too_broad": "这个文件夹范围太大：它是你的主文件夹、磁盘顶层或 Manut AI 自己的数据。请换一个。",
+  "worktrees.root.root_in_checkout": "这个文件夹在某个项目自己的文件里面，泳道文件夹会混在其中。请选择任何项目之外的文件夹。",
+  "worktrees.root.root_unwritable": "Kit 无法在这个文件夹里写入。请选择可以保存文件的文件夹。",
+  "worktrees.root.chat": "选择的泳道文件夹现在无法使用，所以没有创建泳道，Kit 在这个项目自己的文件夹里工作。请在设置的 Worktrees 里修改。",
+  "worktrees.remote.title": "从远程开始",
+  "worktrees.remote.hint": "新泳道从远程上基准分支的最新提交开始。Kit 会先只获取这一个分支，最多等待 10 秒，并且从不询问密码。如果获取不了，或你本机的分支有远程没有的提交，泳道会从你本机的分支开始并告诉你。",
+  "worktrees.prefix.title": "分支前缀",
+  "worktrees.prefix.hint": "每条泳道的分支都以它开头，方便你认出 Kit 的分支。一到两个小写单词，每个后面跟一个斜杠，例如 kit/ 或 team/ana/。",
+  "worktrees.prefix.save": "保存",
+  "worktrees.prefix.empty": "请输入前缀。",
+  "worktrees.prefix.slash": "前缀要以斜杠结尾，例如 kit/。",
+  "worktrees.prefix.form": "只能用小写字母、数字和连字符，写一到两个以斜杠结尾的单词。",
+  "worktrees.cleanup": "清理",
+  "worktrees.deleted.title": "删除聊天时删除它的文件夹",
+  "worktrees.deleted.hint": "只有当里面没有更改或新文件，且分支上的每个提交都在远程里时才删除。否则保留文件夹，并列在泳道下面。分支始终保留。",
+  "worktrees.merged.title": "拉取请求合并后删除它的文件夹",
+  "worktrees.merged.hint": "打开项目时通过 gh 或 glab 读取你的拉取请求，每小时最多一次。只有当提交已在默认分支里、文件夹里没有更改或新文件、且没有聊天还在里面工作时才删除。如果 gh 或 glab 没有登录，它会说无法确认，并且什么都不做。",
+};

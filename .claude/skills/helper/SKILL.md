@@ -63,7 +63,9 @@ list names only.
 
 ## Words and docs
 
-- Every string goes through `apps/desktop/src/i18n/` in all four dictionaries (`en`, `ja`, `ko`, `zh`). No Thai yet. A
+- Every string goes through `apps/desktop/src/i18n/` in all four dictionaries (`en`, `ja`, `ko`, `zh`), in the area
+  file named after the key's prefix (`i18n/en/lane.ts` for `lane.*`; a new feature adds its own area file in all four,
+  as `src/i18n/README.md` says), and then writes `src/i18n/snapshot/` again with `UPDATE_I18N_SNAPSHOT=1`. No Thai yet. A
   word the app keeps in English everywhere stays so (`src/i18n/i18n.test.ts`); a new Settings page whose name stays
   English joins the names `e2e/i18n-zh.spec.ts` keeps.
 - Comments say why, in full sentences. No emojis and no em-dashes anywhere.

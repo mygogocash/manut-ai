@@ -1,0 +1,20 @@
+export const plans = {
+  // plans (the Plans tab: the list of a bot's runs)
+  "plans.tab": "Plans",
+  "plans.of": "{bot}'s plans",
+  "plans.all": "All {n} plans",
+  "plans.none": "No plans yet.",
+  "plans.noneHint": "When this bot hands work to subagents, each part and how far it got shows here, live.",
+  "plans.noneHow": "To start one, ask it to split a task into parallel parts, or send {cmd} with the task.",
+  "plans.noneHowHermes": "Bots plan big jobs in parts with oh-my-hermes, which isn't on this computer. Add it from + under Terminals.",
+  "plans.stale": "no update for {t}",
+  "plans.cli": "CLI agents",
+  "plans.cliAll": "CLI agents ({n})",
+  "plans.showAll": "Show all ({n})",
+  "plans.fewer": "Show fewer",
+  "plans.refresh": "Refresh",
+  "plans.open": "Open plan {name}",
+  "plans.graph": "Plan graph",
+  "plans.session": "This session's subagents",
+  "plans.sessionNone": "No subagents in this session yet.",
+};

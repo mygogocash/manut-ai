@@ -20,8 +20,9 @@ describe("the dictionaries' snapshot", () => {
       const now = sorted(DICT[l]);
       if (process.env.UPDATE_I18N_SNAPSHOT === "1") writeFileSync(file, `${JSON.stringify(now, null, 2)}\n`);
       const pinned = JSON.parse(readFileSync(file, "utf8")) as Record<string, string>;
-      expect(Object.keys(now), l).toEqual(Object.keys(pinned));
-      expect(now, l).toEqual(pinned);
+      const why = `${l}: the words differ from src/i18n/snapshot/${l}.json. If you changed them on purpose, write it again with UPDATE_I18N_SNAPSHOT=1 (src/i18n/README.md)`;
+      expect(Object.keys(now), why).toEqual(Object.keys(pinned));
+      expect(now, why).toEqual(pinned);
     });
   }
 });

@@ -1,0 +1,16 @@
+export const mp = {
+  "mp.title": "Model and reasoning",
+  "mp.pick": "Pick a model",
+  "mp.search": "Search models",
+  "mp.makers": "Model makers",
+  "mp.all": "All",
+  "mp.other": "Other",
+  "mp.offline": "{bot} is offline",
+  "mp.loading": "Loading models…",
+  "mp.none": "No models match",
+  "mp.noAccount": "{bot} has no AI account yet. Sign in below the chat, then its models show here.",
+  "mp.reasoning": "Thinking",
+  "mp.inHermes": "This cannot be changed here yet",
+  "mp.appliesChat": "Applies to this chat · {link}",
+  "mp.botSettings": "Team member's settings",
+};
