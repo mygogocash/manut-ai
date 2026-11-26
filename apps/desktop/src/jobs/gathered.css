@@ -1,0 +1,179 @@
+/* The Gathered block of the job's side-by-side view (GatheredBlock.tsx, item 102c). Under the columns where they fit, a tab of its own where
+   they do not (jobview.css). Only the body scrolls: the compare list opens upward from the head and must not be clipped. */
+.jv-gathered {
+  flex: none;
+  max-height: 44%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.gt {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+}
+.gt-head {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+.gt-count {
+  font-weight: 600;
+}
+.gt-wait {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--aui-warn, var(--ink));
+  font-size: 13px;
+}
+.gt-compare-wrap {
+  position: relative;
+  margin-left: auto;
+}
+.gt .btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.gt-note {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--rad);
+  background: var(--aui-subtle);
+  font-size: 13px;
+}
+.gt-body {
+  min-height: 0;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: repeat(var(--gt-n, 3), minmax(0, 1fr));
+  gap: 12px;
+  align-items: start;
+}
+.gt-lane {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--rad);
+  background: var(--aui-surface, var(--main));
+}
+.gt-lane[data-state="waiting"] {
+  border-color: var(--aui-warn, var(--line));
+}
+.gt-h {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 6px;
+}
+.gt-agent {
+  font-weight: 600;
+}
+.gt-model {
+  font-size: 12px;
+}
+/* the whole answer, in a box that scrolls rather than a cut one */
+.gt-answer {
+  max-height: 200px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--rad);
+  font-size: 13px;
+  line-height: 1.5;
+  user-select: text;
+}
+.gt-answer:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 1px;
+}
+.gt-why {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  font-size: 13px;
+}
+.gt-why.err {
+  color: var(--aui-danger, var(--ink));
+}
+.gt-k {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 2px;
+}
+.gt-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 12px;
+}
+.gt-list li {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+.gt-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gt-add {
+  color: var(--aui-ok, var(--ink));
+}
+.gt-del {
+  color: var(--aui-danger, var(--ink));
+}
+.gt-result {
+  font-size: 13px;
+}
+.gt-result.ok {
+  color: var(--aui-ok, var(--ink));
+}
+.gt-result.err {
+  color: var(--aui-danger, var(--ink));
+}
+.gt-stale {
+  font-size: 12px;
+}
+
+@container jv (max-width: 760px) {
+  /* as a tab it fills the view and is the only thing in it */
+  .jv-gathered {
+    max-height: none;
+    flex: 1;
+    min-height: 0;
+  }
+  .jv-gathered[data-active="false"] {
+    display: none;
+  }
+  .jv[data-tab="gathered"] .jv-cols {
+    display: none;
+  }
+  .gt {
+    flex: 1;
+    border-top: 0;
+    padding-top: 0;
+  }
+  .gt-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
