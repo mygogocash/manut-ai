@@ -1483,6 +1483,16 @@ know in advance; and a line naming a file with @ was not read in. Then each file
 - OpenCode: an `instructions` entry in the `OPENCODE_CONFIG_CONTENT` the app already passes (its rules page: an absolute path
   is "used as written"; OpenCode 2.3.0's own code reads such a path while `OPENCODE_DISABLE_PROJECT_CONFIG` keeps project files
   out). The entry joins the value before the second rule listing, so the ask rules are checked with the very value OpenCode gets.
+  OpenCode's own placeholders never reach it as placeholders (item 118): OpenCode fills in `{env:NAME}` and `{file:path}`
+  within its config, so a project's AGENTS.md could otherwise put one of the person's own files, or a variable of theirs, into
+  the system prompt if OpenCode filled them in within an instructions file's text too. Whether it does could not be settled
+  without a chat: with a scratch home, a made-up variable and a scratch instructions file, `opencode debug config
+  --standalone` (OpenCode 2.3.0) showed an `{env:...}` in a config value filled in and listed the instructions file only by
+  its path; the patterns (`\{env:([^}]+)\}`, `\$\{env:([^}]+)\}`, `\{file:[^}]+\}`) are in its binary as strings, while the
+  code that uses them is compiled and cannot be read; and its server's API (`/openapi.json`) holds instruction entries only
+  for a session. So the text written for OpenCode, paths included, has a space after the brace of every `{env:` and `{file:`
+  in any letter case (`project_notes::inert_for_opencode`): no pattern matches, and the words stay readable. Claude Code's
+  text is handed over as written. The path in the entry still refuses either token, as before.
 
 **What the chat says.** One quiet line, once: "Read this project's CLAUDE.md." with the files it read, and "Left out: …" with
 each file left out and why (a link, over 64 KB, over 128 KB in all, not plain text, only for some files, could not be passed
