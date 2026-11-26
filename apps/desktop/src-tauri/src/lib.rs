@@ -26,6 +26,7 @@ mod lane_clean;
 mod lane_config;
 mod lane_diff;
 mod past_chats;
+mod project_notes;
 mod platform;
 mod outpost;
 mod power;
@@ -678,10 +679,12 @@ async fn session_close_all(shell: State<'_, Shell>) -> Result<(), String> {
 /// Start allow-listed agent `agent` in folder `cwd` as a chat: its structured mode (the fixed arguments in
 /// the allow-list), with events for the chat view on `on_event` and, once, `{event:"exit", code, error}`.
 /// Only an agent id, a folder, optionally a Claude Code session id or Codex thread id, optionally the account a
-/// restarted session ran with, and the SESSIONS id (`s<digits>`, whose attachment folder a Claude Code chat may
-/// read) cross from the UI.
+/// restarted session ran with, the SESSIONS id (`s<digits>`, whose attachment folder a Claude Code chat may
+/// read) and the permission mode the chat starts in (one the agent offers, `agent_chat::start_mode`; none: its careful
+/// one) cross from the UI.
 #[tauri::command]
-async fn chat_start(shell: State<'_, Shell>, agent: String, cwd: String, resume: Option<String>, account: Option<String>, session: Option<String>, suggest: Option<bool>, on_event: Channel<serde_json::Value>) -> Result<u32, String> {
+#[allow(clippy::too_many_arguments)]
+async fn chat_start(shell: State<'_, Shell>, agent: String, cwd: String, resume: Option<String>, account: Option<String>, session: Option<String>, suggest: Option<bool>, mode: Option<String>, on_event: Channel<serde_json::Value>) -> Result<u32, String> {
     let chats = shell.chats.clone();
     tauri::async_runtime::spawn_blocking(move || {
         // The same account as a terminal session of this agent: its home variable, or nothing ("This computer"), with the
@@ -696,7 +699,7 @@ async fn chat_start(shell: State<'_, Shell>, agent: String, cwd: String, resume:
             ("claude", Some(s)) => user_home().and_then(|h| session_files::session_dir(&h, s)).ok(),
             _ => None,
         };
-        chats.start_agent_with(&agent, std::path::Path::new(&cwd), resume.as_deref(), &account_env, files.as_deref(), suggest.unwrap_or(false), move |out| {
+        chats.start_agent_with(&agent, std::path::Path::new(&cwd), resume.as_deref(), &account_env, files.as_deref(), suggest.unwrap_or(false), mode.as_deref(), move |out| {
             let _ = on_event.send(match out {
                 ChatOut::Event(e) => e,
                 ChatOut::Exit(code, error) => serde_json::json!({"event": "exit", "code": code, "error": error}),
@@ -974,6 +977,15 @@ async fn workflows_read() -> Result<workflows::Folder, String> {
 async fn workflows_folder() -> Result<String, String> {
     let home = user_home()?;
     tauri::async_runtime::spawn_blocking(move || workflows::make(&home).map(|p| p.to_string_lossy().into_owned())).await.map_err(|e| e.to_string())?
+}
+
+/// Settings › Workflows (item 91): whether a workflow's project is a folder a run may start in (workflows.rs `project`): its real
+/// path, or a short code (`missing`, `link`, `too_broad`, `app_folder`, `not_repo`, `no_git`). Asked when the person allows a
+/// workflow and again before every run. Only reads, and asks git nothing but where its top folder is.
+#[tauri::command]
+async fn workflows_project(project: String) -> Result<String, String> {
+    let home = user_home()?;
+    tauri::async_runtime::spawn_blocking(move || workflows::project(&home, &project).map_err(str::to_string)).await.map_err(|e| e.to_string())?
 }
 
 /// Settings › Worktrees: the folder the person chose for lanes' folders, checked and made (lane.rs `check_lanes_root`): its real
@@ -1663,6 +1675,7 @@ fn commands(invoke: tauri::ipc::Invoke) -> bool {
         lane_root_check,
         workflows_read,
         workflows_folder,
+        workflows_project,
         agent_config_list,
         skill_bundle_read,
         skill_link_read,

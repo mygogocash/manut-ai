@@ -13,6 +13,7 @@ const wf = (over: Partial<Workflow> = {}): Workflow => ({
   steps: ["Run the tests."],
   schedule: { kind: "daily", at: "02:00" },
   timeZone: "Asia/Bangkok",
+  digest: "0".repeat(64),
   ...over,
 });
 /** 02:00 in Bangkok (UTC+7) on 25 November 2026 is 19:00 UTC the day before. */

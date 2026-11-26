@@ -9,6 +9,7 @@ import { SourceIcon, Spinner } from "../ui";
 import { withZone } from "../lib/zone";
 import { cadence, isFailure, nextRun, sourceName, statusText } from "./format";
 import "./panel.css";
+import { Icon } from "../ui/icons";
 
 export type PanelTab = "details" | "terminal" | "schedule" | "worktrees" | "diff" | "runs";
 
@@ -28,48 +29,15 @@ export const TABS: { id: PanelTab; readonly label: string }[] = (Object.keys(TAB
   },
 }));
 
-const I = { fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
+/** Each tab's drawing, from the brand's one set (src/ui/icons.tsx, item 85i). */
 export const TAB_ICON: Record<PanelTab, ReactElement> = {
-  details: (
-    <svg viewBox="0 0 24 24" {...I}>
-      <circle cx="12" cy="12" r="9" />
-      <path d="M12 11v6M12 7.5v.01" />
-    </svg>
-  ),
-  terminal: (
-    <svg viewBox="0 0 24 24" {...I}>
-      <rect x="3" y="4" width="18" height="16" rx="2" />
-      <path d="m7 9 3 3-3 3M13 15h4" />
-    </svg>
-  ),
-  schedule: (
-    <svg viewBox="0 0 24 24" {...I}>
-      <circle cx="12" cy="12" r="9" />
-      <path d="M12 7v5l3 2" />
-    </svg>
-  ),
-  worktrees: (
-    <svg viewBox="0 0 24 24" {...I}>
-      <circle cx="6" cy="5" r="2" />
-      <circle cx="6" cy="19" r="2" />
-      <circle cx="18" cy="8" r="2" />
-      <path d="M6 7v10M18 10c0 4-5 4-11 7" />
-    </svg>
-  ),
-  diff: (
-    <svg viewBox="0 0 24 24" {...I}>
-      <path d="M8 3v8M4 7h8M4 18h8M15 6h6M15 18h6M15 12h6" />
-    </svg>
-  ),
+  details: <Icon name="info" />,
+  terminal: <Icon name="terminal" />,
+  schedule: <Icon name="clock" />,
+  worktrees: <Icon name="git-branch" />,
+  diff: <Icon name="diff" />,
   // three nodes with edges: one on the left feeding two on the right
-  runs: (
-    <svg viewBox="0 0 24 24" {...I}>
-      <rect x="2.5" y="9.5" width="5" height="5" rx="1" />
-      <rect x="16.5" y="3.5" width="5" height="5" rx="1" />
-      <rect x="16.5" y="15.5" width="5" height="5" rx="1" />
-      <path d="M7.5 12c4.5 0 4.5-6 9-6M7.5 12c4.5 0 4.5 6 9 6" />
-    </svg>
-  ),
+  runs: <Icon name="nodes" />,
 };
 
 /** The tab row's maximise / restore control: the panel grows in place to every pixel right of the sidebar and
@@ -88,15 +56,7 @@ export function PanelMaxButton() {
       onClick={() => s.setPanelMax(!max)}
       data-testid="panel-max"
     >
-      {max ? (
-        <svg viewBox="0 0 24 24" {...I} width="14" height="14" aria-hidden="true">
-          <path d="M4 14h6v6M20 10h-6V4M14 10l6.5-6.5M10 14l-6.5 6.5" />
-        </svg>
-      ) : (
-        <svg viewBox="0 0 24 24" {...I} width="14" height="14" aria-hidden="true">
-          <path d="M14 4h6v6M10 20H4v-6M20 4l-6.5 6.5M4 20l6.5-6.5" />
-        </svg>
-      )}
+      {max ? <Icon name="shrink" /> : <Icon name="expand" />}
     </button>
   );
 }
@@ -309,9 +269,7 @@ function Loading({ error, empty }: { error: string | null; empty?: string }) {
 function Refresh({ onClick }: { onClick: () => void }) {
   return (
     <button type="button" className="pn-ref" onClick={onClick} title={t("pn.refresh")} aria-label={t("pn.refresh")}>
-      <svg viewBox="0 0 24 24" {...I} width="12" height="12">
-        <path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7" />
-      </svg>
+      <Icon name="circle-arrows" />
     </button>
   );
 }

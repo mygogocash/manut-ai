@@ -3,22 +3,29 @@
 // listed with why. It is a Settings page, not a page of the side menu: a person who never turns Workflows on sees nothing new
 // anywhere else, and the lanes a run starts show where every lane shows, in the Code page's Lanes band.
 //
+// Item 91: each card shows every step's text in full, with the project's folder and the agent, under "Steps and project". A
+// workflow runs only once the person pressed "Allow this workflow to run" there, and only while its file is still that text;
+// until then Run now cannot be pressed and the card says why. The press allows the text the card drew (its digest), never the
+// file as it may be by the time the press lands.
+//
 // `WorkflowsView` draws a given state so a test can draw each one; `WorkflowsPage` reads the workflows store and acts.
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import "./workflows.css";
-import { t, type Key } from "../i18n";
+import { t } from "../i18n";
 import { Toggle } from "../pages/kit";
 import { Row } from "../settings/DevRow";
 import { agentLabel, folderName, type AgentInfo } from "../sessions/agents";
 import { getSessions, useSessions } from "../sessions/sessions";
 import { getStore, selectAsks, useStore } from "../state/store";
-import type { WorkflowFile } from "./file";
+import type { Workflow, WorkflowFile } from "./file";
 import type { RunRec } from "./history";
 import { getWorkflowsHost } from "./host";
 import { getHost } from "../sessions/host";
+import { standingOf, type Allowances, type Standing } from "./allow";
 import { getWorkflows, useWorkflows, type LiveRun, type RunRefusal, type WorkflowsState } from "./runner";
 import { keptOk, useWorkflowSettings, type WorkflowSettings } from "./settings";
-import { fileWhyWords, nextWords, runLine, whenWords } from "./words";
+import { fileWhyWords, nextWords, refusedWords, runLine, standingWords, whenWords } from "./words";
+import { Icon } from "../ui/icons";
 
 /** How many runs each workflow shows; the rest stay kept, within the history's bounds. */
 export const HISTORY_SHOWN = 10;
@@ -33,8 +40,10 @@ export interface WorkflowsViewProps {
   live: Record<string, LiveRun>;
   /** the workflows whose run waits on an ask of the person's now */
   waiting: string[];
-  /** why Run now last did not start, by file */
+  /** why a run last did not start, by file */
   refused: Record<string, RunRefusal>;
+  /** what the person allowed, by file */
+  allowed: Allowances;
   agents: AgentInfo[] | null;
   now: number;
   onOn: (on: boolean) => void;
@@ -44,6 +53,9 @@ export interface WorkflowsViewProps {
   onRunNow: (file: string) => void;
   onOpenLane: (session: string) => void;
   onStopAfter: (file: string) => void;
+  /** "Allow this workflow to run": `digest` is the text the card drew */
+  onAllow: (file: string, digest: string) => void;
+  onDisallow: (file: string) => void;
 }
 
 /** The number "Skipped runs kept" holds, or null when it is not one the page takes. */
@@ -64,6 +76,55 @@ function liveWords(l: LiveRun, waiting: boolean): string {
   if (l.step < 0) return t("wf.live.starting");
   const at = { step: l.step + 1, steps: l.steps.length };
   return waiting ? t("wf.live.waiting", at) : t("wf.live.step", at);
+}
+
+/** "Steps and project": every step's text in full, in order, with the project's folder and the agent, and Allow (or Stop
+ *  allowing) under them, so a workflow is allowed only from where its steps are read. Open by itself while the workflow is not
+ *  allowed, as the kit's accordion opens (KitMore); the panel stays in the page while closed, only hidden. */
+function Look({ wf, standing, agents, onAllow, onDisallow }: { wf: Workflow; standing: Standing; agents: AgentInfo[] | null; onAllow: () => void; onDisallow: () => void }) {
+  const [shown, setShown] = useState<boolean | null>(null);
+  const open = shown ?? standing !== "allowed";
+  const id = useId();
+  return (
+    <div className="wf-look">
+      <button type="button" className="wf-look-h" aria-expanded={open} aria-controls={id} onClick={() => setShown(!open)} data-testid="workflow-look">
+        <span>{t("wf.look")}</span>
+        <Icon name="chevron-down" className="wf-chev" />
+      </button>
+      <div id={id} className="wf-look-p" role="region" aria-label={t("wf.look")} hidden={!open} data-testid="workflow-steps">
+        <dl className="wf-facts">
+          <dt>{t("wf.look.project")}</dt>
+          <dd className="mono" data-testid="workflow-project">
+            {wf.project}
+          </dd>
+          <dt>{t("wf.look.agent")}</dt>
+          <dd>{agentLabel(wf.agent, agents)}</dd>
+        </dl>
+        <ol className="wf-steps">
+          {wf.steps.map((s, i) => (
+            <li key={i} data-testid="workflow-step">
+              {s}
+            </li>
+          ))}
+        </ol>
+        {standing === "allowed" ? (
+          <div className="wf-allow">
+            <span className="wf-sub">{t("wf.allowed")}</span>
+            <button type="button" className="st-btn" onClick={onDisallow} data-testid="workflow-disallow">
+              {t("wf.disallow")}
+            </button>
+          </div>
+        ) : (
+          <div className="wf-allow">
+            <span className="wf-sub">{t("wf.allow.hint")}</span>
+            <button type="button" className="st-btn" onClick={onAllow} data-testid="workflow-allow">
+              {t("wf.allow")}
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 export function WorkflowsView(p: WorkflowsViewProps) {
@@ -123,10 +184,12 @@ export function WorkflowsView(p: WorkflowsViewProps) {
         const l = p.live[wf.file];
         const runs = p.runs.filter((r) => r.file === wf.file && r.state !== "running").slice(0, HISTORY_SHOWN);
         const next = p.settings.on ? nextWords(wf, p.now) : null;
-        const refused = p.refused[wf.file];
+        const standing = standingOf(wf, p.allowed);
+        // the standing line already says a run was not allowed, or that the file changed
+        const refused = p.refused[wf.file] === standing ? undefined : p.refused[wf.file];
         const steps = wf.steps.length === 1 ? t("wf.steps.one") : t("wf.steps.many", { n: wf.steps.length });
         return (
-          <section key={wf.file} className="st-grp wf-card" data-testid="workflow" data-file={wf.file}>
+          <section key={wf.file} className="st-grp wf-card" data-testid="workflow" data-file={wf.file} data-standing={standing}>
             <div className="wf-head">
               <div className="wf-k">
                 <b className="wf-name">{wf.name}</b>
@@ -138,8 +201,8 @@ export function WorkflowsView(p: WorkflowsViewProps) {
               <button
                 type="button"
                 className="st-btn"
-                disabled={!p.settings.on || !!l}
-                title={!p.settings.on ? t("wf.off") : undefined}
+                disabled={!p.settings.on || !!l || standing !== "allowed"}
+                title={!p.settings.on ? t("wf.off") : standing !== "allowed" ? standingWords(standing) : undefined}
                 aria-label={t("wf.runNowAria", { name: wf.name })}
                 onClick={() => p.onRunNow(wf.file)}
                 data-testid="workflow-run-now"
@@ -147,6 +210,12 @@ export function WorkflowsView(p: WorkflowsViewProps) {
                 {t("wf.runNow")}
               </button>
             </div>
+            {standing !== "allowed" && (
+              <div className={`wf-stand ${standing}`} role="status" data-testid="workflow-standing">
+                {standingWords(standing)}
+              </div>
+            )}
+            <Look wf={wf} standing={standing} agents={p.agents} onAllow={() => p.onAllow(wf.file, wf.digest)} onDisallow={() => p.onDisallow(wf.file)} />
             {l && (
               <div className={`wf-live${p.waiting.includes(wf.file) ? " ask" : ""}`} data-testid="workflow-live">
                 <span>{liveWords(l, p.waiting.includes(wf.file))}</span>
@@ -168,7 +237,7 @@ export function WorkflowsView(p: WorkflowsViewProps) {
             )}
             {refused && !l && (
               <div className="wf-live" role="status" data-testid="workflow-refused">
-                {t(`wf.refused.${refused}` as Key)}
+                {refusedWords(refused)}
               </div>
             )}
             <div className="wf-hist">
@@ -215,7 +284,6 @@ export function WorkflowsPage() {
   const ss = useSessions();
   const app = useStore();
   const [keptText, setKeptText] = useState(String(settings.skippedKept));
-  const [refused, setRefused] = useState<Record<string, RunRefusal>>({});
   const [now, setNow] = useState(() => Date.now());
   // the folder is read again as the page opens, so a file saved a moment ago is listed
   useEffect(() => {
@@ -237,7 +305,8 @@ export function WorkflowsPage() {
       runs={wf.runs}
       live={wf.live}
       waiting={waiting}
-      refused={refused}
+      refused={wf.refused}
+      allowed={wf.allowed}
       agents={ss.agents}
       now={now}
       onOn={(on) => getWorkflows().setOn(on)}
@@ -258,18 +327,12 @@ export function WorkflowsPage() {
           }
         })();
       }}
-      onRunNow={(file) => {
-        void getWorkflows()
-          .runNow(file)
-          .then((why) => setRefused((r) => {
-            const next = { ...r };
-            if (why) next[file] = why;
-            else delete next[file];
-            return next;
-          }));
-      }}
+      // why it did not start is kept by the store, so the card says it whichever way Run now was pressed (the palette too)
+      onRunNow={(file) => void getWorkflows().runNow(file)}
       onOpenLane={(session) => getStore().actions.openSession(session)}
       onStopAfter={(file) => getWorkflows().stopAfterStep(file)}
+      onAllow={(file, digest) => void getWorkflows().allow(file, digest)}
+      onDisallow={(file) => getWorkflows().disallow(file)}
     />
   );
 }

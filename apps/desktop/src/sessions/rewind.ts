@@ -76,8 +76,9 @@ export function wentLive(items: readonly TimelineItem[], id: string, where: Wher
   const at = items.findIndex((i) => i.kind === "user" && i.id === id);
   if (at < 0) return false;
   const live = (line: string) => {
-    const a = readCommand(line, where).action;
-    return a === "push" || a === "live";
+    const c = readCommand(line, where);
+    // a push to an address rather than a remote reads as a step that sends, and saves the change all the same
+    return c.action === "push" || c.action === "live" || (c.action === "unknown" && c.saves);
   };
   for (const it of items.slice(at + 1)) {
     if (it.kind !== "activity") continue;

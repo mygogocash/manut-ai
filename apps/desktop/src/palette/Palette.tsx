@@ -15,11 +15,13 @@ import { openNewSessionMenu } from "../sessions/newMenu";
 import { closePalette, usePaletteOpen } from "./state";
 import { useLeaving } from "../ui/leave";
 import { getWorkflows, useWorkflows } from "../workflows/runner";
+import { standingOf } from "../workflows/allow";
 import { useWorkflowSettings } from "../workflows/settings";
 import { usePlaces } from "./places";
 import { keyResult } from "./filter";
 import { buildGroups, flat, type Group } from "./groups";
 import type { PaletteCtx, Row } from "./registry";
+import { Icon } from "../ui/icons";
 
 const LIST_ID = "palette-list";
 const optionId = (i: number) => `palette-opt-${i}`;
@@ -49,6 +51,9 @@ export function PaletteView(p: PaletteViewProps) {
       {...(p.leaving ? { "data-leaving": "", inert: true, "aria-hidden": true } : {})}
     >
       <div className="pal" role="dialog" aria-modal="true" aria-label={t("pal.title")} onKeyDown={p.onKeyDown} data-testid="palette">
+        {/* The canvas's Search board: the magnifier, the field, and Esc to say how it closes. */}
+        <div className="pal-s">
+        <Icon name="search" />
         <input
           ref={p.inputRef}
           className="pal-in"
@@ -65,6 +70,10 @@ export function PaletteView(p: PaletteViewProps) {
           spellCheck={false}
           data-testid="palette-input"
         />
+        <span className="pal-kbd" aria-hidden="true">
+          Esc
+        </span>
+        </div>
         <ul className="pal-list" id={LIST_ID} role="listbox" aria-label={t("pal.title")} data-testid="palette-list">
           {p.groups.map((g) => (
             <li key={g.key} role="presentation" className="pal-g" data-testid={`palette-group-${g.key}`}>
@@ -87,6 +96,7 @@ export function PaletteView(p: PaletteViewProps) {
                       data-testid="palette-row"
                       data-row={r.id}
                     >
+                      <Icon name={r.icon ?? g.icon} />
                       <span className="pal-n">{r.label}</span>
                       {r.hint && <span className="pal-sub">{r.hint}</span>}
                     </li>
@@ -138,8 +148,9 @@ function OpenPalette({ leaving }: { leaving: boolean }) {
         if (getStore().getState().ui.view !== "code") s.openPage("code");
         openNewSessionMenu();
       },
-      // what Settings › Workflows offers Run now for: none while Workflows is off, a file that is no workflow, or a run going
-      workflows: wfOn ? wf.files.flatMap((f) => ("workflow" in f && !wf.live[f.file] ? [{ file: f.file, name: f.workflow.name }] : [])) : [],
+      // what Settings › Workflows offers Run now for: none while Workflows is off, a file that is no workflow, one the person has
+      // not allowed as it is now (item 91), or a run going
+      workflows: wfOn ? wf.files.flatMap((f) => ("workflow" in f && !wf.live[f.file] && standingOf(f.workflow, wf.allowed) === "allowed" ? [{ file: f.file, name: f.workflow.name }] : [])) : [],
       // the Run now on its page: the page opens, so the run is seen starting where its button is
       runWorkflow: (file) => {
         s.openSettings("workflows");

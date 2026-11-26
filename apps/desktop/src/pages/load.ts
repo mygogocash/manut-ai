@@ -21,3 +21,12 @@ export async function load<T>(ask: () => Promise<T>): Promise<Load<T>> {
     return unavailable(e);
   }
 }
+
+/** The refusals the app words for a person (the runtime's own sentence, in the app's language): "Not yet" in Connected
+ *  mode, a page only the shop's owner sees, being offline or signed out, a version too old. A page shows these words as
+ *  they are. Any other failure (an internal error, an unknown request, a refusal the app did not expect) is not for a
+ *  person to read: the page says it did not load and keeps the words under Details (`LoadFailed`, item 85i). */
+const WORDED = new Set(["not_yet", "owner_only", "not_permitted", "not_a_helper", "no_shop", "offline", "signed_out", "unavailable", "update_app", "practice", "feature_disabled", "not_offered", "paused"]);
+
+/** The failure says why in words meant for the person, so the page shows them. */
+export const saysWhy = (l: { code: string }): boolean => WORDED.has(l.code);

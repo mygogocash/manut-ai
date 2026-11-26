@@ -69,6 +69,9 @@ const RECORD_BYTES: u64 = 16 * 1024;
 pub(crate) const IGNORED_SHOWN: usize = 20;
 /// The most ignored files and folders read in one lane's folder; a folder with more is kept, the first ones named.
 const IGNORED_MAX: usize = 2000;
+/// The most folders under a modules folder, and checked-out submodules of a work tree, whose config one read looks at; a
+/// repository with more is read as one that names a program (`?`), and nothing runs in it by itself.
+const SUBMODULES_MAX: usize = 100;
 
 /// Making and removing lanes one at a time, so two calls never choose the same folder or remove one twice. Reads take no
 /// turn: they only look.
@@ -147,6 +150,9 @@ pub struct Kept {
     /// The files and folders git ignores in it that are not plainly rebuilt and the app did not put there (see
     /// [`Git::ignored_own`]), at most [`IGNORED_SHOWN`]: what a clean-up keeps a clean folder for.
     pub ignored: Vec<String>,
+    /// Whether it has submodules ([`Git::submodules`]): what changed inside them is not in `changed`, a clean-up leaves it, and
+    /// Remove never forces it. False when it could not be read.
+    pub submodules: bool,
 }
 
 /// What the person said yes to when a lane's folder goes. `changed`: how many changed or new files they saw counted and said
@@ -224,8 +230,9 @@ fn in_progress(git_dir: &Path) -> bool {
     IN_PROGRESS.iter().any(|f| git_dir.join(f).exists())
 }
 
-/// The environment variables that would point `git` at another repository than the folder it is run in.
-const REDIRECTS: [&str; 7] = ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY", "GIT_COMMON_DIR", "GIT_NAMESPACE", "GIT_CEILING_DIRECTORIES"];
+/// The environment variables that would point `git` at another repository than the folder it is run in, or at another one's
+/// objects (`GIT_ALTERNATE_OBJECT_DIRECTORIES`, which git_moved.rs and turn_files.rs take out too).
+const REDIRECTS: [&str; 8] = ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR", "GIT_NAMESPACE", "GIT_CEILING_DIRECTORIES"];
 
 /// The person's own `git`, run with no hook and no file-system monitor (each can run a program the repository names: a
 /// post-checkout hook that installs dependencies, a reference-transaction hook on a deleted branch), English messages, no
@@ -233,7 +240,8 @@ const REDIRECTS: [&str; 7] = ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT
 ///
 /// Work the app starts by itself (the automatic pull, the merged clean-up, a deleted chat's folder, the kept list, the lane's
 /// Diff) first reads the repository's own config ([`Git::config_risk`]) and does nothing while it names a program git would
-/// run or another address to fetch from. Work the person asked for by pressing something (a lane started, a push after a Yes,
+/// run or another address to fetch from, and it never goes into a submodule (item 90): a git started inside one reads that
+/// submodule's own config and attributes, which neither that read nor any `-c` here reaches. Work the person asked for by pressing something (a lane started, a push after a Yes,
 /// Remove) runs with the person's and the repository's settings, as the same git in a terminal would, hooks and the file
 /// monitor aside.
 pub(crate) struct Git {
@@ -276,6 +284,22 @@ fn runs_or_redirects(key: &str, value: &str) -> bool {
 /// global and system settings are theirs, and run in their terminal too. A subsection that is an address (`url.<base>`,
 /// `credential.<url>`) is shown as `*`, since it can hold a token, and the rest passes the one masker.
 pub(crate) fn risky_setting(listing: &str, scoped: bool) -> Option<String> {
+    risky_by(listing, scoped, runs_or_redirects)
+}
+
+/// The settings of a submodule's own config that make git run a program while it works inside that submodule: every one
+/// [`runs_or_redirects`] names, and a diff driver's program (`diff.external`, `diff.<driver>.command` and `.textconv`), since the
+/// `--no-ext-diff --no-textconv` on the app's own diffs do not reach a diff git runs inside a submodule (`diff.submodule=diff`).
+/// Hooks and the file monitor are not listed: the app's `-c core.hooksPath` and `-c core.fsmonitor=false` reach every git that
+/// git itself starts, a submodule's included (`git help config`, `GIT_CONFIG_PARAMETERS`).
+fn runs_in_a_submodule(key: &str, value: &str) -> bool {
+    let lower = key.to_ascii_lowercase();
+    let driver = lower.strip_prefix("diff.").is_some_and(|rest| rest.contains('.') && (rest.ends_with(".command") || rest.ends_with(".textconv")));
+    runs_or_redirects(key, value) || lower == "diff.external" || driver
+}
+
+/// [`risky_setting`], with `risky` saying which settings count.
+fn risky_by(listing: &str, scoped: bool, risky: fn(&str, &str) -> bool) -> Option<String> {
     let mut parts = listing.split('\0').filter(|p| !p.is_empty());
     loop {
         let scope = if scoped { parts.next()? } else { "local" };
@@ -284,7 +308,7 @@ pub(crate) fn risky_setting(listing: &str, scoped: bool) -> Option<String> {
             continue;
         }
         let (key, value) = kv.split_once('\n').unwrap_or((kv, ""));
-        if runs_or_redirects(key, value) {
+        if risky(key, value) {
             let lower = key.to_ascii_lowercase();
             let shown = match lower.split_once('.') {
                 Some((section @ ("url" | "credential"), rest)) if rest.contains('.') => format!("{section}.*.{}", rest.rsplit('.').next().unwrap_or("")),
@@ -293,6 +317,172 @@ pub(crate) fn risky_setting(listing: &str, scoped: bool) -> Option<String> {
             return Some(tasks::mask_secrets(&shown));
         }
     }
+}
+
+/// How [`config_risk_by`] runs git: `git <args>` in the folder being read, through the caller's own runner, Some when git ran.
+pub(crate) type Runner<'a> = dyn Fn(&[&str]) -> Option<tasks::Ran> + 'a;
+
+/// How deep a modules folder is walked: a submodule's name can hold `/`, and a submodule can have submodules of its own.
+const MODULES_DEPTH: usize = 8;
+
+/// The setting that makes work the app starts by itself run a program or fetch elsewhere, in the repository `cwd` is in or in
+/// any of its submodules, or None (item 86, item 90). Read with `--includes`, so a file a config includes counts as its own; a
+/// git too old to say each setting's scope (before 2.26) is asked for the local file alone. What cannot be read is not taken
+/// as having nothing in it: it is `?`.
+///
+/// The repository's own scopes first ([`risky_setting`]). Then every submodule's own config, since a git that reached into one
+/// would read it there, where no `-c` of the app reaches (the app's runs never go into one: this is the second guard): each git
+/// folder under the work tree's modules folder (`git rev-parse --git-path modules`, the worktree's own for a lane), nested ones
+/// too, walked without following a link, and the git folder of each submodule checked out in the work tree that is not under
+/// it (`<path>/.git`, a folder or a file that names one anywhere: `gitdir:`). A submodule's setting is named `<where>:<setting>`
+/// (`modules/sub:filter.spy.clean`). Attributes are not read: `.gitattributes`, `info/attributes` and `core.attributesFile` only
+/// name a filter or diff driver, which runs nothing unless a config defines its program, and every config git reads for the
+/// repository and its submodules is read here (the person's own global and system settings aside, theirs as in a terminal).
+pub(crate) fn config_risk_by(run: &Runner, cwd: &Path) -> Option<String> {
+    if let Some(s) = listing_risk(run, None, runs_or_redirects) {
+        return Some(s);
+    }
+    submodule_risk(run, cwd).map(|s| tasks::one_line(tasks::mask_secrets(&s), 200))
+}
+
+/// What one config listing says (see [`config_risk_by`]): the repository's own, or with `git_dir` another git folder's (a
+/// submodule's, as git itself reads it there: `includeIf` is matched against that folder).
+fn listing_risk(run: &Runner, git_dir: Option<&Path>, risky: fn(&str, &str) -> bool) -> Option<String> {
+    let dir = git_dir.map(|d| format!("--git-dir={}", d.display()));
+    let ok = |rest: &[&str]| -> Option<tasks::Ran> {
+        let mut args: Vec<&str> = dir.iter().map(String::as_str).collect();
+        args.extend_from_slice(rest);
+        run(&args).filter(|r| r.code == Some(0))
+    };
+    if let Some(r) = ok(&["config", "--list", "--show-scope", "--includes", "-z"]) {
+        return risky_by(&r.out, true, risky);
+    }
+    match ok(&["config", "--list", "--local", "--includes", "-z"]) {
+        Some(r) => risky_by(&r.out, false, risky),
+        None => Some("?".into()),
+    }
+}
+
+/// The paths of the gitlinks (submodules) in a `git ls-files -s -z` listing, or None when it may have been cut short.
+fn gitlinks(listing: &tasks::Ran) -> Option<Vec<&str>> {
+    if listing.code != Some(0) || listing.out.len() as u64 >= tasks::MAX_OUT {
+        return None;
+    }
+    Some(listing.out.split('\0').filter_map(|e| e.strip_prefix("160000 ")).filter_map(|e| e.split_once('\t').map(|(_, p)| p)).collect())
+}
+
+/// `p` as git printed it, from the folder `cwd`.
+fn from_cwd(cwd: &Path, p: &str) -> PathBuf {
+    let p = PathBuf::from(p);
+    if p.is_absolute() {
+        p
+    } else {
+        cwd.join(p)
+    }
+}
+
+/// The submodules' half of [`config_risk_by`].
+fn submodule_risk(run: &Runner, cwd: &Path) -> Option<String> {
+    let lines = |args: &[&str]| run(args).filter(|r| r.code == Some(0)).map(|r| r.out.lines().map(|l| l.trim().to_string()).collect::<Vec<_>>());
+    let Some(at) = lines(&["rev-parse", "--show-toplevel", "--git-path", "modules"]) else { return Some("modules:?".into()) };
+    let (Some(top), Some(modules)) = (at.first().filter(|l| !l.is_empty()), at.get(1).filter(|l| !l.is_empty())) else { return Some("modules:?".into()) };
+    let (top, modules) = (from_cwd(cwd, top), from_cwd(cwd, modules));
+    let mut seen = 0usize;
+    if let Some(s) = walk_modules(run, &modules, "modules", 0, &mut seen) {
+        return Some(s);
+    }
+    // a submodule checked out with its git folder somewhere else than the modules folder
+    let Some(listing) = run(&["ls-files", "-s", "-z"]) else { return Some("submodules:?".into()) };
+    let Some(links) = gitlinks(&listing) else { return Some("submodules:?".into()) };
+    let modules_real = real(&modules);
+    for path in links {
+        let shown = format!("{path}/.git");
+        if !Path::new(path).components().all(|c| matches!(c, Component::Normal(_))) {
+            return Some(format!("{shown}:?"));
+        }
+        let dot = top.join(path).join(".git");
+        let Ok(md) = fs::symlink_metadata(&dot) else { continue };
+        seen += 1;
+        if seen > SUBMODULES_MAX || md.file_type().is_symlink() {
+            return Some(format!("{shown}:?"));
+        }
+        let git_dir = if md.is_dir() {
+            dot.clone()
+        } else {
+            // `gitdir: <folder>`, relative to the folder the file is in
+            let mut text = String::new();
+            if fs::File::open(&dot).and_then(|f| f.take(4096).read_to_string(&mut text)).is_err() {
+                return Some(format!("{shown}:?"));
+            }
+            let Some(target) = text.lines().next().and_then(|l| l.strip_prefix("gitdir:")).map(str::trim).filter(|t| !t.is_empty()) else {
+                return Some(format!("{shown}:?"));
+            };
+            let target = from_cwd(&top.join(path), target);
+            // one under the modules folder was read with it
+            if real(&target).starts_with(&modules_real) {
+                continue;
+            }
+            target
+        };
+        if let Some(s) = listing_risk(run, Some(&git_dir), runs_in_a_submodule) {
+            return Some(format!("{shown}:{s}"));
+        }
+        if let Some(s) = walk_modules(run, &git_dir.join("modules"), &format!("{shown}/modules"), 1, &mut seen) {
+            return Some(s);
+        }
+    }
+    None
+}
+
+/// Reads every submodule git folder under `dir` (shown as `shown`), as [`config_risk_by`] says: a folder with a `config` file is
+/// one, and its own `modules` folder is read in turn; any other folder is part of a name with `/` in it. A link, a folder git
+/// cannot read, more than [`SUBMODULES_MAX`] folders or deeper than [`MODULES_DEPTH`] is `?`. None: nothing there names a
+/// program (or there is no such folder).
+fn walk_modules(run: &Runner, dir: &Path, shown: &str, depth: usize, seen: &mut usize) -> Option<String> {
+    let md = fs::symlink_metadata(dir).ok()?;
+    if !md.is_dir() {
+        return Some(format!("{shown}:?"));
+    }
+    let Ok(read) = fs::read_dir(dir) else { return Some(format!("{shown}:?")) };
+    let mut entries: Vec<fs::DirEntry> = read.flatten().collect();
+    entries.sort_by_key(|e| e.file_name());
+    for e in entries {
+        let name = e.file_name().to_string_lossy().into_owned();
+        let here = format!("{shown}/{name}");
+        let Ok(ft) = e.file_type() else { return Some(format!("{here}:?")) };
+        if ft.is_symlink() {
+            return Some(format!("{here}:?"));
+        }
+        if !ft.is_dir() {
+            // a stray file (`.DS_Store`): no git folder
+            continue;
+        }
+        *seen += 1;
+        if *seen > SUBMODULES_MAX {
+            return Some("modules:?".into());
+        }
+        if depth + 1 > MODULES_DEPTH {
+            return Some(format!("{here}:?"));
+        }
+        let p = e.path();
+        match fs::symlink_metadata(p.join("config")) {
+            Ok(c) if c.file_type().is_symlink() || !c.is_file() => return Some(format!("{here}:?")),
+            Ok(_) => {
+                if let Some(s) = listing_risk(run, Some(&p), runs_in_a_submodule) {
+                    return Some(format!("{here}:{s}"));
+                }
+                if let Some(s) = walk_modules(run, &p.join("modules"), &format!("{here}/modules"), depth + 1, seen) {
+                    return Some(s);
+                }
+            }
+            Err(_) => {
+                if let Some(s) = walk_modules(run, &p, &here, depth + 1, seen) {
+                    return Some(s);
+                }
+            }
+        }
+    }
+    None
 }
 
 impl Git {
@@ -306,17 +496,10 @@ impl Git {
         Ok(Git { automatic: true, ..Git::new(home)? })
     }
 
-    /// The setting of the repository `cwd` is in that makes automatic work run a program or fetch elsewhere
-    /// ([`risky_setting`]), or None. Read with `--includes`, so a file the config includes counts as its own. A git too old to
-    /// say each setting's scope (before 2.26) is asked for the local file alone.
+    /// The setting of the repository `cwd` is in, or of one of its submodules, that makes automatic work run a program or fetch
+    /// elsewhere, or None: [`config_risk_by`], through this runner.
     pub(crate) fn config_risk(&self, cwd: &Path) -> Option<String> {
-        if let Ok(r) = self.run(cwd, &["config", "--list", "--show-scope", "--includes", "-z"]) {
-            if r.code == Some(0) {
-                return risky_setting(&r.out, true);
-            }
-        }
-        let r = self.run(cwd, &["config", "--list", "--local", "--includes", "-z"]).ok()?;
-        (r.code == Some(0)).then(|| risky_setting(&r.out, false)).flatten()
+        config_risk_by(&|args: &[&str]| self.run(cwd, args).ok(), cwd)
     }
 
     /// `git -C <cwd> <args>`, at most `limit`.
@@ -329,6 +512,11 @@ impl Git {
         let mut argv: Vec<String> = vec!["-C".into(), cwd.to_string_lossy().into_owned(), "-c".into(), self.hooks.clone(), "-c".into(), "core.fsmonitor=false".into()];
         if self.automatic {
             argv.extend(["-c".into(), "protocol.ext.allow=never".into()]);
+            // Never into a submodule (item 90): a git started inside one reads that submodule's own config and attributes,
+            // which no `-c` here reaches, so its clean filter would run. Each command that can descend says so itself
+            // (`--ignore-submodules=all` on status and diff, `--no-recurse-submodules` on the fetch); these two are the
+            // defaults for anything that does not, by `git help config`.
+            argv.extend(["-c".into(), "submodule.recurse=false".into(), "-c".into(), "diff.ignoreSubmodules=all".into()]);
         }
         argv.extend(args.iter().map(|a| (*a).to_string()));
         let mut env: Vec<(&str, &str)> = vec![("GIT_TERMINAL_PROMPT", "0"), ("LC_ALL", "C"), ("GIT_OPTIONAL_LOCKS", "0")];
@@ -373,9 +561,11 @@ impl Git {
         Some(ran.out.lines().filter_map(|l| l.strip_prefix("worktree ")).map(|p| real(Path::new(p))).collect())
     }
 
-    /// How many files in worktree `wt` are changed or new (not ignored), or None when git could not say.
+    /// How many files in worktree `wt` are changed or new (not ignored), or None when git could not say. A submodule is not
+    /// counted, changed or not (item 90): to say whether one changed git runs `status` inside it, which reads the submodule's
+    /// own config and attributes and so runs any clean filter they name.
     pub(crate) fn changed(&self, wt: &Path) -> Option<u32> {
-        let ran = self.run(wt, &["status", "--porcelain=v1", "--untracked-files=all", "--ignore-submodules=none"]).ok()?;
+        let ran = self.run(wt, &["status", "--porcelain=v1", "--untracked-files=all", "--ignore-submodules=all"]).ok()?;
         (ran.code == Some(0)).then(|| ran.out.lines().filter(|l| !l.trim().is_empty()).count() as u32)
     }
 
@@ -454,6 +644,20 @@ impl Git {
         }
         let r = format!("refs/heads/{branch}");
         self.line(at, &["rev-list", "--count", &r, "--not", "--remotes"]).and_then(|l| l.parse().ok())
+    }
+
+    /// Whether the work tree `wt` has submodules (item 90): a gitlink in its index, checked out or not (an empty submodule
+    /// folder can hold files git lists nowhere, and `git worktree remove` takes them), or a modules folder of its own (a submodule
+    /// checked out there once, whose commits may be nowhere else). None when git could not say. Nothing inside a submodule is
+    /// read by itself (see [`Git::changed`]), so what one holds is not known: whatever could take it or move past it (a clean-up,
+    /// a force, the automatic pull) does not happen without the person.
+    pub(crate) fn submodules(&self, wt: &Path) -> Option<bool> {
+        let modules = self.line(wt, &["rev-parse", "--git-path", "modules"]).filter(|l| !l.is_empty())?;
+        if fs::symlink_metadata(from_cwd(wt, &modules)).is_ok() {
+            return Some(true);
+        }
+        let listing = self.run(wt, &["ls-files", "-s", "-z"]).ok()?;
+        gitlinks(&listing).map(|l| !l.is_empty())
     }
 
     /// Whether the worktree at `wt` is partway through a rebase, merge, cherry-pick, revert or bisect, or holds an index lock.
@@ -908,7 +1112,9 @@ pub fn list(home: &Path, cwd: &Path) -> Result<Vec<Kept>, String> {
         .map(|(i, r)| {
             let wt = PathBuf::from(&r.worktree);
             let exists = fs::symlink_metadata(&wt).map(|m| m.is_dir()).unwrap_or(false);
-            let read = exists && i < STATUS_MAX && !risky;
+            // and each lane's folder is read only when its own config does not either: a lane has a worktree config and a
+            // modules folder of its own (a submodule checked out in it), which the repository's read does not see
+            let read = exists && i < STATUS_MAX && !risky && git.config_risk(&wt).is_none();
             let dir = if r.prefix.is_empty() { wt.clone() } else { wt.join(&r.prefix) };
             Kept {
                 dir: dir.to_string_lossy().into_owned(),
@@ -916,6 +1122,8 @@ pub fn list(home: &Path, cwd: &Path) -> Result<Vec<Kept>, String> {
                 ahead: if read { git.ahead(&wt, &r) } else { None },
                 unpushed: if read { git.unpushed(&wt, &r.branch) } else { None },
                 ignored: if read { git.ignored_own(&wt, &r.prefix).map(|mut v| { v.truncate(IGNORED_SHOWN); v }).unwrap_or_default() } else { Vec::new() },
+                // read even where the config names a program: only the index and the modules folder are looked at
+                submodules: exists && i < STATUS_MAX && git.submodules(&wt) == Some(true),
                 exists,
                 worktree: r.worktree,
                 branch: r.branch,
@@ -960,9 +1168,11 @@ pub fn remove(home: &Path, worktree: &str, ask: &RemoveAsk) -> Result<Removed, S
         return Ok(Removed { changed: Some(changed), ahead, ..Removed::default() });
     }
 
-    // git's own note of the worktree goes with it; for a folder already gone, only the note
+    // git's own note of the worktree goes with it; for a folder already gone, only the note. A folder with submodules is never
+    // forced (item 90): their work is not in `changed`, and a force takes it, the commits in its own modules folder too, so
+    // git's own refusal of such a folder stands and says why
     let mut args = vec!["worktree", "remove"];
-    if changed > 0 {
+    if changed > 0 && exists && git.submodules(&wt) == Some(false) {
         args.push("--force");
     }
     args.push(worktree);
@@ -1011,7 +1221,8 @@ pub(crate) fn own_lane(home: &Path, worktree: &str) -> Result<(PathBuf, PathBuf,
 /// What a clean-up did with one lane's folder: `removed`, or why it was kept. `kept` is a short code the page words:
 /// `changes` (a changed or new file), `unpushed` (commits on its branch that are on no remote), `ignored` (files git ignores
 /// that are not rebuilt and the app did not put there, named in `ignored`), `config` (the repository's own config names a
-/// program git would run, [`Git::config_risk`]), `busy` (git is partway through
+/// program git would run, [`Git::config_risk`]), `submodules` (it has submodules, whose work is not read: [`Git::submodules`]),
+/// `busy` (git is partway through
 /// something there), `unread` (git could not say what is there), `changed` (it changed while this ran), `held` (a session still
 /// works in it). `changed` and `unpushed` give the numbers.
 #[derive(Debug, Serialize, PartialEq, Default)]
@@ -1047,6 +1258,12 @@ pub fn release(home: &Path, worktree: &str, pushed: bool) -> Result<Released, St
         // `status` and `git worktree remove` would run)
         if git.config_risk(&wt).is_some() {
             return keep("config", None, None);
+        }
+        // what a submodule holds is not read by itself, so a folder with any is not the clean-up's to remove (item 90)
+        match git.submodules(&wt) {
+            Some(false) => {}
+            Some(true) => return keep("submodules", None, None),
+            None => return keep("unread", None, None),
         }
         let changed = git.changed(&wt);
         match changed {
@@ -1542,6 +1759,80 @@ pub(crate) mod tests {
         marker
     }
 
+    /// A repository `subsrc` in `home` with one commit, added to `d` as its submodule `sub` (checked out in `d`, its git folder
+    /// under `d`'s modules folder) and committed, so every lane made from `d` afterwards has it too, not checked out.
+    pub(crate) fn with_submodule(home: &Path, d: &Path) {
+        let src = home.join("subsrc");
+        fs::create_dir_all(&src).unwrap();
+        sh(&src, &["init", "-q"]);
+        sh(&src, &["symbolic-ref", "HEAD", "refs/heads/main"]);
+        commit_in(&src, "s.txt", "inside\n");
+        sh(d, &["-c", "protocol.file.allow=always", "submodule", "add", "-q", src.to_str().unwrap(), "sub"]);
+        sh(d, &["commit", "-q", "-m", "sub"]);
+    }
+
+    /// `wt`'s submodule `sub` checked out (when it is not yet), its OWN config naming a clean filter for every file, as in a
+    /// folder someone sent, and its file touched so git has to read it through the filter to compare it. Nothing in the
+    /// repository's own config names a program. The filter is a stand-in that notes it ran in `home/ran`.
+    pub(crate) fn filter_in_submodule(home: &Path, wt: &Path) -> PathBuf {
+        let sub = wt.join("sub");
+        if fs::symlink_metadata(sub.join(".git")).is_err() {
+            sh(wt, &["-c", "protocol.file.allow=always", "submodule", "update", "--init", "-q"]);
+        }
+        let (script, marker) = spy(home, "subfilter", false);
+        sh(&sub, &["config", "filter.spy.clean", &script]);
+        let attrs = sh(&sub, &["rev-parse", "--git-path", "info/attributes"]);
+        let attrs = if Path::new(&attrs).is_absolute() { PathBuf::from(attrs) } else { sub.join(attrs) };
+        fs::create_dir_all(attrs.parent().unwrap()).unwrap();
+        fs::write(&attrs, "* filter=spy\n").unwrap();
+        let s = sub.join("s.txt");
+        let text = fs::read(&s).unwrap();
+        std::thread::sleep(Duration::from_millis(1100));
+        fs::write(&s, text).unwrap();
+        marker
+    }
+
+    #[test]
+    fn no_automatic_read_or_clean_up_runs_a_program_a_submodule_s_own_config_names() {
+        let Some((home, d)) = repo("sub-auto") else { return };
+        with_origin(&home, &d);
+        with_submodule(&home, &d);
+        sh(&d, &["push", "-q", "origin", "main"]);
+        let made = pushed_lane(&home, &d, "sub");
+        let wt = Path::new(&made.worktree);
+        let marker = filter_in_submodule(&home, wt);
+        let ran = || fs::read_to_string(&marker).unwrap_or_default();
+        // git's own count of the folder, the kept list's counts and a deleted chat's clean-up, each the app's own doing
+        let _ = Git::automatic(&home).unwrap().changed(wt);
+        assert!(!marker.exists(), "a program ran for the count: {}", ran());
+        let _ = list(&home, &d).unwrap();
+        assert!(!marker.exists(), "a program ran for the kept list: {}", ran());
+        let r = release(&home, &made.worktree, true).unwrap();
+        assert!(!marker.exists(), "a program ran for the clean-up: {}", ran());
+        assert!(!r.removed, "{r:?}");
+        assert!(wt.join("sub/s.txt").exists() && wt.join("sub.txt").exists());
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn the_main_moved_note_runs_no_program_a_submodule_s_own_config_names() {
+        let Some((home, d)) = repo("sub-moved") else { return };
+        with_submodule(&home, &d);
+        let a = make(&home, &d, &names(&["kit/a"])).unwrap();
+        let marker = filter_in_submodule(&home, Path::new(&a.worktree));
+        commit_in(&d, "a.txt", "one\nmain\n");
+        fs::write(Path::new(&a.dir).join("a.txt"), "one\nlane\n").unwrap();
+        let m = crate::git_moved::main_moved(Path::new(&a.dir), Some("main"), &names(&["a.txt"])).unwrap();
+        assert!(!marker.exists(), "a program ran: {}", fs::read_to_string(&marker).unwrap_or_default());
+        // the submodule's own config names a program, so there is no note; without it there is one, and the submodule is not in it
+        assert_eq!(m, None);
+        sh(&Path::new(&a.worktree).join("sub"), &["config", "--unset", "filter.spy.clean"]);
+        fs::write(Path::new(&a.worktree).join("sub/s.txt"), "changed in the submodule\n").unwrap();
+        let m = crate::git_moved::main_moved(Path::new(&a.dir), Some("main"), &names(&["a.txt"])).unwrap().unwrap();
+        assert_eq!((m.ours.clone(), m.theirs.clone()), (vec!["a.txt".to_string()], vec!["a.txt".to_string()]));
+        let _ = fs::remove_dir_all(home);
+    }
+
     #[test]
     fn reads_which_of_the_repository_s_own_settings_run_a_program_or_send_a_fetch_elsewhere() {
         let entry = |scope: &str, kv: &str| format!("{scope}\0{kv}\0");
@@ -1583,6 +1874,208 @@ pub(crate) mod tests {
         fs::write(d.join(".git/more.cfg"), "[credential]\n\thelper = store\n").unwrap();
         sh(&d, &["config", "include.path", "more.cfg"]);
         assert_eq!(git.config_risk(&d).as_deref(), Some("credential.helper"));
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn a_clean_up_never_removes_a_folder_with_submodules_whose_work_it_does_not_count() {
+        let Some((home, d)) = repo("sub-release") else { return };
+        with_origin(&home, &d);
+        with_submodule(&home, &d);
+        sh(&d, &["push", "-q", "origin", "main"]);
+        // a submodule never checked out, its empty folder holding a file of someone's: git lists nothing for it
+        let a = pushed_lane(&home, &d, "a");
+        let wt = Path::new(&a.worktree);
+        fs::write(wt.join("sub/notes.txt"), "mine\n").unwrap();
+        assert_eq!(Git::automatic(&home).unwrap().changed(wt), Some(0));
+        let r = release(&home, &a.worktree, true).unwrap();
+        assert_eq!((r.removed, r.kept.as_deref()), (false, Some("submodules")), "{r:?}");
+        assert_eq!(fs::read_to_string(wt.join("sub/notes.txt")).unwrap(), "mine\n");
+        // a submodule checked out, with work in it that is not counted
+        let b = pushed_lane(&home, &d, "b");
+        let wt = Path::new(&b.worktree);
+        sh(wt, &["-c", "protocol.file.allow=always", "submodule", "update", "--init", "-q"]);
+        fs::write(wt.join("sub/s.txt"), "uncommitted in the submodule\n").unwrap();
+        commit_in(&wt.join("sub"), "only-here.txt", "a commit on no remote\n");
+        let r = release(&home, &b.worktree, true).unwrap();
+        assert_eq!((r.removed, r.kept.as_deref()), (false, Some("submodules")), "{r:?}");
+        // the merged clean-up's path, which asks for no remote, keeps them the same way
+        assert_eq!(release(&home, &b.worktree, false).unwrap().kept.as_deref(), Some("submodules"));
+        assert_eq!(fs::read_to_string(wt.join("sub/s.txt")).unwrap(), "uncommitted in the submodule\n");
+        assert!(wt.join("sub/only-here.txt").exists());
+        // the kept list says so for both, and for a lane with none it does not
+        let got = list(&home, &d).unwrap();
+        assert!(got.iter().all(|k| k.submodules), "{got:?}");
+        let _ = fs::remove_dir_all(home);
+
+        let Some((home, d)) = repo("sub-release-none") else { return };
+        let plain = make(&home, &d, &names(&["kit/p"])).unwrap();
+        assert!(!list(&home, &d).unwrap()[0].submodules);
+        assert_eq!(Git::automatic(&home).unwrap().submodules(Path::new(&plain.worktree)), Some(false));
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn remove_never_forces_a_folder_with_submodules_so_git_s_own_refusal_keeps_their_work() {
+        let Some((home, d)) = repo("sub-remove") else { return };
+        with_submodule(&home, &d);
+        let a = make(&home, &d, &names(&["kit/a"])).unwrap();
+        let wt = Path::new(&a.worktree);
+        sh(wt, &["-c", "protocol.file.allow=always", "submodule", "update", "--init", "-q"]);
+        // clean: git's own rule refuses a worktree with a submodule checked out, without a force flag
+        let err = remove(&home, &a.worktree, &RemoveAsk::default()).unwrap_err();
+        assert!(err.contains("submodules"), "{err}");
+        assert!(wt.join("sub/s.txt").exists());
+        // one changed file of the lane's own, counted, and uncounted work in the submodule: whatever the yes was to, the folder
+        // stays, since a force would take the submodule's work with it
+        fs::write(wt.join("a.txt"), "changed\n").unwrap();
+        fs::write(wt.join("sub/s.txt"), "uncommitted in the submodule\n").unwrap();
+        for changed in [1, 2] {
+            let got = remove(&home, &a.worktree, &RemoveAsk { changed, ..RemoveAsk::default() });
+            assert!(!got.as_ref().is_ok_and(|r| r.removed), "{changed}: {got:?}");
+            assert_eq!(fs::read_to_string(wt.join("sub/s.txt")).unwrap(), "uncommitted in the submodule\n", "{changed}");
+        }
+        assert_eq!(fs::read_to_string(wt.join("a.txt")).unwrap(), "changed\n");
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn reads_every_submodule_s_own_config_too_and_stops_at_what_it_cannot_read() {
+        let Some((home, d)) = repo("sub-config") else { return };
+        let git = Git::automatic(&home).unwrap();
+        let modules = d.join(".git/modules");
+        // a submodule's git folder as git makes one: `git init --bare` writes a config of the folder's own (local) scope
+        let module = |at: &Path| {
+            fs::create_dir_all(at).unwrap();
+            sh(&home, &["init", "-q", "--bare", at.to_str().unwrap()]);
+        };
+        let set = |dir: &Path, k: &str, v: &str| {
+            sh(&home, &["--git-dir", dir.to_str().unwrap(), "config", k, v]);
+        };
+        let clear = || {
+            let _ = fs::remove_dir_all(&modules);
+        };
+        assert_eq!(git.config_risk(&d), None);
+
+        // (what is planted, what config_risk names): every member of the class, each alone
+        type Plant<'a> = Box<dyn Fn() + 'a>;
+        let mut cases: Vec<(&str, Plant<'_>, &str)> = vec![
+            ("a clean filter in a submodule's own config", Box::new(|| { let m = modules.join("sub"); module(&m); set(&m, "filter.spy.clean", "x"); }), "modules/sub:filter.spy.clean"),
+            ("a nested submodule's ssh command", Box::new(|| { let m = modules.join("sub"); module(&m); let n = m.join("modules/inner"); module(&n); set(&n, "core.sshCommand", "x"); }), "modules/sub/modules/inner:core.sshcommand"),
+            ("a submodule whose name has a slash", Box::new(|| { let m = modules.join("libs/a"); module(&m); set(&m, "remote.origin.uploadpack", "x"); }), "modules/libs/a:remote.origin.uploadpack"),
+            ("a file a submodule's config includes", Box::new(|| { let m = modules.join("sub"); module(&m); fs::write(m.join("more.cfg"), "[credential]\n\thelper = x\n").unwrap(); set(&m, "include.path", "more.cfg"); }), "modules/sub:credential.helper"),
+            ("a file included only where the submodule is the repository", Box::new(|| { let m = modules.join("sub"); module(&m); fs::write(m.join("more.cfg"), "[filter \"x\"]\n\tsmudge = x\n").unwrap(); set(&m, "includeIf.gitdir:**/modules/sub.path", "more.cfg"); }), "modules/sub:filter.x.smudge"),
+            ("a diff driver's program in a submodule", Box::new(|| { let m = modules.join("sub"); module(&m); set(&m, "diff.x.textconv", "x"); }), "modules/sub:diff.x.textconv"),
+            ("an external diff in a submodule", Box::new(|| { let m = modules.join("sub"); module(&m); set(&m, "diff.external", "x"); }), "modules/sub:diff.external"),
+            ("a fetch sent elsewhere from a submodule", Box::new(|| { let m = modules.join("sub"); module(&m); set(&m, "url.https://x.example/.insteadOf", "https://github.com/"); }), "modules/sub:url.*.insteadof"),
+            ("a submodule folder git cannot read", Box::new(|| { let m = modules.join("sub"); module(&m); fs::write(m.join("config"), "[core\nnot a config\n").unwrap(); }), "modules/sub:?"),
+            ("more folders than are read", Box::new(|| { for i in 0..(SUBMODULES_MAX + 1) { fs::create_dir_all(modules.join(format!("n{i}"))).unwrap(); } }), "modules:?"),
+            ("folders nested deeper than are read", Box::new(|| { fs::create_dir_all(modules.join("a/b/c/d/e/f/g/h/i/j")).unwrap(); }), "modules/a/b/c/d/e/f/g/h/i:?"),
+        ];
+        #[cfg(unix)]
+        cases.push(("a link in the modules folder", Box::new(|| { fs::create_dir_all(&modules).unwrap(); let away = home.join("away.git"); module(&away); std::os::unix::fs::symlink(&away, modules.join("sub")).unwrap(); }), "modules/sub:?"));
+        for (what, plant, named) in &cases {
+            plant();
+            assert_eq!(git.config_risk(&d).as_deref(), Some(*named), "{what}");
+            clear();
+        }
+        // what is not a program in a submodule's config, and a submodule folder with none, is nothing to stop for
+        let m = modules.join("sub");
+        module(&m);
+        for (k, v) in [("core.hooksPath", "x"), ("core.fsmonitor", "x"), ("user.name", "Ana"), ("remote.origin.url", "https://github.com/o/r.git")] {
+            set(&m, k, v);
+        }
+        fs::write(modules.join(".DS_Store"), "x").unwrap();
+        assert_eq!(git.config_risk(&d), None);
+        clear();
+        // the repository's own diff drivers are switched off on every diff the app runs, so they stop nothing
+        sh(&d, &["config", "diff.x.textconv", "x"]);
+        assert_eq!(git.config_risk(&d), None);
+        sh(&d, &["config", "--unset", "diff.x.textconv"]);
+
+        // a submodule checked out with its own git folder in the work tree, not under the modules folder
+        let v = d.join("vendor/x");
+        fs::create_dir_all(&v).unwrap();
+        sh(&v, &["init", "-q"]);
+        commit_in(&v, "v.txt", "v\n");
+        sh(&d, &["add", "vendor/x"]);
+        assert_eq!(git.config_risk(&d), None);
+        sh(&v, &["config", "filter.y.smudge", "x"]);
+        assert_eq!(git.config_risk(&d).as_deref(), Some("vendor/x/.git:filter.y.smudge"));
+        // one whose `.git` is a file that points at a git folder anywhere else
+        let elsewhere = home.join("elsewhere.git");
+        fs::rename(v.join(".git"), &elsewhere).unwrap();
+        sh(&home, &["--git-dir", elsewhere.to_str().unwrap(), "config", "--unset", "filter.y.smudge"]);
+        sh(&home, &["--git-dir", elsewhere.to_str().unwrap(), "config", "core.worktree", v.to_str().unwrap()]);
+        fs::write(v.join(".git"), format!("gitdir: {}\n", elsewhere.display())).unwrap();
+        assert_eq!(git.config_risk(&d), None);
+        sh(&home, &["--git-dir", elsewhere.to_str().unwrap(), "config", "core.askPass", "x"]);
+        assert_eq!(git.config_risk(&d).as_deref(), Some("vendor/x/.git:core.askpass"));
+        let _ = fs::remove_dir_all(&home.join("elsewhere.git"));
+        let _ = fs::remove_file(v.join(".git"));
+
+        // the developer's folder whose own `.git` is such a file: git reads the folder it points at, and so does this
+        let folder = home.join("code").join("pointed");
+        fs::create_dir_all(&folder).unwrap();
+        let real_git = home.join("pointed.git");
+        fs::rename(d.join(".git"), &real_git).unwrap();
+        sh(&home, &["--git-dir", real_git.to_str().unwrap(), "config", "core.worktree", folder.to_str().unwrap()]);
+        fs::write(folder.join(".git"), format!("gitdir: {}\n", real_git.display())).unwrap();
+        sh(&home, &["--git-dir", real_git.to_str().unwrap(), "config", "filter.spy.process", "x"]);
+        assert_eq!(git.config_risk(&folder).as_deref(), Some("filter.spy.process"));
+        // and a config git cannot read at all is not one with nothing in it
+        fs::write(real_git.join("config"), "[core\nnot a config\n").unwrap();
+        assert_eq!(git.config_risk(&folder).as_deref(), Some("?"));
+        drop(cases);
+        let _ = fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn other_ways_a_folder_points_git_elsewhere_are_read_as_git_reads_them() {
+        let Some((home, d)) = repo("elsewhere") else { return };
+        let git = Git::automatic(&home).unwrap();
+        // a bare repository committed inside the project, its own config naming a program: from a folder inside it git uses
+        // that repository (unless the person's own `safe.bareRepository` says not to), and this reads the same config, or `?`
+        let bare = d.join("vendor/evil.git");
+        fs::create_dir_all(&bare).unwrap();
+        sh(&home, &["init", "-q", "--bare", bare.to_str().unwrap()]);
+        sh(&home, &["--git-dir", bare.to_str().unwrap(), "config", "core.sshCommand", "x"]);
+        assert!(git.config_risk(&bare).is_some());
+        assert!(git.config_risk(&bare.join("refs")).is_some());
+        // the automatic pull from there does nothing: it has no work tree of its own
+        assert_ne!(crate::git_pull::pull(&home, &bare).why, "pulled");
+        // from the project's own folder it is a folder of files like any other
+        assert_eq!(git.config_risk(&d), None);
+        // what the app was started with cannot send git to another repository's files or objects
+        for k in ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR", "GIT_NAMESPACE"] {
+            assert!(REDIRECTS.contains(&k), "{k}");
+        }
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn a_real_submodule_whose_own_config_names_a_filter_stops_every_automatic_path_by_name() {
+        let Some((home, d)) = repo("sub-config-real") else { return };
+        with_origin(&home, &d);
+        with_submodule(&home, &d);
+        sh(&d, &["push", "-q", "origin", "main"]);
+        let git = Git::automatic(&home).unwrap();
+        assert_eq!(git.config_risk(&d), None);
+        // checked out in the developer's folder: its git folder is under the repository's modules folder
+        let marker = filter_in_submodule(&home, &d);
+        assert_eq!(git.config_risk(&d).as_deref(), Some("modules/sub:filter.spy.clean"));
+        sh(&d.join("sub"), &["config", "--unset", "filter.spy.clean"]);
+        // checked out in a lane: under the lane's own modules folder, which the lane's reads and clean-up look at
+        let made = pushed_lane(&home, &d, "s");
+        let wt = Path::new(&made.worktree);
+        filter_in_submodule(&home, wt);
+        assert_eq!(git.config_risk(wt).as_deref(), Some("modules/sub:filter.spy.clean"));
+        assert_eq!(git.config_risk(&d), None);
+        let r = release(&home, &made.worktree, true).unwrap();
+        assert_eq!((r.removed, r.kept.as_deref()), (false, Some("config")), "{r:?}");
+        let kept = list(&home, &d).unwrap().into_iter().find(|k| k.worktree == made.worktree).unwrap();
+        assert_eq!((kept.exists, kept.changed, kept.unpushed), (true, None, None));
+        assert!(!marker.exists(), "a program ran: {}", fs::read_to_string(&marker).unwrap_or_default());
         let _ = fs::remove_dir_all(home);
     }
 

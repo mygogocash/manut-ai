@@ -272,8 +272,9 @@
   color: var(--aui-muted);
 }
 .st-nav-i svg {
-  width: 14px;
-  height: 14px;
+  /* The brand set's size (src/ui/icons.tsx). */
+  width: 16px;
+  height: 16px;
 }
 .st-dot.working {
   background: var(--g-accent);
@@ -335,11 +336,13 @@
 .be-av-wrap {
   flex: none;
 }
+/* The picture button is the face's own tile, a rounded square with the mark's corner (22.5%, face.css), not a circle
+   (item 85i: the faces of item 85e are square). */
 .be-av {
   position: relative;
   width: 64px;
   height: 64px;
-  border-radius: 50%;
+  border-radius: 22.5%;
   padding: 0;
   outline-offset: 3px;
 }
@@ -349,7 +352,7 @@
 .be-av-cover {
   position: absolute;
   inset: 0;
-  border-radius: 50%;
+  border-radius: 22.5%;
   display: grid;
   place-items: center;
   color: #fff;
@@ -413,8 +416,8 @@
   flex: none;
 }
 .be-pen svg {
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
 }
 .be-link:hover:not(:disabled) {
   background: var(--raise2);
@@ -842,46 +845,6 @@
   background: var(--g-accent);
   font-size: 13px;
 }
-.st-row.ap-row-col {
-  flex-direction: column;
-  align-items: stretch;
-  gap: 10px;
-}
-.ap-sw {
-  display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
-  gap: 6px;
-}
-.ap-swb {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 4px 6px;
-  border-radius: var(--r);
-  border: 1px solid var(--line);
-  font-size: 12px;
-  color: var(--aui-muted);
-}
-.ap-swb:hover {
-  background: var(--hover);
-  color: var(--ink);
-}
-.ap-swb.on {
-  border-color: var(--line-strong);
-  background: var(--raise2);
-  color: var(--ink);
-}
-.ap-swc {
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
-  background: linear-gradient(120deg, var(--a1), var(--a2) 55%, var(--a3));
-}
-.ap-swb.on .ap-swc {
-  box-shadow: 0 0 0 2px var(--bg), 0 0 0 3px var(--muted);
-}
-
 /* "Soon" tag for features that are not in this version yet, and keyboard keys */
 .st-soon {
   padding: 1px 6px;

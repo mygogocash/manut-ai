@@ -26,6 +26,26 @@ describe("a computer use card", () => {
     expect(computerWords({ act: "menu", app: "TextEdit", menu: ["File", "Save…"] })).toEqual({ title: "Choose File › Save… in TextEdit?", lines: "App: TextEdit\nMenu: File › Save…" });
   });
 
+  it("says typing replaces everything a field holds, and how much, whenever it holds anything", () => {
+    setLang("en");
+    expect(computerWords({ act: "replace", app: "TextEdit", window: "Letter.rtf", control: "text area", replaces: 1204, text: "Thanks!" })).toEqual({
+      title: "Replace everything in text area (1204 characters) in TextEdit?",
+      lines:
+        "App: TextEdit\nWindow: Letter.rtf\nControl: text area\nThe control's name is the one TextEdit gives it (a web page names its own controls), so check it is the one you mean.\nReplace with: Thanks!",
+    });
+    expect(computerWords({ act: "replace", app: "Safari", control: "text field “Name”", replaces: 1, text: "Mint" }).title).toBe(
+      "Replace everything in text field “Name” (1 character) in Safari?",
+    );
+    for (const l of LANGS) {
+      setLang(l);
+      const w = computerWords({ act: "replace", app: "TextEdit", control: "text area", replaces: 1204, text: "Thanks!" });
+      expect(w.title, l).toContain("1204");
+      expect(w.title, l).toContain("text area");
+      expect(w.title, l).not.toBe(computerWords({ act: "set", app: "TextEdit", control: "text area", text: "Thanks!" }).title);
+      expect(w.lines, l).toContain("Thanks!");
+    }
+  });
+
   it("reads in every language with the app's own names kept", () => {
     for (const l of LANGS) {
       setLang(l);

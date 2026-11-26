@@ -148,7 +148,7 @@
   color: var(--needs, #e9a23b);
 }
 .th-sub-none {
-  color: var(--quiet);
+  color: var(--muted);
 }
 /* "open": a › on the second line's right while hovered or focused */
 .th-go {
@@ -212,7 +212,7 @@
 .th-more .th-open {
   display: flex;
   padding: 2px 8px;
-  color: var(--quiet);
+  color: var(--muted);
   font-size: 11px;
 }
 .th-more .th-open:hover {
@@ -326,7 +326,7 @@
   color: var(--muted);
 }
 .th-head-sep {
-  color: var(--quiet);
+  color: var(--muted);
 }
 .th-head-title {
   min-width: 0;
@@ -337,7 +337,7 @@
 .th-empty {
   padding: 0 24px 12px;
   font-size: 12px;
-  color: var(--quiet);
+  color: var(--muted);
   text-align: center;
 }
 /* a new thread's one empty line, in the timeline where "Say hi to <bot>" stands in a main chat (it used to sit above

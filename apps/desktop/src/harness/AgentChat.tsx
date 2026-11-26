@@ -103,7 +103,7 @@ export function AgentChat({
           </span>
           {trail.map((c, i) => (
             <span key={i} className="ac-crumb-w">
-              <ChevronRight size={9} />
+              <ChevronRight />
               {i < trail.length - 1 ? (
                 <button type="button" className="ac-crumb" onClick={() => setTrail(trail.slice(0, i + 1))} data-testid="agent-chat-crumb">
                   {c.label}

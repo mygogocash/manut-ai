@@ -188,7 +188,7 @@ describe("Start", () => {
     await settle();
     expect(run()).toMatchObject({ phase: "failed", why: "changed" });
     expect(host.ops()).toEqual(["read", "start", "read", "start", "read"]);
-    expect(previewRecord(KEY).plan).toEqual({ argv: ["pnpm", "run", "start"], label: "pnpm run start" });
+    expect(previewRecord(KEY).plan).toEqual({ argv: ["pnpm", "run", "start"], label: "pnpm run start", script: { name: "start", text: "vite" } });
   });
 
   it("stops saying it is starting after the host's wait with no address, and an address later still counts", async () => {

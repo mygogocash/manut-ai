@@ -16,7 +16,7 @@ export function PanelResizer({ open, tab, max = false }: { open: boolean; tab: s
   const [winW, setWinW] = useState(() => window.innerWidth);
   const start = useRef<{ x: number; w: number; kind: PanelKind } | null>(null);
   const kind = panelKind(tab);
-  const sideW = () => el("sidebar")?.getBoundingClientRect().width ?? 248;
+  const sideW = () => el("sidebar")?.getBoundingClientRect().width ?? 196;
   const fit = (w: number) => clampPanel(w, window.innerWidth, sideW());
   const saved = widths[kind];
   // maximised: everything right of the sidebar, and no handle; restoring goes back to the tab's own width

@@ -86,8 +86,9 @@ export function statusLine(s: ComputerStatus): Key {
   return "computer.needBoth";
 }
 
-/** What a computer use card can be about: a first look at an app, or one of the four actions. */
-const ACTS: readonly ComputerAsk["act"][] = ["look", "click", "set", "key", "menu"];
+/** What a computer use card can be about: a first look at an app, or one of the four actions (typing is `set` into an
+ *  empty field, or `replace` for a field that holds anything). */
+const ACTS: readonly ComputerAsk["act"][] = ["look", "click", "set", "replace", "key", "menu"];
 
 /** Invisible format characters (Unicode's general category Cf: bidi overrides and isolates, zero-width spaces). The
  *  shell takes them out of what an app says and refuses text to type that holds any (room.rs `clean`); the page takes
@@ -108,6 +109,9 @@ export function computerAsk(v: unknown): ComputerAsk | null {
   const menu = Array.isArray(c.menu) && c.menu.every((m) => typeof m === "string") ? (c.menu as string[]).map(clean) : undefined;
   if (c.menu !== undefined && !menu) return null;
   for (const k of ["window", "control", "text", "keys"]) if (c[k] !== undefined && text(c[k]) === undefined) return null;
+  // typing that replaces what a field holds is drawn only with how much it holds, and that count rides on nothing else
+  const replaces = typeof c.replaces === "number" && Number.isInteger(c.replaces) && c.replaces >= 1 ? c.replaces : undefined;
+  if ((c.act === "replace") !== (replaces !== undefined) || (c.act !== "replace" && c.replaces !== undefined)) return null;
   // a picture that is not a small base64 PNG is left out: the card is whole without it
   const picture = typeof c.picture === "string" && c.picture.length <= PICTURE_CHARS && BASE64.test(c.picture) ? c.picture : undefined;
   return {
@@ -118,6 +122,7 @@ export function computerAsk(v: unknown): ComputerAsk | null {
     ...(text(c.text) !== undefined ? { text: text(c.text) } : {}),
     ...(text(c.keys) !== undefined ? { keys: text(c.keys) } : {}),
     ...(menu ? { menu } : {}),
+    ...(replaces !== undefined ? { replaces } : {}),
     ...(picture ? { picture } : {}),
   };
 }
