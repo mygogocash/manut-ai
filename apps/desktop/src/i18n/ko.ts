@@ -101,6 +101,7 @@ import { prov } from "./ko/prov";
 import { prs } from "./ko/prs";
 import { pull } from "./ko/pull";
 import { pv } from "./ko/pv";
+import { reach } from "./ko/reach";
 import { resume } from "./ko/resume";
 import { review } from "./ko/review";
 import { risk } from "./ko/risk";
@@ -262,6 +263,7 @@ export const ko: Record<Key, string> = {
   ...prs,
   ...pull,
   ...pv,
+  ...reach,
   ...resume,
   ...review,
   ...risk,

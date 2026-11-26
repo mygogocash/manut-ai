@@ -5,6 +5,7 @@ import { t as tr, type Key } from "../i18n";
 import type { PlanItem } from "../lib/protocol";
 import { hideSplitBlocks } from "../threads/types";
 import { endsInHelperBlock, hideHelperBlocks } from "../jobs/helperBlocks";
+import { endsInReachBlock, hideReachBlocks } from "../jobs/reachBlocks";
 import type { Turn } from "./types";
 
 // ---- activity text --------------------------------------------------------------------------
@@ -59,7 +60,18 @@ export function parsePlan(items: unknown): PlanItem[] {
 /** An answer's text as the chat shows it: the fork's thread blocks hidden in every chat, and a lead lane's helper blocks in a turn
  *  that started with Helpers on (item 102e, `Turn.helpers`), whose blocks the app reads itself and turns into a card. In any other
  *  chat a helper block is the agent's own words and is shown as it wrote it. */
-export const shownText = (t: Pick<Turn, "helpers"> | null | undefined, text: string): string => hideSplitBlocks(t?.helpers ? hideHelperBlocks(text) : text);
+export const shownText = (t: Pick<Turn, "helpers" | "reach"> | null | undefined, text: string): string => hideSplitBlocks(ownBlocksHidden(t, text));
+
+/** An answer's text without the blocks the app reads itself in this turn: a lead lane's helper blocks (item 102e, `Turn.helpers`)
+ *  and a coding chat's reach blocks while chats are on its "Kit may reach" list (item 102k, `Turn.reach`). The fork's thread blocks
+ *  are left for `shownText`. */
+export function ownBlocksHidden(t: Pick<Turn, "helpers" | "reach"> | null | undefined, text: string): string {
+  const out = t?.helpers ? hideHelperBlocks(text) : text;
+  return t?.reach ? hideReachBlocks(out) : out;
+}
+
+/** Whether `raw` ends in a block the app reads itself in this turn, closed or still being written. */
+const endsInOwnBlock = (t: Pick<Turn, "helpers" | "reach">, raw: string): boolean => (!!t.helpers && endsInHelperBlock(raw)) || (!!t.reach && endsInReachBlock(raw));
 
 export function liveLabel(t: Turn): { verb: string; code?: string } {
   const status = t.status || WORKING;
@@ -78,9 +90,9 @@ export function liveLabel(t: Turn): { verb: string; code?: string } {
 export function answerSoFar(t: Turn): string {
   const raw = t.streaming.slice(t.cut ?? 0).replace(/^\s+/, "");
   const shown = shownText(t, raw);
-  // a lead lane's helper block being written at the end (item 102e): the lines before it are whole, though hiding it trimmed the
-  // line end that said so
-  const text = shown && t.helpers && endsInHelperBlock(raw) ? `${shown}\n` : shown;
+  // a lead lane's helper block (item 102e) or a reach block (item 102k) being written at the end: the lines before it are whole,
+  // though hiding it trimmed the line end that said so
+  const text = shown && endsInOwnBlock(t, raw) ? `${shown}\n` : shown;
   const end = text.lastIndexOf("\n");
   if (end < 0) return "";
   const lines = text.slice(0, end).split("\n");

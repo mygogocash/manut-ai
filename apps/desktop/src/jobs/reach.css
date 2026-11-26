@@ -1,0 +1,95 @@
+/* The "Kit may reach" list under a coding chat's box (MayReach.tsx): one line in the folder row's quiet size and colour (sessions.css
+   .ss-ctx, .ss-chip). With nothing listed it is one quiet button; with chats, a label, a chip per chat with its number in ink (what
+   Kit calls it) and an ×, and a small add. The picker it opens is Bring context from…'s (chat/box/Bring.tsx), placed over the box. */
+.rc-list {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 6px 1px 0;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+.rc-h {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+.rc-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  max-width: 240px;
+  padding: 0 4px 0 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  color: var(--ink);
+  white-space: nowrap;
+}
+.rc-n {
+  flex: none;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 7px;
+  background: var(--raise2);
+  color: var(--ink);
+  font-size: 10.5px;
+  font-weight: 500;
+  line-height: 14px;
+  text-align: center;
+}
+.rc-t {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rc-x,
+.rc-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 6px;
+  height: 22px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.rc-x {
+  padding: 0 3px;
+  height: 18px;
+}
+.rc-add.icon {
+  padding: 0 5px;
+}
+.rc-x:hover,
+.rc-add:hover {
+  background: var(--raise2);
+  color: var(--ink);
+}
+.rc-msg {
+  flex-basis: 100%;
+  color: var(--aui-warning);
+}
+/* The reach cards (ReachCards.tsx) take the Start helpers card's form (helpers.css): the text that would go in its quiet panel,
+   whole, then the card's lines and its two buttons. A started lane's Open is a quiet link on the settled line. */
+.rc-card .rc-text {
+  max-height: 260px;
+}
+.rc-open {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}

@@ -696,6 +696,9 @@ Every switch that turns a built part on, and what each needs from the owner, is 
 
 ## Known flaky tests (they fail only under heavy load)
 
+- Rust `a_grok_chat_reads_its_accounts_own_home_for_its_asks` (item 101d): failed once in item 102g's first whole
+  Rust run on this Mac and passed alone and on the next run; it waits a fixed 300 ms for a stand-in process. If it fails
+  again, wait on the process instead of the clock.
 - `apps/api` `test/task-companies.test.ts` ("non-members cannot wait on company tasks...", "deleting a company
   releases its tasks...") and `test/auth-email.test.ts` ("gives Apple's session in every way..."): timed out at 5 s in
   item 104's run 45873764860 (with a `rows.filter is not a function` uncaught in workerd), a branch that changes no API
