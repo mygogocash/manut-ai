@@ -8,7 +8,7 @@ import type { RemoteSnapshot } from "../remote/host";
 import { memoryKeyring } from "../remote/keys";
 import { CONSENT_VERSION, consentCovers, readChoice, remoteMac, resetRemoteForTests, resumeRemote, turnOn, writeChoice } from "../remote/state";
 import { FakeChats } from "../remote/testkit/chats";
-import { APP_PAGES } from "./pages";
+import { APP_PAGES, inHood } from "./pages";
 import { CONSENT_POINTS, RemoteView, type RemoteViewProps } from "./RemotePage";
 
 const words = (html: string) => html.replace(/<[^>]*>/g, " ").replace(/&#x27;/g, "'").replace(/&quot;/g, '"').replace(/\s+/g, " ");
@@ -48,10 +48,11 @@ afterEach(() => {
 });
 
 describe("Settings › Sharing and access", () => {
-  it("is one App page, after Artifacts", () => {
+  it("is one App page, an everyday one after Voice, never under the hood", () => {
     const ids = APP_PAGES.map((p) => p.id);
     expect(ids.filter((id) => id === "remote")).toHaveLength(1);
-    expect(ids.indexOf("remote")).toBe(ids.indexOf("artifacts") + 1);
+    expect(ids.indexOf("remote")).toBe(ids.indexOf("voice") + 1);
+    expect(inHood("remote")).toBe(false);
   });
 
   it("starts off, says so, and offers no pairing until it is on and the relay answers", () => {
