@@ -53,6 +53,7 @@ import { TermShareCards } from "./TermShareCard";
 import { LanePane } from "../code/LanePane";
 import { LaneReview } from "../code/Review";
 import { isLaneChat } from "../code/laneStore";
+import { HelpersSwitch } from "../jobs/HelpersSwitch";
 import { chatPullOf, useChatPullsVersion, type ChatPull } from "../code/chatPull";
 import { usePullsVersion } from "../tasks/pulls";
 import { showBoardPull } from "../tasks/state";
@@ -243,6 +244,8 @@ function ChatPane({ rec, chatKey }: { rec: SessionRec; chatKey: string }) {
             {/* the chat box's model with its effort, and how much the agent may do before asking (item 80) */}
             <SessionModel rec={rec} options={ss.models[rec.id]} note={ss.notes[rec.id]} />
             {(modesOf(rec.agent).length > 0 || takesFiles) && <SessionApproval rec={rec} />}
+            {/* Helpers, beside the approval level: only in a lane's chat with a folder of its own (item 102e) */}
+            <HelpersSwitch rec={rec} />
           </>
         }
         foot={<Context rec={rec} />}

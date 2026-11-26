@@ -72,6 +72,7 @@ import { noteMcpSeen } from "../settings/mcp/agentConfig";
 import { t as tr, type Key } from "../i18n";
 import { recordError } from "../report/errors";
 import { notesSaid } from "./projectNotes";
+import { createLeadLanes } from "../jobs/leadLanes";
 import { windowWatched, type SessionNote } from "../lib/notify";
 import { createCloseGrace, graceMs, restoreSplitIn, type SplitWas } from "./closeGrace";
 import { watchOpenFolder } from "./revealOpen";
@@ -130,6 +131,16 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     for (const l of [...listeners]) l();
   };
   const rec = (id: string) => state.list.find((s) => s.id === id);
+  /** Helper requests of lead lanes (item 102e, src/jobs/leadLanes.ts): the Helpers switch, the lead's note in front of each message
+   *  while it is on, and the Start helpers card a turn's answer can ask for. It starts no agent. */
+  const leads = createLeadLanes({
+    rec,
+    chatKey: (id) => keys.get(id),
+    store: () => store(),
+    agents: () => state.agents,
+    models: (id) => state.models[id] ?? [],
+    efforts: (id) => state.live[id]?.efforts ?? [],
+  });
   /** A link id no session in the list holds (termLink.ts). */
   const freshLinkId = (taken: ReadonlySet<string> = new Set(state.list.map((r) => r.linkId).filter((x): x is string => !!x))): string => {
     for (;;) {
@@ -579,10 +590,15 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
         // sentence, said in the person's language
         if (ev.event === "turn.end" && typeof ev.error === "string") ev = { ...ev, error: signedOutSaid(ev.error) };
         if (ev.event === "turn.end" && proc.noChat && ev.outcome === "error") ev = { ...ev, error: proc.noChat };
+        // a lead lane with Helpers on: its turn is marked so the chat hides its helper blocks, and what it writes is kept for its
+        // end to read (item 102e)
+        ev = leads.before(id, ev);
         // Kit's dial: the card is added either way, so the chat says what was done; its answer goes through the card
         const kit = kitAsk(id, ev);
         dispatchChat(id, ev, !!kit);
         if (kit) void kit();
+        // the turn's end: a helper request becomes the Start helpers card under the answer, or a line saying why not
+        void leads.after(id, ev);
         if (ev.event === "tool.diff" && Array.isArray(ev.files)) noteChange(keys.get(id) ?? "", ev.files as DiffFile[]);
         // what the lane's work has shown: its test runs read from their output, and the files that changed
         noteLaneEvent(keys.get(id) ?? "", ev, Date.now(), laneWhere(id));
@@ -760,6 +776,12 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
       // (rewind.ts); a message that joins a running turn starts none
       const key = keys.get(id);
       if (i.kind === "send" && i.id && REWINDS.includes(r.agent) && !(key && store().getState().chats[key]?.turn)) await turns.beforeSend(id, workDir(r), i.id);
+      if (i.kind === "send") {
+        // a message of the person's reaches the agent: it gets its own rounds of helper lanes, and while Helpers is on the lead's
+        // note goes in front of it, never into the bubble (item 102e)
+        leads.personSpoke(id);
+        i = { ...i, text: leads.wire(id, i.text) };
+      }
       await host.chatInput(proc.hostId, i);
       return;
     }
@@ -2354,6 +2376,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
         // a lane keeps its branch and its own folder: Resume and Restart start its agent there, never in the developer's
         ...(s.lane ? { lane: s.lane } : {}),
         ...(s.workflow ? { workflow: s.workflow } : {}),
+        ...(s.helpers ? { helpers: true as const } : {}),
         ...(s.continuedFrom ? { continuedFrom: s.continuedFrom } : {}),
         ...(s.continuedIn ? { continuedIn: s.continuedIn } : {}),
         ...(s.running && !auto && !termAuto && !folderAuto ? { paused: true } : {}),
@@ -2554,6 +2577,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     void stopChat(id).then(() => Promise.all([host.removeFiles(id).catch(() => undefined), free ? letLaneGo(r?.lane) : undefined]));
     turns.forget(id);
     forgetSentFiles(id);
+    leads.forget(id);
     const key = keys.get(id);
     if (key) {
       // a title being written for it stops with it (item 96): nobody is left to read it, and it is the person's own use
@@ -2674,6 +2698,16 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     }
   };
 
+  /** The Helpers switch in a lane's box (item 102e): on, the lane's agent is told how to ask for helper lanes with each message and
+   *  its requests become Start helpers cards; off, a card still open is taken back. Kept with the session. Refused (false) where it
+   *  is not offered: a chat with no lane of its own, a workflow's lane, an agent that does not run as a chat. */
+  const setHelpers = (id: string, on: boolean): boolean => {
+    if (!leads.offered(id)) return false;
+    patchRec(id, { helpers: on ? true : undefined });
+    if (!on) leads.switchedOff(id);
+    return true;
+  };
+
   /** Change a chat session's permission mode (Claude Code's own switch; Codex from its next turn). Kept with the
    *  session, so a restart sets it again. Only the modes controls.ts offers for the agent. */
   const setMode = async (id: string, mode: string) => {
@@ -2784,6 +2818,16 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     setModel,
     setMode,
     setEffort,
+    setHelpers,
+    /** Session `id` may show the Helpers switch (item 102e). */
+    helpersOffered: (id: string): boolean => leads.offered(id),
+    /** The person's Start helpers (`start`) or Not now on the card `askId` of session `id`: settled once in approval-core; no agent
+     *  starts (item 102h listens on `whenHelperRoundApproved`). */
+    answerHelpers: (id: string, askId: string, start: boolean) => leads.answer(id, askId, start),
+    /** Item 102h's hand-off: each round the person approved with Start helpers. Nothing listens yet. */
+    whenHelperRoundApproved: (fn: Parameters<typeof leads.whenRoundApproved>[0]) => leads.whenRoundApproved(fn),
+    /** Session `id`'s rounds of helper lanes, as item 102d's rules keep them. */
+    helperRounds: (id: string) => leads.roundsOf(id),
     rename,
     rewriteTitle,
     moveRow,

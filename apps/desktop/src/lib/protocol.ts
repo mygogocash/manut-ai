@@ -748,7 +748,8 @@ export type ComputerAsk = {
 };
 
 export type BridgeEvent =
-  | (EventBase & { event: "turn.start" })
+  /** `helpers`: set by the app (never by an agent) on a lead lane's turn that starts with Helpers on (item 102e, src/jobs/). */
+  | (EventBase & { event: "turn.start"; helpers?: true })
   /** `retry`: the agent tries the turn again by itself (OmO's `auto_retry_start`); the line says which try. */
   | (EventBase & { event: "status"; text: string; retry?: { attempt: number; max: number } })
   /** The agent is thinking; `text` is what it thought, when the agent sends it (SESSIONS agents). */

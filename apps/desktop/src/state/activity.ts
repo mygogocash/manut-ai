@@ -4,6 +4,7 @@
 import { t as tr, type Key } from "../i18n";
 import type { PlanItem } from "../lib/protocol";
 import { hideSplitBlocks } from "../threads/types";
+import { endsInHelperBlock, hideHelperBlocks } from "../jobs/helperBlocks";
 import type { Turn } from "./types";
 
 // ---- activity text --------------------------------------------------------------------------
@@ -55,6 +56,11 @@ export function parsePlan(items: unknown): PlanItem[] {
   });
 }
 
+/** An answer's text as the chat shows it: the fork's thread blocks hidden in every chat, and a lead lane's helper blocks in a turn
+ *  that started with Helpers on (item 102e, `Turn.helpers`), whose blocks the app reads itself and turns into a card. In any other
+ *  chat a helper block is the agent's own words and is shown as it wrote it. */
+export const shownText = (t: Pick<Turn, "helpers"> | null | undefined, text: string): string => hideSplitBlocks(t?.helpers ? hideHelperBlocks(text) : text);
+
 export function liveLabel(t: Turn): { verb: string; code?: string } {
   const status = t.status || WORKING;
   const last = t.steps[t.steps.length - 1];
@@ -70,7 +76,11 @@ export function liveLabel(t: Turn): { verb: string; code?: string } {
  *  never a line still being typed and never an open code block (it shows once its closing fence came). Shown in
  *  pieces of whole lines, so the answer grows a line or paragraph at a time instead of word by word. */
 export function answerSoFar(t: Turn): string {
-  const text = hideSplitBlocks(t.streaming.slice(t.cut ?? 0).replace(/^\s+/, ""));
+  const raw = t.streaming.slice(t.cut ?? 0).replace(/^\s+/, "");
+  const shown = shownText(t, raw);
+  // a lead lane's helper block being written at the end (item 102e): the lines before it are whole, though hiding it trimmed the
+  // line end that said so
+  const text = shown && t.helpers && endsInHelperBlock(raw) ? `${shown}\n` : shown;
   const end = text.lastIndexOf("\n");
   if (end < 0) return "";
   const lines = text.slice(0, end).split("\n");

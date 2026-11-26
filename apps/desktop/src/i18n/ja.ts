@@ -46,6 +46,7 @@ import { google } from "./ja/google";
 import { graph } from "./ja/graph";
 import { harness } from "./ja/harness";
 import { head } from "./ja/head";
+import { helpers } from "./ja/helpers";
 import { history } from "./ja/history";
 import { home } from "./ja/home";
 import { id } from "./ja/id";
@@ -204,6 +205,7 @@ export const ja: Record<Key, string> = {
   ...graph,
   ...harness,
   ...head,
+  ...helpers,
   ...history,
   ...home,
   ...id,

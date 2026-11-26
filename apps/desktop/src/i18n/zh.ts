@@ -46,6 +46,7 @@ import { google } from "./zh/google";
 import { graph } from "./zh/graph";
 import { harness } from "./zh/harness";
 import { head } from "./zh/head";
+import { helpers } from "./zh/helpers";
 import { history } from "./zh/history";
 import { home } from "./zh/home";
 import { id } from "./zh/id";
@@ -204,6 +205,7 @@ export const zh: Record<Key, string> = {
   ...graph,
   ...harness,
   ...head,
+  ...helpers,
   ...history,
   ...home,
   ...id,

@@ -46,6 +46,7 @@ import { google } from "./ko/google";
 import { graph } from "./ko/graph";
 import { harness } from "./ko/harness";
 import { head } from "./ko/head";
+import { helpers } from "./ko/helpers";
 import { history } from "./ko/history";
 import { home } from "./ko/home";
 import { id } from "./ko/id";
@@ -204,6 +205,7 @@ export const ko: Record<Key, string> = {
   ...graph,
   ...harness,
   ...head,
+  ...helpers,
   ...history,
   ...home,
   ...id,
