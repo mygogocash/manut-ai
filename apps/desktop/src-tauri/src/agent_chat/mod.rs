@@ -16,8 +16,8 @@
 //! The UI sends only an agent id, a folder and chat input; the program and its arguments come from the
 //! allow-list. Closing the session (or quitting the app) stops the program.
 //!
-//! This is a folder. `mod.rs` keeps what every adapter shares (`Input`, `Event`, `Step`, the `Adapter` trait and the two
-//! small adapters that wrap another) and re-exports what other files use, so every `crate::agent_chat::X` path is the
+//! This is a folder. `mod.rs` keeps what every adapter shares (`Input`, `Event`, `Step`, the `Adapter` trait and the
+//! `Unrecognized` and `UsageTap` adapters) and re-exports what other files use, so every `crate::agent_chat::X` path is the
 //! same as when this was one file. `subagents.rs` holds the agent-neutral event helpers, `claude.rs`, `codex.rs` and
 //! `pi.rs` one adapter each, and `live.rs` the processes that run them. Each file keeps the tests of its own code; the
 //! tests that span several adapters stay in `mod.rs`.
