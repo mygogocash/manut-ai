@@ -20,7 +20,7 @@
   flex: none;
   font-family: inherit;
   font-size: 11px;
-  color: var(--quiet);
+  color: var(--muted);
 }
 .term-mi-gap {
   margin-top: 5px;

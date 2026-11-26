@@ -20,6 +20,7 @@ import { HarnessStack } from "../harness/HarnessMark";
 import type { HarnessFacts } from "../harness/registry";
 import { subagentEnded, type Chat } from "../state/store";
 import "./threads.css";
+import { Icon } from "../ui/icons";
 
 /** A thread's state from what the store holds: its chat (turn, last turn, open asks) and the bridge's list row. */
 export function rowStatus(state: AppState, bot: string, row: ThreadRow): ThreadStatus {
@@ -71,9 +72,7 @@ export function rowPreview(state: AppState, bot: string, row: ThreadRow, nowMs: 
 /** A speech bubble, the thread's own mark. */
 function Bubble() {
   return (
-    <svg className="th-bub" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
-      <path d="M3.2 2.5h9.6a1.7 1.7 0 0 1 1.7 1.7v5.6a1.7 1.7 0 0 1-1.7 1.7H7.4L4.5 13.8v-2.3H3.2a1.7 1.7 0 0 1-1.7-1.7V4.2a1.7 1.7 0 0 1 1.7-1.7Z" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinejoin="round" />
-    </svg>
+    <Icon name="message" className="th-bub" />
   );
 }
 
@@ -139,9 +138,7 @@ export function ThreadTree({ bot, id }: { bot: string; id: string }) {
                 {pv.text}
               </span>
               <span className="th-go" aria-hidden="true" data-testid="thread-go">
-                <svg width="10" height="10" viewBox="0 0 10 10">
-                  <path d="M3.8 2.2 6.6 5 3.8 7.8" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
+                <Icon name="chevron-right" />
               </span>
             </button>
             <button
@@ -152,9 +149,7 @@ export function ThreadTree({ bot, id }: { bot: string; id: string }) {
               data-testid="thread-x"
               onClick={(e) => setAsking({ thread: r.thread, at: e.currentTarget.getBoundingClientRect() })}
             >
-              <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
-                <path d="M2.5 2.5 7.5 7.5M7.5 2.5 2.5 7.5" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
-              </svg>
+              <Icon name="x" />
             </button>
             {asking?.thread === r.thread && (
               <ConfirmRemove

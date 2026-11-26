@@ -6,6 +6,7 @@ import { useStore } from "../../state/store";
 import { fileName, fileSize, mediaKind, type MediaKind } from "./mediaLines";
 import "./media.css";
 import { t } from "../../i18n";
+import { Icon } from "../../ui/icons";
 
 type Loaded =
   | { state: "loading" }
@@ -107,10 +108,7 @@ function Lightbox({ url, name, onClose }: { url: string; name: string; onClose: 
 }
 
 const FileIcon = () => (
-  <svg className="media-ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
-    <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
-    <path d="M14 3v5h5" />
-  </svg>
+  <Icon name="file" className="media-ic" />
 );
 
 /** One compact row for a file that is not a picture: icon, name, size, then its actions (`children`). */

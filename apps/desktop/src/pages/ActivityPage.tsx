@@ -40,13 +40,14 @@ import {
   type Range,
 } from "./activity";
 import { dayBand } from "./history";
-import { LOADING, load, type Load } from "./load";
+import { LOADING, load, saysWhy, type Load } from "./load";
 import { Loading } from "./Loading";
-import { Empty, MenuPageFrame } from "./MenuPage";
+import { Empty, LoadFailed, MenuPageFrame } from "./MenuPage";
 import { useShowOlder, type OlderView } from "./older";
 import { OwnersOnly } from "./OwnersOnly";
 import { saveCsv, type SaveResult } from "./saveFile";
 import { ShowOlder } from "./ShowOlder";
+import { Icon } from "../ui/icons";
 
 export interface Person {
   id: string;
@@ -77,6 +78,8 @@ export interface ActivityViewProps {
   onDownload: () => void;
   /** the "Jobs and chats" tab: back to History */
   onBack: () => void;
+  /** Try again, after a read that failed in a way the app did not word for people: the log is read again */
+  onRetry?: () => void;
   onOpenJob: (id: string) => void;
   /** the runtime has older events than the log holds, or Show older has shown all of them (older.ts): the line and the button under the list */
   older?: OlderView;
@@ -161,13 +164,6 @@ export async function downloadCsv(
   return save(csvName(nowMs), exportCsv(events, x, nowMs, words));
 }
 
-function Glyph({ d }: { d: string }) {
-  return (
-    <svg className="ic" viewBox="0 0 16 16" aria-hidden="true">
-      <path d={d} />
-    </svg>
-  );
-}
 
 function Chip({ on, onClick, id, children }: { on: boolean; onClick: () => void; id: string; children: ReactNode }) {
   return (
@@ -190,9 +186,7 @@ function Check({ on, onClick, id, label, labelledby, describedby }: { on: boolea
       onClick={onClick}
       data-testid={id}
     >
-      <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        <path d="M3.5 8.5l3 3 6-7" />
-      </svg>
+      <Icon name="check" />
     </button>
   );
 }
@@ -214,7 +208,7 @@ function ExportDialog({ log, p }: { log: Log; p: ActivityViewProps }) {
       <div className="dh">
         <h3 id="exp-title">{t("act.exp.title")}</h3>
         <button type="button" className="ib" aria-label={t("pn.close")} onClick={() => p.onExport({ type: "close" })} data-testid="act-export-close">
-          <Glyph d="M4 4l8 8M12 4l-8 8" />
+          <Icon name="x" />
         </button>
       </div>
       <p id="exp-desc" className="mut">
@@ -427,7 +421,7 @@ export function ActivityView(p: ActivityViewProps) {
         />
       </form>
       <button type="button" className="btn" aria-haspopup="dialog" aria-expanded={p.exporting.open} aria-controls="act-export" onClick={() => p.onExport({ type: p.exporting.open ? "close" : "open" })} data-testid="act-export">
-        <Glyph d="M8 2.5v8M4.5 7.5L8 11l3.5-3.5M3 13.5h10" />
+        <Icon name="arrow-down-to-line" />
         {t("act.export")}
       </button>
     </>
@@ -444,10 +438,14 @@ export function ActivityView(p: ActivityViewProps) {
     );
   if (p.load.kind === "unavailable")
     return frame(
-      <div className="off" role="alert" data-testid="act-unavailable">
-        <h2>{t("act.unavailable")}</h2>
-        <p>{p.load.message}</p>
-      </div>,
+      saysWhy(p.load) ? (
+        <div className="off" role="alert" data-testid="act-unavailable">
+          <h2>{t("act.unavailable")}</h2>
+          <p>{p.load.message}</p>
+        </div>
+      ) : (
+        <LoadFailed details={p.load.message} onRetry={p.onRetry ?? (() => {})} testId="act-failed" />
+      ),
     );
   if (!full || !log)
     return frame(
@@ -459,7 +457,7 @@ export function ActivityView(p: ActivityViewProps) {
 
   const person = (id: string, label: string) => (
     <Chip key={id} on={f.who === id} onClick={() => p.onFilter({ type: "who", who: id })} id={`act-who-${id}`}>
-      {id === ALL ? <Glyph d="M6 3.8a2.2 2.2 0 100 4.4 2.2 2.2 0 000-4.4zM2 13c.4-2.2 2-3.3 4-3.3s3.6 1.1 4 3.3M11 4.2a2 2 0 010 3.8M12 9.9c1.3.4 2 1.4 2.3 3.1" /> : p.face(id)}
+      {id === ALL ? <Icon name="users" /> : p.face(id)}
       {label}
     </Chip>
   );
@@ -659,6 +657,10 @@ export function ActivityPage() {
         });
       }}
       onBack={() => s.closeSettings()}
+      onRetry={() => {
+        setState(LOADING);
+        setReads((n) => n + 1);
+      }}
       onOpenJob={(id) => s.openJob(id)}
       older={state.kind === "ready" && state.value.older ? { state: state.value.older, ui: more.ui, onShow: more.show } : undefined}
       helped={helped}

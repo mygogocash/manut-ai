@@ -25,6 +25,7 @@
   ],
   "exclude": [
     "test/remote-mac.test.ts",
+    "test/remote-phone.test.ts",
     "test/remote-mac.env.d.ts"
   ]
 }
