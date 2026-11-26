@@ -1,3 +1,4 @@
+import { isObj } from "../lib/guards";
 // Source control (item 75): what the shell says about git, gh and glab (src-tauri/src/source_tools.rs), what a pull of a project's
 // default branch did (git_pull.rs), and the asks that put a lane up for review and merge its pull request (review.rs). Each answer
 // is read here before it is believed, as the lanes' answers are (laneBranch.ts): a field that is not what the shell sends reads as
@@ -24,7 +25,6 @@ export interface SourceTools {
   gitlab: SourceTool;
 }
 
-const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 const str = (v: unknown): string => (typeof v === "string" ? v : "");
 
 const MISSING: SourceTool = { installed: false, version: "", signedIn: null, accounts: [] };

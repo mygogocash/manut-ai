@@ -15,6 +15,7 @@ import { dayTime, longDay } from "../../app/time";
 import { t, type Key } from "../../i18n";
 import { onlyOwnerWords } from "../../lib/shops";
 import type { Answer } from "./session";
+import { isObj } from "../../lib/guards";
 
 /** Who the API names when the shop's own session decided (apps/api approvals.ts) and when the owner's link did (pilot.ts). */
 export const OWNER_SESSION = "owner-session";
@@ -47,7 +48,6 @@ export function decisionPath(requestId: string): string {
 }
 
 type Obj = Record<string, unknown>;
-const isObj = (v: unknown): v is Obj => !!v && typeof v === "object" && !Array.isArray(v);
 
 const NOT_PERMITTED: Partial<Record<ApprovalKind, Key>> = {
   money: "rt.no.money",
