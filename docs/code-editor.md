@@ -1371,6 +1371,17 @@ while hidden. The shell gives a list read within 55 seconds again, and before re
 GET --include -H 'If-None-Match: <ETag>' repos/<r>/pulls?state=open&per_page=51`: a 304 gives the last list again and costs no
 rate limit. The GraphQL list is read only when GitHub says the list changed, a check was still running, or ten minutes passed.
 
+**A project's own icon** (item 100b, `code/ProjectIcon.tsx`, `src-tauri/src/project_icon.rs`). A project's folder header on the
+Code page (TERMINALS) and Kit's band show the picture the folder keeps at the first of `public/favicon.svg`, `favicon.svg`,
+`public/favicon.ico`, `favicon.ico`, `app/icon.png`, `app/favicon.ico`, `src/app/icon.png`, `assets/icon.png`,
+`.github/logo.png`. Only the shell reads it: the folder must be absolute with no `.` or `..` part, every folder on the way and the
+file itself are read with `symlink_metadata` and must not be a link (the file is opened with `O_NOFOLLOW` and its real path must
+be inside the folder's), at most 64 KiB, and only a picture (an SVG with an `<svg` element, a PNG or an ICO by their first
+bytes). It answers a `data:` address of that type, kept by path, size and modified time. The page draws it only as an `<img>`
+(an SVG drawn as an image runs no script and loads no link) and draws nothing for any other address. Without one a folder
+header keeps its folder glyph and Kit's band its name alone, as before. The side menu and the palette list no projects today, so
+neither has a row to draw it on.
+
 ### MCP servers and skills
 
 What a person already has works wherever an agent runs here (item 72). Chats, terminals and Buddy start the agent with the

@@ -27,6 +27,7 @@ mod lane_config;
 mod lane_diff;
 mod outside_use;
 mod past_chats;
+mod project_icon;
 mod project_notes;
 mod platform;
 mod outpost;
@@ -918,6 +919,14 @@ async fn pulls_methods(boards: State<'_, Arc<pulls::Boards>>, source: String, re
     tauri::async_runtime::spawn_blocking(move || b.methods(src, &repo)).await.map_err(|e| e.to_string())?
 }
 
+/// A project's own icon (item 100b, project_icon.rs): the picture its folder keeps in one of a few known places, as a `data:`
+/// address of an image's type, or null. Only reads; never through a link, never outside the folder, at most 64 KiB.
+#[tauri::command]
+async fn project_icon(icons: State<'_, Arc<project_icon::Icons>>, cwd: String) -> Result<Option<String>, String> {
+    let i = Arc::clone(&icons);
+    tauri::async_runtime::spawn_blocking(move || i.icon(&cwd)).await.map_err(|e| e.to_string())
+}
+
 /// The git branch of a session's folder, from its `.git/HEAD` only (no program runs); "" outside a repository.
 #[tauri::command]
 async fn session_branch(cwd: String) -> Result<String, String> {
@@ -1655,6 +1664,8 @@ pub fn run() {
             // the asks that push a lane and open or merge its pull request, each settled once (review.rs)
             app.manage(Arc::new(review::Ledger::default()));
             app.manage(Arc::new(pulls::Boards::default()));
+            // the projects' own icons, kept by size and modified time (project_icon.rs)
+            app.manage(Arc::new(project_icon::Icons::default()));
             app.manage(Arc::new(skill_links::Installs::default()));
             // free space on the home folder's volume, read once a minute (disk.rs)
             app.manage(disk::Disk::start(app.handle().clone(), user_home().ok()));
@@ -1855,6 +1866,7 @@ fn commands(invoke: tauri::ipc::Invoke) -> bool {
         pulls_board,
         pulls_view,
         pulls_methods,
+        project_icon,
         gh_accounts,
         source_tools,
         tasks_me,

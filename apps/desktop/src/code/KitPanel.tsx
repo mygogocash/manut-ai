@@ -29,6 +29,7 @@ import { MainMoved } from "./MainMoved";
 import { AutoPull } from "./AutoPull";
 import { LaneReview } from "./Review";
 import { PreviewSample } from "./PreviewSample";
+import { ProjectIconView, useProjectIcon } from "./ProjectIcon";
 import { allowFolder, dropRule, mayAllow, removeFolder, setLevel, updateKitProjects, useKitProject, type KitProject } from "./project";
 import { Empty } from "../pages/MenuPage";
 import { MenuIcon } from "../sidebar/menuIcons";
@@ -68,6 +69,8 @@ export interface KitPanelProps {
   children?: ReactNode;
   /** The lanes' folders kept on this computer, under the lanes (KitPanel fills it: KeptLanes.tsx). */
   kept?: ReactNode;
+  /** The project's own icon (item 100b, ProjectIcon.tsx), shown before its name when its folder keeps one. */
+  icon?: string | null;
 }
 
 /** A folder as the developer reads it: `~` for the home folder. */
@@ -83,19 +86,22 @@ export function KitPanelView(p: KitPanelProps) {
       {p.kept}
       <div className="band">
         <span id="kit-dial-title">{t("kit.dial")}</span>
-        {p.projects.length > 1 ? (
-          <select aria-label={t("kit.project")} value={root} onChange={(e) => p.onProject(e.currentTarget.value)} data-testid="kit-project">
-            {p.projects.map((r) => (
-              <option key={r} value={r}>
-                {projectName(r)}
-              </option>
-            ))}
-          </select>
-        ) : (
-          <span className="mono" title={root}>
-            {name}
-          </span>
-        )}
+        <span className="kit-proj">
+          <ProjectIconView icon={p.icon ?? null} />
+          {p.projects.length > 1 ? (
+            <select aria-label={t("kit.project")} value={root} onChange={(e) => p.onProject(e.currentTarget.value)} data-testid="kit-project">
+              {p.projects.map((r) => (
+                <option key={r} value={r}>
+                  {projectName(r)}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <span className="mono" title={root}>
+              {name}
+            </span>
+          )}
+        </span>
       </div>
       <div className="dial" role="group" aria-label={t("kit.dial")} data-testid="kit-dial">
         {KIT_LEVELS.map((l) => (
@@ -241,6 +247,7 @@ export function KitPanel() {
   const [picked, setPicked] = useState<string | null>(null);
   const root = picked && projects.includes(picked) ? picked : (projects[0] ?? "");
   const project = useKitProject(root);
+  const icon = useProjectIcon(getHost(), root);
   const lanes = useLaneRows(root);
   // a lane whose pull request merged, or that has been quiet, settles by itself (item 94)
   useLaneSettle(lanes);
@@ -318,6 +325,7 @@ export function KitPanel() {
         onDropFolder={(folder) => updateKitProjects((x) => removeFolder(x, root, folder))}
         onOpenSession={(id) => getStore().actions.openSession(id)}
         kept={<KeptLanes root={root} />}
+        icon={icon}
       >
         {/* Settings › Source control › Automatically pull: what the last pull of this project's default branch did, or why not */}
         <AutoPull root={root} />

@@ -252,6 +252,10 @@ export interface SessionHost extends HistoryHost {
    *  (code/secrets.ts `savedKeys`, item 117). null when this host cannot read a folder; rejects for a folder the app did not
    *  make. Kit's dial asks before a commit or a push unless this answered in time with nothing unread and no key. */
   laneKeys?(worktree: string): Promise<SavedKeys | null>;
+  /** A project's own icon (item 100b, src-tauri/src/project_icon.rs): the picture folder `cwd` keeps in one of a few known places,
+   *  as a `data:` address of an SVG, PNG or ICO, or null. Read only by the shell, never through a link, at most 64 KiB; the page
+   *  draws it only as an image (code/ProjectIcon.tsx). Absent on a shell older than the item. */
+  projectIcon?(cwd: string): Promise<string | null>;
   /** Show folder `cwd` in the file manager. */
   reveal(cwd: string): Promise<void>;
   /** Open the person's own system terminal in folder `cwd` (their shell; nothing typed into it). */
@@ -561,6 +565,11 @@ export class TauriHost implements SessionHost, BuddyHost {
     const { invoke } = await this.core();
     return readView(await invoke<unknown>("session_main_moved", { cwd, base: o.base ?? null, show: o.show ?? [] }));
   }
+  async projectIcon(cwd: string) {
+    const { invoke } = await this.core();
+    const got = await invoke<unknown>("project_icon", { cwd });
+    return typeof got === "string" ? got : null;
+  }
   async reveal(cwd: string) {
     const { invoke } = await this.core();
     await invoke("session_reveal", { cwd });
@@ -848,6 +857,8 @@ export type MockGlobals = MockTurnGlobals & {
   /** Free bytes the mock's disk watch reads (src/lib/disk.ts); unset = 100 GB. */
   __manutDiskFree?: number;
   __manutPickFolder?: string | null;
+  /** e2e: the icon each project folder keeps, as the shell answers it (a `data:` address); none: no folder keeps one */
+  __manutProjectIcons?: Record<string, string>;
   __manutSessionCalls?: MockCall[];
   /** e2e: every message a mock terminal's program printed and every acknowledgement of one, in the order they happened */
   __manutSessionFlow?: MockFlow[];
@@ -1710,6 +1721,10 @@ export class MockHost implements SessionHost, BuddyHost {
     // page names as the base, else the answer's own
     const branch = this.g.__manutBranches?.[cwd] || v.branch;
     return { ...v, branch, base: o.base || v.base, both };
+  }
+  /** As the shell answers: the address e2e gave for the folder, else none. */
+  async projectIcon(cwd: string) {
+    return this.g.__manutProjectIcons?.[cwd] ?? null;
   }
   async reveal(cwd: string) {
     this.log({ op: "reveal", cwd });
