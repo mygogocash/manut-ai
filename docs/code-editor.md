@@ -673,10 +673,46 @@ start, so a file changed by hand never starts what the page would refuse.
   - Not done: Antigravity's thinking level (`thought_level`) has no switch here, as for the other ACP agents. Cursor's ask
     path was checked against its bundle, not a real tool call, since its account could not run one here.
 
+- **From the ACP registry (item 101c).** Under Your agents, the agents of the Agent Client Protocol's registry
+  (agentclientprotocol/registry, Apache-2.0), with a search lifted from T3 Code's (the id or name whole, then a prefix, word
+  starts, inside, the makers, the description). Each row has its mark (item 122's logo where one is published, else the
+  monogram), the registry's name, version and description, and Add… or why not; the pinned release and its date are said
+  once at the foot.
+  - **Pinned, never fetched.** The list is one release of the registry (`src-tauri/acp-registry/registry.json`, byte for
+    byte, with its address, tag, commit and SHA-256 in `pin.json`), compiled into the shell (`acp_registry.rs`). Nothing in
+    the app asks the network for it and there is no "check for newer": `node scripts/pin-acp-registry.mjs [tag]` pins
+    another release by hand, prints what changed, and a Rust test holds the committed file to its SHA-256. The pin also keeps
+    the registry's own `quarantine.json` at that commit, and, for each npm package, the command it installs, read from its
+    manifest on registry.npmjs.org as `npm exec` would choose it. Each entry is read on its own: a bad one is skipped and
+    counted, never fatal.
+  - **Nothing run but the agent.** The registry runs agents through `npx`, `uvx` or a downloaded archive; manut runs none of
+    them. The card shows `npm install -g <package>@<version>`, `uv tool install <name>==<version>` or the archive's address
+    and SHA-256 for the person to install from, and the agent is then started as its installed command, exactly as one
+    added by hand. On Windows npm's commands are `.cmd` files, which a person's own agent never starts, so only archives and
+    uv are taken there.
+  - **Not offered twice, and not offered when unsafe.** An entry that is an agent manut already offers (by its id, by any
+    program it could run, or as Claude's, Codex's, Antigravity's and pi's own ACP adapters) says "In Providers as ...";
+    one whose program a person's own agent runs says "Added as ...". Not offered, with the reason: one the registry's
+    checks set aside, one with no way to run here, one that needs an environment variable (a person's own agent gets
+    none), one whose arguments are not one of the start lines read here (`STARTS`: none, `acp`, `--acp`, `--acp=true`,
+    `acp serve`, `serve acp`, `--mode acp`; the rule turned round, so a later pin cannot bring in an option that skips an
+    ask), and one the checks below refuse.
+  - **The same card and the same writer.** Add… asks the shell for the card (`acp_registry_preview`), drafted as a bot's
+    draft is: `custom_agents::bot_refusal` (no shell, interpreter, OpenCode, Kilo Code or built-in agent's program) and every
+    check of a hand-added agent. It writes nothing. The card shows the exact command, where the agent comes from, its
+    install line or archive, source and licence; Cancel, Change… (the Add agent form with the same values) and Add. Add is
+    `custom_agent_confirm`, the one writer of `~/.manut/custom-agents.json`, which checks the entry again. The registry names
+    no session modes (its schema has none), so an agent from it starts in its own default mode with no argument of manut's
+    changing it, and its asks come through `session/request_permission` as any person's own agent's do. Not done: holding a
+    registry agent to the modes in which it asks (item 101a's `asks_in`), which needs its own `session/new` read in a real
+    run; such an agent becomes a generic ACP row, and the registry then lists it as already there.
+
 `providers.rs`' tests pin each check, the order of a start's arguments and that a value never leaves; `agent_chat.rs`'
 `providers_settings_reach_a_chat_and_never_weaken_its_start` and `sessions.rs`' terminal twin start a stand-in program and
 read back exactly what it was given; `accounts.rs` pins the shell's list. `src/settings/providers/*.test.ts(x)` pin the page's
-own check, the patch, the words and the mock host, and `e2e/agents-settings.spec.ts` walks the page.
+own check, the patch, the words and the mock host, and `e2e/agents-settings.spec.ts` walks the page. `acp_registry.rs`' tests pin
+the registry's reading, matching, checks and card; `src/settings/agents/acpRegistry.test.tsx` the list and its search; and
+`e2e/acp-registry.spec.ts` finding an agent, its card and the result in Providers.
 
 ### Pinned, snoozed, settled and archived
 

@@ -68,6 +68,14 @@ hold. From `AntigravitySession.swift`, Antigravity's own input names (`CommandLi
 not); from `ACPSession.swift`, that an agent's `session/new` reports its modes and models both as `modes` and `models`
 and as configuration options, and that a mode is set with `session/set_config_option` or else `session/set_mode`.
 
+The Agent Client Protocol's agent registry (Apache-2.0, `agentclientprotocol/registry`, release `v2026.11.26-3667256` at
+commit `36672565f76e7fb9796eb15182e0e14fb9e77c33`) for Settings › Providers › From the ACP registry (item 101c): its
+published `registry.json` is pinned byte for byte in `apps/desktop/src-tauri/acp-registry/` with its `quarantine.json`
+read into `pin.json`, and its `FORMAT.md` read for the fields and platform targets; its licence is in
+`apps/desktop/THIRD_PARTY_NOTICES.md`. Each agent it lists keeps its own licence. T3 Code again (MIT, at `ae945dd`) for the
+registry's search: `searchRank` in `packages/provider-acp-registry/src/server/AcpRegistrySupport.ts`, lifted as `searchRank`
+in `apps/desktop/src/settings/agents/acpRegistry.ts`; its live fetch, downloads and `npx` runs were read and left out.
+
 Libraries added for one feature are named here too: `qrcode` 1.5.4 (MIT, soldair/node-qrcode), already the web app's,
 pinned in the desktop for the pairing code's QR image (`apps/desktop/src/remote/QrCode.tsx`, lifted from
 `apps/web/src/ops/QrCode.tsx`); only its `create` is used, which returns the modules and reaches no network; `objc2-speech`, `objc2-avf-audio` and `objc2-av-foundation`
