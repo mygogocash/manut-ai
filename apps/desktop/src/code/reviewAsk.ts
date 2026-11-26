@@ -9,7 +9,7 @@
 // approval-core lets only the owner decide that kind. On this Mac the person is the owner of their own repositories' asks.
 import { InMemoryApprovalStore, type ApprovalOption } from "@manut/approval-core";
 import type { SessionHost } from "../sessions/host";
-import type { ReviewAsk, ReviewDone } from "./source";
+import type { RepoAsk, ReviewAsk, ReviewDone } from "./source";
 
 /** What every ask offers: yes, this once, or no. approval-core has no standing yes, so neither does the ask. */
 export const REVIEW_OPTIONS: readonly ApprovalOption[] = [
@@ -29,7 +29,7 @@ export function resetReviewAsks(): void {
 
 /** Opens the shell's ask as an approval-core request, its detail the ask as the shell wrote it. Throws when approval-core refuses
  *  it (an id already used, which the shell never sends). */
-export async function openReviewAsk(ask: ReviewAsk): Promise<void> {
+export async function openReviewAsk(ask: ReviewAsk | RepoAsk): Promise<void> {
   const opened = await store.open({ id: ask.id, kind: "public_post", options: REVIEW_OPTIONS, detail: ask });
   if (!opened.ok) throw new Error(opened.refused);
 }

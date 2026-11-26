@@ -27,6 +27,7 @@ mod lane_config;
 mod lane_diff;
 mod outside_use;
 mod past_chats;
+mod new_project;
 mod project_icon;
 mod project_notes;
 mod platform;
@@ -1142,6 +1143,23 @@ async fn review_ask_merge_pull(asks: State<'_, Arc<review::Ledger>>, folder: Str
     tauri::async_runtime::spawn_blocking(move || l.ask_merge_pull(&home, &folder, &source, &repo, number, &method, credits.unwrap_or(false))).await.map_err(|e| e.to_string())?
 }
 
+/// A new project (item 100b, new_project.rs): the folder at `path` in the person's home, made when it is not there (refused when it
+/// is there with anything in it), with git started in it by the app's own git (no hook, no template). Writes only on this Mac.
+#[tauri::command]
+async fn project_new(path: String) -> Result<new_project::Made, String> {
+    let home = user_home()?;
+    tauri::async_runtime::spawn_blocking(move || new_project::make(&home, &path)).await.map_err(|e| e.to_string())?
+}
+
+/// The ask to make the GitHub repository `name` from the new project at `folder`, private unless `public` (review.rs `ask_repo`):
+/// the exact `gh repo create` line, or why it cannot be made. Writes nothing; pushes nothing, ever.
+#[tauri::command]
+async fn review_ask_repo(asks: State<'_, Arc<review::Ledger>>, folder: String, name: String, public: bool) -> Result<review::Ask, String> {
+    let home = user_home()?;
+    let l = Arc::clone(&asks);
+    tauri::async_runtime::spawn_blocking(move || l.ask_repo(&home, &folder, &name, public)).await.map_err(|e| e.to_string())?
+}
+
 /// The person's answer to ask `id`, once approval-core settled it on the page (review.rs `settle`): a No runs nothing, a Yes runs
 /// what the ask named, once. Only the id and the answer cross; never an argv, a branch or a text.
 #[tauri::command]
@@ -1830,6 +1848,8 @@ fn commands(invoke: tauri::ipc::Invoke) -> bool {
         review_ask_open,
         review_ask_merge,
         review_ask_merge_pull,
+        review_ask_repo,
+        project_new,
         review_settle,
         review_withdraw,
         session_main_moved,

@@ -20,7 +20,7 @@ import { MOCK_MOVED, MOCK_MOVED_ROOT } from "../code/mockMoved";
 import { readCleaned, readKept, readMade, readReleased, readRemoved, type KeptLane, type LaneCleaned, type LaneMade, type LaneReleased, type LaneRemoveAsk, type LaneRemoved } from "../code/laneBranch";
 import { readAgentConfig, type AgentConfig } from "../settings/mcp/agentConfig";
 import { readInstallAsk, readInstallDone, readLinkRead, readSkillReads, type InstallAsk, type InstallDone, type LinkRead, type ReadSkill } from "../runtime/skillBundle";
-import { readAsk, readDone, readDraft, readPulled, readTools, type MergeMethod, type Pulled, type ReviewAsk, type ReviewDone, type ReviewDraft, type SourceTools } from "../code/source";
+import { readAsk, readDone, readDraft, readMadeProject, readPulled, readRepoAsk, readTools, type MergeMethod, type NewProjectMade, type Pulled, type RepoAsk, type ReviewAsk, type ReviewDone, type ReviewDraft, type SourceTools } from "../code/source";
 import { checkArgs, checkVars, homeVarOf, rulesOf, versionAgent, type ProviderPatch, type ProviderView } from "../settings/providers/model";
 
 /** What the person did in a chat. Mirrors `Input` in src-tauri/src/agent_chat.rs. `images`: saved copies
@@ -220,6 +220,13 @@ export interface SessionHost extends HistoryHost {
    *  for, whose remote must name `repo` (`not_this_project` otherwise). A lane's request is asked as the lane's own Merge. Writes
    *  nothing. */
   reviewMergePull?(folder: string, source: "github" | "gitlab", repo: string, number: number, method: MergeMethod, credits?: boolean): Promise<ReviewAsk>;
+  /** New project on the Code page (item 100b, src-tauri/src/new_project.rs): the folder at `path`, made in the person's home when it
+   *  is not there, with git started in it by the app's own git (no hook, no template). Writes only on this Mac. Rejects with a code
+   *  (`bad_path`, `outside_home`, `not_empty`, `not_a_folder`, `link`, `git_missing`, `init_failed:<line>`, ...). */
+  projectNew?(path: string): Promise<NewProjectMade>;
+  /** The ask to make the GitHub repository `name` from the new project at `folder`, private unless `isPublic` (review.rs `ask_repo`):
+   *  the exact `gh repo create` line. Writes nothing and pushes nothing; a Yes goes through `reviewSettle` like every ask. */
+  repoAsk?(folder: string, name: string, isPublic: boolean): Promise<RepoAsk>;
   /** The person's answer to ask `id`, after approval-core settled it (code/reviewAsk.ts is the only caller): a No runs nothing, a
    *  Yes runs what the ask named, once. Only the id and the answer go to the shell. Rejects with `already_decided`,
    *  `withdrawn`, `expired` or `not_found`. */
@@ -516,6 +523,18 @@ export class TauriHost implements SessionHost, BuddyHost {
     if (!ask || ask.kind !== "merge") throw new Error("unread");
     return ask;
   }
+  async projectNew(path: string) {
+    const { invoke } = await this.core();
+    const made = readMadeProject(await invoke<unknown>("project_new", { path }));
+    if (!made) throw new Error("unread");
+    return made;
+  }
+  async repoAsk(folder: string, name: string, isPublic: boolean) {
+    const { invoke } = await this.core();
+    const ask = readRepoAsk(await invoke<unknown>("review_ask_repo", { folder, name, public: isPublic }));
+    if (!ask) throw new Error("unread");
+    return ask;
+  }
   async reviewSettle(id: string, yes: boolean) {
     const { invoke } = await this.core();
     const done = readDone(await invoke<unknown>("review_settle", { id, yes }));
@@ -742,6 +761,9 @@ export interface MockCall {
     | "title.run"
     | "title.cancel"
     | "review.settle"
+    | "project.new"
+    | "repo.ask"
+    | "repo.settle"
     | "buddy.start"
     | "buddy.input"
     | "buddy.close"
@@ -794,6 +816,8 @@ export interface MockCall {
   titleEffort?: string;
   /** source.tools: the CLIs were asked again */
   fresh?: boolean;
+  /** repo.settle: on a Yes, the command the mock would have run (the ask's own line) */
+  command?: string;
   /** review.settle: the person's answer, and on a Yes the title and body the mock would have sent */
   yes?: boolean;
   title?: string;
@@ -859,6 +883,11 @@ export type MockGlobals = MockTurnGlobals & {
   __manutPickFolder?: string | null;
   /** e2e: the icon each project folder keeps, as the shell answers it (a `data:` address); none: no folder keeps one */
   __manutProjectIcons?: Record<string, string>;
+  /** e2e: folders that are there already ("empty", "full" or "file"), as New project's shell would find them; anything else is
+   *  not there yet */
+  __manutFolders?: Record<string, "empty" | "full" | "file">;
+  /** e2e: what the new repository's ask refuses with (`not_signed_in`, ...), and what its Yes answers when it fails */
+  __manutRepoAsk?: { refuse?: string; fail?: string };
   __manutSessionCalls?: MockCall[];
   /** e2e: every message a mock terminal's program printed and every acknowledgement of one, in the order they happened */
   __manutSessionFlow?: MockFlow[];
@@ -1637,7 +1666,44 @@ export class MockHost implements SessionHost, BuddyHost {
     this.log({ op: "review.ask", path: folder, branch });
     return ask;
   }
+  /** As the shell (new_project.rs): inside `/home/you`, not there or an empty folder, and git started in it (logged). */
+  async projectNew(path: string): Promise<NewProjectMade> {
+    const p = path.replace(/\/+$/, "");
+    if (!p.startsWith("/") || p.split("/").some((w) => w === "." || w === "..")) throw new Error("bad_path");
+    if (!p.startsWith("/home/you/")) throw new Error("outside_home");
+    const there = this.g.__manutFolders?.[p];
+    if (there === "full") throw new Error("not_empty");
+    if (there === "file") throw new Error("not_a_folder");
+    (this.g.__manutFolders ??= {})[p] = "full";
+    this.log({ op: "project.new", path: p });
+    return { folder: p, name: p.slice(p.lastIndexOf("/") + 1), existed: there === "empty" };
+  }
+  /** The new repositories' asks, by id: answered once, as review.rs's are. */
+  private repoAsks = new Map<string, { state: "waiting" | "decided" | "withdrawn"; ask: RepoAsk }>();
+  async repoAsk(folder: string, name: string, isPublic: boolean): Promise<RepoAsk> {
+    const r = this.g.__manutRepoAsk ?? {};
+    if (r.refuse) throw new Error(r.refuse);
+    if (!/^[A-Za-z0-9_][A-Za-z0-9._-]{0,99}(\/[A-Za-z0-9_][A-Za-z0-9._-]{0,99})?$/.test(name.trim())) throw new Error("bad_repo_name");
+    const id = Array.from({ length: 32 }, () => "0123456789abcdef"[Math.floor(Math.random() * 16)]).join("");
+    const words = ["repo", "create", name.trim(), isPublic ? "--public" : "--private", "--source", folder, "--remote", "origin"];
+    const plan = ["gh", ...words.map((w) => (/^[A-Za-z0-9_./=:@+,-]+$/.test(w) ? w : `'${w.replace(/'/g, "'\\''")}'`))].join(" ");
+    const ask: RepoAsk = { id, kind: "repo", repo: name.trim(), folder, visibility: isPublic ? "public" : "private", remote: "origin", plan };
+    this.repoAsks.set(id, { state: "waiting", ask });
+    this.log({ op: "repo.ask", path: folder, name: ask.repo });
+    return ask;
+  }
   async reviewSettle(id: string, yes: boolean): Promise<ReviewDone> {
+    const repo = this.repoAsks.get(id);
+    if (repo) {
+      if (repo.state !== "waiting") throw new Error(repo.state === "decided" ? "already_decided" : "withdrawn");
+      repo.state = "decided";
+      this.log({ op: "repo.settle", path: repo.ask.folder, yes, ...(yes ? { command: repo.ask.plan } : {}) });
+      if (!yes) return { outcome: "declined", pushed: false, url: "", number: 0, step: "", error: "" };
+      const fail = this.g.__manutRepoAsk?.fail;
+      if (fail) return { outcome: "failed", pushed: false, url: "", number: 0, step: "create", error: fail };
+      const full = repo.ask.repo.includes("/") ? repo.ask.repo : `you/${repo.ask.repo}`;
+      return { outcome: "created", pushed: false, url: `https://github.com/${full}`, number: 0, step: "", error: "" };
+    }
     const e = this.asks.get(id);
     if (!e) throw new Error("not_found");
     if (e.state !== "waiting") throw new Error(e.state === "decided" ? "already_decided" : "withdrawn");
@@ -1651,6 +1717,8 @@ export class MockHost implements SessionHost, BuddyHost {
     return { outcome: "opened", pushed: true, url: `https://github.com/${e.ask.repo}/pull/${number}`, number, step: "", error: "" };
   }
   async reviewWithdraw(id: string): Promise<void> {
+    const r = this.repoAsks.get(id);
+    if (r?.state === "waiting") r.state = "withdrawn";
     const e = this.asks.get(id);
     if (e?.state === "waiting") e.state = "withdrawn";
   }

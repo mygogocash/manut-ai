@@ -102,7 +102,7 @@ impl Filter {
     }
 }
 
-fn segment_ok(s: &str) -> bool {
+pub(crate) fn segment_ok(s: &str) -> bool {
     !s.is_empty()
         && s.len() <= 100
         && !s.starts_with('-')

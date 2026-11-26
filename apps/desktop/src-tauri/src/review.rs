@@ -42,6 +42,12 @@
 //! repository (its folder's remote), from a branch of that very repository. A lane's request is asked as that lane's own Merge;
 //! any other is asked the same way without a lane's tip to check, bound to the head commit shown and read again before it runs,
 //! with a method the repository allows. No other write is added.
+//!
+//! A new project made on GitHub too (item 100b, `Ledger::ask_repo`) is the third write, through the same ask: the shell checks the
+//! project's folder (in the person's home, a repository of its own with no `origin` yet), the name and the CLI, and writes down
+//! `gh repo create <name> --private --source <folder> --remote origin` (or `--public`, when the person chose it). The ask shows
+//! that line in full, as it will run; a Yes runs it once, after the folder is read again. It pushes nothing: no `--push`, and no
+//! other step here sends the project's commits.
 
 use std::collections::HashMap;
 use std::io::Read;
@@ -102,6 +108,11 @@ pub struct Ask {
     pub message: String,
     /// How many agent credit lines were taken out of the message (Settings › Source control › Remove agent credits when merging).
     pub dropped: u32,
+    /// A new repository's own (`kind` `repo`, item 100b): the project's folder, who can see it (`private` or `public`), and the
+    /// exact command a Yes runs, as one line.
+    pub folder: String,
+    pub visibility: String,
+    pub plan: String,
 }
 
 /// What a settled ask did. `outcome`: `declined` (the person said no; nothing ran), `opened`, `merged`, or `failed` with the
@@ -141,6 +152,8 @@ enum Plan {
     /// `lane`: the home folder and the lane's folder, when the request is a lane's (its tip is read again before the merge); none
     /// for a request of the project's that no lane of the app's made (item 100), which is bound to the head commit shown alone.
     Merge { source: Source, cli: PathBuf, view: Vec<String>, lane: Option<(PathBuf, PathBuf)>, branch: String, base: String, head: String, number: u64, url: String, merge: Vec<String> },
+    /// A new project's repository on GitHub (item 100b): the project's folder, and `gh repo create`'s argv.
+    Repo { home: PathBuf, dir: PathBuf, cli: PathBuf, create: Vec<String> },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -263,6 +276,60 @@ pub fn read_created(out: &str) -> (String, u64) {
         }
     }
     (String::new(), 0)
+}
+
+/// A new repository's name as `gh repo create` takes it: `name`, or `owner/name` for an organisation's, each part letters, digits,
+/// `.`, `_` and `-`, at most 100, never starting with `-` or `.`. Err(`bad_repo_name`) for anything else.
+pub fn repo_name(name: &str) -> Result<String, String> {
+    let name = name.trim();
+    let parts: Vec<&str> = name.split('/').collect();
+    if parts.is_empty() || parts.len() > 2 || !parts.iter().all(|p| tasks::segment_ok(p)) {
+        return Err("bad_repo_name".into());
+    }
+    Ok(name.to_string())
+}
+
+/// The argv (after `gh`) that makes the GitHub repository `name` from the project at `folder`, private unless `public`, with the
+/// new repository as the folder's `origin`. It pushes nothing: no `--push`.
+pub fn repo_argv(name: &str, public: bool, folder: &Path) -> Result<Vec<String>, String> {
+    let name = repo_name(name)?;
+    let dir = folder.to_str().filter(|d| folder.is_absolute() && !d.chars().any(char::is_control)).ok_or("bad_path")?;
+    let s = |x: &str| x.to_string();
+    Ok(vec![s("repo"), s("create"), name, s(if public { "--public" } else { "--private" }), s("--source"), s(dir), s("--remote"), s("origin")])
+}
+
+/// A command as one line a person can read and a shell would run as the same words: each word as it is when it is plain, else in
+/// single quotes (a `'` in it written `'\''`).
+pub fn plan_line(program: &str, argv: &[String]) -> String {
+    let plain = |w: &str| !w.is_empty() && w.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'/' | b'=' | b':' | b'@' | b'+' | b','));
+    std::iter::once(program.to_string()).chain(argv.iter().map(|w| if plain(w) { w.clone() } else { format!("'{}'", w.replace('\'', "'\\''")) })).collect::<Vec<_>>().join(" ")
+}
+
+/// The new repository's address in what `gh repo create` printed: the first `https://github.com/<owner>/<name>` in it.
+pub fn read_repo_url(out: &str) -> String {
+    for w in out.split_whitespace() {
+        let u = tasks::web_url(w.trim_end_matches(['.', ',', ')']).trim_end_matches(".git"));
+        if let Some(path) = u.strip_prefix("https://github.com/") {
+            let parts: Vec<&str> = path.split('/').collect();
+            if parts.len() == 2 && parts.iter().all(|p| tasks::segment_ok(p)) {
+                return u;
+            }
+        }
+    }
+    String::new()
+}
+
+/// Whether `dir` is a repository's own top folder (its `.git` a real folder, not a link and not a worktree's file) with no remote
+/// named `origin` yet: Err(`not_a_repository`) or Err(`has_origin`).
+fn bare_project(git: &Git, dir: &Path) -> Result<(), String> {
+    let dot = std::fs::symlink_metadata(dir.join(".git")).map_err(|_| "not_a_repository".to_string())?;
+    if !dot.is_dir() || dot.file_type().is_symlink() {
+        return Err("not_a_repository".into());
+    }
+    if git.line(dir, &["config", "--get", "remote.origin.url"]).is_some() {
+        return Err("has_origin".into());
+    }
+    Ok(())
 }
 
 /// How a pull request is merged. Every one is asked; there is no automatic one.
@@ -804,6 +871,42 @@ impl Ledger {
             subject,
             message,
             dropped,
+            ..Ask::default()
+        })
+    }
+
+    /// Asks to make the GitHub repository `name` from the new project at `folder` (item 100b), private unless `public`. It checks
+    /// the folder (absolute, in the person's home, a repository's own top with no `origin`), the name, and that gh is here and
+    /// signed in, and answers the ask with the exact command a Yes runs. Writes nothing: only [`Ledger::settle`] with its id and a
+    /// Yes runs it.
+    pub fn ask_repo(&self, home: &Path, folder: &str, name: &str, public: bool) -> Result<Ask, String> {
+        let p = crate::new_project::path_ok(folder)?;
+        let dir = p.canonicalize().map_err(|_| "gone".to_string())?;
+        let real_home = home.canonicalize().map_err(|_| "gone".to_string())?;
+        if dir == real_home || !dir.starts_with(&real_home) || !dir.is_dir() {
+            return Err("outside_home".into());
+        }
+        let name = repo_name(name)?;
+        let git = Git::new(home)?;
+        bare_project(&git, &dir)?;
+        let cli = self.cli(Source::Github).ok_or("not_installed")?;
+        let signed = tasks::run_env(&cli, &tasks::auth_argv(Source::Github), false, &[], &[]).is_ok_and(|r| r.code == Some(0));
+        if !signed {
+            return Err("not_signed_in".into());
+        }
+        let create = repo_argv(&name, public, &dir)?;
+        let plan = plan_line("gh", &create);
+        let id = self.keep(Plan::Repo { home: home.to_path_buf(), dir: dir.clone(), cli, create });
+        Ok(Ask {
+            id,
+            kind: "repo".into(),
+            source: "github".into(),
+            repo: name,
+            remote: "origin".into(),
+            folder: dir.to_string_lossy().into_owned(),
+            visibility: if public { "public" } else { "private" }.into(),
+            plan,
+            ..Ask::default()
         })
     }
 
@@ -891,6 +994,18 @@ fn run(_settled: Settled, plan: &Plan) -> Done {
                 Err(e) => Done::failed("merge", tasks::error_line(&e), false),
             }
         }
+        Plan::Repo { home, dir, cli, create } => {
+            // the folder is still the new project the person saw: a repository's own, with no `origin` set since
+            let Ok(git) = Git::new(home) else { return Done::failed("check", "git_missing".into(), false) };
+            if bare_project(&git, dir).is_err() {
+                return Done::failed("check", "changed".into(), false);
+            }
+            match tasks::run_env_for(cli, create, true, &[], &[], CLI_LIMIT) {
+                Ok(r) if r.code == Some(0) => Done { outcome: "created".into(), url: read_repo_url(&format!("{}\n{}", r.out, r.err)), ..Done::default() },
+                Ok(r) => Done::failed("create", tasks::error_line(if r.err.trim().is_empty() { &r.out } else { &r.err }), false),
+                Err(e) => Done::failed("create", tasks::error_line(&e), false),
+            }
+        }
     }
 }
 
@@ -926,7 +1041,7 @@ pub(crate) mod tests {
         let log = home.join(format!("{name}.log"));
         let view = home.join(format!("{name}-view.json"));
         let script = format!(
-            "#!/bin/sh\nprintf '%s\\0' \"$@\" >> '{log}'\nprintf '\\036' >> '{log}'\ncase \"$1 $2\" in\n\"auth status\") exit {auth};;\n\"pr create\") echo 'https://github.com/o/r/pull/7'; exit 0;;\n\"mr create\") echo 'https://gitlab.com/g/p/-/merge_requests/4'; exit 0;;\n\"pr view\"|\"mr view\") cat '{view}'; exit 0;;\n\"repo view\") cat '{repo}' || exit 1; exit 0;;\n\"pr merge\"|\"mr merge\") exit 0;;\nesac\nexit 2\n",
+            "#!/bin/sh\nprintf '%s\\0' \"$@\" >> '{log}'\nprintf '\\036' >> '{log}'\ncase \"$1 $2\" in\n\"auth status\") exit {auth};;\n\"pr create\") echo 'https://github.com/o/r/pull/7'; exit 0;;\n\"mr create\") echo 'https://gitlab.com/g/p/-/merge_requests/4'; exit 0;;\n\"pr view\"|\"mr view\") cat '{view}'; exit 0;;\n\"repo view\") cat '{repo}' || exit 1; exit 0;;\n\"repo create\") echo 'https://github.com/you/shop-site'; exit 0;;\n\"pr merge\"|\"mr merge\") exit 0;;\nesac\nexit 2\n",
             log = log.display(),
             view = view.display(),
             repo = home.join(format!("{name}-repo.json")).display()
@@ -1506,6 +1621,113 @@ pub(crate) mod tests {
         assert_eq!(l.ask_merge_pull(&home, &folder, "github", "o/r", 7, "squash", false).map(|a| a.method), Ok("squash".into()));
         assert!(writes(&home, "gh").is_empty());
         let _ = fs::remove_dir_all(home);
+    }
+
+    /// A home folder with a new project in it (item 100b), made as the page's New project makes one.
+    fn new_project(name: &str) -> Option<(PathBuf, PathBuf)> {
+        tasks::find("git")?;
+        let home = crate::lane::tests::tmp(name);
+        let made = crate::new_project::make(&home, home.join("code/shop-site").to_str().unwrap()).unwrap();
+        Some((home, PathBuf::from(made.folder)))
+    }
+
+    #[test]
+    fn a_new_repository_s_ask_shows_the_exact_command_and_writes_nothing() {
+        let Some((home, dir)) = new_project("repo-ask") else { return };
+        let l = ledger(&home);
+        let folder = dir.to_string_lossy().into_owned();
+        let ask = l.ask_repo(&home, &folder, "shop-site", false).unwrap();
+        assert_eq!(
+            ask,
+            Ask {
+                id: ask.id.clone(),
+                kind: "repo".into(),
+                source: "github".into(),
+                repo: "shop-site".into(),
+                remote: "origin".into(),
+                folder: folder.clone(),
+                visibility: "private".into(),
+                plan: format!("gh repo create shop-site --private --source {folder} --remote origin"),
+                ..Ask::default()
+            }
+        );
+        // public only when chosen, said in the command too
+        let public = l.ask_repo(&home, &folder, "baanmali/shop-site", true).unwrap();
+        assert_eq!((public.visibility.as_str(), public.plan.as_str()), ("public", format!("gh repo create baanmali/shop-site --public --source {folder} --remote origin").as_str()));
+        // gh was only asked whether it is signed in
+        assert!(writes(&home, "gh").is_empty(), "{:?}", calls(&home, "gh"));
+        // no push, ever, and nothing that forces or names another remote
+        let argv = repo_argv("shop-site", false, &dir).unwrap();
+        assert_eq!(argv, ["repo", "create", "shop-site", "--private", "--source", folder.as_str(), "--remote", "origin"]);
+        assert!(!argv.iter().any(|w| w.starts_with("--push") || w.starts_with("--clone") || w == "--public"));
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn a_yes_makes_the_repository_once_and_pushes_nothing_and_a_no_runs_nothing() {
+        let Some((home, dir)) = new_project("repo-yes") else { return };
+        let l = ledger(&home);
+        let folder = dir.to_string_lossy().into_owned();
+        let no = l.ask_repo(&home, &folder, "shop-site", false).unwrap();
+        assert_eq!(l.settle(&no.id, false), Ok(Done { outcome: "declined".into(), ..Done::default() }));
+        assert!(writes(&home, "gh").is_empty());
+        let ask = l.ask_repo(&home, &folder, "shop-site", false).unwrap();
+        let done = l.settle(&ask.id, true).unwrap();
+        assert_eq!(done, Done { outcome: "created".into(), url: "https://github.com/you/shop-site".into(), ..Done::default() });
+        let w = writes(&home, "gh");
+        assert_eq!(w, vec![vec!["repo", "create", "shop-site", "--private", "--source", folder.as_str(), "--remote", "origin"]]);
+        // once: a second answer runs nothing
+        assert_eq!(l.settle(&ask.id, true), Err("already_decided".into()));
+        assert_eq!(writes(&home, "gh").len(), 1);
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn a_new_repository_is_asked_only_for_a_project_of_its_own_in_home_with_a_good_name_and_gh_signed_in() {
+        let Some((home, dir)) = new_project("repo-refuse") else { return };
+        let l = ledger(&home);
+        let folder = dir.to_string_lossy().into_owned();
+        for bad in ["", "-x", ".x", "a/b/c", "a b", "owner/", "x;rm"] {
+            assert_eq!(l.ask_repo(&home, &folder, bad, false), Err("bad_repo_name".into()), "{bad:?}");
+        }
+        // a folder outside the home folder, the home folder itself, a relative or dotted path
+        let outside = crate::lane::tests::tmp("repo-refuse-outside");
+        sh(&outside, &["init", "-q"]);
+        assert_eq!(l.ask_repo(&home, outside.to_str().unwrap(), "x", false), Err("outside_home".into()));
+        assert_eq!(l.ask_repo(&home, home.to_str().unwrap(), "x", false), Err("outside_home".into()));
+        assert_eq!(l.ask_repo(&home, "code/shop-site", "x", false), Err("bad_path".into()));
+        assert_eq!(l.ask_repo(&home, &format!("{folder}/../shop-site"), "x", false), Err("bad_path".into()));
+        // a folder inside another repository, not one of its own
+        fs::create_dir_all(dir.join("sub")).unwrap();
+        assert_eq!(l.ask_repo(&home, dir.join("sub").to_str().unwrap(), "x", false), Err("not_a_repository".into()));
+        // gh signed out
+        let signed_out = Ledger::with(stand_in(&home, "gh", 1), stand_in(&home, "glab", 0), ASK_LIFE);
+        assert_eq!(signed_out.ask_repo(&home, &folder, "x", false), Err("not_signed_in".into()));
+        // a project that has an `origin` already
+        sh(&dir, &["remote", "add", "origin", "https://github.com/o/r.git"]);
+        assert_eq!(l.ask_repo(&home, &folder, "x", false), Err("has_origin".into()));
+        assert!(writes(&home, "gh").is_empty());
+        let _ = fs::remove_dir_all(home);
+        let _ = fs::remove_dir_all(outside);
+    }
+
+    #[test]
+    fn an_origin_set_after_the_ask_stops_the_yes() {
+        let Some((home, dir)) = new_project("repo-changed") else { return };
+        let l = ledger(&home);
+        let ask = l.ask_repo(&home, dir.to_str().unwrap(), "shop-site", false).unwrap();
+        sh(&dir, &["remote", "add", "origin", "https://github.com/o/r.git"]);
+        assert_eq!(l.settle(&ask.id, true).unwrap(), Done::failed("check", "changed".into(), false));
+        assert!(writes(&home, "gh").is_empty());
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn a_plan_line_reads_as_the_words_that_run() {
+        let a = vec!["repo".to_string(), "create".into(), "shop".into(), "--private".into(), "--source".into(), "/Users/fon/My Code/it's".into(), "--remote".into(), "origin".into()];
+        assert_eq!(plan_line("gh", &a), "gh repo create shop --private --source '/Users/fon/My Code/it'\\''s' --remote origin");
+        assert_eq!(read_repo_url("✓ Created repository you/shop on github.com\n  https://github.com/you/shop\n✓ Added remote https://github.com/you/shop.git"), "https://github.com/you/shop");
+        assert_eq!(read_repo_url("nothing"), "");
     }
 
     #[test]
