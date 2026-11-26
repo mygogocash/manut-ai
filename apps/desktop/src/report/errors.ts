@@ -2,6 +2,7 @@
 // would not start, a call the runtime refused, a page error. Settings › Report a problem reads them. Each is kept as one
 // short masked line, so what is held is already safe to show; report.ts cleans it once more when it writes the report.
 import { maskSecrets } from "../lib/secrets";
+import { changes } from "../lib/changes";
 
 /** How many are kept. The report shows at most 20 of them. */
 export const KEEP = 50;
@@ -16,7 +17,7 @@ export interface KeptError {
 }
 
 const kept: KeptError[] = [];
-const listeners = new Set<() => void>();
+const listeners = changes();
 
 /** The first line of `text`, masked and cut. Nothing else of the message is kept. */
 export function oneLine(text: string): string {
@@ -34,7 +35,7 @@ export function recordError(source: KeptError["source"], text: string, at: numbe
   if (last && last.source === source && last.text === line && at - last.at < 1000) return;
   kept.push({ at, source, text: line });
   while (kept.length > KEEP) kept.shift();
-  for (const l of [...listeners]) l();
+  listeners.emitSnapshot();
 }
 
 /** The kept problems, newest first. */
@@ -43,10 +44,7 @@ export function recentErrors(): KeptError[] {
 }
 
 export function onErrors(f: () => void): () => void {
-  listeners.add(f);
-  return () => {
-    listeners.delete(f);
-  };
+  return listeners.subscribe(f);
 }
 
 /** Tests only. */
