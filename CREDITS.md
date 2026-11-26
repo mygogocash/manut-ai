@@ -1,6 +1,6 @@
 # Credits
 
-Manut AI is built on other people's good work. This file names every project we took code, ideas, wording or test vectors from, what we took and under which licence. It moved here from the README on 26 Nov 2026, word for word. The desktop app's own notices are in [`apps/desktop/NOTICE.md`](apps/desktop/NOTICE.md) and [`apps/desktop/THIRD_PARTY_NOTICES.md`](apps/desktop/THIRD_PARTY_NOTICES.md), which also list the coding agents' and editors' marks (Lobe Icons, MIT; Simple Icons, CC0).
+Manut AI is built on other people's good work. This file names every project we took code, ideas, wording or test vectors from, what we took and under which licence. It moved here from the README on 26 Nov 2026, word for word. The desktop app's own notices are in [`apps/desktop/NOTICE.md`](https://github.com/mygogocash/manut-ai/blob/pilot/week-1/apps/desktop/NOTICE.md) and [`apps/desktop/THIRD_PARTY_NOTICES.md`](https://github.com/mygogocash/manut-ai/blob/pilot/week-1/apps/desktop/THIRD_PARTY_NOTICES.md), which also list the coding agents' and editors' marks (Lobe Icons, MIT; Simple Icons, CC0).
 
 ## Where each part started
 
