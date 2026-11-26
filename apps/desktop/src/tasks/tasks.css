@@ -185,6 +185,13 @@
   font-size: 11.5px;
   color: var(--muted);
 }
+/* the scope switch leads each choice with a 16px icon (item 122): a taller segment gives the icon 6px above and below,
+   and the words the scale's 12px, so the icon never presses on the segment's edge */
+.tk-seg.tk-scope button {
+  height: 28px;
+  padding: 0 10px 0 8px;
+  font-size: 12px;
+}
 .tk-seg button:hover {
   color: var(--ink);
 }

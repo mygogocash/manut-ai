@@ -127,3 +127,34 @@ for (const theme of ["light", "dark"] as const)
       await shoot(page, `row-menu-${theme}-${width}`);
     });
 
+
+for (const theme of ["light", "dark"] as const)
+  for (const width of [1280, 900])
+    test(`the Tasks scope switch leads each choice with its icon, centred in its segment (${theme}, ${width})`, async ({ page }) => {
+      await start(page, theme, width);
+      await page.getByTestId("menu-code").click();
+      await page.getByTestId("tasks-open").click();
+      await expect(page.getByTestId("tasks-page")).toBeVisible();
+      const seg = page.locator(".tk-scope");
+      const parts = await seg.locator("button").evaluateAll((els) =>
+        els.map((b) => {
+          const r = b.getBoundingClientRect();
+          const i = b.querySelector("svg")!.getBoundingClientRect();
+          return { icon: `${Math.round(i.width)}x${Math.round(i.height)}`, top: Math.round(i.top - r.top), bottom: Math.round(r.bottom - i.bottom), left: Math.round(i.left - r.left) };
+        }),
+      );
+      expect(parts).toHaveLength(3);
+      for (const p of parts) {
+        expect(p.icon).toBe("16x16");
+        // the icon stands clear of the segment's edges, the same space above and below
+        expect(Math.abs(p.top - p.bottom)).toBeLessThanOrEqual(1);
+        expect(p.top).toBeGreaterThanOrEqual(5);
+        expect(p.left).toBeGreaterThanOrEqual(8);
+      }
+      // the words do not wrap: one line per segment
+      expect(await seg.locator("button").evaluateAll((els) => els.every((b) => b.getBoundingClientRect().height < 40))).toBe(true);
+      if (SHOTS) {
+        await motionDone(page);
+        await page.screenshot({ path: join(SHOTS, `tasks-scope-${theme}-${width}.png`), clip: { x: 0, y: 0, width, height: 140 }, animations: "disabled" });
+      }
+    });
