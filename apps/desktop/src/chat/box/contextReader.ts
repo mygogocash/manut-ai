@@ -13,6 +13,7 @@ import { accountGroups } from "../../settings/accounts/useAccounts";
 import type { AccountGroup } from "../../lib/protocol";
 import { t } from "../../i18n";
 import { chatScope } from "./scope";
+import { withThrough } from "./carry";
 import type { ContextReader, ReadMsg, ThreadRef } from "./threadContext";
 
 export interface ReaderParts {
@@ -61,7 +62,8 @@ export function appReader(p: ReaderParts): ContextReader {
       }
       return { files: changedFiles(state().chats[key]), moreFiles: 0 };
     },
-    scope: (key) => chatScope(key, state().shops.current, p.sessions.byKey(key), groups()),
+    // with every shop whose context the chat took in, which its chips carry on (item 121)
+    scope: (key) => withThrough(key, chatScope(key, state().shops.current, p.sessions.byKey(key), groups())),
   };
 }
 

@@ -12,7 +12,9 @@
 //
 // Kept on this computer by chat key (`manut.box.carry`), beside that chat's unsent text (app/drafts.ts), so a restart keeps
 // them. Each chip carries the shop or the coding account it was made under (`Scope`): a chip made under one is refused, and
-// never sent, in a chat under another (`scopeRefusal`).
+// never sent, in a chat under another (`scopeRefusal`). Since item 121 a chip also carries every shop whose chat's context the
+// chat it came from took in (`through`, kept by chat as `manut.box.through` when a send takes chips), so a shop's context
+// cannot reach another shop by way of a coding chat: it is refused anywhere one of those shops differs.
 import { useSyncExternalStore } from "react";
 import { t } from "../../i18n";
 
@@ -26,11 +28,16 @@ export const NOTE_MAX = 500;
 export const THREADS_MAX = 3;
 
 /** What a chat belongs to: a team chat to the shop every page shows (`shop`, "" when the runtime lists none), a coding chat to
- *  the account its agent runs as (`account`, `<cli>:<account>`, none for an agent with no accounts). */
+ *  the account its agent runs as (`account`, `<cli>:<account>`, none for an agent with no accounts). `through`: every shop
+ *  whose chat's context the chat took in before (item 121), which its own chips carry on. */
 export interface Scope {
   shop?: string;
   account?: string;
+  through?: string[];
 }
+
+/** Every shop a chip's content has passed through: the shop it was made under and the shops its chat took in. */
+const shopsOf = (s: Scope): string[] => [...(s.shop !== undefined ? [s.shop] : []), ...(s.through ?? [])];
 
 /** A note on a selection. `more`: characters of the selection left out past QUOTE_MAX (0: none). */
 export interface NoteChip {
@@ -55,9 +62,11 @@ export interface ThreadChip {
 export type Carried = NoteChip | ThreadChip;
 
 /** Why a chip made under `from` may not go to a chat under `to`: another shop, or another account of the same agent; null when
- *  it may. A side that names no shop (a coding chat) or no account (a team chat, an agent with none) is no reason. */
+ *  it may. Every shop the chip passed through counts (item 121): a coding chat that took in one shop's context gives chips that
+ *  another shop's chat refuses. A side that names no shop (a coding chat) or no account (a team chat, an agent with none) is no
+ *  reason. */
 export function scopeRefusal(from: Scope, to: Scope): "shop" | "account" | null {
-  if (from.shop !== undefined && to.shop !== undefined && from.shop !== to.shop) return "shop";
+  if (to.shop !== undefined && shopsOf(from).some((shop) => shop !== to.shop)) return "shop";
   const cli = (a: string) => a.slice(0, a.indexOf(":") + 1 || a.length);
   if (from.account && to.account && cli(from.account) === cli(to.account) && from.account !== to.account) return "account";
   return null;
@@ -185,7 +194,13 @@ export const CARRY_KEY = "manut.box.carry";
 
 const isScope = (v: unknown): v is Scope => {
   const s = v as Scope | null;
-  return !!s && typeof s === "object" && (s.shop === undefined || typeof s.shop === "string") && (s.account === undefined || typeof s.account === "string");
+  return (
+    !!s &&
+    typeof s === "object" &&
+    (s.shop === undefined || typeof s.shop === "string") &&
+    (s.account === undefined || typeof s.account === "string") &&
+    (s.through === undefined || (Array.isArray(s.through) && s.through.every((x) => typeof x === "string")))
+  );
 };
 
 /** One saved chip, or null when it cannot be read (a field missing or of the wrong kind). */
@@ -253,6 +268,7 @@ const EMPTY: readonly Carried[] = Object.freeze([]);
 export function setCarryStorage(s: CarryStorage | null): void {
   storage = s ? () => s : browserStorage;
   byChat = parseCarry(storage()?.getItem(CARRY_KEY) ?? null);
+  through = parseThrough(storage()?.getItem(THROUGH_KEY) ?? null);
   for (const l of [...listeners]) l();
 }
 
@@ -280,6 +296,48 @@ export function carry(key: string, chip: Carried): "notes" | "threads" | "same" 
 
 /** Take chip `id` out of chat `key`'s box. */
 export const dropCarried = (key: string, id: string): void => setCarried(key, getCarried(key).filter((c) => c.id !== id));
+
+// ---- the shops a chat took in (item 121) -----------------------------------------------------------------------------
+
+export const THROUGH_KEY = "manut.box.through";
+
+/** The record by chat, defensively: a chat's entry is the strings of its list, anything else is left out. */
+function parseThrough(raw: string | null): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  try {
+    const v: unknown = JSON.parse(raw ?? "{}");
+    if (!v || typeof v !== "object" || Array.isArray(v)) return out;
+    for (const [key, list] of Object.entries(v as Record<string, unknown>)) {
+      out[key] = Array.isArray(list) ? [...new Set(list.filter((x): x is string => typeof x === "string"))] : [];
+    }
+  } catch {
+    /* none kept */
+  }
+  return out;
+}
+
+let through: Record<string, string[]> = parseThrough(storage()?.getItem(THROUGH_KEY) ?? null);
+
+/** Every shop whose chat's context chat `key` took in, by any chip a send took there. */
+export const throughOf = (key: string): string[] => through[key] ?? [];
+
+/** A send in chat `key` took `chips`: every shop they passed through is the chat's now, for the chips made of it later. */
+export function tookIn(key: string, chips: readonly Carried[]): void {
+  const shops = [...new Set([...throughOf(key), ...chips.flatMap((c) => shopsOf(c.scope))])];
+  if (shops.length === throughOf(key).length) return;
+  through = { ...through, [key]: shops };
+  try {
+    storage()?.setItem(THROUGH_KEY, JSON.stringify(through));
+  } catch {
+    /* no storage, or full: it holds for this run */
+  }
+}
+
+/** `scope`, the scope of chat `key`, with the shops that chat took in (`through`) when it took any. */
+export function withThrough(key: string, scope: Scope): Scope {
+  const shops = throughOf(key);
+  return shops.length ? { ...scope, through: shops } : scope;
+}
 
 /** Chat `key`'s chips, for its box. */
 export function useCarried(key: string): readonly Carried[] {

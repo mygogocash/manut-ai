@@ -2010,7 +2010,10 @@ through the store, sessions and shell it is handed), `SelectionNote.tsx`, `Bring
   menu: a + whose one row is files still opens the picker at once, and there a chat comes in by a drag.
 - **Shop and account.** Each chip names the shop (a team chat) or the agent account (a coding chat) it was made under. A chat of
   another shop, or of another account of the same agent, is refused in a plain line before anything of it is read; a kept chip
-  of another shop is red and never sent.
+  of another shop is red and never sent. Since item 121 a chip also carries every shop whose chat's context the chat it came
+  from took in (kept by chat as `manut.box.through` whenever a send takes chips), and is refused anywhere one of those shops
+  differs, so a shop's context cannot reach another shop by way of a coding chat. Sends made before item 121 were not
+  recorded, so a coding chat that took a shop's context in before then carries no shop for it.
 - **Continue with….** A started coding chat's agent chip opens the other models of its agent and the other installed agents that
   chat. A pick opens a NEW chat in the same lane (no second folder or branch) or folder, with the old chat's context above its
   box, unsent; its agent starts with the person's first message, the picked model set first, its own agent keeping the old

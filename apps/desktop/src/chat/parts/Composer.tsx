@@ -16,7 +16,7 @@ import { composing as imeComposing } from "../../lib/ime";
 import { newer, older, onFirstLine, onLastLine, type Recall, type Step } from "./promptHistory";
 import { addAt, matchMembers, mentionAt, putMention, withAction, withFolders, type Member } from "../box/context";
 import { CarriedChips, FolderChips, MentionPicker } from "../box/BoxParts";
-import { goes, setCarried, useCarried, withCarried, type Scope } from "../box/carry";
+import { goes, setCarried, tookIn, useCarried, withCarried, type Scope } from "../box/carry";
 import { SelectionNote } from "../box/SelectionNote";
 import { BringPicker, bringInto, bringRows } from "../box/Bring";
 import { readRef, THREAD_DRAG, type ThreadRef } from "../box/threadContext";
@@ -173,9 +173,12 @@ export function Composer({
   const has = text.trim().length > 0 || good.length > 0 || folders.length > 0 || going.length > 0;
   /** What goes: the carried chips that may, then the text with its folders on their own lines. */
   const full = () => withCarried(folders.length ? withFolders(text, folders) : text, carried, scope);
-  /** A send or Cmd+S took the chips that may go here; refused ones stay, as red files do. */
+  /** A send or Cmd+S took the chips that may go here; refused ones stay, as red files do. The chat keeps every shop they
+   *  passed through, so its own chips carry them on (item 121). */
   const sentCarried = () => {
-    if (going.length) setCarried(bot.name, carried.filter((c) => !going.includes(c)));
+    if (!going.length) return;
+    tookIn(bot.name, going);
+    setCarried(bot.name, carried.filter((c) => !going.includes(c)));
   };
   const store = useStore();
   // where an ArrowUp/ArrowDown walk through `history` stands (promptHistory.ts)
