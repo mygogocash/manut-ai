@@ -99,7 +99,9 @@ The fixes are items 85e to 85i in `docs/plan.md`; the motion is items 85a to 85c
 19. **Dark, Settings, General:** in the Appearance preview a chip is white text on a near-white ground
     (`settings/settings.css`, a hand-typed `#fff`). Seen.
 20. **At 900 wide,** Team's and Customize's right panel drops under a half-height list and leaves a blank strip, and
-    Settings shows three columns with 485px left for the page. Seen.
+    Settings shows three columns with 485px left for the page. Seen. Fixed in item 85i (26 Nov) for Team and Customize
+    (Settings in 85h): under the width where the two cannot stand side by side (936 for Team, 976 for Customize, with the
+    196px menu), the list keeps its own height and the panel follows it with its edge on top, as BrandLayout says.
 
 ### Words
 

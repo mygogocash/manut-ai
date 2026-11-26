@@ -152,6 +152,31 @@ test("Code opens on the grey Lanes band and its empty state, names each coding t
   }
 });
 
+test("at 900 wide, Team's and Customize's right panel follows the list at its own height, its edge on top, with no blank strip", async ({ page }) => {
+  await page.setViewportSize({ width: 900, height: 820 });
+  await start(page);
+  for (const [row, list, side] of [["team", ".teamp > .pane", "pause-side"], ["customize", ".brain > .pane", "routines"]] as const) {
+    await page.getByTestId(`menu-${row}`).click();
+    await expect(page.getByTestId(side)).toBeVisible();
+    await motionDone(page);
+    const pane = page.getByTestId(`page-${row}`).locator(list);
+    const [p, s] = await Promise.all([pane.boundingBox(), page.getByTestId(side).boundingBox()]);
+    // below the list, the full width of the column
+    expect(Math.round(s!.y), row).toBe(Math.round(p!.y + p!.height));
+    expect(Math.round(s!.width), row).toBe(Math.round(p!.width));
+    // the list is as tall as what it holds: its last child ends within its own padding of its bottom
+    const gap = await pane.evaluate((e) => {
+      const last = e.lastElementChild!.getBoundingClientRect();
+      return e.getBoundingClientRect().bottom - last.bottom;
+    });
+    expect(gap, row).toBeLessThanOrEqual(32);
+    expect(await page.getByTestId(side).evaluate((e) => [getComputedStyle(e).borderLeftWidth, getComputedStyle(e).borderTopWidth])).toEqual(["0px", "1px"]);
+  }
+  // at 1280 they stand side by side again, the panel's edge on its left
+  await page.setViewportSize({ width: 1280, height: 820 });
+  await expect.poll(() => page.getByTestId("routines").evaluate((e) => getComputedStyle(e).borderLeftWidth)).toBe("1px");
+});
+
 test("pictures of every menu page and Settings, at 1280 and 900, light and dark", async ({ page }) => {
   test.skip(!SHOTS, "QUIET_SHOTS=<dir> keeps the pictures");
   test.setTimeout(240_000);
