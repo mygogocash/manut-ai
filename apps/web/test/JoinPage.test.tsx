@@ -385,17 +385,27 @@ describe("the join page's sign-in", () => {
   });
 
   it("counts down to a new code from when the answer arrived, then offers one", async () => {
-    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
+    // The test owns the clock: the system time is pinned before anything renders, so "when the answer arrived" is a
+    // fixed instant, and the page's one-second interval moves only when the test advances it. Real time never enters
+    // the count, so a slow runner cannot read a different second.
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"], now: new Date("2026-11-27T03:00:00.000Z") });
     const { api } = signedInApi();
     renderWithApi(<JoinPage token={TOKEN} />, api);
     fireEvent.change(screen.getByLabelText("Email"), { target: { value: "mint@baanmali.example" } });
     fireEvent.click(screen.getByRole("button", { name: "Send code" }));
     expect(await screen.findByText("You can ask for a new code in 1:00.")).toBeTruthy();
+    // The page starts its interval in an effect, which React may flush a moment after the text shows. Let it run, so
+    // the first advance below always meets a ticking page rather than one still starting.
+    await act(async () => {});
     expect(screen.queryByRole("button", { name: "Send a new code" })).toBeNull();
     act(() => vi.advanceTimersByTime(18_000));
     expect(screen.getByText("You can ask for a new code in 0:42.")).toBeTruthy();
-    act(() => vi.advanceTimersByTime(42_000));
+    act(() => vi.advanceTimersByTime(41_000));
+    expect(screen.getByText("You can ask for a new code in 0:01.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Send a new code" })).toBeNull();
+    act(() => vi.advanceTimersByTime(1_000));
     expect(screen.getByRole("button", { name: "Send a new code" })).toBeTruthy();
+    expect(screen.queryByText(/You can ask for a new code in/)).toBeNull();
   });
 
   it("goes back to the address with Use another email, keeping what was typed", async () => {
