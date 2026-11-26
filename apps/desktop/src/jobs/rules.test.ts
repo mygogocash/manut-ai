@@ -12,6 +12,7 @@ import {
   BUDGET,
   budgetAskOpened,
   budgetAskSettled,
+  budgetChanged,
   budgetClock,
   budgetDone,
   budgetDue,
@@ -256,6 +257,23 @@ describe("the budget of one helper lane", () => {
         expect(c.b.steps).toBe(3);
         expect(c.b.sinceChange).toBe(0);
         expect(c.b.nudgeAt).toBe(BUDGET.nudgeSteps);
+      },
+    },
+    {
+      // Item 102h: an agent reports a step and then the change it made, so the change restarts the nudge's count without a second
+      // step; while an ask waits it changes nothing, as a step does not
+      name: "a change reported after its step restarts the nudge's count and counts no step",
+      run: () => {
+        const c = new Clocked().steps(30);
+        c.b = budgetChanged(c.b);
+        expect(c.b.steps).toBe(30);
+        expect(c.b.sinceChange).toBe(0);
+        expect(c.b.nudgeAt).toBe(BUDGET.nudgeSteps);
+        const same = c.b;
+        expect(budgetChanged(same)).toBe(same);
+        c.steps(5).ask("q1");
+        const held = c.b;
+        expect(budgetChanged(held)).toBe(held);
       },
     },
     {
@@ -635,8 +653,8 @@ class Q {
     this.r = o.rounds;
     return o.kept;
   }
-  drop(round?: string) {
-    const o = dropWaiting(this.r, round);
+  drop(round?: string, index?: number) {
+    const o = dropWaiting(this.r, round, index);
     this.r = o.rounds;
     return o.dropped;
   }
@@ -925,6 +943,21 @@ describe("rounds of helper lanes", () => {
         // nothing of r1 started, so it has nothing to tell the lead and goes
         expect(q.round("r1")).toBeUndefined();
         expect(q.round("r2")?.back).toBe(false);
+      },
+    },
+    {
+      // Design R5 and R7 (item 102h): the person's Stop on one waiting row drops that helper alone, counted as the person's
+      name: "the person's Stop on one waiting helper drops it alone and the round goes on",
+      run: () => {
+        const q = new Q();
+        q.open("r1", ["a", "b", "c"]);
+        expect(q.drop("r1", 1)).toBe(1);
+        expect(q.r.waiting.map((w) => w.index)).toEqual([0, 2]);
+        expect(q.round("r1")?.dropped).toEqual({ breaker: 0, person: 1 });
+        // an index that is not waiting drops nothing
+        expect(q.drop("r1", 1)).toBe(0);
+        expect(q.start()?.index).toBe(0);
+        expect(q.start()?.index).toBe(2);
       },
     },
     // Not ported: BuddyBatchingTests.takeSettledWave. It is GoSpark's company waves, whose reports went to a wave driver instead
