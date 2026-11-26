@@ -102,7 +102,8 @@ function RepoPicker({ source, repo, recent, onPick }: { source: CliSource; repo:
     <span className="pg-chipwrap">
       <button type="button" className="tk-repo" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen((o) => !o)} data-testid="tasks-repo">
         <SourceMark source={source} size={12} />
-        <span>{repo || t("tasks.pickRepo")}</span>
+        {/* a repository's name is set as code; the words asking for one are not */}
+        <span className={repo ? "tk-repo-name" : undefined}>{repo || t("tasks.pickRepo")}</span>
       </button>
       <Popover open={open} onClose={() => setOpen(false)} align="left" width={280} label={t("tasks.pickRepo")}>
         <form
