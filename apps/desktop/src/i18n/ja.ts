@@ -53,6 +53,7 @@ import { id } from "./ja/id";
 import { imp } from "./ja/imp";
 import { inbox } from "./ja/inbox";
 import { job } from "./ja/job";
+import { jobview } from "./ja/jobview";
 import { key } from "./ja/key";
 import { kit } from "./ja/kit";
 import { lane } from "./ja/lane";
@@ -213,6 +214,7 @@ export const ja: Record<Key, string> = {
   ...imp,
   ...inbox,
   ...job,
+  ...jobview,
   ...key,
   ...kit,
   ...lane,

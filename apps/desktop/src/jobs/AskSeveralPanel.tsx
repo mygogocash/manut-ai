@@ -184,15 +184,18 @@ export function refusalWords(r: AskRefusal, agents: Parameters<typeof agentLabel
 }
 
 /** The panel's own box key: its unsent text is kept as any chat's is (app/drafts.ts). */
-const BOX_KEY = "agent:several";
+export const BOX_KEY = "agent:several";
 
-export function AskSeveralPanel({ at, accountWord, onBack, onClose }: { at: string; accountWord: (agent: AgentId) => string; onBack: () => void; onClose: () => void }) {
+export function AskSeveralPanel({ at, accountWord, onBack, onClose, initial }: { at: string; accountWord: (agent: AgentId) => string; onBack: () => void; onClose: () => void; initial?: readonly AskPick[] }) {
   const ss = useSessions();
   const accounts = useAccounts();
   const choices = useAgentChoices();
   const nowS = Math.floor(Date.now() / 1000);
   const here = chatAgents(offeredAgents(ss.agents ?? []), ss.recent);
-  const [picks, setPicks] = useState<AskPick[]>(() => firstPicks(offeredAgents(ss.agents ?? []), ss.recent, choices, accounts.groups));
+  // Ask them again (item 102b) opens it on the rows the job was started with, tidied against what each agent lists now
+  const [picks, setPicks] = useState<AskPick[]>(() =>
+    initial && initial.length >= MIN_ASK ? initial.slice(0, MAX_ASK).map((p) => tidyPick(p, choices)) : firstPicks(offeredAgents(ss.agents ?? []), ss.recent, choices, accounts.groups),
+  );
   const [problem, setProblem] = useState("");
   // the box is made again after a refused send, so the words the person typed come back (the box clears what it sends)
   const [again, setAgain] = useState(0);
