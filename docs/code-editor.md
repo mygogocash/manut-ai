@@ -1138,7 +1138,25 @@ helper or a status line program in a chat the app starts, where the agent has a 
   instruction files"). Checked on this Mac with OpenCode 2.3.0: `opencode debug config --standalone` in a folder with an
   `opencode.json` and a `.opencode` folder lists both as sources without it and neither with it, while the person's own
   configuration and an inline `OPENCODE_CONFIG_CONTENT` stay. A person's variable of that name is refused on Settings ›
-  Providers, as the app's own, and the app's value goes last. Since item 114 the inline value (after the ask rules) also says
+  Providers, as the app's own, and the app's value goes last.
+
+  **How OpenCode's own rules are read** (item 89, both forms since item 114). Before a chat starts, OpenCode lists its agents
+  and their resolved permission rules, the app builds ask rules from them (what the person allows for the shell and for edits
+  asks, what they deny stays denied) and sets them in `OPENCODE_CONFIG_CONTENT`, lists again, and starts the chat only when
+  OpenCode took exactly them and nothing else changed (`acp_chat::probe_rules`). OpenCode 2.3.0 has no `opencode agent list`:
+  it prints its help and ends with code 1, so every OpenCode chat was refused on this Mac. It lists the same fact as JSON with
+  `opencode debug agents --standalone` (each agent's `id`, `mode` and `permissions` as `action`, `resource`, `effect`), names the
+  shell tool `shell` rather than `bash` (its config still takes `bash`), matches case as written on every platform, and
+  decides by the last rule that matches, else ask (read in its bundle, and recorded on this Mac for five configs in
+  `tests/fixtures/acp/opencode2-rules.json`). `--standalone` matters: without it the listing comes from OpenCode's background
+  service, started earlier with other variables, while `opencode acp` always starts a server of its own that inherits the
+  chat's. The app tries the 2.x listing first and then 1.x's `agent list`; a listing that fails or cannot be read moves on to
+  the other, one whose rules were read but not kept refuses the chat at once, and neither readable refuses it as before ("could
+  not confirm it would keep your own OpenCode permission rules"). Not exercised: an OpenCode 2.3.0 chat itself (no agent was
+  run), so how 2.3.0's ACP side answers the chat's own messages is still only what item 89 recorded from 1.19.5; and
+  2.3.0's Code Mode `execute` and its own schedules, which are other actions than the shell and edits.
+
+  Since item 114 the inline value (after the ask rules) also says
   `"formatter": false` and `"lsp": false`: OpenCode runs formatters after its write, edit and patch tools and language servers
   for the files it touches, and both find and run the project's own tools and configs (a project-local Prettier, an ESLint
   config), so the person's own config switching them on would still run the project's code with no card. Both keys take
