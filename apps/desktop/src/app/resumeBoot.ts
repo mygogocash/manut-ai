@@ -80,6 +80,8 @@ function snapshot(): ResumeSnap {
         ...(r.modelWant ? { modelWant: r.modelWant } : {}),
         // the lanes one Ask several message started stay one job after a restart (item 102a)
         ...(r.job ? { job: r.job } : {}),
+        // a helper lane stays under its lead after a restart (item 102h)
+        ...(r.helperOf ? { helperOf: r.helperOf } : {}),
       })),
       messages: (id) => {
         const key = ss.chatKey(id);

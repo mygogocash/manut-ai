@@ -1,8 +1,9 @@
 // Item 102e (docs/several-agents.md, "4. Helper lanes a lane asks for"): the Helpers switch in a lane's box, a helper block hidden
 // while the lead's answer streams, and the Start helpers card when the turn ends, one approval settled once. Kit's chat runs on the
 // stand-in coding agent of src/sessions/host.mock.ts, whose `/helpers <word>` answer ends with helper blocks written a few words at a
-// time, as kit-lanes.spec.ts's lanes run on it; Buddy's chat on Practice, whose Buddy answers through the same stand-in. Nothing in
-// item 102e starts a helper lane: the stand-in shell must see no `chat.start` but the lead's own, whatever is pressed. Pictures of
+// time, as kit-lanes.spec.ts's lanes run on it; Buddy's chat on Practice, whose Buddy answers through the same stand-in. Only Start
+// helpers starts helper lanes (item 102h, e2e/helper-runs.spec.ts): Not now and a refused request leave the stand-in shell with no
+// `chat.start` but the lead's own. Pictures of
 // the card, light and dark, go to HELPERS_SHOTS (else Playwright's ignored test-results).
 import { join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
@@ -114,15 +115,19 @@ test.describe("a lane's chat", () => {
     expect(await chatStarts(page)).toBe(lead);
   });
 
-  test("Start helpers is settled once and starts no agent in this version", async ({ page }) => {
+  test("Start helpers is settled once, and its helper lanes start in their agents' Ask mode (item 102h)", async ({ page }) => {
     await lane(page);
     await page.getByTestId("helpers-switch").click();
     await send(page, "/helpers two");
     const card = page.getByTestId("helpers-card");
     await expect(card).toBeVisible();
     await card.getByTestId("helpers-start").click();
-    await expect(page.getByTestId("helpers-line")).toHaveText(/You approved this round\. This version does not start helper lanes yet, so none started\./);
-    expect(await chatStarts(page)).toBe(1);
+    await expect(page.getByTestId("helpers-line")).toHaveText(/You approved this round\. Its helper lanes start below\./);
+    await expect(page.getByTestId("helpers-card")).toHaveCount(0);
+    await expect(page.getByTestId("helper-run-row")).toHaveCount(2);
+    await expect.poll(() => chatStarts(page)).toBe(3);
+    const modes = (await calls(page)).filter((c) => c.op === "chat.start").map((c) => (c as { mode?: string }).mode);
+    expect(modes.slice(1)).toEqual(["ask", "default"]);
   });
 
   test("a block with a key a helper never takes is refused whole: a line, no card, no agent", async ({ page }) => {

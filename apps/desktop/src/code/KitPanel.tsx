@@ -209,7 +209,9 @@ function LaneBelow({ root, row, backOpen, onCloseBack }: { root: string; row: La
   useEffect(() => {
     if (backOpen && !row.canBringBack) onCloseBack();
   }, [backOpen, row.canBringBack, onCloseBack]);
-  const own = laneBase(row);
+  // a helper lane's work goes back to its lead by landing (item 102i), never by merging its lead's branch into it or by a pull request
+  // of its own (docs/several-agents.md, "What it does not do"): it offers neither main-moved's merge nor Put up for review
+  const own = row.helper ? null : laneBase(row);
   return (
     <>
       {backOpen && row.canBringBack ? <BringBack id={row.id} onClose={onCloseBack} /> : null}

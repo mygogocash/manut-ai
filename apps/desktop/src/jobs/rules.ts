@@ -129,6 +129,14 @@ export function budgetStep(b: Budget, changedFile: boolean): Budget {
     : { ...b, steps: b.steps + 1, sinceChange: b.sinceChange + 1 };
 }
 
+/** A file changed without another step being counted: an agent reports a tool call (`tool.start`, a step) and then the change it
+ *  made (`tool.diff`), so the change restarts the nudge's count after its step was counted (item 102h). While an ask waits the count
+ *  stands still, as `budgetStep`'s does. */
+export function budgetChanged(b: Budget): Budget {
+  if (b.asks.length || (b.sinceChange === 0 && b.nudgeAt === BUDGET.nudgeSteps)) return b;
+  return { ...b, sinceChange: 0, nudgeAt: BUDGET.nudgeSteps };
+}
+
 /** An ask or a question of the helper now waits on the person. The first one stops the clock where it is. This is the design's
  *  addition to GoSpark, whose watchdog only waited for an answer once time was up: here a slow answer never costs a helper any
  *  of its minutes. */
@@ -500,9 +508,10 @@ export function recordBack<B>(r: Rounds<B>, report: HelperReport): { rounds: Rou
 }
 
 /** The person's Stop all: the helpers still waiting go without starting, those of one round or of every round, so a round stopped
- *  by hand does not refill from its own queue as its helpers stop. Returns how many went. */
-export function dropWaiting<B>(r: Rounds<B>, round?: string): { rounds: Rounds<B>; dropped: number } {
-  const going = r.waiting.filter((w) => round === undefined || w.round === round);
+ *  by hand does not refill from its own queue as its helpers stop. With `index`, only that waiting helper of the round goes: the
+ *  person's Stop on its row (item 102h). Returns how many went. */
+export function dropWaiting<B>(r: Rounds<B>, round?: string, index?: number): { rounds: Rounds<B>; dropped: number } {
+  const going = r.waiting.filter((w) => (round === undefined || w.round === round) && (index === undefined || w.index === index));
   if (!going.length) return { rounds: r, dropped: 0 };
   const rounds = r.rounds.map((x) => {
     const n = going.filter((w) => w.round === x.id).length;

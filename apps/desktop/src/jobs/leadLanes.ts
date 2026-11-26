@@ -4,9 +4,9 @@
 // answer when its turn ends, and turns a request into the Start helpers card or a line that says why there is none.
 //
 // Nothing here starts an agent. Start helpers settles the card's one approval in approval-core (`helperAsks.ts`), records the round
-// with item 102d's rules (`openRound` in `rules.ts`), and hands the round to whoever listens on `whenRoundApproved`: item 102h will,
-// to start each helper lane in its asking mode. Until then nothing listens, so nothing starts. The person's press is the only way
-// there: `answer` is called from the card's buttons, and nothing an agent writes reaches it.
+// with item 102d's rules (`openRound` in `rules.ts`), and hands the round to whoever listens on `whenRoundApproved`: item 102h does,
+// to start each helper lane in its asking mode (`helperRuns.ts`, which the sessions store hands every approved round). The person's
+// press is the only way there: `answer` is called from the card's buttons, and nothing an agent writes reaches it.
 import { t as tr, type Key } from "../i18n";
 import { agentDef, sessionMode, type AgentInfo, type SessionRec } from "../sessions/agents";
 import type { ChatEvent } from "../sessions/host";
@@ -69,9 +69,9 @@ export function refusalWords(r: HelperRefusal): string {
 /** Whether session `rec` may offer the Helpers switch (R1, R4): a lane's chat with a folder of its own, so a landing can only ever
  *  write there, never the developer's own folder; not a workflow's lane, which nobody may be watching and which is read careful;
  *  and only an agent that runs as a chat in the app. Buddy's chat and a terminal are not sessions of this kind at all. A helper
- *  lane (item 102h) will not offer it either: a helper lane cannot ask for helper lanes. */
+ *  lane (item 102h, `helperOf`) does not offer it either: a helper lane cannot ask for helper lanes. */
 export function helpersOffered(rec: SessionRec | undefined, agents: readonly AgentInfo[] | null): boolean {
-  if (!rec || rec.status === "draft" || rec.workflow || !rec.lane?.dir) return false;
+  if (!rec || rec.status === "draft" || rec.workflow || rec.helperOf || !rec.lane?.dir) return false;
   return sessionMode(agents as AgentInfo[] | null, rec) === "chat";
 }
 
@@ -210,8 +210,8 @@ export function createLeadLanes(deps: LeadDeps) {
       for (const l of [...listeners]) l(approved);
       return { ok: true };
     },
-    /** Item 102h's hand-off: hear each round the person approved, to start its helper lanes. Nothing in item 102e listens, so
-     *  approving a round starts no agent. The returned function stops it. */
+    /** Item 102h's hand-off: hear each round the person approved, to start its helper lanes (the sessions store hands each to
+     *  `helperRuns.ts`). The returned function stops it. */
     whenRoundApproved(fn: (r: HelperRoundApproved) => void): () => void {
       listeners.add(fn);
       return () => {
@@ -220,6 +220,11 @@ export function createLeadLanes(deps: LeadDeps) {
     },
     /** Session `id`'s rounds as item 102d's rules keep them (tests, and item 102h). */
     roundsOf: (id: string): Rounds<HelperRow> => rounds.get(id) ?? noRounds<HelperRow>(),
+    /** Item 102h moves session `id`'s rounds on as its helper lanes start, stop and come back (`startNext`, `recordBack`,
+     *  `dropWaiting`); this store keeps the one value, so a card's next press reads where they stand. */
+    setRounds(id: string, r: Rounds<HelperRow>): void {
+      rounds.set(id, r);
+    },
     /** Session `id` closed: what was kept for it goes. */
     forget(id: string): void {
       rounds.delete(id);

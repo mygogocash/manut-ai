@@ -177,6 +177,16 @@ export interface SessionHost extends HistoryHost {
   /** Settings › Worktrees: check the folder chosen for lanes' folders and make it; resolves with its real path, rejects with a
    *  code (`bad_root`, `root_too_broad`, `root_in_checkout`, `root_unwritable`). */
   laneRootCheck?(root: string): Promise<string>;
+  /** A helper lane's own working folder (item 102f, src-tauri/src/lane_helper.rs; item 102h starts its agent there): a snapshot of
+   *  the lead lane's folder `lead` (the lane's `worktree`) as it is now, kept under the app's own ref and checked out in a new
+   *  worktree beside the lead's, on a branch named from the lead's (`kit/<words>-help-1`), its record naming job `job`. The lead's
+   *  index, HEAD, branch, stash and files never change, nothing is pushed and no agent starts. Rejects with a short code
+   *  (`bad_job`, `not_a_lane`, `lead_is_helper`, `busy`, `no_commit`, `taken`, `no_folder`, `git_missing`) or git's own line, with
+   *  nothing made. Absent in a shell older than helper lanes: none then starts. */
+  laneHelperWorktree?(lead: string, job: string): Promise<LaneMade>;
+  /** This computer's memory in bytes (item 102h, src-tauri/src/machine.rs; docs/several-agents.md R7), read once by the shell with no
+   *  program run, so the page can tell how many helper lanes run at once. Null when it could not be read. */
+  machineMemory?(): Promise<number | null>;
   /** Settings › MCP and Skills: the MCP servers and skills Claude Code and Codex have, by name and where each comes from, read
    *  from their own files (src-tauri/src/agent_config.rs) for the person's own home and, when given, the project folder `cwd`.
    *  Only reads. Null where this computer's files cannot be read (a plain browser). */

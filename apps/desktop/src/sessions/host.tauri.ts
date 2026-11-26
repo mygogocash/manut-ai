@@ -255,6 +255,17 @@ export class TauriHost implements SessionHost, BuddyHost {
     if (!made) throw new Error("no_folder");
     return made;
   }
+  async laneHelperWorktree(lead: string, job: string) {
+    const { invoke } = await this.core();
+    const made = readMade(await invoke<unknown>("lane_helper_worktree", { lead, job }));
+    if (!made) throw new Error("no_folder");
+    return made;
+  }
+  async machineMemory() {
+    const { invoke } = await this.core();
+    const n = await invoke<unknown>("machine_memory");
+    return typeof n === "number" && Number.isFinite(n) && n > 0 ? n : null;
+  }
   async laneList(cwd: string) {
     const { invoke } = await this.core();
     return readKept(await invoke<unknown>("lane_list", { cwd }));

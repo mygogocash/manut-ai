@@ -418,6 +418,19 @@ export interface SessionRec {
   /** Ask several agents (item 102a, src/jobs/ask.ts): the id of the job whose one message started this lane. Every lane of a job
    *  is an ordinary lane started in its agent's Ask mode; the id only groups them in the Lanes band. Saved with the session. */
   job?: string;
+  /** A helper lane (item 102h, src/jobs/helperRuns.ts): the lead lane it was started for, the job its lead's helper lanes share (the
+   *  shell's ref names it, item 102f), the round the person approved with Start helpers and its place in that round (Helper 1 is 0).
+   *  It is an ordinary lane started in its agent's Ask mode, which the person cannot change while it runs, and it never offers the
+   *  Helpers switch: a helper lane cannot ask for helper lanes. Saved with the session. */
+  helperOf?: HelperOf;
+}
+
+/** What a helper lane's record names of its lead and its round (SessionRec `helperOf`). */
+export interface HelperOf {
+  lead: string;
+  job: string;
+  round: string;
+  index: number;
 }
 
 /** How long a TERMINALS card's second line may be (the card truncates it further with an ellipsis). */

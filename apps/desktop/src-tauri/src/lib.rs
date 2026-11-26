@@ -29,6 +29,7 @@ mod lane_config;
 mod lane_diff;
 mod lane_helper;
 mod lane_land;
+mod machine;
 mod outside_use;
 mod past_chats;
 mod import_past;
@@ -1035,6 +1036,14 @@ async fn lane_take_back(helper: String) -> Result<lane_land::TakenBack, String> 
     tauri::async_runtime::spawn_blocking(move || lane_land::take_back(&home, &helper)).await.map_err(|e| e.to_string())?
 }
 
+/// How much memory this computer has, in bytes (item 102h, machine.rs; docs/several-agents.md R7): read once from the kernel
+/// (`hw.memsize` on macOS), with no program run, so the page can tell how many helper lanes run at once. Null when it could not
+/// be read, which the page counts as the smallest Mac the app runs on.
+#[tauri::command]
+fn machine_memory() -> Option<u64> {
+    machine::memory_bytes()
+}
+
 /// Settings › MCP and Skills: the MCP servers and skills Claude Code and Codex have, by name and where each comes from, read
 /// from their own files for the person's own home and, when given, the project folder `cwd` (agent_config.rs). Only reads,
 /// and names only: never a command, an argument, an environment value, a header or an address.
@@ -1978,6 +1987,7 @@ fn commands(invoke: tauri::ipc::Invoke) -> bool {
         lane_helper_worktree,
         lane_land,
         lane_take_back,
+        machine_memory,
         lane_list,
         lane_projects,
         lane_remove,

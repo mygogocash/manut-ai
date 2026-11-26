@@ -3,18 +3,20 @@
 // workflow's steps are, with the agent, model and effort it would run on, and what the app already knows will not start. It is one
 // approval of the lead lane, settled once through approval-core (`helperAsks.ts`): Not now first, so the left-most answer is the
 // safe one, then Start helpers, the card's one black button. Once settled, or once the lead's turn moved on, it collapses to one
-// line. Starting the helper lanes is item 102h's: until then Start helpers records the round and says that none started.
+// line. Once the person pressed Start helpers, the round's helper lanes start (item 102h) and the Helpers card with their rows,
+// their Stop and Stop all follows the line (`HelperRunCard.tsx`).
 //
 // `HelpersCardView` draws from props alone, so a test renders each state; `HelpersAskCard` is the timeline's, which presses through
 // the sessions store.
 import "./helpers.css";
-import { useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { t, type Key } from "../i18n";
 import { maskSecrets, revealHidden } from "../lib/secrets";
 import { agentDef } from "../sessions/agents";
 import { getSessions } from "../sessions/sessions";
 import type { HelpersAskItem } from "../state/types";
 import type { HelperRow, HelpersAsk } from "./helperAsks";
+import { HelperRunCard } from "./HelperRunCard";
 import { BUDGET, MAX_ROUNDS, ROUND_MAX } from "./rules";
 
 /** What a row says about where the helper lane runs: its agent, then its model and effort, or why it will not start. */
@@ -54,12 +56,14 @@ export interface HelpersCardViewProps {
   busy?: boolean;
   /** why the last press was not taken */
   error?: string | null;
+  /** how many helper lanes run at once on this Mac, once its memory was read (item 102h) */
+  atOnce?: number | null;
   onStart?: () => void;
   onNotNow?: () => void;
 }
 
 /** The card from props alone: open with its rows and buttons, or settled into one line. */
-export function HelpersCardView({ ask, done, busy, error, onStart, onNotNow }: HelpersCardViewProps) {
+export function HelpersCardView({ ask, done, busy, error, atOnce, onStart, onNotNow }: HelpersCardViewProps) {
   const n = ask.rows.length;
   const title = n === 1 ? t("helpers.ask.one") : t("helpers.ask.many", { n });
   if (done) {
@@ -101,6 +105,12 @@ export function HelpersCardView({ ask, done, busy, error, onStart, onNotNow }: H
         ))}
       </ol>
       <p className="hl-lines">{t("helpers.lines", { minutes: BUDGET.stopMs / 60_000, steps: BUDGET.stopSteps })}</p>
+      {/* this Mac's cap (rule R7), said only once the shell read the memory and only when the round is more than it runs at once */}
+      {atOnce && n > atOnce ? (
+        <p className="hl-at-once" data-testid="helpers-at-once">
+          {t("helpers.atOnce", { n: atOnce })}
+        </p>
+      ) : null}
       {ask.heldBack > 0 && (
         <p className="card-note hl-held" data-testid="helpers-held" role="note">
           {t("helpers.heldBack", { asked: n + ask.heldBack, max: ROUND_MAX, left: ask.heldBack })}
@@ -124,10 +134,18 @@ export function HelpersCardView({ ask, done, busy, error, onStart, onNotNow }: H
 }
 
 /** The timeline's card: each press goes to the sessions store, which settles the card's approval once and reads the lead's turn
- *  itself. A press that is refused leaves the card as the store has it and says why under the buttons. */
+ *  itself. A press that is refused leaves the card as the store has it and says why under the buttons. Once Start helpers is taken,
+ *  the round's Helpers card follows its line (item 102h). */
 export function HelpersAskCard({ item }: { item: HelpersAskItem }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const ss = getSessions();
+  const atOnce = useSyncExternalStore(ss.onHelperRuns, ss.helpersAtOnce, ss.helpersAtOnce);
+  const open = !item.done;
+  useEffect(() => {
+    // the card says this Mac's cap while it waits: the shell's memory read, once a run of the app
+    if (open) void ss.readHelpersAtOnce().catch(() => undefined);
+  }, [open, ss]);
   const press = async (start: boolean) => {
     if (busy) return;
     setBusy(true);
@@ -136,5 +154,12 @@ export function HelpersAskCard({ item }: { item: HelpersAskItem }) {
     setBusy(false);
     if (!r.ok) setError(refusedWords(r.refused));
   };
-  return <HelpersCardView ask={item.ask} done={item.done} busy={busy} error={error} onStart={() => void press(true)} onNotNow={() => void press(false)} />;
+  const view = <HelpersCardView ask={item.ask} done={item.done} busy={busy} error={error} atOnce={atOnce} onStart={() => void press(true)} onNotNow={() => void press(false)} />;
+  if (item.done !== "started") return view;
+  return (
+    <>
+      {view}
+      <HelperRunCard round={item.id} />
+    </>
+  );
 }

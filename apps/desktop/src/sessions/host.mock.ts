@@ -10,6 +10,7 @@ import { t } from "../i18n";
 import { steersOf } from "./controls";
 import { withoutHelperPolicy } from "../jobs/helperPolicy";
 import { withoutReachNote } from "../jobs/reachList";
+import { readHelperBrief } from "../jobs/helperBrief";
 import type { DiskLevel, DiskState } from "../lib/disk";
 import type { ImportApp, ImportProfile } from "./term/import";
 import { type GitView } from "../code/moved";
@@ -55,6 +56,7 @@ export interface MockCall {
     | "registry.preview"
     | "power.busy"
     | "lane.worktree"
+    | "lane.helper"
     | "lane.remove"
     | "lane.root"
     | "lane.release"
@@ -102,6 +104,9 @@ export interface MockCall {
   size?: number;
   path?: string;
   keep?: string[];
+  /** lane.helper: the lead lane's folder a helper lane was made from, and its job (item 102f) */
+  lead?: string;
+  job?: string;
   /** lane.worktree: the branch the shell made for a lane, and the one it was made from (main.moved: the one the page named) */
   branch?: string;
   base?: string;
@@ -179,6 +184,8 @@ export interface MockLane {
   /** The developer's folder it was made from. */
   project: string;
   made: number;
+  /** A helper lane's record (item 102f): its job and its lead lane's folder. */
+  helper?: { job: string; lead: string };
 }
 
 export type MockGlobals = MockTurnGlobals & {
@@ -211,6 +218,14 @@ export type MockGlobals = MockTurnGlobals & {
   __manutMockTaken?: string[];
   /** e2e: the lanes' working folders the mock shell made (its records), as `lane_list` lists them */
   __manutLanes?: MockLane[];
+  /** e2e: this computer's memory in bytes, as the shell reads `hw.memsize` (item 102h); unset = 8 GB, the smallest Mac; null = it
+   *  could not be read */
+  __manutMemory?: number | null;
+  /** e2e: the next helper lane's folder is refused with this code, as the shell refuses one (item 102f) */
+  __manutMockHelperRefused?: string;
+  /** e2e: what the stand-in agent does with helper lane `n`'s brief (item 102h): one of its own commands (`/work hold`, `/approve`);
+   *  none: it answers the brief at once */
+  __manutMockHelpers?: Record<number, string>;
   /** e2e: how many files are changed or new in each lane's folder, and how many commits on its branch are not on its base,
    *  by the folder's worktree (none: 0) */
   __manutLaneChanged?: Record<string, number>;
@@ -909,6 +924,36 @@ export class MockHost implements SessionHost, BuddyHost {
     const remoteFrom = start?.remote ? (this.g.__manutRemoteFrom?.[cwd] ?? "") : "";
     return { branch, base, dir: worktree, worktree, left: this.g.__manutLeft?.[cwd] ?? 0, from: remoteFrom, local: start?.remote && !remoteFrom ? "no_remote" : "", config: this.g.__manutConfig?.[cwd] ?? 0, stayed: this.g.__manutStayed?.[cwd] ?? 0 };
   }
+  /** As the shell does it (src-tauri/src/lane_helper.rs, item 102f): only for a lane folder the mock shell made that is not itself a
+   *  helper lane's, on the first `<lead>-help-<n>` no branch has, in a folder beside the lead's, its record naming the job and the
+   *  lead. The snapshot itself is the shell's: here the folder is only listed. */
+  async laneHelperWorktree(lead: string, job: string): Promise<LaneMade> {
+    if (job.length > 40 || !/^[a-z0-9]+(-[a-z0-9]+)*$/.test(job)) throw new Error("bad_job");
+    const lanes = (this.g.__manutLanes ??= []);
+    const rec = lanes.find((l) => l.worktree === lead);
+    if (!rec) throw new Error("not_a_lane");
+    if (rec.helper) throw new Error("lead_is_helper");
+    const refused = this.g.__manutMockHelperRefused;
+    if (refused) {
+      delete this.g.__manutMockHelperRefused;
+      throw new Error(refused);
+    }
+    const taken = (this.g.__manutMockTaken ??= []);
+    const prefix = rec.branch.slice(0, rec.branch.lastIndexOf("/") + 1);
+    const words = rec.branch.slice(prefix.length);
+    const branch = Array.from({ length: 20 }, (_, k) => `${prefix}${words}-help-${k + 1}`).find((n) => !taken.includes(n));
+    if (!branch) throw new Error("taken");
+    const worktree = `${lead.slice(0, lead.lastIndexOf("/"))}/${branch.slice(prefix.length)}`;
+    taken.push(branch);
+    (this.g.__manutBranches ??= {})[worktree] = branch;
+    lanes.unshift({ worktree, dir: worktree, branch, base: rec.branch, project: rec.project, made: Math.floor(Date.now() / 1000), helper: { job, lead } });
+    this.log({ op: "lane.helper", lead, job, branch, path: worktree });
+    return { branch, base: rec.branch, dir: worktree, worktree, left: 0, from: "", local: "", config: 0, stayed: 0 };
+  }
+  /** As the shell reads `hw.memsize` (item 102h): what e2e set, else an 8 GB Mac. */
+  async machineMemory(): Promise<number | null> {
+    return this.g.__manutMemory === undefined ? 8 * 1024 ** 3 : this.g.__manutMemory;
+  }
   /** A browser cannot read this computer's files: nothing, unless e2e gave a stand-in of the shell's answer. */
   async agentConfig(): Promise<AgentConfig[] | null> {
     return this.g.__manutAgentConfig === undefined ? null : readAgentConfig(this.g.__manutAgentConfig);
@@ -1378,6 +1423,20 @@ const MOCK_HELPERS: Record<string, string> = {
   approve: ["One helper lane for this.", "", helperBlock({ title: "Ship it", brief: "Merge and deploy.", approve: true })].join("\n"),
   text: ["A lead asks for helper lanes with a block like this:", "", "````", "```manut-helpers", '{"title": "x", "brief": "y"}', "```", "````", "", "This one I did myself."].join("\n"),
   many: ["Ten small parts.", "", "```manut-helpers", JSON.stringify(Array.from({ length: 10 }, (_, k) => ({ title: `Part ${k + 1}`, brief: `Do part ${k + 1} of the checkout.` }))), "```"].join("\n"),
+  // three helper lanes, more than an 8 GB Mac runs at once (item 102h)
+  three: [
+    "Three parts that do not touch each other.",
+    "",
+    helperBlock({
+      title: "Tests for the QR builder",
+      brief: "In src/qr.ts, promptPayQR(shopId, amount) builds the PromptPay payload. Write tests in src/qr.test.ts for 0, 59.00 and 590.00 baht. Do not touch src/receipt.tsx. Run pnpm test src/qr.test.ts.",
+      agent: "codex",
+    }),
+    "",
+    helperBlock({ title: "The receipt's Thai date", brief: "In src/receipt.tsx show the date in the Thai Buddhist calendar with Intl.DateTimeFormat. Check with pnpm test src/receipt.test.ts." }),
+    "",
+    helperBlock({ title: "LINE share button", brief: "Add a Share to LINE button under the receipt in src/receipt.tsx that opens line.me/R/share with the receipt's link. Check with pnpm test src/receipt.test.ts." }),
+  ].join("\n"),
 };
 
 /** A reach block as a coding chat's agent writes one (item 102k). */
@@ -1592,7 +1651,10 @@ class MockChat {
       if (this.how.noChat) return; // the old program reads it and says nothing
       // the lead's note in front of a message while Helpers is on (item 102e) is read as instructions, not as the command
       // and the note naming its "Kit may reach" list (item 102k)
-      const text = withoutReachNote(withoutHelperPolicy(i.text)).trim();
+      let text = withoutReachNote(withoutHelperPolicy(i.text)).trim();
+      // a helper lane's brief (item 102h): what e2e set for helper lane n (`__manutMockHelpers`), else it does the task at once
+      const brief = readHelperBrief(text);
+      if (brief) text = (globalThis as { __manutMockHelpers?: Record<number, string> }).__manutMockHelpers?.[brief.n] ?? `/helperdone ${brief.n}`;
       if (text === "/exit") {
         this.at(30, () => {
           // a clean exit mid-turn, as the Rust watcher reports it (exit_turn_end)
@@ -1708,6 +1770,16 @@ class MockChat {
         }
         this.at(at + 60, () => this.emit({ event: "message", id: `m${++this.seq}`, text: reply }));
         this.at(at + 200, () => this.end("done"));
+        return;
+      }
+      if (text.startsWith("/helperdone")) {
+        // a helper lane that did its brief (item 102h): one step that changed a file, and a short report
+        this.took(i.id);
+        const n = text.slice(11).trim() || "1";
+        this.at(60, () => this.emit({ event: "tool.start", tool_id: `t-h${n}`, name: "patch", detail: "src/qr.test.ts" }));
+        this.at(140, () => this.emit({ event: "tool.end", tool_id: `t-h${n}`, name: "", ok: true, ms: 70 }));
+        this.say(`Helper ${n}: done. I changed what the brief named and checked it with its own test.`, 220);
+        this.at(600, () => this.end("done"));
         return;
       }
       if (text.startsWith("/reach")) {
