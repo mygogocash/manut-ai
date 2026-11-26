@@ -246,6 +246,8 @@ export type ApprovalItem = {
    *  to update the app. */
   outdated?: boolean;
   resolved?: ApprovalChoice;
+  /** Who settled it, when it was not the person at this Mac: a paired phone's device id (src/remote/serve.ts). */
+  decidedBy?: string;
   expired?: AskExpiry;
   /** Why it stopped waiting, in words, when the runtime said more than the reason ("Already decided by Mint at 19:42"). */
   expiredNote?: string;
@@ -389,8 +391,8 @@ export interface Peek {
 export type Theme = "system" | "dark" | "light";
 /** Colour set for bubbles, links and the accent points (send, badges, live dots). The logo never changes. */
 export type Palette = "manut" | "graphite" | "ocean" | "forest" | "sunset" | "rose";
-/** soft = both sides in tinted bubbles (default); solid = your bubble in the accent colour; open = the bot
- *  writes on the page and only your messages are bubbles. */
+/** soft = both sides in tinted bubbles; solid = your bubble in the accent colour; open = the bot writes on the page
+ *  and only your messages are bubbles (the default since item 85f: the Chat board's look). */
 export type BubbleStyle = "soft" | "solid" | "open";
 export const BUBBLE_STYLES: BubbleStyle[] = ["soft", "solid", "open"];
 export type TextSize = "small" | "medium" | "large";
@@ -598,17 +600,37 @@ const emptyChat = (): Chat => ({
   turnSeq: 0,
 });
 
-const DEFAULT_LOOK: Look = { palette: "manut", bubbles: "soft", text: "small" };
+/** The Chat board's look (item 85f): an answer on the page with only the person's message in a bubble ("open"), at
+ *  the board's sizes ("medium": a 17px answer, a 15px message). */
+export const DEFAULT_LOOK: Look = { palette: "manut", bubbles: "open", text: "medium" };
+/** Saved looks carry this from item 85f on. A look saved before it held the old defaults (soft bubbles, small text)
+ *  whenever the person changed anything else, since the whole look is saved at once: those two values meant "as the
+ *  app draws it" and read as today's defaults. A choice made since is kept as it is. */
+export const LOOK_VERSION = 2;
+
+/** A saved look (`manut.look`), read tolerantly: an unknown value falls back to the default. */
+export function parseLook(raw: string | null): Look {
+  try {
+    const v = raw ? (JSON.parse(raw) as Partial<Look> & { v?: unknown }) : {};
+    const before = v.v !== LOOK_VERSION;
+    const bubbles = BUBBLE_STYLES.includes(v.bubbles as BubbleStyle) && !(before && v.bubbles === "soft") ? (v.bubbles as BubbleStyle) : DEFAULT_LOOK.bubbles;
+    const text = v.text === "small" || v.text === "medium" || v.text === "large" ? (before && v.text === "small" ? DEFAULT_LOOK.text : v.text) : DEFAULT_LOOK.text;
+    return {
+      palette: PALETTES.includes(v.palette as Palette) ? (v.palette as Palette) : DEFAULT_LOOK.palette,
+      bubbles,
+      text,
+    };
+  } catch {
+    return { ...DEFAULT_LOOK };
+  }
+}
+
+/** What `manut.look` holds: the look and the version it was saved under. */
+export const savedLook = (look: Look): string => JSON.stringify({ ...look, v: LOOK_VERSION });
 
 function readLook(): Look {
   try {
-    const raw = typeof localStorage !== "undefined" ? localStorage.getItem("manut.look") : null;
-    const v = raw ? (JSON.parse(raw) as Partial<Look>) : {};
-    return {
-      palette: PALETTES.includes(v.palette as Palette) ? (v.palette as Palette) : DEFAULT_LOOK.palette,
-      bubbles: BUBBLE_STYLES.includes(v.bubbles as BubbleStyle) ? (v.bubbles as BubbleStyle) : "soft",
-      text: v.text === "medium" || v.text === "large" ? v.text : "small",
-    };
+    return parseLook(typeof localStorage !== "undefined" ? localStorage.getItem("manut.look") : null);
   } catch {
     return { ...DEFAULT_LOOK };
   }
@@ -1047,7 +1069,7 @@ export type Action =
   /** chat.send went through: the bot has the message (its "Read" mark). */
   | { type: "send.ok"; bot: string; id: string; now: number }
   | { type: "event"; ev: BridgeEvent; now: number }
-  | { type: "approval.resolved"; bot: string; request_id: string; choice: ApprovalChoice }
+  | { type: "approval.resolved"; bot: string; request_id: string; choice: ApprovalChoice; by?: string }
   | { type: "approval.passed"; bot: string; request_id: string; passed: PassedOnNote }
   | { type: "shops"; list: ShopRow[]; current: string | null; left: ShopLeft[] }
   | { type: "shops.dismiss"; id: string }
@@ -1619,7 +1641,7 @@ export function reduce(state: AppState, a: Action): AppState {
           withItems(
             c,
             c.items.map((i) =>
-              i.kind === "approval" && i.request_id === a.request_id ? { ...i, resolved: a.choice } : i,
+              i.kind === "approval" && i.request_id === a.request_id ? { ...i, resolved: a.choice, ...(a.by ? { decidedBy: a.by } : {}) } : i,
             ),
           ),
         ),
@@ -2084,7 +2106,8 @@ export interface Actions {
   sendWithFiles(text: string, files: OutFile[]): Promise<void>;
   /** A message with files in `bot`'s thread `thread`, as `sendWithFiles` sends one in a main chat. */
   threadSendWithFiles(bot: string, thread: string, text: string, files: OutFile[]): Promise<void>;
-  interrupt(): Promise<void>;
+  /** Stops the running turn of `bot`'s chat (the selected bot's by default), as the chat's Stop does. */
+  interrupt(bot?: string): Promise<void>;
   /** Steer queue, on a held row of `bot`'s main chat (the selected bot's by default). Send now: stop the running
    *  turn (one `chat.interrupt`) and send this one first when it ends. */
   queueSendNow(id: string, bot?: string): Promise<void>;
@@ -2095,7 +2118,8 @@ export interface Actions {
   /** Take it out of the queue and put its text back into the composer. */
   queueEdit(id: string, bot?: string): void;
   queueDelete(id: string, bot?: string): void;
-  respondApproval(requestId: string, choice: ApprovalChoice, bot?: string): Promise<void>;
+  /** `by`: who decided, when it is not the person at this Mac (a paired phone's device id); kept on the card. */
+  respondApproval(requestId: string, choice: ApprovalChoice, bot?: string, by?: string): Promise<void>;
   /** A helper passes an ask of their shop on to its owner with a note (`approval.pass_on`); the card shows the note once
    *  the runtime took it. */
   passOnApproval(requestId: string, note: string, bot?: string): Promise<void>;
@@ -2152,6 +2176,8 @@ export interface Actions {
    *  settled with a yes (src/runtime/artifactAsks.ts). Nothing else can publish or remove a link. */
   artifactsList(): Promise<OpMap["artifacts.list"]["result"]>;
   artifactsPublish(ask: string): Promise<OpMap["artifacts.publish"]["result"]>;
+  /** A bundle of skills (item 84), by the id of the ask the person settled with a yes after looking at every file. */
+  artifactsPublishSkills(ask: string): Promise<OpMap["artifacts.publishSkills"]["result"]>;
   artifactsRemove(ask: string): Promise<OpMap["artifacts.remove"]["result"]>;
   /** Tasks › Linear: whether `bot`'s config names a Linear MCP server (bridge `tasks.linear`, config only). */
   tasksLinear(bot: string): Promise<{ configured: boolean; server: string }>;
@@ -3032,8 +3058,8 @@ export function createStore(bridge: BridgeLike, opts: StoreOptions = {}): Store 
       held.delete(id);
       dispatch({ type: "queue.drop", bot, id });
     },
-    async interrupt() {
-      const bot = state.selectedBot;
+    async interrupt(which) {
+      const bot = botArg(which);
       if (!bot) return;
       try {
         await bridge.request("chat.interrupt", { bot });
@@ -3041,7 +3067,7 @@ export function createStore(bridge: BridgeLike, opts: StoreOptions = {}): Store 
         fail(e);
       }
     },
-    async respondApproval(requestId, choice, bot) {
+    async respondApproval(requestId, choice, bot, by) {
       const b = botArg(bot);
       if (!b) return;
       try {
@@ -3049,7 +3075,7 @@ export function createStore(bridge: BridgeLike, opts: StoreOptions = {}): Store 
         if (route) await route.approve(requestId, choice);
         else if (isSessionChat(b)) throw new Error(tr("ask.sessionEnded"));
         else await bridge.request("approval.respond", { bot: b, request_id: requestId, choice });
-        dispatch({ type: "approval.resolved", bot: b, request_id: requestId, choice });
+        dispatch({ type: "approval.resolved", bot: b, request_id: requestId, choice, ...(by ? { by } : {}) });
       } catch (e) {
         fail(e);
       }
@@ -3133,6 +3159,7 @@ export function createStore(bridge: BridgeLike, opts: StoreOptions = {}): Store 
     routineRemove: (shop, routine) => bridge.request("routine.remove", { shop, routine }),
     artifactsList: () => bridge.request("artifacts.list", {}),
     artifactsPublish: (ask) => bridge.request("artifacts.publish", { ask }),
+    artifactsPublishSkills: (ask) => bridge.request("artifacts.publishSkills", { ask }),
     artifactsRemove: (ask) => bridge.request("artifacts.remove", { ask }),
     tasksLinear: (bot) => (bridge.request as unknown as (op: string, p: unknown) => Promise<{ configured: boolean; server: string }>)("tasks.linear", { bot }),
     async startTaskThread(bot, title, text) {
@@ -3250,7 +3277,7 @@ export function createStore(bridge: BridgeLike, opts: StoreOptions = {}): Store 
     setLook(look) {
       dispatch({ type: "ui.look", look });
       try {
-        if (typeof localStorage !== "undefined") localStorage.setItem("manut.look", JSON.stringify(state.ui.look));
+        if (typeof localStorage !== "undefined") localStorage.setItem("manut.look", savedLook(state.ui.look));
       } catch {
         /* no storage */
       }

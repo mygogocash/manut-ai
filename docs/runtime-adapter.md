@@ -943,6 +943,29 @@ change (`src/runtime/artifactAsks.ts`).
   the list unreadable rather than shown in part. Nothing is kept: the links live in the page's state only, never the store, the
   kept read of the shop, an event or a log.
 
+## Skills shared by a link
+
+Item 84 (the routes are `docs/pilot-api.md`, "Skill links"). Behind Settings › Artifacts › Allow sharing skills by link, off by
+default and apart from the pages' switch (`src/lib/artifactLinks.ts`): while it is off no skill is read, published or fetched.
+The rules a bundle keeps are in three places that say the same thing: `apps/api/src/artifact-store.ts`,
+`src/runtime/skillBundle.ts` and `src-tauri/src/skill_links.rs`.
+
+- **Sharing.** The Artifacts page's Share skills as a link offers the person's own skills from Settings › MCP and Skills' list
+  (`from: home`, by folder name). The shell reads each folder (`skill_bundle_read`) following no link: a link, a binary, an
+  over-large or special file is named and stops the publish, and dot-files are left out and named. A file in which the key masker
+  (`src/lib/secrets.ts`) finds a key stops it too, named, never shown. Otherwise `askToShareSkills` opens a `public_post` whose
+  detail is the exact bundle; its Yes is refused (`not_reviewed`) until every file was opened or the tick is set
+  (`src/runtime/fileReview.ts`). `artifacts.publishSkills` takes only the ask's id, checks the rules and keys again, and sends
+  exactly `{ title, kind: "skills", skills }` (`skills_off` while the switch is off, nothing sent).
+- **Installing.** Settings › MCP and Skills › Install skills from a link (`src/settings/mcp/InstallSkills.tsx`). The origin comes
+  from `artifacts.list`; a link anywhere else is refused on the page (`installLink.ts`) and by the shell (`skill_link_read`,
+  `other_host`) before anything is fetched. The shell fetches `/a/{link}.json` with its curl (`api_link::fetch_link`: no token,
+  no redirect, 512 KiB at most), holds it to the rules again and keeps it by id. `skill_install_ask` writes nothing and answers
+  the ask; `src/runtime/skillInstallAsks.ts` opens it as approval-core's `command`, holds its Yes for the same review, and only a
+  settled Yes reaches `skill_install_settle`, once. The shell then writes each skill as a new folder in Claude Code's `skills/` or
+  `~/.agents/skills/` for Codex: the skills folder may not be a link (`link_root`), an existing skill is refused (`exists:<name>`)
+  at the ask and again before writing, every folder and file is made new (`create_new`), files are `0644`, and nothing runs.
+
 ## Signing in
 
 ### What the lifted sign-in supports today

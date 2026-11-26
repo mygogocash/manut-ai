@@ -94,13 +94,15 @@ test.beforeEach(async () => {
   await mock("mock.reset");
 });
 
-test("Terminal is a Settings page after General; manut's own two themes lead the list and are picked", async ({ page }) => {
+test("Terminal is the first page under the hood; manut's own two themes lead the list and are picked", async ({ page }) => {
   await open(page);
   await page.getByTestId("nav-settings").click();
   const nav = page.locator(".st-nav button");
   const names = await nav.allTextContents();
-  // Voice sits between them since the chat box got its microphone (item 81)
-  expect(names.slice(names.indexOf("General"), names.indexOf("Terminal") + 1)).toEqual(["General", "Voice", "Terminal"]);
+  // General and Voice lead the list (Voice since the chat box got its microphone, item 81); Terminal opens the
+  // developer pages under "Under the hood" (item 85h)
+  expect(names.slice(0, 2)).toEqual(["General", "Voice"]);
+  expect(names[names.indexOf("Under the hood") + 1]).toBe("Terminal");
   await page.getByTestId("settings-nav-terminal").click();
   await expect(page.getByTestId("settings-nav-terminal")).toHaveAttribute("aria-current", "page");
 

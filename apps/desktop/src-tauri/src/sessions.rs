@@ -79,7 +79,16 @@ pub const AGENTS: [Agent; 9] = [
 /// approvals sent to us over the same stream (`--permission-prompt-tool stdio`) instead of a TUI prompt, and each
 /// message the person sent echoed back when Claude Code takes it (`--replay-user-messages`), so a message sent
 /// while a turn runs shows as waiting until then.
-pub const CLAUDE_CHAT_ARGS: [&str; 10] = [
+///
+/// `--setting-sources user` (item 89, security review of 26 Nov 2026): `-p` skips Claude Code's "trust this folder"
+/// question (`claude --help`), so without it a folder's own files would act in every chat: the project's
+/// `.claude/settings.json` and `.claude/settings.local.json` (hooks, allow rules, a mode, `apiKeyHelper`, a status line, an
+/// `env` block), its `.mcp.json` servers, and its skills, commands and subagents with their own hooks and allowed tools.
+/// Claude Code's permissions page ("What runs before you trust a folder") names this flag for `claude -p` in a repository
+/// one did not write; its Agent SDK page lists what each source loads. With `user` alone, the person's own settings, skills,
+/// commands, subagents, CLAUDE.md and plugins load as always, and so do the MCP servers in `~/.claude.json` and managed
+/// settings, which no source list turns off. What a project no longer gives a chat is in docs/code-editor.md.
+pub const CLAUDE_CHAT_ARGS: [&str; 12] = [
     "-p",
     "--input-format",
     "stream-json",
@@ -90,6 +99,8 @@ pub const CLAUDE_CHAT_ARGS: [&str; 10] = [
     "--permission-prompt-tool",
     "stdio",
     "--replay-user-messages",
+    "--setting-sources",
+    "user",
 ];
 
 /// What a Claude Code chat adds to [`CLAUDE_CHAT_ARGS`] when the person turned on Settings › General › Suggested next message
@@ -1915,7 +1926,7 @@ mod tests {
         );
         assert_eq!(
             chat_args("claude").unwrap(),
-            ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--permission-prompt-tool", "stdio", "--replay-user-messages"]
+            ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--permission-prompt-tool", "stdio", "--replay-user-messages", "--setting-sources", "user"]
         );
         assert_eq!(chat_args("codex").unwrap(), ["app-server"]);
         assert_eq!(chat_args("pi").unwrap(), ["--mode", "rpc"]);

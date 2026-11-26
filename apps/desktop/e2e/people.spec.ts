@@ -262,11 +262,14 @@ test("a shop the person only helps at has no people to change: the page says who
   await expect(page.getByTestId("people-owner")).toContainText("Fon (you)");
 });
 
-test("People sits under Shop in the Settings list, in its own group, between the bots and the app", async ({ page }) => {
+test("People sits under Shop in the Settings list, in its own group, between the bots and Under the hood", async ({ page }) => {
   await page.goto("/");
   await page.getByTestId("nav-settings").click();
   const headings = await page.locator(".st-nav .st-sh").allTextContents();
-  expect(headings.map((h) => h.trim())).toEqual(["Bots", "Shop", "App"]);
+  expect(headings.map((h) => h.trim())).toEqual(["Bots", "Shop"]);
+  // the developer pages' one entry comes after the shop's (item 85h)
+  const order = await page.locator(".st-nav").evaluate((nav) => [...nav.querySelectorAll("[data-testid]")].map((e) => e.getAttribute("data-testid")));
+  expect(order.indexOf("settings-hood")).toBe(order.indexOf("settings-nav-people") + 1);
   await expect(page.getByTestId("settings-nav-people")).toHaveText("People");
   await page.getByTestId("settings-nav-people").click();
   await expect(page.getByTestId("settings-nav-people")).toHaveAttribute("aria-current", "page");

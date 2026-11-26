@@ -52,13 +52,12 @@ test("header chip counts the other places and toggles the panel", async ({ page 
   await open(page);
   const chip = page.getByTestId("places");
   await expect(chip).toHaveText("3 other places");
-  // one app mark per place (1 Slack + 2 Discord sessions -> Slack and Discord marks), not one per session
-  await expect(chip.locator(".src-ic")).toHaveCount(2);
-  await expect(chip.locator(".src-ic-slack")).toHaveCount(1);
-  await expect(chip.locator(".src-ic-discord")).toHaveCount(1);
-  await expect(chip.locator(".src-sq")).toHaveCount(0);
-  // the header right keeps the model control and the panel button, nothing else
-  await expect(page.getByTestId("head-right").locator(":scope > *")).toHaveCount(2);
+  // words only: no other company's mark in the header (item 85f, the Chat board); its tooltip names each app once
+  // (1 Slack + 2 Discord sessions -> Slack and Discord), not once per session
+  await expect(chip.locator(".src-ic, .src-sq, svg, img")).toHaveCount(0);
+  await expect(chip).toHaveAttribute("title", "Where Kami is: Slack and Discord");
+  // the header right keeps only the panel button: the model is in the chat box
+  await expect(page.getByTestId("head-right").locator(":scope > *")).toHaveCount(1);
 
   const details = page.getByTestId("details");
   await chip.click();

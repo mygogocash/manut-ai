@@ -15,7 +15,8 @@
 //! A repository's own config can name programs git runs while it reads: a file monitor, an external diff, a text
 //! conversion, a clean filter. The first three are switched off on the command line. The note is read by itself whenever the
 //! page shows a session, so a repository whose own config names a clean filter, or any other program git would run
-//! (`lane::risky_setting`, item 86), is not read at all: there is no note, as for a folder that is not a repository.
+//! (`lane::risky_setting`, item 86), or one of whose submodules' own config does (`lane::config_risk_by`, item 90), is not
+//! read at all: there is no note, as for a folder that is not a repository. No diff here goes into a submodule (see `DIFF`).
 
 use std::path::{Path, PathBuf};
 
@@ -74,8 +75,10 @@ const UNSET: &[&str] = &[
 ];
 
 /// The flags of every diff: no external program, no text conversion, no colour, and a rename is a delete and an add, so a
-/// file one side moved and the other edited counts as changed on both.
-const DIFF: &[&str] = &["diff", "--no-ext-diff", "--no-textconv", "--no-renames"];
+/// file one side moved and the other edited counts as changed on both. A submodule is hidden and, if one reached a diff
+/// anyway, drawn as two commit names (item 90): comparing one with the work tree runs `status` inside it, and `diff.submodule`'s
+/// `log` and `diff` forms read or diff inside it, each with the submodule's own config, whose clean filter no flag here reaches.
+const DIFF: &[&str] = &["diff", "--no-ext-diff", "--no-textconv", "--no-renames", "--ignore-submodules=all", "--submodule=short"];
 
 /// A `diff` call's arguments: the flags every diff has, `extra`, then `tail`.
 fn diff_args(extra: &[&str], tail: &[&str]) -> Vec<String> {
@@ -92,9 +95,10 @@ struct Git {
 }
 
 impl Git {
-    /// `git -C <dir> <args>`, with the file monitor off. Err only when git could not run or did not answer in time.
+    /// `git -C <dir> <args>`, with the file monitor off and nothing going into a submodule unless a command is told to (see
+    /// [`DIFF`]). Err only when git could not run or did not answer in time.
     fn run(&self, args: &[&str]) -> Result<Ran, String> {
-        let mut argv: Vec<String> = vec!["-c".into(), "core.fsmonitor=false".into(), "-C".into(), self.dir.to_string_lossy().into_owned()];
+        let mut argv: Vec<String> = vec!["-c".into(), "core.fsmonitor=false".into(), "-c".into(), "submodule.recurse=false".into(), "-c".into(), "diff.ignoreSubmodules=all".into(), "-C".into(), self.dir.to_string_lossy().into_owned()];
         argv.extend(args.iter().map(|a| a.to_string()));
         run_env(&self.exe, &argv, true, ENV, UNSET)
     }
@@ -218,15 +222,9 @@ pub fn main_moved(cwd: &Path, base: Option<&str>, show: &[String]) -> Result<Opt
     let probe = Git { exe: exe.clone(), dir: cwd.to_path_buf() };
     let Some(top) = probe.line(&["rev-parse", "--show-toplevel"])? else { return Ok(None) };
     let git = Git { exe, dir: PathBuf::from(top) };
-    // the note is read by itself: nothing more is read where the repository's own config names a program git would run
-    let config = git.run(&["config", "--list", "--show-scope", "--includes", "-z"])?;
-    let risky = if config.code == Some(0) {
-        crate::lane::risky_setting(&config.out, true)
-    } else {
-        let local = git.run(&["config", "--list", "--local", "--includes", "-z"])?;
-        (local.code == Some(0)).then(|| crate::lane::risky_setting(&local.out, false)).flatten()
-    };
-    if risky.is_some() {
+    // the note is read by itself: nothing more is read where the repository's own config, or a submodule's, names a program
+    // git would run, or cannot be read
+    if crate::lane::config_risk_by(&|args: &[&str]| git.run(args).ok(), &git.dir).is_some() {
         return Ok(None);
     }
 

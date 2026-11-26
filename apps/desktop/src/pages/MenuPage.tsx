@@ -40,7 +40,8 @@ export function MenuPageFrame({
         {middle}
         {acts && <div className="acts">{acts}</div>}
       </header>
-      <div className="mpage-body">{children}</div>
+      {/* The body fades in the first time the page opens in a session (lib/firstPaint.ts); the header does not move. */}
+      <div className="mpage-body" data-arrive-body={page}>{children}</div>
     </section>
   );
 }

@@ -41,6 +41,13 @@ describe("computer use on the page", () => {
   it("takes a card's fields only when it can draw them whole", () => {
     expect(computerAsk({ act: "click", app: "TextEdit", window: "Untitled", control: "button “Save”" })).toEqual({ act: "click", app: "TextEdit", window: "Untitled", control: "button “Save”" });
     expect(computerAsk({ act: "menu", app: "TextEdit", menu: ["File", "Save…"] })).toEqual({ act: "menu", app: "TextEdit", menu: ["File", "Save…"] });
+    // typing that replaces what a field holds is drawn only with how much it holds: the card must say so
+    expect(computerAsk({ act: "replace", app: "TextEdit", control: "text area", replaces: 10, text: "Thanks!" })).toEqual({ act: "replace", app: "TextEdit", control: "text area", replaces: 10, text: "Thanks!" });
+    for (const replaces of [undefined, 0, -1, 1.5, "10", null]) {
+      expect(computerAsk({ act: "replace", app: "TextEdit", control: "text area", replaces, text: "Thanks!" }), String(replaces)).toBeNull();
+    }
+    // and a count never rides on another act
+    expect(computerAsk({ act: "set", app: "TextEdit", control: "text area", replaces: 10, text: "x" })).toBeNull();
     for (const bad of [null, undefined, "click", [], {}, { act: "drag", app: "TextEdit" }, { act: "click" }, { act: "click", app: "" }, { act: "set", app: "X", text: 3 }, { act: "menu", app: "X", menu: ["File", 2] }, { act: "menu", app: "X", menu: "File" }, { act: "look", app: "\u202e" }]) {
       expect(computerAsk(bad), JSON.stringify(bad)).toBeNull();
     }

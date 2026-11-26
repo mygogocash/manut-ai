@@ -1,5 +1,6 @@
 // A workflow file read and checked (item 77b): every field, each refusal with its reason, and the folder's list as the page shows it.
 import { describe, expect, it } from "vitest";
+import { sha256Hex } from "../runtime/http/sha256";
 import { plainFolder, readFolder, readWorkflow, STEP_MAX, STEPS_MAX } from "./file";
 
 const good = {
@@ -18,17 +19,75 @@ const why = (o: unknown) => {
 
 describe("a workflow file", () => {
   it("reads every field of a good file, the steps trimmed, the file's name as its id", () => {
-    const r = read({ ...good, version: 1, steps: ["  Run the tests.  ", "Fix them."] });
+    const text = JSON.stringify({ ...good, version: 1, steps: ["  Run the tests.  ", "Fix them."] });
+    const r = read(text);
     expect(r).toEqual({
       file: "nightly.json",
-      workflow: { file: "nightly.json", name: "Nightly tests", project: "/Users/nam/code/shop-site", agent: "claude", steps: ["Run the tests.", "Fix them."], schedule: { kind: "daily", at: "02:00" }, timeZone: "Asia/Bangkok" },
+      workflow: { file: "nightly.json", name: "Nightly tests", project: "/Users/nam/code/shop-site", agent: "claude", steps: ["Run the tests.", "Fix them."], schedule: { kind: "daily", at: "02:00" }, timeZone: "Asia/Bangkok", digest: sha256Hex(text) },
     });
   });
 
   it("needs no schedule, no zone and no version", () => {
     const { schedule: _s, timeZone: _z, ...plain } = good;
     const r = read(plain);
-    expect("workflow" in r && r.workflow).toEqual({ file: "nightly.json", name: good.name, project: good.project, agent: "claude", steps: good.steps });
+    expect("workflow" in r && r.workflow).toEqual({ file: "nightly.json", name: good.name, project: good.project, agent: "claude", steps: good.steps, digest: sha256Hex(JSON.stringify(plain)) });
+  });
+
+  it("carries the digest of the file's exact text: two files that read as the same workflow differ when their text does (item 91)", () => {
+    const digest = (text: string) => {
+      const r = read(text);
+      return "workflow" in r ? r.workflow.digest : null;
+    };
+    const plain = JSON.stringify(good);
+    expect(digest(plain)).toBe(sha256Hex(plain));
+    expect(digest(plain)).toMatch(/^[0-9a-f]{64}$/);
+    for (const same of [JSON.stringify(good, null, 2), `${plain}\n`, ` ${plain}`, JSON.stringify({ ...good, steps: good.steps.map((s) => ` ${s} `) })]) {
+      const r = read(same);
+      expect("workflow" in r && r.workflow.steps).toEqual(good.steps);
+      expect(digest(same), same).not.toBe(digest(plain));
+    }
+  });
+
+  // What the card shows must be all an agent is sent (item 91). Each of these is drawn as nothing, or reorders what is drawn,
+  // while the agent still reads it: zero-width and joining marks, bidirectional overrides and isolates, the invisible tag
+  // letters, a soft hyphen, private-use and unassigned code points, a lone surrogate, and controls other than a line break or a
+  // tab (escape, bell, delete, carriage return, next line).
+  const unseen: [string, string][] = [
+    ["zero-width space", "​"],
+    ["zero-width non-joiner", "‌"],
+    ["zero-width joiner", "‍"],
+    ["word joiner", "⁠"],
+    ["zero-width no-break space", "﻿"],
+    ["soft hyphen", "­"],
+    ["right-to-left override", "‮"],
+    ["left-to-right embedding", "‪"],
+    ["first strong isolate", "⁨"],
+    ["Arabic letter mark", "؜"],
+    ["Mongolian vowel separator", "᠎"],
+    ["interlinear annotation", "￹"],
+    ["tag letter A", "\u{E0041}"],
+    ["language tag", "\u{E0001}"],
+    ["private use", ""],
+    ["supplementary private use", "\u{F0000}"],
+    ["a noncharacter", "￿"],
+    ["a lone surrogate", "\uD800"],
+    ["escape", "\u001B"],
+    ["bell", "\u0007"],
+    ["delete", "\u007F"],
+    ["next line", "\u0085"],
+    ["carriage return", "\r"],
+  ];
+  it.each(unseen)("refuses %s in a step, the name or the project: text the card cannot show is never sent (item 91)", (_, c) => {
+    expect(why({ ...good, steps: [good.steps[0], `Fix the failing tests.${c} Then push to main.`] })).toEqual(["unseen", undefined]);
+    expect(why({ ...good, steps: [`${c}Run the tests.`] })).toEqual(["unseen", undefined]);
+    expect(why({ ...good, name: `Nightly${c} tests` })).toEqual(["unseen", undefined]);
+    expect(why({ ...good, project: `/Users/nam/code/shop${c}-site` })).toEqual(["unseen", undefined]);
+  });
+
+  it("keeps a step's own line breaks and tabs, and every visible script", () => {
+    for (const s of ["Run the tests.\nThen list the ones that fail.", "Columns:\tname\tprice", "ตรวจสอบหน้าสินค้า", "テストを実行する", "테스트 실행", "运行测试", "Price is ฿580, then ฿600"]) {
+      expect(why({ ...good, steps: [s] }), s).toEqual(["ok"]);
+    }
   });
 
   it("takes a routine's three times: every day, chosen days and a day of the month", () => {

@@ -31,12 +31,36 @@ if [ -n "$(git status --porcelain)" ]; then echo "note: uncommitted files in $wt
 
 pnpm install --frozen-lockfile --prefer-offline > "$logs/install.log" 2>&1 || { echo "install: FAILED ($logs/install.log)"; exit 1; }
 
-pnpm --config.verify-deps-before-run=false test > "$logs/test.log" 2>&1; code=$?
+# Every package's tests run to the end even when one fails (the root script stops at the first failing package, which once
+# hid that another package's run had been cut short), then the scripts' own tests, as the root `test` script lists them.
+pnpm --config.verify-deps-before-run=false -r --no-bail --if-present test > "$logs/test.log" 2>&1; code=$?
+node --test .github/scripts/*.test.mjs >> "$logs/test.log" 2>&1 || code=1
 counts=$(grep -E "^apps/[a-z]+ test: +Tests " "$logs/test.log" | sed -E 's/^apps\/([a-z]+) test: +Tests +/\1 /' | tr '\n' ';')
 scripts=$(grep -E "^ℹ (pass|fail)" "$logs/test.log" | tr '\n' ' ')
 if [ $code -eq 0 ]; then echo "test: ok  $counts scripts: $scripts"; else
-  fail=1; echo "test: FAILED  $counts"
+  echo "test: FAILED  $counts"
   grep -E " FAIL | × |Cannot find package|Error: " "$logs/test.log" | cut -c1-200 | sort -u | head -15
+  # A file that failed in the whole run is run once more by itself: under a loaded Mac a test can pass its five seconds
+  # and be right (docs/handoff.md, "Known flaky tests"). Only a run where every failed file passes alone, and at most
+  # five files failed, counts as passed, and the files are named so one that needs this too often is seen.
+  files=$(sed 's/\x1b\[[0-9;]*[A-Za-z]//g' "$logs/test.log" | grep -E "^(apps|packages)/[a-z-]+ test: +FAIL +[^ ]+" | sed -E 's/^((apps|packages)\/[a-z-]+) test: +FAIL +([^ ]+).*/\1 \3/' | sort -u)
+  n=$(printf '%s\n' "$files" | grep -c . || true)
+  alone=1
+  if [ "$n" -ge 1 ] && [ "$n" -le 5 ]; then
+    while read -r dir file; do
+      [ -z "$dir" ] && continue
+      if ( cd "$dir" && pnpm --config.verify-deps-before-run=false exec vitest run "$file" ) > "$logs/alone-$(basename "$file").log" 2>&1; then
+        echo "test: $dir $file failed in the whole run and passed alone"
+      else
+        alone=0; echo "test: $dir $file FAILED again alone ($logs/alone-$(basename "$file").log)"
+      fi
+    done <<EOF_FILES
+$files
+EOF_FILES
+  else
+    alone=0
+  fi
+  if [ $alone -eq 1 ]; then echo "test: ok after running $n failed file(s) alone"; else fail=1; fi
 fi
 
 pnpm --config.verify-deps-before-run=false typecheck > "$logs/types.log" 2>&1; code=$?

@@ -21,8 +21,8 @@
 //! yes is bound to more than the name: the control's window, its place in that window's tree and its position and size
 //! on screen at the moment of the ask ([`Place`]), checked again just before acting.
 //!
-//! Never, for a look or an action: Manut AI's own windows (an agent must not read or answer its own asks), System
-//! Settings, the places macOS keeps passwords (Keychain Access, Passwords) and the prompts where macOS asks for a
+//! Never, for a look or an action: Manut AI's own windows and web pages, in any app (an agent must not read or answer
+//! its own asks: [`own_window`]), System Settings, the places macOS keeps passwords (Keychain Access, Passwords) and the prompts where macOS asks for a
 //! password, a fingerprint or a permission ([`REFUSED`]); what a password field holds; anything while the screen is
 //! locked or another person's session is in front.
 
@@ -34,7 +34,7 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 use serde_json::{json, Value};
 
-use super::keys::{self, Chord};
+use super::keys::{self, Chord, Keyboard};
 
 /// A control on the Mac, as the desk holds it (an accessibility element there, a number in a test).
 pub type Handle = Arc<dyn Any + Send + Sync>;
@@ -64,6 +64,8 @@ pub struct Node {
     /// What it holds. Never read for a password field, by the desk, and dropped here again if one ever came.
     pub value: Option<String>,
     pub enabled: bool,
+    /// The address it shows, as the app gives it: a web area's page (`AXURL`), a window's document (`AXDocument`).
+    pub address: Option<String>,
     pub handle: Handle,
 }
 
@@ -86,6 +88,26 @@ pub struct Place {
     pub path: Vec<usize>,
     /// Its position and size on screen in whole points (x, y, width, height), when the Mac says them.
     pub frame: Option<[i64; 4]>,
+}
+
+/// A window as the Mac says it is now.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Win {
+    /// Its number (`_AXUIElementGetWindow`), which stays the window's own while its title changes; None when the Mac
+    /// does not say it.
+    pub number: Option<u32>,
+    pub title: String,
+    /// The addresses it shows where the control is: the window's document (`AXDocument`) and the page of each web area
+    /// that holds the control (`AXURL`), as the app gives them.
+    pub addresses: Vec<String>,
+}
+
+/// Where an app's key presses go now, as the Mac says: the window that has the keyboard, and the control focused in
+/// it with its place, or None when the window itself has the focus.
+#[derive(Clone)]
+pub struct Focus {
+    pub window: Win,
+    pub control: Option<(Node, Place)>,
 }
 
 /// The ranges of Unicode's general category Cf (format characters: the bidi embeddings, overrides, marks and isolates,
@@ -151,13 +173,19 @@ pub trait Desk: Send + Sync {
     /// Where the control is now (its window's number, its place in the window's tree, its frame), or None when that
     /// cannot be told.
     fn place(&self, handle: &Handle) -> Option<Place>;
+    /// The window the control is in now, its title and the addresses it shows there, or None when that cannot be told.
+    fn window_of(&self, handle: &Handle) -> Option<Win>;
     /// A PNG picture of the part of window `place.window` that `place.frame` covers: the control as it looks.
     fn snapshot(&self, place: &Place) -> Result<Vec<u8>, String>;
-    /// The title of the app's focused window, where its keys go.
-    fn focused_window(&self, pid: i32) -> Option<String>;
+    /// Where the app's key presses go now: the window that has the keyboard and the control focused in it, or None when
+    /// that cannot be told.
+    fn focus(&self, pid: i32) -> Option<Focus>;
     fn press(&self, handle: &Handle) -> Result<(), String>;
     fn set_value(&self, handle: &Handle, text: &str) -> Result<(), String>;
-    fn key(&self, pid: i32, chord: &Chord) -> Result<(), String>;
+    /// The keyboard layout in use and the others the person has turned on, read fresh (`keys.rs`).
+    fn keyboard(&self) -> Result<Keyboard, String>;
+    /// Presses `chord` as the key with virtual key code `code`, found on the layout in use ([`Chord::code`]).
+    fn key(&self, pid: i32, chord: &Chord, code: u16) -> Result<(), String>;
     fn menu(&self, pid: i32, path: &[String]) -> Result<(), String>;
 }
 
@@ -190,8 +218,9 @@ pub const OWN_BUNDLE: &str = "xyz.manut.desktop";
 /// The apps computer use never looks at or works, each with the words a refusal uses. Bundle identifiers read from
 /// this Mac's own `Info.plist` files (macOS 27.2): System Settings, the two places passwords are kept, the login and
 /// lock screen and the screen saver, and every prompt where macOS asks for a password, Touch ID, a permission or an
-/// "open anyway".
-pub const REFUSED: [(&str, &str); 12] = [
+/// "open anyway", with the two helpers that draw the password and Touch ID sheets (XPC services, which the rule in
+/// [`refused`] for macOS's own programs covers too).
+pub const REFUSED: [(&str, &str); 15] = [
     ("com.apple.systempreferences", "System Settings"),
     ("com.apple.keychainaccess", "Keychain Access, where macOS keeps passwords"),
     ("com.apple.Passwords", "Passwords, where macOS keeps passwords"),
@@ -200,19 +229,119 @@ pub const REFUSED: [(&str, &str); 12] = [
     ("com.apple.ScreenSaver.Engine", "the screen saver"),
     ("com.apple.SecurityAgent", "a password prompt"),
     ("com.apple.LocalAuthentication.UIAgent", "a Touch ID or password prompt"),
+    ("com.apple.LocalAuthenticationRemoteService", "a Touch ID or password prompt"),
+    ("com.apple.SecurityAgentHelper.arm64", "a password prompt"),
+    ("com.apple.SecurityAgentHelper.x86_64", "a password prompt"),
     ("com.apple.tcc.AuthorizationPromptService", "a permission prompt"),
     ("com.apple.accessibility.universalAccessAuthWarn", "the Accessibility permission prompt"),
     ("com.apple.UserNotificationCenter", "a system alert"),
     ("com.apple.coreservices.uiagent", "a prompt about opening an app or file"),
 ];
 
+/// Why Manut AI's own windows and pages are never looked at or worked.
+const OWN: &str = "Manut AI's own windows and pages, where you are asked before anything acts";
+
+/// Another copy of Manut AI, which shows asks as this one does: a bundle identifier of Manut AI's (`xyz.manut.`), a
+/// name that is Manut AI's, or its program (`manut`, as a build that is not a bundle runs it).
+fn own_program(app: &App) -> bool {
+    let bundle = app.bundle.to_ascii_lowercase();
+    let name = clean(&app.name).trim().to_lowercase();
+    let program = app.path.rsplit('/').next().unwrap_or("").to_ascii_lowercase();
+    bundle == OWN_BUNDLE || bundle.starts_with("xyz.manut.") || name == "manut" || name.contains("manut ai") || program == "manut"
+}
+
+/// The titles Manut AI's own windows and web pages set (`apps/desktop/index.html`, and each page's `documentTitle` in
+/// `apps/web/src/{approve,delete,join,app}/strings.ts`, the web being English only), lowercased: a window whose title
+/// holds any of them shows where the person answers an ask.
+const OWN_TITLES: [&str; 4] = ["manut ai", "approve a reply", "delete your shop's data", "join a shop"];
+
+/// The host Manut AI's web pages are served from (`WEB_ORIGIN`, `apps/api/wrangler.jsonc`), and its subdomains.
+const OWN_HOST: &str = "manut.xyz";
+
+/// The paths of the pages that answer an ask with a link alone (`apps/web/src/router.tsx`): approve a reply, delete the
+/// shop's data, join a shop. On any host, since a page can be served from a preview or from this Mac while developing.
+const LINK_PATHS: [&str; 3] = ["/approve/", "/delete/", "/join/"];
+
+/// Whether `address` is one of Manut AI's own web pages: any page of its host, or a link page on any host.
+pub fn own_address(address: &str) -> bool {
+    let a = clean(address).trim().to_ascii_lowercase();
+    let rest = a.split_once("://").map_or(a.as_str(), |(_, r)| r);
+    let end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    let (authority, path) = rest.split_at(end);
+    let host = authority.rsplit('@').next().unwrap_or("").split(':').next().unwrap_or("").trim_end_matches('.');
+    if host == OWN_HOST || host.ends_with(&format!(".{OWN_HOST}")) {
+        return true;
+    }
+    let path = path.split(['?', '#']).next().unwrap_or("");
+    LINK_PATHS.iter().any(|p| path.starts_with(p) && path.len() > p.len())
+}
+
+/// Whether a window shows one of Manut AI's own windows or pages, where the person answers what agents ask: by a page
+/// address it shows, or, for a browser that gives no address, by the title those pages set.
+pub fn own_window(title: &str, addresses: &[String]) -> bool {
+    let t = clean(title).to_lowercase().replace('\u{2019}', "'");
+    OWN_TITLES.iter().any(|o| t.contains(o)) || addresses.iter().any(|a| own_address(a))
+}
+
+/// `t` with the secret part of any link to a page that answers an ask by itself taken out (`/approve/<token>` reads
+/// `/approve/…`): such a link approves, deletes or joins for whoever opens it, so an agent never reads one.
+pub fn hide_links(t: &str) -> String {
+    let lower = t.to_ascii_lowercase();
+    let mut out = String::with_capacity(t.len());
+    let mut at = 0;
+    while let Some(start) = LINK_PATHS.iter().filter_map(|p| lower[at..].find(p).map(|i| at + i + p.len())).min() {
+        out.push_str(&t[at..start]);
+        let end = t[start..].find(|c: char| !(c.is_ascii_alphanumeric() || "-._~%".contains(c))).map_or(t.len(), |e| start + e);
+        if end > start {
+            out.push('…');
+        }
+        at = end;
+    }
+    out.push_str(&t[at..]);
+    out
+}
+
+/// Where macOS keeps its own programs: its sealed system volume and the folders under it that the person cannot change.
+/// `/usr/local/` is the person's.
+fn of_macos(path: &str) -> bool {
+    ["/System/", "/usr/", "/bin/", "/sbin/", "/Library/Apple/"].iter().any(|p| path.starts_with(p)) && !path.starts_with("/usr/local/")
+}
+
+/// The folders where macOS keeps the apps a person opens themselves (Safari's is on the app cryptex, as this Mac runs it,
+/// and the same seen through the Preboot volume).
+const MACOS_APPS: [&str; 5] = [
+    "/System/Applications/",
+    "/System/Applications/Utilities/",
+    "/System/Cryptexes/App/System/Applications/",
+    "/System/Volumes/Preboot/Cryptexes/App/System/Applications/",
+    "/System/Library/CoreServices/Applications/",
+];
+
+/// The Finder, the one app a person opens that macOS keeps among its own services.
+const FINDER: &str = "/System/Library/CoreServices/Finder.app/Contents/MacOS/Finder";
+
+/// `path` is the program of an app a person opens from one of macOS's Applications folders, or the Finder: an `.app`
+/// right in one of those folders, its program right in its `Contents/MacOS`, nothing nested and nothing doubled.
+fn macos_app(path: &str) -> bool {
+    path == FINDER
+        || MACOS_APPS.iter().any(|dir| {
+            path.strip_prefix(dir).is_some_and(|rest| {
+                let parts: Vec<&str> = rest.split('/').collect();
+                matches!(parts.as_slice(), [app, "Contents", "MacOS", program] if app.len() > 4 && app.ends_with(".app") && !program.is_empty())
+            })
+        })
+}
+
 /// Why computer use stays away from `app`, or None when it may look at it. Besides Manut AI and the list above: any
 /// window of a program that does not run as this person (the login window, and macOS's prompts that run as the system),
-/// and any of a program with no bundle identifier that is part of macOS (under `/System/`) or whose program cannot be
-/// read, so a prompt this list does not name yet is still left alone.
+/// any of a program that cannot be read, and any of a program of macOS that is not an app a person opens from one of its
+/// Applications folders (its prompts, alerts, agents and helpers, whatever kind of bundle they are and whatever they
+/// are called), so a prompt this list does not name yet is still left alone. SecurityAgentHelper and
+/// LocalAuthenticationRemoteService, which draw the password and Touch ID sheets, run as the person from XPC services
+/// with bundle identifiers, which is why the rule is where a program runs and not what it lacks.
 pub fn refused(app: &App, own_pid: i32) -> Option<String> {
-    if app.pid == own_pid || app.bundle.eq_ignore_ascii_case(OWN_BUNDLE) {
-        return Some("Manut AI's own windows, where you are asked before anything acts".into());
+    if app.pid == own_pid || own_program(app) {
+        return Some(OWN.into());
     }
     if let Some((_, why)) = REFUSED.iter().find(|(b, _)| app.bundle.eq_ignore_ascii_case(b)) {
         return Some((*why).to_string());
@@ -220,8 +349,8 @@ pub fn refused(app: &App, own_pid: i32) -> Option<String> {
     if !app.mine {
         return Some("a window of a program that does not run as you, such as the login window or a macOS prompt".into());
     }
-    if app.bundle.trim().is_empty() && (app.path.is_empty() || app.path.starts_with("/System/")) {
-        return Some("a window of macOS itself, such as one of its prompts".into());
+    if app.path.is_empty() || (of_macos(&app.path) && !macos_app(&app.path)) {
+        return Some("a window of macOS itself that is not an app you open, such as one of its prompts, alerts or helpers".into());
     }
     None
 }
@@ -229,7 +358,8 @@ pub fn refused(app: &App, own_pid: i32) -> Option<String> {
 /// What a card shows, as the page draws it in the person's language (`tool.computer` on the ask).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Shown {
-    /// `look`, `click`, `set`, `key` or `menu`.
+    /// `look`, `click`, `set` (typing into an empty field), `replace` (typing in place of everything a field holds),
+    /// `key` or `menu`.
     pub act: &'static str,
     pub app: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -242,6 +372,9 @@ pub struct Shown {
     pub keys: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub menu: Option<Vec<String>>,
+    /// For `replace`, how many characters the field holds at the ask, all of which the text takes the place of.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub replaces: Option<usize>,
     /// A small picture of the control at the moment of the ask, a PNG in base64, when Screen capture is on.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub picture: Option<String>,
@@ -254,6 +387,7 @@ impl Shown {
             "look" => format!("Let the agent look at {} in this chat?", self.app),
             "click" => format!("Click {} in {}?", self.control.as_deref().unwrap_or("a control"), self.app),
             "set" => format!("Type into {} in {}?", self.control.as_deref().unwrap_or("a field"), self.app),
+            "replace" => format!("Replace everything in {} ({}) in {}?", self.control.as_deref().unwrap_or("a field"), characters(self.replaces.unwrap_or(0)), self.app),
             "key" => format!("Press {} in {}?", self.keys.as_deref().unwrap_or(""), self.app),
             _ => format!("Choose {} in {}?", self.menu.as_deref().unwrap_or_default().join(" › "), self.app),
         }
@@ -268,7 +402,7 @@ impl Shown {
         if let Some(c) = &self.control {
             l.push(format!("Control: {c}"));
         }
-        if matches!(self.act, "click" | "set") {
+        if matches!(self.act, "click" | "set" | "replace") {
             l.push(format!("The control's name is the one {} gives it (a web page names its own controls), so check it is the one you mean.", self.app));
         }
         if let Some(k) = &self.keys {
@@ -278,7 +412,7 @@ impl Shown {
             l.push(format!("Menu: {}", m.join(" › ")));
         }
         if let Some(t) = &self.text {
-            l.push(format!("Text: {t}"));
+            l.push(if self.act == "replace" { format!("Replace with: {t}") } else { format!("Text: {t}") });
         }
         if self.act == "look" {
             l.push(format!("It may read the text and controls of {}'s windows and take their picture until this chat ends. Never what a password field holds.", self.app));
@@ -287,14 +421,36 @@ impl Shown {
     }
 }
 
+/// `n` characters, in words: "1 character", "10 characters".
+fn characters(n: usize) -> String {
+    if n == 1 { "1 character".into() } else { format!("{n} characters") }
+}
+
 /// What a yes is for: the very control, key or menu item the card named.
 #[derive(Clone)]
 enum Target {
     App { key: String },
-    /// A click, or with `value` the text put into a field; `place` is where the control was at the ask.
-    Node { pid: i32, role: String, label: String, handle: Handle, value: Option<String>, place: Place },
-    Key { pid: i32, window: Option<String>, chord: Chord },
+    /// A click, or with `value` the text put into a field and `held` exactly what the field held at the ask (empty for
+    /// typing, else all that the text replaces); `place` is where the control was at the ask.
+    Node { pid: i32, role: String, label: String, handle: Handle, value: Option<String>, held: Option<String>, place: Place },
+    /// A key press, where it was aimed at the ask, and the key that sends it on the layout then in use.
+    Key { pid: i32, aim: Aim, chord: Chord, code: u16 },
     Menu { pid: i32, path: Vec<String> },
+}
+
+/// Where a key press was aimed at the ask: the window that had the keyboard, by its number and its title, and the
+/// control focused in it, by its role, name and place. A key goes only where all of these still hold.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Aim {
+    window: Option<u32>,
+    title: String,
+    control: Option<(String, String, Place)>,
+}
+
+impl Aim {
+    fn of(f: &Focus) -> Aim {
+        Aim { window: f.window.number, title: f.window.title.clone(), control: f.control.as_ref().map(|(n, p)| (n.role.clone(), n.label.clone(), p.clone())) }
+    }
 }
 
 /// One ask's card and what its yes would be for.
@@ -360,8 +516,18 @@ pub struct Room {
 }
 
 pub const NO_YES: &str = "Manut AI has no yes from the person for this action. Each action runs only right after the person allows it once on its card in the chat, and that yes is used once. If they said no, do not try again unless they ask.";
+/// Why a key press is not asked about or sent when the window that has the keyboard cannot be told.
+const NO_FOCUS: &str = "Computer use cannot tell which window of the app has the keyboard now, so it does not press a key there. Ask the person to click into the window, or use a control's own action instead.";
+/// Why a window that shows one of Manut AI's own windows or pages is never looked at or worked.
+const OWN_PAGE: &str = "That window shows one of Manut AI's own windows or pages, where the person answers what agents ask, so computer use never looks at or works it, whatever the person allowed. Ask the person to answer it themselves.";
+/// Why a control whose window cannot be told is not touched.
+const NO_WINDOW: &str = "Computer use cannot tell which window that control is in now, so it does not touch it. Look again.";
 const LOCKED: &str = "The Mac's screen is locked or asleep, or someone else's session is in front, so computer use does nothing now. Ask the person to unlock the Mac and say when.";
 const NO_ACCESSIBILITY: &str = "macOS has not given Manut AI Accessibility, so computer use cannot read or work any window. The person turns it on in Manut AI's Settings › Computer.";
+/// Why typing into a field whose content cannot be read is not asked about: it would replace what it holds, unseen.
+const UNREAD: &str = "Computer use cannot read what that field holds now, so it cannot say whether typing would replace something there, and does not ask. Reach the goal another way, such as the window's own buttons.";
+/// Why typing whose field changed after the yes is not done.
+const HELD_CHANGED: &str = "The field holds other text than it did when the person said yes, so nothing was typed: typing puts the text in place of everything the field holds. Look again and ask again.";
 
 /// The key an app is allowed under: its bundle identifier, else its name.
 fn app_key(app: &App) -> String {
@@ -370,7 +536,7 @@ fn app_key(app: &App) -> String {
 
 /// `t` cut to `n` characters on one line, without invisible format characters, for a card or a tree.
 fn short(t: &str, n: usize) -> String {
-    let one = clean(t).split_whitespace().collect::<Vec<_>>().join(" ");
+    let one = hide_links(&clean(t)).split_whitespace().collect::<Vec<_>>().join(" ");
     if one.chars().count() <= n { one } else { format!("{}…", one.chars().take(n - 1).collect::<String>()) }
 }
 
@@ -442,19 +608,44 @@ impl Room {
         Ok(self.desk.windows(pid)?.iter().map(|t| clean(t)).collect())
     }
 
-    /// The title of an app's focused window, without invisible format characters.
-    fn focused_window(&self, pid: i32) -> Option<String> {
-        self.desk.focused_window(pid).map(|t| clean(&t))
+    /// Where an app's keys go now, its window's title and its control's name and value without invisible format
+    /// characters; None unless the window that has the keyboard has a number the Mac says, so it is that window and not
+    /// another with the same title.
+    fn focus(&self, pid: i32) -> Option<Focus> {
+        let f = self.desk.focus(pid)?;
+        f.window.number?;
+        let window = Win { title: clean(&f.window.title), addresses: f.window.addresses.iter().map(|a| clean(a)).collect(), ..f.window };
+        Some(Focus { window, control: f.control.map(|(n, p)| (Room::tidy(n), p)) })
     }
 
     /// A control as the Mac reads it, its name and value without invisible format characters.
     fn tidy(n: Node) -> Node {
-        Node { label: clean(&n.label), value: n.value.map(|v| clean(&v)), role: clean(&n.role), subrole: clean(&n.subrole), ..n }
+        Node { label: clean(&n.label), value: n.value.map(|v| clean(&v)), role: clean(&n.role), subrole: clean(&n.subrole), address: n.address.map(|a| clean(&a)), ..n }
     }
 
     /// The control read again now, tidied.
     fn again(&self, handle: &Handle) -> Option<Node> {
         self.desk.again(handle).map(Room::tidy)
+    }
+
+    /// The window a control is in now, its title and addresses without invisible format characters; an error when it
+    /// cannot be told or it shows one of Manut AI's own windows or pages.
+    fn window_of(&self, handle: &Handle) -> Result<Win, String> {
+        let w = self.desk.window_of(handle).ok_or(NO_WINDOW)?;
+        let w = Win { title: clean(&w.title), addresses: w.addresses.iter().map(|a| clean(a)).collect(), ..w };
+        if own_window(&w.title, &w.addresses) {
+            return Err(OWN_PAGE.into());
+        }
+        Ok(w)
+    }
+
+    /// An error when the window that has the app's keyboard, as far as the Mac can tell, shows one of Manut AI's own
+    /// windows or pages: a menu item acts there.
+    fn front_not_own(&self, pid: i32) -> Result<(), String> {
+        match self.desk.focus(pid) {
+            Some(f) if own_window(&f.window.title, &f.window.addresses) => Err(OWN_PAGE.into()),
+            _ => Ok(()),
+        }
     }
 
     /// A small picture of the control at `place` for its card, in base64, when Screen capture is on and the control is
@@ -512,7 +703,7 @@ impl Room {
             return Ok(Decision::Free);
         }
         let app = self.target_app(args)?;
-        let shown = |act| Shown { act, app: app.name.clone(), window: None, control: None, text: None, keys: None, menu: None, picture: None };
+        let shown = |act| Shown { act, app: app.name.clone(), window: None, control: None, text: None, keys: None, menu: None, replaces: None, picture: None };
         match tool {
             LOOK => {
                 let key = app_key(&app);
@@ -533,19 +724,33 @@ impl Room {
                     (n.handle.clone(), look.title.clone())
                 };
                 // the control as it is at the moment of the ask, and where: what the card names and the yes is bound to
-                let n = self.again(&handle).ok_or("The control is gone from the window since the look, so nothing is asked. Look again.")?;
+                let raw = self.desk.again(&handle).ok_or("The control is gone from the window since the look, so nothing is asked. Look again.")?;
+                let n = Room::tidy(raw.clone());
                 if n.secure() {
                     return Err("Computer use never touches a password field.".into());
                 }
                 let place = self.desk.place(&handle).ok_or("Computer use cannot tell where that control is on the screen, so it does not ask about it. Look again.")?;
+                // the window it is in now, which must not show one of Manut AI's own windows or pages
+                self.window_of(&handle)?;
                 let mut s = Shown { window: Some(title), control: Some(control_name(&n)), ..shown(if tool == CLICK { "click" } else { "set" }) };
+                let mut held = None;
                 if tool == SET {
                     let t = args.get("value").and_then(Value::as_str).ok_or("Give the text to put in the field (`value`).")?;
                     typed_ok(t)?;
+                    // The Mac puts the text in place of the field's whole value, so what it holds now decides the card:
+                    // typing into an empty field, or replacing all of what it holds, said with how much. It is read as
+                    // the Mac gives it, before any tidying: an invisible character is still something replaced.
+                    let now = raw.value.ok_or(UNREAD)?;
+                    let count = now.chars().count();
+                    if count > 0 {
+                        s.act = "replace";
+                        s.replaces = Some(count);
+                    }
                     s.text = Some(t.to_string());
+                    held = Some(now);
                 }
                 s.picture = self.card_picture(&place);
-                let target = Target::Node { pid: app.pid, role: n.role, label: n.label, handle, value: s.text.clone(), place };
+                let target = Target::Node { pid: app.pid, role: n.role, label: n.label, handle, value: s.text.clone(), held, place };
                 Ok(Decision::Card(Ask { shown: s, target }))
             }
             KEY => {
@@ -553,9 +758,20 @@ impl Room {
                 if let Some(effect) = chord.blocked() {
                     return Err(format!("{} would {effect}, so computer use never sends it. Reach the goal another way, such as the window's own button or menu item.", chord.shown()));
                 }
-                let window = self.focused_window(app.pid);
-                let s = Shown { window: window.clone(), keys: Some(chord.shown()), ..shown("key") };
-                Ok(Decision::Card(Ask { shown: s, target: Target::Key { pid: app.pid, window, chord } }))
+                // the key that types the chord's character on the layout in use, never read as a blocked shortcut on
+                // any layout turned on
+                let code = chord.code(&self.desk.keyboard()?)?;
+                // the key goes to the window that has the keyboard and the control focused there: the card names both,
+                // and the yes is bound to them, not to a title another window can share
+                let focus = self.focus(app.pid).ok_or(NO_FOCUS)?;
+                if own_window(&focus.window.title, &focus.window.addresses) {
+                    return Err(OWN_PAGE.into());
+                }
+                if focus.control.as_ref().is_some_and(|(n, _)| n.secure()) {
+                    return Err("The keyboard is in a password field, and computer use never types into one.".into());
+                }
+                let s = Shown { window: Some(focus.window.title.clone()), control: focus.control.as_ref().map(|(n, _)| control_name(n)), keys: Some(chord.shown()), ..shown("key") };
+                Ok(Decision::Card(Ask { shown: s, target: Target::Key { pid: app.pid, aim: Aim::of(&focus), chord, code } }))
             }
             MENU => {
                 let path: Vec<String> = args
@@ -574,6 +790,7 @@ impl Room {
                 if apple_menu(&path[0]) {
                     return Err("Computer use never chooses from the Apple menu, which reaches System Settings, logging out and shutting down.".into());
                 }
+                self.front_not_own(app.pid)?;
                 let s = Shown { menu: Some(path.clone()), ..shown("menu") };
                 Ok(Decision::Card(Ask { shown: s, target: Target::Menu { pid: app.pid, path } }))
             }
@@ -670,6 +887,11 @@ impl Room {
         }
         let mut nodes: Vec<Node> = self.desk.tree(app.pid, w - 1)?.into_iter().map(Room::tidy).collect();
         nodes.truncate(MAX_NODES);
+        // a window that shows one of Manut AI's own windows or pages is never read out, by its title or any page in it
+        let addresses: Vec<String> = nodes.iter().filter_map(|n| n.address.clone()).collect();
+        if own_window(&titles[w - 1], &addresses) {
+            return Err(OWN_PAGE.into());
+        }
         for n in nodes.iter_mut().filter(|n| n.secure()) {
             n.value = None;
         }
@@ -702,9 +924,10 @@ impl Room {
     fn act(&self, target: Target) -> Result<Reply, String> {
         match target {
             Target::App { .. } => Err(NO_YES.into()),
-            Target::Node { pid, role, label, handle, value, place } => {
+            Target::Node { pid, role, label, handle, value, held, place } => {
                 let app = self.still_app(pid)?;
-                let now = self.again(&handle).ok_or("The control is gone from the window, so nothing was done. Look again.")?;
+                let raw = self.desk.again(&handle).ok_or("The control is gone from the window, so nothing was done. Look again.")?;
+                let now = Room::tidy(raw.clone());
                 if now.secure() {
                     return Err("Computer use never touches a password field.".into());
                 }
@@ -715,6 +938,7 @@ impl Room {
                 if self.desk.place(&handle).as_ref() != Some(&place) {
                     return Err("The control moved or changed its place in the window since the person said yes, so nothing was done. Look again and ask again.".into());
                 }
+                self.window_of(&handle)?;
                 let name = control_name(&now);
                 match value {
                     None => {
@@ -722,27 +946,46 @@ impl Room {
                         Ok(Reply::ok(format!("Clicked {name} in {}. Call `get_app_state` to see what changed.", app.name)))
                     }
                     Some(text) => {
+                        // the yes was for the field as it was at the ask: empty to type into, or holding exactly what
+                        // the card said the text replaces; a yes to type never covers a field filled since
+                        if raw.value != held {
+                            return Err(HELD_CHANGED.into());
+                        }
                         self.desk.set_value(&handle, &text)?;
                         // read back: an app can take the text, change it or ignore it
-                        let held = self.again(&handle).and_then(|n| n.value);
-                        let how = if held.as_deref() == Some(text.as_str()) { "it now holds exactly that text" } else { "it does not read back as exactly that text, so check with `get_app_state` before going on" };
-                        Ok(Reply::ok(format!("Typed into {name} in {}: {how}.", app.name)))
+                        let back = self.again(&handle).and_then(|n| n.value);
+                        let how = if back.as_deref() == Some(text.as_str()) { "it now holds exactly that text" } else { "it does not read back as exactly that text, so check with `get_app_state` before going on" };
+                        let did = if held.as_deref().is_some_and(|h| !h.is_empty()) { "Replaced everything in" } else { "Typed into" };
+                        Ok(Reply::ok(format!("{did} {name} in {}: {how}.", app.name)))
                     }
                 }
             }
-            Target::Key { pid, window, chord } => {
+            Target::Key { pid, aim, chord, code } => {
                 let app = self.still_app(pid)?;
                 if chord.blocked().is_some() {
                     return Err("Computer use never sends that shortcut.".into());
                 }
-                if window.is_some() && self.focused_window(pid) != window {
-                    return Err(format!("A different window of {} is in front now, so the key was not pressed. Look again and ask again.", app.name));
+                // the layout read again: the same key must still type what the card named, and no layout turned on
+                // since may read it as a shortcut that is never sent
+                if chord.code(&self.desk.keyboard()?)? != code {
+                    return Err("The keyboard layout changed since the person said yes, so the key was not pressed. Look again and ask again.".into());
                 }
-                self.desk.key(pid, &chord)?;
+                let now = self.focus(pid).ok_or(NO_FOCUS)?;
+                if own_window(&now.window.title, &now.window.addresses) {
+                    return Err(OWN_PAGE.into());
+                }
+                if now.control.as_ref().is_some_and(|(n, _)| n.secure()) {
+                    return Err("The keyboard is in a password field, and computer use never types into one.".into());
+                }
+                if Aim::of(&now) != aim {
+                    return Err(format!("A different window or control of {} has the keyboard now, so the key was not pressed. Look again and ask again.", app.name));
+                }
+                self.desk.key(pid, &chord, code)?;
                 Ok(Reply::ok(format!("Pressed {} in {}. Call `get_app_state` to see what changed.", chord.shown(), app.name)))
             }
             Target::Menu { pid, path } => {
                 let app = self.still_app(pid)?;
+                self.front_not_own(pid)?;
                 self.desk.menu(pid, &path)?;
                 Ok(Reply::ok(format!("Chose {} in {}. Call `get_app_state` to see what changed.", path.join(" › "), app.name)))
             }
@@ -786,10 +1029,10 @@ pub fn tools() -> Value {
         {"name": CLICK, "title": "Click a control", "description": "Presses one element from the latest get_app_state. Asks the person first, every time.",
          "inputSchema": {"type": "object", "properties": {"app": app, "element_index": element}, "required": ["app", "element_index"]},
          "annotations": {"readOnlyHint": false, "destructiveHint": true}, "_meta": write_meta},
-        {"name": SET, "title": "Type into a field", "description": "Puts text into one text field from the latest get_app_state, replacing what it holds. Asks the person first, every time. Never a password field.",
+        {"name": SET, "title": "Type into a field", "description": "Puts text into one text field from the latest get_app_state. An empty field is typed into; a field that holds anything has all of it replaced by the text, and the person's card says so and how many characters it holds. Asks the person first, every time. Never a password field.",
          "inputSchema": {"type": "object", "properties": {"app": app, "element_index": element, "value": {"type": "string", "maxLength": TEXT_CHARS}}, "required": ["app", "element_index", "value"]},
          "annotations": {"readOnlyHint": false, "destructiveHint": true}, "_meta": write_meta},
-        {"name": KEY, "title": "Press a key", "description": "Presses one key, with modifiers if any (\"Return\", \"Escape\", \"Cmd+S\"), in the app's focused window. Asks the person first, every time. Shortcuts that quit, log out, lock the screen, force quit or empty the Trash are never sent.",
+        {"name": KEY, "title": "Press a key", "description": "Presses one key, with modifiers if any (\"Return\", \"Escape\", \"Cmd+S\"), in the control that has the keyboard in the app's focused window. A letter, digit or punctuation mark is the character the key types on the Mac's keyboard layout. Asks the person first, every time. Shortcuts that quit, log out, lock the screen, force quit or empty the Trash are never sent, on any layout.",
          "inputSchema": {"type": "object", "properties": {"app": app, "key": {"type": "string"}}, "required": ["app", "key"]},
          "annotations": {"readOnlyHint": false, "destructiveHint": true}, "_meta": write_meta},
         {"name": MENU, "title": "Choose a menu item", "description": "Chooses one item from the app's menu bar by its path of titles, such as [\"File\", \"Save…\"]. Asks the person first, every time. Never the Apple menu.",
@@ -856,7 +1099,7 @@ mod tests {
         let (s, r) = room();
         let args = json!({"app": "textedit"});
         let a = card(&r, LOOK, &args);
-        assert_eq!(a.shown, Shown { act: "look", app: "TextEdit".into(), window: None, control: None, text: None, keys: None, menu: None, picture: None });
+        assert_eq!(a.shown, Shown { act: "look", app: "TextEdit".into(), window: None, control: None, text: None, keys: None, menu: None, replaces: None, picture: None });
         assert_eq!(a.shown.title(), "Let the agent look at TextEdit in this chat?");
         // run before the person answered: refused, and the window was not read
         let before = r.run(LOOK, &args);
@@ -1065,7 +1308,7 @@ mod tests {
         assert_eq!(a.shown.lines(), "App: TextEdit\nWindow: Untitled\nKeys: Cmd+S");
         r.answered(KEY, &args, &a);
         assert!(!r.run(KEY, &args).error);
-        assert_eq!(s.acts(), [format!("key {TEXTEDIT} Cmd+S")]);
+        assert_eq!(s.acts(), [format!("key {TEXTEDIT} Cmd+S 0x01")]);
         // the app's front window changed after the yes: the key is not pressed
         let a = card(&r, KEY, &args);
         r.answered(KEY, &args, &a);
@@ -1214,6 +1457,320 @@ mod tests {
         s.add_app(App { pid: 500, name: "SecurityAgent".into(), bundle: String::new(), path: agent.into(), mine: false });
         assert!(refused(&r, LOOK, &json!({"app": "SecurityAgent"})).starts_with("Computer use never looks at or works"));
         assert!(!r.run(LIST, &json!({})).text.contains("SecurityAgent"));
+    }
+
+    /// Typing puts the text in place of everything the field holds (the Mac sets the field's value). So a field that
+    /// holds anything is a different, stronger card that says so and how much it holds, an empty one is typed into, and
+    /// a yes is bound to what the field held at the ask: a yes to type into an empty field never covers it once filled,
+    /// and a yes to replace never covers other text.
+    #[test]
+    fn typing_into_a_field_that_holds_text_says_it_replaces_everything() {
+        let (s, r) = room();
+        look(&r, "TextEdit");
+        // the text area holds "Dear bank," (10 characters)
+        let replace = json!({"app": "TextEdit", "element_index": 3, "value": "Thanks!"});
+        let a = card(&r, SET, &replace);
+        assert_eq!(a.shown.act, "replace");
+        assert_eq!(a.shown.title(), "Replace everything in text area (10 characters) in TextEdit?");
+        assert_eq!(serde_json::to_value(&a.shown).unwrap()["replaces"], json!(10));
+        assert!(a.shown.lines().ends_with("\nReplace with: Thanks!"), "{}", a.shown.lines());
+        // an empty field is typed into
+        let typing = json!({"app": "TextEdit", "element_index": 6, "value": "Mint"});
+        let t = card(&r, SET, &typing);
+        assert_eq!((t.shown.act, t.shown.title()), ("set", "Type into text field “Name” in TextEdit?".to_string()));
+        assert!(serde_json::to_value(&t.shown).unwrap().get("replaces").is_none());
+        // the yes to type, and the field filled before the run: nothing is typed
+        r.answered(SET, &typing, &t);
+        s.change(TEXTEDIT, 0, 5, |x| x.value = Some("Old name".into()));
+        let out = r.run(SET, &typing);
+        assert!(out.error && out.text.contains("holds other text"), "{}", out.text);
+        // the yes to replace, and the text changed (to as many characters) before the run: nothing is typed
+        r.answered(SET, &replace, &a);
+        s.change(TEXTEDIT, 0, 2, |x| x.value = Some("Dear Bank.".into()));
+        let out = r.run(SET, &replace);
+        assert!(out.error && out.text.contains("holds other text"), "{}", out.text);
+        assert!(s.acts().is_empty());
+        // asked again and allowed, it replaces exactly what the card said
+        let a = card(&r, SET, &replace);
+        r.answered(SET, &replace, &a);
+        assert!(!r.run(SET, &replace).error);
+        assert_eq!(s.acts(), [format!("set {TEXTEDIT} 0 2 Thanks!")]);
+        // what a field holds counts whole: a lone space, an invisible character, a number, one character
+        for (held, n, title) in [(" ", 1, "(1 character)"), ("\u{200B}", 1, "(1 character)"), ("42", 2, "(2 characters)"), ("ร้าน", 4, "(4 characters)")] {
+            s.change(TEXTEDIT, 0, 5, |x| x.value = Some(held.into()));
+            let a = card(&r, SET, &typing);
+            assert_eq!(a.shown.act, "replace", "{held:?}");
+            assert_eq!(serde_json::to_value(&a.shown).unwrap()["replaces"], json!(n), "{held:?}");
+            assert!(a.shown.title().contains(title), "{held:?}: {}", a.shown.title());
+        }
+        // a field whose content cannot be read is not asked about: the card could not say what typing replaces
+        s.change(TEXTEDIT, 0, 5, |x| x.value = None);
+        assert!(refused(&r, SET, &typing).contains("cannot read what"));
+    }
+
+    /// macOS's prompts and its helpers are refused by where they run, not only by name: SecurityAgentHelper and
+    /// LocalAuthenticationRemoteService run as the person, have bundle identifiers and live under `/System/`, as an
+    /// XPC service. A program of macOS is let in only when it is an app a person opens from one of macOS's
+    /// Applications folders, or the Finder.
+    #[test]
+    fn macos_helpers_that_are_not_apps_a_person_opens_are_refused_by_where_they_run() {
+        let app = |bundle: &str, path: &str| App { pid: 9, name: "x".into(), bundle: bundle.into(), path: path.into(), mine: true };
+        let agent = "/System/Library/Frameworks/Security.framework/Versions/A/MachServices/SecurityAgent.bundle/Contents/XPCServices";
+        for (bundle, path) in [
+            ("com.apple.SecurityAgentHelper.arm64", format!("{agent}/SecurityAgentHelper-arm64.xpc/Contents/MacOS/SecurityAgentHelper-arm64")),
+            ("com.apple.SecurityAgentHelper.x86_64", format!("{agent}/SecurityAgentHelper-x86_64.xpc/Contents/MacOS/SecurityAgentHelper-x86_64")),
+            ("com.apple.LocalAuthenticationRemoteService", "/System/Library/PrivateFrameworks/LocalAuthenticationUI.framework/Versions/A/XPCServices/LocalAuthenticationRemoteService.xpc/Contents/MacOS/LocalAuthenticationRemoteService".into()),
+            // helpers no list names yet, of every kind a program of macOS comes in
+            ("com.apple.example.service", "/System/Library/PrivateFrameworks/Example.framework/XPCServices/Example.xpc/Contents/MacOS/Example".into()),
+            ("com.apple.example.extension", "/System/Library/ExtensionKit/Extensions/Example.appex/Contents/MacOS/Example".into()),
+            ("com.apple.example.plugin", "/System/Library/CoreServices/Example.bundle/Contents/MacOS/Example".into()),
+            ("com.apple.example.nested", "/System/Library/PrivateFrameworks/Example.framework/Versions/A/Resources/Example.app/Contents/MacOS/Example".into()),
+            ("com.apple.example.widget", "/System/Applications/Notes.app/Contents/PlugIns/Widget.appex/Contents/MacOS/Widget".into()),
+            // macOS's own agents and alerts, which are apps but not ones a person opens
+            ("com.apple.notificationcenterui", "/System/Library/CoreServices/NotificationCenter.app/Contents/MacOS/NotificationCenter".into()),
+            ("com.apple.controlcenter", "/System/Library/CoreServices/ControlCenter.app/Contents/MacOS/ControlCenter".into()),
+            ("com.apple.example.alert", "/System/Library/CoreServices/Example Alert.app/Contents/MacOS/Example Alert".into()),
+            ("com.apple.example.safari-agent", "/System/Cryptexes/App/usr/libexec/SafariNotificationAgent".into()),
+            ("com.apple.example.protect", "/Library/Apple/System/Library/CoreServices/XProtect.app/Contents/MacOS/XProtect".into()),
+            ("com.apple.example.daemon", "/usr/libexec/exampled".into()),
+            ("", "/usr/sbin/exampled".into()),
+            ("", "/sbin/example".into()),
+            // a path that does not read as macOS keeps it is not one, even with an identifier
+            ("com.apple.example.doubled", "/System/Applications//Notes.app/Contents/MacOS/Notes".into()),
+            ("com.apple.example.unread", String::new()),
+        ] {
+            assert!(super::refused(&app(bundle, &path), 1).is_some(), "{path}");
+        }
+        // the apps a person opens from macOS, and every program that is not macOS's, stay possible
+        for path in [
+            "/System/Applications/Notes.app/Contents/MacOS/Notes",
+            "/System/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal",
+            "/System/Cryptexes/App/System/Applications/Safari.app/Contents/MacOS/Safari",
+            "/System/Library/CoreServices/Finder.app/Contents/MacOS/Finder",
+            "/System/Library/CoreServices/Applications/Archive Utility.app/Contents/MacOS/Archive Utility",
+            "/Applications/Shopee.app/Contents/MacOS/Shopee",
+            "/usr/local/bin/tool",
+            "/opt/homebrew/bin/python3",
+            "/Users/k/bin/tool",
+        ] {
+            assert!(super::refused(&app("com.example.app", path), 1).is_none(), "{path}");
+        }
+    }
+
+    /// A key press goes to the window that had the keyboard at the ask, bound to that window itself and not to its
+    /// title: another window with the same title, an untitled one, or none the Mac can tell gets no key.
+    #[test]
+    fn a_key_goes_only_to_the_window_that_had_the_keyboard_at_the_ask() {
+        use crate::computer::stand::f;
+        let (s, r) = room();
+        // a second untitled document
+        s.add_window(TEXTEDIT, "Untitled", vec![f("AXWindow", "Untitled"), f("AXTextArea", "")]);
+        let args = json!({"app": "TextEdit", "key": "Return"});
+        let a = card(&r, KEY, &args);
+        r.answered(KEY, &args, &a);
+        s.focus_window(TEXTEDIT, Some(2));
+        let out = r.run(KEY, &args);
+        assert!(out.error, "{}", out.text);
+        // no window that can be told: no card, and a yes given before is not used
+        s.focus_window(TEXTEDIT, None);
+        assert!(matches!(r.ask(KEY, &args), Decision::Refuse(_)));
+        s.focus_window(TEXTEDIT, Some(0));
+        let a = card(&r, KEY, &args);
+        r.answered(KEY, &args, &a);
+        s.focus_window(TEXTEDIT, None);
+        assert!(r.run(KEY, &args).error);
+        // untitled windows: an empty title is no exemption
+        s.set_title(TEXTEDIT, 0, "");
+        s.set_title(TEXTEDIT, 2, "");
+        s.focus_window(TEXTEDIT, Some(0));
+        let a = card(&r, KEY, &args);
+        r.answered(KEY, &args, &a);
+        s.focus_window(TEXTEDIT, Some(2));
+        assert!(r.run(KEY, &args).error);
+        assert!(s.acts().is_empty());
+        // the same window, and the keyboard moved to another control, or the control moved: no key
+        s.set_title(TEXTEDIT, 0, "Untitled");
+        s.focus_window(TEXTEDIT, Some(0));
+        s.focus_control(TEXTEDIT, 0, Some(5));
+        let a = card(&r, KEY, &args);
+        assert_eq!(a.shown.lines(), "App: TextEdit\nWindow: Untitled\nControl: text field “Name”\nKeys: Return");
+        r.answered(KEY, &args, &a);
+        s.focus_control(TEXTEDIT, 0, Some(1));
+        assert!(r.run(KEY, &args).text.contains("different window or control"));
+        s.focus_control(TEXTEDIT, 0, Some(5));
+        let a = card(&r, KEY, &args);
+        r.answered(KEY, &args, &a);
+        s.change(TEXTEDIT, 0, 5, |x| x.frame[1] += 40);
+        assert!(r.run(KEY, &args).error);
+        // the keyboard in a password field: never a key there, asked or not
+        let a = card(&r, KEY, &args);
+        r.answered(KEY, &args, &a);
+        s.focus_control(TEXTEDIT, 0, Some(3));
+        assert!(r.run(KEY, &args).text.contains("password field"));
+        assert!(refused(&r, KEY, &args).contains("password field"));
+        assert!(s.acts().is_empty());
+        // where all of it still holds, the key is pressed
+        s.focus_control(TEXTEDIT, 0, Some(5));
+        let a = card(&r, KEY, &args);
+        r.answered(KEY, &args, &a);
+        assert!(!r.run(KEY, &args).error);
+        assert_eq!(s.acts(), [format!("key {TEXTEDIT} Return 0x24")]);
+    }
+
+    /// Manut AI's own asks are answered in its own windows and on its web pages (approve a reply, delete the shop's
+    /// data, join a shop, the owner's web app): an agent must never press Allow on its own ask, whatever the person
+    /// allowed. So any window that shows one of them is never looked at or worked, in any app, and another copy of
+    /// Manut AI is its own windows too.
+    #[test]
+    fn manut_ais_own_windows_and_pages_are_refused_wherever_they_show() {
+        use crate::computer::stand::{f, SAFARI, SAFARI_PATH};
+        let (s, r) = room();
+        s.add_app(App { pid: SAFARI, name: "Safari".into(), bundle: "com.apple.Safari".into(), path: SAFARI_PATH.into(), mine: true });
+        s.add_window(SAFARI, "Shopee Seller Centre", vec![f("AXWindow", "Shopee Seller Centre"), f("AXButton", "Approve")]);
+        assert!(!look(&r, "Safari").error);
+        let click = json!({"app": "Safari", "element_index": 2});
+        let key = json!({"app": "Safari", "key": "Return"});
+        let menu = json!({"app": "Safari", "menu": ["File", "Close Window"]});
+        for title in ["Approve a reply", "Delete your shop's data", "Join a shop", "Manut AI", "Approve a reply - Google Chrome", "approve A REPLY", "Approve a\u{200B} reply"] {
+            s.set_title(SAFARI, 0, title);
+            assert!(r.run(LOOK, &json!({"app": "Safari"})).error, "look {title}");
+            for (tool, args) in [(CLICK, &click), (KEY, &key), (MENU, &menu)] {
+                assert!(matches!(r.ask(tool, args), Decision::Refuse(_)), "{tool} {title}");
+            }
+        }
+        // a yes given while the window showed a shop is not used once it shows an approval page
+        s.set_title(SAFARI, 0, "Shopee Seller Centre");
+        look(&r, "Safari");
+        for (tool, args) in [(CLICK, &click), (KEY, &key), (MENU, &menu)] {
+            let a = card(&r, tool, args);
+            r.answered(tool, args, &a);
+        }
+        s.set_title(SAFARI, 0, "Approve a reply");
+        for (tool, args) in [(CLICK, &click), (KEY, &key), (MENU, &menu)] {
+            assert!(r.run(tool, args).error, "{tool}");
+        }
+        assert!(s.acts().is_empty());
+        // another copy of Manut AI is its own windows, by its name, its bundle or its program
+        let app = |name: &str, bundle: &str, path: &str| App { pid: 9, name: name.into(), bundle: bundle.into(), path: path.into(), mine: true };
+        for other in [
+            app("Manut AI", "xyz.manut.desktop.dev", "/Users/k/Downloads/Manut AI.app/Contents/MacOS/manut"),
+            app("manut", "", "/Users/k/manut-ai/apps/desktop/src-tauri/target/debug/manut"),
+            app("Manut\u{200B} AI", "com.example.other", "/Applications/Other.app/Contents/MacOS/Other"),
+            app("Helper", "xyz.manut.helper", "/Applications/Helper.app/Contents/MacOS/Helper"),
+        ] {
+            assert!(super::refused(&other, 1).is_some_and(|w| w.contains("Manut AI")), "{other:?}");
+        }
+    }
+
+    /// A browser that says which page a window shows is read by that page's address, whatever its title: any page of
+    /// Manut AI's host, and a link page (approve, delete, join) on any host. The near misses stay ordinary pages.
+    #[test]
+    fn manut_ais_own_pages_are_known_by_their_address() {
+        use crate::computer::stand::{f, SAFARI, SAFARI_PATH};
+        for own in [
+            "https://dev.manut.xyz/approve/Abc-123_x",
+            "https://manut.xyz/app/",
+            "https://staging.manut.xyz/",
+            "HTTPS://MANUT.XYZ./delete/t0k3n",
+            "https://user@dev.manut.xyz:443/join/x?y=1",
+            "http://localhost:5173/approve/tok",
+            "https://pages-preview.example/delete/tok#top",
+            "https://dev.manut.xyz\u{200B}/approve/x",
+        ] {
+            assert!(own_address(own), "{own}");
+        }
+        for other in ["https://evilmanut.xyz/", "https://manut.xyz.example.com/", "https://shopee.co.th/approve", "https://github.com/x/approve/y", "file:///Users/k/approve/x.txt", "https://example.com/?next=/approve/x", ""] {
+            assert!(!own_address(other), "{other}");
+        }
+        // a window whose web area shows an approval page, titled as anything, is never read or worked
+        let (s, r) = room();
+        s.add_app(App { pid: SAFARI, name: "Safari".into(), bundle: "com.apple.Safari".into(), path: SAFARI_PATH.into(), mine: true });
+        let mut page = f("AXWebArea", "Shop");
+        page.address = Some("https://shopee.co.th/".into());
+        s.add_window(SAFARI, "Shop", vec![f("AXWindow", "Shop"), page, f("AXButton", "Approve")]);
+        assert!(!look(&r, "Safari").error);
+        let click = json!({"app": "Safari", "element_index": 3});
+        let key = json!({"app": "Safari", "key": "Return"});
+        let a = card(&r, CLICK, &click);
+        r.answered(CLICK, &click, &a);
+        s.change(SAFARI, 0, 1, |x| x.address = Some("https://dev.manut.xyz/approve/Abc".into()));
+        assert!(r.run(CLICK, &click).text.contains("Manut AI's own"));
+        assert!(r.run(LOOK, &json!({"app": "Safari"})).text.contains("Manut AI's own"));
+        assert!(matches!(r.ask(CLICK, &click), Decision::Refuse(_)));
+        assert!(matches!(r.ask(KEY, &key), Decision::Refuse(_)));
+        assert!(s.acts().is_empty());
+    }
+
+    /// A link that answers an ask by itself (approve, delete, join) is never read out of any window: its secret part is
+    /// taken out of every name, value and title an agent reads.
+    #[test]
+    fn an_approval_link_is_never_read_out() {
+        assert_eq!(hide_links("Open https://dev.manut.xyz/approve/Abc-123_x.y~z%20 now"), "Open https://dev.manut.xyz/approve/… now");
+        assert_eq!(hide_links("/DELETE/abc and /join/xyz/"), "/DELETE/… and /join/…/");
+        assert_eq!(hide_links("ร้าน /approve/ ok"), "ร้าน /approve/ ok");
+        let (s, r) = room();
+        s.change(TEXTEDIT, 0, 2, |x| x.value = Some("Approve: https://manut.xyz/approve/S3cr3t-token".into()));
+        let seen = look(&r, "TextEdit").text;
+        assert!(seen.contains("[3] text area: Approve: https://manut.xyz/approve/…"), "{seen}");
+        assert!(!seen.contains("S3cr3t"));
+    }
+
+    /// The titles the room knows are the ones Manut AI's own pages set, read from their sources, so a renamed page is not
+    /// missed.
+    #[test]
+    fn every_title_manut_ais_own_pages_set_is_known() {
+        let mut titles = Vec::new();
+        for src in [
+            include_str!("../../../../web/src/approve/strings.ts"),
+            include_str!("../../../../web/src/delete/strings.ts"),
+            include_str!("../../../../web/src/join/strings.ts"),
+            include_str!("../../../../web/src/app/strings.ts"),
+        ] {
+            titles.extend(src.lines().filter(|l| l.trim_start().starts_with("documentTitle: \"")).map(|l| l.split('"').nth(1).unwrap().to_string()));
+        }
+        let index = include_str!("../../../index.html");
+        titles.push(index.split("<title>").nth(1).and_then(|t| t.split("</title>").next()).unwrap().to_string());
+        assert!(titles.len() >= 5, "{titles:?}");
+        for t in &titles {
+            assert!(own_window(t, &[]), "{t}");
+        }
+        assert!(!own_window("Shopee Seller Centre", &[]));
+    }
+
+    /// A key press is sent by the key that types its character on the layout in use, and the layout is read again just
+    /// before it is sent: on a French Mac Cmd+A is the key in the US "Q" place, a layout changed since the yes sends
+    /// nothing, and a key some layout turned on reads as Cmd+Q is never sent.
+    #[test]
+    fn a_key_is_sent_by_the_key_that_types_it_on_the_layout_in_use() {
+        use crate::computer::stand::{layout, FRENCH, US};
+        let (s, r) = room();
+        let (french, us) = (layout("French", &FRENCH), layout("U.S.", &US));
+        let only = |l: &crate::computer::keys::Layout| Some(Keyboard { current: l.clone(), others: Vec::new() });
+        s.set_keyboard(only(&french));
+        let args = json!({"app": "TextEdit", "key": "Cmd+A"});
+        let a = card(&r, KEY, &args);
+        assert_eq!(a.shown.title(), "Press Cmd+A in TextEdit?");
+        r.answered(KEY, &args, &a);
+        assert!(!r.run(KEY, &args).error);
+        assert_eq!(s.acts(), [format!("key {TEXTEDIT} Cmd+A 0x0C")]);
+        // the layout changed between the yes and the run: nothing is pressed
+        let a = card(&r, KEY, &args);
+        r.answered(KEY, &args, &a);
+        s.set_keyboard(only(&us));
+        assert!(r.run(KEY, &args).text.contains("keyboard layout changed"));
+        // another layout turned on reads French's A key as Q: refused before any card, and a yes given before is not used
+        s.set_keyboard(only(&french));
+        let a = card(&r, KEY, &args);
+        r.answered(KEY, &args, &a);
+        s.set_keyboard(Some(Keyboard { current: french.clone(), others: vec![us.clone()] }));
+        assert!(r.run(KEY, &args).text.contains("Cmd+Q would quit the app"));
+        assert!(refused(&r, KEY, &args).contains("Cmd+Q would quit the app"));
+        // a character no key types there, and a layout that cannot be read: no card
+        s.set_keyboard(only(&french));
+        assert!(refused(&r, KEY, &json!({"app": "TextEdit", "key": "Cmd+1"})).contains("no key types “1”"));
+        s.set_keyboard(None);
+        assert!(refused(&r, KEY, &args).contains("keyboard layout"));
+        assert_eq!(s.acts().len(), 1);
     }
 
     #[test]

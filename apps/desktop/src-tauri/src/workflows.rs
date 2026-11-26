@@ -12,10 +12,18 @@
 //!   (`too_big`), when it cannot be read (`unreadable`) or when it is not UTF-8 text (`not_text`);
 //! - at most 100 files are listed, in name order, and the rest are counted (`more`);
 //! - a folder that is a link is not read at all (`state: link`).
+//!
+//! Item 91: a workflow's `project` is checked here when the person allows the workflow and again before every run
+//! ([`project`]). A run starts only in the top folder of a git repository, written as its real path, that is not the home
+//! folder, a disk's top, a folder that holds the home folder or the app's own folder, or anything inside the app's own folder.
+//! The lane a run starts in is made from that repository (lane.rs), and what counts as inside the project for Kit's dial is
+//! that folder, so a folder this check would let through could never be wider than one repository.
 
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use serde::Serialize;
+
+use crate::lane;
 
 /// A workflow file is read only up to this size: a few steps of plain text are a few kilobytes.
 pub const FILE_MAX: u64 = 64 * 1024;
@@ -152,6 +160,94 @@ pub fn make(home: &Path) -> Result<PathBuf, String> {
     Ok(dir)
 }
 
+/// The longest project path read.
+const PROJECT_MAX: usize = 1024;
+
+/// `p` without Windows' verbatim prefix (`\\?\C:\...`), which `canonicalize` adds there, so it compares with a path as written.
+fn plain(p: PathBuf) -> PathBuf {
+    #[cfg(windows)]
+    {
+        let s = p.to_string_lossy();
+        if let Some(rest) = s.strip_prefix(r"\\?\") {
+            if rest.as_bytes().get(1) == Some(&b':') {
+                return PathBuf::from(rest.to_string());
+            }
+        }
+    }
+    p
+}
+
+/// Whether `p` is the top of a disk: no folder above it, or one on another disk (a volume's own top folder, where a disk is
+/// mounted). A folder that cannot be read is taken as one.
+fn disk_top(p: &Path) -> bool {
+    let Some(parent) = p.parent() else { return true };
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        match (std::fs::metadata(p), std::fs::metadata(parent)) {
+            (Ok(a), Ok(b)) => a.dev() != b.dev(),
+            _ => true,
+        }
+    }
+    // elsewhere only a drive's own top is known for one (no folder above it, above)
+    #[cfg(not(unix))]
+    {
+        let _ = parent;
+        false
+    }
+}
+
+/// Whether the workflow's project `written` is a folder a run may start in, checked as it is now: its real path, or a short
+/// code the page says in words (`src/workflows/words.ts`):
+///
+/// - `missing`: not an absolute path written plainly, not there, or not a folder.
+/// - `link`: a link on the way to it, or letters the disk writes differently: the path written must be its real path, so the
+///   folder allowed is the folder that runs, and it cannot be pointed somewhere else later.
+/// - `too_broad`: the disk's top or another disk's top, the home folder, or a folder that holds the home folder or the app's
+///   own folder (`~/.manut`, wherever it really is).
+/// - `app_folder`: inside the app's own folder, or a lane's working folder made under a folder the person chose.
+/// - `not_repo`: not the top folder of a git repository (no `.git` in it, or git says its top is another folder).
+/// - `no_git`: git is not installed, so no lane can be made.
+///
+/// git is asked only `rev-parse --show-toplevel`, as the app's own automatic work runs it (no hook, no file monitor, no
+/// `ext::` remote): a program the repository names never runs.
+pub fn project(home: &Path, written: &str) -> Result<String, &'static str> {
+    let path = Path::new(written);
+    // a `.` or `..` part is refused as written (Rust's own reading of a path drops a `.` in the middle)
+    let dotted = written.split(['/', '\\']).any(|x| x == "." || x == "..");
+    if written.is_empty() || written.len() > PROJECT_MAX || written.chars().any(char::is_control) || dotted || !path.is_absolute() || path.components().any(|c| !matches!(c, Component::RootDir | Component::Prefix(_) | Component::Normal(_))) {
+        return Err("missing");
+    }
+    let real = plain(std::fs::canonicalize(path).map_err(|_| "missing")?);
+    if !real.is_dir() {
+        return Err("missing");
+    }
+    // compared part by part: a written path that only ends in a separator is the same folder
+    if real != path {
+        return Err("link");
+    }
+    let home_real = plain(std::fs::canonicalize(home).unwrap_or_else(|_| home.to_path_buf()));
+    let own = home_real.join(".manut");
+    let own_real = plain(std::fs::canonicalize(&own).unwrap_or_else(|_| own.clone()));
+    if disk_top(&real) || home_real.starts_with(&real) || own_real.starts_with(&real) {
+        return Err("too_broad");
+    }
+    if real.starts_with(&own) || real.starts_with(&own_real) || lane::in_a_lane(home, &real) || lane::in_a_lane(&home_real, &real) {
+        return Err("app_folder");
+    }
+    // git's own folder or file (a linked worktree's) right in it: anything deeper inside a repository is not its top
+    if std::fs::symlink_metadata(real.join(".git")).is_err() {
+        return Err("not_repo");
+    }
+    let git = lane::Git::automatic(home).map_err(|_| "no_git")?;
+    let ran = git.run(&real, &["rev-parse", "--show-toplevel"]).map_err(|_| "not_repo")?;
+    let top = ran.out.lines().next().unwrap_or("").trim();
+    if ran.code != Some(0) || top.is_empty() || std::fs::canonicalize(top).map(plain).ok().as_deref() != Some(real.as_path()) {
+        return Err("not_repo");
+    }
+    Ok(real.to_string_lossy().into_owned())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -272,6 +368,105 @@ mod tests {
         // again: the same folder, nothing else
         assert_eq!(make(&h.0).unwrap(), made);
         assert_eq!(read(&h.0).state, State::Ok);
+    }
+
+    /// Item 91: every folder a workflow's `project` may name, as the disk has it, and what the check says of each. Only a
+    /// repository's own top folder, written as its real path and narrower than the home folder and the app's own, passes.
+    #[cfg(unix)]
+    #[test]
+    fn a_project_is_only_a_repositorys_top_folder_written_as_its_real_path() {
+        use crate::lane::tests::{repo, sh};
+        use std::os::unix::fs::symlink;
+        let Some((home, web)) = repo("wf-project") else {
+            eprintln!("git is not installed: the project check's table is not run");
+            return;
+        };
+        let s = |p: &Path| p.to_string_lossy().into_owned();
+        let check = |p: &str| project(&home, p);
+
+        // a repository's top folder, written as its real path (a final separator is the same folder)
+        assert_eq!(check(&s(&web)), Ok(s(&web)));
+        assert_eq!(check(&format!("{}/", s(&web))), Ok(s(&web)));
+        // a linked worktree's top folder is a repository's top folder too
+        let wt = home.join("code").join("web-app-wt");
+        sh(&web, &["worktree", "add", "-q", "-b", "side", &s(&wt)]);
+        assert_eq!(check(&s(&wt)), Ok(s(&wt)));
+
+        // the hostile folders, each with why
+        std::fs::create_dir_all(home.join("notes")).unwrap();
+        symlink(&web, home.join("code").join("web-link")).unwrap();
+        symlink(home.join("code"), home.join("code-link")).unwrap();
+        std::fs::create_dir_all(home.join("fake").join(".git")).unwrap();
+        std::fs::create_dir_all(home.join("stray")).unwrap();
+        std::fs::write(home.join("stray").join(".git"), "gitdir: /nowhere/at/all\n").unwrap();
+        // the app's own folder, and a repository made inside it
+        let inside = home.join(".manut").join("lanes").join("web-app").join("try");
+        std::fs::create_dir_all(&inside).unwrap();
+        sh(&inside, &["init", "-q"]);
+        let up = home.parent().unwrap().to_path_buf();
+        let table: Vec<(String, &str)> = vec![
+            (s(&home), "too_broad"),
+            (s(&up), "too_broad"),
+            ("/".into(), "too_broad"),
+            (s(&home.join(".manut")), "too_broad"),
+            (s(&inside), "app_folder"),
+            (s(&home.join("notes")), "not_repo"),
+            (s(&web.join("apps")), "not_repo"),
+            (s(&web.join("apps").join("web")), "not_repo"),
+            (s(&home.join("fake")), "not_repo"),
+            (s(&home.join("stray")), "not_repo"),
+            (s(&home.join("code").join("web-link")), "link"),
+            (s(&home.join("code-link").join("web-app")), "link"),
+            (s(&web.join("a.txt")), "missing"),
+            (s(&home.join("gone")), "missing"),
+            (format!("{}/../web-app", s(&web)), "missing"),
+            (format!("{}/./apps", s(&web)), "missing"),
+            ("code/web-app".into(), "missing"),
+            (format!("{}\n", s(&web)), "missing"),
+            (String::new(), "missing"),
+            (format!("/{}", "a".repeat(PROJECT_MAX)), "missing"),
+        ];
+        for (p, why) in &table {
+            assert_eq!(check(p), Err(*why), "{p:?}");
+        }
+        // the same letters in another case are never the folder allowed: not there, or not the repository's own top
+        assert!(check(&s(&web).replace("web-app", "WEB-APP")).is_err());
+
+        // the home folder stays refused when it is a repository itself (a dotfiles checkout)
+        sh(&home, &["init", "-q"]);
+        assert_eq!(check(&s(&home)), Err("too_broad"));
+    }
+
+    /// The app's own folder kept somewhere else through a link: a repository that holds where it really is, is as broad as the
+    /// home folder for this check; and a lane's working folder under a folder the person chose is the app's own.
+    #[cfg(unix)]
+    #[test]
+    fn a_project_never_holds_the_apps_own_folder_nor_is_a_lanes_folder() {
+        use crate::lane::tests::{names, repo, sh};
+        let Some((home, web)) = repo("wf-own") else {
+            eprintln!("git is not installed: not run");
+            return;
+        };
+        let s = |p: &Path| p.to_string_lossy().into_owned();
+        let data = home.parent().unwrap().join(format!("manut-wf-data-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&data);
+        std::fs::create_dir_all(data.join("kept")).unwrap();
+        sh(&data, &["init", "-q"]);
+        std::os::unix::fs::symlink(data.join("kept"), home.join(".manut")).unwrap();
+        assert_eq!(project(&home, &s(&data)), Err("too_broad"));
+        assert_eq!(project(&home, &s(&web)), Ok(s(&web)));
+        std::fs::remove_file(home.join(".manut")).unwrap();
+        let _ = std::fs::remove_dir_all(&data);
+
+        // a lane made under a folder the person chose (Settings › Worktrees) is a repository's top, and the app's own
+        let root = home.join("lanes-root");
+        let made = lane::make_with(&home, &web, &names(&["kit/try-it"]), &lane::Start { root: s(&root), remote: false }).unwrap();
+        assert!(Path::new(&made.worktree).starts_with(root.canonicalize().unwrap()));
+        assert_eq!(project(&home, &made.worktree), Err("app_folder"));
+        // and one made in the default place, inside the app's own folder
+        let made = lane::make(&home, &web, &names(&["kit/try-again"])).unwrap();
+        assert_eq!(project(&home, &made.worktree), Err("app_folder"));
+        assert_eq!(project(&home, &s(&web)), Ok(s(&web)));
     }
 
     #[test]

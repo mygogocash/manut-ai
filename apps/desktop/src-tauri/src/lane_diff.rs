@@ -46,6 +46,11 @@ const MAX_NAMES: usize = 20_000;
 /// Set for every call: a path from a list is a path, never a pathspec; nothing pages.
 const ENV: &[(&str, &str)] = &[("GIT_LITERAL_PATHSPECS", "1"), ("GIT_PAGER", "cat")];
 
+/// On every diff (item 90): a submodule is hidden, so git never runs inside one (a `diff` against the work tree runs `status`
+/// in each submodule, which reads the submodule's own config and runs its clean filter), and one that reached a diff anyway is
+/// drawn as two commit names, never with `diff.submodule`'s `log` or `diff` forms, which read or diff inside it.
+const SUBMODULES: &[&str] = &["--ignore-submodules=all", "--submodule=short"];
+
 /// One changed file. `state` is `changed`, `new`, `deleted` or `renamed` (`from` is its old path). `diff` is git's unified diff
 /// with its keys masked, empty when `note` says why: `binary`, `too_large` or `left_out` (the answer's budget ran out first).
 #[derive(Serialize, Debug, PartialEq, Clone)]
@@ -123,7 +128,11 @@ fn mtime_of(wt: &Path, p: &str) -> u64 {
 /// Every file that differs from `start`: what git's own diff says about tracked files (renames paired), then the new files git
 /// does not ignore.
 fn entries(git: &Git, wt: &Path, start: &str) -> Result<Vec<Entry>, String> {
-    let tracked = git.run_with(wt, &["diff", "--name-status", "-z", "-M", "--no-ext-diff", "--no-textconv", "--no-color", start], Duration::from_secs(20), ENV)?;
+    // a submodule is not one of the lane's files, and comparing one would run git inside it (`SUBMODULES`)
+    let mut argv: Vec<&str> = vec!["diff", "--name-status", "-z", "-M", "--no-ext-diff", "--no-textconv", "--no-color"];
+    argv.extend_from_slice(SUBMODULES);
+    argv.push(start);
+    let tracked = git.run_with(wt, &argv, Duration::from_secs(20), ENV)?;
     if tracked.code != Some(0) {
         return Err("unread".into());
     }
@@ -179,6 +188,7 @@ fn diff_of(git: &Git, wt: &Path, start: &str, e: &Entry, left: Duration) -> Resu
     }
     let from = e.from.as_deref().unwrap_or("");
     let mut argv: Vec<&str> = vec!["diff", "--no-ext-diff", "--no-textconv", "--no-color"];
+    argv.extend_from_slice(SUBMODULES);
     if e.untracked {
         argv.extend(["--no-index", "--", "/dev/null", &e.path]);
     } else if e.from.is_some() {
@@ -451,6 +461,23 @@ mod tests {
         let got = get(&home, &wt);
         assert!(find(&got, "a.txt").diff.contains("+changed"));
         assert!(!marker.exists(), "a program ran: {}", fs::read_to_string(&marker).unwrap_or_default());
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn no_program_a_submodule_s_own_config_names_runs_to_read_a_diff() {
+        let Some((home, d)) = repo("ld-submodule") else { return };
+        crate::lane::tests::with_submodule(&home, &d);
+        let made = lane::make(&home, &d, &names(&["kit/x"])).unwrap();
+        let wt = PathBuf::from(&made.worktree);
+        let marker = crate::lane::tests::filter_in_submodule(&home, &wt);
+        fs::write(wt.join("a.txt"), "one\nchanged\n").unwrap();
+        let got = read(&home, &wt.to_string_lossy());
+        assert!(!marker.exists(), "a program ran: {}", fs::read_to_string(&marker).unwrap_or_default());
+        // whatever the Diff could say, a submodule is never one of the lane's own files
+        if let Ok(got) = got {
+            assert!(got.files.iter().all(|f| f.path != "sub"), "{got:?}");
+        }
         let _ = fs::remove_dir_all(home);
     }
 

@@ -89,8 +89,12 @@ describe("Team", () => {
     expect(html).toMatch(/class="tag err"[^>]*>Could not finish</);
     expect(html).toMatch(/class="tag"[^>]*>Not connected</);
     expect(html).toMatch(/class="tag"[^>]*>Idle</);
-    // Each member's face is the app's own avatar for that member.
+    // Each member's face is the brand's: Buddy's blue face, and the others drawn on their own colour at the kit's 40
     expect(count(html, 'class="ui-av"')).toBe(5);
+    expect(count(html, 'data-face="buddy"')).toBe(1);
+    expect(count(html, 'class="face lg"')).toBe(4);
+    expect(html).toMatch(/data-face="nam"[^]*?class="fg"[^>]*fill="#CDDDEB"/);
+    expect(html).toMatch(/data-face="kit"[^]*?class="fg"[^>]*fill="#E6D9C2"/);
     expect(html).toContain('data-testid="team-kit"');
   });
 

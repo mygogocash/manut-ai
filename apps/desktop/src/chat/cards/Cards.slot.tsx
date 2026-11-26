@@ -40,9 +40,11 @@ const EXPIRED_LABEL: Record<AskExpiry, Key> = {
   cancelled: "card.notAnswered",
 };
 
-/** Buttons in display order; only those the request offers are shown. All carry the same weight: the card
- *  never nudges toward allowing (a `rm -rf` must not have a bright "Allow" next to a faint "Deny"). Deny comes
- *  first so the left-most, first-tabbed answer is the safe one. `key` is its number while the card has focus. */
+/** Buttons in display order; only those the request offers are shown. Deny comes first so the left-most, first-tabbed
+ *  answer is the safe one, and no answer is ever the card's default: Enter on the card does nothing, and a number key
+ *  answers only while the card has focus. The design canvas draws Allow once as the card's one black button and the
+ *  others quiet (cards.css); that is the look only, the order and the keys are these. `key` is its number while the card
+ *  has focus. */
 const BUTTONS: { choice: ApprovalChoice; label: Key; key: string }[] = [
   { choice: "deny", label: "card.deny", key: "1" },
   { choice: "once", label: "card.allowOnce", key: "2" },
@@ -65,9 +67,10 @@ function useFocusRequest(bot: string, id: string, ref: RefObject<HTMLElement | n
   }, [req, bot, id, open, ref]);
 }
 
-function Line({ icon, text, detail, testid, landed }: { icon: string; text: string; detail?: string; testid: string; landed?: boolean }) {
+/** A closed card's one line. `ok`: an Allow, whose tick takes the green of done. */
+function Line({ icon, text, detail, testid, landed, ok }: { icon: string; text: string; detail?: string; testid: string; landed?: boolean; ok?: boolean }) {
   return (
-    <div className={`line card-line${landed ? " landed" : ""}`} data-testid={testid}>
+    <div className={`line card-line${ok ? " ok" : ""}${landed ? " landed" : ""}`} data-testid={testid}>
       <span className="line-ic">{icon}</span>
       <span className="line-t">
         {text}
@@ -115,7 +118,7 @@ function Approval({ bot, item }: { bot: string; item: ApprovalItem }) {
   if (item.resolved) {
     const denied = item.resolved === "deny";
     // an ask Kit's dial answered by itself says how
-    return <Line icon={denied ? "✕" : "✓"} text={kitDoneText(bot, item.request_id) ?? t(ALLOW_LABEL[item.resolved])} detail={detail} testid="card-line" landed={landed} />;
+    return <Line icon={denied ? "✕" : "✓"} text={kitDoneText(bot, item.request_id) ?? t(ALLOW_LABEL[item.resolved])} detail={detail} testid="card-line" landed={landed} ok={!denied} />;
   }
   // the runtime's own words for why it stopped waiting ("Already decided by Mint at 19:42"), when it gave them
   if (item.expired && !busy) return <Line icon="–" text={item.expiredNote || t(EXPIRED_LABEL[item.expired])} detail={detail} testid="card-line" />;
@@ -180,7 +183,6 @@ function Approval({ bot, item }: { bot: string; item: ApprovalItem }) {
       <div className="card-title">{title}</div>
       {risks.length > 0 && (
         <div className="card-risk" data-testid="card-risk" role="note">
-          <span className="card-risk-ic" aria-hidden="true">!</span>
           {risks.join(" · ")}
         </div>
       )}
@@ -528,7 +530,7 @@ function Clarify({ bot, item }: { bot: string; item: ClarifyItem }) {
 
   const detail = interview ? t("card.questions", { n: item.questions!.length }) : item.question;
   const landed = useLanded(item.answer !== undefined);
-  if (item.answer !== undefined) return <Line icon="✓" text={t("card.answeredWith", { answer: item.answer })} detail={detail} testid="card-line" landed={landed} />;
+  if (item.answer !== undefined) return <Line icon="✓" text={t("card.answeredWith", { answer: item.answer })} detail={detail} testid="card-line" landed={landed} ok />;
   if (item.expired && !busy) return <Line icon="–" text={t(EXPIRED_LABEL[item.expired])} detail={detail} testid="card-line" />;
   if (!open && !busy) return <Line icon="–" text={t("card.notAnswered")} detail={detail} testid="card-line" />;
   if (interview) return <Interview bot={bot} item={item} cardRef={formRef} />;
@@ -574,7 +576,7 @@ function Clarify({ bot, item }: { bot: string; item: ClarifyItem }) {
       <div className="card-acts">
         {choices.length > 0 ? (
           (multi || pick.other.trim()) && (
-            <button type="button" className="card-btn soft" disabled={busy || given === null} onClick={() => void answer(given ?? "")}>
+            <button type="button" className="card-btn primary" disabled={busy || given === null} onClick={() => void answer(given ?? "")}>
               {t("card.answer")}
             </button>
           )
@@ -595,7 +597,7 @@ function Clarify({ bot, item }: { bot: string; item: ClarifyItem }) {
               aria-label={t("card.yourAnswer")}
               onChange={(e) => setText(e.target.value)}
             />
-            <button type="submit" className="card-btn soft" disabled={busy || !text.trim()}>
+            <button type="submit" className="card-btn primary" disabled={busy || !text.trim()}>
               {t("card.answer")}
             </button>
           </form>
