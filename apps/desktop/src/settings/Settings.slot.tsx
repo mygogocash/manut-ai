@@ -35,6 +35,7 @@ import { SourceControlPage } from "./SourceControlPage";
 import { ArtifactLinksPage } from "./ArtifactLinksPage";
 import { RemotePage } from "./RemotePage";
 import { setSuggestOn, useSuggestOn } from "../lib/suggest";
+import { QUIET_DAYS, setInbox, useInbox } from "../sidebar/inbox";
 import { TITLE_EFFORTS, TITLE_MODELS, setTitleModel, useTitleModel } from "../lib/titleModel";
 import { VoicePage } from "./VoicePage";
 import { ComputerPage } from "./ComputerPage";
@@ -664,6 +665,32 @@ function SuggestToggle() {
   return <Toggle on={on} label={t("suggest.title")} onChange={setSuggestOn} testId="set-suggest" />;
 }
 
+/** Settings › General › Recent chats › Working group (item 94, sidebar/inbox.ts): off until the person turns it on. */
+function WorkingToggle() {
+  const inbox = useInbox();
+  return <Toggle on={inbox.working} label={t("inbox.working")} onChange={(working) => setInbox({ working })} testId="set-working" />;
+}
+
+/** Settings › General › Side menu › Done after quiet days (item 94): 3 days by default, Off turns it off. */
+function QuietDaysSeg() {
+  const inbox = useInbox();
+  return (
+    <Modes
+      label={t("inbox.quiet")}
+      value={String(inbox.quietDays)}
+      options={QUIET_DAYS.map((n) => ({ value: String(n), label: n === 0 ? t("set.off") : n === 1 ? t("inbox.day1") : t("inbox.days", { n }) }))}
+      onChange={(v) => setInbox({ quietDays: Number(v) })}
+      testId="set-quiet-days"
+    />
+  );
+}
+
+/** Settings › General › Side menu › Done when its pull request merges (item 94): on by default. */
+function MergedToggle() {
+  const inbox = useInbox();
+  return <Toggle on={inbox.merged} label={t("inbox.merged")} onChange={(merged) => setInbox({ merged })} testId="set-settle-merged" />;
+}
+
 /** Settings › General › Titles and words (lib/titleModel.ts, item 96): off until the person turns it on, since each title is an extra
  *  request on their own plan; the model and the effort that write them. */
 export function TitlesRows() {
@@ -748,7 +775,18 @@ function GeneralPage() {
           <Value>{t("suggest.agentsValue")}</Value>
         </Row>
       </div>
-      <div className="st-grp">
+      {/* the side menu's own choices (item 94), with the menu's other one, the tasks bar */}
+      <div className="st-gh">{t("inbox.group")}</div>
+      <div className="st-grp" data-testid="set-inbox">
+        <Row title={t("inbox.working")} hint={t("inbox.workingHint")}>
+          <WorkingToggle />
+        </Row>
+        <Row title={t("inbox.quiet")} hint={t("inbox.quietHint")}>
+          <QuietDaysSeg />
+        </Row>
+        <Row title={t("inbox.merged")} hint={t("inbox.mergedHint")}>
+          <MergedToggle />
+        </Row>
         <Row title={t("tasks.barSetting")} hint={t("tasks.barSettingHint")}>
           <TasksBarToggle />
         </Row>

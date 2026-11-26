@@ -19,7 +19,7 @@ import { BringBack } from "./BringBack";
 import { projectName, sessionsWithKeys, useKeysVersion } from "./kitAsks";
 import { showPull } from "../tasks/state";
 import { useRowMarks } from "../sidebar/rows";
-import { laneBase, LanesView, openLane, useLaneRows, type LaneRow, type LanesProps } from "./Lanes";
+import { laneBase, LanesView, openLane, useLaneRows, useLaneSettle, type LaneRow, type LanesProps } from "./Lanes";
 import { openNewSessionMenu } from "../sessions/newMenu";
 import { usePlace } from "../palette/places";
 import { KeptLanes, useLaneProjects } from "./KeptLanes";
@@ -240,6 +240,8 @@ export function KitPanel() {
   const root = picked && projects.includes(picked) ? picked : (projects[0] ?? "");
   const project = useKitProject(root);
   const lanes = useLaneRows(root);
+  // a lane whose pull request merged, or that has been quiet, settles by itself (item 94)
+  useLaneSettle(lanes);
   // The command palette offers New lane while a project is open here, and presses this very link's function.
   const laneAction = useMemo(() => (root ? { newLane: () => openNewSessionMenu({ chat: true, folder: root }) } : null), [root]);
   usePlace("lane", laneAction);

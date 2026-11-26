@@ -27,9 +27,13 @@ import { isDesktop } from "../settings/accounts/native";
 import { accountLabel, EMPTY_SHOP } from "../onboarding/shop";
 import { currentRow, MENU_ROWS, recentParts, rowPage, type MenuRow } from "./menu";
 import { rowStatus } from "../threads/ThreadTree";
-import { MoreButton, useRowMenu } from "./RowMenu";
+import { MoreButton, settledWhy, useRowMenu } from "./RowMenu";
 import { threadRowKey, useRowMarks } from "./rows";
 import { RowsWatcher } from "./RowsWatcher";
+import { useInbox } from "./inbox";
+import { useRowSelect, useSelectionEscape } from "./useRowSelect";
+
+type RowSelect = ReturnType<typeof useRowSelect>;
 import { togglePalette } from "../palette/state";
 import { BrandMark, MenuIcon, SearchGlyph } from "./menuIcons";
 import { Icon } from "../ui/icons";
@@ -58,21 +62,35 @@ export interface RecentItem {
   place?: "pinned" | "settled";
   /** The row's key for its menu (rows.ts); a row without one has no menu. */
   rowKey?: string;
+  /** Its turn runs: Snooze also offers "Until it finishes" (item 94). */
+  working?: boolean;
+  /** Why it settled by itself, on its quiet second line ("Done after 3 quiet days"); none for a row the person settled. */
+  why?: string | null;
 }
 
-/** One chat of Recent: the row, and the menu of what can be done to it (Pin, Snooze, Done for now, Archive). */
-function RecentRow({ item }: { item: RecentItem }) {
+/** One chat of Recent: the row, and the menu of what can be done to it (Pin, Snooze, Done for now, Archive), to it alone or to every
+ *  row selected with it (item 94). */
+function RecentRow({ item, select }: { item: RecentItem; select: RowSelect }) {
   const marks = useRowMarks();
-  const menu = useRowMenu({ rowKey: item.rowKey ?? "", kind: "chat", mark: item.rowKey ? marks[item.rowKey] : undefined, name: item.title });
+  const keys = item.rowKey ? select.actsOn(item.rowKey) : [];
+  const many = keys.length > 1;
+  const menu = useRowMenu({ rowKey: item.rowKey ?? "", kind: "chat", mark: item.rowKey ? marks[item.rowKey] : undefined, name: many ? t("row.count", { n: keys.length }) : item.title, working: item.working, keys });
+  const selected = select.selected(item.rowKey);
   return (
-    <li className={`rec-li${item.place ? ` ${item.place}` : ""}${menu.isOpen ? " menu-open" : ""}`} data-place={item.place} data-flip={item.key} onContextMenu={item.rowKey ? menu.onContextMenu : undefined}>
-      <button type="button" className="rec" title={item.title} onClick={item.open} data-testid="menu-recent">
+    <li className={`rec-li${item.place ? ` ${item.place}` : ""}${menu.isOpen ? " menu-open" : ""}`} data-place={item.place} data-flip={item.key} data-row-key={item.rowKey} data-sel={selected || undefined} onContextMenu={item.rowKey ? menu.onContextMenu : undefined}>
+      <button type="button" className="rec" title={item.title} onClick={(e) => select.click(e, item.rowKey, item.open)} onKeyDown={(e) => select.keyDown(e, item.rowKey)} data-testid="menu-recent">
         {item.place === "pinned" && (
           <span className="rec-pin" role="img" aria-label={t("row.pinned")} title={t("row.pinned")} data-testid="menu-recent-pin">
             <PinGlyph />
           </span>
         )}
         {item.title}
+        {item.why && (
+          <span className="rec-why" data-testid="menu-recent-why">
+            {item.why}
+          </span>
+        )}
+        {selected && <span className="vh">, {t("row.selected")}</span>}
       </button>
       {item.rowKey && <MoreButton name={item.title} onOpen={menu.open} className="rec-more" />}
       {menu.menu}
@@ -89,6 +107,7 @@ export function SideMenu({
   current,
   needs,
   recent,
+  working = [],
   settings,
   account = accountLabel(EMPTY_SHOP),
   helping = false,
@@ -105,6 +124,8 @@ export function SideMenu({
   /** how many asks wait on the person; no count shows at 0 */
   needs: number;
   recent: RecentItem[];
+  /** The Working group (item 94): chats whose turn runs, when the person turned the group on; nothing is drawn while it is empty. */
+  working?: RecentItem[];
   /** Settings is open: the account row is current, as on the canvas's Settings board */
   settings: boolean;
   /** who the account row names and the initial in its avatar (onboarding/shop.ts `accountLabel`); "You" by default */
@@ -123,8 +144,12 @@ export function SideMenu({
   /** the shop's AI spend this month against its cap, in integer satang, when the runtime gives them; none draws no pill */
   budget?: Budget | null;
 }) {
+  // Recent and the Working group are one list to select in, in the order they are drawn
+  const order = [...recent, ...working].flatMap((r) => (r.rowKey ? [r.rowKey] : []));
+  const select = useRowSelect("recent", order);
+  useSelectionEscape();
   return (
-    <nav className="sb" aria-label={t("menu.label")} data-testid="sidebar">
+    <nav className="sb" aria-label={t("menu.label")} data-testid="sidebar" data-select-scope="recent">
       <div className="brand">
         {/* The mark leads where New does, as the canvas's mark links to Home. */}
         <button type="button" className="sb-home" aria-label={t("menu.home")} onClick={() => onRow("new")} data-testid="menu-home">
@@ -159,7 +184,19 @@ export function SideMenu({
           </div>
           <ul className="sb-recent" aria-labelledby="menu-recent-h" data-arrive="sidebar" data-arrive-rows=".rec-li" data-flip-list>
             {recent.map((r) => (
-              <RecentRow key={r.key} item={r} />
+              <RecentRow key={r.key} item={r} select={select} />
+            ))}
+          </ul>
+        </>
+      )}
+      {working.length > 0 && (
+        <>
+          <div className="sb-h" id="menu-working-h">
+            {t("menu.working")}
+          </div>
+          <ul className="sb-recent sb-working" aria-labelledby="menu-working-h" data-testid="menu-working">
+            {working.map((r) => (
+              <RecentRow key={r.key} item={r} select={select} />
             ))}
           </ul>
         </>
@@ -232,13 +269,16 @@ export function Sidebar() {
   const members = selectSidebarBots(s).map((b) => b.name);
   const untitled = t("thread.untitled");
   const marks = useRowMarks();
-  const parts = recentParts(s.threads, members, marks, (bot, row) => rowStatus(s, bot, row) === "needs_you", Date.now());
-  const item = (place: RecentItem["place"]) => (r: { bot: string; thread: string; title: string }): RecentItem => ({
+  const inbox = useInbox();
+  const parts = recentParts(s.threads, members, marks, (bot, row) => rowStatus(s, bot, row) === "needs_you", Date.now(), 3, { working: (bot, row) => rowStatus(s, bot, row) === "running", group: inbox.working });
+  const item = (place: RecentItem["place"]) => (r: { bot: string; thread: string; title: string; working?: boolean }): RecentItem => ({
     key: `${r.bot}:${r.thread}`,
     title: r.title || untitled,
     open: () => void s.openThread(r.bot, r.thread),
     place,
     rowKey: threadRowKey(r.bot, r.thread),
+    working: r.working,
+    why: place === "settled" ? settledWhy(marks[threadRowKey(r.bot, r.thread)]) : null,
   });
   const recent = [...parts.pinned.map(item("pinned")), ...parts.recent.map(item(undefined)), ...parts.settled.map(item("settled"))];
   // New (and the brand mark) opens Home; every other row opens its own page.
@@ -250,6 +290,7 @@ export function Sidebar() {
       current={currentRow(s.ui, s.selectedBot)}
       needs={selectAsks(s).length}
       recent={recent}
+      working={parts.working.map(item(undefined))}
       settings={s.ui.view === "settings"}
       account={accountLabel({ person: s.ui.shop.person, shop: viewedShopName(s) })}
       helping={!!helpedShop(s.shops)}
