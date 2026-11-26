@@ -66,7 +66,8 @@ The fixes are items 85e to 85i in `docs/plan.md`; the motion is items 85a to 85c
     light); `--quiet` is left on placeholders and disabled controls, and `src/theme/quietRule.test.ts` keeps it there.
     The chat's stylesheets (47 rules) wait for item 85f, which rewrites them; the test names them once the lead drops
     its one exception.
-12. **Team's Pause everyone** is a red outlined button. Pausing can be undone, so red is wrong. Seen.
+12. **Team's Pause everyone** is a red outlined button. Pausing can be undone, so red is wrong. Seen. Fixed in item 85i
+    (26 Nov): the Team board's quiet button; the question's own Pause everyone stays as PauseAll draws it.
 
 ### Density and rhythm
 
@@ -85,7 +86,10 @@ The fixes are items 85e to 85i in `docs/plan.md`; the motion is items 85a to 85c
 ### Empty, loading and error states
 
 17. **Customize and the activity log** print a raw error as body text when a read fails. The system-states board says
-    "This page did not load. Nothing was changed. Try again." Seen; a real failure would read the same.
+    "This page did not load. Nothing was changed. Try again." Seen; a real failure would read the same. Fixed in item 85i
+    (26 Nov): a failure the app does not word for people shows the board's banner with Try again, and the raw error only
+    under a shut Details (`LoadFailed`, `saysWhy` in `pages/load.ts`); a worded refusal (Not yet, owner only, offline)
+    still says why in its own sentence.
 18. The empty states of Needs you, Artifacts and History are good and alike: the pattern for the others.
 
 ### Dark, and narrow

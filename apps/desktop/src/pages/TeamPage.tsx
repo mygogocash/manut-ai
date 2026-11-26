@@ -274,7 +274,9 @@ export function TeamView({
   const state = pause?.state.kind === "ready" ? pause.state.value : null;
   const paused = !!state?.paused;
   const loading = pause?.state.kind === "loading";
-  // With no one but the lead to stop (or no team at all) there is nothing to pause, so the button is not offered.
+  // With no one but the lead to stop (or no team at all) there is nothing to pause, so the button is not offered. Pausing can
+  // be undone, so it is the Team board's quiet button, not red, which means failed (item 85i, finding 12); its question's
+  // own Pause everyone stays as the PauseAll board draws it.
   const offered = !!pause && members.length > 0 && !(state && state.members.length === 0);
   const acts =
     pause &&
@@ -284,7 +286,7 @@ export function TeamView({
         {t("pause.resume")}
       </button>
     ) : (
-      <button type="button" className="btn danger" disabled={loading || pause.ui.busy} aria-busy={loading || undefined} onClick={pause.onAsk} data-testid="pause-open">
+      <button type="button" className="btn" disabled={loading || pause.ui.busy} aria-busy={loading || undefined} onClick={pause.onAsk} data-testid="pause-open">
         {t("pause.button")}
       </button>
     ));

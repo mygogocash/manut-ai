@@ -516,3 +516,46 @@
   right: auto;
   width: 320px;
 }
+
+/* A read that failed in a way the app did not word for people (MenuPage.tsx `LoadFailed`, item 85i): the system-states
+   board's banner (StatesSystem, "Something went wrong"; packages/ui-kit app.css `.banner.err`), then the runtime's own
+   words under a small Details. */
+.mpage .failed {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.mpage .banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--rad-lg);
+  background: var(--aui-subtle);
+  font-size: 13.5px;
+}
+.mpage .banner.err {
+  border-color: transparent;
+  background: var(--errbg);
+  color: var(--aui-danger);
+}
+.mpage .banner.err .btn {
+  color: var(--ink);
+}
+.mpage .failed-d {
+  padding: 0 12px;
+  color: var(--aui-muted);
+  font-size: 12px;
+}
+.mpage .failed-d summary {
+  cursor: pointer;
+  width: max-content;
+}
+.mpage .failed-d code {
+  display: block;
+  margin-top: 4px;
+  font-family: var(--aui-font-mono);
+  overflow-wrap: anywhere;
+}

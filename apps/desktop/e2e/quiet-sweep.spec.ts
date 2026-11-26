@@ -96,6 +96,40 @@ test("the command menu is the Search board's: 34px rows of an icon and its word,
   }
 });
 
+test("Team's Pause everyone is the quiet button, and Customize says it did not load in the board's words, the raw error under Details", async ({ page }) => {
+  await start(page);
+  await page.getByTestId("menu-team").click();
+  const pause = page.getByTestId("pause-open");
+  await expect(pause).toBeVisible();
+  const [c, b, danger] = await pause.evaluate((e) => {
+    const probe = document.createElement("i");
+    probe.style.color = "var(--aui-danger)";
+    document.body.append(probe);
+    const d = getComputedStyle(probe).color;
+    probe.remove();
+    return [getComputedStyle(e).color, getComputedStyle(e).borderTopColor, d];
+  });
+  expect(c).not.toBe(danger);
+  expect(b).not.toBe(danger);
+
+  // the stand-in runtime has no memory or routines to read: a failure the app did not word for people
+  await page.getByTestId("menu-customize").click();
+  const failed = page.getByTestId("memory-failed");
+  await expect(failed.locator(".banner")).toHaveText("This page did not load. Nothing was changed.Try again");
+  await expect(page.getByTestId("memory-failed-details")).toBeHidden();
+  // what shows (not what is in the shut Details) has no raw error
+  expect(await page.getByTestId("page-customize").innerText()).not.toContain("no such op");
+  await failed.locator("summary").click();
+  await expect(page.getByTestId("memory-failed-details")).toHaveText("no such op: memory.list");
+  await page.getByTestId("memory-failed-retry").click();
+  await expect(page.getByTestId("memory-failed")).toBeVisible();
+  if (SHOTS) for (const theme of ["light", "dark"] as const) {
+    await page.evaluate((th) => document.documentElement.setAttribute("data-theme", th), theme);
+    await page.waitForTimeout(300);
+    await page.screenshot({ path: join(SHOTS, `customize-failed-${theme}.png`), animations: "disabled" });
+  }
+});
+
 test("pictures of every menu page and Settings, at 1280 and 900, light and dark", async ({ page }) => {
   test.skip(!SHOTS, "QUIET_SHOTS=<dir> keeps the pictures");
   test.setTimeout(240_000);

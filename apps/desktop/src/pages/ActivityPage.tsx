@@ -40,9 +40,9 @@ import {
   type Range,
 } from "./activity";
 import { dayBand } from "./history";
-import { LOADING, load, type Load } from "./load";
+import { LOADING, load, saysWhy, type Load } from "./load";
 import { Loading } from "./Loading";
-import { Empty, MenuPageFrame } from "./MenuPage";
+import { Empty, LoadFailed, MenuPageFrame } from "./MenuPage";
 import { useShowOlder, type OlderView } from "./older";
 import { OwnersOnly } from "./OwnersOnly";
 import { saveCsv, type SaveResult } from "./saveFile";
@@ -78,6 +78,8 @@ export interface ActivityViewProps {
   onDownload: () => void;
   /** the "Jobs and chats" tab: back to History */
   onBack: () => void;
+  /** Try again, after a read that failed in a way the app did not word for people: the log is read again */
+  onRetry?: () => void;
   onOpenJob: (id: string) => void;
   /** the runtime has older events than the log holds, or Show older has shown all of them (older.ts): the line and the button under the list */
   older?: OlderView;
@@ -436,10 +438,14 @@ export function ActivityView(p: ActivityViewProps) {
     );
   if (p.load.kind === "unavailable")
     return frame(
-      <div className="off" role="alert" data-testid="act-unavailable">
-        <h2>{t("act.unavailable")}</h2>
-        <p>{p.load.message}</p>
-      </div>,
+      saysWhy(p.load) ? (
+        <div className="off" role="alert" data-testid="act-unavailable">
+          <h2>{t("act.unavailable")}</h2>
+          <p>{p.load.message}</p>
+        </div>
+      ) : (
+        <LoadFailed details={p.load.message} onRetry={p.onRetry ?? (() => {})} testId="act-failed" />
+      ),
     );
   if (!full || !log)
     return frame(
@@ -651,6 +657,10 @@ export function ActivityPage() {
         });
       }}
       onBack={() => s.closeSettings()}
+      onRetry={() => {
+        setState(LOADING);
+        setReads((n) => n + 1);
+      }}
       onOpenJob={(id) => s.openJob(id)}
       older={state.kind === "ready" && state.value.older ? { state: state.value.older, ui: more.ui, onShow: more.show } : undefined}
       helped={helped}
