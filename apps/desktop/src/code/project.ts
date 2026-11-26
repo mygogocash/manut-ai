@@ -4,7 +4,7 @@
 // groups, it never leaves this computer and nothing on disk changes for it. The pure helpers carry the rules; the
 // store below them is the page's.
 import { useSyncExternalStore } from "react";
-import { kitLevelOf, type KitLevel } from "@manut/member-grants";
+import { kitLevelOf, mayAlwaysAllow, type KitAction, type KitLevel } from "@manut/member-grants";
 import { isTildePath, pathKey } from "../sessions/folders";
 import { insideProject, type Rule } from "./command";
 
@@ -46,7 +46,7 @@ const withProject = (p: Projects, root: string, f: (x: KitProject) => KitProject
   return key ? { ...p, [key]: f(projectOf(p, key)) } : p;
 };
 
-const sameRule = (a: Rule, b: Rule) => !!a.exact === !!b.exact && a.words.length === b.words.length && a.words.every((w, i) => w === b.words[i]);
+const sameRule = (a: Rule, b: Rule) => !!a.exact === !!b.exact && a.action === b.action && a.words.length === b.words.length && a.words.every((w, i) => w === b.words[i]);
 
 export const setLevel = (p: Projects, root: string, level: KitLevel): Projects => withProject(p, root, (x) => ({ ...x, level: kitLevelOf(level) }));
 
@@ -86,9 +86,11 @@ const isStrings = (x: unknown): x is string[] => Array.isArray(x) && x.every((w)
 
 function readRule(x: unknown): Rule | null {
   if (!x || typeof x !== "object") return null;
-  const r = x as { words?: unknown; exact?: unknown };
+  const r = x as { words?: unknown; exact?: unknown; action?: unknown };
   if (!isStrings(r.words) || !r.words.length || r.words.some((w) => !w)) return null;
-  return r.exact === true ? { words: r.words, exact: true } : { words: r.words };
+  // the step it was kept for, when it is one a rule may cover; any other value is read as none (the least strict)
+  const action = typeof r.action === "string" && mayAlwaysAllow(r.action as KitAction) ? { action: r.action as KitAction } : {};
+  return r.exact === true ? { words: r.words, exact: true, ...action } : { words: r.words, ...action };
 }
 
 function readBlocked(x: unknown): Blocked | null {

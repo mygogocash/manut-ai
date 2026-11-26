@@ -12,7 +12,7 @@
 // not cover whole (a plan, a tool that is not a file tool, a path the shell cut short, a change that names no file)
 // is left as it is.
 import { kitDecide, type Connection, type KitAction, type KitDecision } from "@manut/member-grants";
-import { IN_GIT_DIR, folderOf, guardedPath, insideProject, readCommand, ruleMatches, type ReadCommand, type Rule, type Say, type Where } from "./command";
+import { IN_GIT_DIR, folderOf, guardedPath, insideProject, readCommand, ruleCovers, type ReadCommand, type Rule, type Say, type Where } from "./command";
 import type { KitProject } from "./project";
 import type { AskTool } from "../lib/protocol";
 
@@ -196,6 +196,7 @@ function readWords(ask: AskWords, where: Where): AskRead | null {
  *  session's changes. */
 export function decideAsk(read: AskRead, project: KitProject, keys: readonly string[], now: number = Date.now()): KitDecision {
   const line = read.what === "command" ? read.line : undefined;
-  const alwaysAllowed = line !== undefined && project.rules.some((r) => ruleMatches(r, line));
+  // a rule covers only the step it was kept for, never a harsher one with the same first words
+  const alwaysAllowed = line !== undefined && project.rules.some((r) => ruleCovers(r, line, read.action));
   return kitDecide({ action: read.action, outside: read.outside.length > 0, holdsSecret: read.saves && keys.length > 0, alwaysAllowed }, project.level, ON_THIS_MAC, now);
 }

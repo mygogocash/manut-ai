@@ -90,7 +90,7 @@ describe("Kit's dial on a coding session's asks", () => {
     expect(kitCard(asked("r2", "Run this command?", "pnpm add qrcode"), { chat: s.key, root: ROOT, home: "/w" })).toEqual({
       root: ROOT,
       say: { key: "kit.say.add1" },
-      always: { words: ["pnpm", "add"] },
+      always: { words: ["pnpm", "add"], action: "install" },
       keys: [],
     });
   });

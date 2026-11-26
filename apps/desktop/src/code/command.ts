@@ -35,10 +35,12 @@ export interface Say {
   vars?: Record<string, string | number>;
 }
 
-/** What "Always allow in this project" keeps: a command's first words, or the whole command (`exact`). */
+/** What "Always allow in this project" keeps: a command's first words, or the whole command (`exact`), and the step it
+ *  was kept for (item 116). A rule saved before it named its step has none. */
 export interface Rule {
   words: string[];
   exact?: true;
+  action?: KitAction;
 }
 
 export interface ReadCommand {
@@ -2142,7 +2144,7 @@ function readFrom({ cmds, opaque }: Lexed, where: Where, start: string | null): 
   const only = cmds.length === 1 ? cmds[0] : null;
   const ruleable = action === "change" || action === "install" || action === "delete" || action === "push";
   if (only && ruleable && !opaque && !outside.length && !only.redirects.length && !ASSIGNMENT.test(only.words[0] ?? "") && whole.head !== undefined) {
-    rule = whole.head === "exact" ? { words: [...only.words], exact: true } : { words: only.words.slice(0, whole.head) };
+    rule = whole.head === "exact" ? { words: [...only.words], exact: true, action } : { words: only.words.slice(0, whole.head), action };
   }
   return { action, outside, saves, rule, say: s, ends };
 }
@@ -2182,6 +2184,26 @@ export function ruleMatches(rule: Rule, line: string): boolean {
   if (ASSIGNMENT.test(words[0] ?? "")) return false;
   if (rule.exact && words.length !== rule.words.length) return false;
   return rule.words.every((w, i) => words[i] === w);
+}
+
+/** Options that make a command do more of what it does, or something harsher: force, delete, hard, clear, recursive. */
+const HARSHER = /^--(force|force-with-lease|force-if-includes|delete|hard|clear|recursive|mirror|prune|discard-changes)(=|$)/;
+/** The short ones, where the program reads its letters so (git's `-f`, `-d`, `-D`, `-r`; a package manager's `-f` and
+ *  `-r`), counted inside a bundle (`-fu`). Elsewhere a letter means something else (`pnpm add -D` saves a tool). */
+const HARSHER_SHORT: Record<string, RegExp> = { git: /^-[^-]*[fdDrR]/, pnpm: /^-[^-]*[fr]/, npm: /^-[^-]*[fr]/, yarn: /^-[^-]*[fr]/, bun: /^-[^-]*[fr]/ };
+
+/** The step a kept rule covers: the one it was kept for, or, for a rule saved before rules named one, the least strict
+ *  step its own words can mean (read as on a branch of Kit's own, so `git push` is a push). */
+const ruleAction = (rule: Rule): KitAction => rule.action ?? readCommand(rule.words.join(" "), { cwd: "/rule", root: "/rule", branch: "kit/rule" }).action;
+
+/** Whether a kept rule covers `line`, read as `action` (item 116): its words begin the line (`ruleMatches`), the line is
+ *  the very step the rule was kept for, and no word after the rule's own is an option that makes it harsher. So a rule
+ *  kept from a push never covers a forced push or a delete, nor one kept from a new branch a branch's delete. */
+export function ruleCovers(rule: Rule, line: string, action: KitAction): boolean {
+  if (!ruleMatches(rule, line) || ruleAction(rule) !== action) return false;
+  const words = lex(line).cmds[0].words;
+  const short = HARSHER_SHORT[words[0] ?? ""];
+  return !words.slice(rule.words.length).some((w) => HARSHER.test(w) || short?.test(w));
 }
 
 /** A rule as the developer reads it: "pnpm add …", or the whole command. */

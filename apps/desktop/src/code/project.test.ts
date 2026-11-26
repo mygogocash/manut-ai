@@ -78,6 +78,13 @@ describe("a saved record", () => {
     expect(parseProjects(JSON.stringify(p))).toEqual(p);
   });
 
+  it("keeps the step a rule was kept for, and reads any other value as none (item 116)", () => {
+    const p = addRule(none, root, { words: ["git", "push"], action: "push" });
+    expect(parseProjects(JSON.stringify(p))).toEqual(p);
+    for (const action of ["live", "unknown", "read", "anything", 3])
+      expect(projectOf(parseProjects(JSON.stringify({ [root]: { level: "edits_alone", rules: [{ words: ["git", "push"], action }] } })), root).rules).toEqual([{ words: ["git", "push"] }]);
+  });
+
   it("reads a broken part as its careful default, and drops what it cannot read", () => {
     const raw = JSON.stringify({
       [root]: {

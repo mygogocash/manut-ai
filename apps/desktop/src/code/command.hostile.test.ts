@@ -5,8 +5,9 @@
 // reaching the network is no longer a read.
 import { describe, expect, it } from "vitest";
 import { kitDecide, type KitAction, type KitLevel } from "@manut/member-grants";
-import { foldersAfter, readCommand, type Where } from "./command";
-import { ON_THIS_MAC } from "./ask";
+import { foldersAfter, readCommand, type Rule, type Where } from "./command";
+import { ON_THIS_MAC, decideAsk } from "./ask";
+import { emptyProject } from "./project";
 
 const root = "/Users/fon/baanmali-preorder";
 const at: Where = { cwd: root, root, home: "/Users/fon", branch: "kit/promptpay-qr" };
@@ -747,6 +748,63 @@ describe("C2: a check or a read with an option its own list does not hold (item 
     for (const line of ["ruff check --fix-only src", "ruff check --add-noqa src", "npx eslint --fix src", "cargo clippy --fix"]) expect([line, read(line).action]).toEqual([line, "change"]);
     // an option that only leaves a folder out is not a file it writes
     expect(read("grep -rn --exclude-dir=.git foo src").action).toBe("read");
+  });
+});
+
+describe("C3: a kept rule covers only the step it was kept for (item 116)", () => {
+  const project = (rules: Rule[]) => ({ ...emptyProject(), level: "edits_and_safe_commands" as const, rules });
+  const decide = (line: string, rules: Rule[]) => {
+    const c = readCommand(line, at);
+    return decideAsk({ what: "command", action: c.action, outside: c.outside, folder: null, saves: c.saves, rule: c.rule, line, say: c.say }, project(rules), [], 0).answer;
+  };
+  /** The line a rule is kept from, a stricter line that begins with its words, and a line the rule still covers. */
+  const ROWS: [kept: string, stricter: string, covered: string][] = [
+    ["git push origin kit/x", "git push --force origin kit/x", "git push origin kit/y"],
+    ["git push origin kit/x", "git push origin --delete kit/old", "git push -u origin kit/x"],
+    ["git push origin kit/x", "git push -f origin kit/x", "git push origin kit/x"],
+    ["git push origin kit/x", "git push --force-with-lease origin kit/x", "git push origin kit/z"],
+    ["git push origin kit/x", "git push origin +kit/x", "git push origin kit/x"],
+    ["git branch kit/new", "git branch -D kit/promptpay-qr", "git branch kit/other"],
+    ["git branch kit/new", "git branch --delete kit/old", "git branch kit/two"],
+    ["git stash", "git stash clear", "git stash"],
+    ["git stash", "git stash drop", "git stash"],
+    ["git rm --cached src/a.ts", "git rm -r src", "git rm --cached src/b.ts"],
+    ["git switch kit/x", "git switch -f kit/x", "git switch kit/y"],
+    ["git switch kit/x", "git switch --discard-changes kit/x", "git switch kit/z"],
+    ["git remote rename a b", "git remote remove origin", "git remote rename c d"],
+    ["git checkout main", "git checkout -f main", "git checkout kit/x"],
+    ["git reset src/a.ts", "git reset --hard src/a.ts", "git reset src/b.ts"],
+    ["git worktree add kit-x", "git worktree remove kit-x", "git worktree add kit-y"],
+    ["pnpm install", "pnpm install --force", "pnpm install"],
+    ["pnpm add qrcode", "pnpm add -r qrcode", "pnpm add dayjs"],
+  ];
+
+  it("never lets a rule kept from one step cover a stricter step with the same first words", () => {
+    const wrong: string[] = [];
+    for (const [kept, stricter, covered] of ROWS) {
+      const rule = readCommand(kept, at).rule;
+      if (!rule) {
+        wrong.push(`no rule: ${kept}`);
+        continue;
+      }
+      if (decide(stricter, []) === "alone") wrong.push(`alone without a rule: ${stricter}`);
+      if (decide(stricter, [rule]) === "alone") wrong.push(`covered: ${kept} -> ${stricter}`);
+      if (readCommand(covered, at).outside.length === 0 && decide(covered, [rule]) !== "alone") wrong.push(`no longer covered: ${kept} -> ${covered}`);
+    }
+    expect(wrong).toEqual([]);
+  });
+
+  it("reads a rule saved before it named its step as covering only the least strict step its words can mean", () => {
+    const old = (...words: string[]): Rule => ({ words });
+    expect(decide("git push origin kit/x", [old("git", "push")])).toBe("alone");
+    expect(decide("git push --force origin kit/x", [old("git", "push")])).toBe("ask");
+    expect(decide("git push origin --delete kit/old", [old("git", "push")])).toBe("ask");
+    expect(decide("git branch -D kit/x", [old("git", "branch")])).toBe("ask");
+    expect(decide("git stash clear", [old("git", "stash")])).toBe("ask");
+    expect(decide("pnpm add dayjs", [old("pnpm", "add")])).toBe("alone");
+    expect(decide("pnpm add -r dayjs", [old("pnpm", "add")])).toBe("ask");
+    // a new rule names the step it was kept for
+    expect(readCommand("git push origin kit/x", at).rule).toEqual({ words: ["git", "push"], action: "push" });
   });
 });
 

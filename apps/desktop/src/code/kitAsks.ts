@@ -13,7 +13,7 @@ import type { ApprovalChoice, DiffFile, EventOf } from "../lib/protocol";
 import { appSounds } from "../lib/sounds";
 import type { ApprovalItem } from "../state/store";
 import { decideAsk, readAsk, type AskRead, type AskWords } from "./ask";
-import { foldersAfter, ruleMatches, scriptRun, type Rule, type Say } from "./command";
+import { foldersAfter, ruleCovers, scriptRun, type Rule, type Say } from "./command";
 import { scriptText } from "./previewRun";
 import { noteReads, resetPreview } from "./preview";
 import { kitProjects, noteBlocked, projectOf, updateKitProjects, type KitProject } from "./project";
@@ -155,7 +155,7 @@ export function kitCard(ev: EventOf<"approval.request">, ctx: AskContext, packag
   const keys = keysIn(ctx.chat);
   const d = decideAsk(read, project, keys);
   // a rule is matched against the line that was read, never the card's one-line command
-  const kept = read.line !== undefined && project.rules.some((r) => ruleMatches(r, read.line!));
+  const kept = read.line !== undefined && project.rules.some((r) => ruleCovers(r, read.line!, read.action));
   const always = d.answer === "ask" && d.mayAlwaysAllow && read.rule && !kept ? read.rule : null;
   // a script's text is shown only while the shell can only be in the session's folder: elsewhere it runs another one
   const here = ev.tool?.cwd ?? ev.cwd ?? ctx.root;

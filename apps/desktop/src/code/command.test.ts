@@ -13,7 +13,7 @@ describe("the canvas's command", () => {
   it("pnpm add qrcode adds 1 package, and its rule covers adding any package", () => {
     const c = read("pnpm add qrcode");
     expect(c).toMatchObject({ action: "install", outside: [], saves: false, say: { key: "kit.say.add1" } });
-    expect(c.rule).toEqual({ words: ["pnpm", "add"] });
+    expect(c.rule).toEqual({ words: ["pnpm", "add"], action: "install" });
     expect(ruleText(c.rule!)).toBe("pnpm add …");
     expect(read("pnpm add qrcode dayjs").say).toEqual({ key: "kit.say.addN", vars: { n: 2 } });
   });
@@ -298,15 +298,15 @@ describe("outside the project", () => {
 
 describe("Always allow in this project", () => {
   it("keeps the program and what it does for an install, a push or a safe command", () => {
-    expect(read("pnpm add qrcode").rule).toEqual({ words: ["pnpm", "add"] });
-    expect(read("git push -u origin kit/qr").rule).toEqual({ words: ["git", "push"] });
-    expect(read("gh pr create --title x").rule).toEqual({ words: ["gh", "pr", "create"] });
-    expect(read("git commit -m 'x'").rule).toEqual({ words: ["git", "commit"] });
-    expect(read("pnpm build").rule).toEqual({ words: ["pnpm", "build"] });
+    expect(read("pnpm add qrcode").rule).toEqual({ words: ["pnpm", "add"], action: "install" });
+    expect(read("git push -u origin kit/qr").rule).toEqual({ words: ["git", "push"], action: "push" });
+    expect(read("gh pr create --title x").rule).toEqual({ words: ["gh", "pr", "create"], action: "push" });
+    expect(read("git commit -m 'x'").rule).toEqual({ words: ["git", "commit"], action: "change" });
+    expect(read("pnpm build").rule).toEqual({ words: ["pnpm", "build"], action: "change" });
   });
 
   it("keeps a delete only as the exact command", () => {
-    expect(read("rm -rf ./build").rule).toEqual({ words: ["rm", "-rf", "./build"], exact: true });
+    expect(read("rm -rf ./build").rule).toEqual({ words: ["rm", "-rf", "./build"], exact: true, action: "delete" });
     expect(ruleText({ words: ["rm", "-rf", "./build"], exact: true })).toBe("rm -rf ./build");
   });
 

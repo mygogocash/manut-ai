@@ -268,6 +268,18 @@ program or reaches the network. What it does not understand is `unknown`, and as
   retractions. A kubeconfig or kuberc named on the line asks (it can name a program kubectl runs), and `turbo.json`,
   which can name where turbo sends its cache, is a file a change to which always asks.
 
+#### What a kept rule covers (item 116)
+
+"Always allow in this project" keeps a command's first words and, since item 116, the step it was kept for (a change,
+an install, a delete or a push). A later command is covered only when it begins with those words, is that very step,
+and carries no option after them that makes it harsher: `--force`, `--delete`, `--hard`, `--clear`, `--recursive`,
+`--mirror`, `--prune`, `--discard-changes`, and git's `-f`, `-d`, `-D` and `-r` or a package manager's `-f` and `-r`,
+in a bundle too. So a rule kept from `git push origin kit/x` covers another push of a branch, never `git push --force`
+or `git push --delete`, and one kept from `git branch kit/new` never covers `git branch -D`. A rule saved before item
+116 names no step; it covers only the step its own words mean when read alone (`git push` a push of a branch of Kit's
+own, `git branch kit/new` a change). Kit's card offers a rule again for a harsher command, since the kept one does not
+cover it.
+
 #### A check's options, from a list (item 116)
 
 Four reviews each found an option a deny-list did not know that makes a check or a read write a file, run a program the
