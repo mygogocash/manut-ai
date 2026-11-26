@@ -262,19 +262,19 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    person picks; item 96's setting said less than Suggest sends, and its report named a test that had not been
    written; item 113's check read an indented line under a one-line value differently from a forgiving YAML reader;
    item 112 let jq print the environment. Read a helper's branch, not its report.
-   Running on 26 Nov at 10:20, each a subagent of the lead's session in its own worktree:
-   - item 114, the third read's fix for the app's own git work (`fix/git-auto-3`, Opus, `cc-item114-git-auto-3`):
-     built, reviewed, and joined by its helper with item 93, since both changed how an OpenCode chat's rule value is
-     built and checked (`agent_rules`, `acp_chat.rs`); it waits for the gate. The lead added one commit that lets ten
-     `http` settings that only pace a transfer pass the check;
+   Item 114 merged at 10:25 on 26 Nov, so every finding of the third security read is fixed on the branch (items 112 to
+   115). A fourth read, read-only, started then over the day's merges; its findings are not in yet.
+   Running on 26 Nov at 10:25, each a subagent of the lead's session in its own worktree:
    - item 98, a drawing in the chat (`feat/chat-drawing`, Opus, `cc-item98-chat-drawing`): an agent's HTML in a closed
      frame, the safety model first; a no with evidence is an accepted result;
    - item 107, open a lane or a project in the person's editor (`feat/open-in-editor`, Sonnet,
-     `cc-item107-open-in-editor`).
-   Next: items 97 and 106 (briefs written), then 100 and 101; a fourth security read once item 114 merges (and item
-   98, if it does); 78f part 2 (it needs a tailnet and phones to try); and a redeploy of dev for the API routes of
-   items 83, 84 and 78b's health answer (all behind flags that are off). The briefs the helpers were given are not
-   kept in the repository; each item's row in `docs/plan.md` says what it is.
+     `cc-item107-open-in-editor`);
+   - item 97, context from one thread to another (`feat/thread-context`, Opus, `cc-item97-thread-context`);
+   - item 106, use everywhere (`feat/usage-everywhere`, Sonnet, `cc-item106-usage-everywhere`);
+   - the fourth security read (Opus, read-only, in `cc-review4`).
+   Next: items 100 and 101; the fourth read's fixes; 78f part 2 (it needs a tailnet and phones to try); and a redeploy
+   of dev for the API routes of items 83, 84 and 78b's health answer (all behind flags that are off). The briefs the
+   helpers were given are not kept in the repository; each item's row in `docs/plan.md` says what it is.
    At a load of 30 (five helpers and a gate on this 8 GB Mac) browser tests time out: `e2e/settings-column.spec.ts` "a
    deep link to a developer page" failed at three different lines in four runs on the lead branch and passed in two.
    Keep to four helpers.
