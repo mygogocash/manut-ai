@@ -3246,6 +3246,8 @@ export const ja: Record<Key, string> = {
   "inbox.group": "サイドメニュー",
   "inbox.working": "作業中のまとまり",
   "inbox.workingHint": "作業中のチャットは「最近」の下の控えめな「作業中」にまとまり、終わると一番上に戻ります。あなたの確認が必要なチャットは、いつも「最近」に残ります。",
+  "row.count": "{n} 件のチャット",
+  "row.selected": "選択中",
   "lane.away": "スヌーズ中とアーカイブ ({n})",
   "lane.pr": "プルリクエスト #{n}（{state}）",
   "lane.prTip": "タスクで開く",

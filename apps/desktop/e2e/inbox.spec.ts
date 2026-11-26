@@ -136,6 +136,45 @@ for (const theme of ["light", "dark"] as const) {
       await expect(page.getByTestId("menu-recent").first()).toHaveText("The 12.12 teaser");
     });
 
+    test("several rows: Cmd-click selects, the menu settles them all, one Undo brings them all back", async ({ page }) => {
+      await begin(page, theme);
+      const mac = await isMac(page);
+      const a = recent(page, "Late parcels");
+      const c = recent(page, "Check the books");
+      await a.getByTestId("menu-recent").click({ modifiers: [mac ? "Meta" : "Control"] });
+      await c.getByTestId("menu-recent").click({ modifiers: [mac ? "Meta" : "Control"] });
+      await expect(a).toHaveAttribute("data-sel", "true");
+      await expect(c).toHaveAttribute("data-sel", "true");
+      // a Cmd-click selects; it does not open the chat
+      await chatOpen(page);
+      await c.hover();
+      await shot(page, `select-several-${theme}`);
+      await c.getByTestId("row-more").click();
+      await expect(page.getByTestId("row-menu")).toHaveAttribute("aria-label", "More for 2 chats");
+      await page.getByTestId("row-settle").click();
+      await expect(a).toHaveAttribute("data-place", "settled");
+      await expect(c).toHaveAttribute("data-place", "settled");
+      await expect(page.locator(".rec-li[data-sel]")).toHaveCount(0);
+      await expect(page.getByTestId("row-undo-toast")).toContainText("Done for now: 2 chats");
+      await page.keyboard.press(mac ? "Meta+z" : "Control+Shift+z");
+      await expect(a).not.toHaveAttribute("data-place", "settled");
+      await expect(c).not.toHaveAttribute("data-place", "settled");
+    });
+
+    test("several rows from the keyboard: Shift and an arrow select, Escape clears", async ({ page }) => {
+      await begin(page, theme);
+      const rows = page.locator(".sb-recent .rec-li");
+      await rows.first().getByTestId("menu-recent").focus();
+      await page.keyboard.press("Shift+ArrowDown");
+      await page.keyboard.press("Shift+ArrowDown");
+      await expect(page.locator(".rec-li[data-sel='true']")).toHaveCount(3);
+      await expect(rows.nth(2).getByTestId("menu-recent")).toBeFocused();
+      await page.keyboard.press("Shift+ArrowUp");
+      await expect(page.locator(".rec-li[data-sel='true']")).toHaveCount(2);
+      await page.keyboard.press("Escape");
+      await expect(page.locator(".rec-li[data-sel]")).toHaveCount(0);
+    });
+
     test("⌘Z in the chat box leaves a row's mark alone", async ({ page }) => {
       await begin(page, theme);
       const row = recent(page, "The 12.12 teaser");

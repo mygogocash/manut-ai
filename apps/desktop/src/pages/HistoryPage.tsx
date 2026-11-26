@@ -24,6 +24,7 @@ import { useShowOlder, type OlderView } from "./older";
 import { useJobList } from "./RecentWork";
 import { ShowOlder } from "./ShowOlder";
 import { MoreButton, useRowMenu } from "../sidebar/RowMenu";
+import { NO_SELECT, useRowSelect, useSelectionEscape, type RowSelect } from "../sidebar/useRowSelect";
 import { placeOf, threadRowKey, untilWord, useRowMarks, type RowMark, type RowMarks, type RowPlace } from "../sidebar/rows";
 
 /** One thread as its row shows it. */
@@ -184,9 +185,11 @@ function markWord(r: HistoryRowView, nowMs: number): { text: string; tip?: strin
 
 /** A chat's menu on its History row: the same Pin, Snooze, Done for now and Archive (or Bring back) as everywhere. It keeps state, so
  *  it is its own element and `HistoryView` stays a function of its props. */
-export function HistoryMore({ row }: { row: HistoryRowView }) {
+export function HistoryMore({ row, keys = [] }: { row: HistoryRowView; keys?: readonly string[] }) {
   const marks = useRowMarks();
-  const menu = useRowMenu({ rowKey: row.rowKey ?? "", kind: "chat", mark: marks[row.rowKey ?? ""], name: row.title, working: row.status === "running" });
+  // the rows selected with it (item 94), when it is one of two or more: the menu acts on all of them
+  const many = keys.length > 1;
+  const menu = useRowMenu({ rowKey: row.rowKey ?? "", kind: "chat", mark: marks[row.rowKey ?? ""], name: many ? t("row.count", { n: keys.length }) : row.title, working: row.status === "running", keys });
   return (
     <>
       <MoreButton name={row.title} onOpen={menu.open} className="hist-more" />
@@ -240,12 +243,15 @@ export function HistoryView({
   nowMs = Date.now(),
   helped = null,
   onNeeds,
+  select = NO_SELECT,
 }: {
   /** The shop shown, when the person only helps there: its past work and its activity log are its owner's, so the page says
    *  whose they are in place of the list, the search and the log's button. */
   helped?: Pick<ShopRow, "name" | "owner"> | null;
   /** opens Needs you, from the words a helper's shop shows */
   onNeeds?: () => void;
+  /** Several chats selected at once (item 94, sidebar/useRowSelect.ts); none: a click opens its row. */
+  select?: RowSelect;
   days: HistoryDayView[];
   /** The chats the person archived (`historyArchive`): drawn as the Archive under the days, with a way to bring each back. */
   archive?: HistoryRowView[];
@@ -322,7 +328,7 @@ export function HistoryView({
     ) : undefined;
   return (
     <MenuPageFrame page="history" title={t("menu.history")} middle={chips} acts={acts}>
-      <div className="pane" data-arrive="history" data-arrive-rows=".hist-li" data-flip-list data-flip-scope={`${query}|${lane}`}>
+      <div className="pane" data-arrive="history" data-arrive-rows=".hist-li" data-flip-list data-flip-scope={`${query}|${lane}`} data-select-scope="history">
         {days.length ? (
           days.map((d) => (
             <section key={d.key} className="day" aria-label={d.label}>
@@ -334,8 +340,8 @@ export function HistoryView({
                 {d.rows.map((r) => {
                   const st = r.tag ? { word: r.tag.word, tag: r.tag.cls } : STATUS[r.status];
                   return (
-                    <li key={r.key} className="hist-li" data-flip={r.key} data-place={r.place} data-row-key={r.rowKey}>
-                      <button type="button" className="rowl" onClick={r.open} data-testid="history-row">
+                    <li key={r.key} className="hist-li" data-flip={r.key} data-place={r.place} data-row-key={r.rowKey} data-sel={select.selected(r.rowKey) || undefined}>
+                      <button type="button" className="rowl" onClick={(e) => select.click(e, r.rowKey, r.open)} onKeyDown={(e) => select.keyDown(e, r.rowKey)} data-testid="history-row">
                         {r.lane && (
                           <span className="tag kind" data-testid="history-kind">
                             {t(LANE_WORD[r.lane])}
@@ -355,8 +361,9 @@ export function HistoryView({
                           );
                         })()}
                         <span className="when">{r.time}</span>
+                        {select.selected(r.rowKey) && <span className="vh">, {t("row.selected")}</span>}
                       </button>
-                      {r.rowKey && <HistoryMore row={r} />}
+                      {r.rowKey && <HistoryMore row={r} keys={select.actsOn(r.rowKey)} />}
                     </li>
                   );
                 })}
@@ -403,9 +410,14 @@ export function HistoryPage() {
   const marks = useRowMarks();
   const lanes = historyLanes(s, jobs);
   const lane = picked !== "all" && !lanes.includes(picked) ? "all" : picked;
+  const days = historyDays(s, query, Date.now(), jobs, lane, marks);
+  // the chats of the days, in the order drawn, are one list to select several in (item 94); a job has no marks
+  const select = useRowSelect("history", days.flatMap((d) => d.rows.flatMap((r) => (r.rowKey ? [r.rowKey] : []))));
+  useSelectionEscape();
   return (
     <HistoryView
-      days={historyDays(s, query, Date.now(), jobs, lane, marks)}
+      select={select}
+      days={days}
       archive={historyArchive(s, marks, Date.now())}
       query={query}
       hasThreads={hasThreads}

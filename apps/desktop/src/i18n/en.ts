@@ -3279,6 +3279,8 @@ export const en = {
   "inbox.group": "Side menu",
   "inbox.working": "Working group",
   "inbox.workingHint": "A chat that is working waits in a quiet Working group under Recent, and comes back to the top when it finishes. A chat that needs you always stays in Recent.",
+  "row.count": "{n} chats",
+  "row.selected": "selected",
   "lane.away": "Snoozed and archived ({n})",
   "lane.pr": "Pull request #{n} ({state})",
   "lane.prTip": "Open it in Tasks",

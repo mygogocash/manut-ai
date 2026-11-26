@@ -3246,6 +3246,8 @@ export const ko: Record<Key, string> = {
   "inbox.group": "사이드 메뉴",
   "inbox.working": "작업 중 묶음",
   "inbox.workingHint": "작업 중인 채팅은 최근 아래의 조용한 '작업 중' 묶음에서 기다리다가, 끝나면 맨 위로 돌아옵니다. 당신이 필요한 채팅은 항상 최근에 남습니다.",
+  "row.count": "채팅 {n}개",
+  "row.selected": "선택됨",
   "lane.away": "다시 알림과 보관됨 ({n})",
   "lane.pr": "풀 리퀘스트 #{n} ({state})",
   "lane.prTip": "작업에서 열기",

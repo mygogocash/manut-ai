@@ -3246,6 +3246,8 @@ export const zh: Record<Key, string> = {
   "inbox.group": "侧边菜单",
   "inbox.working": "进行中分组",
   "inbox.workingHint": "正在进行的聊天会放在“最近”下方一个安静的“进行中”分组里，完成后回到最上面。需要你处理的聊天始终留在“最近”里。",
+  "row.count": "{n} 个聊天",
+  "row.selected": "已选择",
   "lane.away": "已稍后提醒和已归档 ({n})",
   "lane.pr": "拉取请求 #{n}（{state}）",
   "lane.prTip": "在任务中打开",

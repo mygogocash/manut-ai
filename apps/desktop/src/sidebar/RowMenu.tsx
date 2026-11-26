@@ -9,6 +9,7 @@
 // placed at a point inside the window and is the same `row-menu` the sessions' own menu uses.
 import { useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { t, type Key } from "../i18n";
+import { clearSelection } from "./selection";
 import { actOnRows, dayField, pickedTime, SNOOZES, snoozeUntil, timeField, type RowAction, type RowMark } from "./rows";
 
 export type RowKind = "chat" | "lane" | "terminal";
@@ -83,6 +84,8 @@ export function RowMenu({ rowKey, kind, mark, name, at, onDismiss, extra, workin
   const many = keys && keys.length > 1 ? keys : null;
   const done = (a: RowAction) => {
     actOnRows(many ?? [rowKey], a, name);
+    // the rows acted on have moved: the selection has done its work
+    if (many) clearSelection();
     onDismiss(true);
   };
   const choices: RowChoice[] = many ? ["pin", "snooze", "settle", "archive"] : rowChoices(kind, mark);

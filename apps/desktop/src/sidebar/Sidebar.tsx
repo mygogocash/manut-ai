@@ -29,6 +29,9 @@ import { MoreButton, useRowMenu } from "./RowMenu";
 import { threadRowKey, useRowMarks } from "./rows";
 import { RowsWatcher } from "./RowsWatcher";
 import { useInbox } from "./inbox";
+import { useRowSelect, useSelectionEscape } from "./useRowSelect";
+
+type RowSelect = ReturnType<typeof useRowSelect>;
 import { togglePalette } from "../palette/state";
 import { BrandMark, MenuIcon, SearchGlyph } from "./menuIcons";
 import { DiskChip } from "./DiskChip";
@@ -60,19 +63,24 @@ export interface RecentItem {
   working?: boolean;
 }
 
-/** One chat of Recent: the row, and the menu of what can be done to it (Pin, Snooze, Done for now, Archive). */
-function RecentRow({ item }: { item: RecentItem }) {
+/** One chat of Recent: the row, and the menu of what can be done to it (Pin, Snooze, Done for now, Archive), to it alone or to every
+ *  row selected with it (item 94). */
+function RecentRow({ item, select }: { item: RecentItem; select: RowSelect }) {
   const marks = useRowMarks();
-  const menu = useRowMenu({ rowKey: item.rowKey ?? "", kind: "chat", mark: item.rowKey ? marks[item.rowKey] : undefined, name: item.title, working: item.working });
+  const keys = item.rowKey ? select.actsOn(item.rowKey) : [];
+  const many = keys.length > 1;
+  const menu = useRowMenu({ rowKey: item.rowKey ?? "", kind: "chat", mark: item.rowKey ? marks[item.rowKey] : undefined, name: many ? t("row.count", { n: keys.length }) : item.title, working: item.working, keys });
+  const selected = select.selected(item.rowKey);
   return (
-    <li className={`rec-li${item.place ? ` ${item.place}` : ""}${menu.isOpen ? " menu-open" : ""}`} data-place={item.place} data-flip={item.key} data-row-key={item.rowKey} onContextMenu={item.rowKey ? menu.onContextMenu : undefined}>
-      <button type="button" className="rec" title={item.title} onClick={item.open} data-testid="menu-recent">
+    <li className={`rec-li${item.place ? ` ${item.place}` : ""}${menu.isOpen ? " menu-open" : ""}`} data-place={item.place} data-flip={item.key} data-row-key={item.rowKey} data-sel={selected || undefined} onContextMenu={item.rowKey ? menu.onContextMenu : undefined}>
+      <button type="button" className="rec" title={item.title} onClick={(e) => select.click(e, item.rowKey, item.open)} onKeyDown={(e) => select.keyDown(e, item.rowKey)} data-testid="menu-recent">
         {item.place === "pinned" && (
           <span className="rec-pin" role="img" aria-label={t("row.pinned")} title={t("row.pinned")} data-testid="menu-recent-pin">
             <PinGlyph />
           </span>
         )}
         {item.title}
+        {selected && <span className="vh">, {t("row.selected")}</span>}
       </button>
       {item.rowKey && <MoreButton name={item.title} onOpen={menu.open} className="rec-more" />}
       {menu.menu}
@@ -126,8 +134,12 @@ export function SideMenu({
   /** what the runtime and this computer add above the account row: the disk chip, usage meters, an update */
   foot?: ReactNode;
 }) {
+  // Recent and the Working group are one list to select in, in the order they are drawn
+  const order = [...recent, ...working].flatMap((r) => (r.rowKey ? [r.rowKey] : []));
+  const select = useRowSelect("recent", order);
+  useSelectionEscape();
   return (
-    <nav className="sb" aria-label={t("menu.label")} data-testid="sidebar">
+    <nav className="sb" aria-label={t("menu.label")} data-testid="sidebar" data-select-scope="recent">
       <div className="brand">
         {/* The mark leads where New does, as the canvas's mark links to Home. */}
         <button type="button" className="sb-home" aria-label={t("menu.home")} onClick={() => onRow("new")} data-testid="menu-home">
@@ -162,7 +174,7 @@ export function SideMenu({
           </div>
           <ul className="sb-recent" aria-labelledby="menu-recent-h" data-arrive="sidebar" data-arrive-rows=".rec-li" data-flip-list>
             {recent.map((r) => (
-              <RecentRow key={r.key} item={r} />
+              <RecentRow key={r.key} item={r} select={select} />
             ))}
           </ul>
         </>
@@ -174,7 +186,7 @@ export function SideMenu({
           </div>
           <ul className="sb-recent sb-working" aria-labelledby="menu-working-h" data-testid="menu-working">
             {working.map((r) => (
-              <RecentRow key={r.key} item={r} />
+              <RecentRow key={r.key} item={r} select={select} />
             ))}
           </ul>
         </>
