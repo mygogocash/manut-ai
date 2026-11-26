@@ -8,7 +8,8 @@ import { presentOutside, type PresentContext } from "../lib/outside";
 import { SoundBoard, soundFor, type AudioLike } from "../lib/sounds";
 import type { BridgeEvent } from "../lib/protocol";
 
-const ctx = (over: Partial<PresentContext> = {}): PresentContext => ({ hideDetails: false, quiet: { start: "22:00", end: "07:00" }, now: new Date(2026, 10, 26, 5, 0).getTime(), waiting: 1, ...over });
+// The suite runs as if the computer were in Bangkok (testSetup.ts): 22:00 UTC is 05:00 there, inside quiet hours, and 05:00 UTC is noon.
+const ctx = (over: Partial<PresentContext> = {}): PresentContext => ({ hideDetails: false, quiet: { start: "22:00", end: "07:00" }, now: Date.UTC(2026, 10, 25, 22, 0), waiting: 1, ...over });
 const message: BridgeEvent = { event: "message", bot: "kami", id: "m1", text: "Your report is ready." };
 const done: BridgeEvent = { event: "turn.end", bot: "kami", outcome: "done" };
 const names = { name: () => "Kami", watching: () => false };
@@ -18,7 +19,7 @@ describe("a finish's notification and its chime", () => {
     const note = noteFor(message, names)!;
     expect(note).toBeTruthy();
     for (const hideDetails of [false, true]) {
-      const shown = presentOutside({ kind: "notice", title: note.title, body: note.body }, ctx({ hideDetails, now: new Date(2026, 10, 26, 12, 0).getTime(), quiet: { start: "22:00", end: "07:00" } }));
+      const shown = presentOutside({ kind: "notice", title: note.title, body: note.body }, ctx({ hideDetails, now: Date.UTC(2026, 10, 26, 5, 0), quiet: { start: "22:00", end: "07:00" } }));
       expect(shown, `hideDetails ${hideDetails}`).not.toBeNull();
       expect(shown!.sound).toBe(false);
     }
@@ -53,7 +54,7 @@ describe("a finish's notification and its chime", () => {
   });
 
   it("a request's notification keeps its own sound: that is an ask, not a finish", () => {
-    const shown = presentOutside({ kind: "request", approval: "", member: "Kami", summary: "Run ls", canApprove: false }, ctx({ now: new Date(2026, 10, 26, 12, 0).getTime() }));
+    const shown = presentOutside({ kind: "request", approval: "", member: "Kami", summary: "Run ls", canApprove: false }, ctx({ now: Date.UTC(2026, 10, 26, 5, 0) }));
     expect(shown!.sound).toBe(true);
   });
 });
