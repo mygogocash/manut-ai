@@ -176,7 +176,10 @@ needs a QR reader, which the repository does not have: the browser's own is used
   (`maskCommand`, the shell's `tasks::mask_command`, the table's `command` rows), on the Mac's card and on the phone alike:
   it masks a key and nothing else. It reads a command line by line, never joins two words, and a masked value stops at
   the first character the shell acts on (a backtick, `$`, `(`, `)`, `|`, `;`, `&`, `<`, `>`, `{`, `}`, a backslash, a
-  line break), so a substitution, a pipe, a second command or a redirection is always shown. A token-shaped word is
+  line break), so a substitution, a pipe, a second command or a redirection is always shown. A private key block in a command
+  (a heredoc, an `echo`, a `printf` or a JSON value with `\n` between its lines) keeps its BEGIN and END lines and shows its
+  body as one masked line, when every line of its body holds only base64 and the header characters old PEM files use; a block
+  whose body holds anything else is shown whole. A token-shaped word is
   masked only when it is a whole word with a key's shape, so a command's own operand (`rm -rf sk-releases-backup`) is
   shown. The shell sends the card the whole command with its line breaks (it used to fold it to one line and cut it at
   160 characters), and the phone gets it unclipped up to 20,000 characters; past that the phone gets the start, marked

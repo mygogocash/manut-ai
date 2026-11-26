@@ -11,8 +11,20 @@ import spec from "./secrets.json";
 /** A pattern of secrets.json with `{names}` and `{prefixes}` filled in, global, with its own flags. */
 const compile = (pattern: string, flags = ""): RegExp => new RegExp(pattern.replaceAll("{names}", spec.names).replaceAll("{prefixes}", spec.prefixes), `g${flags}`);
 
-/** Each `whole` pattern, and whether its match must stand alone as a word. */
-const WHOLE = spec.whole.map((e) => [compile(e[0] as string, e[1] as string), e[2] === "word"] as const);
+/** Each `whole` pattern, and its kind: `word` (its match must stand alone as a word), `block` (a private key block, which a
+ *  command masks through `BLOCKS` instead), or none. */
+const WHOLE = spec.whole.map((e) => [compile(e[0] as string, e[1] as string), (e[2] as string | undefined) ?? ""] as const);
+/** A command's private key blocks: [pattern with (BEGIN)(body)(END) groups, the line break that goes before the mask]. */
+const BLOCKS = spec.blocks.map((e) => [compile(e[0] as string), e[1] as string, e[2] === "unended"] as const);
+const BLOCK_BEGIN = new RegExp(spec.blockBegin);
+const BLOCK_END = new RegExp(spec.blockEnd);
+
+/** Whether the block that ends its base64 lines at `from` in `text` has no END of its own: none before the next BEGIN. */
+function unended(text: string, from: number): boolean {
+  const rest = text.slice(from);
+  const next = rest.search(BLOCK_BEGIN);
+  return !BLOCK_END.test(next < 0 ? rest : rest.slice(0, next));
+}
 const SPLIT = spec.split.map(([p, n]) => [new RegExp(p as string, "g"), n as number] as const);
 const TOKENS = compile(spec.tokens);
 const WORD = compile(spec.word);
@@ -56,9 +68,12 @@ const upTo = (value: string): number => {
   return i < 0 ? value.length : i;
 };
 
-/** `text`'s `whole` matches masked. */
-function maskWhole(text: string): string {
-  for (const [rx, word] of WHOLE) text = text.replace(rx, (m: string, ...args: unknown[]) => (word && !alone(m, at(args)) ? m : spec.mask));
+/** `text`'s `whole` matches masked; in a command (`command`), not a key block, which `BLOCKS` masked first. */
+function maskWhole(text: string, command = false): string {
+  for (const [rx, kind] of WHOLE) {
+    if (command && kind === "block") continue;
+    text = text.replace(rx, (m: string, ...args: unknown[]) => (kind === "word" && !alone(m, at(args)) ? m : spec.mask));
+  }
   return text;
 }
 
@@ -85,27 +100,35 @@ export function maskSecrets(text: string): string {
   return text.replace(ASSIGNED, (m: string, name: string) => (aKey(m.slice(name.length + 1)) ? `${name}=${spec.mask}` : m));
 }
 
-/** One line of a command, masked as `maskCommand` says. */
+/** One line of a command, masked as `maskCommand` says. A value that already holds the mask (a key block's) is left as it is. */
 function commandLine(line: string): string {
-  line = maskWhole(line);
+  line = maskWhole(line, true);
   line = line.replace(WORD, (m: string, ...args: unknown[]) => (alone(m, at(args)) && keyShaped(m) ? spec.mask : m));
   for (const rx of KEPT) {
     line = line.replace(rx, (m: string, before: string, secret: string, after: string) => {
-      const n = aKey(secret) ? upTo(secret) : 0;
+      const n = aKey(secret) && !secret.includes(spec.mask) ? upTo(secret) : 0;
       return n ? `${before}${spec.mask}${secret.slice(n)}${after}` : m;
     });
   }
   return line.replace(ASSIGNED, (m: string, name: string) => {
     const value = m.slice(name.length + 1);
-    const n = aKey(value) ? upTo(value) : 0;
+    const n = aKey(value) && !value.includes(spec.mask) ? upTo(value) : 0;
     return n ? `${name}=${spec.mask}${value.slice(n)}` : m;
   });
 }
 
-/** A command, or anything else an approval shows, with its keys masked and nothing else: read line by line, so no masked
- *  value spans a line; never joined across a blank, so a command's next word stays; and a masked value stops at the first
- *  character the shell acts on, which is shown with what follows it. What a person approves is then what runs, less the
+/** A command, or anything else an approval shows, with its keys masked and nothing else: a private key block whose body holds
+ *  only key characters keeps its BEGIN and END lines and shows its body as one mask line, and one whose body holds anything
+ *  else is shown whole; then read line by line, so no other masked value spans a line; never joined across a blank, so a
+ *  command's next word stays; and a masked value stops at the first character the shell acts on, which is shown with what
+ *  follows it. What a person approves is then what runs, less the
  *  keys in it (item 117; the table's `command` rows, which the shell's twin runs too). */
 export function maskCommand(text: string): string {
+  // a private key block whose body holds nothing the shell acts on: its BEGIN and END lines stay, its body is one mask line
+  for (const [rx, sep, open] of BLOCKS) {
+    text = text.replace(rx, (m: string, begin: string, _body: string, end: string, offset: number, whole: string) =>
+      open && !unended(whole, offset + m.length) ? m : `${begin}${sep}${spec.mask}${end}`,
+    );
+  }
   return text.split("\n").map(commandLine).join("\n");
 }

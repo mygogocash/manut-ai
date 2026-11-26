@@ -45,6 +45,12 @@ const COMMANDS = [
   { name: "short", command: "pnpm test", shown: "pnpm test" },
   { name: "long", command: LONG, shown: LONG },
   { name: "key", command: "API_KEY=abc123 TOKEN=xyz789|sh pnpm deploy", shown: "API_KEY=•••• TOKEN=••••|sh pnpm deploy" },
+  // a private key block keeps its BEGIN and END lines and shows its body as one masked line
+  {
+    name: "pem",
+    command: `cat > key.pem <<'EOF'\n-----BEGIN RSA PRIVATE KEY-----\nMIIB${"X".repeat(60)}\n${"X".repeat(64)}\n-----END RSA PRIVATE KEY-----\nEOF`,
+    shown: "cat > key.pem <<'EOF'\n-----BEGIN RSA PRIVATE KEY-----\n••••\n-----END RSA PRIVATE KEY-----\nEOF",
+  },
 ] as const;
 
 async function open(page: Page, theme: Theme) {

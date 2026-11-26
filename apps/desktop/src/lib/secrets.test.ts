@@ -33,7 +33,13 @@ describe("maskSecrets (the one masker; patterns in secrets.json)", () => {
     // also stops at a backslash; a key block on one line (a JSON string's `\n`) keeps its own, which escape only its own
     // masked characters, since the block starts and ends with its dashes.
     const shell = (s: string) => s.replace(/[^`$()|;&<>{}\n]/g, "");
-    for (const [text] of [...table.command, ...table.cases]) expect(shell(maskCommand(text)), text).toBe(shell(text));
+    const block = /-{4,5} ?BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY/;
+    for (const [text] of [...table.command, ...table.cases]) {
+      // a private key block keeps its BEGIN and END lines and shows its body as one line: only its body's line breaks go
+      const out = maskCommand(text);
+      const lines = (s: string) => (block.test(text) ? s.replace(/\n/g, "") : s);
+      expect(lines(shell(out)), text).toBe(lines(shell(text)));
+    }
   });
 
   it("masks an sk- key of 32 lowercase hex, built here so no scanner reads the table as a live key (item 117)", () => {

