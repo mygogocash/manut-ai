@@ -1,6 +1,6 @@
 // The steer queue: its reducer, which held message goes out next, whether a new one is held, and the drafts that
 // keep held text across a restart. Split out of store.ts (item 125d), which re-exports what it exported before.
-import { hideSplitBlocks } from "../threads/types";
+import { shownText } from "./activity";
 import type { MessageItem, Chat, AppState } from "./types";
 import { withItems, patchTurn } from "./helpers";
 
@@ -86,7 +86,7 @@ const STEER_REPLY_MAX = 140;
  *  with nothing written before it), it keeps waiting for the next ones. The rest stays hidden as commentary. */
 export function ackSteer(c: Chat, said: string): Chat {
   const id = c.steerAck?.id;
-  const line = hideSplitBlocks(said).split("\n").map((l) => l.trim()).find(Boolean);
+  const line = shownText(c.turn, said).split("\n").map((l) => l.trim()).find(Boolean);
   if (!id || !line) return c;
   const reply = line.length <= STEER_REPLY_MAX ? line : `${line.slice(0, STEER_REPLY_MAX - 1).trimEnd()}…`;
   const items = c.items.map((i) => (i.kind === "user" && i.id === id ? { ...i, steerReply: reply } : i));

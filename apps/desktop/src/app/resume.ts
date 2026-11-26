@@ -74,6 +74,8 @@ export interface SavedSession {
   lane?: SavedLane;
   /** A lane a workflow started: the workflow's name (SessionRec `workflow`), so it keeps asking before every change. */
   workflow?: string;
+  /** Helpers is on in the lane's box (SessionRec `helpers`, item 102e). */
+  helpers?: true;
   /** Continue with… (item 97, continueWith.ts): the link id of the chat this one continues, and of the chat that continues this
    *  one, each shown as a quiet line linking the other. */
   continuedFrom?: string;
@@ -165,6 +167,8 @@ function parseSession(v: unknown): SavedSession | null {
   if (shell) out.shell = shell;
   const lane = parseLane(v.lane);
   if (lane) out.lane = lane;
+  // only a lane with a folder of its own may have Helpers on (item 102e)
+  if (v.helpers === true && lane?.dir) out.helpers = true;
   if (Array.isArray(v.messages)) {
     const msgs = v.messages.map(parseMsg).filter((m): m is SavedMsg => !!m).slice(-MAX_MESSAGES);
     if (msgs.length) out.messages = msgs;
