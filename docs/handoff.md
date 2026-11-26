@@ -243,16 +243,35 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    "edits alone" an agent may edit a test file and then run the tests without asking.
    Also merged on 26 Nov: 78b, the Mac's side of reaching it from a phone, with Settings, Sharing and access, switched
    off.
-   Running on 26 Nov at 08:10, each a subagent of the lead's session in its own worktree:
-   - item 78c, the phone's side of reaching the Mac (`feat/remote-phone`, Opus, `cc-item78c-remote-phone`);
-   - item 85i, the last sweep of the audit (`feat/quiet-sweep`, Opus, `cc-item85i-quiet-sweep`);
-   - item 93, a project's instructions handed to a lane's agent as text (`feat/project-instructions`, Opus,
-     `cc-item93-project-instructions`);
-   - four browser specs that fail in CI's shards since the visual items merged, one of which says a member's face
-     moves when the status line comes (`fix/specs-after-sweep`, Sonnet, `cc-fix-specs-after-sweep`).
-   Next: a third read of the security fixes, 78f part 2 (it needs a tailnet and phones to try), and a redeploy of dev
-   for the API routes of items 83, 84 and 78b's health answer (all behind flags that are off). The briefs the helpers
-   were given are not kept in the repository; each item's row in `docs/plan.md` says what it is.
+   Also merged by 09:20 on 26 Nov: item 85i (the last sweep of the design audit), item 93 (a lane's agent reads the
+   project's own instructions again, as text), and four browser specs repaired, one of them a real flaw (a member's
+   face sat five pixels above its ring). With these the audit's findings are all acted on but the two that wait for a
+   runtime field (the chat header's tabs and cost line, the side menu's budget pill).
+   A THIRD SECURITY READ that morning, over the second round's fixes and the new work, found more: one critical and
+   three high in how the dial reads a command (the reader must be right for every command, since reads and checks go
+   without asking at every level), one high in skills installed from a link (off by default), and several medium. They
+   are items 112 to 115, being fixed the same way. The reviewer found the rest of the second round's fixes sound. A
+   question for the owner comes with item 112: whether only a short list of exact commands should go without asking,
+   and everything else ask.
+   On 26 Nov the owner pasted T3 Code's features and asked which are here and for a plan for the rest:
+   `docs/t3code-parity.md` has each of the 71 (12 here, 1 built and off, 26 in part, 32 missing) and the plan's items
+   94 to 111.
+   Running on 26 Nov at 09:20, each a subagent of the lead's session in its own worktree:
+   - items 112 to 115, the third read's fixes (`fix/dial-reading-3`, `fix/skill-links-run`, `fix/git-auto-3`,
+     `fix/remote-3`, all Opus, worktrees `cc-item112-…` to `cc-item115-…`);
+   - item 78c, the phone's side of reaching the Mac (`feat/remote-phone`, Opus, `cc-item78c-remote-phone`); item 115
+     changes how a phone answers a question, and the two must be joined at merge;
+   - items 94 (the sidebar as an inbox, `feat/inbox`, Opus), 95 (the chat box's keys, drafts and send-on-reset,
+     `feat/chat-box-keys`, Opus) and 96 (titles by a model the person picks, `feat/titles-by-model`, Sonnet).
+   Next: items 97, 98, 100 and 101 of the T3 Code list, a fourth read once 112 to 115 merge, 78f part 2 (it needs a
+   tailnet and phones to try), and a redeploy of dev for the API routes of items 83, 84 and 78b's health answer (all
+   behind flags that are off). The briefs the helpers were given are not kept in the repository; each item's row in
+   `docs/plan.md` says what it is.
+   On 26 Nov at 08:20 the Mac's disk was full (159 MB free) and a helper stopped: the shared Rust build cache had
+   grown to 57 GB, because each worktree's build of the app's own crate is kept. The lead removed that crate's builds
+   and the incremental cache (third-party crates' builds stay, so a rebuild is minutes); if the disk fills again,
+   remove `debug/build/manut` and `debug/incremental` under `~/Library/Caches/manut-ai-cargo-target` while no cargo
+   runs.
    The account reached its five-hour limit a second time at 03:48 on 26 Nov, with seven helpers mid-work, and reset at
    07:50; each was sent on in its own thread with its work intact, as after the first.
    At 23:55 on 25 Nov the account reached its five-hour limit and six helpers stopped mid-work; the limit reset at
@@ -630,6 +649,10 @@ Every switch that turns a built part on, and what each needs from the owner, is 
   `apps/web` files: timed out only when the whole Mac stalled for half a minute with four helpers running; each passes
   alone.
 - `apps/web` `test/ShopDataTab.test.tsx`, "says when the API could not be reached": failed once in a loaded full run.
+- `apps/desktop` `src/runtime/http/feed.test.ts`: failed in two loaded gates on 26 Nov (seven tests at once) and
+  passed alone each time. `apps/desktop/src-tauri`
+  `agent_chat::tests::a_claude_chat_is_handed_the_projects_own_instructions_as_text` (item 93) failed a gate's first
+  Rust run and passed its second: not yet read for a race.
 - `apps/desktop/src-tauri` `shop_cache_key::tests::keychain::*` and
   `outpost::item::tests::keeps_this_macs_outpost_in_its_own_keychain_item_beside_the_session`: six failed once on 25
   Nov with `Err("keychain")` in a suite that took ten minutes, while the Mac slept between dark wakes; alone the same
