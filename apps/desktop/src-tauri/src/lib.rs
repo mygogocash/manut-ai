@@ -28,6 +28,7 @@ mod lane_clean;
 mod lane_config;
 mod lane_diff;
 mod lane_helper;
+mod lane_land;
 mod outside_use;
 mod past_chats;
 mod import_past;
@@ -1011,6 +1012,29 @@ async fn lane_helper_worktree(lead: String, job: String) -> Result<lane::Made, S
     tauri::async_runtime::spawn_blocking(move || lane_helper::make(&home, &lead, &job)).await.map_err(|e| e.to_string())?
 }
 
+/// Lands the work of the helper lane whose folder is `helper` in its lead lane's folder (item 102g, lane_land.rs;
+/// docs/several-agents.md R8): the helper lane's change since its snapshot, committed or not, build output cut and keys named,
+/// applied three ways into the lead's working tree only, one landing at a time per lead folder, with what was there kept first
+/// for Take back. A patch that will not apply, or names a file outside the lead's project, is kept at
+/// `~/.manut/patches/<job>/<folder>.patch` (0600) and the lead's folder is not written. The page names only a helper lane the
+/// app made: its lead, job and snapshot come from its record. Nothing is committed or pushed, and no agent starts. A refusal is
+/// a short code (`not_a_lane`, `not_a_helper`, `no_lead`, `landed`, `busy`, `no_snapshot`, `no_commit`, `config:<setting>`,
+/// `git_missing`) or git's own line.
+#[tauri::command]
+async fn lane_land(helper: String) -> Result<lane_land::Landed, String> {
+    let home = user_home()?;
+    tauri::async_runtime::spawn_blocking(move || lane_land::land(&home, &helper)).await.map_err(|e| e.to_string())?
+}
+
+/// Take back this landing (item 102g, lane_land.rs): the files the landing of the helper lane `helper` wrote in its lead's folder
+/// go back as they were, byte for byte, only while nothing there changed since. A refusal is a short code (`not_a_lane`,
+/// `not_a_helper`, `no_lead`, `not_landed`, `changed`, `no_commit`, `git_missing`) or the system's own words.
+#[tauri::command]
+async fn lane_take_back(helper: String) -> Result<lane_land::TakenBack, String> {
+    let home = user_home()?;
+    tauri::async_runtime::spawn_blocking(move || lane_land::take_back(&home, &helper)).await.map_err(|e| e.to_string())?
+}
+
 /// Settings › MCP and Skills: the MCP servers and skills Claude Code and Codex have, by name and where each comes from, read
 /// from their own files for the person's own home and, when given, the project folder `cwd` (agent_config.rs). Only reads,
 /// and names only: never a command, an argument, an environment value, a header or an address.
@@ -1952,6 +1976,8 @@ fn commands(invoke: tauri::ipc::Invoke) -> bool {
         session_branch,
         lane_worktree,
         lane_helper_worktree,
+        lane_land,
+        lane_take_back,
         lane_list,
         lane_projects,
         lane_remove,
