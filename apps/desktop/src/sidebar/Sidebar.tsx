@@ -62,7 +62,7 @@ function RecentRow({ item }: { item: RecentItem }) {
   const marks = useRowMarks();
   const menu = useRowMenu({ rowKey: item.rowKey ?? "", kind: "chat", mark: item.rowKey ? marks[item.rowKey] : undefined, name: item.title });
   return (
-    <li className={`rec-li${item.place ? ` ${item.place}` : ""}${menu.isOpen ? " menu-open" : ""}`} data-place={item.place} data-flip={item.key} onContextMenu={item.rowKey ? menu.onContextMenu : undefined}>
+    <li className={`rec-li${item.place ? ` ${item.place}` : ""}${menu.isOpen ? " menu-open" : ""}`} data-place={item.place} data-flip={item.key} data-row-key={item.rowKey} onContextMenu={item.rowKey ? menu.onContextMenu : undefined}>
       <button type="button" className="rec" title={item.title} onClick={item.open} data-testid="menu-recent">
         {item.place === "pinned" && (
           <span className="rec-pin" role="img" aria-label={t("row.pinned")} title={t("row.pinned")} data-testid="menu-recent-pin">

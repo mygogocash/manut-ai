@@ -6,7 +6,7 @@
 // placed at a point inside the window and is the same `row-menu` the sessions' own menu uses.
 import { useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { t, type Key } from "../i18n";
-import { markRow, SNOOZES, snoozeUntil, type RowAction, type RowMark } from "./rows";
+import { actOnRows, SNOOZES, snoozeUntil, type RowAction, type RowMark } from "./rows";
 
 export type RowKind = "chat" | "lane" | "terminal";
 
@@ -47,7 +47,9 @@ export function menuAt(x: number, y: number, rows = 5): { x: number; y: number }
   return { x: Math.max(6, Math.min(x, window.innerWidth - W - 6)), y: Math.max(6, Math.min(y, window.innerHeight - height(rows) - 6)) };
 }
 
-export function RowMenu({ rowKey, kind, mark, name, at, onDismiss, extra }: { rowKey: string; kind: RowKind; mark: RowMark | undefined; name: string; at: { x: number; y: number }; onDismiss: () => void; extra?: ReactNode }) {
+/** `onDismiss(back)`: the menu closes; `back` when it closed by a choice or Escape, so the focus goes back to the row (where ⌘Z undoes
+ *  what was just done), and not when the person clicked somewhere else. */
+export function RowMenu({ rowKey, kind, mark, name, at, onDismiss, extra }: { rowKey: string; kind: RowKind; mark: RowMark | undefined; name: string; at: { x: number; y: number }; onDismiss: (back?: boolean) => void; extra?: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
   const [snoozing, setSnoozing] = useState(false);
   useEffect(() => {
@@ -60,8 +62,8 @@ export function RowMenu({ rowKey, kind, mark, name, at, onDismiss, extra }: { ro
   // the first item takes focus again when the menu changes step
   useEffect(() => void ref.current?.querySelector<HTMLButtonElement>("button")?.focus(), [snoozing]);
   const done = (a: RowAction) => {
-    markRow(rowKey, a);
-    onDismiss();
+    actOnRows([rowKey], a, name);
+    onDismiss(true);
   };
   return (
     <div
@@ -75,7 +77,7 @@ export function RowMenu({ rowKey, kind, mark, name, at, onDismiss, extra }: { ro
         if (e.key === "Escape") {
           e.preventDefault();
           e.stopPropagation();
-          onDismiss();
+          onDismiss(true);
           return;
         }
         const btns = [...(ref.current?.querySelectorAll<HTMLButtonElement>("button") ?? [])];
@@ -114,18 +116,31 @@ export function RowMenu({ rowKey, kind, mark, name, at, onDismiss, extra }: { ro
 /** A row's menu state: `open(x, y)` shows it, `menu` is the element to draw inside the row, `onContextMenu` opens it at the pointer. */
 export function useRowMenu(props: { rowKey: string; kind: RowKind; mark: RowMark | undefined; name: string }) {
   const [at, setAt] = useState<{ x: number; y: number } | null>(null);
-  const close = useCallback(() => setAt(null), []);
-  const open = (x: number, y: number) => setAt(menuAt(x, y, rowChoices(props.kind, props.mark).length));
+  // what had the focus when the menu opened (its "more" button), or the row a right-click opened it on: where the focus goes back
+  const opener = useRef<HTMLElement | null>(null);
+  const close = useCallback((back?: boolean) => {
+    setAt(null);
+    const el = opener.current;
+    opener.current = null;
+    if (!back || !el?.isConnected) return;
+    // a row moves as it is pinned or settled, but it is the same element: focusing it keeps ⌘Z on it
+    (el.matches("button, [tabindex]") ? el : el.querySelector<HTMLElement>("button"))?.focus();
+  }, []);
+  const open = (x: number, y: number, from?: HTMLElement | null) => {
+    const active = typeof document !== "undefined" ? document.activeElement : null;
+    opener.current = from ?? (active instanceof HTMLElement && active !== document.body ? active : null);
+    setAt(menuAt(x, y, rowChoices(props.kind, props.mark).length));
+  };
   const menu = at ? <RowMenu {...props} at={at} onDismiss={close} /> : null;
-  const onContextMenu = (e: ReactMouseEvent) => {
+  const onContextMenu = (e: ReactMouseEvent<HTMLElement>) => {
     e.preventDefault();
-    open(e.clientX, e.clientY);
+    open(e.clientX, e.clientY, e.currentTarget);
   };
   return { open, menu, onContextMenu, isOpen: at !== null };
 }
 
 /** The quiet "more" button a row ends with: shown on hover and focus by the row's own style, it opens the row's menu under it. */
-export function MoreButton({ name, onOpen, className = "row-more" }: { name: string; onOpen: (x: number, y: number) => void; className?: string }) {
+export function MoreButton({ name, onOpen, className = "row-more" }: { name: string; onOpen: (x: number, y: number, from?: HTMLElement) => void; className?: string }) {
   return (
     <button
       type="button"
@@ -135,7 +150,8 @@ export function MoreButton({ name, onOpen, className = "row-more" }: { name: str
       aria-haspopup="menu"
       onClick={(e) => {
         const r = e.currentTarget.getBoundingClientRect();
-        onOpen(r.left, r.bottom + 2);
+        // the button itself is where the focus goes back (a click does not focus a button in WebKit)
+        onOpen(r.left, r.bottom + 2, e.currentTarget);
       }}
       data-testid="row-more"
     >

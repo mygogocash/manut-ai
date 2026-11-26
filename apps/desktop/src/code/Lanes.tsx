@@ -201,7 +201,7 @@ function LaneItem({ row, now, onOpen, onPull, backOpen, onBack, below, place, ma
   const tag = laneTag(row.status);
   const line = row.status === "failed" ? row.error : row.line ? t(row.line.key, row.line.vars) : "";
   return (
-    <div className={`lane${place === "settled" ? " settled" : ""}`} data-testid={`lane-${row.id}`} data-status={row.status} data-place={place}>
+    <div className={`lane${place === "settled" ? " settled" : ""}`} data-testid={`lane-${row.id}`} data-row-key={sessionRowKey(row.id)} data-status={row.status} data-place={place}>
       <button type="button" className="rowl" onClick={() => onOpen(row.id)} title={t("lane.open")}>
         {place === "pinned" && (
           <span className="lane-pin" role="img" aria-label={t("row.pinned")} title={t("row.pinned")} data-testid="lane-pin">
@@ -279,7 +279,7 @@ export function LaneMore({ row, mark }: { row: LaneRow; mark: RowMark | undefine
     if (!lane) return;
     const on = (e: MouseEvent) => {
       e.preventDefault();
-      open(e.clientX, e.clientY);
+      open(e.clientX, e.clientY, lane);
     };
     lane.addEventListener("contextmenu", on);
     return () => lane.removeEventListener("contextmenu", on);

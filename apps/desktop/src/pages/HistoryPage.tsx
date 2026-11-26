@@ -208,7 +208,7 @@ export function HistoryArchive({ rows }: { rows: HistoryRowView[] }) {
       {open && (
         <ul className="rows">
           {rows.map((r) => (
-            <li key={r.key} className="hist-li">
+            <li key={r.key} className="hist-li" data-row-key={r.rowKey}>
               <button type="button" className="rowl" onClick={r.open} data-testid="history-archive-row">
                 <Avatar bot={r.bot} size={24} />
                 <span className="grow">{r.title}</span>
@@ -333,7 +333,7 @@ export function HistoryView({
                 {d.rows.map((r) => {
                   const st = r.tag ? { word: r.tag.word, tag: r.tag.cls } : STATUS[r.status];
                   return (
-                    <li key={r.key} className="hist-li" data-flip={r.key} data-place={r.place}>
+                    <li key={r.key} className="hist-li" data-flip={r.key} data-place={r.place} data-row-key={r.rowKey}>
                       <button type="button" className="rowl" onClick={r.open} data-testid="history-row">
                         {r.lane && (
                           <span className="tag kind" data-testid="history-kind">

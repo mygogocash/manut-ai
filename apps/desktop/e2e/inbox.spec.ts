@@ -1,0 +1,90 @@
+// The sidebar as an inbox (item 94): a row's mark taken back with Undo (the quiet toast and ⌘Z on the row), several rows
+// selected and acted on at once, and the Working group. `INBOX_SHOTS=<dir>` keeps a picture of each in light and dark.
+import { expect, test, type Page } from "@playwright/test";
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
+import { usePlatform } from "./term-find-helpers";
+import { chatOpen } from "./start";
+
+const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
+async function mock(op: string, params: Record<string, unknown> = {}): Promise<any> {
+  const ws = new WebSocket(`ws://127.0.0.1:${MOCK}/?token=e2e`);
+  await new Promise<void>((res, rej) => {
+    ws.onopen = () => res();
+    ws.onerror = () => rej(new Error("mock websocket error"));
+  });
+  const reply = await new Promise<any>((res) => {
+    ws.onmessage = (m) => {
+      const msg = JSON.parse(String(m.data));
+      if (msg.id === "in1") res(msg);
+    };
+    ws.send(JSON.stringify({ id: "in1", op, ...params }));
+  });
+  ws.close();
+  return reply.result;
+}
+
+const DIR = process.env.INBOX_SHOTS || "";
+const shot = async (page: Page, name: string) => {
+  if (!DIR) return;
+  mkdirSync(DIR, { recursive: true });
+  await page.screenshot({ path: join(DIR, `${name}.png`) });
+};
+
+const TITLES = ["Late parcels", "The 12.12 teaser", "Check the books"];
+
+async function begin(page: Page, theme: "light" | "dark") {
+  await mock("mock.reset");
+  await mock("mock.threads", { bot: "kami", threads: TITLES.map((title, i) => ({ title, ago: 60 * (i + 1) })) });
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.addInitScript((t) => localStorage.setItem("manut.theme", t), theme);
+  await usePlatform(page);
+  await page.goto("/");
+  await chatOpen(page);
+  await expect(page.getByTestId("menu-recent")).toHaveCount(3);
+}
+
+const recent = (page: Page, title: string) => page.locator(".sb-recent .rec-li").filter({ hasText: title });
+const isMac = (page: Page) => page.evaluate(() => /Mac|iPhone|iPad/.test(navigator.platform));
+
+for (const theme of ["light", "dark"] as const) {
+  test.describe(`the inbox (${theme})`, () => {
+    test("Done for now is taken back by the toast's Undo, and by ⌘Z on the row", async ({ page }) => {
+      await begin(page, theme);
+      const row = recent(page, "Late parcels");
+      await row.hover();
+      await row.getByTestId("row-more").click();
+      await page.getByTestId("row-settle").click();
+      await expect(row).toHaveAttribute("data-place", "settled");
+      const toast = page.getByTestId("row-undo-toast");
+      await expect(toast).toContainText("Done for now: Late parcels");
+      await shot(page, `undo-toast-${theme}`);
+      await toast.getByTestId("row-undo").click();
+      await expect(row).not.toHaveAttribute("data-place", "settled");
+      await expect(toast).toHaveCount(0);
+
+      // again, and this time the key: the focus went back to the row's "more" button, in the side menu
+      await row.hover();
+      await row.getByTestId("row-more").click();
+      await page.getByTestId("row-settle").click();
+      await expect(row).toHaveAttribute("data-place", "settled");
+      await expect(row.getByTestId("row-more")).toBeFocused();
+      await page.keyboard.press((await isMac(page)) ? "Meta+z" : "Control+Shift+z");
+      await expect(row).not.toHaveAttribute("data-place", "settled");
+      await expect(page.getByTestId("row-undo-toast")).toHaveCount(0);
+    });
+
+    test("⌘Z in the chat box leaves a row's mark alone", async ({ page }) => {
+      await begin(page, theme);
+      const row = recent(page, "The 12.12 teaser");
+      await row.hover();
+      await row.getByTestId("row-more").click();
+      await page.getByTestId("row-pin").click();
+      await expect(row).toHaveAttribute("data-place", "pinned");
+      await page.getByTestId("composer").focus();
+      await page.keyboard.press((await isMac(page)) ? "Meta+z" : "Control+Shift+z");
+      await expect(row).toHaveAttribute("data-place", "pinned");
+      await expect(page.getByTestId("row-undo-toast")).toContainText("Pinned: The 12.12 teaser");
+    });
+  });
+}

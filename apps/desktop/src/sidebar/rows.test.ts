@@ -1,7 +1,7 @@
 // The row marks (item 76): reading a saved record (an older build's, one with a field this build does not know, a broken one), the
-// places a row goes, that an ask always brings a snoozed or settled row back, and what is kept across a restart.
+// places a row goes, that an ask always brings a snoozed or settled row back, and what is kept across a restart. Item 94: undo.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { applyRow, arrange, getRowMarks, markRow, nextWake, parseRowMarks, placeOf, resetRowMarks, ROWS_KEY, setRowMarks, snoozeUntil, sweep, threadRowKey, sessionRowKey, wakeAll, wakeRows, type RowMarks } from "./rows";
+import { actOnRows, applyRow, applyRows, arrange, changedFrom, getRowMarks, getRowUndo, markRow, nextWake, parseRowMarks, placeOf, resetRowMarks, restoreRows, ROWS_KEY, setRowMarks, snoozeUntil, sweep, threadRowKey, sessionRowKey, undoRows, UNDO_MS, wakeAll, wakeRows, type RowAction, type RowMark, type RowMarks } from "./rows";
 
 const HOUR = 3_600_000;
 const T = threadRowKey("buddy", "t1");
@@ -144,5 +144,81 @@ describe("what is kept", () => {
     setRowMarks({ [T]: { settled: true } });
     wakeRows([T, "thread:buddy:other"]);
     expect(getRowMarks()).toEqual({});
+  });
+});
+
+describe("undo (item 94)", () => {
+  const disk = new Map<string, string>();
+  beforeEach(() => {
+    disk.clear();
+    vi.stubGlobal("localStorage", { getItem: (k: string) => disk.get(k) ?? null, setItem: (k: string, v: string) => void disk.set(k, v) });
+    resetRowMarks({});
+  });
+  afterEach(() => vi.useRealTimers());
+
+  const A = threadRowKey("buddy", "a");
+  const B = threadRowKey("buddy", "b");
+
+  it("takes back each of Pin, Snooze, Done for now and Archive, putting back exactly the mark the row had", () => {
+    const had: (RowMark | undefined)[] = [undefined, { pinned: 3 }, { snoozed: 9e12 }, { settled: true }];
+    const acts: RowAction[] = [{ do: "pin" }, { do: "snooze", until: 8e12 }, { do: "settle" }, { do: "archive" }];
+    for (const was of had)
+      for (const a of acts) {
+        const start: RowMarks = was ? { [A]: was, [B]: { pinned: 1 } } : { [B]: { pinned: 1 } };
+        resetRowMarks(start);
+        actOnRows([A], a, "Weekend sale post", 50);
+        if (getRowMarks()[A] === start[A]) continue; // pinning a pinned row changes nothing, and nothing is held to undo
+        expect(getRowUndo()?.kind, `${JSON.stringify(was)} ${a.do}`).toBe(a.do);
+        expect(undoRows()).toBe(true);
+        expect(getRowMarks(), `${JSON.stringify(was)} ${a.do}`).toEqual(start);
+        expect(getRowUndo()).toBeNull();
+      }
+  });
+
+  it("holds nothing for an action that changed nothing, and for unpin, bring back and restore", () => {
+    resetRowMarks({ [A]: { pinned: 1 } });
+    actOnRows([A], { do: "pin" }, "x", 5);
+    expect(getRowUndo()).toBeNull();
+    actOnRows([A], { do: "unpin" }, "x", 5);
+    expect(getRowUndo()).toBeNull();
+    expect(undoRows()).toBe(false);
+  });
+
+  it("takes back a whole bulk action, each row to its own mark, and keeps only the newest action", () => {
+    resetRowMarks({ [A]: { pinned: 2 }, [B]: { snoozed: 9e12 } });
+    const C = threadRowKey("buddy", "c");
+    actOnRows([A, B, C], { do: "settle" }, "3 chats", 10);
+    expect(getRowMarks()).toEqual({ [A]: { settled: true }, [B]: { settled: true }, [C]: { settled: true } });
+    actOnRows([C], { do: "archive" }, "c", 11);
+    // the newest is the one Undo holds
+    expect(undoRows()).toBe(true);
+    expect(getRowMarks()[C]).toEqual({ settled: true });
+    expect(undoRows()).toBe(false);
+    // the bulk settle again, then its undo: every row back as it was
+    resetRowMarks({ [A]: { pinned: 2 }, [B]: { snoozed: 9e12 } });
+    actOnRows([A, B, C], { do: "settle" }, "3 chats", 10);
+    undoRows();
+    expect(getRowMarks()).toEqual({ [A]: { pinned: 2 }, [B]: { snoozed: 9e12 } });
+  });
+
+  it("goes after a few seconds", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000_000);
+    actOnRows([A], { do: "settle" }, "a");
+    expect(getRowUndo()?.until).toBe(1_000_000 + UNDO_MS);
+    vi.advanceTimersByTime(UNDO_MS - 1);
+    expect(getRowUndo()).not.toBeNull();
+    vi.advanceTimersByTime(1);
+    expect(getRowUndo()).toBeNull();
+    expect(undoRows()).toBe(false);
+  });
+
+  it("restores exactly: a row that had no mark loses the one it was given, the others keep theirs", () => {
+    const marks: RowMarks = { [A]: { settled: true }, [B]: { pinned: 4 } };
+    expect(restoreRows(marks, { [A]: undefined })).toEqual({ [B]: { pinned: 4 } });
+    expect(restoreRows(marks, { [A]: { snoozed: 7 } })).toEqual({ [A]: { snoozed: 7 }, [B]: { pinned: 4 } });
+    // nothing to put back: the same object
+    expect(restoreRows(marks, { [B]: marks[B] })).toBe(marks);
+    expect(changedFrom(marks, applyRows(marks, [A, B], { do: "settle" }, 1), [A, B])).toEqual({ [B]: { pinned: 4 } });
   });
 });

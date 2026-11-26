@@ -39,9 +39,11 @@ export function RowsWatcher() {
     askedChats: new Set(selectAsks(s).map((a) => a.bot)),
   });
   const needKey = needing.join("\n");
+  // again whenever the marks change: an Undo (item 94) puts back the mark a row had, and a row that asks something since must not
+  // be put away by it (wakeAll changes nothing, and so writes nothing, when no row that asks has such a mark)
   useEffect(() => {
     if (needKey) wakeRows(needKey.split("\n"));
-  }, [needKey]);
+  }, [needKey, marks]);
 
   // the row open in the main column
   const open = s.ui.view === "chat" && s.selectedBot && s.ui.thread ? threadRowKey(s.selectedBot, s.ui.thread) : s.ui.view === "session" && s.ui.session ? sessionRowKey(s.ui.session) : null;

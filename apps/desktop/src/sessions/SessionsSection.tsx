@@ -33,7 +33,7 @@ import { countRender, useAnyFlowing, useTermFace } from "./termActivity";
 import { addFolder, addedFolders, allCollapsed, collapseOthers, folderGroups, pathKey, folderSummary, isCollapsed, isTildePath, getFolderPrefs, moveFolder, orderFolders, removeFolder, setAllFolders, setFolderGone, setFolderPrefs, toggleFolder, useFolderPrefs, useGoneFolders, withAdded } from "./folders";
 import { ChevronDown, ChevronRight } from "../ui/icons";
 import { rowChoices } from "../sidebar/RowMenu";
-import { arrange, markRow, sessionRowKey, useRowMarks, type RowMark as PlaceMark } from "../sidebar/rows";
+import { actOnRows, arrange, sessionRowKey, useRowMarks, type RowMark as PlaceMark } from "../sidebar/rows";
 import { CUE_PX, useEdgeFade } from "../sidebar/edgeFade";
 import { getHost, type PastChat } from "./host";
 import { getSessions, useSessions } from "./sessions";
@@ -1399,7 +1399,7 @@ const TermRow = memo(function TermRow({ rec, agents, unseen, active, ticking, on
   const actions = termMenuItems(rec, rowMark ?? null);
   const pick = (a: RowAction) => {
     const sx = getSessions();
-    if (a === "pin" || a === "unpin" || a === "settle" || a === "wake") markRow(sessionRowKey(rec.id), { do: a });
+    if (a === "pin" || a === "unpin" || a === "settle" || a === "wake") actOnRows([sessionRowKey(rec.id)], { do: a }, title.title);
     else if (a === "rename") setEditing(true);
     else if (a === "reveal") void sx.revealFolder(rec.id);
     else if (a === "terminal") void sx.openTerminal(rec.id);
@@ -1479,6 +1479,7 @@ const TermRow = memo(function TermRow({ rec, agents, unseen, active, ticking, on
       className={`ss-row tr${active ? " active" : ""}${running ? " run" : ""}${menu ? " menu-open" : ""}${rowMark?.pinned !== undefined ? " pinned" : ""}${rowMark?.settled ? " settled" : ""}${split ? (active ? " split-focus" : away ? " split split-away" : " split") : ""}`}
       data-split={split ? (active ? "focused" : away ? "away" : "in") : undefined}
       data-testid={`session-${rec.id}`}
+      data-row-key={sessionRowKey(rec.id)}
       data-status={rec.status}
       data-term-status={status ?? "idle"}
       data-fg={rec.fgAgent ?? undefined}

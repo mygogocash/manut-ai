@@ -113,7 +113,8 @@ export function applyRow(marks: RowMarks, key: string, action: RowAction, now: n
       next = was?.archived !== undefined ? was : { snoozed: action.until };
       break;
     case "settle":
-      next = was?.archived !== undefined ? was : { settled: true };
+      // settling a settled row changes nothing (and so holds nothing to undo)
+      next = was?.archived !== undefined || was?.settled ? was : { settled: true };
       break;
     case "wake":
       next = was && (was.snoozed !== undefined || was.settled) ? null : was ?? null;
@@ -132,6 +133,63 @@ export function applyRow(marks: RowMarks, key: string, action: RowAction, now: n
   if (next === (was ?? null)) return marks;
   const rest = Object.fromEntries(Object.entries(marks).filter(([k]) => k !== key));
   return next ? { ...rest, [key]: next } : rest;
+}
+
+/** `marks` with `action` done to every row of `keys` at `now` (item 94: several rows at once). The same object back when nothing
+ *  changes. */
+export function applyRows(marks: RowMarks, keys: readonly string[], action: RowAction, now: number): RowMarks {
+  let out = marks;
+  for (const k of keys) out = applyRow(out, k, action, now);
+  return out;
+}
+
+// ---- undo (item 94) -------------------------------------------------------------------------------------------------
+//
+// Pin, Snooze, Done for now and Archive can each be taken back for a few seconds, with ⌘Z while the sidebar or the row has focus,
+// or the Undo of the quiet toast that says what was done. One action is kept, the newest: it holds exactly the mark each row it
+// touched had before (none, for a row that had none), so undoing puts back that mark and nothing else, for one row or for all the
+// rows of a bulk action. The idea of undoing a settle or a snooze comes from T3 Code's sidebar (pingdotgg/t3code, MIT License,
+// `threadUndo.ts`); the code is this app's own.
+
+/** The actions that can be undone. */
+export type UndoKind = "pin" | "snooze" | "settle" | "archive";
+/** How long the Undo toast stays: a few seconds, as the brief asks. */
+export const UNDO_MS = 6_000;
+
+/** One action that can be taken back. `before` names every row it changed, with the mark it had (undefined: none). */
+export interface RowUndo {
+  id: number;
+  kind: UndoKind;
+  /** What the toast calls it: the row's name, or how many rows. */
+  name: string;
+  before: Readonly<Record<string, RowMark | undefined>>;
+  /** When it was done, and when the toast goes (ms). */
+  at: number;
+  until: number;
+}
+
+/** The kind of undo an action is, or null for one that is not undone (unpin, bring back, open, restore). */
+export function undoKind(action: RowAction): UndoKind | null {
+  return action.do === "pin" || action.do === "snooze" || action.do === "settle" || action.do === "archive" ? action.do : null;
+}
+
+/** What each row of `keys` had in `was` that `next` changed: the record an undo needs. Empty when nothing changed. */
+export function changedFrom(was: RowMarks, next: RowMarks, keys: readonly string[]): Record<string, RowMark | undefined> {
+  const out: Record<string, RowMark | undefined> = {};
+  for (const k of keys) if (was[k] !== next[k]) out[k] = was[k];
+  return out;
+}
+
+/** `marks` with each row of `before` set back to exactly the mark it had: deleted where it had none. */
+export function restoreRows(marks: RowMarks, before: Readonly<Record<string, RowMark | undefined>>): RowMarks {
+  const keys = Object.keys(before);
+  if (keys.every((k) => marks[k] === before[k])) return marks;
+  const out: Record<string, RowMark> = Object.fromEntries(Object.entries(marks).filter(([k]) => !(k in before)));
+  for (const k of keys) {
+    const m = before[k];
+    if (m) out[k] = m;
+  }
+  return out;
 }
 
 /** `marks` with the snoozed and settled marks of every row in `keys` cleared: an ask came. */
@@ -205,6 +263,49 @@ export function setRowMarks(next: RowMarks): void {
 
 /** Do `action` to row `key`. */
 export const markRow = (key: string, action: RowAction, now: number = Date.now()): void => setRowMarks(applyRow(load(), key, action, now));
+
+let undo: RowUndo | null = null;
+let undoSeq = 0;
+let undoTimer: ReturnType<typeof setTimeout> | null = null;
+const undoListeners = new Set<() => void>();
+const undoChanged = () => {
+  for (const fn of undoListeners) fn();
+};
+function setUndo(next: RowUndo | null): void {
+  if (undoTimer !== null) clearTimeout(undoTimer);
+  undoTimer = null;
+  undo = next;
+  if (next) undoTimer = setTimeout(() => setUndo(null), Math.max(0, next.until - Date.now()));
+  undoChanged();
+}
+
+/** The person does `action` to the rows of `keys` (one, or several selected), which the toast calls `name`. Pin, Snooze, Done for
+ *  now and Archive become the one action Undo takes back, when they changed something. */
+export function actOnRows(keys: readonly string[], action: RowAction, name: string, now: number = Date.now()): void {
+  const was = load();
+  const next = applyRows(was, keys, action, now);
+  setRowMarks(next);
+  const kind = undoKind(action);
+  const before = changedFrom(was, next, keys);
+  if (kind && Object.keys(before).length) setUndo({ id: ++undoSeq, kind, name, before, at: now, until: now + UNDO_MS });
+}
+
+/** Take back the action Undo holds: each row it touched gets exactly the mark it had. False when there is none. */
+export function undoRows(): boolean {
+  if (!undo) return false;
+  const before = undo.before;
+  setUndo(null);
+  setRowMarks(restoreRows(load(), before));
+  return true;
+}
+
+/** The action Undo holds, or null once its few seconds are over. */
+export const getRowUndo = (): RowUndo | null => undo;
+const subscribeUndo = (fn: () => void) => {
+  undoListeners.add(fn);
+  return () => void undoListeners.delete(fn);
+};
+export const useRowUndo = (): RowUndo | null => useSyncExternalStore(subscribeUndo, getRowUndo, getRowUndo);
 /** Clear the snoozed and settled marks of `keys` (a no-op when none has one). */
 export const wakeRows = (keys: readonly string[], now: number = Date.now()): void => setRowMarks(wakeAll(load(), keys, now));
 /** Drop what `sweep` says. */
@@ -212,6 +313,7 @@ export const sweepRows = (alive: (key: string) => boolean, now: number = Date.no
 /** A test starts from none. */
 export function resetRowMarks(next: RowMarks = {}): void {
   marks = next;
+  setUndo(null);
   for (const fn of listeners) fn();
 }
 
