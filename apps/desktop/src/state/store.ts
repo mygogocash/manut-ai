@@ -1049,7 +1049,7 @@ export type Action =
   | { type: "hello"; hello: HelloResult }
   | { type: "error"; message: string | null }
   | { type: "bots"; bots: Bot[] }
-  | { type: "select"; bot: string }
+  | { type: "select"; bot: string; behind?: boolean }
   | { type: "chat.opened"; bot: string; res: ChatOpenResult; now: number; since?: number }
   /** Automation answers that came in while manut was closed (or not attached): `count` more unread. */
   | { type: "watch.missed"; bot: string; count: number }
@@ -1508,7 +1508,10 @@ export function reduce(state: AppState, a: Action): AppState {
     case "bots":
       return { ...state, bots: a.bots };
     case "select":
-      return { ...state, selectedBot: a.bot, unread: { ...state.unread, [a.bot]: 0 }, ui: { ...state.ui, view: "chat", thread: null } };
+      // `behind`: the member is chosen behind the page shown, which stays (the app starting while the person already opened one)
+      return a.behind
+        ? { ...state, selectedBot: a.bot }
+        : { ...state, selectedBot: a.bot, unread: { ...state.unread, [a.bot]: 0 }, ui: { ...state.ui, view: "chat", thread: null } };
     case "ui.thread":
       return {
         ...state,
@@ -2718,11 +2721,11 @@ export function createStore(bridge: BridgeLike, opts: StoreOptions = {}): Store 
     setRoster([...(roster ?? []), ...seed.filter((n) => !roster?.includes(n))]);
   };
 
-  const selectBot = async (bot: string) => {
+  const selectBot = async (bot: string, behind = false) => {
     // the open chat always has its row: a bot opened from Needs you, an @mention or Settings joins the list
     if (state.ui.roster && state.bots.some((b) => b.name === bot)) listBot(bot, true);
-    dispatch({ type: "select", bot });
-    markWatchSeen(bot);
+    dispatch({ type: "select", bot, ...(behind ? { behind: true } : {}) });
+    if (!behind) markWatchSeen(bot);
     const jobs: Promise<unknown>[] = [loadElsewhere(bot), loadRoutines(bot), loadModels(bot)];
     if (!state.threads[bot]) jobs.push(loadThreads(bot));
     if (!state.chats[bot]?.loaded) jobs.push(loadChat(bot).catch(fail));
@@ -2948,10 +2951,16 @@ export function createStore(bridge: BridgeLike, opts: StoreOptions = {}): Store 
               ? back.bot
               : listed[0];
         void loadAutomations();
+        // The person may already have opened a page while the app was connecting (the side menu answers at once): the
+        // first member is then chosen behind that page, and nothing below takes the person away from it. Before this, the
+        // start chose the member's chat and then Home, and undid the click.
+        const moved = state.ui.view !== "chat" || state.ui.thread !== null || !!state.ui.session;
         // the panel and view come back as the bot is selected, before its chat and lists load: put back only once
         // those reads ended, a click on the panel in the meantime (the places chip, ⌘.) was undone by it
-        const loading = first ? selectBot(first) : Promise.resolve();
-        if (back?.bot && back.bot === first) {
+        const loading = first ? selectBot(first, moved) : Promise.resolve();
+        if (moved) {
+          // the page the person opened stays; what was saved before the restart is not put back over it
+        } else if (back?.bot && back.bot === first) {
           const { panelOpen, panelTab, runsFull, runId } = back;
           // a TERMINALS session comes back open (sessions/entry.ts)
           const session = SESSIONS_ENTRY ? back.session : null;
@@ -2960,7 +2969,7 @@ export function createStore(bridge: BridgeLike, opts: StoreOptions = {}): Store 
         // Home is where the app starts: on a first run, after a restart that left Home open, and when the member saved
         // before the restart is gone. The first member is still chosen above, so its chat, lists and drafts load behind
         // Home. A chat or a terminal session the person left open comes back instead (resume.ts).
-        if (state.ui.view === "chat" && (!back?.bot || back.view === "home")) dispatch({ type: "ui.page", page: "home" });
+        if (!moved && state.ui.view === "chat" && (!back?.bot || back.view === "home")) dispatch({ type: "ui.page", page: "home" });
         await loading;
         // Load the other listed chats too, so the sidebar can show previews and unread counts. A profile outside
         // the list is not opened as a chat (that would make its Bot Chat, and list it): it is only asked for the
