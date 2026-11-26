@@ -687,8 +687,10 @@ Every switch that turns a built part on, and what each needs from the owner, is 
   `src/lib/notify.device.test.ts`, `src/lib/notify.ask.test.ts`; `apps/web` `test/macRemote.test.ts`,
   `test/MakeRoutineForm.test.tsx`, `test/JoinPage.test.tsx` ("counts down to a new code"). Each is a 5 second limit
   reached at a load of 30, not yet read further.
-- `apps/desktop` `src/runtime/http/feed.test.ts`: failed in two loaded gates on 26 Nov (seven tests at once) and
-  passed alone each time. `apps/desktop/src-tauri`
+- `apps/desktop` `src/runtime/http/feed.test.ts`: failed in three loaded gates on 26 Nov (seven tests at once) and
+  passed alone each time. Fixed at 15:50: its backoff test stepped half a second at a time through hours of fake
+  waits, passed five seconds under load, and its loop ran on under the next tests' clock. It now jumps to each next
+  timer, and every test's followers are let go after it. `apps/desktop/src-tauri`
   `agent_chat::tests::a_claude_chat_is_handed_the_projects_own_instructions_as_text` (item 93) raced and is fixed: its
   stand-in ended at the app's first line of input, and now waits for its input to close.
 - `apps/desktop/src-tauri` `shop_cache_key::tests::keychain::*` and
