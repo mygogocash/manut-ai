@@ -15,7 +15,12 @@ import { t, tx } from "../../i18n";
 import { composing as imeComposing } from "../../lib/ime";
 import { newer, older, onFirstLine, onLastLine, type Recall, type Step } from "./promptHistory";
 import { addAt, matchMembers, mentionAt, putMention, withAction, withFolders, type Member } from "../box/context";
-import { FolderChips, MentionPicker } from "../box/BoxParts";
+import { CarriedChips, FolderChips, MentionPicker } from "../box/BoxParts";
+import { goes, setCarried, useCarried, withCarried, type Scope } from "../box/carry";
+import { SelectionNote } from "../box/SelectionNote";
+import { BringPicker, bringInto, bringRows } from "../box/Bring";
+import { readRef, THREAD_DRAG, type ThreadRef } from "../box/threadContext";
+import { getSessions } from "../../sessions/sessions";
 import { useBoxVoice } from "../box/Voice";
 import { voiceOffered } from "../../voice/engine";
 import { keysCaption, sendKey, stashKey, useFollowUp, whileRunning, type BoxKind, type FollowUp } from "../box/keys";
@@ -40,7 +45,9 @@ const MAX_H = 200;
  * While an answer runs (item 95), Enter does Settings' "While an answer is running" (wait for it, or add it now) and
  * Cmd+Enter the other, for that one message (chat/box/keys.ts); a quiet line under the box says which. With no answer
  * running both keys send. Cmd+S puts the draft aside, words, folders and files, in Drafts on Home (app/stash.ts), and a
- * draft taken from there into this chat brings its files along. */
+ * draft taken from there into this chat brings its files along. Notes on a selection and other chats' context (item 97,
+ * chat/box/carry.ts) are chips above the text, kept by this chat's key: a send puts the ones that may go here in front of
+ * the text and clears them, Cmd+S takes them along as that same text. */
 export function Composer({
   bot,
   running,
@@ -71,6 +78,8 @@ export function Composer({
   steers = true,
   boxKind = "member",
   limit,
+  scope = {},
+  waitNote = null,
 }: {
   bot: Bot;
   running: boolean;
@@ -130,6 +139,12 @@ export function Composer({
   /** The account this chat runs on is at its limit (item 95, chat/box/later.ts): until when, and how to keep what is
    *  typed to send then. `onWait` is false when a message already waits in this chat. */
   limit?: { until: string; onWait: (text: string) => boolean } | null;
+  /** The shop or coding account this chat belongs to (chat/box/scope.ts): a chip made under another is shown refused and
+   *  never sent. */
+  scope?: Scope;
+  /** Why Send waits now (a lane's other chat works there, item 97): the box keeps what is typed, Send and Enter do nothing, and
+   *  this line under the box says why. */
+  waitNote?: string | null;
 }) {
   // unsent text survives switching chats and restarts (drafts.ts; the composer is keyed by its chat)
   const [text, setText] = useState(() => getDraft(bot.name));
@@ -140,6 +155,9 @@ export function Composer({
   /** Actions from the + over text already typed: the `/` menu is open for it, and a pick goes in front of the text. */
   const [forced, setForced] = useState(false);
   const [sending, setSending] = useState(false);
+  /** Bring context from… is open over the box (item 97); a row dragged over the box is on it. */
+  const [bringing, setBringing] = useState(false);
+  const [dropOn, setDropOn] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   /** Cmd+S just put the draft aside: one quiet line says where it went, until the person types again. */
   const [aside, setAside] = useState(false);
@@ -149,7 +167,16 @@ export function Composer({
   const anchor = useRef<HTMLSpanElement>(null);
   const pop = useRef<HTMLDivElement>(null);
   const good = chips.filter((c) => !c.reason);
-  const has = text.trim().length > 0 || good.length > 0 || folders.length > 0;
+  // notes and other chats' context this chat's box carries (item 97); only the ones that may go here count as something to send
+  const carried = useCarried(bot.name);
+  const going = goes(carried, scope);
+  const has = text.trim().length > 0 || good.length > 0 || folders.length > 0 || going.length > 0;
+  /** What goes: the carried chips that may, then the text with its folders on their own lines. */
+  const full = () => withCarried(folders.length ? withFolders(text, folders) : text, carried, scope);
+  /** A send or Cmd+S took the chips that may go here; refused ones stay, as red files do. */
+  const sentCarried = () => {
+    if (going.length) setCarried(bot.name, carried.filter((c) => !going.includes(c)));
+  };
   const store = useStore();
   // where an ArrowUp/ArrowDown walk through `history` stands (promptHistory.ts)
   const recall = useRef<Recall>(null);
@@ -446,13 +473,14 @@ export function Composer({
    *  be saved keeps the whole draft in the box, with the reason. */
   const putAside = async () => {
     if (!has || sending || offline) return;
-    const body = folders.length ? withFolders(text, folders) : text;
+    const body = full();
     setSending(true);
     setErr(null);
     try {
       await stashDraft({ text: body, files: good, from: bot.name });
       edit("");
       setFolders([]);
+      sentCarried();
       setChips((cur) => {
         cur.forEach((c) => !c.reason && c.url && URL.revokeObjectURL(c.url));
         return cur.filter((c) => c.reason);
@@ -471,11 +499,27 @@ export function Composer({
   useEffect(() => () => latest.current.forEach((c) => c.url && URL.revokeObjectURL(c.url)), []);
 
   const overlay = useDropZone(wrap, !offline && !!onSendFiles, add);
+  /** Another chat's context as one chip above the box (item 97), from a row dropped on it or picked in Bring context from…; a
+   *  refusal or a chat that could not be read is said where a file's problem is. Nothing is sent. */
+  const bring = async (r: ThreadRef) => {
+    setBringing(false);
+    setErr(null);
+    const line = await bringInto(bot.name, scope, r);
+    if (line) setErr(line);
+    ref.current?.focus();
+  };
+  const listBring = useCallback(
+    (query: string) => {
+      const ss = getSessions();
+      return bringRows(store, { list: ss.getState().list, agents: ss.getState().agents, chatKey: ss.chatKey }, query, bot.name);
+    },
+    [store, bot.name],
+  );
   const follow = useFollowUp(boxKind);
 
   /** Send with Enter or Cmd+Enter (`key`): while an answer runs they choose between waiting for it and adding it now. */
   const send = async (key: "enter" | "cmd" = "enter") => {
-    if (!has || offline || sending) return;
+    if (!has || offline || sending || waitNote) return;
     const how = running ? whileRunning(key, steers, follow) : undefined;
     vc.sending();
     if (threadCmd && onNewThread) {
@@ -484,12 +528,13 @@ export function Composer({
       onNewThread(threadCmd.first);
       return;
     }
-    // the folders named go on their own lines under the text (none: the text as typed)
-    const body = folders.length ? withFolders(text, folders) : text;
+    // the carried chips go first, then the text, then the folders named on their own lines (none: the text as typed)
+    const body = full();
     if (!good.length || !onSendFiles) {
       onSend(body, how);
       edit("");
       setFolders([]);
+      sentCarried();
       return;
     }
     setSending(true);
@@ -498,6 +543,7 @@ export function Composer({
       await onSendFiles(body, good, how);
       edit("");
       setFolders([]);
+      sentCarried();
       setChips((cur) => cur.filter((c) => c.reason)); // red chips stay: they were never sent
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
@@ -536,6 +582,7 @@ export function Composer({
       onFolder={onFolder ? () => void addFolder() : undefined}
       onMention={mentions?.length ? addMention : undefined}
       onActions={actions ? openActions : undefined}
+      onBring={offline ? undefined : () => setBringing(true)}
     />
   );
   const fieldEl = (
@@ -710,7 +757,7 @@ export function Composer({
       className="send"
       aria-label={t("cmp.send")}
       title={t("cmp.send")}
-      disabled={!has || offline || sending}
+      disabled={!has || offline || sending || !!waitNote}
       onClick={() => void send()}
       data-testid="send"
     >
@@ -728,9 +775,11 @@ export function Composer({
       }}
     >
       {overlay}
+      <SelectionNote chatKey={bot.name} scope={scope} box={wrap} onDone={() => ref.current?.focus()} />
       {threadPicking && <ThreadPicker bot={bot.display_name} active onPick={pickThread} popRef={tPop} />}
       {picking && <SkillPicker items={items} active={at} onPick={pick} onHover={setActive} popRef={pop} />}
       {cmdOpen && cmd && <CommandPicker items={cmd.shown} more={cmd.total - cmd.shown.length} active={cmdAt} onPick={pickCommand} onHover={setCmdActive} popRef={cmdPop} />}
+      {bringing && <BringPicker rows={listBring} onPick={(r) => void bring(r)} onClose={() => (setBringing(false), ref.current?.focus())} />}
       {mentioning && <MentionPicker items={mItems} active={mAt} onPick={pickMention} onHover={setMActive} />}
       {hint && (
         <div className="hint" role="note" data-testid="skill-hint" data-kind={hint}>
@@ -741,9 +790,35 @@ export function Composer({
         </div>
       )}
       {vc.above}
-      <div className={`composer${has ? " has" : ""}${rows ? " bx-rows" : ""}`} data-testid="composer-box">
+      <div
+        className={`composer${has ? " has" : ""}${rows ? " bx-rows" : ""}${dropOn ? " drop-ctx" : ""}`}
+        data-testid="composer-box"
+        // a side-menu, History or lane row dragged onto the box brings that chat's context (item 97)
+        onDragOver={(e) => {
+          if (offline || ![...e.dataTransfer.types].includes(THREAD_DRAG)) return;
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "copy";
+          setDropOn(true);
+        }}
+        onDragLeave={(e) => {
+          if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropOn(false);
+        }}
+        onDrop={(e) => {
+          const r = readRef(e.dataTransfer.getData(THREAD_DRAG));
+          setDropOn(false);
+          if (!r) return;
+          e.preventDefault();
+          void bring(r);
+        }}
+      >
+        {dropOn && (
+          <div className="bx-drop-ctx" aria-hidden="true">
+            {t("carry.drop")}
+          </div>
+        )}
         <Chips chips={chips} onRemove={remove} />
         <FolderChips folders={folders} onRemove={(f) => setFolders((cur) => cur.filter((x) => x !== f))} />
+        <CarriedChips chatKey={bot.name} list={carried} scope={scope} onRemoved={() => ref.current?.focus()} />
         {err && (
           <div className="att-err" role="alert" data-testid="attach-error">
             {err}
@@ -811,16 +886,21 @@ export function Composer({
               type="button"
               className="card-btn"
               onClick={() => {
-                const body = folders.length ? withFolders(text, folders) : text;
-                if (!limit.onWait(body)) return;
+                if (!limit.onWait(full())) return;
                 edit("");
                 setFolders([]);
+                sentCarried();
               }}
               data-testid="composer-wait"
             >
               {t("later.sendAt", { when: limit.until })}
             </button>
           )}
+        </div>
+      )}
+      {waitNote && (
+        <div className="cmp-keys" role="note" data-testid="composer-lane-wait">
+          {waitNote}
         </div>
       )}
       {aside && (
