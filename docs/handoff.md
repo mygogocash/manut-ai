@@ -235,7 +235,7 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    critical or high, three high, four medium. Unlike the first review's, several are in the published 0.1.1 (how Kit's
    dial reads a command, a repository's own agent settings taking effect in a lane with no question asked, and the
    Code page's own git reads in a repository with submodules). All eight are fixed and merged as items 88 to 92 by
-   08:45 on 26 Nov, each with a failing test first; the merge commits say what was wrong. The fixes are not in any
+   08:10 on 26 Nov, each with a failing test first; the merge commits say what was wrong. The fixes are not in any
    build: 0.1.1 is still the only release, and the owner decides what its page says and when 0.1.2 is cut. Item 89 has
    one cost a developer will notice: a lane's Claude Code no longer reads the project's own settings, hooks, MCP list
    or `CLAUDE.md` (the person's own all still load); item 93 hands the project's instructions back as plain text. What
@@ -243,7 +243,7 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    "edits alone" an agent may edit a test file and then run the tests without asking.
    Also merged on 26 Nov: 78b, the Mac's side of reaching it from a phone, with Settings, Sharing and access, switched
    off.
-   Running on 26 Nov at 08:45, each a subagent of the lead's session in its own worktree:
+   Running on 26 Nov at 08:10, each a subagent of the lead's session in its own worktree:
    - item 78c, the phone's side of reaching the Mac (`feat/remote-phone`, Opus, `cc-item78c-remote-phone`);
    - item 85i, the last sweep of the audit (`feat/quiet-sweep`, Opus, `cc-item85i-quiet-sweep`);
    - item 93, a project's instructions handed to a lane's agent as text (`feat/project-instructions`, Opus,
