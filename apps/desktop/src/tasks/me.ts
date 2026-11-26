@@ -6,6 +6,7 @@ import { useSyncExternalStore } from "react";
 import { taskHost, MeFail } from "./host";
 import { getTasks, subscribeTasks } from "./state";
 import { ME_SECTIONS, accountId, type ChosenAccount, type GhAccount, type GhAccounts, type MeFailKind, type MeItem, type MeSection } from "./types";
+import { changes } from "../lib/changes";
 
 /** A row of the "나" list: an item, the account it was read as and the section it came from. */
 export interface MeRow extends MeItem {
@@ -133,10 +134,10 @@ interface MeData {
 }
 
 let data: MeData = { lists: {}, detected: null };
-const listeners = new Set<() => void>();
+const listeners = changes();
 
 function emit() {
-  for (const fn of listeners) fn();
+  listeners.emit();
 }
 
 /** Still one of the chosen accounts (a read that ends after its account was removed changes nothing). */
@@ -151,8 +152,7 @@ function put(id: string, patch: Partial<AccountLists>) {
 
 export const getMeData = () => data;
 export function subscribeMe(fn: () => void) {
-  listeners.add(fn);
-  return () => void listeners.delete(fn);
+  return listeners.subscribe(fn);
 }
 export const useMeData = () => useSyncExternalStore(subscribeMe, getMeData, getMeData);
 

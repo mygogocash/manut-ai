@@ -17,6 +17,7 @@
 // cannot reach another shop by way of a coding chat: it is refused anywhere one of those shops differs.
 import { useSyncExternalStore } from "react";
 import { t } from "../../i18n";
+import { changes } from "../../lib/changes";
 
 /** The longest selection a note quotes, in characters; the rest is cut with a line that says how much. */
 export const QUOTE_MAX = 3_000;
@@ -261,7 +262,7 @@ const browserStorage = (): CarryStorage | null => {
 
 let storage: () => CarryStorage | null = browserStorage;
 let byChat: Record<string, Carried[]> = parseCarry(storage()?.getItem(CARRY_KEY) ?? null);
-const listeners = new Set<() => void>();
+const listeners = changes();
 const EMPTY: readonly Carried[] = Object.freeze([]);
 
 /** Tests: where the chips are kept, read again from it (null: the browser's own). */
@@ -269,7 +270,7 @@ export function setCarryStorage(s: CarryStorage | null): void {
   storage = s ? () => s : browserStorage;
   byChat = parseCarry(storage()?.getItem(CARRY_KEY) ?? null);
   through = parseThrough(storage()?.getItem(THROUGH_KEY) ?? null);
-  for (const l of [...listeners]) l();
+  listeners.emitSnapshot();
 }
 
 export const getCarried = (key: string): readonly Carried[] => byChat[key] ?? EMPTY;
@@ -284,7 +285,7 @@ export function setCarried(key: string, list: readonly Carried[]): void {
   } catch {
     /* no storage, or full: the chips hold for this run */
   }
-  for (const l of [...listeners]) l();
+  listeners.emitSnapshot();
 }
 
 /** Add `chip` to chat `key`'s box; the reason when it was not added. */
@@ -343,8 +344,7 @@ export function withThrough(key: string, scope: Scope): Scope {
 export function useCarried(key: string): readonly Carried[] {
   return useSyncExternalStore(
     (l) => {
-      listeners.add(l);
-      return () => void listeners.delete(l);
+      return listeners.subscribe(l);
     },
     () => getCarried(key),
     () => getCarried(key),

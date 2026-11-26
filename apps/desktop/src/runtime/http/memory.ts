@@ -27,6 +27,7 @@ import { factIdOk, factTextRefusal, type MemoryFact, type MemoryOps, type Memory
 import { OpError } from "../mock/host";
 import type { OwnerLink } from "./connections";
 import type { ShopAnswer } from "./shops";
+import { isObj } from "../../lib/guards";
 
 /** The shop's facts: `GET` lists them. */
 export const MEMORY_PATH = "/v1/memory";
@@ -36,7 +37,6 @@ export const CORRECT_PATH = "/v1/memory/correct";
 export const FORGET_PATH = "/v1/memory/forget";
 
 type Obj = Record<string, unknown>;
-const isObj = (v: unknown): v is Obj => !!v && typeof v === "object" && !Array.isArray(v);
 /** A time or a count from the API: a finite number, else null. */
 const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
 

@@ -12,6 +12,8 @@ import { t } from "../../i18n";
 import { clock, limitName } from "../../sidebar/usageFormat";
 import { accountHost, accountOps, isDesktop, type LoginStatus } from "./native";
 import { accountName, autoSwitchOn, isCpa, lapseNotices, nextAccount, pruneSeen, resetFirstOn, switchNote, CLI_NAME } from "./rules";
+import { changes } from "../../lib/changes";
+import { errText } from "../../lib/errText";
 
 const REFRESH_MS = 60_000;
 const ASKS_STATUS: AccountCli[] = ["claude", "codex"];
@@ -28,14 +30,12 @@ type Snap = {
   note: { cli: string; text: string; at: number } | null;
 };
 let snap: Snap = { groups: null, error: null, onComputer: null, status: {}, versions: {}, note: null };
-const fns = new Set<() => void>();
+const fns = changes();
 const set = (next: Partial<Snap>) => {
   snap = { ...snap, ...next };
-  for (const f of [...fns]) f();
+  fns.emitSnapshot();
 };
 let inflight: Promise<void> | null = null;
-
-const errText = (e: unknown) => (typeof e === "object" && e && "message" in e ? String((e as { message: unknown }).message) : String(e));
 
 async function readStatuses(groups: AccountGroup[]): Promise<Record<string, LoginStatus>> {
   const host = accountHost();
@@ -157,13 +157,12 @@ async function lapseNotice(groups: AccountGroup[]): Promise<void> {
 
 /** The accounts as last read (null before the first read); SESSIONS notes which one a new session runs as. */
 export const accountGroups = (): AccountGroup[] | null => snap.groups;
+/** What the shared copy holds now, for a reader that is not a component (Settings › Report a problem). */
+export const accountsNow = (): Snap => snap;
 
 export function useAccounts(): Snap {
   return useSyncExternalStore(
-    (f) => {
-      fns.add(f);
-      return () => fns.delete(f);
-    },
+    (f) => fns.subscribe(f),
     () => snap,
     () => snap,
   );

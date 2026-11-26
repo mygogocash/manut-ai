@@ -1,8 +1,8 @@
 // A job's schedule in words. Hermes stores a display string (`0 9 * * 1-5`, `every 30m`, `once at 2026-12-01 09:00`);
 // the common shapes are said in the UI language ("weekdays at 09:00", "평일 09:00"), anything else stays as written.
 import { lang, t } from "../i18n";
+import { pad } from "../lib/pad";
 
-const pad = (n: number) => String(n).padStart(2, "0");
 const num = (s: string, lo: number, hi: number): number | null => {
   if (!/^\d{1,2}$/.test(s)) return null;
   const n = Number(s);

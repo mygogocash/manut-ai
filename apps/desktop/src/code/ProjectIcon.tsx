@@ -8,6 +8,7 @@
 // such an address is not drawn at all.
 import { useEffect, useSyncExternalStore, type ReactNode } from "react";
 import type { SessionHost } from "../sessions/host";
+import { changes } from "../lib/changes";
 
 /** The addresses an icon may come as: a picture's type, base64 and nothing else. */
 const PICTURE = /^data:image\/(svg\+xml|png|x-icon);base64,[A-Za-z0-9+/]+={0,2}$/;
@@ -18,12 +19,11 @@ export const isIconAddress = (url: unknown): url is string => typeof url === "st
 /** The last answer for each folder this run (null: it keeps none), so a row draws at once while the shell is asked again. */
 const known = new Map<string, string | null>();
 const asking = new Set<string>();
-const listeners = new Set<() => void>();
+const listeners = changes();
 let version = 0;
 
 const subscribe = (l: () => void) => {
-  listeners.add(l);
-  return () => void listeners.delete(l);
+  return listeners.subscribe(l);
 };
 
 /** Asks `host` for folder `cwd`'s icon, once at a time per folder, and keeps the answer. */
@@ -36,7 +36,7 @@ export async function readProjectIcon(host: Pick<SessionHost, "projectIcon">, cw
     if (known.get(cwd) !== icon) {
       known.set(cwd, icon);
       version++;
-      listeners.forEach((l) => l());
+      listeners.emit();
     }
     return icon;
   } finally {
@@ -58,7 +58,7 @@ export function resetProjectIcons(): void {
   known.clear();
   asking.clear();
   version++;
-  listeners.forEach((l) => l());
+  listeners.emit();
 }
 
 /** The icon `icon` drawn as a 16px picture, or `fallback` (what the row showed before) when there is none. */

@@ -25,7 +25,7 @@
 import { useSyncExternalStore } from "react";
 import type { ITerminalInitOnlyOptions, ITerminalOptions, Terminal } from "@xterm/xterm";
 import type { FitAddon } from "@xterm/addon-fit";
-import { afterOpen, bracketedPaste, CELLS_EVENT, feed, gpuComing, isParked, live, onVisible, PARKING_EVENT, type Remake } from "./term/engine";
+import { afterOpen, bracketedPaste, CELLS_EVENT, feed, gpuComing, isParked, live, onVisible, PARKING_EVENT } from "./term/engine";
 import { TERM_INPUT_EVENT } from "./term/paste-guard";
 import { onCwd, onProgress } from "./term/engine-marks";
 import { applyLook, termOptions } from "./term/look";
@@ -38,18 +38,18 @@ import { getShellHost, learnThisHost } from "../terminal/host";
 import { onSessionFg } from "./fg";
 import { termActs } from "./termActivity";
 import { isLinkId, LINK_COPIED_EVENT, newLinkId, termLinkUrl } from "./termLink";
-import { acpRow, agentDef, agentLabel, continues, draftAgent, draftFolder, draftOpen, hermesOnly, idInUse, installLine, isBuiltin, isGone, isShell, isTerminalRec, LAST_LINE_MAX, refusedResume, SHELL, termEnd, termMarkAgent, lastPrintedLine, OPEN_KEY, setsUpScreen, UI_BYTES, opensAs, parseOpens, parseRecent, pushRecent, RECENT_KEY, registerAcp, sessionMode, termGroups, type AgentId, type AgentInfo, type OpenAs, type Unseen, type Opens, type Recent, type SessionRec } from "./agents";
+import { acpRow, agentDef, agentLabel, continues, draftAgent, draftFolder, draftOpen, hermesOnly, idInUse, installLine, isBuiltin, isGone, isShell, isTerminalRec, LAST_LINE_MAX, refusedResume, SHELL, termEnd, termMarkAgent, lastPrintedLine, OPEN_KEY, setsUpScreen, UI_BYTES, opensAs, pushRecent, RECENT_KEY, registerAcp, sessionMode, type AgentId, type OpenAs, type Unseen, type SessionRec } from "./agents";
 import { clearSuggestion, noteSuggestion } from "../chat/suggestion";
 import { suggestOn, suggestWorks } from "../lib/suggest";
 import { acceptTitle, chatMaterial, titleRequest, wantsTitle, whyKey } from "./titleWords";
 import { titleModel } from "../lib/titleModel";
-import { NAME_MAX, parseTitles, promptTitle, putTitle, TITLES_KEY } from "./titles";
+import { NAME_MAX, promptTitle, putTitle, TITLES_KEY } from "./titles";
 import { getDraft, setDraft as setUnsent } from "../app/drafts";
 import { getHost, type ChatEvent, type ChatInput, type ConvState, type PastChat, type SessionHost } from "./host";
 import { localBot } from "../peers/peerKey";
 import { askOpen, folderKey, getStore, notifySessionEvent, notifySessionNote, onBridgeEvent, selectAsks, setChatRoute, setSessionKeyLookup, type ApprovalItem, type OutFile, type SentFile, type Store } from "../state/store";
-import { blobType, bytesOf, inlinePicture, parseSentFiles, pathsTyped, putSentFiles, SENT_FILES_KEY, shellQuote, wireText, type SavedFile, type SentFilesBook } from "./attach";
-import type { AccountCli, AccountGroup, ApprovalChoice, BridgeEvent, ClarifyAnswers, DiffFile, EventOf, Msg } from "../lib/protocol";
+import { blobType, bytesOf, inlinePicture, pathsTyped, putSentFiles, SENT_FILES_KEY, shellQuote, wireText, type SavedFile, type SentFilesBook } from "./attach";
+import type { AccountGroup, ApprovalChoice, BridgeEvent, ClarifyAnswers, DiffFile, EventOf, Msg } from "../lib/protocol";
 import { settleApproval } from "../chat/cards/respond";
 import { afterBranchRead, beforeBranchRead, kitAnswer, noteChange, savesAlone } from "../code/kitAsks";
 import { readSaved, SAVED_READ_MS } from "../code/secrets";
@@ -70,7 +70,7 @@ import { busyMate, continuedDraft, laneFree, type ContinuePick } from "./continu
 import { parseCommands, type AgentCommand } from "../chat/parts/commands";
 import { noteMcpSeen } from "../settings/mcp/agentConfig";
 import { t as tr, type Key } from "../i18n";
-import { sandboxSaid } from "../appStore";
+import { recordError } from "../report/errors";
 import { notesSaid } from "./projectNotes";
 import { windowWatched, type SessionNote } from "../lib/notify";
 import { createCloseGrace, graceMs, restoreSplitIn, type SplitWas } from "./closeGrace";
@@ -78,148 +78,13 @@ import { watchOpenFolder } from "./revealOpen";
 import { getSplit, groupOf, leaveIn, setSplit } from "./splitState";
 import { folderGroups, getFolderPrefs, orderFolders, pathKey, ranElsewhere, revealFolder as openFolderGroup, setFolderGone } from "./folders";
 import { broughtBackNote, REWINDS, rewoundNote, TurnBook, turnTitle } from "./rewind";
-
-/** The Accounts CLI a session of `agent` signs in as (mirrors `session_cli` in src-tauri/src/accounts.rs). */
-export const ACCOUNT_CLI: Partial<Record<AgentId, AccountCli>> = { claude: "claude", codex: "codex", grok: "grok" };
-
-/** The account a new session of `agent` runs as, from the Accounts list when it is loaded (none = unknown or the
- *  agent has no accounts; the shell then uses the one picked for new sessions). */
-export function accountFor(groups: AccountGroup[] | null, agent: AgentId): string | undefined {
-  const cli = ACCOUNT_CLI[agent];
-  const g = cli ? groups?.find((x) => x.cli === cli) : undefined;
-  return g ? (g.active ?? "default") : undefined;
-}
-
-export interface ModelOption {
-  id: string;
-  label: string;
-  detail?: string;
-  /** Hermes provider slug (oh-my-hermes sessions). */
-  provider?: string;
-}
-
-export interface SessionsState {
-  /** null until the first look-up */
-  agents: AgentInfo[] | null;
-  home: string | null;
-  list: SessionRec[];
-  recent: Recent[];
-  /** How the person last opened each agent (Chat or Terminal), kept on this computer. */
-  opens: Opens;
-  /** models a chat session can switch to, by session id */
-  models: Record<string, ModelOption[]>;
-  /** last problem a chat reported that is not a turn's own error (model refused, …), by session id */
-  notes: Record<string, string>;
-  /** what each chat's agent reported about itself, by session id */
-  live: Record<string, AgentLive>;
-  /** what a session did while the person was not looking at it, by session id (gone once they open it) */
-  unseen: Record<string, Unseen>;
-}
-
-/** What a chat's agent said about its controls (agent_chat.rs events). Nothing here is estimated. */
-export interface AgentLive {
-  /** the permission mode in force ("" = one manut does not offer, the agent's own) */
-  mode?: string;
-  /** what the agent itself reported it runs with: its approval policy and sandbox (Codex `never`,
-   *  `dangerFullAccess`; Claude Code's permission mode), shown when it means no approvals or full disk access */
-  approval?: string;
-  sandbox?: string;
-  /** the reasoning effort in force */
-  effort?: string;
-  /** the reasoning levels it takes; none = it has no effort control */
-  efforts?: string[];
-  /** its own commands and skills, for the `/` menu */
-  commands?: AgentCommand[];
-  /** context tokens in use and its window, as it counted them */
-  usage?: { used: number; max: number };
-  /** the git branch of its folder ("" = not a repository) */
-  branch?: string;
-  /** the agent can take back the person's last message (its own rewind; Claude Code and Codex) */
-  rewind?: boolean;
-  /** it ended because it is not signed in: the command that signs it in, run by the person in a terminal */
-  signin?: string;
-}
-
-interface Term {
-  /** the terminal now: reading it makes a parked one again (term/park.ts) */
-  readonly term: Terminal;
-  /** the xterm it has, parked or not */
-  raw: Terminal;
-  fit: FitAddon;
-  /** makes it again after it was parked */
-  remake?: Remake;
-  /** xterm renders into this element; it moves between session views instead of being re-created */
-  el: HTMLDivElement;
-  hostId: number | null;
-  closed: boolean;
-  /** Undoes what the engine attached after the terminal opened (its renderer, add-ons). */
-  undo: () => void;
-  /** The size the program was last told (when it started, then each resize sent). */
-  told: { cols: number; rows: number } | null;
-  /** xterm resized (and so reflowed or trimmed its screen) since the program was last told its size: set by every
-   *  resize, cleared by `tellSize`. A size that came back to `told` still needs the program to redraw. */
-  reflowed: boolean;
-  /** A changed size waiting to be sent (`RESIZE_SETTLE_MS`). */
-  settle: ReturnType<typeof setTimeout> | null;
-  /** Where its program runs: the agent PTY host, or (a Shell row) the login-shell host of the bottom panel. */
-  io: TermIo;
-  /** Which program run in this terminal it is (a CLI row goes on as the login shell when its CLI ends): output
-   *  drawn after its program was replaced is not acknowledged to the next one. */
-  run: number;
-  /** The person pressed a key or pasted in the current program once it ran (not the terminal's own replies to its
-   *  queries): a shell that ends before that, with an error, failed at start (termEnd). */
-  keyed: boolean;
-  /** The current program printed something; `keyedHeard`: the person pressed a key or pasted after that. A CLI
-   *  continuing its conversation that ends before such a key could not continue it (termEnd). */
-  heard: boolean;
-  keyedHeard: boolean;
-  /** The next start continues the row's conversation without looking for its file first: Claude Code refused that
-   *  id as a new conversation because it has it (once). */
-  resumeOnce?: boolean;
-  /** Its row was closed and waits out the undo window (closeGrace.ts): its program runs on, hidden, and takes no
-   *  input (keys, bot prompts, dropped files) until Undo puts the row back. */
-  held?: boolean;
-}
-
-/** The PTY calls a terminal makes once its program runs. */
-type TermIo = Pick<SessionHost, "write" | "ack" | "resize" | "close">;
-
-/** How much of the end of a CLI's output is kept while it may still be refusing its conversation. */
-const SAID_MAX = 2_048;
-
-/** The row's last-output time is written at most this often (a flood would otherwise re-render the sidebar). */
-const OUT_MARK_MS = 500;
-
-/** A terminal's new size goes to its program once it has stopped changing for this long. Dragging a window gives
- *  one size per frame (16.7 ms at 60 Hz), so a wait of one frame or less collapses nothing; two frames does, and
- *  the program redraws once for the size the drag ended on instead of once per frame. */
-export const RESIZE_SETTLE_MS = 32;
-
-const utf8 = new TextEncoder();
-
-/** A random (version 4) UUID: the id manut gives a new Claude Code conversation in a terminal (`--session-id`). */
-export function newConversationId(): string {
-  const c = globalThis.crypto;
-  if (typeof c?.randomUUID === "function") return c.randomUUID();
-  const b = c.getRandomValues(new Uint8Array(16));
-  b[6] = (b[6] & 0x0f) | 0x40;
-  b[8] = (b[8] & 0x3f) | 0x80;
-  const h = [...b].map((x) => x.toString(16).padStart(2, "0")).join("");
-  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
-}
-
-/** TERMINALS agents that continue their own conversation after manut restarts (`claude --resume`, `codex resume`). */
-const TERM_CONTINUES: readonly AgentId[] = ["claude", "codex"];
-/** TERMINALS agents that reopen their own dropped session after manut restarts with no id from manut: oh-my-hermes
- *  (`omh`) is told its row's link (`MANUT_TERMINAL_LINK`, rule 11) and reopens the session it dropped under that
- *  terminal by itself (OMH's auto-resume), so it needs no conversation id. */
-const TERM_REOPENS: readonly AgentId[] = ["omh"];
-/** Whether a TERMINALS session that was running when manut closed starts again by itself after the restart. */
-const termComesBack = (s: Pick<SavedSession, "agent" | "agentSession">): boolean =>
-  TERM_REOPENS.includes(s.agent) || (!!s.agentSession && TERM_CONTINUES.includes(s.agent));
-/** When a TERMINALS Codex session first asks for its conversation id, and how often after that until it has one. */
-const CODEX_ID_FIRST_MS = 5_000;
-const CODEX_ID_EVERY_MS = 15_000;
+import { NO_RULES, signedOutSaid, errText } from "./sessionErrors";
+import { ACCOUNT_CLI, accountFor, SAID_MAX, OUT_MARK_MS, RESIZE_SETTLE_MS, utf8, newConversationId, TERM_CONTINUES, TERM_REOPENS, termComesBack, CODEX_ID_FIRST_MS, CODEX_ID_EVERY_MS } from "./sessionPure";
+export { ACCOUNT_CLI, accountFor, RESIZE_SETTLE_MS, newConversationId } from "./sessionPure";
+import { readRecent, readSentFiles, readTitles, titleKey, TITLED, readOpens } from "./sessionBooks";
+export { NO_RULES, signedOutSaid } from "./sessionErrors";
+import type { ModelOption, SessionsState, AgentLive, Term, TermIo, ChatProc } from "./sessionTypes";
+export type { ModelOption, SessionsState, AgentLive } from "./sessionTypes";
 
 type Xterm = [typeof import("@xterm/xterm"), typeof import("@xterm/addon-fit")];
 let xtermLoad: Promise<Xterm> | null = null;
@@ -229,90 +94,6 @@ const loadXterm = () =>
   (xtermLoad ??= Promise.all([import("@xterm/xterm"), import("@xterm/addon-fit"), import("@xterm/xterm/css/xterm.css"), termFontsReady()]).then(
     ([x, f]) => (xtermMods = [x, f]),
   ));
-
-/** A chat's process (agent chat in the shell) or Hermes folder chat (bridge). */
-interface ChatProc {
-  kind: "agent" | "folder";
-  /** shell chat id (agent) */
-  hostId?: number;
-  /** bridge folder chat id (folder) */
-  fid?: string;
-  bot?: string;
-  /** set when manut itself stopped it (close, Terminal toggle), so its exit is not an end of the session */
-  stopping?: boolean;
-  /** the program never spoke its chat protocol (an old version, a hung start): the reason its turn and exit carry */
-  noChat?: string;
-  /** it is not signed in (an Agent Client Protocol agent's `-32000`): manut ends it with `noChat` as the reason */
-  signedOut?: boolean;
-}
-
-const readRecent = () => {
-  try {
-    return parseRecent(typeof localStorage !== "undefined" ? localStorage.getItem(RECENT_KEY) : null);
-  } catch {
-    return [];
-  }
-};
-
-/** The names the person gave sessions, kept on this computer by the agent's own conversation id. */
-/** Files sent in session chats (saved paths), so their bubbles show them again after a restart. */
-const readSentFiles = (): SentFilesBook => {
-  try {
-    return parseSentFiles(typeof localStorage !== "undefined" ? localStorage.getItem(SENT_FILES_KEY) : null);
-  } catch {
-    return {};
-  }
-};
-
-const readTitles = () => {
-  try {
-    return parseTitles(typeof localStorage !== "undefined" ? localStorage.getItem(TITLES_KEY) : null);
-  } catch {
-    return {};
-  }
-};
-const titleKey = (r: SessionRec) => (r.agentSession ? `${r.agent}:${r.agentSession}` : null);
-
-/** Agents whose own session files carry a conversation title the bridge can read (`cli.title`). */
-const TITLED: readonly AgentId[] = ["claude", "codex"];
-
-/** The shell's own words when it will not start OpenCode (`NO_RULES` in acp_chat.rs, kept equal by a test); for Kilo
- *  Code the same sentence names Kilo Code (`no_rules`). */
-export const NO_RULES = "OpenCode did not start because Manut AI could not confirm it would keep your own OpenCode permission rules.";
-
-/** The shell's own sentence for an Agent Client Protocol agent that is not signed in (`signed_out` in acp_chat.rs,
- *  the command between backticks; a test keeps the two equal). */
-const SIGNED_OUT = /^(.+) is not signed in\. Run `([^`]+)` in a terminal and sign in\.$/;
-
-/** `text` as a person reads it: the shell's not-signed-in sentence is said in their language with the command as
- *  plain words (no backticks); anything else is returned as it is. */
-export const signedOutSaid = (text: string): string => {
-  const m = SIGNED_OUT.exec(text.trim());
-  return m ? tr("ss.signedOut", { agent: m[1], cmd: m[2] }) : text;
-};
-
-const errText = (e: unknown) =>
-  signedOutSaid(
-    // (a terminal the App Store edition's sandbox refused is said in plain words, src/appStore.ts)
-    sandboxSaid(
-      typeof e === "string"
-        ? e
-        : e instanceof Error
-          ? e.message
-          : typeof e === "object" && e && "message" in e
-            ? String((e as { message: unknown }).message)
-            : String(e),
-      tr,
-    ),
-  );
-
-const readOpens = () => {
-  try {
-    return parseOpens(typeof localStorage !== "undefined" ? localStorage.getItem(OPEN_KEY) : null);
-  } catch {
-    return {};
-  }
-};
 
 /** `pulls`: the Tasks host a chat's own pull request is read through (item 100, code/chatPull.ts); none reads nothing. */
 export function createSessions(host: SessionHost, store: () => Store = getStore, accounts: () => AccountGroup[] | null = () => null, pulls: () => Pick<TaskHost, "remote" | "view"> | null = () => null) {
@@ -390,7 +171,10 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     // `ms`: a program that ends within its first seconds did not really run
     notifyState?.(id, { kind, name: nameOf(r), ...detail, ms: Date.now() - r.startedAt, told });
   };
-  const patchRec = (id: string, p: Partial<SessionRec>) => set({ list: state.list.map((s) => (s.id === id ? { ...s, ...p } : s)) });
+  const patchRec = (id: string, p: Partial<SessionRec>) => {
+    if (p.error) recordError("session", p.error);
+    set({ list: state.list.map((s) => (s.id === id ? { ...s, ...p } : s)) });
+  };
   let titles = readTitles();
   const saveTitles = (next: Record<string, string>) => {
     titles = next;

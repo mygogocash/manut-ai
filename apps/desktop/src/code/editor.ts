@@ -6,6 +6,7 @@
 // that one, never the app's global one.
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { t } from "../i18n";
+import { changes } from "../lib/changes";
 
 export interface EditorInfo {
   id: string;
@@ -37,7 +38,7 @@ export function readEditorPref(): string {
   return v !== null && (EDITOR_IDS as readonly string[]).includes(v) ? v : "auto";
 }
 
-const listeners = new Set<() => void>();
+const listeners = changes();
 export function setEditorPref(id: string): void {
   try {
     if (id === "auto") localStorage.removeItem(KEY);
@@ -45,13 +46,12 @@ export function setEditorPref(id: string): void {
   } catch {
     /* no storage */
   }
-  listeners.forEach((l) => l());
+  listeners.emit();
 }
 export function useEditorPref(): string {
   return useSyncExternalStore(
     (l) => {
-      listeners.add(l);
-      return () => listeners.delete(l);
+      return listeners.subscribe(l);
     },
     readEditorPref,
     readEditorPref,

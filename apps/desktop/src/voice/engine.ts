@@ -6,6 +6,7 @@
 // `window.__manutVoice` and lets a test say words and finish speaking; without it the box offers no voice there.
 import { isMacPlatform } from "../lib/power";
 import { chunks, type HearStatus, type Route, type Spoken } from "./voice";
+import { inTauri } from "../lib/tauri";
 
 /** What the page hears from one recognition. Neither callback comes after `cancel`. */
 export interface HearCallbacks {
@@ -45,7 +46,6 @@ export interface Mouth {
   cancel(): void;
 }
 
-const inTauri = () => typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 type MockGlobals = { __manutVoiceMock?: boolean; __manutVoice?: VoiceMock };
 const mockOn = () => typeof window !== "undefined" && !!(window as unknown as MockGlobals).__manutVoiceMock;
 

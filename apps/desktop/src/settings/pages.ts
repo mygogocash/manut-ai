@@ -41,6 +41,9 @@ export const HOOD_PAGES: Page[] = [
   { id: "workflows", label: "set.workflows", icon: "nodes" },
   // Practice or Connected, and signing in to the API (DeveloperPage.tsx)
   { id: "developer", label: "set.developer", icon: "code" },
+  // one action gathers what is wrong, shows it, and hands it to the person's own coding agent or drafts an issue; nothing is
+  // sent without an ask (item 105, report/ReportPage.tsx)
+  { id: "report", label: "set.report", icon: "flag" },
 ];
 
 /** Every App page, the everyday ones first: the order the palette lists them in. */

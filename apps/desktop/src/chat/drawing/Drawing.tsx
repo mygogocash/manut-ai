@@ -13,8 +13,8 @@ import { BOX_DEFAULT, DRAWING_SANDBOX, FAR_AWAY_PX, boxHeight, innerDoc, outerDo
 import { prepareDrawing } from "./sanitize";
 import { claimLive, releaseLive, useLive } from "./live";
 import "./drawing.css";
+import { prefersReducedMotion } from "../../lib/reducedMotion";
 
-const reducedMotion = () => typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 /** The nearest box that scrolls the card: the chat's timeline. "Far out of view" is measured against it. */
 function scrollParent(el: HTMLElement): HTMLElement | null {
@@ -83,7 +83,7 @@ function Frame({ doc, title, ratio, fill }: { doc: string; title: string; ratio:
 export function DrawingCard({ code, by }: { code: string; by: string }) {
   const id = useId();
   const title = t("dw.title", { name: by });
-  const prepared = useMemo(() => prepareDrawing(code, { reduceMotion: reducedMotion() }), [code]);
+  const prepared = useMemo(() => prepareDrawing(code, { reduceMotion: prefersReducedMotion() }), [code]);
   const doc = useMemo(() => (prepared.ok ? outerDoc(innerDoc(prepared.parts), title) : null), [prepared, title]);
   const live = useLive(id);
   const [larger, setLarger] = useState(false);

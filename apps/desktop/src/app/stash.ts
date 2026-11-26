@@ -17,6 +17,7 @@ import type { OutFile } from "../state/store";
 import { blobType, bytesOf } from "../sessions/attach";
 import { getHost } from "../sessions/host";
 import { getDraft, setDraft } from "./drafts";
+import { changes } from "../lib/changes";
 
 export const STASH_KEY = "manut.drafts.new";
 /** The list holds this many; a sixth lets the oldest go, with an Undo. */
@@ -106,7 +107,7 @@ let list: Stashed[] = parseStash(storage()?.getItem(STASH_KEY) ?? null);
 let dropped: Stashed | null = null;
 let dropTimer: ReturnType<typeof setTimeout> | null = null;
 let snap: { list: readonly Stashed[]; dropped: Stashed | null } = { list, dropped };
-const listeners = new Set<() => void>();
+const listeners = changes();
 
 function set(next: Stashed[], gone: Stashed | null = dropped): void {
   list = next;
@@ -117,7 +118,7 @@ function set(next: Stashed[], gone: Stashed | null = dropped): void {
   } catch {
     /* no storage, or full: the list holds for this run */
   }
-  for (const l of [...listeners]) l();
+  listeners.emitSnapshot();
 }
 
 export const stashed = (): readonly Stashed[] => list;
@@ -126,8 +127,7 @@ export const stashed = (): readonly Stashed[] => list;
 export function useStash(): { list: readonly Stashed[]; dropped: Stashed | null } {
   return useSyncExternalStore(
     (l) => {
-      listeners.add(l);
-      return () => void listeners.delete(l);
+      return listeners.subscribe(l);
     },
     () => snap,
     () => snap,

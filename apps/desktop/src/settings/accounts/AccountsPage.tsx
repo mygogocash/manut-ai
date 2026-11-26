@@ -32,8 +32,8 @@ import { t, tx } from "../../i18n";
 import { holdImeEnter } from "../../lib/ime";
 import { GithubAccounts } from "./GithubAccounts";
 import { outsideUseOn, setOutsideUse } from "../../usage/outside";
+import { errText } from "../../lib/errText";
 
-const errText = (e: unknown) => (typeof e === "object" && e && "message" in e ? String((e as { message: unknown }).message) : String(e));
 const NOTE_MS = 8000;
 
 /** `embedded`: a part of Settings › Providers (item 74) rather than a page of its own. */

@@ -4,13 +4,14 @@
 // it off is dropped, so turning it off stops showing them at once.
 import { useSyncExternalStore } from "react";
 import { suggestOn } from "../lib/suggest";
+import { changes } from "../lib/changes";
 
 const book = new Map<string, string>();
-const listeners = new Set<() => void>();
+const listeners = changes();
 let version = 0;
 const changed = () => {
   version++;
-  listeners.forEach((l) => l());
+  listeners.emit();
 };
 
 /** The longest suggestion kept. */
@@ -34,8 +35,7 @@ export function clearSuggestion(key: string): void {
 export const suggestionFor = (key: string): string | null => (suggestOn() ? (book.get(key) ?? null) : null);
 
 const subscribe = (l: () => void) => {
-  listeners.add(l);
-  return () => void listeners.delete(l);
+  return listeners.subscribe(l);
 };
 /** The suggestion for chat `key`, kept current. */
 export function useSuggestion(key: string): string | null {

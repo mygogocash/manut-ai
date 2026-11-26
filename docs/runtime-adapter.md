@@ -1009,6 +1009,14 @@ The `csrf` token is only for company-console writes, which this runtime never ma
   session then ends on its own.
 - A new sign-in first ends the session the keychain held, including another origin's (on that origin's own API), so
   replacing the one keychain item never leaves a live session behind.
+- Delete account (item 124; `src/settings/DeleteAccount.tsx`): Settings › General, the page the "You" row opens, has an
+  Account group whose row opens the page. `ApiSession.deleteAccount` sends `POST /v1/account/deletion` with exactly
+  `{ owned: [{ shop, name }] }` (docs/pilot-api.md, "Deleting your own account"), as an ask's answer is sent: once, and
+  again only after a 401. Once the API says it is done, the session and its shop sessions are forgotten here without
+  calling the API back (it ended them all), the saved runtime becomes Practice for the next start, and the page offers a
+  restart rather than making one. A runtime that answers `signed_out` lists no shops, so the account row stops naming
+  them. `signIn` also takes Apple's authorization code and sends it with the identity token, so the API can keep the
+  token a deletion revokes; the pasted sign-in below has none, and the real Sign in with Apple must pass it.
 
 ### The smallest honest path, and what it cannot do yet
 

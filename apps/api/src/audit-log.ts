@@ -78,6 +78,9 @@ export const AUDIT_ACTIONS = [
   "helper.joined",
   "helper.session_opened",
   "helper.removed",
+  // A helper deleted their own account from the app (account-deletion.ts): they leave the shop as a removal would, and the
+  // log says it was their doing. Names the helper by their id.
+  "helper.left",
   "away.set",
   "away.cleared",
   "request.passed_on",

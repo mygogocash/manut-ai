@@ -10,6 +10,7 @@
 // own skills as a link, and installing skills from someone else's link (Settings › MCP and Skills). A skill tells a coding agent
 // what to do, so sharing pages does not turn it on: while it is off no bundle is read, published or fetched.
 import { useSyncExternalStore } from "react";
+import { changes } from "./changes";
 
 export interface ArtifactSettings {
   /** Allow publishing public artifact links. */
@@ -41,7 +42,7 @@ export function parseArtifactSettings(text: string | null): ArtifactSettings {
   }
 }
 
-const listeners = new Set<() => void>();
+const listeners = changes();
 let cache: { text: string | null; value: ArtifactSettings } | null = null;
 
 export function artifactSettings(): ArtifactSettings {
@@ -56,14 +57,13 @@ export function setArtifactSettings(patch: Partial<ArtifactSettings>): void {
   } catch {
     /* no storage: the switch stays as it was */
   }
-  listeners.forEach((l) => l());
+  listeners.emit();
 }
 
 export function useArtifactSettings(): ArtifactSettings {
   return useSyncExternalStore(
     (l) => {
-      listeners.add(l);
-      return () => listeners.delete(l);
+      return listeners.subscribe(l);
     },
     artifactSettings,
     artifactSettings,

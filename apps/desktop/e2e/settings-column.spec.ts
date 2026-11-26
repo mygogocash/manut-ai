@@ -47,7 +47,7 @@ test("the everyday pages come first; the developer pages wait under one entry, w
   await hood.click();
   await expect(hood).toHaveAttribute("aria-expanded", "true");
   await expect(page.getByTestId("settings-hood-list").locator("button")).toHaveText([
-    "Terminal", "Providers", "Computer", "Worktrees", "Source control", "Artifacts", "MCP and Skills", "Workflows", "Developer",
+    "Terminal", "Providers", "Computer", "Worktrees", "Source control", "Artifacts", "MCP and Skills", "Workflows", "Developer", "Report a problem",
   ]);
   await motionDone(page);
   // turned half a turn: the matrix of rotate(180deg), read to two places

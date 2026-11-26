@@ -11,6 +11,7 @@ import { Avatar } from "../ui";
 import { t } from "../i18n";
 import { DOCK_MAX } from "./dockState";
 import { revealBotTop } from "./revealBot";
+import { prefersReducedMotion } from "../lib/reducedMotion";
 
 /** Tiles per row for `n` tiles: rows filled edge to edge, never one tile alone under a full row (4 = 2x2). */
 export function dockCols(n: number): number {
@@ -27,7 +28,6 @@ export function dockSpan(i: number, n: number): number {
 
 export const DOCK_FADE_MS = 150;
 
-const reduced = () => typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 /** Under 700px of window height the dock keeps one row. */
 function useShortWindow(): boolean {
@@ -57,7 +57,7 @@ export function Dock({ above }: { above: string[] }) {
       setLeaving(false);
       return;
     }
-    if (reduced()) {
+    if (prefersReducedMotion()) {
       setKept([]);
       return;
     }

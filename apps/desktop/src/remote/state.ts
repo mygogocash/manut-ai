@@ -12,6 +12,7 @@ import { getStore } from "../state/store";
 import { fromStore, storeActions } from "./fromStore";
 import { healthProbe, pageSocket, shellKeyring } from "./fromShell";
 import { RemoteMac, type RemoteMacDeps, type RemoteSnapshot } from "./host";
+import { changes } from "../lib/changes";
 
 export const REMOTE_KEY = "manut.remote";
 /** The version of the consent sheet's words. Raise it whenever their promise changes. */
@@ -53,7 +54,7 @@ export function consentCovers(choice: RemoteChoice, version = CONSENT_VERSION): 
 
 let remote: RemoteMac | null = null;
 let snapshot: RemoteSnapshot | null = null;
-const listeners = new Set<() => void>();
+const listeners = changes();
 
 /** The app's RemoteMac, made the first time it is asked for. Making it opens nothing. */
 export function remoteMac(deps?: RemoteMacDeps): RemoteMac {
@@ -87,7 +88,7 @@ export function remoteMac(deps?: RemoteMacDeps): RemoteMac {
   snapshot = made.snapshot();
   made.subscribe((next) => {
     snapshot = next;
-    for (const listener of listeners) listener();
+    listeners.emit();
   });
   return made;
 }
@@ -126,8 +127,7 @@ export function resumeRemote(): void {
 }
 
 function subscribe(listener: () => void): () => void {
-  listeners.add(listener);
-  return () => listeners.delete(listener);
+  return listeners.subscribe(listener);
 }
 
 /** The Settings page's view, kept the same object until something changes. */

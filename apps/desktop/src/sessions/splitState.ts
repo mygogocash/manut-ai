@@ -9,6 +9,7 @@
 // when the session list says so (SplitView prunes), and a split left with one pane ends.
 import { useSyncExternalStore } from "react";
 import { equalize, MAX_PANES, neighbor, panesOf, parseLayout, removePane, setRatioAt, splitLayout, stepPane, swapPanes, type FocusDir, type Layout, type PaneKey } from "../terminal/layout";
+import { changes } from "../lib/changes";
 
 export interface SplitGroup {
   layout: Layout;
@@ -140,7 +141,7 @@ function read(): SplitGroup[] {
 }
 
 let state: SplitState = { groups: read() };
-const listeners = new Set<() => void>();
+const listeners = changes();
 
 export function setSplit(patch: Partial<SplitState>): void {
   const before = state.groups;
@@ -155,12 +156,11 @@ export function setSplit(patch: Partial<SplitState>): void {
       /* no storage */
     }
   }
-  for (const fn of listeners) fn();
+  listeners.emit();
 }
 
 const subscribe = (fn: () => void) => {
-  listeners.add(fn);
-  return () => void listeners.delete(fn);
+  return listeners.subscribe(fn);
 };
 export const getSplit = (): SplitState => state;
 export const useSplit = (): SplitState => useSyncExternalStore(subscribe, getSplit, getSplit);

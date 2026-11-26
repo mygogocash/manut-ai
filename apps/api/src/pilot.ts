@@ -1003,6 +1003,104 @@ async function wipeShop(env: PilotEnv, record: PilotDeletionRecord): Promise<{ r
   return { response: json(summary), record: completed };
 }
 
+/// What an owner's own deletion of one of their shops came to (account-deletion.ts): done, with what the wipe removed; or
+/// stopped, with the reason (`wipe_incomplete` and the step that stopped it, or a record that could not be read or
+/// written). Sending the same request again finishes a stopped one.
+export type OwnerShopDeletion =
+  | { ok: true; summary: Record<string, unknown> }
+  | { ok: false; error: string; failed?: unknown };
+
+async function wiped(env: PilotEnv, record: PilotDeletionRecord): Promise<OwnerShopDeletion> {
+  const { response } = await wipeShop(env, record);
+  const body = (await response.json().catch(() => null)) as Record<string, unknown> | null;
+  if (response.ok && body) return { ok: true, summary: body };
+  return { ok: false, error: typeof body?.error === "string" ? body.error : "wipe_incomplete", failed: body?.failed };
+}
+
+/// The owner deletes their own shop, signed in, as part of deleting their account (item 124; docs/pilot-api.md, "Deleting
+/// your own account"). It runs through the very deletion record and wipe the operator's request and the owner's link use:
+/// one owner confirmation is opened (or the one already open is answered), and decided in AuthObject by approval-core's
+/// rules as `owner`, naming the linked account by its id, before anything is wiped; then the tenant deletion runs and the
+/// record is completed. The person's own signed-in session and the shop's name typed in the app are the owner's yes
+/// (account-deletion.ts checks both before this runs), so no link is minted and none is needed. The shop's log gets
+/// `deletion.requested` and `deletion.decided` as for the link, and they go with the shop; the record outlives it, with
+/// `askedBy`, the account's id.
+///
+/// A deletion already approved, by the link or by an earlier try of this one, is finished without opening another. A shop
+/// whose own record a stopped wipe already removed is finished as the operator's same request finishes it. A shop that is
+/// gone already is done.
+export async function ownerDeletesShop(env: PilotEnv, tenant: string, accountId: string): Promise<OwnerShopDeletion> {
+  const stored = await readDeletionState(env, tenant);
+  if (!stored) return { ok: false, error: "audit_unavailable" };
+  const shop = await shopRecord(env, tenant).catch(() => undefined);
+  if (shop === undefined) return { ok: false, error: "shop_unavailable" };
+  if (!shop) {
+    const started = unfinishedDeletion(stored);
+    if (!started) return { ok: true, summary: {} };
+    const listed = await isRegistered(env, tenant);
+    if (listed === null) return { ok: false, error: "shops_unavailable" };
+    return listed ? wiped(env, started) : { ok: true, summary: {} };
+  }
+  if (stored.deletion && approvedDeletion(stored.confirmation) &&
+      stored.deletion.confirmationId === stored.confirmation?.request.id) {
+    return wiped(env, stored.deletion);
+  }
+  const goes = await liveGoes(env, tenant).catch(() => null);
+  if (!goes) return { ok: false, error: "shop_unavailable" };
+  const detail: DeletionDetail = { tenant, shopName: shop.name, goes };
+  const opening = await authCall(env, "/pilot-deletions/open", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-admin": "1" },
+    body: JSON.stringify({ tenant, name: shop.name, deletedBy: null, askedBy: accountId, detail }),
+  });
+  if (!opening.ok) return { ok: false, error: "audit_unavailable" };
+  const opened = (await opening.json()) as OpenedConfirmation;
+  if (opened.outcome === "approved") return wiped(env, opened.deletion);
+  const actor: AuditActor = { kind: "owner", id: accountId };
+  const confirmationId = opened.confirmation.request.id;
+  if (opened.outcome === "opened") {
+    await appendAudit(env, tenant, { actor, action: "deletion.requested", subject: { confirmationId }, outcome: "ok" });
+  }
+  const deciding = await authCall(env, "/pilot-deletions/decide", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-admin": "1" },
+    body: JSON.stringify({ tenant, id: confirmationId, approve: true, role: "owner", decidedBy: accountId }),
+  });
+  if (!deciding.ok) return { ok: false, error: "decision_unavailable" };
+  const decided = (await deciding.json()) as DecidedConfirmation;
+  // Another answer may have settled it a moment before: a yes is finished, anything else deletes nothing.
+  if (!decided.result.ok && !(decided.result.refused === "already_decided" && approvedDeletion(decided.confirmation))) {
+    return { ok: false, error: "decision_refused" };
+  }
+  if (decided.result.ok) {
+    await appendAudit(env, tenant, { actor, action: "deletion.decided", subject: { confirmationId }, outcome: "approved" });
+  }
+  const record = decided.deletion ?? opened.deletion;
+  return wiped(env, record);
+}
+
+/// A shop the person began to make themselves and never finished (shops-store.ts, `personMakes`), deleted with their
+/// account: it is on no list and has no customers, so, as for a shop that never went live, its deletion is recorded and
+/// run at once, with `askedBy` the person's account. One whose object holds no shop is done: taking its make off the
+/// journal is AuthObject's (account-store.ts). One that is listed by now is an owned shop like any other, and is left to
+/// that list.
+export async function deleteUnfinishedMake(env: PilotEnv, tenant: string, askedBy: string): Promise<OwnerShopDeletion> {
+  const shop = await shopRecord(env, tenant).catch(() => undefined);
+  if (shop === undefined) return { ok: false, error: "shop_unavailable" };
+  const stored = await readDeletionState(env, tenant);
+  if (!stored) return { ok: false, error: "audit_unavailable" };
+  const started = unfinishedDeletion(stored);
+  if (!shop && !started) return { ok: true, summary: {} };
+  const listed = await isRegistered(env, tenant);
+  if (listed === null) return { ok: false, error: "shops_unavailable" };
+  if (started) return listed || shop ? wiped(env, started) : { ok: true, summary: {} };
+  if (listed || !shop) return { ok: true, summary: {} };
+  const record: PilotDeletionRecord = { tenant, name: shop.name, requestedAt: new Date().toISOString(), deletedBy: null,
+    askedBy };
+  if (!(await writeDeletion(env, record)).ok) return { ok: false, error: "audit_unavailable" };
+  return wiped(env, record);
+}
+
 /// A pilot shop is a tenant of its own (`pilot:<uuid>`), so every existing
 /// per-tenant boundary (vault, task ownership, consent, export, deletion)
 /// applies to it unchanged. No session can ever carry such a tenant: session

@@ -2646,8 +2646,10 @@ keeps three reads there ("What a person's own sign-in reaches", below), and the 
   A part it cannot read answers 500 `export_incomplete` naming it, as the operator's does; an object it cannot reach at
   all, 503 `export_unavailable`. It is not written to the audit log, as no export is. The desktop read it as its task list
   every minute until 24 Nov 2026; it reads the task list, the schedules and the attention items instead (below).
-- **Deletion stays with the owner's link.** `DELETE /v1/tenant/data` answers a shop session 401, as before. To delete a
-  live shop's data, the operator asks and the owner says yes on the confirmation link ("Export and deletion", above).
+- **Deletion is the owner's link, or their own account's deletion.** `DELETE /v1/tenant/data` answers a shop session 401,
+  as before. To delete a live shop's data, the operator asks and the owner says yes on the confirmation link ("Export and
+  deletion", above), or the owner deletes their own account from the app, signed in, which deletes the shops it owns
+  through the same record and wipe ("Deleting your own account", below).
 - **Who and in what order.** Who is asking comes first (401 `unauthorized`, `unlinked` or `removed`; 503
   `people_unavailable` when the session cannot be checked), then the role (a helper's session: 403 `owner_only`), then
   the method (405 `method_not_allowed`: each of these paths takes `GET` alone but consent, which takes `PUT` too, so a
@@ -2792,7 +2794,99 @@ type OwnerAccountView = { id: string; linkedAt: string; devices: number };   // 
 - **Export and deletion.** The shop's export carries the link in `people.ownerAccount`: `{ id, subject, linkedAt }` or
   `null`, where `subject` is the account's verified Apple subject; never a session's hash. Deleting the shop wipes the
   link and every owner session with the rest of its people, and takes the shop out of every person's index. A person who
-  deletes their own data keeps their links, which are their shops' records, and loses a code they had not used yet.
+  deletes their own data keeps their links, which are their shops' records, and loses a code they had not used yet. A
+  person who deletes their account deletes their shops with it ("Deleting your own account", below).
+
+## Deleting your own account
+
+Item 124, 26 Nov 2026 (`apps/api/src/account-deletion.ts`, `account-store.ts`, `apple-tokens.ts`). The Mac App Store asks
+for it: App Review Guideline 5.1.1(v) says "If your app supports account creation, you must also offer account deletion
+within the app", and Apple's page "Offering account deletion in your app" says to "Offer to delete the entire account
+record, along with associated personal data", that "Deleting an account removes the account from the developer's
+records, along with any data associated with the account that the developer isn't legally required to maintain", and
+that "Apps that support Sign in with Apple should use the Sign in with Apple REST API to revoke user tokens" (both read
+on 26 Nov 2026). The app's page is Settings › General › Delete account (`docs/app-store/2.0.0.md`).
+
+**`POST /v1/account/deletion`** with the person's own signed-in session (Apple's or a code's by email) and exactly
+`{ owned: [{ shop, name }] }`.
+
+| Status | Body | When |
+| --- | --- | --- |
+| 200 | `{ deleted: true, shops: [{ id, name }], left: [{ id, name }], apple? }` | Done: `shops` were deleted with the account, `left` are the shops the person no longer helps at. `apple` only for an account made with Sign in with Apple: `revoked`, `retrying` (Apple did not answer yes; the deletion is done and Apple is asked again, below), `no_token` (no Apple token was kept for the account, so we could not end it; the person can in their Apple Account's settings), or `gave_up` |
+| 401 | `{ error: "unauthorized" }` | No signed-in session: none, the operator key, a shop session (`mos1.`, `mhs1.`), a session already ended. Before the method and the body |
+| 405 | `{ error: "method_not_allowed" }` | Anything but `POST`, after the session |
+| 400 | `{ error: "invalid_request" }` | The body is not exactly `{ owned }` with each entry exactly `{ shop, name }`: an account, a role, a tenant or anything else is refused, not dropped |
+| 409 | `{ error: "owned_changed", owned: [{ id, name }] }` | `owned` is not exactly the shops the account owns now; `owned` in the answer is the list as it is. Nothing is deleted |
+| 409 | `{ error: "name_mismatch", shop }` | A name is not the shop's (outer spaces and how an accent was typed do not count, as for the operator's `confirmName`). Nothing is deleted |
+| 409 | `{ error: "deletion_running" }` | Another request for the same account is running (a lease of 5 minutes). Nothing more is done |
+| 503 | `{ error: "account_unavailable" }`, `{ error: "audit_unavailable" }` | The person's shops, or the record of the deletion, could not be read or written. Nothing is deleted |
+| 500 | `{ error: "deletion_incomplete", step, failed }` | It stopped part way: `step` is `shops`, `helping` or `account`, `failed` what stopped it. The record is kept, and the same request finishes the same deletion |
+| 429, 503 | `rate_limited`, `rate_limit_unavailable` | Every try counts against `TENANT_DELETE_LIMITER` (10 a minute per source address, any method), with `DELETE /v1/tenant/data`, before the session is read |
+
+- **Only the person, only their account.** The session decides whose account it is and nothing in the body names one;
+  each shop's own people record decides what the person is there, as `GET /v1/shops` reads it. A shop session and the
+  operator key are not a sign-in. No link is involved, so a link someone else holds can never delete an account.
+- **A second explicit step.** The app asks twice (the page that says what goes, then the shop's name typed for an owner or
+  a red Delete for a helper), and the API checks the first of those itself: `owned` must name every shop the account owns,
+  each by its exact name. So nothing is deleted that the person was not shown by name, and a shop the operator linked to
+  the account meanwhile is never deleted unseen (`owned_changed`). A helper, who owns nothing, sends `{ owned: [] }`.
+  Apple allows this: "You may add steps to verify the identity of the person making the request, and to confirm that they
+  want to delete the account", but "apps that make it unnecessarily difficult for someone to delete their account will
+  not pass review", so no email link is added: the person's own signed-in session is the confirmation an email link would
+  give, and a link would add a step the owner's own app does not need.
+- **For an owner: their account and their shop's data.** Each shop they own is deleted through the very record and wipe the
+  operator's request and the owner's link use ("Export and deletion", above): one owner confirmation opened (or the one
+  already waiting answered) and decided in AuthObject by approval-core as `owner`, `decidedBy` the linked account's id,
+  before anything is wiped; then the tenant deletion, and the record completed. The shop's deletion record has
+  `deletedBy: null` and `askedBy`, the account's id; the shop's log gets `deletion.requested` and `deletion.decided`
+  (`approved`) by the owner's account, which go with the shop, as the link's do. So the shop's messages, replies, both
+  kinds of payment, the LINE connection, its people and every helper session, its memory, routines, vault, Google
+  connection (revoked at Google first) and audit log all go, and it leaves the console's list last. A shop they began to
+  make and never finished goes too.
+- **For a helper: their account and their place in the shop, nothing of the shop's.** They leave each shop they help at as
+  the owner's removal would (`POST /people/leave` on the shop's object): every helper session of theirs ends, their
+  invites and cover go and their decisions are refused from then on. The log says `helper.left`, the helper by their id as
+  the actor. The shop keeps everything else, including the name the owner gave them and what they did, which are the
+  owner's records.
+- **Then their own sign-in.** Their index of shops, the shops they made, their waiting link code, every make of theirs still
+  on the journal, and their own tenant's data with every session on every device, as `DELETE /v1/tenant/data` runs it
+  (`tenantDelete`). The sessions go last of all.
+- **The record** (AuthObject, `account-deletion:<SHA-256 of the subject>`): the account by that hash, never its Apple id;
+  `kind` (`apple` or `email`); `requestedAt`; `owned` (`{ shop, name, account }`) and `helping` (`{ shop, name, helper }`);
+  `makes`; `finishedAt`; and `apple`. It is written before anything is deleted, and a request that cannot write it
+  deletes nothing. It outlives the account, as a shop's deletion record outlives the shop.
+- **A stop part way.** The steps run in a fixed order (the shops, the unfinished makes, the places as a helper, the index
+  and the Apple token, the person's own data and sessions), and each answers again after its own work: a shop already
+  deleted is done, a helper already gone is done. A stop answers 500 `deletion_incomplete` and gives the lease back; the
+  person's session still works, and the same request, naming the same shops (the ones already deleted are still accepted,
+  from the record), finishes the same deletion, keeping when it was first asked for. Only a stop in the very last step,
+  after the sessions ended, cannot be sent again from that session; signing in again and asking again finishes it.
+- **Sign in with Apple.** Apple's REST API needs a token Apple gave us: "In order to revoke authorization for a user, you
+  must obtain a valid refresh token or access token. If you don't have either token for the user, you can generate tokens
+  when validating an authorization code" (Token revocation). Until this item the sign-in kept none: `POST
+  /v1/auth/exchange` verified the identity token and stored nothing of Apple's. From now on the exchange takes an
+  optional `authorizationCode` (Apple's code from the same sign-in; anything that is not one is 400 `invalid_request`),
+  exchanges it at `https://appleid.apple.com/auth/token` (`grant_type=authorization_code`, no `redirect_uri`, which
+  Apple asks for only "if the application provided a `redirect_uri` in the initial authorization request") for a refresh
+  token, checks that Apple's id token names the same person, and keeps it sealed under the vault's key
+  (`apple-grant:<hash>`). The sign-in stands whatever Apple says; nothing of Apple's answer is logged. Each call is signed
+  with a client secret made for it: an ES256 JWT, `kid` the key's id, `iss` the Team ID, `aud` `https://appleid.apple.com`,
+  `sub` the client id, good for five minutes (Apple allows up to six months). On deletion the token moves to a pending
+  revoke in the same write that forgets the person's index, and is sent once to `https://appleid.apple.com/auth/revoke`
+  (`token_type_hint=refresh_token`), which "returns a `200` response code without a response body after the server
+  invalidates the `token` value, or if the `token` value was previously invalidated". Anything else never stops the
+  deletion: the record says `retrying`, and AuthObject's alarm tries again after 1 minute, 5, 30, 2 hours, 6, 12, 24 and 24
+  (nine tries over about three days); on Apple's 200 the token is forgotten and the record says `revoked`, and after the
+  last try it is forgotten unrevoked and the record says `gave_up`. An account signed in before this, or by a sign-in that
+  sent no code, has no token: Apple's technote TN3194 says "If you don't have the user's refresh token, access token, or
+  authorization code, you must still fulfill the user's account deletion request", and to "Direct the user to manually
+  revoke access", which the app's line does.
+- **Settings it needs.** `APPLE_CLIENT_ID` (as today), `APPLE_TEAM_ID` and `APPLE_KEY_ID` (vars, 10 characters each), the
+  secret `APPLE_PRIVATE_KEY` (the Sign in with Apple key's `.p8` text), and `CRED_KEY`. Without them no token is asked for
+  or kept, and a deletion answers `no_token`. The tests stand Apple in at `TEST_APPLE_ORIGIN` with a made-up
+  `TEST_APPLE_PRIVATE_KEY`, both honoured only on a test Worker, as the other `TEST_` vars are.
+- **Must be deployed to production before the App Store build is released.** The desktop's Delete account calls this route;
+  against a Worker without it every press would fail. Deploying is the owner's.
 
 ## The web app's session
 

@@ -19,6 +19,7 @@ import { findTermLinks, isLinkId } from "./termLink";
 import { pickTitle } from "./titles";
 import { termLinkState } from "../chat/parts/TermLinkChip";
 import { t } from "../i18n";
+import { inTauri } from "../lib/tauri";
 
 /** What the shell writes for one session (term_share.rs `Status`). */
 export interface ShareStatus {
@@ -63,7 +64,6 @@ export interface ShareHost {
   take(links: string[]): Promise<ShareRequest[]>;
 }
 
-const inTauri = () => typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
 class TauriShare implements ShareHost {
   private async invoke<T>(cmd: string, args: Record<string, unknown>): Promise<T> {

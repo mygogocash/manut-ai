@@ -1,0 +1,106 @@
+/* Settings › Report a problem (ReportPage.tsx). The rows are Settings' own (.st-grp, .st-row, .st-btn); this sheet holds only
+   the report's block, the agent and folder pickers and the question before an issue is drafted, which is a decision and so the
+   page's one card (it fades in where it stands, as an ask does: docs/motion.md, Arrive with no distance). */
+
+.rp .rp-lead {
+  margin: 0 10px 4px;
+  font-size: 13px;
+  color: var(--aui-muted);
+}
+/* the report: a read-only block that scrolls, so a long one never pushes the actions away */
+.rp .rp-text {
+  margin: 0 10px;
+  padding: 12px;
+  max-height: 280px;
+  overflow: auto;
+  border-radius: var(--rad);
+  background: var(--aui-subtle);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.rp .rp-text:focus-visible,
+.rp .st-btn:focus-visible {
+  outline: 2px solid var(--aui-border-strong);
+  outline-offset: 1px;
+}
+.rp .rp-acts {
+  margin-top: 12px;
+}
+.rp .st-row {
+  flex-wrap: wrap;
+}
+.rp .st-v {
+  max-width: 100%;
+}
+.rp .rp-pick {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+}
+/* the three controls of the agent row share one 34px line */
+.rp .rp-pick .st-btn,
+.rp .rp-agent {
+  min-height: 34px;
+  height: 34px;
+  gap: 6px;
+}
+/* a small action in a band's header, as the Code page's bands carry theirs: the quiet underlined link */
+.rp .rp-link {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--aui-muted);
+  text-decoration: underline;
+}
+.rp .rp-link:hover {
+  color: var(--ink);
+}
+.rp .rp-link:focus-visible {
+  outline: 2px solid var(--aui-border-strong);
+  outline-offset: 1px;
+}
+/* the folder reads as a button but is a path: it shortens with an ellipsis in the room it has */
+.rp .rp-pick .st-btn[data-testid="report-folder"] {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rp .st-btn.dark {
+  border-color: var(--aui-primary);
+  background: var(--aui-primary);
+  color: var(--aui-on-primary);
+}
+.rp .st-btn.dark:hover:not(:disabled) {
+  background: var(--aui-primary);
+  opacity: 0.88;
+}
+.rp .rp-ask {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 8px 10px 0;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--rad-xl);
+  background: var(--aui-surface);
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.5;
+  --rise-by: 0px;
+  animation: var(--anim-arrive);
+}
+.rp .rp-ask p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.rp .rp-ask-btns {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
