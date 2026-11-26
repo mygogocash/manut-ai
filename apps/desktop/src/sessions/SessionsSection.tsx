@@ -1288,7 +1288,7 @@ function SessionMenu({ at, name, actions, onPick, onDismiss, editor }: { at: { x
 }
 
 /** The row menu's size, to keep it inside the window: 168 wide, 26 per row plus its padding and separator. */
-const MENU_W_PX = 168;
+const MENU_W_PX = 208;
 const menuHeight = (rows: number) => rows * 26 + 14;
 
 /** The name field of a row being renamed: Enter or leaving it saves, Esc cancels, an empty name goes back to the
@@ -1385,6 +1385,13 @@ const TermRow = memo(function TermRow({ rec, agents, unseen, active, ticking, on
   countRender(`row:${rec.id}`);
   const [editing, setEditing] = useState(false);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  // why the last Open in <editor> failed, said in the row's quiet second line for a few seconds (the row has no chat to say it under)
+  const [why, setWhy] = useState("");
+  useEffect(() => {
+    if (!why) return;
+    const id = window.setTimeout(() => setWhy(""), 8000);
+    return () => window.clearTimeout(id);
+  }, [why]);
   const wrap = useRef<HTMLDivElement>(null);
   const live = rec.status === "running" || rec.status === "starting";
   const { act, now } = useTermFace(rec.id, rec.startedAt, ticking);
@@ -1412,7 +1419,10 @@ const TermRow = memo(function TermRow({ rec, agents, unseen, active, ticking, on
     else if (a === "retitle") void sx.rewriteTitle(rec.id);
     else if (a === "reveal") void sx.revealFolder(rec.id);
     else if (a === "terminal") void sx.openTerminal(rec.id);
-    else if (a === "editor") void sx.openInEditor(rec.id);
+    else if (a === "editor") {
+      setWhy("");
+      void sx.openInEditor(rec.id).then((w) => w && setWhy(w));
+    }
     else if (a === "link") void sx.copyLink(rec.id);
     else if (a === "here") sx.startTerminal(rec.agent, rec.cwd, rec.shell);
     else if (a === "close") onClose(rec);
@@ -1459,25 +1469,33 @@ const TermRow = memo(function TermRow({ rec, agents, unseen, active, ticking, on
       </span>
       {/* line 2, muted: the CLI, then what it last printed (else the title it set) */}
       <span className="tr-sub" data-testid="term-meta" title={activity.line || undefined}>
-        <span className="tr-cli">{activity.cli}</span>
-        {movedTo && (
+        {why ? (
+          <span className="tr-line" role="alert" data-testid="term-editor-why">
+            {why}
+          </span>
+        ) : (
           <>
-            <span className="tr-dot" aria-hidden="true">
-              ·
-            </span>
-            <span className="tr-cwd" data-testid="term-cwd" title={movedTo}>
-              {folderName(movedTo)}
-            </span>
-          </>
-        )}
-        {activity.line && (
-          <>
-            <span className="tr-dot" aria-hidden="true">
-              ·
-            </span>
-            <span className="tr-line" data-testid="term-line">
-              {activity.line}
-            </span>
+            <span className="tr-cli">{activity.cli}</span>
+            {movedTo && (
+              <>
+                <span className="tr-dot" aria-hidden="true">
+                  ·
+                </span>
+                <span className="tr-cwd" data-testid="term-cwd" title={movedTo}>
+                  {folderName(movedTo)}
+                </span>
+              </>
+            )}
+            {activity.line && (
+              <>
+                <span className="tr-dot" aria-hidden="true">
+                  ·
+                </span>
+                <span className="tr-line" data-testid="term-line">
+                  {activity.line}
+                </span>
+              </>
+            )}
           </>
         )}
       </span>

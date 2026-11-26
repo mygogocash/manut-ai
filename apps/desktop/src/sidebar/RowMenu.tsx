@@ -42,8 +42,8 @@ const ACTION: Partial<Record<RowChoice, RowAction>> = {
   restore: { do: "restore" },
 };
 
-/** The menu's size, to keep it inside the window: 168 wide, 26 per row plus its padding. */
-const W = 168;
+/** The menu's size, to keep it inside the window: 168 wide, or the widest word (an editor's name) up to about 208, 26 per row plus its padding. */
+const W = 208;
 const height = (rows: number) => rows * 26 + 14;
 
 /** Where a menu of `rows` rows opens for a pointer or a button at (`x`, `y`): inside the window. */

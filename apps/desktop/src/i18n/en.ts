@@ -1248,7 +1248,7 @@ export const en = {
   "editor.openProject": "Open the project in {name}",
   "editor.openSession": "Open this session's folder in {name}",
   "editor.title": "Editor",
-  "editor.hint": "Where Open in editor opens a folder. Automatic uses the first one found on this computer, in this order: Visual Studio Code, Cursor, Windsurf, Zed, Xcode (Mac only).",
+  "editor.hint": "Which editor Open in uses. Automatic takes the first one found on this computer, in this order: Visual Studio Code, Cursor, Windsurf, Zed, Xcode (Mac only).",
   "editor.auto": "Automatic",
   "editor.none": "No editor was found on this computer, so Open in editor is not offered. Visual Studio Code, Cursor, Windsurf, Zed and Xcode (Mac only) are looked for.",
   "editor.gone": "{name} was not found on this computer, so the first editor found is used.",

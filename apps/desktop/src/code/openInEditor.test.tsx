@@ -98,7 +98,8 @@ describe("the folder each action opens", () => {
     const { ss, g, opened } = setup();
     g.__manutEditorFails = "the folder is not there";
     ss.restore([{ id: "p", agent: "claude", cwd: DEV, startedAt: 1, view: "chat", running: false, exitCode: 0 }]);
-    await ss.openInEditor("p");
+    // returned too, for a row that has no chat to say it under
+    expect(await ss.openInEditor("p")).toBe("The folder is not there any more, so it was not opened.");
     expect(opened()).toHaveLength(1);
     expect(ss.getState().notes.p).toBe("The folder is not there any more, so it was not opened.");
   });
@@ -163,7 +164,7 @@ describe("Settings › Developer › Editor", () => {
     expect(html).toMatch(/<option value="vscode"[^>]*>Visual Studio Code<\/option>/);
     expect(html).toMatch(/<option value="cursor"[^>]*>Cursor<\/option>/);
     expect(html).not.toContain('value="zed"');
-    expect(words(html)).toContain("Automatic uses the first one found on this computer, in this order: Visual Studio Code, Cursor, Windsurf, Zed, Xcode (Mac only).");
+    expect(words(html)).toContain("Automatic takes the first one found on this computer, in this order: Visual Studio Code, Cursor, Windsurf, Zed, Xcode (Mac only).");
     // no field to type a command into
     expect(html).not.toContain("<input");
     expect(html).toMatch(/<option value="auto" selected/);

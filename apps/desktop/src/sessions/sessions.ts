@@ -1465,14 +1465,18 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
   };
 
   /** Open session `id`'s folder in the person's editor, through the host this store was built with. A lane's own folder when it has
-   *  one (`workDir`), else the session's; a failure is said under its chat in the app's own words (code/editor.ts). */
-  const openInEditor = async (id: string) => {
+   *  one (`workDir`), else the session's; a failure is said under its chat in the app's own words (code/editor.ts) and
+   *  returned, for a row that has no chat to say it under. */
+  const openInEditor = async (id: string): Promise<string | null> => {
     const r = rec(id);
-    if (!r?.cwd) return;
+    if (!r?.cwd) return null;
     try {
       await openFolderInEditor(host, workDir(r));
+      return null;
     } catch (e) {
-      note(id, errText(e));
+      const why = errText(e);
+      note(id, why);
+      return why;
     }
   };
 
