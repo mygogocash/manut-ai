@@ -4,6 +4,7 @@ import { mockPtyOut, nextMockPty } from "./fg";
 import mockAcpAgents from "./mockAcpAgents.json";
 import { MockTurnFiles, type MockTurnGlobals, type TurnFilesHost } from "./turnFiles";
 import { botRefusal, mockCheck, mockNewId, type CustomEntry, type CustomList, type CustomPreview, type CustomWhy } from "./custom";
+import { withMine, type RegistryList } from "../settings/agents/acpRegistry";
 import type { AskTool } from "../lib/protocol";
 import { t } from "../i18n";
 import { steersOf } from "./controls";
@@ -49,6 +50,7 @@ export interface MockCall {
     | "custom.botPreview"
     | "custom.confirm"
     | "custom.remove"
+    | "registry.preview"
     | "power.busy"
     | "lane.worktree"
     | "lane.remove"
@@ -521,8 +523,12 @@ export class MockHost implements SessionHost, BuddyHost {
   }
   async customPreview(label: string, program: string, args: string, install: string): Promise<CustomPreview> {
     this.log({ op: "custom.preview", name: label, path: program, data: args });
+    return this.customCard(label, program, args.split(/\s+/).filter(Boolean), install);
+  }
+  /** The card the shell's `draft` makes: the checked entry, an id free in the file, the command as found now. */
+  private customCard(label: string, program: string, args: string[], install: string): CustomPreview {
     const taken = (this.g.__manutCustomFile ?? []).map((v) => (v && typeof v === "object" ? String((v as { id?: unknown }).id ?? "") : "")).filter(Boolean);
-    const entry: CustomEntry = { id: mockNewId(label.trim(), program.trim(), taken), label: label.trim(), program: program.trim(), args: args.split(/\s+/).filter(Boolean), install: install.trim() };
+    const entry: CustomEntry = { id: mockNewId(label.trim(), program.trim(), taken), label: label.trim(), program: program.trim(), args, install: install.trim() };
     const why = mockCheck(entry, (p) => Object.values(this.programs()).includes(p));
     if (why) throw new Error(`why:${why}`);
     if (taken.length >= 32) throw new Error("why:many");
@@ -547,6 +553,25 @@ export class MockHost implements SessionHost, BuddyHost {
   async customRemove(id: string) {
     this.log({ op: "custom.remove", agent: id });
     this.g.__manutCustomFile = (this.g.__manutCustomFile ?? []).filter((v) => (v as { id?: unknown })?.id !== id);
+  }
+  // ---- the ACP registry (item 101c): the shell's list for an Apple silicon Mac (acp_registry.rs, held equal by its
+  // test), beside the mock's file; loaded only here, so the app's own bundle does not carry it ----------------------
+  async acpRegistry(): Promise<RegistryList> {
+    const list = (await import("../settings/agents/mockAcpRegistry.json")).default as RegistryList;
+    return withMine(list, this.loadCustom().agents);
+  }
+  /** acp_registry.rs `preview_in`: only an offered entry has a card, drafted as a bot's draft is. Writes nothing. */
+  async acpRegistryPreview(id: string): Promise<CustomPreview> {
+    this.log({ op: "registry.preview", agent: id });
+    const list = await this.acpRegistry();
+    const o = list.agents.find((a) => a.id === id);
+    if (!o) throw new Error("why:registry");
+    if (o.state !== "offered") throw new Error(o.state === "there" ? "why:builtin" : o.state === "yours" ? "why:dup" : o.state === "refused" ? `why:${o.note}` : "why:registry");
+    const why = botRefusal(o.program);
+    if (why) throw new Error(`why:${why}`);
+    const card = this.customCard(o.label, o.program, o.args, o.install);
+    const { name, version, via, install, archive, sha256, website, repository, license } = o;
+    return { ...card, registry: { id, name, version, via, install, archive, sha256, website, repository, license, tag: list.pin.tag } };
   }
   private disk: { level: DiskLevel; alerts: number; rev: number; heard: Set<(s: DiskState) => void> } = { level: "ok", alerts: 0, rev: 0, heard: new Set() };
   /** The shell's rules (src-tauri/src/disk.rs) on `__manutDiskFree` bytes (unset: 100 GB free): the event only when

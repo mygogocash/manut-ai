@@ -4,6 +4,7 @@
 import { ab } from "./en/ab";
 import { acc } from "./en/acc";
 import { acct } from "./en/acct";
+import { acpreg } from "./en/acpreg";
 import { act } from "./en/act";
 import { ag } from "./en/ag";
 import { art } from "./en/art";
@@ -119,6 +120,7 @@ import { shops } from "./en/shops";
 import { side } from "./en/side";
 import { skills } from "./en/skills";
 import { skl } from "./en/skl";
+import { snap } from "./en/snap";
 import { sounds } from "./en/sounds";
 import { split } from "./en/split";
 import { sq } from "./en/sq";
@@ -161,6 +163,7 @@ export const en = {
   ...ab,
   ...acc,
   ...acct,
+  ...acpreg,
   ...act,
   ...ag,
   ...art,
@@ -276,6 +279,7 @@ export const en = {
   ...side,
   ...skills,
   ...skl,
+  ...snap,
   ...sounds,
   ...split,
   ...sq,

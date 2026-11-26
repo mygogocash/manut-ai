@@ -5,6 +5,7 @@ import { getSessions } from "./sessions/sessions";
 import { bootResume } from "./app/resumeBoot";
 import { startTermLinks } from "./sessions/termLinkOpen";
 import { startTermShare } from "./sessions/termShare";
+import { startSnapshots } from "./computer/snapshot";
 import { resolveTheme } from "./app/theme";
 import { readTheme } from "./state/store";
 import { learnThisHost } from "./terminal/host";
@@ -27,6 +28,8 @@ bootResume();
 startTermLinks();
 // the status files bots holding a terminal link read, and the requests they leave (shown as cards, typed only on Allow)
 startTermShare();
+// a snapshot of any app (item 104): what the key the person set took opens in a new chat's box, never sent from here
+startSnapshots();
 // "Reach this Mac from your phone" comes back on only for a person who turned it on after its consent sheet; for everyone
 // else this reads one saved choice and does nothing (src/remote/state.ts).
 void import("./remote/state").then((m) => m.resumeRemote());

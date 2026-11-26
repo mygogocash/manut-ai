@@ -3,6 +3,7 @@ import type { Key } from "./index";
 import { ab } from "./ko/ab";
 import { acc } from "./ko/acc";
 import { acct } from "./ko/acct";
+import { acpreg } from "./ko/acpreg";
 import { act } from "./ko/act";
 import { ag } from "./ko/ag";
 import { art } from "./ko/art";
@@ -118,6 +119,7 @@ import { shops } from "./ko/shops";
 import { side } from "./ko/side";
 import { skills } from "./ko/skills";
 import { skl } from "./ko/skl";
+import { snap } from "./ko/snap";
 import { sounds } from "./ko/sounds";
 import { split } from "./ko/split";
 import { sq } from "./ko/sq";
@@ -160,6 +162,7 @@ export const ko: Record<Key, string> = {
   ...ab,
   ...acc,
   ...acct,
+  ...acpreg,
   ...act,
   ...ag,
   ...art,
@@ -275,6 +278,7 @@ export const ko: Record<Key, string> = {
   ...side,
   ...skills,
   ...skl,
+  ...snap,
   ...sounds,
   ...split,
   ...sq,

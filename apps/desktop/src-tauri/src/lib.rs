@@ -3,6 +3,7 @@ mod acp_agents;
 mod api_link;
 mod acp_chat;
 mod acp_mcp;
+mod acp_registry;
 mod agent_chat;
 mod agent_config;
 mod app_menu;
@@ -383,6 +384,22 @@ async fn custom_agent_bot_preview(label: String, program: String, args: Vec<Stri
     tauri::async_runtime::spawn_blocking(move || custom_agents::bot_preview_here(&label, &program, &args, &install).map_err(|w| format!("why:{}", w.code())))
         .await
         .map_err(|e| e.to_string())?
+}
+
+/// Settings › Providers › From the ACP registry (item 101c): the pinned registry's agents, each offered, already there,
+/// the person's own, or not offered with its reason. Reads the compiled-in copy and manut's own agents file; fetches
+/// nothing.
+#[tauri::command]
+async fn acp_registry_list() -> Result<acp_registry::RegistryList, String> {
+    tauri::async_runtime::spawn_blocking(acp_registry::list_here).await.map_err(|e| e.to_string())
+}
+
+/// The confirm card for registry entry `id`: drafted as a bot's draft is (the custom-agent checks, no shell, interpreter
+/// or built-in program) with the exact command and where it comes from. Writes nothing; only the card's Add
+/// (`custom_agent_confirm`) does. A refusal is `why:<code>`.
+#[tauri::command]
+async fn acp_registry_preview(id: String) -> Result<acp_registry::RegistryPreview, String> {
+    tauri::async_runtime::spawn_blocking(move || acp_registry::preview_here(&id)).await.map_err(|e| e.to_string())?
 }
 
 /// The remove confirm: agent `id` leaves manut's own file (a broken entry too).
@@ -1717,6 +1734,19 @@ pub fn run() {
     // refused there (Guideline 2.4.5(vii), app_store.rs). Its page asks nothing either (src/sidebar/updater.ts).
     #[cfg(not(app_store))]
     let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    // A snapshot of any app (computer/snap.rs, item 104): the plugin is there, and registers nothing until the person
+    // turns the key on in Settings › Computer. Its one handler reads the app in front when the key goes down. The page is
+    // given none of its commands (capabilities/default.json), so only the shell registers a key.
+    #[cfg(target_os = "macos")]
+    let builder = builder.plugin(
+        tauri_plugin_global_shortcut::Builder::new()
+            .with_handler(|app, _keys, event| {
+                if event.state == tauri_plugin_global_shortcut::ShortcutState::Pressed {
+                    computer::snap::pressed(app);
+                }
+            })
+            .build(),
+    );
     let app = builder
         // The process plugin does the restart that follows an update.
         .plugin(tauri_plugin_process::init())
@@ -1789,6 +1819,15 @@ pub fn run() {
                     eprintln!("Manut AI: no computer use: {e}");
                 }
             }
+            // the snapshot's key (computer/snap.rs): off until the person turns it on, and registered only then. On the
+            // Mac app alone: elsewhere, and in the App Store edition, whose sandbox refuses accessibility, Settings says
+            // it is not here and nothing is ever registered.
+            #[cfg(target_os = "macos")]
+            let keys: Box<dyn computer::snap::Hotkeys> =
+                if app_store::APP_STORE { Box::new(computer::snap::Nowhere) } else { Box::new(computer::snap::Plugin(app.handle().clone())) };
+            #[cfg(not(target_os = "macos"))]
+            let keys: Box<dyn computer::snap::Hotkeys> = Box::new(computer::snap::Nowhere);
+            app.manage(computer::snap::Snap::start(user_home().ok(), keys, cfg!(target_os = "macos") && !app_store::APP_STORE));
             app.manage(Shell {
                 logins: accounts::Logins::new(),
                 sessions: Sessions::new(),
@@ -1868,6 +1907,8 @@ fn commands(invoke: tauri::ipc::Invoke) -> bool {
         custom_agent_bot_preview,
         custom_agent_confirm,
         custom_agent_remove,
+        acp_registry_list,
+        acp_registry_preview,
         session_start,
         shell_start,
         shells_available,
@@ -2007,6 +2048,8 @@ fn commands(invoke: tauri::ipc::Invoke) -> bool {
         voice::voice_stop,
         computer::computer_status,
         computer::computer_open,
+        computer::snap::snapshot_settings,
+        computer::snap::snapshot_set,
         tailscale::tailscale_state
     ];
     answer(invoke)

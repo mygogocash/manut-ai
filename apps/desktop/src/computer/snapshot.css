@@ -1,0 +1,41 @@
+/* the line a press of the snapshot's key leaves when nothing was read (SnapshotNotice.tsx): at the window's foot, over
+   whatever shows, until it is closed */
+.snap-notice {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  z-index: 61;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: min(520px, calc(100vw - 32px));
+  padding: 8px 8px 8px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-bubble);
+  background: var(--pop);
+  color: var(--ink);
+  box-shadow: var(--pop-shadow);
+  font-size: 13px;
+  line-height: 1.4;
+  --rise-by: 0px;
+  animation: var(--anim-arrive);
+}
+.snap-notice-t {
+  flex: 1;
+  min-width: 0;
+}
+.snap-notice .st-btn {
+  flex: none;
+}
+.snap-notice .ui-ib {
+  flex: none;
+}
+
+/* Settings › Computer: the box that records the snapshot's keys */
+.snap-keys {
+  width: 9em;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+}

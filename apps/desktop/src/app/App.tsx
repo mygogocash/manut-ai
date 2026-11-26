@@ -14,6 +14,7 @@ import { DetailsFallback } from "./DetailsFallback";
 import { PanelResizer } from "./PanelResizer";
 import { TermMenu } from "../sessions/term/TermMenu";
 import { CloseToasts } from "../sessions/CloseToasts";
+import { SnapshotNotice } from "../computer/SnapshotNotice";
 import { Palette } from "../palette/Palette";
 import { SettingsView } from "./SettingsView";
 import { AutomationsPage } from "../pages/Automations";
@@ -155,6 +156,8 @@ export function App() {
       {/* The undo toasts of a closed terminal belong to the app, not to the Code page's list: ⌘W closes the terminal in
           view, and the list is not drawn then. */}
       <CloseToasts />
+      {/* a press of the snapshot's key that read nothing says why, over whatever is showing (item 104) */}
+      <SnapshotNotice />
       {/* ⌘K and the menu's Search open it over whatever is showing */}
       <Palette />
       {/* Bring over's offer, over whatever is showing: once on a first launch, then from History */}
