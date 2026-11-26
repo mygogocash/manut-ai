@@ -8,7 +8,7 @@
 // Usage:
 //   node .github/scripts/e2e-timings.mjs <run id> [--repo <owner/name>]
 //       The lead: downloads that CI run's shard reports with `gh` and rewrites apps/desktop/e2e/timings.json. Commit the
-//       change when the shards have drifted apart (see what it prints, and `node .github/scripts/e2e-shards.mjs --total 8`).
+//       change when the shards have drifted apart (see what it prints, and `node .github/scripts/e2e-shards.mjs --total 9`).
 //   node .github/scripts/e2e-timings.mjs --reports <dir> --out <file>
 //       CI's all-shards job: the same file, written for the run's `e2e-timings` artifact. Nothing is committed from CI.
 // Both take --dir <spec folder> (default apps/desktop/e2e) and --base <timings file> (default timings.json in it).

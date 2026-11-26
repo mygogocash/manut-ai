@@ -27,7 +27,7 @@ model by the work, as the owner asked on 25 Nov 2026: think with the strongest m
 
 When an item is large, the lead settles the design first and hands a lighter model the plan, rather than a strong model
 the whole thing. The Mac was the limit while every item's gate ran on it, one at a time; since item 126 CI checks each
-helper's push on GitHub, several at once (one full run is 17 jobs, and the organisation's free plan runs 20 at a
+helper's push on GitHub, several at once (one full run is 18 jobs, and the organisation's free plan runs 20 at a
 time), so the lead's own review is the queue. Helpers still share the Mac for their own tests: keep heavy local runs to
 one or two at once.
 

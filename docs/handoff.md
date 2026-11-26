@@ -757,9 +757,9 @@ Every switch that turns a built part on, and what each needs from the owner, is 
   green with `finish-item.sh --ci`, which refuses any commit but the one CI passed (`ci-wait.sh <branch>` prints each
   job). `gate.sh` on this Mac is for when CI is down, and it does not run the browser specs. A run on `pilot/week-1` or
   `main` is never cancelled by the next push: one runs, the newest waits, and a run already waiting is replaced. The
-  desktop's browser specs run as eight shards balanced by each spec file's measured time
+  desktop's browser specs run as nine shards balanced by each spec file's measured time
   (`apps/desktop/e2e/timings.json`); when the shards drift apart, refresh it from a green run with
-  `node .github/scripts/e2e-timings.mjs <run id>` and commit it. One full run is 17 jobs at its widest, and the
+  `node .github/scripts/e2e-timings.mjs <run id>` and commit it. One full run is 18 jobs at its widest, and the
   organisation's free plan runs 20 at once (5 on macOS), so a second full run at the same moment waits a few minutes
   for places.
 - GitHub: `git push` works as it is. For `gh`, prefix commands with

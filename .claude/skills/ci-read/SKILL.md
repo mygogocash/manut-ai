@@ -17,7 +17,7 @@ What to know when reading it:
   branch, start CI by hand (Actions, CI, Run workflow).
 - **On `pilot/week-1` and `main` a push never cancels the run in progress** (since item 126, 26 Nov 2026): one runs, the
   newest waits, and a run already waiting is replaced by a newer one. On any other branch a newer push cancels it.
-- **A failing desktop browser spec fails the run** (since item 126). The eight shards are balanced by each spec file's
+- **A failing desktop browser spec fails the run** (since item 126). The nine shards are balanced by each spec file's
   measured time; "Desktop Playwright (all shards)" adds them up, names a test that passed only on its retry as flaky,
   and fails when any shard failed or left no report.
 - **A helper's branch has CI too**: `.claude/skills/lead-merge/scripts/ci-wait.sh <branch>` waits for the run of its

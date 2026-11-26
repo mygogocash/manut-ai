@@ -14,10 +14,10 @@
 # push is measured from the newest commit CI passed on main or a pilot branch that its history holds.
 #
 # How many runs fit at once: GitHub's Free plan runs 20 jobs at a time for the whole organisation, 5 of them on macOS
-# (GitHub's "Actions limits", job concurrency for standard hosted runners). A full run is 17 jobs at its widest, once
-# What changed is done: nine checks (one of them on macOS) and eight Playwright shards. So one full run fits, and a
-# second full run started at the same moment begins with 3 places and takes the rest as the first run's short jobs end,
-# a few minutes later. Most pushes are not full runs: a docs push is three jobs, and a push to the desktop app twelve.
+# (GitHub's "Actions limits", job concurrency for standard hosted runners). A full run is 18 jobs at its widest, once
+# What changed is done: nine checks (one of them on macOS) and nine Playwright shards. So one full run fits, and a
+# second full run started at the same moment begins with 2 places and takes the rest as the first run's short jobs end,
+# a few minutes later. Most pushes are not full runs: a docs push is three jobs, and a push to the desktop app thirteen.
 name: CI
 
 on:
@@ -280,13 +280,14 @@ jobs:
         run: cargo test --locked
 
   e2e:
-    # The desktop's Playwright suite (apps/desktop/e2e, about 210 spec files) as eight shards side by side. Each shard
+    # The desktop's Playwright suite (apps/desktop/e2e, about 210 spec files) as nine shards side by side. Each shard
     # runs one worker against one mock bridge (apps/desktop/playwright.config.ts), so the suite's time is split, not
     # shared. Playwright's own --shard splits by test count, and a few files are far longer than the rest: on 26 Nov
     # 2026 its six shards took from 6 to 17 minutes. So each shard runs whole spec files chosen by their measured time
     # (.github/scripts/e2e-shards.mjs, reading apps/desktop/e2e/timings.json), and the shards end within a minute of
     # each other. One file, panel-max.spec.ts, takes nearly eight minutes alone, and no shard can be shorter than it:
-    # eight is the fewest shards for which it is the longest. A failing test fails its shard and the run.
+    # nine shards bring the others to about its time (7m 45s alone and 7m 47s for the longest of the rest, by the
+    # timings of 26 Nov 2026), and a tenth would shorten nothing. A failing test fails its shard and the run.
     name: Desktop Playwright (shard ${{ matrix.shard }} of ${{ strategy.job-total }})
     needs: changes
     if: needs.changes.outputs.e2e == 'true'
@@ -298,7 +299,7 @@ jobs:
       # split takes the matrix's own size.
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -373,10 +374,10 @@ jobs:
           pattern: playwright-results-*
           path: ${{ runner.temp }}/playwright-results
           merge-multiple: true
-      # --strict fails the job on a failed test, an error outside the tests, an unreadable report, or fewer than eight
+      # --strict fails the job on a failed test, an error outside the tests, an unreadable report, or fewer than nine
       # shards' reports. A flaky test (one that passed on its retry) is counted and named but does not fail it.
       - name: Write the counts of all shards to the job summary
-        run: node .github/scripts/playwright-summary.mjs --title "Desktop Playwright, all shards" --shards 8 --strict "$RUNNER_TEMP/playwright-results"
+        run: node .github/scripts/playwright-summary.mjs --title "Desktop Playwright, all shards" --shards 9 --strict "$RUNNER_TEMP/playwright-results"
       # A shard can fail outside its tests (its install, a step before the suite) and still have left a report, so the
       # shards' own result is checked too.
       - name: Check every shard passed
