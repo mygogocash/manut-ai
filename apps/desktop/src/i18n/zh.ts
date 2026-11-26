@@ -42,6 +42,7 @@ import { failed } from "./zh/failed";
 import { fb } from "./zh/fb";
 import { find } from "./zh/find";
 import { gate } from "./zh/gate";
+import { gathered } from "./zh/gathered";
 import { google } from "./zh/google";
 import { graph } from "./zh/graph";
 import { harness } from "./zh/harness";
@@ -204,6 +205,7 @@ export const zh: Record<Key, string> = {
   ...fb,
   ...find,
   ...gate,
+  ...gathered,
   ...google,
   ...graph,
   ...harness,

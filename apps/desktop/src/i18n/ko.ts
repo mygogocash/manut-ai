@@ -42,6 +42,7 @@ import { failed } from "./ko/failed";
 import { fb } from "./ko/fb";
 import { find } from "./ko/find";
 import { gate } from "./ko/gate";
+import { gathered } from "./ko/gathered";
 import { google } from "./ko/google";
 import { graph } from "./ko/graph";
 import { harness } from "./ko/harness";
@@ -204,6 +205,7 @@ export const ko: Record<Key, string> = {
   ...fb,
   ...find,
   ...gate,
+  ...gathered,
   ...google,
   ...graph,
   ...harness,
