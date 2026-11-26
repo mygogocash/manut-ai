@@ -435,6 +435,19 @@ the screens are built on tested ground.
   a chat with no lane; the lead's instructions when the switch is on. Tests: `helperBlocks.test.ts`, the card's
   component, the switch's absence where it does not belong. Safety tests: a block with an unknown key (`mode`, `approve`)
   is refused whole; an unanswered, declined or refused card starts no agent; a third round shows no card.
+  **Built 27 Nov 2026** (`src/jobs/helperBlocks.ts`, `helperPolicy.ts`, `helperAsks.ts`, `leadLanes.ts`, `HelpersCard.tsx`,
+  `HelpersSwitch.tsx`, their tests, and `e2e/helper-blocks.spec.ts`; `docs/decisions/102e-helper-blocks.md`). Nothing starts
+  a helper lane yet: Start helpers settles the card once through approval-core, records the round with 102d's `openRound` and
+  calls the sessions store's `whenHelperRoundApproved` listeners, where 102h will start them; the card then says none
+  started. What changed from the design or was settled on the way: both `manut-helpers` and `helpers` open a block, which
+  holds one helper or a list; one block that cannot be read, a key outside the five, or a block left open refuses the whole
+  request with a line and no card (GoSpark keeps the readable blocks); the blocks are hidden only in a lead lane's turn that
+  started with Helpers on, and in any other chat are the agent's own words; the lead's note goes in front of each message the
+  person sends while the switch is on, never into the bubble (item 93's way at the agent's start would need a restart for
+  each switch); a card still open is taken back when the lead's next turn starts or Helpers goes off, and is stamped with
+  the turn that asked, so approval-core refuses a late press as superseded; the card checks agents and models only against
+  what this Mac already lists, and says nothing yet of how many run at once (the memory read is 102h's); the card is not in
+  Needs you and does not survive a restart.
 - **102f. A helper lane from the lead's snapshot (shell).** `lane.rs` makes a lane from a snapshot of a lane's folder
   (temporary index, a commit under the app's own refs), named from the lead's branch, with the record naming its job and
   lead. Rust tests against temporary repositories. Safety test: the lead's `git status --porcelain`, its index file's bytes,
