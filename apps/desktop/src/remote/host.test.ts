@@ -100,6 +100,7 @@ describe("Unpair", () => {
     await turnOn(h);
     const { phone } = await pairPhone(h);
     const session = await phone.connect();
+    await session.request({ t: "open", chat: "buddy" });
     expect(await session.request({ t: "allow", chat: "buddy", ask: "req-1", revision: 1 })).toMatchObject({ t: "challenge" });
     expect(h.remote.challenges.size).toBe(1);
     await h.remote.unpair(phone.deviceId!);
@@ -195,6 +196,28 @@ describe("turning the switch off", () => {
     h.clock.advance(60 * 60_000);
     await settle();
     expect(h.relay.urls).toHaveLength(1);
+  });
+});
+
+describe("the revision a phone was shown, across the switch", () => {
+  it("is refused once the ask changed while the switch was off, and kept when it did not", async () => {
+    const h = macHarness();
+    await turnOn(h);
+    const { phone } = await pairPhone(h);
+    let session = await phone.connect();
+    await session.request({ t: "open", chat: "buddy" });
+    h.chats.update("buddy", (items) => [...items, { kind: "approval", id: "req-7", ts: 7, open: true, title: "Post the sale", command: "post --page shop", choices: ["once", "deny"] }]);
+    h.remote.publish();
+    await session.pushed(1);
+    // Off, the ask changes, on again: the phone comes back with what it saw.
+    h.remote.turnOff();
+    h.chats.update("buddy", (items) => items.map((i) => (i.kind === "approval" && i.id === "req-1" ? { ...i, command: "line broadcast --to everyone" } : i)));
+    await turnOn(h);
+    session = await phone.connect();
+    expect(await session.request({ t: "allow", chat: "buddy", ask: "req-1", revision: 1 })).toMatchObject({ t: "refused", reason: "changed" });
+    // The ask that did not change keeps the revision the phone saw.
+    expect(await phone.allow(session, { chat: "buddy", ask: "req-7", revision: 1 })).toMatchObject({ t: "done" });
+    expect(h.chats.done).toEqual([{ action: "allowOnce", chat: "buddy", ask: "req-7", by: phone.deviceId }]);
   });
 });
 

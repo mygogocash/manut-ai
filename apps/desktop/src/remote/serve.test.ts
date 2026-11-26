@@ -40,7 +40,9 @@ const secondApproval: SourceApproval = {
   choices: ["once", "deny"],
 };
 
-async function setup() {
+/** A Mac's server over chats a test controls, with two paired phones. Both have opened "buddy" (so they were shown its
+ *  asks at revision 1), unless `open` is false. */
+async function setup(options: { open?: boolean } = {}) {
   const chats = new FakeChats();
   chats.update("buddy", (items) => [...items, secondApproval]);
   const authenticators = new Map([
@@ -54,23 +56,29 @@ async function setup() {
   let now = 1_800_000_000_000;
   let onSeen: (() => void) | null = null;
   const challenges = new DecisionChallenges();
-  const server = new Server({
-    chats,
-    actions: chats.actions,
-    challenges,
-    phones: {
-      has: (id) => paired.has(id),
-      passkey: (id) => passkeys.get(id),
-      seen: async (id, _at, signCount) => {
-        onSeen?.();
-        const known = passkeys.get(id);
-        if (known && signCount !== undefined) passkeys.set(id, { ...known, signCount });
+  /** A new server over the same chats and phones, as after the app started again. */
+  const start = () =>
+    new Server({
+      chats,
+      actions: chats.actions,
+      challenges,
+      phones: {
+        has: (id) => paired.has(id),
+        passkey: (id) => passkeys.get(id),
+        seen: async (id, _at, signCount) => {
+          onSeen?.();
+          const known = passkeys.get(id);
+          if (known && signCount !== undefined) passkeys.set(id, { ...known, signCount });
+        },
       },
-    },
-    rp: RP,
-    now: () => now,
-    push: (device, message) => pushed.push({ device, message }),
-  });
+      rp: RP,
+      now: () => now,
+      push: (device, message) => pushed.push({ device, message }),
+    });
+  let server = start();
+  if (options.open !== false) {
+    for (const device of [PHONE, OTHER]) await server.handle(device, encode({ t: "open", id: 0, chat: "buddy" }));
+  }
   let id = 0;
   const send = async (device: string, message: Record<string, unknown>) => (await server.handle(device, encode({ ...message, id: ++id })))[0]!;
   /** Both steps of Allow once from `device`; `change` alters the second step before it is sent. */
@@ -136,7 +144,10 @@ async function setup() {
   };
   return {
     chats,
-    server,
+    get server() {
+      return server;
+    },
+    restart: () => (server = start()),
     challenges,
     paired,
     pushed,
@@ -263,6 +274,7 @@ describe("Allow once", () => {
     expect(await s.allow(PHONE, at, { sign: { signCount: 5 } })).toMatchObject({ t: "done" });
     expect(await s.send(PHONE, { t: "reply", chat: "buddy", ask: "req-2", revision: 1, no: true })).toMatchObject({ t: "done" });
     s.chats.update("buddy", (items) => [...items, { ...secondApproval, id: "req-3" }]);
+    s.server.publish();
     expect(await s.allow(PHONE, { chat: "buddy", ask: "req-3", revision: 1 }, { sign: { signCount: 5 } })).toMatchObject({ reason: "counter" });
     expect(s.chats.done.map((d) => d.action)).toEqual(["allowOnce", "decline"]);
   });
@@ -285,6 +297,8 @@ describe("Allow once", () => {
       { ...secondApproval, id: "shut", open: false },
       { ...secondApproval, id: "only-no", choices: ["deny"] },
     ]);
+    // The phones watching hear of the new asks, as the store's change would tell them.
+    s.server.publish();
     expect(await s.send(PHONE, { t: "allow", chat: "buddy", ask: "old", revision: 1 })).toMatchObject({ reason: "needs_update" });
     expect(await s.send(PHONE, { t: "reply", chat: "buddy", ask: "old", revision: 1, no: true })).toMatchObject({ reason: "needs_update" });
     expect(await s.send(PHONE, { t: "allow", chat: "buddy", ask: "shut", revision: 1 })).toMatchObject({ reason: "ask_closed" });
@@ -331,12 +345,14 @@ describe("No and Stop", () => {
 
 describe("Answering a question", () => {
   const q1 = { chat: "buddy", ask: "q-1", revision: 1 };
-  /** An interview with two questions, listed a then b. */
-  const interview = (s: Awaited<ReturnType<typeof setup>>) =>
+  /** An interview with two questions, listed a then b, which the phones watching hear of. */
+  const interview = (s: Awaited<ReturnType<typeof setup>>) => {
     s.chats.update("buddy", (items) => [
       ...items,
       { kind: "clarify", id: "q-2", ts: 1, open: true, question: "Two things", questions: [{ id: "a", question: "First" }, { id: "b", question: "Second" }] },
     ]);
+    s.server.publish();
+  };
 
   it("reaches the store only through a one-use challenge the phone's passkey answered, for a typed answer and a picked choice alike", async () => {
     const s = await setup();
@@ -348,6 +364,7 @@ describe("Answering a question", () => {
     // A picked choice ("Friday" is one) and typed text each need Face ID.
     expect(await s.answer(PHONE, q1, { answer: "Friday" })).toMatchObject({ t: "done" });
     s.chats.update("buddy", (items) => [...items, { kind: "clarify", id: "q-3", ts: 2, open: true, question: "When" }]);
+    s.server.publish();
     expect(await s.answer(PHONE, { ...q1, ask: "q-3" }, { answer: "Sunday at ten, and refund everyone" })).toMatchObject({ t: "done" });
     expect(s.chats.done).toEqual([
       { action: "answer", chat: "buddy", ask: "q-1", by: PHONE, answer: "Friday" },
@@ -426,6 +443,7 @@ describe("Answering a question", () => {
     // Issued for another revision, and for another ask (an Allow's challenge used for an answer).
     const forRevision = await s.send(PHONE, { t: "reply", ...q1, answer: "Friday" });
     s.chats.update("buddy", (items) => items.map((i) => (i.kind === "clarify" && i.id === "q-1" ? { ...i, question: "Which day, really" } : i)));
+    s.server.publish();
     expect(await s.send(PHONE, { t: "reply", ...q1, revision: 2, answer: "Friday", passkey: proof(forRevision.nonce) })).toMatchObject({ reason: "other_revision" });
     const forAllow = await s.send(PHONE, { t: "allow", chat: "buddy", ask: "req-1", revision: 1 });
     expect(await s.send(PHONE, { t: "reply", ...q1, revision: 2, answer: "Friday", passkey: proof(forAllow.nonce) })).toMatchObject({ reason: "other_request" });
@@ -442,9 +460,12 @@ describe("Answering a question", () => {
     const s = await setup();
     const reword = () => s.chats.update("buddy", (items) => items.map((i) => (i.kind === "clarify" && i.id === "q-1" ? { ...i, question: "Which day should we refund" } : i)));
     expect(await s.answer(PHONE, q1, { answer: "Friday" }, { before: reword })).toMatchObject({ reason: "changed" });
+    // The phone is shown the reworded question, revision 2.
+    s.server.publish();
     const close = () => s.chats.update("buddy", (items) => items.map((i) => (i.kind === "clarify" && i.id === "q-1" ? { ...i, open: false, answered: true } : i)));
     expect(await s.answer(PHONE, { ...q1, revision: 2 }, { answer: "Friday" }, { before: close })).toMatchObject({ reason: "ask_closed" });
     s.chats.update("buddy", (items) => [...items, { kind: "clarify", id: "q-4", ts: 3, open: true, question: "When" }]);
+    s.server.publish();
     s.whenSeen(() => s.paired.delete(PHONE));
     expect(await s.answer(PHONE, { ...q1, ask: "q-4" }, { answer: "Friday" })).toMatchObject({ reason: "unknown_device" });
     expect(s.chats.done).toEqual([]);
@@ -456,6 +477,7 @@ describe("Answering a question", () => {
     phone.signCount = 5;
     expect(await s.answer(PHONE, q1, { answer: "Friday" })).toMatchObject({ t: "done" });
     s.chats.update("buddy", (items) => [...items, { kind: "clarify", id: "q-5", ts: 4, open: true, question: "When" }]);
+    s.server.publish();
     phone.signCount = 5;
     expect(await s.answer(PHONE, { ...q1, ask: "q-5" }, { answer: "Friday" })).toMatchObject({ reason: "counter" });
     expect(s.chats.done.map((d) => d.ask)).toEqual(["q-1"]);
@@ -485,5 +507,81 @@ describe("watching a chat", () => {
     s.server.left(OTHER);
     expect(s.server.journal.isOpen("buddy")).toBe(false);
     expect(await s.send(PHONE, { t: "catchup", chat: "buddy", cursor: events[1]!.cursor })).toMatchObject({ t: "chat" });
+  });
+});
+
+describe("the revision a phone was shown", () => {
+  const changeAll = (s: Awaited<ReturnType<typeof setup>>) =>
+    s.chats.update("buddy", (items) =>
+      items.map((i) =>
+        i.kind === "approval" && i.id === "req-1"
+          ? { ...i, command: "line broadcast --to everyone --text 'Free gift'" }
+          : i.kind === "approval" && i.id === "req-2"
+            ? { ...i, title: "Refund every order" }
+            : i.kind === "clarify" && i.id === "q-1"
+              ? { ...i, question: "Which day should we refund everyone" }
+              : i,
+      ),
+    );
+
+  it("still binds after the phone left and came back: an ask that changed while it was away is refused at the revision it saw", async () => {
+    const s = await setup();
+    // Both phones leave (their streams closed), so no one watches; the asks change; the phone comes back and answers
+    // what it was shown before, revision 1.
+    s.server.left(PHONE);
+    s.server.left(OTHER);
+    changeAll(s);
+    expect(await s.send(PHONE, { t: "allow", chat: "buddy", ask: "req-1", revision: 1 })).toMatchObject({ t: "refused", reason: "changed" });
+    expect(await s.send(PHONE, { t: "reply", chat: "buddy", ask: "req-2", revision: 1, no: true })).toMatchObject({ t: "refused", reason: "changed" });
+    expect(await s.send(PHONE, { t: "reply", chat: "buddy", ask: "q-1", revision: 1, answer: "Friday" })).toMatchObject({ t: "refused", reason: "changed" });
+    // Opened again, it is shown revision 2, and that is what it can answer.
+    const opened = await s.send(PHONE, { t: "open", chat: "buddy" });
+    expect((opened.view as { asks: { id: string; revision: number }[] }).asks.find((a) => a.id === "req-1")?.revision).toBe(2);
+    expect(await s.allow(PHONE, { chat: "buddy", ask: "req-1", revision: 2 })).toMatchObject({ t: "done" });
+    expect(s.chats.done).toEqual([{ action: "allowOnce", chat: "buddy", ask: "req-1", by: PHONE }]);
+  });
+
+  it("still binds when the phone left between the challenge and its answer, and the ask changed meanwhile", async () => {
+    const s = await setup();
+    const away = () => {
+      s.server.left(PHONE);
+      s.server.left(OTHER);
+      changeAll(s);
+    };
+    expect(await s.allow(PHONE, { chat: "buddy", ask: "req-1", revision: 1 }, { before: away })).toMatchObject({ reason: "changed" });
+    const t = await setup();
+    const awayToo = () => {
+      t.server.left(PHONE);
+      t.server.left(OTHER);
+      changeAll(t);
+    };
+    expect(await t.answer(PHONE, { chat: "buddy", ask: "q-1", revision: 1 }, { answer: "Friday" }, { before: awayToo })).toMatchObject({ reason: "changed" });
+    expect([...s.chats.done, ...t.chats.done]).toEqual([]);
+  });
+
+  it("is refused for a revision this Mac never showed the phone: a chat it never opened, or a Mac started again", async () => {
+    const s = await setup({ open: false });
+    expect(await s.send(PHONE, { t: "allow", chat: "buddy", ask: "req-1", revision: 1 })).toMatchObject({ reason: "changed" });
+    expect(await s.send(PHONE, { t: "reply", chat: "buddy", ask: "q-1", revision: 1, answer: "Friday" })).toMatchObject({ reason: "changed" });
+    await s.send(PHONE, { t: "open", chat: "buddy" });
+    expect(await s.send(PHONE, { t: "allow", chat: "buddy", ask: "req-1", revision: 1 })).toMatchObject({ t: "challenge" });
+    // The other phone never opened the chat: what this one was shown counts for this one only.
+    expect(await s.send(OTHER, { t: "allow", chat: "buddy", ask: "req-1", revision: 1 })).toMatchObject({ reason: "changed" });
+    // The Mac starts again (a new server, as after a relaunch), and the ask changed meanwhile: the phone's revision 1 is
+    // not the new server's revision 1.
+    const r = await setup();
+    changeAll(r);
+    r.restart();
+    expect(await r.send(PHONE, { t: "allow", chat: "buddy", ask: "req-1", revision: 1 })).toMatchObject({ reason: "changed" });
+    expect(await r.send(PHONE, { t: "reply", chat: "buddy", ask: "q-1", revision: 1, answer: "Friday" })).toMatchObject({ reason: "changed" });
+    expect([...s.chats.done, ...r.chats.done]).toEqual([]);
+  });
+
+  it("is kept when nothing changed: a phone that left and came back answers the revision it saw", async () => {
+    const s = await setup();
+    s.server.left(PHONE);
+    s.server.left(OTHER);
+    expect(await s.allow(PHONE, { chat: "buddy", ask: "req-1", revision: 1 })).toMatchObject({ t: "done" });
+    expect(await s.answer(PHONE, { chat: "buddy", ask: "q-1", revision: 1 }, { answer: "Friday" })).toMatchObject({ t: "done" });
   });
 });

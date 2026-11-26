@@ -25,6 +25,7 @@ import {
 import { type Keyring, type PairedPhone, RemoteVault } from "./keys";
 import { type LinkState, type RelayProbe, type SocketFactory, type Timers, RelayLink, relaySocketUrl } from "./link";
 import { PairingDoor, type PairingView } from "./pairing";
+import { Projector } from "./project";
 import { type ChatSources, type MacActions, Server } from "./serve";
 
 export interface RemoteMacDeps {
@@ -92,6 +93,9 @@ export class RemoteMac {
   #pairing: PairingDoor | null = null;
   #server: Server | null = null;
   #challenges = new DecisionChallenges();
+  /** Each ask's revision and what each phone was shown, for this app's life: kept across the switch going off and on,
+   *  so a phone's revision binds across a reconnect (project.ts). */
+  readonly #projector = new Projector();
   #on = false;
   #linkState: LinkState | "no_origin" | "no_keychain" = "stopped";
   #pairingView: PairingView = { phase: "idle" };
@@ -203,6 +207,7 @@ export class RemoteMac {
       rp,
       now: () => this.#deps.now(),
       push: (deviceId, message) => this.#push(deviceId, message),
+      projector: this.#projector,
     });
     this.#pairing = new PairingDoor({
       hostId: identity.hostId,
@@ -296,6 +301,7 @@ export class RemoteMac {
     }
     this.#challenges.revoke(id);
     this.#server?.left(id);
+    this.#projector.forgetDevice(id);
   }
 
   /** The store changed: phones watching a chat hear what moved. */

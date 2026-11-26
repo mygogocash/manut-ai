@@ -138,8 +138,13 @@ needs a QR reader, which the repository does not have: the browser's own is used
   Allow does, so it takes the same one-use challenge, for a typed answer and a picked choice alike. Only No to an
   approval and Stop go without one: they can only hold something back.
 - **Revisions.** The store's approvals carry none, so the Mac counts them for a phone: 1 when an ask is first shown, one
-  more whenever what it shows changes. An Allow or a No on another revision is refused as `changed`, also when the ask
-  changed while the person looked at Face ID.
+  more whenever what it shows changes. An Allow, a No or an answer on another revision is refused as `changed`, also
+  when the ask changed while the person looked at Face ID. Since the third review (26 Nov 2026) a revision is never
+  given twice to one ask while the app runs: it is kept when every phone leaves and across the switch going off and on
+  (one `Projector` for the RemoteMac's life), and an ask that leaves the store and comes back with the same id goes on
+  counting. The Mac also keeps, per phone, the newest revision of each ask it sent that phone, and acts only on that
+  one: a phone answering a chat it never opened, or a Mac started again, is refused as `changed`, and the phone opens
+  the chat again.
 - **What a phone sees** is masked with `lib/secrets.ts`, the command included (the card masks it too), and shown whole.
   An ask the card marks as needing an app update, or that the person may only pass on to the shop's owner, offers
   nothing; an approval offers at most Allow once and No.

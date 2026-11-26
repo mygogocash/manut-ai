@@ -95,11 +95,18 @@ export interface ServeDeps {
   /** Sends an unasked message to every channel of a device. */
   push(deviceId: string, message: Record<string, unknown>): void;
   readonly journal?: EventJournal<ChatEvent>;
+  /** The revisions and what each phone was shown, kept by the RemoteMac across this server's life (project.ts). */
+  readonly projector?: Projector;
 }
 
 type Message = Record<string, unknown>;
 
 const MAX_ANSWER_CHARS = 8_000;
+
+/** The asks among some events, for noting what a phone was sent. */
+function asksOf(events: readonly ChatEvent[]): AskView[] {
+  return events.flatMap((event) => (event.k === "ask" ? [event.ask] : []));
+}
 const MAX_ID_CHARS = 1_024;
 const decoder = new TextDecoder("utf-8", { fatal: true });
 
@@ -124,7 +131,7 @@ function cursorOf(value: unknown): Cursor | null {
 
 export class Server {
   readonly #deps: ServeDeps;
-  readonly #projector = new Projector();
+  readonly #projector: Projector;
   readonly #journal: EventJournal<ChatEvent>;
   /** Per chat a phone has open: what it was last sent, and which devices watch it. */
   readonly #watched = new Map<string, { view: ChatView; devices: Set<string> }>();
@@ -137,6 +144,7 @@ export class Server {
   constructor(deps: ServeDeps) {
     this.#deps = deps;
     this.#journal = deps.journal ?? new EventJournal<ChatEvent>();
+    this.#projector = deps.projector ?? new Projector();
   }
 
   get journal(): EventJournal<ChatEvent> {
@@ -186,6 +194,7 @@ export class Server {
     } else {
       this.#watched.set(source.key, { view, devices: new Set([deviceId]) });
     }
+    this.#projector.sent(deviceId, source.key, view.asks);
     return { view, cursor: this.#journal.open(source.key) };
   }
 
@@ -211,6 +220,7 @@ export class Server {
       return [{ t: "chat", id, view, cursor }];
     }
     watched.devices.add(deviceId);
+    this.#projector.sent(deviceId, source.key, asksOf(caught.events.map((e) => e.event)));
     const cursor = this.#journal.cursor(source.key);
     return [{ t: "events", id, chat: source.key, events: caught.events, cursor }];
   }
@@ -237,7 +247,7 @@ export class Server {
       // Step one: a challenge for this device, this ask, the revision it saw and Allow once.
       const found = this.#approval(chat, askId);
       if (typeof found === "string") return refuse(found);
-      if (found.ask.revision !== revision) return refuse("changed");
+      if (found.ask.revision !== revision || !this.#projector.wasShown(deviceId, chat, askId, revision)) return refuse("changed");
       if (!found.ask.offers.includes("once")) return refuse("not_offered");
       try {
         const issued = await this.#deps.challenges.issue({ deviceId, requestId: askBinding(chat, askId), revision, optionId: "once" }, this.#deps.now());
@@ -334,7 +344,7 @@ export class Server {
       if (request.no !== true) return refuse("malformed");
       const found = this.#approval(chat, askId);
       if (typeof found === "string") return refuse(found);
-      if (request.revision !== found.ask.revision) return refuse("changed");
+      if (request.revision !== found.ask.revision || !this.#projector.wasShown(deviceId, chat, askId, found.ask.revision)) return refuse("changed");
       if (!found.ask.offers.includes("deny")) return refuse("not_offered");
       if (!this.#mayAct(deviceId)) return refuse("unknown_device");
       const why = await this.#deps.actions.decline(chat, askId, deviceId);
@@ -344,7 +354,7 @@ export class Server {
     if (!ask.open) return refuse("ask_closed");
     const revision = request.revision;
     if (typeof revision !== "number" || !Number.isSafeInteger(revision) || revision < 1) return refuse("malformed");
-    if (revision !== ask.revision) return refuse("changed");
+    if (revision !== ask.revision || !this.#projector.wasShown(deviceId, chat, askId, revision)) return refuse("changed");
     const read = this.#readAnswer(ask, request);
     if (read === null) return refuse("malformed");
     const optionId = await answerOption(read.bound);
@@ -402,19 +412,24 @@ export class Server {
       const source = this.#deps.chats.get(chat);
       if (!source) continue;
       for (const { event, cursor } of this.#advance(chat, watched, this.#projector.view(source))) {
-        for (const device of watched.devices) this.#deps.push(device, { t: "event", chat, event, cursor });
+        for (const device of watched.devices) {
+          this.#projector.sent(device, chat, asksOf([event]));
+          this.#deps.push(device, { t: "event", chat, event, cursor });
+        }
       }
     }
   }
 
-  /** A device has no channel open any more: it stops watching, and a chat no one watches has its journal closed. */
+  /** A device has no channel open any more: it stops watching, and a chat no one watches has its journal closed. The
+   *  revisions stay (only asks gone from the store let go of what they showed), so a phone that comes back cannot answer
+   *  an ask that changed while it was away at the revision it saw before. */
   left(deviceId: string): void {
     for (const [chat, watched] of this.#watched) {
       watched.devices.delete(deviceId);
       if (watched.devices.size === 0) {
         this.#watched.delete(chat);
         this.#journal.close(chat);
-        this.#projector.forget(chat);
+        this.#projector.retire(chat, this.#deps.chats.get(chat));
       }
     }
   }
