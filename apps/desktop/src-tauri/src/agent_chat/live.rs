@@ -1232,6 +1232,53 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// Item 101d: the settings check of a Grok chat reads the home of the account the chat was given (`GROK_HOME`, from
+    /// `session_env_for`), not only `~/.grok`: an account whose own `config.toml` skips asks does not start although the
+    /// person's own `~/.grok` asks, and an account that asks starts although `~/.grok` says always-approve (as it does on
+    /// the owner's Mac). Added accounts never get a copy of the person's `config.toml`, so that file cannot decide for them.
+    #[cfg(unix)]
+    #[test]
+    fn a_grok_chat_reads_its_accounts_own_home_for_its_asks() {
+        use crate::providers::Stored;
+        let base = std::env::temp_dir().join(format!("manut-101d-grok-acct-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(base.join(".grok")).unwrap();
+        std::fs::create_dir_all(base.join("proj")).unwrap();
+        let home = base.canonicalize().unwrap();
+        let proj = home.join("proj");
+        let (_, acct) = crate::accounts::add(&home, "grok", "work").unwrap();
+        crate::accounts::set_active(&home, "grok", "work").unwrap();
+        let (prog, seen) = recorder(&home, "fake-grok");
+        let mine = Stored { path: prog.to_string_lossy().into_owned(), ..Stored::default() };
+        let c = ChatSessions::default();
+        let start = |account: Option<&str>| {
+            let mut env = crate::accounts::session_env_for(&home, "grok", account);
+            crate::accounts::prepare(&home, "grok", &env);
+            env.push(("HOME".to_string(), home.to_string_lossy().into_owned()));
+            c.start_agent_mine("grok", &proj, None, &env, None, false, &mine, |_| {})
+        };
+        // the person's own home skips asks, the account's does not: the account starts
+        std::fs::write(home.join(".grok/config.toml"), "[ui]\npermission_mode = \"always-approve\"\n").unwrap();
+        std::fs::write(acct.join("config.toml"), "[ui]\npermission_mode = \"ask\"\n").unwrap();
+        assert!(start(Some("work")).is_ok(), "an account that asks is held back by ~/.grok");
+        thread::sleep(Duration::from_millis(300));
+        assert!(seen.exists());
+        let _ = std::fs::remove_file(&seen);
+        // and the person's own home ("This computer") is refused, as before
+        assert_eq!(start(Some("default")).unwrap_err(), crate::acp_chat::no_asks("Grok"));
+        // the account's own file skips asks while ~/.grok asks: the account is refused
+        std::fs::write(home.join(".grok/config.toml"), "[ui]\npermission_mode = \"ask\"\n").unwrap();
+        std::fs::write(acct.join("config.toml"), "[ui]\npermission_mode = \"always-approve\"\n").unwrap();
+        assert_eq!(start(Some("work")).unwrap_err(), crate::acp_chat::no_asks("Grok"));
+        thread::sleep(Duration::from_millis(200));
+        assert!(!seen.exists(), "Grok started in an account whose own settings skip asks");
+        // the account's file is its own: never a link to, nor a copy of, the person's
+        std::fs::remove_file(acct.join("config.toml")).unwrap();
+        assert!(start(Some("work")).is_ok());
+        assert!(std::fs::symlink_metadata(acct.join("config.toml")).is_err(), "the person's config.toml reached the account");
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
     /// The one value of option `flag` in `argv`: present exactly once, as its own argument followed by its value, and never
     /// in the `--flag=value` form, which a second reader could take differently.
     #[cfg(unix)]
