@@ -108,6 +108,7 @@ export const DRAWN = {
   "audio-lines": <><path d="M3 6.5v3M5.5 4.5v7M8 2.5v11M10.5 4.5v7M13 6.5v3" /></>,
   "reply": <><path d="M6 9.5L2.5 6 6 2.5M2.5 6h7a4 4 0 010 8H7.5" /></>,
   "home": <><path d="M2.5 7L8 2.5 13.5 7v5.5a1 1 0 01-1 1h-3v-4h-3v4h-3a1 1 0 01-1-1z" /></>,
+  "pause": <><path d="M6 4v8M10 4v8" /></>,
   "nodes": <><rect x="2" y="6.5" width="3.5" height="3.5" rx="1" /><rect x="10.5" y="2.5" width="3.5" height="3.5" rx="1" /><rect x="10.5" y="10" width="3.5" height="3.5" rx="1" /><path d="M5.5 8.2c3 0 3-4 5-4M5.5 8.2c3 0 3 4 5 4" /></>,
 } satisfies Record<string, ReactNode>;
 

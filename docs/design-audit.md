@@ -75,7 +75,8 @@ The fixes are items 85e to 85i in `docs/plan.md`; the motion is items 85a to 85c
     and the uppercase 10.5px `.st-sh` and `.st-gh` labels, which should be grey bands in sentence case). Measured.
 14. **The side menu is 248px wide** where the board says 196 (`--side-w`). Seen. Fixed in item 85i (26 Nov).
 15. **The command palette's** rows are 32px with no icons, and its groups are in capitals. The board's menu rows are
-    34px with an icon and its word. Seen.
+    34px with an icon and its word. Seen. Fixed in item 85i (26 Nov): 34px rows, each an icon of the set and its word, the
+    groups (Go to, Actions, Chats) on grey bands in sentence case, the field with the magnifier and Esc, as `Search`.
 16. **Needs you** has thin rows, a grey "Approve" tag that looks like a button, and two times. The board has one card a
     decision, a 17px line saying what follows, and Approve on the card. Seen. Rebuilt in item 85g (26 Nov): one card a
     decision, the 17px line, one time and the kind as an amber mark; Approve stays on Home and the chat's card, by the

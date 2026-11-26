@@ -20,6 +20,7 @@ import { usePlaces } from "./places";
 import { keyResult } from "./filter";
 import { buildGroups, flat, type Group } from "./groups";
 import type { PaletteCtx, Row } from "./registry";
+import { Icon } from "../ui/icons";
 
 const LIST_ID = "palette-list";
 const optionId = (i: number) => `palette-opt-${i}`;
@@ -49,6 +50,9 @@ export function PaletteView(p: PaletteViewProps) {
       {...(p.leaving ? { "data-leaving": "", inert: true, "aria-hidden": true } : {})}
     >
       <div className="pal" role="dialog" aria-modal="true" aria-label={t("pal.title")} onKeyDown={p.onKeyDown} data-testid="palette">
+        {/* The canvas's Search board: the magnifier, the field, and Esc to say how it closes. */}
+        <div className="pal-s">
+        <Icon name="search" />
         <input
           ref={p.inputRef}
           className="pal-in"
@@ -65,6 +69,10 @@ export function PaletteView(p: PaletteViewProps) {
           spellCheck={false}
           data-testid="palette-input"
         />
+        <span className="pal-kbd" aria-hidden="true">
+          Esc
+        </span>
+        </div>
         <ul className="pal-list" id={LIST_ID} role="listbox" aria-label={t("pal.title")} data-testid="palette-list">
           {p.groups.map((g) => (
             <li key={g.key} role="presentation" className="pal-g" data-testid={`palette-group-${g.key}`}>
@@ -87,6 +95,7 @@ export function PaletteView(p: PaletteViewProps) {
                       data-testid="palette-row"
                       data-row={r.id}
                     >
+                      <Icon name={r.icon ?? g.icon} />
                       <span className="pal-n">{r.label}</span>
                       {r.hint && <span className="pal-sub">{r.hint}</span>}
                     </li>

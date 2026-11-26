@@ -74,6 +74,28 @@ test("one icon set: every icon on the menu's pages and in Settings is the brand'
   }
 });
 
+test("the command menu is the Search board's: 34px rows of an icon and its word, groups in sentence case on grey bands", async ({ page }) => {
+  await start(page);
+  await page.getByTestId("menu-search").click();
+  await expect(page.getByTestId("palette")).toBeVisible();
+  const rows = page.getByTestId("palette-row");
+  expect(await rows.count()).toBeGreaterThan(5);
+  for (const r of await rows.all()) {
+    expect(Math.round((await r.boundingBox())!.height)).toBe(34);
+    await expect(r.locator("> svg.ic")).toHaveCount(1);
+    expect(Math.round((await r.locator("> svg.ic").boundingBox())!.width)).toBe(16);
+  }
+  const head = page.getByTestId("palette-group-go").locator(".pal-h");
+  await expect(head).toHaveText("Go to");
+  expect(await head.evaluate((e) => [getComputedStyle(e).textTransform, getComputedStyle(e).letterSpacing, getComputedStyle(e).fontSize])).toEqual(["none", "normal", "13px"]);
+  expect(await head.evaluate((e) => getComputedStyle(e).backgroundColor)).not.toBe("rgba(0, 0, 0, 0)");
+  if (SHOTS) for (const theme of ["light", "dark"] as const) {
+    await page.evaluate((th) => document.documentElement.setAttribute("data-theme", th), theme);
+    await page.waitForTimeout(400);
+    await page.screenshot({ path: join(SHOTS, `palette-${theme}.png`), animations: "disabled" });
+  }
+});
+
 test("pictures of every menu page and Settings, at 1280 and 900, light and dark", async ({ page }) => {
   test.skip(!SHOTS, "QUIET_SHOTS=<dir> keeps the pictures");
   test.setTimeout(240_000);
