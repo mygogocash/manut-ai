@@ -35,8 +35,13 @@ export function wantsTitle(rec: Rec | undefined, settings: TitleModel, again = f
   return again || !rec.modelTitle;
 }
 
+/** A file whose name says it holds keys or a login (`.env`, a private key, a keystore, an `.npmrc`): its name and counts go into the
+ *  material and none of its lines do, since masking knows a key by its shape and a file like these may hold one of any shape. */
+export const holdsKeys = (path: string): boolean =>
+  /(^|[\\/])(\.env(\.[^\\/]*)?|\.envrc|\.npmrc|\.netrc|\.pypirc|id_(rsa|dsa|ecdsa|ed25519)[^\\/]*|[^\\/]*\.(pem|key|p12|pfx|jks|keystore|kdbx)|[^\\/]*(secret|credential)[^\\/]*)$/i.test(path);
+
 /** The material of a pull request's words: the lane's commit subjects, then each changed file and the first lines of its diff, masked
- *  and cut (the shell cuts the whole again). */
+ *  and cut (the shell cuts the whole again). A file that holds keys by its name gives its name alone. */
 export function pullMaterial(commits: readonly string[], files: readonly { path: string; kind: string; added: number; removed: number; lines: readonly string[] }[]): string {
   const out: string[] = [];
   if (commits.length) out.push("Commits:", ...commits.slice(0, 20).map((c) => `- ${c}`), "");
@@ -44,7 +49,7 @@ export function pullMaterial(commits: readonly string[], files: readonly { path:
   let room = 4_000;
   for (const f of files.slice(0, 40)) {
     out.push(`${f.kind} ${f.path} (+${f.added} -${f.removed})`);
-    for (const l of f.lines.slice(0, 20)) {
+    for (const l of holdsKeys(f.path) ? [] : f.lines.slice(0, 20)) {
       if (room <= 0) break;
       out.push(l);
       room -= l.length;

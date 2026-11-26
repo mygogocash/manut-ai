@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { acceptTitle, chatMaterial, titleRequest, wantsTitle, whyKey } from "./titleWords";
+import { acceptTitle, chatMaterial, holdsKeys, pullMaterial, titleRequest, wantsTitle, whyKey } from "./titleWords";
 import { pickTitle } from "./titles";
 import { termMenuItems } from "./SessionsSection";
 import { TITLE_MODEL_DEFAULTS, type TitleModel } from "../lib/titleModel";
@@ -31,6 +31,31 @@ describe("a title written by a model (item 96)", () => {
     expect(m).not.toContain("ghp_abcdefghijklmnopqrstuvwxyz0123456789");
     expect(m).not.toContain("later");
     expect(chatMaterial([{ role: "user", text: "x".repeat(9000) }, { role: "assistant", text: "y" }]).length).toBeLessThan(2700);
+  });
+
+  it("gives a pull request's words the commit lines, the file names and a few lines of each change, masked and cut", () => {
+    const file = (path: string, lines: string[]) => ({ path, kind: "update", added: lines.length, removed: 0, lines });
+    const m = pullMaterial(["Add a login page"], [file("src/login.ts", ["@@ -1 +1,2 @@", "+const page = 1;", '+const token = "ghp_abcdefghijklmnopqrstuvwxyz0123456789";'])]);
+    expect(m).toContain("- Add a login page");
+    expect(m).toContain("update src/login.ts (+3 -0)");
+    expect(m).toContain("+const page = 1;");
+    expect(m).not.toContain("ghp_abcdefghijklmnopqrstuvwxyz0123456789");
+    // at most twenty lines of a file, and the whole at most 6,000 characters
+    const long = pullMaterial([], [file("a.ts", Array.from({ length: 50 }, (_, i) => `+line ${i}`))]);
+    expect(long).toContain("+line 19");
+    expect(long).not.toContain("+line 20");
+    expect(pullMaterial([], Array.from({ length: 40 }, (_, i) => file(`f${i}.ts`, Array.from({ length: 20 }, () => "+" + "x".repeat(200))))).length).toBeLessThanOrEqual(6000);
+  });
+
+  it("sends the name of a file that holds keys and none of its lines", () => {
+    const line = "+the shop door code is plain-words-no-masker-knows";
+    for (const path of [".env", "apps/api/.env.production", ".npmrc", "deploy/id_ed25519", "certs/server.pem", "ios/release.keystore", "config/secrets.yaml", "aws/credentials"]) {
+      expect(holdsKeys(path), path).toBe(true);
+      const m = pullMaterial([], [{ path, kind: "add", added: 1, removed: 0, lines: [line] }]);
+      expect(m, path).toContain(`add ${path} (+1 -0)`);
+      expect(m, path).not.toContain("plain-words-no-masker-knows");
+    }
+    for (const path of ["src/environment.ts", "docs/keys.md", "src/env/index.ts", "README.md"]) expect(holdsKeys(path), path).toBe(false);
   });
 
   it("asks with the chosen model and effort", () => {

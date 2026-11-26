@@ -455,11 +455,13 @@ and no other agent here has been checked. The setting says so.
   arrives after a rename is dropped. Row menu › Write the title again asks for another, and is offered only for a chat the person has not
   named. A failed automatic run is quiet; a failed ask says why.
 - **A pull request's words**: Suggest in the review draft sends the lane's commit subjects and changed files with a few lines of each,
-  masked, and fills the title and description to be read and changed. Ask, and the ask's own yes, are unchanged.
+  masked, and fills the title and description to be read and changed. A file whose name says it holds keys (`.env`, a private key, a
+  keystore, an `.npmrc`; `holdsKeys` in `sessions/titleWords.ts`) gives its name and none of its lines, since masking knows a key only by
+  its shape. Ask, and the ask's own yes, are unchanged. The setting has a row, "What it reads", that says all of this.
 - **Not done**: commit messages, and any agent but Claude Code.
 - **Checked**: Rust stand-in tests (`title_run` module, a stand-in program for the CLI, so no real agent runs), `sessions/titleWords.test.ts`,
-  `settings/TitlesRows.test.tsx` and `code/Review.test.tsx`. How a real Claude Code answers, and how the row and the button look, are a
-  hands-on pass that spends the owner's tokens.
+  `settings/TitlesRows.test.tsx` and `code/Review.test.tsx`. How a real Claude Code answers, and how Suggest looks in the review draft (no browser spec reaches that draft), are a
+  hands-on pass that spends the owner's tokens. The lead looked at the Settings rows in light and dark at 1280 and 900.
 
 ### The suggested next message
 

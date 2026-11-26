@@ -675,6 +675,7 @@ export function TitlesRows() {
         <Row title={t("titles.on.title")} hint={t("titles.on.hint")}>
           <Toggle on={m.on} label={t("titles.on.title")} onChange={(on) => setTitleModel({ on })} testId="set-titles-on" />
         </Row>
+        <Row title={t("titles.reads")} hint={t("titles.reads.hint")} />
         <Row title={t("titles.model")} hint={t("titles.model.hint")}>
           <select className="dev-in" value={m.model} aria-label={t("titles.model")} onChange={(e) => setTitleModel({ model: e.currentTarget.value as (typeof TITLE_MODELS)[number] })} data-testid="set-titles-model">
             {TITLE_MODELS.map((v) => (
@@ -747,12 +748,12 @@ function GeneralPage() {
           <Value>{t("suggest.agentsValue")}</Value>
         </Row>
       </div>
-      <TitlesRows />
       <div className="st-grp">
         <Row title={t("tasks.barSetting")} hint={t("tasks.barSettingHint")}>
           <TasksBarToggle />
         </Row>
       </div>
+      <TitlesRows />
       <div className="st-gh">{t("set.system")}</div>
       <div className="st-grp" data-testid="set-system">
         <Row title={t("win.close")} hint={t(isMacPlatform() ? "win.closeHint" : "win.closeHintOther")}>
