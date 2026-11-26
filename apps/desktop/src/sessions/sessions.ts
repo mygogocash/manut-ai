@@ -38,7 +38,7 @@ import { getShellHost, learnThisHost } from "../terminal/host";
 import { onSessionFg } from "./fg";
 import { termActs } from "./termActivity";
 import { isLinkId, LINK_COPIED_EVENT, newLinkId, termLinkUrl } from "./termLink";
-import { acpRow, agentDef, agentLabel, continues, draftAgent, draftFolder, draftOpen, hermesOnly, idInUse, installLine, isBuiltin, isGone, isShell, isTerminalRec, LAST_LINE_MAX, refusedResume, SHELL, termEnd, termMarkAgent, lastPrintedLine, OPEN_KEY, setsUpScreen, UI_BYTES, opensAs, pushRecent, RECENT_KEY, registerAcp, sessionMode, type AgentId, type OpenAs, type Unseen, type SessionRec } from "./agents";
+import { acpRow, agentDef, agentLabel, continues, draftAgent, draftFolder, draftOpen, hermesOnly, idInUse, installLine, isBuiltin, isGone, isShell, isTerminalRec, LAST_LINE_MAX, refusedResume, SHELL, termEnd, termMarkAgent, lastPrintedLine, OPEN_KEY, setsUpScreen, UI_BYTES, opensAs, pushRecent, savedOpen, RECENT_KEY, registerAcp, sessionMode, type AgentId, type OpenAs, type Unseen, type SessionRec } from "./agents";
 import { clearSuggestion, noteSuggestion } from "../chat/suggestion";
 import { suggestOn, suggestWorks } from "../lib/suggest";
 import { acceptTitle, chatMaterial, titleRequest, wantsTitle, whyKey } from "./titleWords";
@@ -2270,7 +2270,9 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     // second row holding the same one comes back paused, so one Hermes session is never attached for two rows
     const folderAgain: string[] = [];
     const folderTaken = new Set<string>();
-    for (const s of saved) {
+    for (const kept of saved) {
+      // a Grok session saved while Grok was a terminal only is that terminal (item 101b)
+      const s = savedOpen(kept);
       if (isGone(s.agent) && s.draft) {
         // a New session never started on an agent manut no longer offers: a draft again, on the usual agent
         list.push({ id: s.id, agent: draftAgent(state.recent, state.agents), cwd: s.cwd, startedAt: s.startedAt, view: "chat", status: "draft" });

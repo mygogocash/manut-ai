@@ -3,7 +3,7 @@
 // shell writes them, so a change on either side fails here.
 import { afterEach, describe, expect, it } from "vitest";
 import { setLang, t } from "../i18n";
-import { MODE_KEPT, NO_ASKS, signedOutSaid } from "./sessionErrors";
+import { MODE_KEPT, NO_ASKS, NO_ASKS_COMMAND, signedOutSaid } from "./sessionErrors";
 
 afterEach(() => setLang("en"));
 
@@ -25,5 +25,22 @@ describe("an agent that would not ask before it acts", () => {
     // the signed-out sentence still reads as before, and anything else is left as it is
     expect(signedOutSaid("Kimi Code is not signed in. Run `kimi login` in a terminal and sign in.")).toBe(t("ss.signedOut", { agent: "Kimi Code", cmd: "kimi login" }));
     expect(signedOutSaid("Cursor did not start.")).toBe("Cursor did not start.");
+  });
+
+  // item 101b: acp_chat.rs `no_asks("Grok")` and `no_asks_command("Grok", "always-approve")`, word for word
+  it("Grok's are said with Grok's own setting, and its command that turns its asks off is named", () => {
+    const grok = "Grok did not start because its own settings let it run commands and change files without asking first.";
+    const command = "Grok's /always-approve turns off its asks, so Manut AI does not send it. Write your message without it.";
+    expect(NO_ASKS.test(grok) && NO_ASKS_COMMAND.test(command)).toBe(true);
+    for (const lang of ["en", "ja", "ko", "zh"] as const) {
+      setLang(lang);
+      expect(signedOutSaid(grok)).toBe(t("ss.noAsksGrok", { agent: "Grok" }));
+      expect(signedOutSaid(command)).toBe(t("ss.noAsksCommand", { agent: "Grok", cmd: "always-approve" }));
+      // each language keeps the setting's own names, as Grok writes them
+      expect(t("ss.noAsksGrok", { agent: "Grok" })).toContain("permission_mode");
+    }
+    setLang("en");
+    expect(signedOutSaid(grok)).toContain("Set permission_mode to ask in the [ui] section of Grok's config.toml");
+    expect(signedOutSaid(command)).toBe(command);
   });
 });
