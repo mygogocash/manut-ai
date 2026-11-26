@@ -13,6 +13,7 @@ import {
   linesRun,
   NOT_STARTED,
   planOf,
+  scriptText,
   previewSecrets,
   readProject,
   refusedRun,
@@ -45,8 +46,8 @@ describe("the shell's answer for a lane's folder", () => {
 
 describe("the command", () => {
   it("is the one @manut/preview-command chooses, as words for the shell and one line for the view", () => {
-    expect(planOf(project())).toEqual({ argv: ["pnpm", "run", "dev"], label: "pnpm run dev" });
-    expect(planOf(project({ files: ["package.json", "yarn.lock"], packageJson: JSON.stringify({ scripts: { start: "next start" } }) }))).toEqual({ argv: ["yarn", "run", "start"], label: "yarn run start" });
+    expect(planOf(project())).toEqual({ argv: ["pnpm", "run", "dev"], label: "pnpm run dev", script: { name: "dev", text: "vite" } });
+    expect(planOf(project({ files: ["package.json", "yarn.lock"], packageJson: JSON.stringify({ scripts: { start: "next start" } }) }))).toEqual({ argv: ["yarn", "run", "start"], label: "yarn run start", script: { name: "start", text: "next start" } });
   });
 
   it("is none, with why, for no package.json, one that cannot be read, no script, and scripts that publish", () => {
@@ -55,6 +56,16 @@ describe("the command", () => {
     expect(planOf(project({ packageJson: "" }))).toEqual({ none: "unreadable" });
     expect(planOf(project({ packageJson: JSON.stringify({ scripts: { build: "vite build" } }) }))).toEqual({ none: "no_script" });
     expect(planOf(project({ packageJson: JSON.stringify({ scripts: { dev: "vite", predev: "vercel deploy --prod" } }) }))).toEqual({ none: "refused" });
+  });
+});
+
+describe("what a script runs", () => {
+  it("is the script's own text from package.json, since its name says nothing of it, a key in it masked", () => {
+    const pkg = (scripts: Record<string, unknown>) => JSON.stringify({ scripts });
+    expect(scriptText(pkg({ dev: "  vite --port 5173 " }), "dev")).toBe("vite --port 5173");
+    expect(scriptText(pkg({ dev: `STRIPE_SECRET_KEY=${KEY} vite` }), "dev")).not.toContain(KEY);
+    for (const [json, name] of [[pkg({ dev: "vite" }), "build"], [pkg({ dev: 3 }), "dev"], [pkg({ dev: " " }), "dev"], ["{", "dev"], [null, "dev"], [JSON.stringify({ scripts: ["vite"] }), "0"], [pkg({}), "toString"]] as const)
+      expect([json, name, scriptText(json, name)]).toEqual([json, name, null]);
   });
 });
 

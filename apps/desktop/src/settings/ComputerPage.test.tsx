@@ -46,7 +46,7 @@ describe("Settings › Computer", () => {
     const text = words(draw());
     expect(text).toContain("Look: only at the apps you allow, chat by chat.");
     expect(text).toContain("Never several under one yes, and nothing while the screen is locked.");
-    expect(text).toContain("Never: Manut AI's own windows, System Settings, Keychain Access and Passwords");
+    expect(text).toContain("Never: Manut AI's own windows and its pages in any browser, System Settings, Keychain Access and Passwords");
   });
 
   it("says a copy not signed with a Developer ID loses both permissions at each update", () => {

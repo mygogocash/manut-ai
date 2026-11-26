@@ -31,12 +31,29 @@ export function readProject(raw: unknown): PreviewProject | null {
 }
 
 /** The command that starts the preview, as the shell runs it (`argv`) and as the view names it (`label`), or why there is none. */
-export type PreviewPlan = { argv: string[]; label: string } | { none: NoneWhy };
+export type PreviewPlan = { argv: string[]; label: string; script?: { name: string; text: string } } | { none: NoneWhy };
 
 export function planOf(project: PreviewProject): PreviewPlan {
   const c = previewCommand({ packageJson: project.packageJson, files: project.files });
   if ("none" in c) return { none: c.none };
-  return { argv: [...c.argv], label: c.argv.join(" ") };
+  const text = scriptText(project.packageJson, c.script);
+  return { argv: [...c.argv], label: c.argv.join(" "), ...(text === null ? {} : { script: { name: c.script, text } }) };
+}
+
+/** The text of the package.json script `name`, a key in it masked, or null when the file has no such script. `pnpm run dev`
+ *  names a script, and only its text says what it runs: Preview's Start and Kit's card show it beside the name. */
+export function scriptText(packageJson: string | null | undefined, name: string): string | null {
+  if (!packageJson) return null;
+  let pkg: unknown;
+  try {
+    pkg = JSON.parse(packageJson);
+  } catch {
+    return null;
+  }
+  const scripts = pkg && typeof pkg === "object" ? (pkg as Record<string, unknown>).scripts : null;
+  if (!scripts || typeof scripts !== "object" || Array.isArray(scripts) || !Object.prototype.hasOwnProperty.call(scripts, name)) return null;
+  const text = (scripts as Record<string, unknown>)[name];
+  return typeof text === "string" && text.trim() !== "" ? maskSecrets(text.trim()) : null;
 }
 
 // ---- what it runs with ------------------------------------------------------------------------------------------
