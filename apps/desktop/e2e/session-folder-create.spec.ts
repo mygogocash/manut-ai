@@ -219,8 +219,9 @@ test("the background menu makes a folder group that survives a reload; the heade
   await openCode(page);
   await expect(group(page, NEW).locator(".ss-row.tr")).toHaveCount(1);
   await expect(group(page, NEW).getByTestId("term-group-empty")).toHaveCount(0);
-  // the row shows before the mock host logs the start (it awaits the shell list first): wait for the log
-  await expect.poll(async () => (await starts(page)).length).toBe(1);
+  // the row shows before the mock host logs the start (it awaits the shell list first): wait for the log, longer than the
+  // default: on a CI shard of four workers the start came after five seconds (26 Nov 2026) and passed on a retry
+  await expect.poll(async () => (await starts(page)).length, { timeout: 15_000 }).toBe(1);
   expect(await groups(page)).toEqual([NEW]);
 
   // removed while its session runs: the list forgets it, the session and its group go on
