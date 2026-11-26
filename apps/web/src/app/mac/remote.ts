@@ -513,13 +513,13 @@ export class MacRemote {
   }
 
   /// The answer to a question: one text, or one per question of an interview (null for one skipped). It goes through
-  /// the same challenge and passkey as Allow once whenever the Mac asks for them (decision.ts).
+  /// the same challenge and passkey as Allow once, bound to the exact answer (decision.ts).
   async answer(id: string, given: string | Record<string, string | null>): Promise<void> {
     const shown = this.#shown(id);
     if (!shown || shown.ask.kind !== "question") return;
     const interview = !!shown.ask.questions?.length;
     if (interview !== (typeof given !== "string")) return;
-    await this.#decide(shown.chat, id, await answerDecision(shown.chat, id, shown.ask.revision, given));
+    await this.#decide(shown.chat, id, await answerDecision(shown.chat, id, shown.ask.revision, given, shown.ask.questions?.map((q) => q.id) ?? []));
   }
 
   /// The one path for an answer the passkey signs (Allow once, and an answer to a question): step one asks; a Mac that

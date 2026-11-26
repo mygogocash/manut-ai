@@ -200,9 +200,17 @@ function printOf(ask: Omit<AskView, "revision">): string {
   return JSON.stringify(shown);
 }
 
-/** Builds chat views and keeps each ask's revision: 1 when first shown, one more each time what it shows changes. */
+/** Builds chat views and keeps each ask's revision: 1 when first shown, one more each time what it shows changes. A
+ *  revision is never given twice to one ask: it is kept while the ask is in the store, and past that, so an ask that
+ *  comes back with the same id goes on counting. It also keeps, per device, the newest revision of each ask that device
+ *  was sent, since an Allow, a No or an answer counts only for a revision the phone was actually shown. One Projector
+ *  lives as long as the app's RemoteMac, across the switch going off and on and across a phone leaving and coming back;
+ *  a Mac started again starts a new one, which has shown no phone anything. */
 export class Projector {
-  readonly #revisions = new Map<string, { print: string; revision: number }>();
+  /** By `askBinding(chat, ask)`: what the ask shows now (null once it left the store) and its revision. */
+  readonly #revisions = new Map<string, { print: string | null; revision: number }>();
+  /** By device, then by `askBinding(chat, ask)`: the newest revision that device was sent. */
+  readonly #shown = new Map<string, Map<string, number>>();
 
   #revision(chat: string, ask: Omit<AskView, "revision">): number {
     const key = askBinding(chat, ask.id);
@@ -243,10 +251,32 @@ export class Projector {
     return { ...shown, revision: this.#revision(source.key, shown) } as AskView;
   }
 
-  /** Forgets the revisions of a chat's asks that are gone. */
-  forget(chat: string): void {
+  /** Lets go of what the asks of `chat` that are no longer in the store showed, keeping their revisions, so a phone's old
+   *  revision never matches an ask that comes back. */
+  retire(chat: string, source: ChatSource | null): void {
+    const present = new Set((source?.items ?? []).filter((i) => i.kind !== "message").map((i) => askBinding(chat, i.id)));
     const prefix = JSON.stringify([chat]).slice(0, -1);
-    for (const key of this.#revisions.keys()) if (key.startsWith(`${prefix},`)) this.#revisions.delete(key);
+    for (const [key, known] of this.#revisions) if (key.startsWith(`${prefix},`) && !present.has(key)) known.print = null;
+  }
+
+  /** `device` was sent these asks of `chat`, at these revisions. */
+  sent(device: string, chat: string, asks: readonly { readonly id: string; readonly revision: number }[]): void {
+    let seen = this.#shown.get(device);
+    if (!seen) this.#shown.set(device, (seen = new Map()));
+    for (const ask of asks) {
+      const key = askBinding(chat, ask.id);
+      seen.set(key, Math.max(seen.get(key) ?? 0, ask.revision));
+    }
+  }
+
+  /** Whether `device` was sent `ask` of `chat` at `revision`, as the newest it holds. */
+  wasShown(device: string, chat: string, ask: string, revision: number): boolean {
+    return this.#shown.get(device)?.get(askBinding(chat, ask)) === revision;
+  }
+
+  /** A device unpaired: nothing it was shown counts any more. */
+  forgetDevice(device: string): void {
+    this.#shown.delete(device);
   }
 }
 

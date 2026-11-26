@@ -3,6 +3,7 @@
 // stream frames with their four-byte number.
 import { describe, expect, it } from "vitest";
 import vectors from "../../../api/test/fixtures/relay-v1-vectors.json";
+import { toBase64Url } from "@manut/remote-channel";
 import { hostIdentity } from "./keys";
 import { HELLO_TIMEOUT_MS, OFF_RETRY_MS, PING_MS, type RelaySocket, RelayLink, challengeMessage, relayFromHealth, relaySocketUrl } from "./link";
 import { ManualClock, settle } from "./testkit/clock";
@@ -41,8 +42,10 @@ class FakeSocket implements RelaySocket {
 }
 
 async function vectorIdentity() {
+  // The shell signs with the private half (remote_keys.rs); here Web Crypto stands in for it.
   const { d, x, y } = vectors.hostKey.privateJwk;
-  return hostIdentity({ d, x, y });
+  const key = await crypto.subtle.importKey("jwk", { kty: "EC", crv: "P-256", d, x, y, ext: false }, { name: "ECDSA", namedCurve: "P-256" }, false, ["sign"]);
+  return hostIdentity({ x, y }, async (message) => toBase64Url(new Uint8Array(await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, key, new TextEncoder().encode(message)))));
 }
 
 async function setup(probe: "on" | "off" | "unknown" = "on") {

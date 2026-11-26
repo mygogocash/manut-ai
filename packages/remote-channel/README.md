@@ -2,7 +2,7 @@
 
 The channel between a paired phone and the Mac (`docs/remote-access.md`, item 78a). The desktop's page and the web
 app on the phone both use it, to pair, to open an encrypted session through the relay in `apps/api` that the relay
-cannot read or change, and to make and check the challenge that binds one Allow to one ask. Pure functions over bytes
+cannot read or change, and to make and check the challenge that binds one Allow, or one answer, to one ask. Pure functions over bytes
 with Web Crypto only (`crypto.subtle`, `crypto.getRandomValues`), which the browser, the desktop's webview and Node
 all have. No dependency.
 
@@ -22,6 +22,7 @@ all have. No dependency.
 | `importSharedSecret` | Both | Turn K into a Web Crypto key that script cannot read back |
 | `DecisionChallenges.issue`, `.verify`, `.revoke` | Mac | The one-use 60-second challenge for one decision, the check of the phone's answer, and dropping a device's challenges at Unpair |
 | `decisionChallenge` | Phone | Recompute the challenge from what its screen shows, to pass to `navigator.credentials.get` |
+| `answerOption` | Both | The choice an answer to a question binds its challenge to: a digest of the exact words |
 | `verifyPasskeyRegistration` | Mac | Check the passkey the phone makes at pairing, and keep its key |
 | `verifyPasskeyAssertion` | Mac | Check a passkey answer (used by `DecisionChallenges.verify`) |
 | `RemoteChannelError`, `REMOTE_CHANNEL_MESSAGES` | Both | The one error, with a fixed sentence per problem |
@@ -86,6 +87,11 @@ message is at most 4 MiB unless both sides set less.
 **Decision challenge** (what the passkey signs): `SHA-256("manut-remote-v1 decision" || 00 || nonce (32) || len16
 device id || len16 request id || u32 revision || len16 option id)`, texts as UTF-8 after a 16-bit length. The
 answer names the challenge by the nonce as base64url.
+
+**Answer option** (the option id of an answer to a question): `answer:` || base64url(SHA-256("manut-remote-v1
+answer" || 00 || json)), where json is `JSON.stringify(["text", <text>])` for one answer, or
+`JSON.stringify(["answers", [[<question id>, <text or null>], ...]])` for an interview, its questions in the order
+the ask lists them.
 
 **Passkey answers** are read as WebAuthn Level 3 lays them out: `authenticatorData` = rpIdHash (32) | flags (1: UP
 bit 0, UV bit 2, BE bit 3, BS bit 4, AT bit 6, ED bit 7) | signCount (4) | attested credential data (aaguid 16 |
@@ -172,9 +178,12 @@ read: the phone's session handshake its K and throwaway key at the welcome, the 
   relay's `revoke` is not trusted to end anything, and a phone that comes another way, such as over Tailscale, has no
   relay at all.
 - Treat `channel.deviceId` as who is speaking, never the relay's `open`, and issue decision challenges for that id.
-- Send `No` and `Stop` without a challenge; ask for one only for an Allow, and pass the decision to `settleApproval`
-  only after `verify` says `ok`, storing its `signCount`. If two answers from one device are checked at once, store
-  their counters in the order they were checked, or check one device's answers one at a time.
+- Send `No` and `Stop` without a challenge, and nothing else: ask for one for an Allow and for every answer to a
+  question, a typed answer and a picked choice alike, since an answer steers the agent as much as an Allow does. Bind
+  an answer's challenge to its exact words with `answerOption`. Pass the decision on (`settleApproval`, or the
+  question's answer) only after `verify` says `ok`, storing its `signCount`, and only if the ask still shows the
+  revision the challenge was bound to. If two answers from one device are checked at once, store their counters in
+  the order they were checked, or check one device's answers one at a time.
 - Refuse a credential id already registered to another device, and keep K, the door token and the passkey record
   where the design says (keychain on the Mac, IndexedDB as non-extractable keys on the phone).
 - Close the channel and open a new session on any refusal, on `exhausted`, and when the relay closes the stream. The

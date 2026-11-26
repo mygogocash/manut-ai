@@ -7,9 +7,12 @@
 // - A session's device is the one its handshake proved (`channel.deviceId`), and a hello naming a device the Mac does not
 //   hold is refused before anything is sent. The relay's `open` decides only which stream it is.
 // - Any refusal on a stream closes its channel and the stream, and a stream the relay closes closes its channel.
-// - Unpair closes every channel of that phone on the Mac itself, drops its waiting decision challenges
-//   (`DecisionChallenges.revoke`), deletes its K and passkey, and tells the relay `revoke`: at once while the socket is
-//   up, and otherwise at the next `ready`. It needs no relay to take effect.
+// - Unpair forgets the phone's K and passkey in the page before anything awaits, closes every stream of that phone on the
+//   Mac itself (open or still in its handshake), drops its waiting decision challenges (`DecisionChallenges.revoke`),
+//   tells the relay `revoke` (at once while the socket is up, otherwise at the next `ready`), and then deletes K and the
+//   passkey from the keychain. It needs no relay to take effect, and a relay that ignores the revoke gets that phone no
+//   session, while the keychain write waits or after. Nothing is sent to a phone no longer paired, checked at the moment
+//   of sending.
 // - Turning the switch off ends everything: the pairing, every channel, every challenge, every journal and the socket.
 import {
   type Channel,
@@ -22,6 +25,7 @@ import {
 import { type Keyring, type PairedPhone, RemoteVault } from "./keys";
 import { type LinkState, type RelayProbe, type SocketFactory, type Timers, RelayLink, relaySocketUrl } from "./link";
 import { PairingDoor, type PairingView } from "./pairing";
+import { Projector } from "./project";
 import { type ChatSources, type MacActions, Server } from "./serve";
 
 export interface RemoteMacDeps {
@@ -58,6 +62,9 @@ type StreamState =
 
 interface Stream {
   state: StreamState;
+  /** The device the relay's `open` named. Never who is speaking (that is the handshake's), only which streams to end at
+   *  that device's Unpair while its handshake is still under way. */
+  readonly claimed: string;
   /** Frames are read one at a time, in order. */
   reading: Promise<void>;
   /** Messages are sent one at a time, in order. */
@@ -86,6 +93,9 @@ export class RemoteMac {
   #pairing: PairingDoor | null = null;
   #server: Server | null = null;
   #challenges = new DecisionChallenges();
+  /** Each ask's revision and what each phone was shown, for this app's life: kept across the switch going off and on,
+   *  so a phone's revision binds across a reconnect (project.ts). */
+  readonly #projector = new Projector();
   #on = false;
   #linkState: LinkState | "no_origin" | "no_keychain" = "stopped";
   #pairingView: PairingView = { phase: "idle" };
@@ -137,7 +147,7 @@ export class RemoteMac {
   /** Reads the paired phones without making anything, for the page while the switch is off. */
   async loadPhones(): Promise<void> {
     if (this.#on) return;
-    this.#vault = await RemoteVault.open(this.#deps.keyring, false);
+    this.#hold(await RemoteVault.open(this.#deps.keyring, false));
     this.#changed();
   }
 
@@ -152,7 +162,11 @@ export class RemoteMac {
       this.#changed();
       return;
     }
-    const vault = await RemoteVault.open(this.#deps.keyring, true).catch(() => null);
+    // The shell's own switch goes on first: until then it makes no key and gives no K.
+    const vault = await this.#deps.keyring
+      .setSwitch(true)
+      .then(() => RemoteVault.open(this.#deps.keyring, true))
+      .catch(() => null);
     if (generation !== this.#generation) return;
     if (!vault?.identity) {
       // No keychain (not macOS, the browser preview) or one that refused: nothing can be kept, so nothing is opened.
@@ -160,7 +174,7 @@ export class RemoteMac {
       this.#changed();
       return;
     }
-    this.#vault = vault;
+    this.#hold(vault);
     const identity = vault.identity;
     const origin = this.#deps.origin;
     const url = identity && origin ? relaySocketUrl(origin, identity.hostId) : null;
@@ -197,6 +211,7 @@ export class RemoteMac {
       rp,
       now: () => this.#deps.now(),
       push: (deviceId, message) => this.#push(deviceId, message),
+      projector: this.#projector,
     });
     this.#pairing = new PairingDoor({
       hostId: identity.hostId,
@@ -242,6 +257,8 @@ export class RemoteMac {
     }
     this.#linkState = "stopped";
     this.#pairingView = { phase: "idle" };
+    // The shell's switch goes off too: no K, no signature and no new phone until it is turned on again.
+    void this.#deps.keyring.setSwitch(false).catch(() => undefined);
     this.#changed();
   }
 
@@ -257,20 +274,40 @@ export class RemoteMac {
     return this.#pairing?.typeCode(code) ?? Promise.resolve(false);
   }
 
-  /** Unpairs a phone, on the Mac's own side first: its channels close, its challenges go, its K and passkey are deleted,
-   *  and the relay is told `revoke` now or at its next `ready`. */
+  /** Unpairs a phone, on the Mac's own side first and before anything awaits: its K and passkey go from the page (so no
+   *  new session of it opens and nothing it asks is served), every stream of it closes, its challenges go, and the relay
+   *  is told `revoke` now or at its next `ready`; then the keychain forgets it. A relay that ignores the revoke gets that
+   *  phone nothing, even while the keychain write waits. */
   async unpair(id: string): Promise<void> {
-    for (const [stream, s] of this.#streams) if (s.state.kind === "open" && s.state.deviceId === id) this.#endStream(stream);
-    this.#challenges.revoke(id);
-    this.#server?.left(id);
-    this.#link?.revokeDevice(id);
     const vault = this.#vault ?? (await RemoteVault.open(this.#deps.keyring, false));
-    this.#vault ??= vault;
+    if (!this.#vault) this.#hold(vault);
+    // `remove` forgets the phone in the page before its first await, which ends its streams (`#dropDevice`).
+    const removing = vault.remove(id);
+    this.#dropDevice(id);
+    this.#link?.revokeDevice(id);
     try {
-      await vault.remove(id);
+      await removing;
     } finally {
       this.#changed();
     }
+  }
+
+  /** Keeps the vault the page reads its phones from, and ends a phone's sessions the moment the vault forgets it, by
+   *  Unpair or by a pairing cancelled while the keychain wrote. */
+  #hold(vault: RemoteVault): void {
+    this.#vault = vault;
+    vault.onRemoved = (id) => this.#dropDevice(id);
+  }
+
+  /** Ends everything of a device on the Mac's side: every stream it has open or under way, its challenges, what it
+   *  watched. */
+  #dropDevice(id: string): void {
+    for (const [stream, s] of this.#streams) {
+      if ((s.state.kind === "open" && s.state.deviceId === id) || s.claimed === id) this.#endStream(stream);
+    }
+    this.#challenges.revoke(id);
+    this.#server?.left(id);
+    this.#projector.forgetDevice(id);
   }
 
   /** The store changed: phones watching a chat hear what moved. */
@@ -280,7 +317,7 @@ export class RemoteMac {
 
   #onOpen(stream: number, device: string): void {
     const door = this.#pairing?.takeStream(stream, device) ?? false;
-    this.#streams.set(stream, { state: door ? { kind: "door" } : { kind: "hello" }, reading: Promise.resolve(), sending: Promise.resolve() });
+    this.#streams.set(stream, { state: door ? { kind: "door" } : { kind: "hello" }, claimed: device, reading: Promise.resolve(), sending: Promise.resolve() });
   }
 
   #onFrame(stream: number, payload: Uint8Array): void {
@@ -336,15 +373,20 @@ export class RemoteMac {
 
   #send(stream: number, s: Stream, message: Record<string, unknown>): void {
     if (s.state.kind !== "open") return;
-    const channel = s.state.channel;
+    const { channel, deviceId } = s.state;
     s.sending = s.sending
       .then(async () => {
+        // Checked again at the moment of sending: a phone unpaired since this was queued is sent nothing more, and its
+        // stream ends.
+        if (s.state.kind !== "open" || !this.#vault?.has(deviceId)) throw new Error("unpaired");
         for (const frame of await channel.seal(encoder.encode(JSON.stringify(message)))) this.#link?.sendFrame(stream, frame);
       })
       .catch(() => this.#endStream(stream));
   }
 
   #push(deviceId: string, message: Record<string, unknown>): void {
+    // A phone no longer paired is told nothing, and whatever of it is still open ends.
+    if (!this.#vault?.has(deviceId)) return this.#dropDevice(deviceId);
     for (const [stream, s] of this.#streams) if (s.state.kind === "open" && s.state.deviceId === deviceId) this.#send(stream, s, message);
   }
 
