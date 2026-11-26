@@ -27,7 +27,7 @@ const some = (items: string[]): string =>
   listText(items.length > SHOWN ? [...items.slice(0, SHOWN), tr("ss.notes.more", { n: items.length - SHOWN })] : items);
 
 /** The chat's line for an `instructions` note (`{read, left}`), or null when it names nothing. */
-export function notesSaid(ev: { read?: unknown; left?: unknown }): string | null {
+export function notesSaid(ev: { [k: string]: unknown }): string | null {
   const read = names(ev.read);
   const left = leftOut(ev.left);
   const said: string[] = [];
