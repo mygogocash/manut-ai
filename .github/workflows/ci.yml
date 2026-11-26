@@ -165,13 +165,16 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-workspace
-      # The engine, with the system libraries and fonts it needs: Thai among them, which the long Thai messages use. It
-      # takes under a minute, but it downloads from Ubuntu's mirror: one run saw it crawl (an 8 MB package took 90
-      # seconds) and use up the job's whole 25 minutes. A limit of its own fails that fast, and the job can be run again.
+      # The engine, with the system libraries and fonts it needs: Thai among them, which the long Thai messages use. The
+      # packages come from Ubuntu's mirror, which has crawled (an 8 MB package took 90 seconds, and once the job's whole
+      # 25 minutes), so they are cached (.github/actions/playwright-browser). A limit of its own fails a crawl fast, and
+      # the job can be run again.
       - name: Install ${{ matrix.engine }}
         timeout-minutes: 10
-        working-directory: apps/web
-        run: pnpm exec playwright install --with-deps ${{ matrix.browser }}
+        uses: ./.github/actions/playwright-browser
+        with:
+          browser: ${{ matrix.browser }}
+          working-directory: apps/web
       # Playwright starts the vite dev server itself (apps/web/playwright.config.ts). --project takes the two phones of
       # this engine (a name with * is a pattern, and "No projects matched" fails the step if the names ever change).
       # --retries=1 lets one slow start through as "flaky" in the summary, and a state that really does not fit fails
@@ -301,10 +304,14 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-workspace
-      # Chromium only: the one WebKit spec runs on macOS alone and skips itself here.
+      # Chromium only: the one WebKit spec runs on macOS alone and skips itself here. Its Ubuntu packages are cached:
+      # on 26 Nov 2026 the mirror held one shard or two of a run for up to five minutes in three runs of four.
       - name: Install Chromium
-        working-directory: apps/desktop
-        run: pnpm exec playwright install --with-deps chromium
+        timeout-minutes: 10
+        uses: ./.github/actions/playwright-browser
+        with:
+          browser: chromium
+          working-directory: apps/desktop
       # The shard's files, one Playwright filter a line, and what the shard holds in the log and the job summary. A
       # shard with no file fails here, because Playwright given no filter would run every file. (The step's shell stops
       # at a failing command, so the script's status is kept until its words are written.)

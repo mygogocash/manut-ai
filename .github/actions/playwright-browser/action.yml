@@ -1,0 +1,51 @@
+# One Playwright browser with the Ubuntu packages it needs, for the browser jobs in ci.yml. The browser itself comes
+# from Playwright's own download host in seconds; the packages (mostly fonts: Japanese, Chinese, Thai and others, about
+# 22 MB for Chromium) come from Ubuntu's mirror, which on 26 Nov 2026 crawled at 130 kB/s in three of four runs and held
+# a shard up to five minutes. So the downloaded packages are kept in the Actions cache: apt finds them where it looks
+# for downloads, checks them against the package lists it has just read, and fetches only what is missing or newer.
+#
+# The cache is keyed on the browser and the runner's image, whose packages change with it; a new image starts from the
+# last one's packages. A run can restore its own branch's caches and the default branch's, and each branch saves its
+# own, which is small enough (tens of megabytes) to leave the repository's 10 GB to the build caches.
+name: Install a Playwright browser
+description: Install one Playwright browser and the Ubuntu packages it needs, keeping the downloaded packages cached.
+
+inputs:
+  browser:
+    description: chromium or webkit
+    required: true
+  working-directory:
+    description: The app whose Playwright installs the browser
+    required: true
+
+runs:
+  using: composite
+  steps:
+    # ImageOS and ImageVersion are the runner's own environment variables, which expressions cannot read.
+    - name: Name the cache
+      id: key
+      shell: bash
+      run: |
+        prefix="playwright-apt-${{ inputs.browser }}-${ImageOS:-ubuntu}-$(uname -m)-"
+        echo "prefix=$prefix" >> "$GITHUB_OUTPUT"
+        echo "key=$prefix${ImageVersion:-unknown}" >> "$GITHUB_OUTPUT"
+    - name: Restore the packages downloaded before
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/apt-archives
+        key: ${{ steps.key.outputs.key }}
+        restore-keys: ${{ steps.key.outputs.prefix }}
+    # apt keeps what it downloads in the folder named here, and apt-get never deletes it after installing. It runs as
+    # root, so the folder is handed back to the runner's user afterwards, for the cache to save it at the end of the
+    # job; its lock and half-downloaded files are not kept.
+    - name: Install the browser and its packages
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        mkdir -p "$HOME/apt-archives/partial"
+        printf 'Dir::Cache::Archives "%s";\nAPT::Keep-Downloaded-Packages "true";\n' "$HOME/apt-archives" |
+          sudo tee /etc/apt/apt.conf.d/99-playwright-archives > /dev/null
+        pnpm exec playwright install --with-deps ${{ inputs.browser }}
+        sudo rm -rf "$HOME/apt-archives/partial" "$HOME/apt-archives/lock"
+        sudo chown -R "$(id -u):$(id -g)" "$HOME/apt-archives"
+        echo "Kept $(find "$HOME/apt-archives" -name '*.deb' | wc -l) packages for the next run."
