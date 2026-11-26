@@ -95,7 +95,7 @@ keeps them:
 | Select several rows; bulk snooze, settle, new titles | part: select and bulk Pin, Snooze, Done for now, Archive in Recent and History (item 94); Write the title again is one row at a time (item 96) | 94, 96 |
 | Auto-settle after some days | has (item 94: 3 days by default) | 94 |
 | Several drafts; stash one | has (item 95): Drafts at the top of Home, five kept with their pictures and files; Cmd+S puts a chat's draft there, to take into any chat or project | 95 |
-| Snapshot of any app with a global key | no | 104 |
+| Snapshot of any app with a global key | has, never pressed on a real Mac (item 104): a key set in Settings › Computer, off until turned on (⌃⌥⌘M suggested), reads the front window with computer use's reader and refusals, masks what looks like a key, and opens a new chat with Buddy whose box holds it; nothing is sent until Send. Without Accessibility it says so with the Open button (`docs/computer-use.md`) | 104 |
 | Swipes on the phone; Live Activities | no (Live Activities need a native app) | 78c, 111 |
 
 ## Pull requests and git

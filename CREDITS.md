@@ -82,4 +82,6 @@ pinned in the desktop for the pairing code's QR image (`apps/desktop/src/remote/
 `apps/web/src/ops/QrCode.tsx`); only its `create` is used, which returns the modules and reaches no network; `objc2-speech`, `objc2-avf-audio` and `objc2-av-foundation`
 (the objc2 project's bindings to Apple's Speech, AVFAudio and AVFoundation frameworks, Zlib OR Apache-2.0 OR MIT), which
 reach the Mac's own speech recognition and the microphone for voice in the chat box (`apps/desktop/src-tauri/src/voice.rs`,
-`docs/voice.md`).
+`docs/voice.md`); and `tauri-plugin-global-shortcut` 2.4.1 with `global-hotkey` 0.8.0 (Tauri's own, Apache-2.0 OR MIT),
+on the Mac only, which registers the snapshot key a person turns on in Settings › Computer
+(`apps/desktop/src-tauri/src/computer/snap.rs`, `docs/computer-use.md`, item 104).

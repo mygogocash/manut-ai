@@ -7,8 +7,9 @@ says when all is ready. Every action that changes something asks first, on the c
 
 Code: `apps/desktop/src-tauri/src/computer/` (`mod.rs` the page's two commands, `room.rs` every rule, `mac.rs` the Mac,
 `mcp.rs` the MCP server, `hub.rs` the socket and the files handed to Claude Code, `tap.rs` the card, `keys.rs` key
-presses, `SKILL.md` the skill), `apps/desktop/src/computer/computer.ts`, `apps/desktop/src/settings/ComputerPage.tsx`
-and `apps/desktop/src/chat/cards/computerCard.ts`.
+presses, `snap.rs` the snapshot key of item 104, `SKILL.md` the skill), `apps/desktop/src/computer/computer.ts`,
+`apps/desktop/src/settings/ComputerPage.tsx` and `apps/desktop/src/chat/cards/computerCard.ts`; for the snapshot,
+`apps/desktop/src/computer/snapshot.ts`, `SnapshotNotice.tsx` and `apps/desktop/src/settings/SnapshotRows.tsx`.
 
 ## What a person sees
 
@@ -261,6 +262,86 @@ Writes:
 - Reading the permissions never prompts: no prompting call is named anywhere in `computer/`
   (`mod.rs` `reading_the_permissions_never_prompts`), and the page has no command that asks (`computer.test.ts`).
 
+## A snapshot of any app (item 104)
+
+The owner's list of 26 Nov 2026 (`docs/t3code-parity.md`): a key pressed anywhere takes the front window's text and
+structure and opens a thread with it. It is in the group that "must be designed first because it can act for the
+person", so this is the design, written before the code, and what was built from it.
+
+### The design
+
+- **Off until the person turns it on.** Settings › Computer › Snapshot of any app has a switch, off, and a keys box that
+  shows a suggestion, ⌃⌥⌘M (Control, Option, Command and M), which the person can take or change by pressing other keys.
+  Nothing is registered with macOS while the switch is off, and the suggestion is only shown. The setting is kept in
+  `~/.manut/snapshot.json`; a missing or unreadable file, or anything but a saved `true`, reads as off.
+- **Keys that take nothing from anyone.** Two or more of Control, Option and Command, Shift if wanted, and one letter or
+  digit. Fewer modifiers would take an app's own shortcut (⌘S, ⇧⌘N) away from every app; a function, media or other key
+  is refused, so the plugin never starts its event tap (below). Keys macOS answers itself are refused or found taken:
+  a short list by name (Lock Screen ⌃⌘Q, Look Up ⌃⌘D, Full Screen ⌃⌘F, the Dock's ⌥⌘D, Hide Others ⌥⌘H, Minimize All
+  ⌥⌘M, Close All ⌥⌘W, Zoom ⌥⌘8, Invert Colours ⌃⌥⌘8), and the shortcuts this Mac has turned on, read from macOS
+  (`CopySymbolicHotKeys`), the person's own changes in Keyboard › Shortcuts included.
+- **Taken says so.** Keys macOS answers, and keys macOS refuses to register, show "Another app or macOS already uses
+  ⌃⌥⌘J. Choose other keys." and are not held. What cannot be seen: another app's own hot key. macOS lets several apps
+  register the same key and tells each of them (`CarbonEvents.h`), so registering it does not fail; pressing it then
+  does both things. The person sees that and picks other keys.
+- **What the key reads is a look's, with a look's refusals.** The app that has the keyboard (`AXFocusedApplication`), its
+  frontmost window (the first `AXWindows` gives, as a look with no window named), walked by the same desk to at most 400
+  elements and 30 levels. Never Manut AI or another copy of it (pressed with Manut AI in front, it says to press the key
+  in the app to bring in), System Settings, Keychain Access, Passwords, macOS's prompts and helpers, an app that does not
+  run as the person, a window that shows one of Manut AI's pages by its address or title, or what a password field
+  holds (named, never read). Nothing while the screen is locked. Nothing on the Mac is changed: a snapshot only reads.
+- **Masked before it leaves the shell.** Every name, title and value loses its invisible format characters and control
+  characters, a link that answers an ask loses its token (`/approve/…`, `room.rs` `hide_links`), and text that looks
+  like a key or a password becomes `••••` through the app's one masker (`src/lib/secrets.json`, the shell's
+  `tasks.rs` `mask_secrets`, the same rules the vault's and every other surface's text goes through). Each is counted.
+  Then the lines are cut: 2,000 characters a value, 200 a name, 8,000 in all.
+- **Shown first, never sent.** Pressing the key brings Manut AI to the front and opens a new chat with Home's member
+  (Buddy, the runtime's default) whose box holds the snapshot as text the person reads and edits: a line naming the app
+  and the window, a line saying Manut AI read it from that window and that it is the app's text, not the person's, and
+  gives no permission (as another chat's context says, item 97), how many keys, approval links and password fields were
+  hidden, whether it was cut, the window's lines in a fence longer than any backticks in them, and a line that ends it.
+  The caret waits after it for the person's ask. Nothing goes to the agent until Send; the only thing the runtime is
+  asked for is the new, empty chat. When no chat can be made (no team yet, the runtime away), the block is kept in
+  Drafts on Home and a line says so.
+- **No permission, no surprise.** Without Accessibility the key reads nothing and Manut AI opens on one line ("To read a
+  window, Manut AI needs Accessibility...") with the same Open button Settings › Computer has, which opens the pane and
+  grants nothing. macOS is never asked: no prompting call is named in `computer/` (`mod.rs`
+  `reading_the_permissions_never_prompts` reads `snap.rs` too, and now refuses `CGEventTapCreate` and
+  `CGRequestListenEventAccess` as well). A window that is never read, nothing in front, or a locked screen say so on the
+  same line.
+- **A picture only if asked.** A second switch, off, adds a picture of the window to the box, and only when Screen
+  capture is already allowed (`CGPreflightScreenCaptureAccess`); otherwise the block says no picture was taken. A
+  picture is not masked, and the switch's line says so.
+- **The page cannot register keys.** The plugin's four commands are given to no page (`capabilities/default.json`), so
+  only the shell registers, from the person's change in Settings. The App Store edition, whose sandbox refuses
+  accessibility, registers nothing and does not show the rows; nor does Windows or Linux.
+
+### What the platform gives
+
+| What | Fact | Source |
+| --- | --- | --- |
+| The key | Tauri's global-shortcut plugin 2.4.1 (Apache-2.0 OR MIT) registers through global-hotkey 0.8.0, which on macOS calls Carbon's `RegisterEventHotKey` with no options for a letter or digit, and `CGEventTapCreate` only for a media key | the crates' source, `platform_impl/macos/mod.rs` |
+| Several apps, one key | "Hot keys are normally non-exclusive: when the key is pressed, notification events are sent to all registrants for that hotkey"; `eventHotKeyExistsErr` only for the same process, or for two exclusive registrations | `HIToolbox/CarbonEvents.h`, `CarbonEventsCore.h` |
+| macOS's own shortcuts | `CopySymbolicHotKeys` returns "the system-wide symbolic hotkeys that are defined in the Keyboard preferences pane" with `kHISymbolicHotKeyCode`, `kHISymbolicHotKeyModifiers` (Carbon's bits) and `kHISymbolicHotKeyEnabled`; "It does not include customized application-specific command keys"; not thread safe. This Mac listed 234 on 27 Nov 2026, ⌘⇧3 as key 20 with 768 | `HIToolbox/CarbonEvents.h`, read on this Mac |
+| The app in front | The system-wide element's `AXFocusedApplication` and `AXUIElementGetPid`; a Carbon hot key does not bring Manut AI to the front, so it is the app the person was in | `HIServices/AXAttributeConstants.h`, `AXUIElement.h` |
+| Key places | A hot key is a key's place (`kVK_ANSI_M` is 0x2E), the same place on every layout; the stand-in U.S. layout's table holds the same codes | `HIToolbox/Events.h`, `stand.rs` |
+
+### Its tests
+
+`snap.rs`: `the_key_is_off_by_default_and_nothing_is_registered_until_it_is_turned_on`,
+`turning_it_on_registers_the_keys_and_off_lets_them_go`, `keys_another_app_holds_say_they_are_taken`,
+`keys_macos_answers_itself_are_taken_and_never_registered`, `only_two_modifiers_and_a_letter_or_digit_can_be_the_key`,
+`elsewhere_nothing_is_registered`, `one_snapshot_at_a_time`, `a_snapshot_reads_the_front_window_as_a_look_does`,
+`without_accessibility_nothing_is_read_and_the_page_is_told_what_is_needed`, `refused_windows_are_never_read`,
+`secrets_and_approval_links_are_masked_and_counted`, `a_snapshot_is_bounded_in_size_and_depth`,
+`a_picture_only_when_asked_and_screen_capture_is_allowed`, `the_page_is_given_none_of_the_plugins_commands`,
+`what_was_taken_reaches_the_page_in_its_own_names`; `mac.rs` `this_macs_own_shortcuts_are_read_without_asking`. The page:
+`src/computer/snapshot.test.ts` (the block in four languages, the fence, reading the shell's answer, opening it through
+the app's own store with nothing but the new chat asked of the runtime), `src/settings/SnapshotRows.test.tsx`, and
+`e2e/app-snapshot.spec.ts` (the stand-in event opens the new chat with the block in its box, nothing is sent until Send
+and then the edited block goes once; a picture joins the box as a file; without Accessibility the line and its Open
+button and no chat; Settings' switch, keys and taken line). The key itself and a real window are the owner's steps below.
+
 ## What the app declares
 
 Nothing new: no usage line exists for either permission and no entitlement covers either (above), so `Info.plist` and
@@ -302,7 +383,31 @@ On the Mac app built from this branch:
    the screen was locked and nothing was done.
 10. After installing the next unsigned update, open Settings › Computer: expect both Off until turned off and on again.
 
+The snapshot key (item 104), on the Mac app built from this branch:
+
+11. Settings › Computer › Snapshot of any app: the switch reads Off, the keys box ⌃⌥⌘M, and the line "Off. No key is set
+    with macOS". With Manut AI in the background, press ⌃⌥⌘M in TextEdit: nothing happens.
+12. Turn the switch On: the line reads "On. Press ⌃⌥⌘M in any app." No macOS prompt appears, then or later.
+13. With Accessibility Off (Settings › Computer), click into TextEdit and press ⌃⌥⌘M: Manut AI comes to the front with
+    one line saying it needs Accessibility and an Open button; Open shows the Accessibility pane. No chat was made.
+14. With Accessibility on, open a TextEdit document holding a few lines and `ghp_` followed by 36 letters and digits,
+    click into it and press ⌃⌥⌘M: Manut AI comes to the front on a new chat with Buddy whose box starts "From TextEdit,
+    window ...", says one key was hidden, and shows the document's lines with `••••` in place of the key. Nothing is
+    sent: edit it, add a question, press Send, and only then does Buddy answer.
+15. Press ⌃⌥⌘M with System Settings, Keychain Access or Manut AI itself in front: a line says it is never read, or to
+    press the key in the app to bring in; no chat. Open an approval link from the pilot in Safari and press it there:
+    refused the same way.
+16. In the keys box press ⌃⌘S or another shortcut System Settings › Keyboard › Keyboard Shortcuts lists as on: the line
+    says another app or macOS uses it. Press ⌘M: it asks for two of Control, Option and Command.
+17. Turn on Picture of the window with Screen capture allowed and press the key over TextEdit: the box also holds a
+    picture of the window. With Screen capture off, the block says no picture was taken.
+18. Turn the switch Off: ⌃⌥⌘M does nothing again in any app. Quit and reopen Manut AI with it On: the key works without
+    opening Settings.
+
 ## Needs the owner
+
+- **The suggested keys.** ⌃⌥⌘M is the suggestion (no shortcut macOS answers on this Mac, and three modifiers keep it out
+  of apps' menus). Another default is a one-line change (`snap.rs` `SUGGESTED`).
 
 - **A Developer ID signature** (item 63's Apple secrets), so both permissions survive updates.
 - **Which agents get it.** Only Claude Code chats (Buddy's and Kit's) have it: their asks are cards the shell sees.
