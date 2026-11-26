@@ -86,7 +86,7 @@ Grab the latest `.dmg` from [Releases](https://github.com/mygogocash/manut-ai/re
 
 ## Run it locally
 
-You need Node 22, [pnpm](https://pnpm.io) and, for the desktop shell, stable Rust.
+You need Node 26 (the LTS; `.nvmrc` says so), [pnpm](https://pnpm.io) and, for the desktop shell, stable Rust.
 
 ```bash
 pnpm install          # only esbuild and workerd may run install scripts (pnpm-workspace.yaml)
