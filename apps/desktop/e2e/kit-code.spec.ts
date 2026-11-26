@@ -85,6 +85,12 @@ test("the dial's level changes what Kit does alone, and going live still asks", 
   await expect(page.getByTestId("card-approval").locator("button")).toHaveText(["No", "Allow once"]);
 });
 
+test("a script run by its name shows what the script runs, from the lane's package.json", async ({ page }) => {
+  await startIn(page, "/kit build");
+  await expect(page.getByTestId("card-kit-say")).toHaveText("Builds the project.");
+  await expect(page.getByTestId("card-kit-script")).toHaveText("The build script runs: vite build");
+});
+
 test("a key typed into the code is never shown, and a commit then asks with the file named", async ({ page }) => {
   const id = await startIn(page, "/kit key");
   await expect(page.getByText("I put the PromptPay key in src/config.ts.")).toBeVisible();

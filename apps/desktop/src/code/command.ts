@@ -1576,6 +1576,32 @@ export function readCommand(line: string, where: Where): ReadCommand {
   return { action, outside, saves, rule, say: s };
 }
 
+/** A package manager's own subcommands: none of them runs a script of the project's by its name. */
+const PM_OWN = new Set([
+  "add", "install", "i", "in", "ci", "remove", "rm", "uninstall", "un", "unlink", "update", "up", "upgrade", "dedupe", "prune", "audit", "dlx",
+  "exec", "x", "publish", "deploy", "pack", "config", "ls", "list", "why", "outdated", "view", "info", "show", "root", "bin", "help", "doctor",
+  "explain", "licenses", "create", "init", "link", "global", "store", "env", "setup", "import", "patch", "rebuild", "fetch", "server", "pkg",
+]);
+
+/** The name of the package.json script `line` runs, when it is one simple command that runs a script of the folder it runs
+ *  in by its name (`pnpm run db:migrate`, `pnpm test`, `yarn dev`, `npm start`); null for anything else, a script of
+ *  another folder (`--filter`, `-C`, `-r`) among them. The name says nothing of what the script does: its card shows that. */
+export function scriptRun(line: string): string | null {
+  const { cmds, opaque } = lex(line);
+  if (opaque || cmds.length !== 1 || cmds[0].redirects.length) return null;
+  const words = cmds[0].words;
+  const pm = (words[0] ?? "").split(/[\\/]/).pop() ?? "";
+  if (!["pnpm", "npm", "yarn", "bun"].includes(pm)) return null;
+  if (has(words, "--filter", "-F", "-C", "--dir", "--prefix", "-r", "--recursive", "--workspace", "-w", "--cwd", "--workspaces")) return null;
+  const ops = operands(words, 1, PM_VALUE);
+  const sub = ops.length ? words[ops[0]] : undefined;
+  if (sub === undefined) return null;
+  if (sub === "run" || sub === "run-script") return ops.length > 1 ? words[ops[1]] : null;
+  if (["test", "t", "tst"].includes(sub)) return pm === "bun" ? null : "test";
+  if (pm === "npm") return ["start", "stop", "restart"].includes(sub) ? sub : null;
+  return PM_OWN.has(sub) ? null : sub;
+}
+
 /** Whether a kept rule covers `line`: one simple command, read in full, whose first words are the rule's (all of them,
  *  and nothing more, for an exact rule). */
 export function ruleMatches(rule: Rule, line: string): boolean {

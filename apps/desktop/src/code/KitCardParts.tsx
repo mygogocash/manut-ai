@@ -3,6 +3,7 @@
 // allow in this project, and the settled line of an ask Kit's dial answered by itself. The card itself stays
 // chat/cards/Cards.slot.tsx's, and every button settles through its one path, `settleApproval`.
 import "./kit.css";
+import { useEffect } from "react";
 import { t, type Key } from "../i18n";
 import type { ApprovalChoice } from "../lib/protocol";
 import { getSessions } from "../sessions/sessions";
@@ -10,6 +11,8 @@ import { workDir } from "./laneBranch";
 import type { ApprovalItem } from "../state/store";
 import { askOfItem, kitAnswered, kitCard, useKeysVersion, type AskContext, type KitCard } from "./kitAsks";
 import { useKitProjects } from "./project";
+import { scriptRun } from "./command";
+import { readPreview, usePreviewRecord } from "./previewStore";
 
 /** Where a coding session's ask is asked, from its chat key (`agent:<id>`); null for any other chat. */
 function sessionContext(chat: string): AskContext | null {
@@ -22,14 +25,24 @@ function sessionContext(chat: string): AskContext | null {
 }
 
 /** Kit's reading of an open ask of chat `chat`, read again when a project's settings or a session's keys change; null
- *  for an ask Kit's words do not cover. */
+ *  for an ask Kit's words do not cover. A command that runs a package.json script by its name shows what the script runs:
+ *  the lane's folder is read for it as its Preview reads it (only a lane's own folder is read, so a session in the
+ *  developer's folder shows the name alone). */
 export function useKitCard(chat: string, item: ApprovalItem): KitCard | null {
   useKitProjects();
   useKeysVersion();
-  if (item.resolved || item.expired || item.outdated) return null;
-  const ctx = sessionContext(chat);
+  const record = usePreviewRecord(chat);
+  const open = !(item.resolved || item.expired || item.outdated);
+  const ctx = open ? sessionContext(chat) : null;
+  const line = item.tool?.line ?? item.command;
+  const wants = !!ctx && scriptRun(line) !== null;
+  const dir = ctx?.root ?? "";
+  const known = record.dir === dir && (record.project !== null || record.reading || record.readWhy !== null);
+  useEffect(() => {
+    if (wants && !known) void readPreview(chat, dir);
+  }, [wants, known, chat, dir]);
   if (!ctx) return null;
-  return kitCard(askOfItem(chat, item), ctx);
+  return kitCard(askOfItem(chat, item), ctx, record.dir === dir ? record.project?.packageJson : null);
 }
 
 /** A button of Kit's card. "Always allow in this project" allows this one ask once, then keeps the rule. */
@@ -58,6 +71,11 @@ export function KitSays({ card }: { card: KitCard }) {
       <p className="card-kit-say" data-testid="card-kit-say">
         {t(card.say.key, card.say.vars)}
       </p>
+      {card.script && (
+        <p className="card-kit-say" data-testid="card-kit-script">
+          {t("kit.ask.script", { name: card.script.name, text: card.script.text })}
+        </p>
+      )}
       {card.keys.length > 0 && (
         <p className="card-kit-key" role="note" data-testid="card-kit-key">
           {t("kit.ask.key", { files: card.keys.join(", ") })}

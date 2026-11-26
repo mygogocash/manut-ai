@@ -1844,6 +1844,7 @@ export const ko: Record<Key, string> = {
   "kit.ask.no": "아니요",
   "kit.ask.always": "이 프로젝트에서 항상 허용",
   "kit.ask.key": "이 변경에 키가 있어요({files}). 저장하기 전에 빼 주세요.",
+  "kit.ask.script": "{name} 스크립트가 실행하는 내용: {text}",
   "kit.done.reads": "Kit이 혼자 했어요 · 아무것도 바꾸지 않아요",
   "kit.done.dial": "Kit이 혼자 했어요 · {level}",
   "kit.done.rule": "Kit이 혼자 했어요 · 이 프로젝트에서 항상 허용",

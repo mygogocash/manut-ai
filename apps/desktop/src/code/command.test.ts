@@ -2,7 +2,7 @@
 // the project, the rule "Always allow in this project" would keep, and what it does in words. The project is the
 // canvas's baanmali-preorder in Fon's home folder.
 import { describe, expect, it } from "vitest";
-import { insideProject, readCommand, ruleMatches, ruleText, type Rule, type Where } from "./command";
+import { insideProject, readCommand, ruleMatches, ruleText, scriptRun, type Rule, type Where } from "./command";
 
 const root = "/Users/fon/baanmali-preorder";
 const at: Where = { cwd: root, root, home: "/Users/fon", branch: "kit/promptpay-qr" };
@@ -326,5 +326,14 @@ describe("Always allow in this project", () => {
     const rm = { words: ["rm", "-rf", "./build"], exact: true } as const satisfies Rule;
     expect(ruleMatches(rm, "rm -rf ./build")).toBe(true);
     expect(ruleMatches(rm, "rm -rf ./build ./src")).toBe(false);
+  });
+});
+
+describe("the package.json script a command runs by its name", () => {
+  it("is named for a script of the folder the command runs in, and for nothing else", () => {
+    for (const [line, name] of [["pnpm run db:migrate", "db:migrate"], ["pnpm db:migrate", "db:migrate"], ["pnpm test", "test"], ["npm test", "test"], ["npm run lint", "lint"], ["npm start", "start"], ["yarn dev", "dev"], ["bun run build", "build"]] as const)
+      expect([line, scriptRun(line)]).toEqual([line, name]);
+    for (const line of ["pnpm add qrcode", "pnpm install", "npm ci", "pnpm exec vitest", "pnpm --filter web test", "pnpm -C sub build", "pnpm -r test", "npm build", "bun test", "pnpm run", "vitest run", "pnpm test && pnpm build", "pnpm test > out.txt", "pnpm run $(x)"])
+      expect([line, scriptRun(line)]).toEqual([line, null]);
   });
 });

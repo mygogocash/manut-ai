@@ -1844,6 +1844,7 @@ export const ja: Record<Key, string> = {
   "kit.ask.no": "いいえ",
   "kit.ask.always": "このプロジェクトで常に許可",
   "kit.ask.key": "この変更にはキーが含まれています（{files}）。保存する前に取り出してください。",
+  "kit.ask.script": "{name} スクリプトが実行する内容: {text}",
   "kit.done.reads": "Kit がひとりで行いました · 何も変えません",
   "kit.done.dial": "Kit がひとりで行いました · {level}",
   "kit.done.rule": "Kit がひとりで行いました · このプロジェクトで常に許可",
