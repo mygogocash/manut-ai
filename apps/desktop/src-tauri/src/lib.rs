@@ -26,12 +26,14 @@ mod lane_clean;
 mod lane_config;
 mod lane_diff;
 mod past_chats;
+mod project_notes;
 mod platform;
 mod outpost;
 mod power;
 mod review;
 mod preview;
 mod providers;
+mod remote_keys;
 #[cfg(all(test, unix))]
 mod pty_bench;
 mod running;
@@ -597,6 +599,48 @@ async fn shop_cache_seal_key_clear() -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(shop_cache_key::clear).await.map_err(|_| "keychain".to_string())?
 }
 
+/// What the keychain keeps for reaching this Mac from a phone (remote_keys.rs): the relay key and the paired phones, as
+/// the JSON document the page reads once and imports at once as keys script cannot read back; null when none is kept.
+/// `unavailable` on a computer with no keychain support, where the page keeps nothing. Reading makes nothing.
+#[tauri::command]
+async fn remote_keys_read() -> Result<Option<String>, String> {
+    let text = tauri::async_runtime::spawn_blocking(remote_keys::read).await.map_err(|_| "keychain".to_string())??;
+    Ok(text.map(|t| t.as_str().to_owned()))
+}
+
+/// Keeps the Mac's relay key, made by the page once the person turned the switch on. Refused (`exists`) when one is kept.
+#[tauri::command]
+async fn remote_keys_set_host(host: remote_keys::HostKey) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || remote_keys::change(|doc| remote_keys::with_host(doc, host)))
+        .await
+        .map_err(|_| "keychain".to_string())?
+}
+
+/// Keeps a newly paired phone. Refused for a malformed record (`invalid`), an id or a passkey already kept (`exists`,
+/// `credential_taken`), and past seven phones (`full`).
+#[tauri::command]
+async fn remote_keys_add_device(device: remote_keys::Device) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || remote_keys::change(|doc| remote_keys::with_device(doc, device)))
+        .await
+        .map_err(|_| "keychain".to_string())?
+}
+
+/// Notes when a phone was last seen and its passkey's counter, which may not go down (`counter`).
+#[tauri::command]
+async fn remote_keys_touch_device(id: String, last_seen: u64, sign_count: u32) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || remote_keys::change(|doc| remote_keys::with_touch(doc, &id, last_seen, sign_count)))
+        .await
+        .map_err(|_| "keychain".to_string())?
+}
+
+/// Forgets a phone at Unpair, its K and passkey with it.
+#[tauri::command]
+async fn remote_keys_remove_device(id: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || remote_keys::change(|doc| Ok(remote_keys::without_device(doc, &id))))
+        .await
+        .map_err(|_| "keychain".to_string())?
+}
+
 /// Keystrokes (and pastes) from the terminal view into session `id`.
 #[tauri::command]
 async fn session_write(shell: State<'_, Shell>, id: u32, data: String) -> Result<(), String> {
@@ -635,10 +679,12 @@ async fn session_close_all(shell: State<'_, Shell>) -> Result<(), String> {
 /// Start allow-listed agent `agent` in folder `cwd` as a chat: its structured mode (the fixed arguments in
 /// the allow-list), with events for the chat view on `on_event` and, once, `{event:"exit", code, error}`.
 /// Only an agent id, a folder, optionally a Claude Code session id or Codex thread id, optionally the account a
-/// restarted session ran with, and the SESSIONS id (`s<digits>`, whose attachment folder a Claude Code chat may
-/// read) cross from the UI.
+/// restarted session ran with, the SESSIONS id (`s<digits>`, whose attachment folder a Claude Code chat may
+/// read) and the permission mode the chat starts in (one the agent offers, `agent_chat::start_mode`; none: its careful
+/// one) cross from the UI.
 #[tauri::command]
-async fn chat_start(shell: State<'_, Shell>, agent: String, cwd: String, resume: Option<String>, account: Option<String>, session: Option<String>, suggest: Option<bool>, on_event: Channel<serde_json::Value>) -> Result<u32, String> {
+#[allow(clippy::too_many_arguments)]
+async fn chat_start(shell: State<'_, Shell>, agent: String, cwd: String, resume: Option<String>, account: Option<String>, session: Option<String>, suggest: Option<bool>, mode: Option<String>, on_event: Channel<serde_json::Value>) -> Result<u32, String> {
     let chats = shell.chats.clone();
     tauri::async_runtime::spawn_blocking(move || {
         // The same account as a terminal session of this agent: its home variable, or nothing ("This computer"), with the
@@ -653,7 +699,7 @@ async fn chat_start(shell: State<'_, Shell>, agent: String, cwd: String, resume:
             ("claude", Some(s)) => user_home().and_then(|h| session_files::session_dir(&h, s)).ok(),
             _ => None,
         };
-        chats.start_agent_with(&agent, std::path::Path::new(&cwd), resume.as_deref(), &account_env, files.as_deref(), suggest.unwrap_or(false), move |out| {
+        chats.start_agent_with(&agent, std::path::Path::new(&cwd), resume.as_deref(), &account_env, files.as_deref(), suggest.unwrap_or(false), mode.as_deref(), move |out| {
             let _ = on_event.send(match out {
                 ChatOut::Event(e) => e,
                 ChatOut::Exit(code, error) => serde_json::json!({"event": "exit", "code": code, "error": error}),
@@ -931,6 +977,15 @@ async fn workflows_read() -> Result<workflows::Folder, String> {
 async fn workflows_folder() -> Result<String, String> {
     let home = user_home()?;
     tauri::async_runtime::spawn_blocking(move || workflows::make(&home).map(|p| p.to_string_lossy().into_owned())).await.map_err(|e| e.to_string())?
+}
+
+/// Settings › Workflows (item 91): whether a workflow's project is a folder a run may start in (workflows.rs `project`): its real
+/// path, or a short code (`missing`, `link`, `too_broad`, `app_folder`, `not_repo`, `no_git`). Asked when the person allows a
+/// workflow and again before every run. Only reads, and asks git nothing but where its top folder is.
+#[tauri::command]
+async fn workflows_project(project: String) -> Result<String, String> {
+    let home = user_home()?;
+    tauri::async_runtime::spawn_blocking(move || workflows::project(&home, &project).map_err(str::to_string)).await.map_err(|e| e.to_string())?
 }
 
 /// Settings › Worktrees: the folder the person chose for lanes' folders, checked and made (lane.rs `check_lanes_root`): its real
@@ -1620,6 +1675,7 @@ fn commands(invoke: tauri::ipc::Invoke) -> bool {
         lane_root_check,
         workflows_read,
         workflows_folder,
+        workflows_project,
         agent_config_list,
         skill_bundle_read,
         skill_link_read,
@@ -1677,6 +1733,11 @@ fn commands(invoke: tauri::ipc::Invoke) -> bool {
         shop_cache_clear,
         shop_cache_seal_key,
         shop_cache_seal_key_clear,
+        remote_keys_read,
+        remote_keys_set_host,
+        remote_keys_add_device,
+        remote_keys_touch_device,
+        remote_keys_remove_device,
         term_link::term_link_take,
         disk::disk_watch,
         turn_files::turn_files_take,

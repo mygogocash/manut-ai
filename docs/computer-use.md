@@ -47,6 +47,8 @@ headers and the Mac's own files. Nothing was read from another app's window, no 
 | Sensitive apps | Bundle identifiers read from this Mac's own `Info.plist` files: System Settings `com.apple.systempreferences`, Keychain Access `com.apple.keychainaccess`, Passwords `com.apple.Passwords`, the login window, SecurityAgent, Touch ID's prompt, TCC's prompt service, the Accessibility prompt and the others in `room.rs` `REFUSED` | `/System/...` |
 | A program's bundle identifier | `NSRunningApplication`'s `runningApplicationWithProcessIdentifier:` and `bundleIdentifier` ("the `CFBundleIdentifier` of the application, or nil if the application does not have an `Info.plist`"); it tracks "only user applications", so the `Info.plist` of the bundle a program runs from (`<name>.<kind>/Contents/MacOS/`) is read when it has none. SecurityAgent runs from `SecurityAgent.bundle` (`com.apple.SecurityAgent`) and the Touch ID and password prompt from `coreautha.bundle` (`com.apple.LocalAuthentication.UIAgent`) | AppKit's `NSRunningApplication.h`, the two bundles' `Info.plist` on this Mac |
 | Who a program runs as | `proc_pidinfo` with `PROC_PIDTBSDINFO`: `pbi_uid` and `pbi_ruid` | `sys/proc_info.h`, `libproc.h` |
+| Keyboard layouts | `TISCopyCurrentKeyboardLayoutInputSource`, `TISCreateInputSourceList`, `kTISPropertyUnicodeKeyLayoutData` ("refers to the 'uchr' keyboard layout data"), "you must call TextInputSources API on the main thread"; `UCKeyTranslate` with `LMGetKbdType`, `kUCKeyActionDown`, `kUCKeyTranslateNoDeadKeysMask`, modifier state "((EventRecord.modifiers) >> 8) & 0xFF" (`cmdKey` = 1 << 8) | `HIToolbox/TextInputSources.h`, `HIToolbox/Events.h`, `CarbonCore/UnicodeUtilities.h` |
+| Where keys go, what a page is | `AXFocusedUIElement` and `AXFocusedWindow`; `AXURL` ("A CFURLRef ... Required for elements that represent a disk or network item") and `AXDocument` | `HIServices/AXAttributeConstants.h` |
 
 ## What was lifted from Orca
 
@@ -93,10 +95,20 @@ macOS never asked, and it could spend a yes the person gave for that chat's own 
   process is named, nothing is served.
 - Parents, not "the parent": a `claude` on the person's `PATH` can be a wrapper that stays Claude Code's parent instead
   of replacing itself (one on this Mac does), and then the process the shell started is the server's grandparent.
-- What is still let in, and why that is the same chat: a program that chat's own Claude Code started (its shell
-  commands, its hooks) can run Manut AI's program with the token. It reaches only that chat's room: the apps the person
-  let that chat look at and the yeses they gave on that chat's cards, each for exactly one call. Another chat, a
-  terminal or anything started outside the chat is refused whatever it holds.
+- The first caller holds the room (item 89, security review of 26 Nov 2026; `hub.rs` `holds_room`, test
+  `a_chats_room_answers_only_its_first_caller_while_that_caller_lives`). A program the chat's own Claude Code starts (a
+  hook in the person's own `~/.claude/settings.json`, which another program of theirs may have written) passes both
+  checks above once it runs Manut AI's program with the token. So the first caller that reaches a chat's room is pinned by
+  the pid and audit token the kernel reported, and every other caller for that chat is refused ("answers only the first
+  server that reached this chat") while that first one lives, which the kernel says by its token still naming a running
+  process. Once it has ended or run another program (Claude Code starting its server again), the next caller that passes
+  the checks takes its place. A new chat starts with an empty room.
+- What is still let in: a program under that chat's own Claude Code that calls before the chat's server first does, or
+  after the server ended. It reaches only that chat's room: the apps the person let that chat look at and the yeses they
+  gave on that chat's cards, each for exactly one call, and the chat's own server is then the one refused. A project's own
+  files can no longer add such a hook (chats start with `--setting-sources user`, see docs/code-editor.md, "What a
+  project's own files cannot do"). Another chat, a terminal or anything started outside the chat is refused whatever it
+  holds.
 - Checked on this Mac with the real kernel (`the_kernel_names_the_caller_and_a_token_read_before_an_exec_names_nothing`):
   the peer's process and parent read right, and the kernel gives a peer's audit token as the process is when asked, so
   a token read before an exec names nothing after it. Starting Claude Code for real is a step for the owner (below).
@@ -113,6 +125,29 @@ Reads (`room.rs` tests unless named):
 - Never Manut AI's own windows (so an agent cannot read or press its own asks), System Settings, Keychain Access,
   Passwords or the prompts (`manut_ai_system_settings_and_the_keychain_are_refused_before_any_card`; in the chat,
   `tap.rs` `a_refused_target_is_denied_with_its_reason_and_never_shown_as_a_card`).
+- Manut AI's own asks wherever they show (second security review, 26 Nov 2026). Only this process and its bundle
+  identifier were refused, so the web pages that answer an ask (approve a reply, delete the shop's data, join a shop,
+  the owner's web app) could be looked at and pressed in an allowed browser, and so could another copy of Manut AI.
+  Now (`own_window`, `own_address`, `own_program` in `room.rs`):
+  - Another copy of Manut AI is its own windows: a bundle identifier under `xyz.manut.`, a name that is Manut AI's, or
+    the program `manut`, as a build that is not a bundle runs it.
+  - A window is refused, for a look and for every action, when a page it shows is one of Manut AI's: any page of its
+    host (`manut.xyz` and its subdomains, `WEB_ORIGIN`), or a link page (`/approve/`, `/delete/`, `/join/` with a token)
+    on any host, read from the window's document (`AXDocument`) and the page of each web area the control is in
+    (`AXURL`, read up its parents). The pages forbid framing (`frame-ancestors 'none'`), so a page inside another
+    site's page is not a way in.
+  - For a browser that gives no address, by the titles those pages set (`apps/web/src/*/strings.ts` `documentTitle`
+    and the desktop's `index.html`, which a test reads, so a renamed page is not missed): any window whose title holds
+    "Manut AI", "Approve a reply", "Delete your shop's data" or "Join a shop" is refused.
+  - A click or typing is checked in the control's window at the ask and again at the run, a key press and a menu item
+    in the window that has the keyboard, so a yes given while a tab showed a shop is not used once it shows an approval
+    page (`manut_ais_own_windows_and_pages_are_refused_wherever_they_show`, `manut_ais_own_pages_are_known_by_their_address`,
+    `every_title_manut_ais_own_pages_set_is_known`).
+  - A link that answers an ask by itself approves for whoever opens it, so its token is taken out of every name, value
+    and title an agent reads, in any app (`/approve/…`, `an_approval_link_is_never_read_out`).
+  - What remains: a browser that gives neither the page's address nor its title; a picture of a window can still show a
+    link; and Chromium's `AXURL` on its web areas is read but was not checked against a real Chrome here (a step for
+    the owner below).
 - The prompts that are not `.app`s (security review, 25 Nov 2026). The bundle identifier used to be read only for a
   program under `.app/Contents/MacOS/`, so SecurityAgent (`SecurityAgent.bundle`) and the Touch ID and password prompt
   (`coreautha.bundle`) read as having none and missed the list. Now it is the system's own (`NSRunningApplication`),
@@ -120,6 +155,19 @@ Reads (`room.rs` tests unless named):
   and besides the list, any window of a program that does not run as this person, and of one with no bundle identifier
   that is under `/System/` or whose program cannot be read, is refused
   (`macos_prompts_are_refused_whatever_kind_of_bundle_they_are`).
+- macOS's helpers, by where they run (second security review, 26 Nov 2026). SecurityAgentHelper (the XPC service in
+  `SecurityAgent.bundle` that draws its password sheet, `com.apple.SecurityAgentHelper.arm64`) and
+  LocalAuthenticationRemoteService (the Touch ID and password sheet, an XPC service of `LocalAuthenticationUI.framework`)
+  run as the person, have bundle identifiers and live under `/System/`, so the rule above let them in. Now any program
+  of macOS (under `/System/`, `/usr/` but not `/usr/local/`, `/bin/`, `/sbin/` or `/Library/Apple/`) is let in only
+  when it is an app a person opens: an `.app` right in `/System/Applications/`, its `Utilities/`, Safari's app cryptex,
+  `/System/Library/CoreServices/Applications/`, or the Finder. Every other kind (XPC services, `.bundle`s, `.appex`es,
+  apps nested in frameworks or in other apps, macOS's own agents and alerts such as Notification Center and Control
+  Center, programs in `/usr/libexec/`) is refused whatever it is called, and so is a program whose path cannot be read,
+  even with a bundle identifier. The two helpers are named in `REFUSED` too
+  (`macos_helpers_that_are_not_apps_a_person_opens_are_refused_by_where_they_run`). On this Mac, UserNotificationCenter
+  and AuthorizationPromptService declare no agent key in their `Info.plist`, so a rule on agents alone would have missed
+  them: that is why the rule names where apps are, not what a helper is.
 - At most 400 elements and 30 levels a look; a picture only with Screen capture
   (`a_picture_comes_only_with_screen_capture`).
 
@@ -153,6 +201,53 @@ Writes:
   - With Screen capture, the card shows a picture of just that part of the window (`CGWindowListCreateImage` with the
     control's frame), for a control up to 640 by 320 points and 256 KB; a larger one, such as a document's text area,
     has none (`a_card_shows_a_small_picture_of_the_control_with_screen_capture`, `computer.test.tsx`).
+- A key is the character it types, on any keyboard (second security review, 26 Nov 2026). Keys were sent by their
+  place on a US keyboard (`kVK_ANSI_*`), so on a French (AZERTY) Mac a card that said Cmd+A sent the key that types Q
+  there and quit the app, past the blocked shortcuts, and Cmd+X on Dvorak did the same. Now (`keys.rs`, `Chord::code`):
+  - Return, Tab, Space, the two deletes, Escape, the arrows, Home, End, Page Up and Page Down keep their codes
+    (`Events.h`: "keycodes for keys that are independent of keyboard layout").
+  - A letter, digit or punctuation mark is sent by the key that types it on the layout in use
+    (`TISCopyCurrentKeyboardLayoutInputSource`, its `kTISPropertyUnicodeKeyLayoutData`, `UCKeyTranslate`), read with
+    Command held for a chord with Command: Thai and Russian type QWERTY letters then, which their shortcuts go by.
+  - That key is checked against every keyboard layout the person has turned on (`TISCreateInputSourceList`), alone and
+    with Command. If any reads it as a shortcut that is never sent, it is refused, naming the layout and what it would
+    do: French with ABC turned on reads Cmd+A's key as Cmd+Q, and "Dvorak - QWERTY Command" types Q alone where it
+    types X with Command.
+  - A character no key types on the layout in use (Cmd+1 on French, a letter alone on Thai) is refused in plain words.
+  - The layout is read again just before the key is sent; a layout changed since the yes sends nothing.
+  - TextInputSources must be called on the main thread of an app (its header), so the desk reads it there and waits at
+    most two seconds; no answer refuses.
+  - The tests' layouts (U.S., French, Dvorak, Dvorak - QWERTY Command, Thai) are this Mac's own, read again through the
+    same calls (`mac.rs` `the_stand_in_layouts_are_the_ones_this_mac_reads`), and every chord on each of them, with each
+    other turned on beside it, is checked (`no_layout_turns_a_chord_into_a_blocked_shortcut`,
+    `a_key_is_sent_by_the_key_that_types_it_on_the_layout_in_use`).
+  - What remains: macOS can keep a layout per document, and an app typing with another layout turned on than the one
+    in use could get another letter than the card's; none of those layouts can turn it into a blocked shortcut.
+- A key press is bound to where the keys go (second security review, 26 Nov 2026). It was bound only to the focused
+  window's title, and not at all when that title was empty, so a key allowed for one "Untitled" document could land in
+  another. Now the ask reads where the app's keys go (`AXFocusedWindow`, `AXFocusedUIElement`): the window's number
+  (`_AXUIElementGetWindow`) and title, and the focused control's role, name and place (`Place`, as a click's). The card
+  names the window and that control ("Control: text field “Name”"), and the yes holds only while all of them hold: a
+  different window (even with the same title or none), the keyboard in another control, or the control moved, and the
+  key is not pressed. When the window that has the keyboard cannot be told (no number, or the focused control is in
+  another window than the one macOS says has the keyboard), nothing is asked and nothing is sent. A key press into a
+  password field is refused like typing into one
+  (`a_key_goes_only_to_the_window_that_had_the_keyboard_at_the_ask`).
+- Typing says what it replaces (security review, 26 Nov 2026). The Mac puts typed text in place of a field's whole value
+  (`AXUIElementSetAttributeValue` with `AXValue`), so a card that read "Type into the text area: Thanks!" turned a page
+  of text into "Thanks!". Now what the field holds is read at the ask, as the Mac gives it:
+  - An empty field is typed into: "Type into <field> in <app>?".
+  - A field that holds anything (a space, an invisible character and a number count) is a different, stronger card:
+    "Replace everything in <field> (N characters) in <app>?", with "Replace with: <text>".
+  - The yes is bound to exactly what the field held at the ask. If it holds anything else when the action runs (filled
+    since a yes to type, or changed since a yes to replace), nothing is typed and the agent asks again, so a yes to type
+    never covers replacing (`typing_into_a_field_that_holds_text_says_it_replaces_everything`; the page draws a replace
+    card only with its count, `computer.test.ts`, `computerCard.test.ts`).
+  - A field whose content cannot be read is not asked about, since the card could not say what typing replaces.
+  - Inserting at the caret was not taken. Orca's `type-text` (at `a634526a`, `TextInput.replaceSelection`) reads the
+    field's whole value and its `AXSelectedTextRange`, splices the text in and writes the whole value back, skipping
+    Chromium, whose writes fire no input events: it still replaces a selection, and the app's text can change between
+    the read and the write. So the card could not promise it.
 - Nothing while the screen is locked, and a yes waiting then is spent (`nothing_runs_while_the_screen_is_locked`).
 - Never the Apple menu (`a_menu_item_is_chosen_by_its_path_and_never_from_the_apple_menu`), never a blocked shortcut
   (`keys.rs`).
@@ -180,13 +275,21 @@ On the Mac app built from this branch:
    socket's caller check with a real Claude Code: if every call says it did not come from the chat's server, the
    chat's server is not under the process Manut AI started, and that is a bug to report.) Then, from Terminal, run
    `ls ~/.manut/computer`: there is no `chats` folder.
-5. Ask "Type Hello into the TextEdit document": a card names TextEdit, the window, the text area and "Hello", and says the
-   control's name is the one TextEdit gives it. Press No: nothing is typed, and the agent does not ask again by itself.
-   Ask again and Allow once: Hello appears once. Ask it to click a button in a small dialog: with Screen capture on, the
+5. With an empty TextEdit document, ask "Type Hello into the TextEdit document": a card titled "Type into text area in
+   TextEdit?" names the window, the text area and "Hello", and says the control's name is the one TextEdit gives it.
+   Press No: nothing is typed, and the agent does not ask again by itself. Ask again and Allow once: Hello appears once.
+   Then ask "Type Thanks into the document": the card now reads "Replace everything in text area (5 characters) in
+   TextEdit?" with "Replace with: Thanks". Before answering, type a letter into the document yourself, then Allow once:
+   nothing is typed and the agent says the field changed. Ask it to click a button in a small dialog: with Screen capture on, the
    card shows a small picture of that button. Move the window after the card shows and before Allow once: the click is
    refused as moved, and the agent asks again.
 6. Ask for Cmd+S in TextEdit: a card says "Press Cmd+S in TextEdit?"; Allow once saves. Ask for Cmd+Q: refused, no card.
-7. Ask it to look at System Settings, Keychain Access, or Manut AI itself: refused, no card.
+   Turn on the French layout in System Settings › Keyboard › Text Input, select it, and ask for Cmd+A in a TextEdit
+   document: Allow once selects all and TextEdit stays open. Ask for Cmd+1: refused, naming the layout.
+7. Ask it to look at System Settings, Keychain Access, or Manut AI itself: refused, no card. Open an approval link from
+   the pilot in Safari and in Chrome, allow the agent to look at each browser, and ask it to look at that tab or press
+   Approve: refused, no card, in both. Ask it to read a LINE or Mail message that holds such a link: the link reads
+   `/approve/…`.
 8. With a login form open in Safari, ask it to read the password field: the tree says the field's content is never read.
 9. Lock the Mac (Ctrl+Cmd+Q) while the agent works on a request in an app, and unlock: whatever it tried meanwhile says
    the screen was locked and nothing was done.

@@ -48,7 +48,8 @@ test("the panel header is six tabs; the header keeps one control", async ({ page
     "Plans",
   ]);
   await expect(page.getByTestId("panel-tab-details")).toHaveAttribute("aria-selected", "true");
-  await expect(page.getByTestId("head-right").locator(":scope > *")).toHaveCount(2);
+  // the header right holds the panel button alone: the model is in the chat box since item 85f
+  await expect(page.getByTestId("head-right").locator(":scope > *")).toHaveCount(1);
   // the selected tab is gray, not the brand gradient
   const bg = await page.getByTestId("panel-tab-details").evaluate((e) => getComputedStyle(e).backgroundImage);
   expect(bg).toBe("none");
@@ -164,8 +165,11 @@ test("the closed panel takes no focus; it comes after the chat in tab order", as
   await page.goto("/");
   await chatOpen(page);
   await expect(page.getByTestId("details")).toHaveAttribute("inert", "");
-  // from the composer (focused on open), Tab leaves the page instead of entering the hidden panel
+  // from the composer (focused on open), Tab reaches the box's model button (in the box since item 85f), then leaves
+  // the page instead of entering the hidden panel
   await expect(page.getByTestId("composer")).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(page.locator(".cw").getByTestId("model-pill")).toBeFocused();
   await page.keyboard.press("Tab");
   expect(await page.evaluate(() => document.activeElement === document.body)).toBe(true);
   // the next stop is the page's first control: the side menu's brand mark (the sidebar's Add a bot before)
@@ -199,5 +203,6 @@ test("a bot with no other places opens Details from its name in the header", asy
   await expect(page.getByTestId("details-panel")).toBeVisible();
   await page.getByTestId("panel-tab-terminal").click();
   await expect(page.getByTestId("panel-terminal")).toBeVisible();
-  await expect(page.getByTestId("head-right").locator(":scope > *")).toHaveCount(2);
+  // the header right holds the panel button alone: the model is in the chat box since item 85f
+  await expect(page.getByTestId("head-right").locator(":scope > *")).toHaveCount(1);
 });

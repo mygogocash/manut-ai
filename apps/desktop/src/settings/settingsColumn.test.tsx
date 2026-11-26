@@ -25,10 +25,10 @@ const noop = () => {};
 
 describe("Settings' pages", () => {
   it("lists the everyday pages first and the developer pages under the hood, every id kept", () => {
-    expect(EVERYDAY_PAGES.map((p) => p.id)).toEqual(["general", "voice"]);
+    expect(EVERYDAY_PAGES.map((p) => p.id)).toEqual(["general", "voice", "remote"]);
     expect(HOOD_PAGES.map((p) => p.id)).toEqual(["terminal", "providers", "computer", "worktrees", "source", "artifacts", "mcp", "workflows", "developer"]);
     // the palette's order and every page's id are what they were
-    expect(APP_PAGES.map((p) => p.id)).toEqual(["general", "voice", "terminal", "providers", "computer", "worktrees", "source", "artifacts", "mcp", "workflows", "developer"]);
+    expect(APP_PAGES.map((p) => p.id)).toEqual(["general", "voice", "remote", "terminal", "providers", "computer", "worktrees", "source", "artifacts", "mcp", "workflows", "developer"]);
     expect(inHood("terminal")).toBe(true);
     expect(inHood("general")).toBe(false);
     expect(inHood("bot:kami")).toBe(false);

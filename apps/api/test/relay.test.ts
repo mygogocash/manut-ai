@@ -286,6 +286,20 @@ describe("relay routes", () => {
     }
   });
 
+  it("says in the public health answer whether the relay is on, and nothing else about it", async () => {
+    for (const [value, said] of [[undefined, "off"], ["0", "off"], ["1 ", "off"], ["1", "on"]] as const) {
+      const fixture = routeFixture();
+      if (value === undefined) delete fixture.target.RELAY_ENABLED;
+      else fixture.target.RELAY_ENABLED = value;
+      const health = await send(fixture.target, "/v1/health", { upgrade: false });
+      expect(health.status).toBe(200);
+      const body = (await health.json()) as Record<string, unknown>;
+      expect(body.relay).toBe(said);
+      expect(Object.keys(body).sort()).toEqual(["families", "ok", "relay", "service"]);
+      expect(fixture.forwarded).toEqual([]);
+    }
+  });
+
   it("rejects a malformed host id with 400", async () => {
     const fixture = routeFixture();
     // Too short, too long, outside base64url, the right length with a percent-escape, and empty.

@@ -1,0 +1,168 @@
+/* Settings › Sharing and access (RemotePage.tsx). The page's rows are Settings' own (.st-grp, .st-row); this sheet holds
+   only what is the page's alone, from the kit's form parts in packages/ui-kit/app.css (.btn, .btn.dark, .btn.ghost,
+   .input, .help, .dialog), copied here under the page's own class, as lanepane.css and review.css copy them. The consent
+   sheet and the pairing panel are decisions, so they are the page's two cards. Both fade in where they stand, as an ask
+   does, and move nothing else (docs/motion.md, Arrive with no distance). */
+
+.rm .btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  padding: 0 12px;
+  border-radius: var(--rad);
+  border: 1px solid var(--line);
+  background: var(--aui-surface);
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.rm .btn:hover:not(:disabled) {
+  background: var(--hov);
+}
+.rm .btn.dark {
+  border-color: var(--aui-primary);
+  background: var(--aui-primary);
+  color: var(--aui-on-primary);
+}
+.rm .btn.dark:hover:not(:disabled) {
+  background: var(--aui-primary);
+  opacity: 0.88;
+}
+.rm .btn.ghost {
+  border-color: transparent;
+  background: transparent;
+  color: var(--aui-muted);
+}
+.rm .btn.ghost:hover:not(:disabled) {
+  background: var(--hov);
+  color: var(--ink);
+}
+.rm .btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.rm .btn:focus-visible,
+.rm .input:focus-visible {
+  outline: 2px solid var(--aui-border-strong);
+  outline-offset: 1px;
+}
+
+.rm .input {
+  min-height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--aui-border-strong);
+  border-radius: var(--rad);
+  background: var(--aui-surface);
+  color: var(--ink);
+  font-size: 14px;
+}
+.rm .input:hover:not(:disabled) {
+  border-color: var(--ink);
+}
+.rm .input:disabled {
+  color: var(--aui-muted);
+}
+.rm .help {
+  font-size: 12px;
+  color: var(--aui-muted);
+}
+
+/* The quiet line while a phone is connected: Settings' own note, at the scale's smallest size. */
+.rm .rm-live {
+  margin-top: 8px;
+  font-size: 12px;
+}
+
+/* A decision: the consent sheet and the pairing panel, as the kit's .dialog draws one, in the page's flow. */
+.rm .rm-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--rad-xl);
+  background: var(--aui-surface);
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.5;
+  --rise-by: 0px;
+  animation: var(--anim-arrive);
+}
+.rm .rm-card p {
+  margin: 0;
+}
+.rm .rm-consent {
+  margin-top: 12px;
+}
+.rm .rm-consent h3 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+}
+.rm .rm-consent ul {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.rm .rm-acts {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.rm .rm-pairing {
+  padding: 12px;
+}
+.rm .rm-pairing + .st-row {
+  border-top: 1px solid var(--line);
+}
+.rm .rm-scan {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+}
+.rm .rm-scan-t {
+  flex: 1 1 200px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.rm .rm-scan-t .rm-acts {
+  justify-content: flex-start;
+}
+/* Dark on white in both themes: a camera cannot read a code inverted. */
+.rm .rm-qr {
+  display: block;
+  flex: none;
+  border-radius: var(--rad);
+  border: 1px solid var(--line);
+}
+.rm .rm-code {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.rm .rm-lab {
+  font-size: 13px;
+  font-weight: 600;
+}
+.rm .rm-code-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.rm .rm-code-in {
+  width: 112px;
+  font-family: var(--mono);
+  font-size: 17px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}

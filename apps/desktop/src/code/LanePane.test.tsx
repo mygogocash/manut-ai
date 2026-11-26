@@ -229,6 +229,10 @@ describe("Preview", () => {
     press(p, "lane-preview-start");
     expect(p.preview.onStart).toHaveBeenCalledTimes(1);
     expect(byId(p, "lane-preview")[0].props["data-phase"]).toBe("idle");
+    // `dev` is only a name: what it runs is said under it, from package.json
+    expect(byId(p, "lane-preview-script")).toHaveLength(0);
+    const said = preview({ preview: previewOf({ record: record({ plan: { argv: ["pnpm", "run", "dev"], label: "pnpm run dev", script: { name: "dev", text: "vite --port 5173" } } }) }) });
+    expect(words(said)).toContain("The dev script runs: vite --port 5173");
   });
 
   it("offers no Start in the developer's own folder, and says the preview runs only in a lane's own folder", () => {

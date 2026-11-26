@@ -29,11 +29,18 @@
 //!    was when it connected (checked on this Mac on 25 Nov 2026), so this rules out another program under the chat that
 //!    speaks to the socket itself, not one that first runs this app's program, which (1) already limits to the chat.
 //!
-//! What this still lets through, and why that is the same chat: a program that the chat's own Claude Code started (its
-//! shell commands, its hooks) and that runs this app's program with the token reaches only that chat's room, with only
-//! the apps the person let that chat look at and the yeses they gave on that chat's cards, each for exactly one call.
-//! Another chat's agent, a terminal, a repository's script started anywhere else, or a program started at login, is
-//! refused whatever it holds.
+//! 3. It is the first caller that reached the chat's room ([`Hub::holds_room`], item 89, security review of 26 Nov 2026):
+//!    the room is pinned to that caller's pid and audit token as the kernel reported them, and every other caller for that
+//!    chat is refused while the first one lives (its token still names a running process). A program the chat's own
+//!    Claude Code starts, such as a hook in the person's own settings that another program of theirs wrote, passes (1) and
+//!    (2) when it runs this app's program. Once the first has ended or run another program (Claude Code starting its
+//!    server again), the next caller that passes (1) and (2) takes its place.
+//!
+//! What this still lets through: a program under the chat's own Claude Code that calls before its server first does, or
+//! after its server ended, reaches only that chat's room, with only the apps the person let that chat look at and the yeses
+//! they gave on that chat's cards, each for exactly one call, and the server is then the one refused. A project's own files
+//! can no longer add such a hook to a chat (`--setting-sources user`, `sessions::CLAUDE_CHAT_ARGS`). Another chat's agent, a
+//! terminal, a repository's script started anywhere else, or a program started at login, is refused whatever it holds.
 
 // Only the Mac starts a hub; elsewhere `attach` finds none and the rest is there for the tests.
 #![cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -61,6 +68,9 @@ pub const CHAIN: usize = 16;
 
 /// What a call that did not come from its chat's own server is answered.
 pub const NOT_ITS_SERVER: &str = "Computer use answers only the server Claude Code started for this chat, and this call did not come from it. Nothing was done.";
+
+/// What a call is answered when another program of the chat already holds its room and still runs.
+pub const NOT_THE_FIRST: &str = "Computer use answers only the first server that reached this chat, and that server still runs. Nothing was done.";
 
 /// Who is at the other end of a connection, as the kernel recorded it when that program connected.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -161,10 +171,12 @@ pub struct Attached {
     pub args: Vec<OsString>,
 }
 
-/// One chat's room, and the process the shell started for it once it has started ([`Hub::bind`]).
+/// One chat's room, the process the shell started for it once it has started ([`Hub::bind`]), and the first caller that
+/// reached the room, which holds it while it lives ([`Hub::holds_room`]).
 struct Chat {
     room: Arc<Room>,
     pid: Option<i32>,
+    first: Option<Caller>,
 }
 
 pub struct Hub {
@@ -326,6 +338,23 @@ impl Hub {
         false
     }
 
+    /// Whether `caller`, which [`Hub::started_for`] already let through, holds chat `token`'s room: it is the first caller
+    /// pinned there (the same pid and the same audit token), or no caller is pinned, or the pinned one no longer runs (its
+    /// token names no process: it ended, or ran another program), and then `caller` is pinned in its place. Read and
+    /// written under one lock, so two callers can never both take an empty room.
+    fn holds_room(&self, token: &str, caller: &Caller) -> bool {
+        let mut chats = self.chats.lock().unwrap();
+        let Some(chat) = chats.get_mut(token) else { return false };
+        match chat.first {
+            Some(first) if first == *caller => true,
+            Some(first) if self.peers.program(&first).is_some() => false,
+            _ => {
+                chat.first = Some(*caller);
+                true
+            }
+        }
+    }
+
     /// The reply to one call line from `caller` (None: who it is could not be read).
     pub fn answer(&self, line: &str, caller: Option<&Caller>) -> String {
         let reply = |text: &str| json!({"text": text, "error": true}).to_string();
@@ -336,6 +365,9 @@ impl Hub {
         };
         if !self.started_for(pid, caller) {
             return reply(NOT_ITS_SERVER);
+        }
+        if !caller.is_some_and(|c| self.holds_room(token, c)) {
+            return reply(NOT_THE_FIRST);
         }
         let tool = call.get("tool").and_then(Value::as_str).unwrap_or("");
         let args = call.get("args").cloned().unwrap_or_else(|| json!({}));
@@ -360,7 +392,7 @@ impl Hub {
             "env": {mcp::TOKEN_VAR: token, mcp::SOCKET_VAR: self.socket.to_string_lossy()},
         }}});
         let room = Arc::new(Room::new(self.desk.clone()));
-        self.chats.lock().unwrap().insert(token.clone(), Chat { room: room.clone(), pid: None });
+        self.chats.lock().unwrap().insert(token.clone(), Chat { room: room.clone(), pid: None, first: None });
         let args = vec!["--mcp-config".into(), config.to_string().into(), "--plugin-dir".into(), self.dir.join("plugin").into_os_string()];
         Some(Attached { token, room, args })
     }
@@ -487,6 +519,16 @@ mod tests {
             let mut p = self.procs.lock().unwrap();
             let e = p.get_mut(&pid).unwrap();
             *e = (e.0 + 1, program, e.2);
+        }
+
+        /// A new process `pid` running `program` under `parent`.
+        fn spawn(&self, pid: i32, program: &'static str, parent: i32) {
+            self.procs.lock().unwrap().insert(pid, (1, program, parent));
+        }
+
+        /// Process `pid` ended: its audit token names nothing any more.
+        fn end(&self, pid: i32) {
+            self.procs.lock().unwrap().remove(&pid);
         }
     }
 
@@ -629,6 +671,66 @@ mod tests {
         // the chat ended: its own server is refused too
         hub.detach(&b.token);
         assert_eq!(call(&hub, &b.token, "list_windows", Some(&family.caller(702)))["error"], true);
+        let _ = std::fs::remove_dir_all(d);
+    }
+
+    /// Item 89 (security review, 26 Nov 2026). A program the chat's own Claude Code starts and that runs this app's program
+    /// with the chat's token passes the walk up its parents: a hook in the person's own settings, which another program of
+    /// theirs may have written, is one. So a chat's room answers only the first caller that reached it, pinned by the pid and
+    /// audit token the kernel reported, and refuses every other caller for that chat while that first one lives; once it has
+    /// ended (Claude Code starting its server again), the next caller that passes the walk takes its place.
+    #[test]
+    fn a_chats_room_answers_only_its_first_caller_while_that_caller_lives() {
+        let d = dir("first");
+        let stand = Arc::new(Stand::new());
+        let family = Arc::new(Family::new());
+        let hub = Hub::new(&d, stand.clone(), family.clone(), APP.into()).unwrap();
+        let a = hub.attach().unwrap();
+        let b = hub.attach().unwrap();
+        hub.bind(&a.token, 600);
+        hub.bind(&b.token, 700);
+        // chat A's own server calls first, and is answered on every call after
+        for _ in 0..2 {
+            assert_eq!(call(&hub, &a.token, "list_windows", Some(&family.caller(601)))["error"], false);
+        }
+        let n = stand.calls().len();
+        // another program under chat A's Claude Code that runs this app's program, as a hook would: right under it, under a
+        // shell the hook started, and under a wrapper further down
+        family.spawn(603, APP, 600);
+        family.spawn(604, "/bin/sh", 600);
+        family.spawn(605, APP, 604);
+        family.spawn(606, "/usr/bin/env", 604);
+        family.spawn(607, APP, 606);
+        for who in [603, 605, 607] {
+            let r = call(&hub, &a.token, "get_app_state", Some(&family.caller(who)));
+            assert_eq!((r["error"].clone(), r["text"].clone()), (json!(true), json!(NOT_THE_FIRST)), "{who}: {r}");
+        }
+        assert_eq!(stand.calls().len(), n, "no refused call read anything");
+        // the first is still answered
+        assert_eq!(call(&hub, &a.token, "list_windows", Some(&family.caller(601)))["error"], false);
+        // the first caller is pinned even when it is not the chat's own server: then the server is the one refused, and
+        // nothing more reaches the room than the person's cards let the first through
+        family.spawn(703, APP, 701);
+        assert_eq!(call(&hub, &b.token, "list_windows", Some(&family.caller(703)))["error"], false);
+        assert_eq!(call(&hub, &b.token, "list_windows", Some(&family.caller(702)))["text"], NOT_THE_FIRST);
+        // the first ended: the next caller that passes the walk takes its place, and the rest stay refused
+        family.end(601);
+        assert_eq!(call(&hub, &a.token, "list_windows", Some(&family.caller(603)))["error"], false);
+        assert_eq!(call(&hub, &a.token, "list_windows", Some(&family.caller(605)))["text"], NOT_THE_FIRST);
+        // the first ran another program: the token it was pinned by names nothing, so it no longer holds the room
+        family.exec(603, "/usr/bin/python3");
+        assert_eq!(call(&hub, &a.token, "list_windows", Some(&family.caller(605)))["error"], false);
+        // a caller the walk refuses never takes the room, even when no first caller lives
+        family.end(605);
+        assert_eq!(call(&hub, &a.token, "list_windows", Some(&family.caller(801)))["text"], NOT_ITS_SERVER);
+        assert_eq!(call(&hub, &a.token, "list_windows", Some(&family.caller(607)))["error"], false);
+        // a chat that ends and a new one for the same process start with an empty room: nothing pinned carries over
+        hub.detach(&a.token);
+        let c = hub.attach().unwrap();
+        hub.bind(&c.token, 600);
+        family.spawn(608, APP, 600);
+        assert_eq!(call(&hub, &c.token, "list_windows", Some(&family.caller(608)))["error"], false);
+        assert_eq!(call(&hub, &c.token, "list_windows", Some(&family.caller(607)))["text"], NOT_THE_FIRST);
         let _ = std::fs::remove_dir_all(d);
     }
 

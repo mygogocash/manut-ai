@@ -60,11 +60,18 @@ function PageFrame({ src, reloads }: { src: string; reloads: number }) {
   );
 }
 
-/** The command in a code line, as the board writes a command. */
-const Command = ({ label }: { label: string }) => (
-  <div className="mut mono lp-cmd" data-testid="lane-preview-command">
-    $ {label}
-  </div>
+/** The command in a code line, as the board writes a command, and what its script runs: the name alone says nothing of it. */
+const Command = ({ label, script }: { label: string; script?: { name: string; text: string } }) => (
+  <>
+    <div className="mut mono lp-cmd" data-testid="lane-preview-command">
+      $ {label}
+    </div>
+    {script && (
+      <p className="mut" data-testid="lane-preview-script">
+        {t("kit.ask.script", { name: script.name, text: script.text })}
+      </p>
+    )}
+  </>
 );
 
 /** A run's last lines, any key hidden. */
@@ -111,7 +118,7 @@ export function LanePreviewView({ dir, record, samples, onStart, onStop, onOpen,
   const startRow = (again: boolean) =>
     ready ? (
       <>
-        <Command label={ready.label} />
+        <Command label={ready.label} script={ready.script} />
         <div className="lp-acts">
           <button type="button" className="btn dark" onClick={onStart} data-testid="lane-preview-start">
             {again ? t("lane.preview.startAgain") : t("lane.preview.start")}

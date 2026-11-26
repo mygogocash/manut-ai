@@ -70,7 +70,7 @@ test("sidebar lists the mock bots and search filters them", async ({ page }) => 
   await expect(page.getByTestId("bot-default")).toBeVisible();
 });
 
-test("select Kami shows history as filled bubbles; switching bots swaps the chat", async ({ page }) => {
+test("select Kami shows history as the Chat board draws it; switching bots swaps the chat", async ({ page }) => {
   await open(page);
   await openChat(page, "friren");
   await expect(page.getByTestId("timeline").getByText("Summarise the Tauri 2 updater docs.")).toBeVisible();
@@ -80,17 +80,15 @@ test("select Kami shows history as filled bubbles; switching bots swaps the chat
   await expect(tl.getByText("Thanks. Ping me when the retry fix is up.")).toBeVisible();
   // markdown: inline code inside the bot bubble
   await expect(tl.getByTestId("bubble-bot").locator("code").first()).toHaveText("/v1/responses");
-  // filled bubbles, no border, the corner --r-bubble (the design kit's 16px since the fork's restyle)
-  const style = await tl.getByTestId("bubble-bot").first().locator(".b").evaluate((el) => {
-    const cs = getComputedStyle(el);
-    return { bg: cs.backgroundColor, border: cs.borderTopWidth, radius: parseFloat(cs.borderTopLeftRadius) };
-  });
-  // the default colour set's bubbles take the design tokens since the fork's restyle
-  expect(style.bg).toBe(await tokenColor(page, "--bub-bot"));
-  expect(style.border).toBe("0px");
-  expect(style.radius).toBe(16);
-  const me = await tl.getByTestId("bubble-user").first().locator(".b").evaluate((el) => getComputedStyle(el).backgroundColor);
-  expect(me).toBe(await tokenColor(page, "--bub-me"));
+  // item 85f: the answer stands on the page (no fill, no border, no corner); only the person's message is a bubble,
+  // filled with the design tokens' quiet fill, no border, the corner --r-bubble (the design kit's 16px)
+  const look = (id: string) =>
+    tl.getByTestId(id).first().locator(".b").evaluate((el) => {
+      const cs = getComputedStyle(el);
+      return { bg: cs.backgroundColor, border: cs.borderTopWidth, radius: parseFloat(cs.borderTopLeftRadius) };
+    });
+  expect(await look("bubble-bot")).toEqual({ bg: "rgba(0, 0, 0, 0)", border: "0px", radius: 0 });
+  expect(await look("bubble-user")).toEqual({ bg: await tokenColor(page, "--bub-me"), border: "0px", radius: 16 });
   await expect(page.getByTestId("header").getByText("Kami", { exact: true })).toBeVisible();
 });
 
@@ -133,15 +131,18 @@ test("slash shows the skill hint when the bot has no skill list", async ({ page 
   await expect(page.getByTestId("skill-hint")).toHaveCount(0);
 });
 
-test("header right holds the model pill and the panel button; name toggles the details column", async ({ page }) => {
+test("header right holds the panel button alone, the model is in the chat box; name toggles the details column", async ({ page }) => {
   await open(page);
   const right = page.getByTestId("head-right");
-  await expect(right.locator(":scope > *")).toHaveCount(2);
-  await expect(right).toContainText("Opus 5.5");
-  await expect(right).toContainText("high");
-  // two controls: the model picker's one button and the panel button
-  expect(await right.locator("button, a, [role=button], input, select").count()).toBeLessThanOrEqual(2);
+  // item 85f: no model name and no maker's mark in the header (the Chat board); the model and its effort moved into the
+  // box, beside where item 80 put Buddy's
+  await expect(right.locator(":scope > *")).toHaveCount(1);
   await expect(right.locator(":scope > *").last()).toHaveAttribute("data-testid", "panel-button");
+  await expect(page.getByTestId("header")).not.toContainText("Opus 5.5");
+  await expect(page.getByTestId("header").locator("[data-testid=model-pill], .src-ic, .model-ic")).toHaveCount(0);
+  const box = page.locator(".cw");
+  await expect(box.getByTestId("model-label")).toHaveText("Opus 5.5");
+  await expect(box.getByTestId("reasoning-label")).toHaveText("high");
   const details = page.getByTestId("details");
   expect((await details.boundingBox())?.width ?? 0).toBeLessThan(2);
   await page.getByTestId("who").click();
@@ -167,8 +168,8 @@ test("theme follows the store; dark and light screenshots", async ({ page }) => 
   await setTheme(page, "light");
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
   await expect(page.getByTestId("bubble-user").first()).toBeVisible();
-  const bg = await page.getByTestId("bubble-bot").first().locator(".b").evaluate((el) => getComputedStyle(el).backgroundColor);
-  expect(bg).toBe(await tokenColor(page, "--bub-bot"));
+  const bg = await page.getByTestId("bubble-user").first().locator(".b").evaluate((el) => getComputedStyle(el).backgroundColor);
+  expect(bg).toBe(await tokenColor(page, "--bub-me"));
   await page.getByTestId("composer").blur();
   await page.waitForTimeout(400); // let the 0.2s colour transitions settle
   await page.screenshot({ path: join(SHOTS, "shell-light.png") });

@@ -5,6 +5,7 @@
 // is built for the mock bridge. What is published, and the ask before it, are tested against the connected runtime in
 // src/runtime/http/artifacts.test.ts.
 import { expect, test } from "@playwright/test";
+import { openHood } from "./start";
 
 const PORT = Number(process.env.MANUT_PORT || 5307);
 
@@ -71,6 +72,7 @@ test("sharing skills is a second switch, off by default, and Install skills from
   });
   await page.goto("/");
   await page.getByTestId("nav-settings").click();
+  await openHood(page); // item 85h: Artifacts, MCP and Skills are under "Under the hood", closed in this spec's storage
   await page.getByTestId("settings-nav-artifacts").click();
   await expect(page.getByTestId("art-set-publish")).toHaveAttribute("aria-checked", "false");
   await expect(page.getByTestId("art-set-skills")).toHaveAttribute("aria-checked", "false");

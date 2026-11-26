@@ -56,15 +56,34 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-test("defaults: the manut colours, soft bubbles, small text", async ({ page }) => {
+test("defaults: the manut colours, the Chat board's look (an answer on the page) at the board's sizes", async ({ page }) => {
   await open(page);
   const html = page.locator("html");
   await expect(html).toHaveAttribute("data-palette", "manut");
-  await expect(html).toHaveAttribute("data-bubbles", "soft");
-  await expect(html).toHaveAttribute("data-text", "small");
-  expect(await css(page, "bubble-bot", "font-size")).toBe("13px");
+  await expect(html).toHaveAttribute("data-bubbles", "open");
+  await expect(html).toHaveAttribute("data-text", "medium");
+  // item 85f: the answer in the serif at 17px / 1.65 with no bubble; the person's message alone in one, at 15px / 1.5
+  expect(await css(page, "bubble-bot", "font-size")).toBe("17px");
+  expect(parseFloat(await css(page, "bubble-bot", "line-height"))).toBeCloseTo(17 * 1.65, 1);
+  expect(await css(page, "bubble-bot", "font-family")).toMatch(/^"Source Serif 4", "Noto Serif Thai", Georgia, serif$/);
+  expect(await css(page, "bubble-bot", "background-color")).toBe("rgba(0, 0, 0, 0)");
+  expect(await css(page, "bubble-user", "font-size")).toBe("15px");
+  expect(await css(page, "bubble-user", "line-height")).toBe("22.5px");
   // the default colour set takes the design tokens (packages/ui-kit), as the fork restyled it
-  expect(await css(page, "bubble-bot", "background-color")).toBe(await tokenColor(page, "--bub-bot"));
+  expect(await css(page, "bubble-user", "background-color")).toBe(await tokenColor(page, "--bub-me"));
+  expect(await page.getByTestId("composer").evaluate((e) => getComputedStyle(e).fontSize)).toBe("15px");
+});
+
+test("a look saved before the board's: its old defaults read as today's, a real choice stays", async ({ page }) => {
+  await page.addInitScript(() => {
+    if (!sessionStorage.getItem("kept")) localStorage.setItem("manut.look", JSON.stringify({ palette: "forest", bubbles: "soft", text: "small" }));
+  });
+  await open(page);
+  const html = page.locator("html");
+  // the colour set it had saved is read as the brand's (item 85i); its old default bubbles and text read as today's
+  await expect(html).toHaveAttribute("data-palette", "manut");
+  await expect(html).toHaveAttribute("data-bubbles", "open");
+  await expect(html).toHaveAttribute("data-text", "medium");
 });
 
 test("no colour to pick: the brand's colours are everyone's, and a set the picker once saved reads as the brand's (item 85i)", async ({ page }) => {
@@ -85,8 +104,17 @@ test("no colour to pick: the brand's colours are everyone's, and a set the picke
   await expect(page.getByTestId("appearance")).not.toContainText("Graphite");
 });
 
-test("bubble styles: solid puts your bubble in the accent; open drops the bot's bubble", async ({ page }) => {
+test("bubble styles: soft puts the answer in a bubble too; solid puts yours in the accent; open is the board's", async ({ page }) => {
   await open(page);
+  await appearance(page);
+  await page.getByTestId("bubbles-seg").getByRole("radio", { name: "Soft" }).click();
+  await expect(page.getByTestId("bubbles-hint")).toHaveText("Both sides in quiet tinted bubbles");
+  await page.getByRole("button", { name: "Close settings" }).click();
+  expect(await css(page, "bubble-bot", "background-color")).toBe(await tokenColor(page, "--bub-bot"));
+  expect(await css(page, "bubble-bot", "padding-left")).toBe("13px");
+  // still the serif at the reading size inside its bubble
+  expect(await css(page, "bubble-bot", "font-size")).toBe("17px");
+
   await appearance(page);
   await page.getByTestId("bubbles-seg").getByRole("radio", { name: "Solid" }).click();
   await expect(page.getByTestId("bubbles-hint")).toHaveText("Your messages in the accent colour");
@@ -103,23 +131,31 @@ test("bubble styles: solid puts your bubble in the accent; open drops the bot's 
   expect(await css(page, "bubble-user", "background-image")).toBe("none");
 });
 
-test("text size changes messages and the composer; every choice survives a reload", async ({ page }) => {
+test("text size moves answers, messages and the composer a step along the board's scale; every choice survives a reload", async ({ page }) => {
   await open(page);
   await appearance(page);
-  await page.getByTestId("text-seg").getByRole("radio", { name: "Large" }).click();
-  await page.getByTestId("bubbles-seg").getByRole("radio", { name: "Open" }).click();
+  await page.getByTestId("text-seg").getByRole("radio", { name: "Small" }).click();
   await page.getByRole("button", { name: "Close settings" }).click();
-  expect(await css(page, "bubble-user", "font-size")).toBe("15px");
-  expect(await page.getByTestId("composer").evaluate((e) => getComputedStyle(e).fontSize)).toBe("15px");
+  expect(await css(page, "bubble-bot", "font-size")).toBe("15px");
+  expect(await css(page, "bubble-user", "font-size")).toBe("14px");
+  await appearance(page);
+  await page.getByTestId("text-seg").getByRole("radio", { name: "Large" }).click();
+  await page.getByTestId("bubbles-seg").getByRole("radio", { name: "Soft" }).click();
+  await page.getByRole("button", { name: "Close settings" }).click();
+  expect(await css(page, "bubble-bot", "font-size")).toBe("20px");
+  expect(await css(page, "bubble-user", "font-size")).toBe("17px");
+  expect(await page.getByTestId("composer").evaluate((e) => getComputedStyle(e).fontSize)).toBe("17px");
   expect(JSON.parse((await page.evaluate(() => localStorage.getItem("manut.look"))) ?? "{}")).toEqual({
     palette: "manut",
-    bubbles: "open",
+    bubbles: "soft",
     text: "large",
+    v: 2,
   });
   await page.evaluate(() => sessionStorage.setItem("kept", "1"));
   await page.reload();
   await expect(page.locator("html")).toHaveAttribute("data-palette", "manut");
-  await expect(page.locator("html")).toHaveAttribute("data-bubbles", "open");
+  // chosen since the board's look: kept
+  await expect(page.locator("html")).toHaveAttribute("data-bubbles", "soft");
   await expect(page.locator("html")).toHaveAttribute("data-text", "large");
 });
 
@@ -127,8 +163,8 @@ test("a bad saved look falls back to the defaults", async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem("manut.look", '{"palette":"neon","bubbles":"round","text":9}'));
   await open(page);
   await expect(page.locator("html")).toHaveAttribute("data-palette", "manut");
-  await expect(page.locator("html")).toHaveAttribute("data-bubbles", "soft");
-  await expect(page.locator("html")).toHaveAttribute("data-text", "small");
+  await expect(page.locator("html")).toHaveAttribute("data-bubbles", "open");
+  await expect(page.locator("html")).toHaveAttribute("data-text", "medium");
 });
 
 test("screenshots: the chat in several looks, and the Appearance page", async ({ page }) => {

@@ -28,7 +28,7 @@ import { modelAdminRoute } from "./model-gateway";
 import { peopleRoute, queryNamesSession } from "./people";
 import { pilotRoute } from "./pilot";
 import { routinesRoute } from "./routines";
-import { relayPath, relayRoute, relaySourceGroup } from "./relay";
+import { relayEnabled, relayPath, relayRoute, relaySourceGroup } from "./relay";
 import { RelayObject } from "./relay-object";
 import { ScheduleObject } from "./schedule-object";
 import { signUpsOpen } from "./self-serve";
@@ -719,11 +719,14 @@ export default {
     const adminDenial = adminGate(request, url.pathname, env, ctx);
     if (adminDenial) return adminDenial;
 
-    // Health carries no task data and stays public.
+    // Health carries no task data and stays public. It also says whether the relay is switched on, which anyone can
+    // already learn from a relay route's 503: the desktop's page cannot read that answer from a socket, and asks here
+    // before dialling again (apps/desktop/src/remote/link.ts).
     if (request.method === "GET" && url.pathname === "/v1/health") {
       return json({
         ok: true,
         service: "manut-api",
+        relay: relayEnabled(env) ? "on" : "off",
         families: [
           "tasks",
           "work",

@@ -1,0 +1,16 @@
+{
+  "//": "The one API test that runs the desktop's own remote code (test/remote-mac.test.ts) is checked here, with the browser's library as the desktop checks that code, since the Workers types and the DOM's cannot be loaded together. The main tsconfig leaves this file out.",
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "strict": true,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "resolveJsonModule": true,
+    "types": []
+  },
+  "files": ["test/remote-mac.test.ts", "test/remote-mac.env.d.ts"]
+}
