@@ -35,6 +35,24 @@ export function wantsTitle(rec: Rec | undefined, settings: TitleModel, again = f
   return again || !rec.modelTitle;
 }
 
+/** The material of a pull request's words: the lane's commit subjects, then each changed file and the first lines of its diff, masked
+ *  and cut (the shell cuts the whole again). */
+export function pullMaterial(commits: readonly string[], files: readonly { path: string; kind: string; added: number; removed: number; lines: readonly string[] }[]): string {
+  const out: string[] = [];
+  if (commits.length) out.push("Commits:", ...commits.slice(0, 20).map((c) => `- ${c}`), "");
+  out.push("Files:");
+  let room = 4_000;
+  for (const f of files.slice(0, 40)) {
+    out.push(`${f.kind} ${f.path} (+${f.added} -${f.removed})`);
+    for (const l of f.lines.slice(0, 20)) {
+      if (room <= 0) break;
+      out.push(l);
+      room -= l.length;
+    }
+  }
+  return maskSecrets(out.join("\n")).slice(0, 6_000);
+}
+
 /** The request for chat `key` (the session's chat key). */
 export const titleRequest = (agent: string, settings: TitleModel, key: string, material: string): TitleRequest => ({
   agent,
