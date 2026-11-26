@@ -296,6 +296,12 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    merging #1 deleted `pilot/week-1`; the lead pushed it back at the same commit about ten minutes later. Before the
    next pilot-to-main merge, the owner protects `pilot/week-1` or turns that setting off, or the branch goes again.
    Merging also switched on Dependabot, whose pull requests target main.
+   On the evening of 26 Nov the lead moved to a new Claude Code session. Item 129 merged (each Playwright worker has
+   its own stand-in; three CI shards of four workers). Item 101 is split into 101a to 101e (rows in `docs/plan.md`);
+   101a (Cursor and Antigravity as chats) and 101e (the first-launch offer to bring over Claude Code and Codex work)
+   are running. GitHub reported 7 Dependabot alerts on `main` (2 critical) at that push, for the owner to look at.
+   The canvas sources move out of `~/Developer/gospark-main` (the owner is deleting the GoSpark folders): see the
+   path in "Where everything is" once moved.
    Running at 14:15: items 100b, 119, 120 and 121, each a subagent in its own `cc-item…` worktree.
    By 15:35 on 26 Nov items 100b, 119 (the App Store edition), 120 (the fifth read's dial fixes) and 123 (the App
    Privacy draft) are merged. Item 121 (what an ask shows) is reviewed and in its gate; 122 (icon-led menus and
