@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { after, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
-import { SPEC_DIR, assign, filterFor, listSpecFiles, median, readTimings } from "./e2e-shards.mjs";
+import { SPEC_DIR, assign, filterFor, listSpecFiles, median, playwrightOrder, readTimings, wall } from "./e2e-shards.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const script = join(here, "e2e-shards.mjs");
@@ -97,6 +97,65 @@ describe("the split", () => {
     for (const total of [0, -1, 2.5, Number.NaN]) assert.throws(() => assign(["a.spec.ts"], {}, total), /whole number/);
   });
 
+  it("refuses a worker count that is not a whole number of at least one", () => {
+    for (const workers of [0, -1, 1.5, Number.NaN]) assert.throws(() => assign(["a.spec.ts"], {}, 1, workers), /workers must be a whole number/);
+  });
+});
+
+describe("a shard of several workers", () => {
+  it("orders files as Playwright hands them out: each folder's entries by localeCompare, a folder at its name", () => {
+    const files = ["b.spec.ts", "B2.spec.ts", "a.spec.ts", "sub.spec.ts", "sub/c.spec.ts", "a-b.spec.ts"];
+    assert.deepEqual([...files].sort(playwrightOrder), ["a-b.spec.ts", "a.spec.ts", "b.spec.ts", "B2.spec.ts", "sub/c.spec.ts", "sub.spec.ts"]);
+  });
+
+  it("takes as long as its workers do, each file going in that order to the worker free first", () => {
+    const cost = (file) => ({ "a.spec.ts": 10, "b.spec.ts": 10, "c.spec.ts": 5, "z.spec.ts": 40 })[file];
+    // a and b start at once, c follows a, and z, named last, waits for the first free worker: 10 + 40.
+    assert.equal(wall(["z.spec.ts", "c.spec.ts", "b.spec.ts", "a.spec.ts"], cost, 2), 50);
+    assert.equal(wall(["a.spec.ts", "b.spec.ts", "c.spec.ts", "z.spec.ts"], cost, 1), 65);
+    assert.equal(wall(["a.spec.ts", "b.spec.ts", "c.spec.ts", "z.spec.ts"], cost, 4), 40);
+    assert.equal(wall([], cost, 3), 0);
+  });
+
+  it("gives the same shards as one worker's split when each shard runs one worker", () => {
+    const next = random(11);
+    for (let round = 0; round < 20; round++) {
+      const files = Array.from({ length: 1 + Math.floor(next() * 40) }, (_, i) => `spec-${i}.spec.ts`);
+      const timings = Object.fromEntries(files.map((file) => [file, Math.round(next() * 500) / 10]));
+      for (const total of [1, 3, 9]) {
+        const { shards } = assign(files, timings, total, 1);
+        for (const shard of shards) assert.ok(Math.abs(shard.wall - shard.seconds) < 1e-9);
+        assert.deepEqual(assign(files, timings, total, 1), assign(files, timings, total));
+      }
+    }
+  });
+
+  it("puts every file in exactly one shard, and each shard's time is its workers' played out", () => {
+    const next = random(3);
+    for (let round = 0; round < 30; round++) {
+      const files = Array.from({ length: 1 + Math.floor(next() * 60) }, (_, i) => `spec-${i}.spec.ts`);
+      const timings = Object.fromEntries(files.filter(() => next() < 0.8).map((file) => [file, Math.round(next() * 500) / 10]));
+      const cost = (file) => (Object.hasOwn(timings, file) ? timings[file] : median(Object.values(timings)));
+      for (const [total, workers] of [[1, 4], [2, 2], [3, 4], [4, 3]]) {
+        const { shards } = assign(files, timings, total, workers);
+        assert.deepEqual(flat(shards).sort(), [...files].sort(), `round ${round}, ${total} shards of ${workers}`);
+        for (const shard of shards) assert.ok(Math.abs(shard.wall - wall(shard.files, cost, workers)) < 1e-9);
+      }
+    }
+  });
+
+  it("starts a long file named late as early as its shard allows, which a split by sums alone does not", () => {
+    // As on 26 Nov 2026: one file of nearly eight minutes, named after the rest, and many of under half a minute.
+    const timings = { "t-long.spec.ts": 474, ...Object.fromEntries(Array.from({ length: 120 }, (_, i) => [`s${String(i).padStart(3, "0")}.spec.ts`, 10 + (i % 7) * 4])) };
+    const files = Object.keys(timings);
+    const cost = (file) => timings[file];
+    const worst = (shards) => Math.max(...shards.map((shard) => wall(shard.files, cost, 4)));
+    const played = assign(files, timings, 3, 4).shards;
+    // Every shard ends within a minute of the long file alone, and so before a split that only adds up its files.
+    assert.ok(worst(played) <= 474 + 60, `${worst(played)}`);
+    assert.ok(worst(played) < worst(assign(files, timings, 3).shards));
+  });
+
   it("takes the median of an odd and an even list", () => {
     assert.equal(median([5, 1, 3]), 3);
     assert.equal(median([4, 1, 3, 2]), 2.5);
@@ -175,7 +234,16 @@ describe("the command", () => {
 
   it("prints the whole plan when no shard is named", () => {
     const out = execFileSync(process.execPath, [script, "--dir", dir, "--total", "2"], { encoding: "utf8" });
-    assert.match(out, /^5 spec files in 2 shards; no shard can be shorter than the longest file, 40s:\n {2}shard 1: /);
+    assert.match(out, /^5 spec files in 2 shards of 1 worker; no shard can be shorter than the longest file, 40s:\n {2}shard 1: /);
+  });
+
+  it("plays out each shard's workers when given --workers, and says how much work a shard holds", () => {
+    const out = execFileSync(process.execPath, [script, "--dir", dir, "--total", "2", "--workers", "2"], { encoding: "utf8" });
+    assert.match(out, /^5 spec files in 2 shards of 2 workers; .*\n {2}shard 1: 2 spec files, about 40s \(1m 0s of work\)\n/);
+    const shard = run("--total", "2", "--shard", "1", "--workers", "2");
+    assert.equal(shard.status, 0, shard.stderr);
+    assert.match(shard.stderr, /2 spec files on 2 workers, about 40s \(1m 0s of work\) by the committed timings \(the longest shard: about 40s\)/);
+    assert.equal(run("--total", "2", "--workers", "0").status, 1);
   });
 });
 
@@ -188,6 +256,7 @@ describe("this repository", () => {
     return next === -1 ? ci.slice(start) : ci.slice(start, start + 1 + next);
   };
   const shards = /\n {8}shard: \[([0-9, ]+)\]\n/.exec(job("e2e"))?.[1].split(",").map(Number);
+  const workers = Number(/\n {6}MANUT_E2E_WORKERS: "([0-9]+)"\n/.exec(job("e2e"))?.[1]);
 
   it("runs ci.yml's shards as 1 to N, from this script, and adds up exactly N of them", () => {
     assert.ok(shards && shards.length >= 2, "the e2e matrix lists its shards");
@@ -195,6 +264,13 @@ describe("this repository", () => {
     assert.match(job("e2e"), /node \.github\/scripts\/e2e-shards\.mjs --total \$\{\{ strategy\.job-total \}\} --shard \$\{\{ matrix\.shard \}\}/);
     assert.doesNotMatch(job("e2e"), /--shard=/);
     assert.match(job("e2e-summary"), new RegExp(`playwright-summary\\.mjs .*--shards ${shards.length} `));
+  });
+
+  it("splits for as many workers as each shard's Playwright runs: the job's MANUT_E2E_WORKERS, which the config reads", () => {
+    assert.ok(Number.isInteger(workers) && workers >= 1, "the e2e job sets MANUT_E2E_WORKERS for the whole job");
+    assert.match(job("e2e"), /e2e-shards\.mjs --total \$\{\{ strategy\.job-total \}\} --shard \$\{\{ matrix\.shard \}\} --workers "\$MANUT_E2E_WORKERS"/);
+    // --workers would start more workers than there are stand-ins (playwright.config.ts refuses it).
+    assert.doesNotMatch(job("e2e"), /playwright test[^\n]*--workers/);
   });
 
   it("fails the run when a shard fails: neither the shards nor their summary may fail quietly", () => {
@@ -208,7 +284,7 @@ describe("this repository", () => {
     assert.equal(problem, undefined);
     assert.ok(Object.keys(timings).length > 0);
     const specs = listSpecFiles(SPEC_DIR);
-    const { shards: split } = assign(specs, timings, shards.length);
+    const { shards: split } = assign(specs, timings, shards.length, workers);
     assert.deepEqual(flat(split).sort(), specs);
     for (const shard of split) assert.ok(shard.files.length > 0);
   });
