@@ -23,6 +23,10 @@
     "EMAIL_FROM_NAME": "Manut AI",
     "TEST_EMAIL_OUTBOX": "on",
     "TEST_GOOGLE_ORIGIN": "https://google.test",
+    "APPLE_TEAM_ID": "TESTTEAM01",
+    "APPLE_KEY_ID": "TESTKEY001",
+    "TEST_APPLE_PRIVATE_KEY": "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgbpnUi5KhRbpkEXDeYAcGSYdMB7GbfOE44EiBQxgPQ+KhRANCAATpeYG2BOaccJ/bw3I4x6xBmH0jXnkoE6lgzJlRZPKhk/PWg5rERj7+ltBe3QMhmV72Wk6nmYI4/Bkgg7oM+tRp",
+    "TEST_APPLE_ORIGIN": "https://apple.test",
     "TEST_JWKS_JSON": "{\"keys\":[{\"kty\":\"EC\",\"crv\":\"P-256\",\"kid\":\"test-key-1\",\"alg\":\"ES256\",\"x\":\"XkiBzVCEinLxSV5HTHlIk_dP5ebqKbf50G0GUVfMdIQ\",\"y\":\"RZYriukHp_ncrsqWDuh0NRFJZR4vQ2ZP7JlWgYLlH_I\"}]}"
   },
   "ratelimits": [

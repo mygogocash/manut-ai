@@ -362,6 +362,34 @@ export function wipeShopsTenant(storage: DurableObjectStorage, tenant: string): 
   });
 }
 
+/// The shops `subject` began to make themselves that are still on the journal of makes: a make that stopped part way and
+/// that nobody asked for again ("A make that stops part way", docs/pilot-api.md). Read a page at a time. Deleting the
+/// person's account deletes each of them (account-deletion.ts), since each may hold the names they typed.
+export function personMakes(kv: SyncKvStorage, subject: string): string[] {
+  const tenants: string[] = [];
+  eachPage<MakingRow>(kv, MAKING_PREFIX, (page) => {
+    for (const [, row] of page) if (row.by === subject) tenants.push(row.tenant);
+  });
+  return tenants;
+}
+
+/// Part of deleting a person's account (account-store.ts), in the caller's transaction: every row this file keeps of
+/// theirs. Their index of shops, which their own data's deletion keeps (`wipeShopsTenant`, above), goes here, with the
+/// shops they made, their waiting link code and every make of theirs still on the journal. By the time this runs the
+/// shops they owned are deleted and they have left the ones they helped at, so no row of theirs could open anything.
+export function forgetPersonShops(kv: SyncKvStorage, subject: string): void {
+  kv.delete(keys.rows(subject));
+  kv.delete(keys.made(subject));
+  const code = kv.get<string>(keys.codeOf(subject));
+  if (code !== undefined) {
+    kv.delete(keys.code(code));
+    kv.delete(keys.codeOf(subject));
+  }
+  eachPage<MakingRow>(kv, MAKING_PREFIX, (page) => {
+    for (const [key, row] of page) if (row.by === subject) kv.delete(key);
+  });
+}
+
 // ---------------------------------------------------------------------------
 // The Worker's calls
 // ---------------------------------------------------------------------------

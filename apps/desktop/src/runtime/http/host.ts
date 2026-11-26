@@ -388,6 +388,9 @@ export class HttpHost {
       this.viewing = null;
       this.departed = [];
       this.show("signed_out", NO_CACHE);
+      // The shops listed were the session's: the account row and the switcher stop naming them (a deleted account's shop
+      // above all, item 124).
+      this.emit({ event: "shops.update", bot: TEAM });
     }
   }
 

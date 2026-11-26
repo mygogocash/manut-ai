@@ -1,4 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
+import { accountDeletionRoute, keepAppleGrant, nextRevokeAt, retryAppleRevokes } from "./account-store";
+import { appleRestConfig, exchangeCode, isAuthorizationCode, type AppleRestEnv } from "./apple-tokens";
 import { macCodeSource, macEmailCode } from "./approval-link";
 import { sha256Hex, verifyAppleToken } from "./auth";
 import { readJsonBody } from "./body";
@@ -15,7 +17,7 @@ import { sessionIndexKey, sweepSessions, wipeGeneration, wipeTenantSessions, typ
 import { shopsAuthRoute, wipeShopsTenant } from "./shops-store";
 import { testWorker } from "./test-origin";
 
-type AuthEnv = EmailSignInEnv & {
+type AuthEnv = EmailSignInEnv & AppleRestEnv & {
   APPLE_CLIENT_ID?: string;
   APPLE_JWKS_URL?: string;
   /// Test-only JWKS, honoured only on a test Worker (test-origin.ts), so the Apple endpoint is the only key source
@@ -197,6 +199,12 @@ export class AuthObject extends DurableObject {
       return modelAlertsRoute(this.ctx.storage, request, url,
         (kv, tenant) => kv.get(pilotRegistryKey(tenant)) !== undefined);
     }
+    // A person's own account deletion (account-store.ts): its record, which outlives the account, and the Apple token a
+    // sign-in kept until the deletion revokes it.
+    if (url.pathname === "/account-deletion" || url.pathname.startsWith("/account-deletion/")) {
+      return accountDeletionRoute(this.ctx.storage, request, url, { env: this.authEnv,
+        alarmBy: (ms) => this.ctx.storage.transaction((storage) => alarmBy(storage, ms / 1_000)) });
+    }
     // Pilot shop deletions and the owners' confirmations of them, kept here so
     // both outlive the shop's own objects.
     if (url.pathname === "/pilot-deletions" || url.pathname.startsWith("/pilot-deletions/")) {
@@ -238,7 +246,7 @@ export class AuthObject extends DurableObject {
   }
 
   private async exchange(request: Request): Promise<Response> {
-    let body: { provider?: unknown; identityToken?: unknown; nonce?: unknown; deviceId?: unknown };
+    let body: { provider?: unknown; identityToken?: unknown; nonce?: unknown; deviceId?: unknown; authorizationCode?: unknown };
     const exchanged = await readJsonBody<typeof body>(request, MAX_BODY_BYTES);
     if (!exchanged.ok) return Response.json({ error: exchanged.error }, { status: exchanged.status });
     body = exchanged.value;
@@ -249,7 +257,11 @@ export class AuthObject extends DurableObject {
       typeof body.nonce !== "string" ||
       typeof body.deviceId !== "string" ||
       body.deviceId.length === 0 ||
-      body.deviceId.length > 128
+      body.deviceId.length > 128 ||
+      // The authorization code Apple gave the app with the identity token, when the app sends it (item 124): it is
+      // exchanged for the refresh token that deleting the account revokes (apple-tokens.ts). Any other value is refused
+      // rather than dropped.
+      (body.authorizationCode !== undefined && !isAuthorizationCode(body.authorizationCode))
     ) {
       return Response.json({ error: "invalid_request" }, { status: 400 });
     }
@@ -286,7 +298,23 @@ export class AuthObject extends DurableObject {
       return true;
     });
     if (!issued) return Response.json({ error: "invalid_identity" }, { status: 401 });
+    if (isAuthorizationCode(body.authorizationCode)) await this.keepAppleToken(tenant, body.authorizationCode);
     return sessionAnswer(minted);
+  }
+
+  /// Exchanges the sign-in's authorization code for the person's Apple refresh token and keeps it sealed, so deleting the
+  /// account can revoke it (apple-tokens.ts, account-store.ts). The sign-in stands whatever happens here: without Apple's
+  /// REST settings, or if Apple refuses the code, does not answer, or answers for someone else, nothing is kept, and a
+  /// deletion then says the token could not be ended by us. Nothing of Apple's answer is logged or returned.
+  private async keepAppleToken(tenant: string, code: string): Promise<void> {
+    const config = appleRestConfig(this.authEnv);
+    if (!config) return;
+    try {
+      const token = await exchangeCode(config, code, tenant.slice("apple:".length));
+      if (token) await keepAppleGrant(this.ctx.storage, config, tenant, token);
+    } catch {
+      // Not kept: the sign-in is unaffected.
+    }
   }
 
   /// Sends a sign-in code to an address (email-code.ts; docs/pilot-api.md, "Signing in by email"). Only the code's HMAC
@@ -372,6 +400,9 @@ export class AuthObject extends DurableObject {
   /// record goes a day after its last send (email-code.ts, `purgeAt`); one this code did not write holds no code anyone
   /// can use, so it goes at once. The same alarm sweeps ended sessions, a bounded page a run (session-index.ts).
   override async alarm(): Promise<void> {
+    // A deleted account's Apple token whose revoke failed is tried again first, outside the transaction below, since each
+    // try waits on Apple (account-store.ts). Its next try is counted with the rest of the alarm's work in that transaction.
+    await retryAppleRevokes(this.ctx.storage, this.authEnv);
     const now = Date.now() / 1_000;
     await this.ctx.storage.transaction(async (storage) => {
       let next = Infinity;
@@ -407,7 +438,7 @@ export class AuthObject extends DurableObject {
         if (records.size < 128) break;
       }
       // Sessions too, a bounded page a run from where the last run stopped (session-index.ts).
-      next = Math.min(next, await sweepSessions(storage, now));
+      next = Math.min(next, await sweepSessions(storage, now), (await nextRevokeAt(storage)) / 1_000);
       if (Number.isFinite(next)) await storage.setAlarm(Math.ceil(next * 1_000));
       else await storage.deleteAlarm();
     });

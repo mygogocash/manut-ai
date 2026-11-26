@@ -52,6 +52,7 @@ const API_AUDIT_ACTIONS = [
   "helper.joined",
   "helper.session_opened",
   "helper.removed",
+  "helper.left",
   "away.set",
   "away.cleared",
   "request.passed_on",
