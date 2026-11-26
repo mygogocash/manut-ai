@@ -1,0 +1,17 @@
+export const rn = {
+  "rn.close": "Close node",
+  "rn.attempt": "attempt {n} of {total}",
+  "rn.notStarted": "not started",
+  "rn.route": "route: {why}",
+  "rn.why": "Why: ",
+  "rn.open": "open",
+  "rn.noHandoff": "No handoff written.",
+  "rn.ask": "Ask in chat",
+  "rn.askHint": "Puts a retry request in the message box. Nothing is sent.",
+  "rn.chainHead": "chain head",
+  "rn.fallback": "fallback",
+  "rn.exhausted": "chain exhausted",
+  "rn.task": "Task {n}",
+  "rn.from": " from {from}",
+  "rn.retryMsg": "Retry {node} in run {run}",
+};

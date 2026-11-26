@@ -1,0 +1,15 @@
+export const note = {
+  "note.approval": "{bot} needs your approval",
+  "note.mayHoldKey": "A command that may hold a key. Open Manut AI to read it.",
+  "note.question": "{bot} has a question",
+  "note.error": "{bot} stopped with an error",
+  "note.failed": "The turn failed.",
+  "note.session.ended": "{name} ended",
+  "note.session.endedBody": "Its program finished.",
+  "note.session.failed": "{name} could not start",
+  "note.session.bell": "{name} wants your attention",
+  "note.session.bellBody": "It rang its terminal's bell.",
+  "note.waiting": "It is waiting for you.",
+  "note.watchMany": "{bot}: {n} watch alerts",
+  "note.atShop": "{bot} at {shop}",
+};

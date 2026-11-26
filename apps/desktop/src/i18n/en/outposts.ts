@@ -1,0 +1,15 @@
+export const outposts = {
+  "outposts.title": "Your shop's outposts",
+  "outposts.hint": "Every machine your shop has, by the name it was given. Rename one so you can tell them apart. Removing one stops its work at once.",
+  "outposts.empty": "No outposts yet.",
+  "outposts.noOther": "No other outposts yet.",
+  "outposts.mac": "A Mac with the app, added {day}",
+  "outposts.cloud": "Wakes when work arrives. Costs nothing asleep.",
+  "outposts.rename": "Rename",
+  "outposts.newName": "New name for {name}",
+  "outposts.remove": "Remove",
+  "outposts.removeAsk": "Remove {name}? Its work stops at once, and it must be registered again to work.",
+  "outposts.keep": "Keep",
+  "outposts.renamed": "Renamed to {name}.",
+  "outposts.removed": "Removed. {name} no longer works for your team.",
+};

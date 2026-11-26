@@ -1,0 +1,26 @@
+import type { id as en } from "../en/id";
+
+export const id: Record<keyof typeof en, string> = {
+  "id.changePic": "画像を変更",
+  "id.changePicOf": "{bot} の画像を変更",
+  "id.savingPic": "画像を保存中",
+  "id.defaultFace": "既定の顔に戻す",
+  "id.rename": "名前を変更",
+  "id.botName": "名前",
+  "id.saving": "保存中…",
+  "id.save": "保存",
+  "id.cancel": "キャンセル",
+  "id.nameHint": "表示される名前だけが変わります。ID は {id} のままです。空にするとその名前を使います。",
+  "id.loading": "読み込み中",
+  "id.unreadable": "このボットの情報を読み込めませんでした。",
+  "id.elsewhere1": "ほかの場所のセッション",
+  "id.elsewhere": "ほかの場所のセッション",
+  "id.skill1": "スキル",
+  "id.skills": "スキル",
+  "id.routine1": "ルーティン",
+  "id.routines": "ルーティン",
+  "id.lastActive": "最終アクティブ",
+  "id.since": "{date} から",
+  "id.picKinds": "PNG、JPEG、WebP の画像を使ってください",
+  "id.picUnreadable": "その画像を読み込めませんでした",
+};
