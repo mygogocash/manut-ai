@@ -16,7 +16,7 @@ const NOT_ICONS: Record<string, string> = {
   "remote/QrCode.tsx": "a pairing code's squares, a picture to scan rather than an icon",
   "sidebar/menuIcons.tsx": "the brand mark, in its own two colours",
   "ui/Avatar.tsx": "a team member's face (KitFaces)",
-  "ui/AgentIcon.tsx": "a coding agent's mark, or its letter (Under the hood)",
+  "ui/AgentIcon.tsx": "a coding agent's, provider's or editor's own published logo (src/ui/agentMarks.ts, Lobe Icons and Simple Icons), drawn in its own colours, which the owner asked for on 26 Nov 2026",
   "ui/ModelIcon.tsx": "a model maker's mark (Under the hood)",
   "ui/brandIcons.tsx": "a service's own logo, where the person connects it",
   "ui/SourceIcon.tsx": "the mark of the app a member's other session is in",

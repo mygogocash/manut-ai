@@ -8,8 +8,9 @@ reproduced below as that licence requires.
 What changed in the fork: the product was renamed, the Hermes Agent bridge and every screen that needed it
 were removed, the runtime moved behind `src/runtime`, the design tokens were replaced with Manut AI's, the
 update endpoint and its signing key were removed, and other companies' agent logos were replaced with
-initials. "Oh My Hermes", "omher" and "Hermes Agent" are names of their own projects; Manut AI is not
-affiliated with or endorsed by them.
+initials. Since 26 Nov 2026 those logos are drawn again from Lobe Icons and Simple Icons under their own
+licences (`THIRD_PARTY_NOTICES.md`). "Oh My Hermes", "omher" and "Hermes Agent" are names of their own projects;
+Manut AI is not affiliated with or endorsed by them.
 
 The fonts, terminal themes and other data that omher shipped keep their own notices in
 `THIRD_PARTY_NOTICES.md`.

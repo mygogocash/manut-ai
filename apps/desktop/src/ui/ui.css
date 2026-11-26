@@ -272,3 +272,26 @@ button.ui-pill:hover {
 [data-theme="light"] .pr-ic[data-state="draft"] {
   color: #59636e;
 }
+
+/* An agent's, a provider's or an editor's mark (AgentIcon.tsx): its own logo, never shrunk in a row. One with no
+   published logo is a monogram: its first letter in the app's own type, weight 600, on the quiet band's tile (the
+   canvas's grey band, --aui-subtle) with a hairline so it keeps its edge on a hovered row. The letter comes from
+   data-letter, so it is never part of the words of the row it stands in. */
+.agent-ic {
+  flex: none;
+}
+.agent-ic.agent-mono {
+  display: inline-grid;
+  place-items: center;
+  box-sizing: border-box;
+  background: var(--aui-subtle);
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--ink);
+  font-family: var(--font);
+  font-weight: 600;
+  line-height: 1;
+  vertical-align: middle;
+}
+.agent-mono::before {
+  content: attr(data-letter);
+}

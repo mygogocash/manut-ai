@@ -1,6 +1,7 @@
 // ONE registry of the harnesses manut can show at work: Hermes itself, and the agent CLIs Hermes hands work to
-// (Claude Code, Codex… through ACP, or an OMH fanout export). Each row names its official mark file in
-// src/assets/agents (read only through ./assets). Adding a harness = one row here + one asset file.
+// (Claude Code, Codex… through ACP, or an OMH fanout export). Each row's id is what its mark is drawn by
+// (src/ui/AgentIcon.tsx: its own published logo from src/ui/agentMarks.ts, or its monogram). Adding a harness = one row
+// here, and its mark in scripts/import-agent-marks.mjs when one is published.
 //
 // `harnessOf(facts)` decides WHO is working, in this order:
 //   1. an explicit kind or executor / fanout owner (`claude-code` → claude, `codex`, `omp`…); a named kind or
@@ -41,10 +42,8 @@ export type HarnessId =
 export interface Harness {
   id: HarnessId;
   label: string;
-  /** Its official mark: a file name in src/assets/agents ("" = the neutral mark). */
+  /** Its mark's file as Oh My Hermes named it ("" = the neutral mark); AgentIcon's `fileMark` reads the same names. */
   mark: string;
-  /** A character mark the vendor ships besides the logo (drawn where a face goes), when there is one. */
-  character?: string;
   /** Other names an executor, owner or ACP command uses for it (lower case, without `-acp`). */
   aliases?: string[];
 }
@@ -67,7 +66,7 @@ export const HARNESSES: readonly Harness[] = [
   { id: "windsurf", label: "Windsurf", mark: "windsurf.svg" },
   { id: "trae", label: "TRAE", mark: "trae-color.svg" },
   { id: "roo", label: "Roo Code", mark: "roocode.svg", aliases: ["roocode", "roo-code"] },
-  { id: "grok", label: "Grok", mark: "grok.svg", character: "grokbot.svg", aliases: ["grok-cli"] },
+  { id: "grok", label: "Grok", mark: "grok.svg", aliases: ["grok-cli"] },
   { id: "pi", label: "pi", mark: "pi.svg" },
   { id: "omp", label: "oh-my-pi", mark: "omp.svg", aliases: ["oh-my-pi"] },
   { id: "omo", label: "OmO", mark: "omo.svg", aliases: ["oh-my-openagent"] },

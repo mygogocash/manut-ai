@@ -36,7 +36,7 @@ function Card({ p, now, caret, cardRef, named }: { p: UsageProvider; now: number
     <div ref={cardRef} className="usage-card ui-pop ui-pop-top ui-pop-left" role="dialog" aria-label={t("use.card", { name: PROVIDER_NAME[p.id] ?? p.id })}
       style={{ "--caret": `${caret}px` } as CSSProperties} data-testid="usage-card">
       <div className="uc-head">
-        {!named && <AgentIcon id={p.id} size={14} />}
+        <AgentIcon id={p.id} title={PROVIDER_NAME[p.id]} size={14} />
         <b>{PROVIDER_NAME[p.id] ?? p.id}</b>
         {/* nothing to show: the state takes the plan's place, so the card stays one line */}
         {p.windows.length === 0 ? (
@@ -161,8 +161,21 @@ export function Usage({ named = false }: { named?: boolean } = {}) {
           onFocus={() => !open?.pinned && setOpen({ id: p.id, pinned: false })}
           onClick={() => setOpen((o) => (o?.id === p.id && o.pinned ? null : { id: p.id, pinned: true }))}
         >
-          <Ring p={p} />
-          {named ? <span className="usage-name">{PROVIDER_NAME[p.id] ?? p.id}</span> : <AgentIcon id={p.id} size={14} className="usage-mark" />}
+          {named ? (
+            // on the Code page each tool is its own mark inside its ring, then its name (the owner's request of 26 Nov 2026)
+            <>
+              <span className="usage-disc">
+                <Ring p={p} />
+                <AgentIcon id={p.id} title={PROVIDER_NAME[p.id]} size={14} className="usage-mark" />
+              </span>
+              <span className="usage-name">{PROVIDER_NAME[p.id] ?? p.id}</span>
+            </>
+          ) : (
+            <>
+              <Ring p={p} />
+              <AgentIcon id={p.id} size={14} className="usage-mark" />
+            </>
+          )}
           {meterDot(p) && <span className={`usage-dot st-${meterDot(p)}`} aria-hidden="true" />}
         </button>
       ))}

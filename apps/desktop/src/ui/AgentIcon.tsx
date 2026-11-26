@@ -1,155 +1,151 @@
-// The mark of an agent or CLI (Claude Code, Codex, Grok, pi, omp…), a sibling of ModelIcon. A mark file in
-// src/assets/agents is imported as text and drawn inline so a monochrome mark follows the text colour
-// (`currentColor`) on both themes. Manut AI ships no such file (see src/harness/assets.ts), so today every agent,
-// known or not, draws a letter mark: the first letter of its name on a quiet tile.
-import type { CSSProperties } from "react";
-import { assetRaw, assetUrl } from "../harness/assets";
+// The mark of a coding agent, a provider or an editor (Claude Code, Codex, Gemini CLI, DeepSeek, Zed…), a sibling of
+// ModelIcon. Since the owner's request of 26 Nov 2026 (docs/decisions.md) each one is drawn by its own published logo
+// wherever Lobe Icons or Simple Icons has that product or its maker (src/ui/agentMarks.ts, generated, with each mark's
+// source), and every other one (pi's forks, OmO, DSH, a person's own agent, a name the app does not know) by a monogram:
+// its first letter in the app's own type on a quiet tile, so a row of agents always reads as a row of marks. A mark
+// drawn in `currentColor` follows the text colour on both themes; one with colours of its own keeps them. A logo names
+// its own product only: the app's own places keep the app's own icon set (src/ui/icons.tsx).
+import { useId, type CSSProperties } from "react";
 import { t } from "../i18n";
+import { AGENT_MARKS } from "./agentMarks";
+import { MODEL_MARKS } from "./modelMarks";
 
 export type AgentMark =
-  | { kind: "svg"; id: string; title: string; viewBox: string; body: string; mono: boolean; evenodd: boolean }
-  | { kind: "img"; id: string; title: string; src: string }
+  | { kind: "svg"; id: string; title: string; viewBox: string; body: string; evenodd: boolean }
   | { kind: "letter"; id: null; title: string; letter: string };
 
-/** Pull viewBox and inner markup out of a published SVG file; ids get a per-mark prefix so two marks never clash. */
-function parse(id: string, title: string, raw: string): AgentMark {
-  const open = /<svg\b([^>]*)>/.exec(raw);
-  if (!open) return { kind: "letter", id: null, title, letter: title[0]?.toUpperCase() ?? "?" };
-  const attrs = open[1];
-  const body = raw
-    .slice(open.index + open[0].length, raw.lastIndexOf("</svg>"))
-    .replace(/<title>[\s\S]*?<\/title>/g, "")
-    .replace(/\bid="([^"]+)"/g, (_, x) => `id="ag-${id}-${x}"`)
-    .replace(/url\(#([^)]+)\)/g, (_, x) => `url(#ag-${id}-${x})`)
-    .trim();
-  return {
-    kind: "svg",
-    id,
-    title,
-    viewBox: /viewBox="([^"]+)"/.exec(attrs)?.[1] ?? "0 0 24 24",
-    body,
-    mono: /fill="currentColor"/.test(attrs),
-    evenodd: /fill-rule="evenodd"/.test(attrs),
-  };
-}
+/** Every agent, provider and editor id with a published mark, by the key agentMarks.ts names it. */
+export const AGENT_IDS: string[] = Object.keys(AGENT_MARKS);
 
-const SVG: [string, string, string][] = (
-  [
-  ["claude", "Claude Code", "claudecode-color.svg"],
-  // Codex draws the OpenAI (GPT) mark bare: the published codex-color.svg is a white app tile that reads as a
-  // blank square at 16px inside a row frame
-  ["codex", "Codex", "openai.svg"],
-  ["openai", "OpenAI", "openai.svg"],
-  ["gemini", "Gemini CLI", "geminicli-color.svg"],
-  ["gemini-app", "Gemini", "gemini-color.svg"],
-  ["grok", "Grok", "grok.svg"],
-  ["grokbot", "Grok Bot", "grokbot.svg"],
-  ["pi", "pi", "pi.svg"],
-  ["omp", "omp", "omp.svg"],
-  ["opencode", "opencode", "opencode.svg"],
-  ["cursor", "Cursor", "cursor.svg"],
-  ["amp", "Amp", "amp-color.svg"],
-  ["cline", "Cline", "cline.svg"],
-  ["copilot", "GitHub Copilot", "githubcopilot.svg"],
-  ["goose", "Goose", "goose.svg"],
-  ["kilo", "Kilo Code", "kilocode.svg"],
-  ["junie", "Junie", "junie-color.svg"],
-  ["qwen", "Qwen Code", "qwen-color.svg"],
-  ["windsurf", "Windsurf", "windsurf.svg"],
-  ["trae", "TRAE", "trae-color.svg"],
-  ["roo", "Roo Code", "roocode.svg"],
-  ] as [string, string, string][]
-).map(([id, title, file]) => [id, title, assetRaw(file) ?? ""]);
-
-const OMH_SRC = assetUrl("omh.png");
-const MARKS: Record<string, AgentMark> = Object.fromEntries([
-  ...SVG.map(([id, title, raw]) => [id, parse(id, title, raw)] as const),
-  // a picture only when its file is there; an <img> with no source would draw a broken-image box
-  ["omh", (OMH_SRC ? { kind: "img", id: "omh", title: "OMH", src: OMH_SRC } : { kind: "letter", id: null, title: "OMH", letter: "O" }) as AgentMark] as const,
-]);
-
-/** Every agent id with a mark, in the order the grid shows them (22). */
-export const AGENT_IDS: string[] = ["omh", ...SVG.map(([id]) => id)];
-
-/** Other spellings people and files use for the same agent. */
+/** Other spellings people, the shell's rows and executors use for the same product (lower case). */
 const ALIASES: Record<string, string> = {
   claudecode: "claude",
   "claude-code": "claude",
-  chatgpt: "openai",
+  "claude-agent": "claude",
+  "claude-code-acp": "claude",
+  "claude-agent-acp": "claude",
+  "openai-codex": "codex",
+  "codex-cli": "codex",
   geminicli: "gemini",
   "gemini-cli": "gemini",
-  "grok-bot": "grokbot",
+  agy: "antigravity",
+  "qwen-code": "qwen",
+  "kimi-code": "kimi",
+  "kimi-cli": "kimi",
+  moonshot: "kimi",
+  "grok-cli": "grok",
+  xai: "grok",
+  "cursor-agent": "cursor",
   githubcopilot: "copilot",
   "github-copilot": "copilot",
+  "copilot-cli": "copilot",
+  "open-code": "opencode",
+  "hermes-agent": "hermes",
+  "z-ai": "zai",
+  "z.ai": "zai",
+  zhipu: "zai",
   kilocode: "kilo",
   "kilo-code": "kilo",
   roocode: "roo",
   "roo-code": "roo",
-  "qwen-code": "qwen",
-  "oh-my-hermes": "omh",
-  kami: "omh",
+  zedindustries: "zed",
 };
 
-const byFile = new Map<string, AgentMark>();
+/** The mark file names the harness registry and the shell's agent rows give (Oh My Hermes' file names), to the mark
+ *  each names. A file no row of this table knows draws the monogram. */
+const FILES: Record<string, string> = {
+  "claudecode-color": "claude",
+  claudecode: "claude",
+  "claude-color": "claude",
+  openai: "codex",
+  codex: "codex",
+  "geminicli-color": "gemini",
+  "gemini-color": "gemini",
+  antigravity: "antigravity",
+  "antigravity-color": "antigravity",
+  "qwen-color": "qwen",
+  "kimi-code": "kimi",
+  "kimi-color": "kimi",
+  grok: "grok",
+  githubcopilot: "copilot",
+  cursor: "cursor",
+  cline: "cline",
+  opencode: "opencode",
+  pi: "pi",
+  "hermes-agent": "hermes",
+  hermesagent: "hermes",
+  "amp-color": "amp",
+  goose: "goose",
+  kilocode: "kilo",
+  "junie-color": "junie",
+  "trae-color": "trae",
+  roocode: "roo",
+  windsurf: "windsurf",
+};
 
-/** The mark in `file` (a name in src/assets/agents, no folder), titled `title`; a letter mark when there is no such
- *  file. */
-export function fileMark(file: string, title: string): AgentMark {
-  const key = `${file}\u0000${title}`;
-  const hit = byFile.get(key);
-  if (hit) return hit;
-  const stem = file.replace(/\.[a-z]+$/i, "");
-  const raw = assetRaw(file);
-  const src = raw ? undefined : assetUrl(file);
-  const mark: AgentMark = raw
-    ? parse(stem, title, raw)
-    : src
-      ? { kind: "img", id: stem, title, src }
-      : { kind: "letter", id: null, title, letter: (title.match(/[a-z0-9]/i)?.[0] ?? "?").toUpperCase() };
-  byFile.set(key, mark);
-  return mark;
-}
+const svgMark = (key: string, title?: string): AgentMark | null => {
+  const art = AGENT_MARKS[key];
+  if (art) return { kind: "svg", id: key, title: title || art.title, viewBox: art.viewBox, body: art.body, evenodd: art.evenodd };
+  // a provider the app already draws as a model's maker (OpenAI, Meta, Mistral, OpenRouter, Ollama): the same mark
+  const model = MODEL_MARKS[key];
+  return model ? { kind: "svg", id: key, title: title || model.title, viewBox: model.viewBox, body: model.body, evenodd: true } : null;
+};
 
-/** The mark for an agent id (case-insensitive, aliases allowed); unknown ids get a letter mark. */
-export function agentIcon(id: string | null | undefined): AgentMark {
+/** The monogram of `name`: its first letter or digit, upper case ("?" when it has none). */
+export const monogram = (name: string): string => (name.match(/[\p{L}\p{N}]/u)?.[0] ?? "?").toUpperCase();
+
+const letter = (name: string): AgentMark => ({ kind: "letter", id: null, title: name || t("mark.unknown"), letter: monogram(name) });
+
+/** The mark for an agent, provider or editor id (any case, aliases allowed): its own logo when one is published, else
+ *  the monogram of `title` (its name as the app shows it) or of the id. */
+export function agentIcon(id: string | null | undefined, title?: string): AgentMark {
   const key = (id ?? "").trim().toLowerCase();
-  const mark = MARKS[ALIASES[key] ?? key];
+  const mark = key ? svgMark(ALIASES[key] ?? key, title) : null;
   if (mark) return mark;
-  const name = (id ?? "").trim();
-  return { kind: "letter", id: null, title: name || t("mark.unknown"), letter: (name.match(/[a-z0-9]/i)?.[0] ?? "?").toUpperCase() };
+  return letter((title ?? "").trim() || (id ?? "").trim());
 }
+
+/** The mark a file name of the registry or a shell row names (`geminicli-color.svg`), titled `title`; the monogram of
+ *  `title` when the file names no published mark. */
+export function fileMark(file: string, title: string): AgentMark {
+  const stem = file.trim().toLowerCase().replace(/\.[a-z]+$/, "");
+  return (FILES[stem] ? svgMark(FILES[stem]) : null) ?? letter(title);
+}
+
+/** The size of a monogram's letter in a tile of `size`: about two thirds of it, as a capital stands in the set's box. */
+export const monoFont = (size: number) => Math.round(size * 0.625);
 
 export function AgentIcon({
   id,
   file,
+  title,
   size = 16,
   style,
   className,
 }: {
   id: string | null | undefined;
-  /** Draw the mark in this file of src/assets/agents instead ([`fileMark`], titled by `id`). */
+  /** Draw the mark this file of the registry or a shell row names instead ([`fileMark`], titled by `title` or `id`). */
   file?: string;
+  /** The name the app shows beside it, which a monogram takes its letter from. */
+  title?: string;
   size?: number;
   style?: CSSProperties;
   className?: string;
 }) {
-  const mark = file ? fileMark(file, id ?? "") : agentIcon(id);
+  // ids of this drawing's own, so two copies of a mark with a gradient or a mask never share one
+  const uid = `ag${useId().replace(/[^a-zA-Z0-9]/g, "")}`;
+  const mark = file ? fileMark(file, title ?? id ?? "") : agentIcon(id, title);
   const cls = `agent-ic${className ? ` ${className}` : ""}`;
-  if (mark.kind === "img") {
-    return (
-      <img src={mark.src} width={size} height={size} alt="" aria-hidden="true" className={cls} draggable={false}
-        data-agent={mark.id} style={{ borderRadius: Math.round(size / 5), ...style }} />
-    );
-  }
   if (mark.kind === "letter") {
+    // the letter is drawn by the stylesheet from data-letter (ui.css), so it is never part of the row's words
     return (
-      <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true" className={cls} data-agent="letter" style={style}>
-        <rect width="24" height="24" rx="5" fill="currentColor" opacity="0.16" />
-        <text x="12" y="16.6" textAnchor="middle" fontSize="13" fontWeight="600" fill="currentColor"
-          fontFamily="-apple-system, system-ui, sans-serif">
-          {mark.letter}
-        </text>
-      </svg>
+      <span
+        className={`${cls} agent-mono`}
+        data-agent="letter"
+        data-letter={mark.letter}
+        aria-hidden="true"
+        style={{ width: size, height: size, fontSize: monoFont(size), borderRadius: Math.max(3, Math.round(size / 4)), ...style }}
+      />
     );
   }
   return (
@@ -157,14 +153,15 @@ export function AgentIcon({
       width={size}
       height={size}
       viewBox={mark.viewBox}
-      fill={mark.mono ? "currentColor" : undefined}
+      fill="currentColor"
       fillRule={mark.evenodd ? "evenodd" : undefined}
       aria-hidden="true"
+      focusable="false"
       className={cls}
       data-agent={mark.id}
       style={style}
-      // static markup from the bundled asset files (no user input)
-      dangerouslySetInnerHTML={{ __html: mark.body }}
+      // static, generated markup from agentMarks.ts and modelMarks.ts (no user input)
+      dangerouslySetInnerHTML={{ __html: mark.body.replace(/%u/g, uid) }}
     />
   );
 }

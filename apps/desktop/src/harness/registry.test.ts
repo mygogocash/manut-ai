@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { assetFiles, assetUrl } from "./assets";
+import { agentIcon, fileMark } from "../ui/AgentIcon";
 import { HARNESSES, harness, harnessByName, harnessOf } from "./registry";
 import { chatPieces, resultText, stepDetail } from "./session";
 
@@ -70,28 +70,36 @@ describe("harnessOf", () => {
 });
 
 describe("HARNESSES", () => {
-  // Oh My Hermes checked here that every row's mark was a file in src/assets/agents. Those files are other
-  // companies' logos and were left out of the fork, so the check is now that none ships and each row still names
-  // the file it would use (one asset plus this row is all a mark we may ship would need).
-  it("ships no mark file; every row but the generic one still names its mark, and ids are unique", () => {
+  // Oh My Hermes kept each row's mark as a file in src/assets/agents. Since the owner's request of 26 Nov 2026 the
+  // published marks are generated into src/ui/agentMarks.ts instead (scripts/import-agent-marks.mjs), so no image file
+  // ships, and a row's mark is drawn by its id: its own logo where one is published, its monogram otherwise.
+  it("ships no mark file; every row draws its own logo or its monogram by its id, and ids are unique", () => {
     expect(existsSync(ASSETS)).toBe(false);
-    expect(assetFiles()).toEqual([]);
+    const logos: string[] = [];
     for (const h of HARNESSES) {
-      if (h.id === "generic") expect(h.mark).toBe("");
-      else expect(h.mark, h.id).toMatch(/^[\w.-]+\.(svg|png)$/);
-      expect(assetUrl(h.mark), h.id).toBeUndefined();
+      if (h.id === "generic") {
+        expect(h.mark).toBe("");
+        continue;
+      }
+      expect(h.mark, h.id).toMatch(/^[\w.-]+\.(svg|png)$/);
+      const m = agentIcon(h.id, h.label);
+      if (m.kind === "svg") logos.push(h.id);
+      else expect(m.letter, h.id).toBe(h.label[0].toUpperCase());
+      // the file name the row keeps names the same mark as its id (or none, for a monogram)
+      expect(fileMark(h.mark, h.label).kind, h.id).toBe(m.kind);
     }
+    expect(logos).toEqual(["hermes", "claude", "codex", "gemini", "opencode", "kimi", "qwen", "copilot", "cline", "goose", "cursor", "amp", "kilo", "junie", "windsurf", "trae", "roo", "grok", "pi"]);
     expect(new Set(HARNESSES.map((h) => h.id)).size).toBe(HARNESSES.length);
   });
 
-  it("only src/harness reads src/assets/agents (one place)", () => {
+  it("nothing reads src/assets/agents any more", () => {
     const hits: string[] = [];
     const walk = (dir: string) => {
       for (const e of readdirSync(dir, { withFileTypes: true })) {
         const p = join(dir, e.name);
         if (e.isDirectory()) {
-          if (!["harness", "__fixtures__"].includes(e.name)) walk(p);
-        } else if (/\.(tsx?|css)$/.test(e.name) && readFileSync(p, "utf8").includes("assets/agents/")) hits.push(p);
+          if (e.name !== "__fixtures__") walk(p);
+        } else if (/\.(tsx?|css)$/.test(e.name) && !e.name.includes(".test.") && readFileSync(p, "utf8").includes("assets/agents/")) hits.push(p);
       }
     };
     walk(join(__dirname, ".."));

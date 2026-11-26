@@ -47,6 +47,8 @@ export interface Row {
   /** the row's icon, from the brand's set: every row of the command menu has one before its word (the canvas's Search
    *  board); a row given none takes its group's */
   icon?: IconName;
+  /** a product the row names (an editor), drawn by its own logo in the icon's place: an id AgentIcon knows, and its name */
+  mark?: { id: string; title: string };
   run(): void;
 }
 
@@ -118,13 +120,13 @@ export const ACTIONS: ActionDef[] = [
     // the Code page's open project, opened in the person's editor: the same call as a lane's menu (code/editor.ts)
     id: "open-editor-project",
     elsewhere: "openFolderInEditor(getHost(), root",
-    offer: (c) => (c.editor && c.places.editorProject ? [{ id: "do:open-editor:project", label: t("editor.openProject", { name: c.editor.label }), icon: "code", run: () => c.places.editorProject!.open() }] : []),
+    offer: (c) => (c.editor && c.places.editorProject ? [{ id: "do:open-editor:project", label: t("editor.openProject", { name: c.editor.label }), icon: "code", mark: { id: c.editor.id, title: c.editor.label }, run: () => c.places.editorProject!.open() }] : []),
   },
   {
     // the open session or lane: a session row's menu and a lane's menu offer the same
     id: "open-editor-session",
     elsewhere: "lane-open-editor",
-    offer: (c) => (c.editor && c.places.editorSession ? [{ id: "do:open-editor:session", label: t("editor.openSession", { name: c.editor.label }), icon: "code", run: () => c.places.editorSession!.open() }] : []),
+    offer: (c) => (c.editor && c.places.editorSession ? [{ id: "do:open-editor:session", label: t("editor.openSession", { name: c.editor.label }), icon: "code", mark: { id: c.editor.id, title: c.editor.label }, run: () => c.places.editorSession!.open() }] : []),
   },
   {
     id: "microphone",
