@@ -2,6 +2,29 @@
 import { expect, test, type Page } from "@playwright/test";
 import { chatOpen, openChat } from "./start";
 
+const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
+
+/** The mock bridge's own reset. A spec before this one in the same worker may leave Kami's turn running (prompt-history's held
+ *  prompt does): a message typed then waits in the queue instead of crossing the socket, and the mid-turn test sees no send. */
+async function resetMock(): Promise<void> {
+  const ws = new WebSocket(`ws://127.0.0.1:${MOCK}/?token=e2e`);
+  await new Promise<void>((res, rej) => {
+    ws.onopen = () => res();
+    ws.onerror = () => rej(new Error("mock websocket error"));
+  });
+  await new Promise<void>((res) => {
+    ws.onmessage = (m) => {
+      if (JSON.parse(String(m.data)).id === "rs1") res();
+    };
+    ws.send(JSON.stringify({ id: "rs1", op: "mock.reset" }));
+  });
+  ws.close();
+}
+
+test.beforeEach(async () => {
+  await resetMock();
+});
+
 async function open(page: Page) {
   await page.goto("/");
   await chatOpen(page);
