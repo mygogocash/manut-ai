@@ -935,7 +935,8 @@ async fn skill_link_read(installs: State<'_, Arc<skill_links::Installs>>, link: 
 }
 
 /// The ask to install skills `names` of kept bundle `read` for `agent`, into that agent's own skills folder. Writes nothing;
-/// rejects `exists:<name>` for a skill it has, `link_root`, `bad_bundle:<why>`, `not_found` or `expired`.
+/// rejects `exists:<name>` for a skill it has, `link_root`, `bad_bundle:<why>`, `acts_alone:<why>:<skill>/<path>[:<field>]` for a
+/// skill an agent would act on by itself (skill_links.rs `file_acts_alone`), `not_found` or `expired`.
 #[tauri::command]
 async fn skill_install_ask(installs: State<'_, Arc<skill_links::Installs>>, read: String, names: Vec<String>, agent: String) -> Result<skill_links::InstallAsk, String> {
     let home = user_home()?;

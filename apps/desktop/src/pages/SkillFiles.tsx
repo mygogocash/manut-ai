@@ -1,11 +1,12 @@
 // Every file of a bundle of skills, before it is published (the Artifacts page) or installed (Settings › MCP and Skills), item 84.
-// Each file shows its path and size, a script or program is marked (by its ending, a `#!` first line or its executable bit), and
+// Each file shows its path and size, SKILL.md is marked as the instructions the agent will follow, a script or program it may ask
+// to run is marked (in a `scripts` or `bin` folder, by its ending, a `#!` first line or its executable bit; item 113), and
 // View opens its text, as written, in a plain block: nothing in a file is ever drawn as a page. Opening a file counts it as looked
 // at (fileReview.ts); the tick "I have looked at every file" counts them all. While neither is done the list says so, and the ask's
 // Yes stays held back.
 import { t } from "../i18n";
 import { sizeText } from "./artifacts";
-import { isScript } from "../runtime/skillBundle";
+import { isInstructions, isScript } from "../runtime/skillBundle";
 import type { FileReview } from "../runtime/fileReview";
 import "./skillFiles.css";
 
@@ -39,11 +40,25 @@ export function SkillFiles(p: SkillFilesProps) {
             {s.files.map((f) => {
               const key = `${s.name}/${f.path}`;
               const script = isScript(f.path, f.text, f.exec);
+              const instructions = isInstructions(f.path);
               const open = p.shown === key;
               return (
-                <li key={key} className="skl-file" data-testid="skl-file" data-path={key} data-script={script ? "1" : "0"} data-opened={p.review?.opened(key) ? "1" : "0"}>
+                <li
+                  key={key}
+                  className="skl-file"
+                  data-testid="skl-file"
+                  data-path={key}
+                  data-script={script ? "1" : "0"}
+                  data-instructions={instructions ? "1" : "0"}
+                  data-opened={p.review?.opened(key) ? "1" : "0"}
+                >
                   <div className="skl-row">
                     <span className="skl-path">{f.path}</span>
+                    {instructions && (
+                      <span className="skl-tag" data-testid="skl-instructions">
+                        {t("skl.instructions")}
+                      </span>
+                    )}
                     {script && (
                       <span className="skl-tag" data-testid="skl-script">
                         {t("skl.script")}
