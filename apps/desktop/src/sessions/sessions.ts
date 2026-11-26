@@ -49,7 +49,7 @@ import { getHost, type ChatEvent, type ChatInput, type ConvState, type PastChat,
 import { localBot } from "../peers/peerKey";
 import { askOpen, folderKey, getStore, notifySessionEvent, notifySessionNote, onBridgeEvent, selectAsks, setChatRoute, setSessionKeyLookup, type ApprovalItem, type OutFile, type SentFile, type Store } from "../state/store";
 import { blobType, bytesOf, inlinePicture, pathsTyped, putSentFiles, SENT_FILES_KEY, shellQuote, wireText, type SavedFile, type SentFilesBook } from "./attach";
-import type { AccountCli, AccountGroup, ApprovalChoice, BridgeEvent, ClarifyAnswers, DiffFile, EventOf, Msg } from "../lib/protocol";
+import type { AccountGroup, ApprovalChoice, BridgeEvent, ClarifyAnswers, DiffFile, EventOf, Msg } from "../lib/protocol";
 import { settleApproval } from "../chat/cards/respond";
 import { afterBranchRead, beforeBranchRead, kitAnswer, noteChange, savesAlone } from "../code/kitAsks";
 import { readSaved, SAVED_READ_MS } from "../code/secrets";
@@ -79,58 +79,12 @@ import { getSplit, groupOf, leaveIn, setSplit } from "./splitState";
 import { folderGroups, getFolderPrefs, orderFolders, pathKey, ranElsewhere, revealFolder as openFolderGroup, setFolderGone } from "./folders";
 import { broughtBackNote, REWINDS, rewoundNote, TurnBook, turnTitle } from "./rewind";
 import { NO_RULES, signedOutSaid, errText } from "./sessionErrors";
+import { ACCOUNT_CLI, accountFor, SAID_MAX, OUT_MARK_MS, RESIZE_SETTLE_MS, utf8, newConversationId, TERM_CONTINUES, TERM_REOPENS, termComesBack, CODEX_ID_FIRST_MS, CODEX_ID_EVERY_MS } from "./sessionPure";
+export { ACCOUNT_CLI, accountFor, RESIZE_SETTLE_MS, newConversationId } from "./sessionPure";
 import { readRecent, readSentFiles, readTitles, titleKey, TITLED, readOpens } from "./sessionBooks";
 export { NO_RULES, signedOutSaid } from "./sessionErrors";
 import type { ModelOption, SessionsState, AgentLive, Term, TermIo, ChatProc } from "./sessionTypes";
 export type { ModelOption, SessionsState, AgentLive } from "./sessionTypes";
-
-/** The Accounts CLI a session of `agent` signs in as (mirrors `session_cli` in src-tauri/src/accounts.rs). */
-export const ACCOUNT_CLI: Partial<Record<AgentId, AccountCli>> = { claude: "claude", codex: "codex", grok: "grok" };
-
-/** The account a new session of `agent` runs as, from the Accounts list when it is loaded (none = unknown or the
- *  agent has no accounts; the shell then uses the one picked for new sessions). */
-export function accountFor(groups: AccountGroup[] | null, agent: AgentId): string | undefined {
-  const cli = ACCOUNT_CLI[agent];
-  const g = cli ? groups?.find((x) => x.cli === cli) : undefined;
-  return g ? (g.active ?? "default") : undefined;
-}
-
-/** How much of the end of a CLI's output is kept while it may still be refusing its conversation. */
-const SAID_MAX = 2_048;
-
-/** The row's last-output time is written at most this often (a flood would otherwise re-render the sidebar). */
-const OUT_MARK_MS = 500;
-
-/** A terminal's new size goes to its program once it has stopped changing for this long. Dragging a window gives
- *  one size per frame (16.7 ms at 60 Hz), so a wait of one frame or less collapses nothing; two frames does, and
- *  the program redraws once for the size the drag ended on instead of once per frame. */
-export const RESIZE_SETTLE_MS = 32;
-
-const utf8 = new TextEncoder();
-
-/** A random (version 4) UUID: the id manut gives a new Claude Code conversation in a terminal (`--session-id`). */
-export function newConversationId(): string {
-  const c = globalThis.crypto;
-  if (typeof c?.randomUUID === "function") return c.randomUUID();
-  const b = c.getRandomValues(new Uint8Array(16));
-  b[6] = (b[6] & 0x0f) | 0x40;
-  b[8] = (b[8] & 0x3f) | 0x80;
-  const h = [...b].map((x) => x.toString(16).padStart(2, "0")).join("");
-  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
-}
-
-/** TERMINALS agents that continue their own conversation after manut restarts (`claude --resume`, `codex resume`). */
-const TERM_CONTINUES: readonly AgentId[] = ["claude", "codex"];
-/** TERMINALS agents that reopen their own dropped session after manut restarts with no id from manut: oh-my-hermes
- *  (`omh`) is told its row's link (`MANUT_TERMINAL_LINK`, rule 11) and reopens the session it dropped under that
- *  terminal by itself (OMH's auto-resume), so it needs no conversation id. */
-const TERM_REOPENS: readonly AgentId[] = ["omh"];
-/** Whether a TERMINALS session that was running when manut closed starts again by itself after the restart. */
-const termComesBack = (s: Pick<SavedSession, "agent" | "agentSession">): boolean =>
-  TERM_REOPENS.includes(s.agent) || (!!s.agentSession && TERM_CONTINUES.includes(s.agent));
-/** When a TERMINALS Codex session first asks for its conversation id, and how often after that until it has one. */
-const CODEX_ID_FIRST_MS = 5_000;
-const CODEX_ID_EVERY_MS = 15_000;
 
 type Xterm = [typeof import("@xterm/xterm"), typeof import("@xterm/addon-fit")];
 let xtermLoad: Promise<Xterm> | null = null;
