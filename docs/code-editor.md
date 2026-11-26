@@ -1804,11 +1804,10 @@ and the palette.
   (`previewSecrets` already takes them as `added`); an address read from the ports a preview listens on when it prints none; a
   preview kept through a reload or a restart of the app (every one stops); and a lane that runs in its own terminal, which has no
   pane.
-- Where Claude Code's shell is. Its ask does not say, and a `cd` in one command carries to the next inside the project
-  and the session's attachments folder (the shell adds it with `--add-dir`), so the dial reads a command from the
-  session's folder. It does check the path Claude Code itself found outside. Starting Claude Code with
-  `CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR=1` would start every command in the project; that changes how the
-  developer's own agent works, so it wants its own decision.
+- Where an agent's shell is. Since item 116 every Claude Code the app starts (a chat, Buddy, a terminal, a title run)
+  runs with `CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR=1` (`fixed_env` in `src-tauri/src/providers.rs`, set after the
+  person's own variables), so its shell starts every command in the session's folder and a `cd` no longer carries to
+  the next command. The dial does not rely on that: see "The folder a session's commands run in".
 - Asks that still name no path, so they ask the person: a search that names no folder, or a Glob whose pattern
   reaches past its folder; oh-my-pi's own edit, which names its file inside its patch; and an ACP agent's search or
   move.
