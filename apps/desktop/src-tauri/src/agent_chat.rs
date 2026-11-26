@@ -5605,6 +5605,23 @@ mod tests {
         let _ = (std::fs::remove_file(mark), std::fs::remove_dir_all(home));
     }
 
+    /// Kit's dial reads a command from the session's folder, so Claude Code's shell must start every command there: a
+    /// `cd` in one command must not carry to the next (item 116). A variable of the person's with the same name never wins.
+    #[cfg(unix)]
+    #[test]
+    fn a_claude_chat_program_starts_every_command_in_the_session_folder() {
+        let c = ChatSessions::default();
+        let tmp = std::env::temp_dir().canonicalize().unwrap();
+        let mark = tmp.join(format!("manut-chat-cwd-{}", std::process::id()));
+        let script = format!("echo \"keep=${{CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR-unset}}\" > '{}'", mark.display());
+        let mine = crate::providers::Stored { env: vec![crate::providers::Var { name: "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR".into(), value: "0".into() }], ..Default::default() };
+        let (out, sink) = collect();
+        c.spawn(vec!["/bin/sh".into(), "-c".into(), script.into()], &tmp, None, &crate::providers::session_env("claude", &mine, &[], true), Box::new(Pi::default()), sink).unwrap();
+        assert!(wait_for(|| out.lock().unwrap().iter().any(|o| matches!(o, ChatOut::Exit(..))), 10));
+        assert_eq!(std::fs::read_to_string(&mark).unwrap().trim(), "keep=1");
+        let _ = std::fs::remove_file(mark);
+    }
+
     #[cfg(unix)]
     #[test]
     fn roots_name_each_running_chat_with_its_program_and_folder_and_drop_one_that_ended_or_was_closed() {

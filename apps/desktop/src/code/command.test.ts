@@ -13,7 +13,7 @@ describe("the canvas's command", () => {
   it("pnpm add qrcode adds 1 package, and its rule covers adding any package", () => {
     const c = read("pnpm add qrcode");
     expect(c).toMatchObject({ action: "install", outside: [], saves: false, say: { key: "kit.say.add1" } });
-    expect(c.rule).toEqual({ words: ["pnpm", "add"] });
+    expect(c.rule).toEqual({ words: ["pnpm", "add"], action: "install" });
     expect(ruleText(c.rule!)).toBe("pnpm add …");
     expect(read("pnpm add qrcode dayjs").say).toEqual({ key: "kit.say.addN", vars: { n: 2 } });
   });
@@ -135,7 +135,9 @@ describe("what a step does", () => {
       "git archive --remote=x HEAD",
     ])
       expect([line, action(line)]).toEqual([line, "unknown"]);
-    expect(action("git -C sub status")).toBe("read");
+    // only the project's own folder: any other may be plain files git takes for a repository (item 116)
+    expect(action("git -C sub status")).toBe("unknown");
+    expect(action("git -C . status")).toBe("read");
     expect(action("git --no-pager log --oneline")).toBe("read");
     expect(action("git config --get user.name")).toBe("read");
     expect(action("git log --output=log.txt")).toBe("change");
@@ -226,7 +228,9 @@ describe("what a step does", () => {
   it("asks for a change to a tool's own settings, and reads them otherwise", () => {
     for (const line of ["npm config set script-shell=./x", "pnpm config set registry https://example.com", "yarn config set npmRegistryServer x", "pnpm config delete registry", "npm config edit", "go env -w GOFLAGS=-x", "go env -u GOPROXY"])
       expect([line, action(line)]).toEqual([line, "unknown"]);
-    for (const line of ["npm config get registry", "pnpm config list", "yarn config", "go env GOPATH", "go env"]) expect([line, action(line)]).toEqual([line, "read"]);
+    for (const line of ["npm config get registry", "go env GOPATH", "go env"]) expect([line, action(line)]).toEqual([line, "read"]);
+    // a listing of every setting can print a token kept there, as printenv does (item 116)
+    for (const line of ["pnpm config list", "yarn config"]) expect([line, action(line)]).toEqual([line, "unknown"]);
   });
 
   it("calls a command that writes its output into a file a change", () => {
@@ -298,15 +302,15 @@ describe("outside the project", () => {
 
 describe("Always allow in this project", () => {
   it("keeps the program and what it does for an install, a push or a safe command", () => {
-    expect(read("pnpm add qrcode").rule).toEqual({ words: ["pnpm", "add"] });
-    expect(read("git push -u origin kit/qr").rule).toEqual({ words: ["git", "push"] });
-    expect(read("gh pr create --title x").rule).toEqual({ words: ["gh", "pr", "create"] });
-    expect(read("git commit -m 'x'").rule).toEqual({ words: ["git", "commit"] });
-    expect(read("pnpm build").rule).toEqual({ words: ["pnpm", "build"] });
+    expect(read("pnpm add qrcode").rule).toEqual({ words: ["pnpm", "add"], action: "install" });
+    expect(read("git push -u origin kit/qr").rule).toEqual({ words: ["git", "push"], action: "push" });
+    expect(read("gh pr create --title x").rule).toEqual({ words: ["gh", "pr", "create"], action: "push" });
+    expect(read("git commit -m 'x'").rule).toEqual({ words: ["git", "commit"], action: "change" });
+    expect(read("pnpm build").rule).toEqual({ words: ["pnpm", "build"], action: "change" });
   });
 
   it("keeps a delete only as the exact command", () => {
-    expect(read("rm -rf ./build").rule).toEqual({ words: ["rm", "-rf", "./build"], exact: true });
+    expect(read("rm -rf ./build").rule).toEqual({ words: ["rm", "-rf", "./build"], exact: true, action: "delete" });
     expect(ruleText({ words: ["rm", "-rf", "./build"], exact: true })).toBe("rm -rf ./build");
   });
 

@@ -23,6 +23,10 @@ export interface Where {
   allowed?: readonly string[];
   /** The branch the project has checked out, for a push that names none. */
   branch?: string;
+  /** The folders a session's earlier commands may have left its shell in, besides `cwd` (item 116): absolute paths, and
+   *  null for one that cannot be known. The line is read from `cwd` and from each of them, and the strictest reading
+   *  speaks, so whether an agent keeps a `cd` for its next command never decides what the dial lets go. */
+  from?: readonly (string | null)[];
 }
 
 /** What a step does, in words: a dictionary key and its slots. */
@@ -31,10 +35,12 @@ export interface Say {
   vars?: Record<string, string | number>;
 }
 
-/** What "Always allow in this project" keeps: a command's first words, or the whole command (`exact`). */
+/** What "Always allow in this project" keeps: a command's first words, or the whole command (`exact`), and the step it
+ *  was kept for (item 116). A rule saved before it named its step has none. */
 export interface Rule {
   words: string[];
   exact?: true;
+  action?: KitAction;
 }
 
 export interface ReadCommand {
@@ -46,6 +52,12 @@ export interface ReadCommand {
   /** The rule "Always allow in this project" would keep, or null when none may be kept. */
   rule: Rule | null;
   say: Say;
+  /** The folders the shell may be in once the line has run, absolute (null: one that cannot be known), for the
+   *  session's next command (`foldersAfter`). */
+  ends: (string | null)[];
+  /** The line is only a `cd` to the project's or the session's folder, written in full: after it, that is where the
+   *  shell is. */
+  resets?: string;
 }
 
 // ---- paths --------------------------------------------------------------------------------------------------------
@@ -182,8 +194,15 @@ function pathLike(word: string): boolean {
 
 // ---- the shell's words --------------------------------------------------------------------------------------------
 
+/** What joins a simple command to the one before it or after it: `start` and `end` for the line's ends, `;` also for a
+ *  line break. */
+type Sep = "start" | "end" | ";" | "&&" | "||" | "|" | "&";
+
 interface Simple {
   words: string[];
+  /** What joins it to the command before it, and to the one after it. */
+  sep: Sep;
+  after: Sep;
   /** Where its output or input goes: each target as written. */
   redirects: string[];
   /** The targets it writes its output into. */
@@ -202,7 +221,7 @@ interface Lexed {
 function lex(line: string): Lexed {
   const cmds: Simple[] = [];
   let opaque = false;
-  let cur: Simple = { words: [], redirects: [], writes: [], piped: false };
+  let cur: Simple = { words: [], redirects: [], writes: [], piped: false, sep: "start", after: "end" };
   let word = "";
   let inWord = false;
   let quote: "'" | '"' | null = null;
@@ -232,11 +251,17 @@ function lex(line: string): Lexed {
     braceOpen = false;
     braceList = false;
   };
-  const endCmd = (piped: boolean) => {
+  const endCmd = (next: Sep) => {
     endWord();
     if (redirect) opaque = true; // a redirect with no target
-    if (cur.words.length || cur.redirects.length) cmds.push(cur);
-    cur = { words: [], redirects: [], writes: [], piped };
+    if (cur.words.length || cur.redirects.length) {
+      cur.after = next;
+      cmds.push(cur);
+      cur = { words: [], redirects: [], writes: [], piped: next === "|", sep: next, after: "end" };
+    } else if (cur.sep === "start" || cur.sep === ";") {
+      // `a &&` then a line break goes on with the same list: a command after it is joined by `&&`, not by the break
+      cur = { ...cur, piped: next === "|", sep: next };
+    }
   };
 
   for (let i = 0; i < line.length; i++) {
@@ -279,21 +304,21 @@ function lex(line: string): Lexed {
       continue;
     }
     if (c === "\n" || c === ";") {
-      endCmd(false);
+      endCmd(";");
       continue;
     }
     if (c === "&" && next === "&") {
-      endCmd(false);
+      endCmd("&&");
       i++;
       continue;
     }
     if (c === "|") {
       if (next === "|") {
-        endCmd(false);
+        endCmd("||");
         i++;
       } else {
         if (next === "&") i++;
-        endCmd(true);
+        endCmd("|");
       }
       continue;
     }
@@ -305,7 +330,7 @@ function lex(line: string): Lexed {
       continue;
     }
     if (c === "&") {
-      endCmd(false);
+      endCmd("&");
       continue;
     }
     if ((c === "<" || c === ">") && next === "(") {
@@ -376,7 +401,7 @@ function lex(line: string): Lexed {
     inWord = true;
   }
   if (quote) opaque = true;
-  endCmd(false);
+  endCmd("end");
   return { cmds, opaque };
 }
 
@@ -397,6 +422,8 @@ interface Verdict {
   cd?: string;
   /** Its folders are where it looks, not what it deletes (a `find` that deletes only what matches a name). */
   filtered?: true;
+  /** After it, the folder the shell is in cannot be known (`cd -`, `pushd`, `popd`, `source`, `eval`). */
+  lost?: true;
 }
 
 const say = (key: Key, vars?: Say["vars"]): Say => (vars ? { key, vars } : { key });
@@ -546,7 +573,12 @@ function packageManager(words: string[], where: Where): Verdict {
   const head = at + 1;
   const rest = ops.slice(1).map((i) => words[i]);
   // what a script is handed after its name goes to whatever the script runs
-  const handed = (from: number, s: Verdict): Verdict => (s.action === "check" ? (checkOptions("", words.slice(from)) ?? s) : s);
+  const handed = (from: number, s: Verdict): Verdict => {
+    if (s.action !== "check") return s;
+    const known = knownOptions("", words.slice(from), true);
+    if (known === "unknown") return unknownProgram(pm);
+    return checkOptions("", words.slice(from)) ?? (known === "change" ? v("change", say("kit.say.format"), head) : s);
+  };
   if (pm === "yarn" && sub === "global") return thisMac();
   if (["add", "install", "i", "in", "ci"].includes(sub)) {
     if (sub === "ci" || !rest.length) return v("install", say("kit.say.installAll"), head);
@@ -570,7 +602,13 @@ function packageManager(words: string[], where: Where): Verdict {
   if (["publish", "deploy"].includes(sub)) return live();
   if (sub === "pack") return v("change", say("kit.say.build"), head);
   // its settings can name the shell every script runs in, so only reading them is a read
-  if (sub === "config") return !rest.length || ["get", "list", "ls"].includes(rest[0]) ? v("read", say("kit.say.read")) : thisMac();
+  // A key, a token or a password in its settings is printed by `get` of it, and by a listing; an option after the
+  // subcommand (yarn's `--no-redacted`) is not read here.
+  if (sub === "config") {
+    const after = words.slice(at + 1);
+    if (rest[0] !== "get" || after.some((w) => w.startsWith("-")) || rest.slice(1).some((w) => /auth|token|passw|secret|cert|key/i.test(w))) return thisMac();
+    return v("read", say("kit.say.read"));
+  }
   if (["ls", "list", "why", "outdated", "view", "info", "show", "root", "bin", "help", "doctor", "explain", "licenses", "--version", "-v"].includes(sub)) {
     // asking a registry the agent named, or about a package by its address, reaches that computer
     if (has(words, "--registry") || words.some((w) => /^--@[^=\s]*:registry/.test(w)) || rest.some((w) => PKG_ADDRESS.test(w))) return sends();
@@ -708,11 +746,17 @@ function configReads(args: string[], rest: string[]): boolean {
 
 function git(words: string[], where: Where): Verdict {
   let at = 1;
+  // `-C` moves git to another folder, each from the last: only the project's own is read (item 116). Any other may be a
+  // folder of plain files that git takes for a repository, whose settings name a program it runs on a read.
+  let dir: string | null = where.cwd || where.root;
   while (at < words.length && words[at].startsWith("-")) {
-    if (words[at] === "-C") at += 2;
-    else if (GIT_GLOBAL_SAFE.has(words[at])) at++;
+    if (words[at] === "-C") {
+      dir = dir === null || words[at + 1] === undefined ? null : resolve(words[at + 1], dir, where.home);
+      at += 2;
+    } else if (GIT_GLOBAL_SAFE.has(words[at])) at++;
     else return unknownProgram("git");
   }
+  if (at > 1 && words.slice(1, at).includes("-C") && (dir === null || !samePath(dir, where.root))) return unknownProgram("git");
   if (at >= words.length) return v("read", say("kit.say.read"));
   const ops = operands(words, at);
   const sub = words[at];
@@ -752,8 +796,10 @@ function git(words: string[], where: Where): Verdict {
     case "name-rev":
     case "check-ignore":
     case "count-objects":
-    case "var":
       return history();
+    case "var":
+      // `-l` lists every setting from every scope, as `git config --list` does
+      return has(args, "-l") ? thisMac() : history();
     case "grep":
       // with `-f` the patterns come from a file, which is checked as any path is, and only the words after `-e` are patterns
       if (hasIn(GIT_GREP_VALUES, args, "-f")) return { ...history(), text: textAfter(words, ["-e"]) };
@@ -830,10 +876,16 @@ function git(words: string[], where: Where): Verdict {
     case "remote":
       if (["remove", "rm"].includes(rest[0] ?? "")) return del();
       return !rest.length || ["show", "get-url"].includes(rest[0] ?? "") ? history() : change();
-    case "config":
+    case "config": {
       if (has(args, "--global", "--system")) return thisMac();
+      // Every setting, or a pattern of them, or one whose name says it holds a key, read from every scope but the
+      // project's own: the person's own settings can hold a token (in a link, a header, a helper's setting).
+      const scoped = args.some((w) => ["--local", "--worktree", "-f", "--blob"].includes(w) || isOpt(w, "--file") || isOpt(w, "--blob"));
+      const lists = args.some((w) => ["--list", "-l", "--get-regexp", "--get-urlmatch"].includes(w)) || ["list", "get-regexp"].includes(rest[0] ?? "");
+      if (!scoped && (lists || rest.some((w) => /token|passw|secret|auth|credential|cookie|private|extraheader/i.test(w)))) return thisMac();
       // a setting can name a program git runs later (an alias, a pager, a hook folder), so changing one is never a safe step
       return configReads(args, rest) ? history() : unknownProgram("git");
+    }
     case "push":
       return push(words, head, where);
     default:
@@ -1065,6 +1117,160 @@ const looksLikeSettings = (value: string) =>
   /(^|[._-])(config|workspace)([._-]|$)|rc(\.[a-z]+)?$|^\.[a-z0-9_-]*rc|^(pyproject\.toml|setup\.cfg|tox\.ini|pytest\.ini|mypy\.ini|ruff\.toml|biome\.jsonc?|t?sconfig.*\.json|jsconfig.*\.json)$/i.test(value.split(/[\\/]/).pop() ?? "");
 const namesAFile = (value: string) => /[\\/]/.test(value) || value.startsWith(".") || /\.(c|m)?[jt]sx?$|\.py$/i.test(value);
 
+// ---- the options a check or a read may have (item 116) ------------------------------------------------------------
+//
+// Four reviews each found an option the deny-lists above did not know that makes a check or a read write a file, run a
+// program the line names, open a debugger on an address, or fetch and install. So a check, and a read of the programs
+// below, is now read from a list of the options each program is known to take harmlessly: any other option makes the
+// line `unknown`, which asks. Each list was read from the program's own `--help` on the Mac that built it (vitest 3.2.7,
+// tsc 5.9.3, playwright, pytest 9.0.2, mypy 1.19.1, ruff 0.15.8, pip 21.2.4, uv 0.11.6, cargo, shellcheck, actionlint) or,
+// for one not installed there, from its own documentation (jest, eslint, prettier, mocha, pylint, go test, turbo). A
+// program with no list here, or one whose documentation was not read, takes no option at all. An option that is only
+// harmless for most values (`--reporter`, `--config`) is still checked by `checkOptions`, and every value is checked as a
+// path is.
+
+/** A program's options: `flags` take no value, `values` take one (joined by `=`, joined to a short one, or the next word),
+ *  and `changes` make the step a change. A long one is written `--name`, compared without letter case, `-` and `_`, and
+ *  taken back with `--no-name` when it is a flag; a short one is `-x`, bundled with others. `long1` reads `-name` as a
+ *  long option, as Go's flags do. */
+interface Known {
+  flags?: string;
+  values?: string;
+  changes?: string;
+  long1?: true;
+}
+
+const optKey = (w: string) => (w.startsWith("--") ? `--${w.slice(2).toLowerCase().replace(/[-_]/g, "")}` : w);
+const setOf = (list = "", long1 = false) => new Set(list.split(/\s+/).filter(Boolean).map((w) => optKey(long1 && !w.startsWith("--") ? `-${w}` : w)));
+
+const PIP_COMMON = "-h --help --isolated -v --verbose -q --quiet --no-input --no-cache-dir --disable-pip-version-check --no-color --no-python-version-warning";
+const UV_COMMON = "-h --help -q --quiet -v --verbose -n --no-cache --color --offline --no-progress --no-config";
+const VITEST =
+  "-w --watch --silent --hideSkippedTests --coverage --isolate --globals --fileParallelism --passWithNoTests --logHeapUsage --allowOnly --expandSnapshotDiff --disableConsoleIntercept --typecheck --printConsoleTrace --includeTaskLocation --run --color --clearScreen -h --help -v --version";
+const VITEST_VALUES = "-r --root -c --config -t --testNamePattern --dir --reporter --mode --workspace --pool --maxWorkers --minWorkers --environment --shard --changed --testTimeout --hookTimeout --bail --retry --exclude --project --slowTestThreshold --teardownTimeout --maxConcurrency";
+const TSC_FLAGS =
+  "--noEmit --pretty --strict --skipLibCheck --skipDefaultLibCheck --listFiles --listFilesOnly --explainFiles --diagnostics --extendedDiagnostics --traceResolution --noErrorTruncation --showConfig --version --help --all " +
+  "--allowJs --checkJs --resolveJsonModule --esModuleInterop --allowSyntheticDefaultImports --forceConsistentCasingInFileNames --isolatedModules --isolatedDeclarations --verbatimModuleSyntax --erasableSyntaxOnly " +
+  "--allowUnreachableCode --allowUnusedLabels --alwaysStrict --exactOptionalPropertyTypes --noFallthroughCasesInSwitch --noImplicitAny --noImplicitOverride --noImplicitReturns --noImplicitThis " +
+  "--noPropertyAccessFromIndexSignature --noUncheckedIndexedAccess --noUnusedLocals --noUnusedParameters --strictBindCallApply --strictBuiltinIteratorReturn --strictFunctionTypes --strictNullChecks " +
+  "--strictPropertyInitialization --useUnknownInCatchVariables --noUncheckedSideEffectImports --experimentalDecorators --emitDecoratorMetadata --useDefineForClassFields --noLib --noResolve";
+const TSC_VALUES = "-p --project --target --module --moduleResolution --lib --jsx --types --moduleDetection --locale";
+const CARGO_CHECK =
+  "--future-incompat-report -v --verbose -q --quiet -h --help --workspace --all --lib --bins --examples --tests --benches --all-targets --all-features --no-default-features -r --release --ignore-rust-version --locked --offline --frozen --keep-going";
+const CARGO_VALUES = "--message-format --color -p --package --exclude --bin --example --test --bench -F --features -j --jobs --profile --target";
+
+const KNOWN: Record<string, Known> = {
+  vitest: { flags: VITEST, values: VITEST_VALUES, changes: "-u --update" },
+  "vitest list": { flags: `${VITEST} --filesOnly`, values: VITEST_VALUES },
+  tsc: { flags: TSC_FLAGS, values: TSC_VALUES },
+  "vue-tsc": { flags: TSC_FLAGS, values: TSC_VALUES },
+  "playwright test": { flags: "--fail-on-flaky-tests --forbid-only --fully-parallel --headed --last-failed --list --no-deps --pass-with-no-tests --quiet --shuffle -x -h --help", values: "-c --config --browser -g --grep -G --grep-invert --global-timeout -j --workers --max-failures --project --repeat-each --reporter --retries --shard --timeout", changes: "-u --update-snapshots" },
+  pytest: {
+    flags: "--markers -x --exitfirst --strict-config --strict-markers --strict --fixtures --fixtures-per-test --runxfail --lf --last-failed --ff --failed-first --nf --new-first --sw --stepwise --sw-skip --cache-show -v --verbose --no-header --no-summary --no-fold-skipped --force-short-summary -q --quiet -l --showlocals --no-showlocals --xfail-tb --full-trace --collect-only --co --noconftest --keep-duplicates --collect-in-virtualenv --continue-on-collection-errors --doctest-modules --doctest-ignore-import-errors --doctest-continue-on-failure --setup-only --setup-show --setup-plan --disable-plugin-autoload --disable-warnings -s -V --version -h --help",
+    values: "-k -m --maxfail --durations --durations-min --verbosity -r --tb --show-capture --color --code-highlight -W --ignore --ignore-glob --deselect --doctest-glob --import-mode --capture --assert --log-level --log-cli-level --log-format --log-date-format",
+  },
+  mypy: {
+    flags:
+      "-h --help -v --verbose -V --version --warn-unused-configs --no-namespace-packages --ignore-missing-imports --follow-untyped-imports --no-site-packages --no-silence-site-packages --disallow-any-expr --disallow-any-decorated --disallow-any-explicit --disallow-any-generics --disallow-any-unimported --disallow-subclassing-any --disallow-untyped-calls --disallow-untyped-defs --disallow-incomplete-defs --check-untyped-defs --disallow-untyped-decorators --implicit-optional --no-strict-optional --warn-redundant-casts --warn-unused-ignores --no-warn-no-return --warn-return-any --warn-unreachable --report-deprecated-as-note --allow-untyped-globals --allow-redefinition --allow-redefinition-new --no-implicit-reexport --strict-equality --strict-equality-for-none --strict-bytes --extra-checks --strict --show-error-context --show-column-numbers --show-error-end --hide-error-codes --show-error-code-links --pretty --no-color-output --no-error-summary --show-absolute-path --no-incremental --show-traceback --scripts-are-modules --explicit-package-bases --exclude-gitignore",
+    values: "-O --follow-imports --python-version --platform --always-true --always-false --untyped-calls-exclude --deprecated-calls-exclude --disable-error-code --enable-error-code --exclude -m -p",
+  },
+  "ruff check": {
+    flags: "--show-fixes --diff --ignore-noqa --preview --statistics --show-files --show-settings -h --help --respect-gitignore --force-exclude -n --no-cache -e --exit-zero --exit-non-zero-on-fix -v --verbose -q --quiet -s --silent --isolated",
+    values: "--output-format --target-version --extension --select --ignore --extend-select --per-file-ignores --extend-per-file-ignores --fixable --unfixable --extend-fixable --exclude --extend-exclude --color",
+    changes: "--fix --unsafe-fixes --fix-only --add-noqa",
+  },
+  "ruff format": { flags: "--check --diff --preview -h --help -n --no-cache --exit-non-zero-on-format --respect-gitignore --force-exclude -v --verbose -q --quiet -s --silent --isolated", values: "--extension --target-version --output-format --exclude --line-length --range --color" },
+  "ruff version": {},
+  jest: {
+    flags: "--ci --clearMocks --collectTests --colors --coverage --collectCoverage --detectOpenHandles --errorOnDeprecated -e --expand --forceExit --help --injectGlobals --listTests --logHeapUsage --noStackTrace -o --onlyChanged -f --onlyFailures --passWithNoTests --randomize --resetMocks --restoreMocks -i --runInBand --runTestsByPath --showSeed --silent --testLocationInResults --useStderr --verbose -v --version --watch --watchAll --workerThreads",
+    values: "-b --bail --changedSince --collectCoverageFrom --coverageProvider --maxConcurrency -w --maxWorkers --seed --selectProjects --shard --testMatch -t --testNamePattern --testPathIgnorePatterns --testPathPatterns --testTimeout",
+    changes: "-u --updateSnapshot",
+  },
+  mocha: {
+    flags: "--allow-uncaught -A --async-only -b --bail --check-leaks --color -c --colors --delay --diff --dry-run --exit --fail-zero --forbid-only --forbid-pending --full-trace --inline-diffs -i --invert --list-interfaces --list-reporters -C --no-colors -p --parallel --posix-exit-codes --recursive --sort -S -h --help -V --version",
+    values: "--global --globals -j --jobs --retries -s --slow -t --timeout --timeouts -u --ui --extension --ignore --exclude -f --fgrep -g --grep",
+  },
+  eslint: {
+    flags: "--no-config-lookup --no-ignore --quiet --color --no-color --no-inline-config --report-unused-disable-directives --report-unused-inline-configs --cache --no-error-on-unmatched-pattern --exit-on-fatal-error --no-warn-ignored --pass-on-no-patterns --debug -h --help -v --version --stats --fix-dry-run",
+    values: "--ext --global --rule --ignore-pattern --max-warnings -f --format --report-unused-disable-directives-severity --cache-strategy --fix-type --concurrency",
+    changes: "--fix",
+  },
+  prettier: { flags: "--check -c --list-different -l --no-config --no-editorconfig --with-node-modules --ignore-unknown -u --no-error-on-unmatched-pattern --cache --debug-check", values: "--ignore-path --config-precedence --log-level --find-config-path", changes: "--write -w" },
+  pylint: { flags: "-h --help --version --list-msgs --list-msgs-enabled", values: "--disable -d --enable -j --ignore --msg-template --recursive --source-roots" },
+  black: { flags: "--check --diff -q --quiet" },
+  isort: { flags: "--check --check-only -c --diff -q --quiet" },
+  // documentation not read for these: they take no option, and any asks
+  ava: {}, tap: {}, pyright: {}, flake8: {}, knip: {}, depcheck: {}, cspell: {}, stylelint: {}, markdownlint: {}, hadolint: {}, cypress: {}, "cypress run": {},
+  "biome check": {}, "biome lint": {}, "biome format": {}, "biome ci": {}, shellcheck: { flags: "-a --check-sourced -C --color --list-optional --norc -V --version --help", values: "-i --include -e --exclude --extended-analysis -f --format -o --enable -s --shell -S --severity -W --wiki-link-count" },
+  actionlint: { long1: true, flags: "-color -no-color -oneline -verbose -version -debug", values: "-ignore -format" },
+  "go test": { long1: true, flags: "-json -cover -failfast -fullpath -short -v -benchmem", values: "-bench -benchtime -count -covermode -coverpkg -cpu -list -parallel -run -shuffle -skip -timeout -vet" },
+  "go vet": { long1: true },
+  "cargo test": { flags: `${CARGO_CHECK} --no-run --no-fail-fast --doc`, values: CARGO_VALUES },
+  "cargo check": { flags: CARGO_CHECK, values: CARGO_VALUES },
+  "cargo bench": { flags: CARGO_CHECK, values: CARGO_VALUES },
+  "cargo clippy": { flags: `${CARGO_CHECK} --no-deps`, values: CARGO_VALUES, changes: "--fix" },
+  "pip list": { flags: `${PIP_COMMON} -o --outdated -u --uptodate -e --editable -l --local --user --pre --not-required --exclude-editable --include-editable --no-index`, values: "--format --exclude" },
+  "pip show": { flags: `${PIP_COMMON} -f --files` },
+  "pip freeze": { flags: `${PIP_COMMON} -l --local --user --all --exclude-editable`, values: "--exclude" },
+  "pip check": { flags: PIP_COMMON },
+  "uv pip list": { flags: `${UV_COMMON} -e --editable --exclude-editable --outdated --strict`, values: "--exclude --format" },
+  "uv pip show": { flags: UV_COMMON },
+  "uv pip freeze": { flags: UV_COMMON },
+  "uv pip tree": { flags: UV_COMMON },
+  "uv pip check": { flags: UV_COMMON },
+  // the words a package manager hands to a script nobody has read: options harmless in every runner a test script is
+  // likely to run (vitest, jest, mocha, playwright, bun's own), and the ones that update snapshots
+  "": { flags: "--run --coverage --silent --verbose --passWithNoTests --runInBand", values: "-t --testNamePattern --reporter --pool --project --shard --testTimeout --maxWorkers --environment --config --mode", changes: "-u --update --updateSnapshot" },
+  // turbo hands the words after `--` to the task, read as a script's are
+  turbo: { values: "--filter -F" },
+};
+
+/** What a program's own options make of a check or a read, by its list in `KNOWN`: null when each is one it takes
+ *  harmlessly, `change` when one changes files, `unknown` for any other (a program with no list knows none). With
+ *  `handed`, words after `--` are read too, as the options of whatever the script runs. */
+function knownOptions(key: string, args: readonly string[], handed = false): "change" | "unknown" | null {
+  const k = KNOWN[key] ?? {};
+  const flags = setOf(k.flags, k.long1);
+  const values = setOf(k.values, k.long1);
+  const changes = setOf(k.changes, k.long1);
+  let change = false;
+  for (let i = 0; i < args.length; i++) {
+    const w = args[i];
+    if (w === "--") {
+      if (handed) continue;
+      break;
+    }
+    if (!w.startsWith("-") || w === "-") continue;
+    if (w.startsWith("--") || k.long1) {
+      const n = optKey(`--${w.replace(/^--?/, "").split("=")[0]}`);
+      if (flags.has(n) || (n.startsWith("--no") && flags.has(`--${n.slice(4)}`))) continue;
+      if (values.has(n)) {
+        if (!w.includes("=")) i++;
+        continue;
+      }
+      if (changes.has(n)) {
+        change = true;
+        continue;
+      }
+      return "unknown";
+    }
+    for (let j = 1; j < w.length; j++) {
+      const c = `-${w[j]}`;
+      if (flags.has(c)) continue;
+      if (changes.has(c)) {
+        change = true;
+        continue;
+      }
+      if (values.has(c)) {
+        if (j === w.length - 1) i++;
+        break;
+      }
+      return "unknown";
+    }
+  }
+  return change ? "change" : null;
+}
+
 /** What a check's own options make of it, or null when they leave it a check: an option that loads a program, a settings
  *  file that is not one, a file it writes, or a service it sends to. `runner` names the runner (`""` when the words go to a
  *  script nobody has read, as `pnpm test --…` does), for its short options. */
@@ -1136,10 +1342,29 @@ function tool(words: string[], where: Where, flags: ReadonlySet<string> = new Se
 /** tsc's options that write a file, by name in lower case: tsc takes either letter case, and one dash or two. */
 const TSC_WRITES = new Set(["outdir", "outfile", "out", "declarationdir", "tsbuildinfofile", "generatetrace", "generatecpuprofile", "build", "b", "init", "watch", "w"]);
 
+/** The subcommands each checker is read with as a check (item 116): any other (`vitest init`, `ruff clean`, `biome
+ *  init`) is not one. A runner with none here takes filters and files after its options. */
+const CHECK_SUBS: Record<string, readonly string[]> = {
+  ruff: ["check", "format", "version"],
+  biome: ["check", "lint", "format", "ci"],
+};
+
 function checker(name: string, words: string[]): Verdict {
   const args = words.slice(1);
+  const sub = args.find((w) => !w.startsWith("-"));
+  if (CHECK_SUBS[name] && !CHECK_SUBS[name].includes(sub ?? "")) return unknownProgram(name);
+  if (name === "vitest" && sub === "init") return unknownProgram(name);
+  // the options of its subcommand when it has a list of its own, else the program's
+  const key = sub !== undefined && KNOWN[`${name} ${sub}`] ? `${name} ${sub}` : CHECK_SUBS[name] ? `${name} ${sub}` : name;
+  const known = knownOptions(key, args);
+  if (known === "unknown") return unknownProgram(name);
   const opts = checkOptions(name, args);
   if (opts) return opts;
+  const r = checkerOf(name, args);
+  return known === "change" && RANK[r.action] < RANK.change ? v("change", say("kit.say.format"), 2) : r;
+}
+
+function checkerOf(name: string, args: string[]): Verdict {
   if (name === "playwright") return args[0] === "test" ? v("check", say("kit.say.test")) : args[0] === "install" ? thisMac() : unknownProgram(name);
   if (name === "cypress") return args[0] === "run" ? v("check", say("kit.say.test")) : unknownProgram(name);
   if (name === "tsc" || name === "vue-tsc") {
@@ -1161,6 +1386,7 @@ function lang(name: string, words: string[]): Verdict {
   const [, sub, third] = words;
   if (name === "go") {
     // a test or a vet built with another program (`-exec`, `-toolexec`, `-vettool`), or writing a file, is not a check
+    if (["test", "vet"].includes(sub) && knownOptions(`go ${sub}`, words.slice(2))) return unknownProgram(name);
     if (["test", "vet", "list"].includes(sub)) {
       const opts = checkOptions("go", words.slice(2));
       if (opts) return opts;
@@ -1180,6 +1406,8 @@ function lang(name: string, words: string[]): Verdict {
   // cargo: `--config` sets what runs a test binary (`target.<triple>.runner`), and `-Z` turns on what is not settled yet
   if (["test", "check", "bench", "clippy"].includes(sub)) {
     if (has(words.slice(2), "--config", "-Z")) return unknownProgram(name);
+    const known = knownOptions(`cargo ${sub}`, words.slice(2));
+    if (known === "unknown") return unknownProgram(name);
     const opts = checkOptions("cargo", words.slice(2));
     if (opts) return opts;
   }
@@ -1203,7 +1431,8 @@ function python(words: string[]): Verdict {
   if (flag === "--version" || flag === "-V") return v("read", say("kit.say.read"));
   if (flag !== "-m" || !mod) return unknownProgram(words[0]);
   if (mod === "pytest") return checker("pytest", words.slice(2));
-  if (mod === "unittest") return checkOptions("", words.slice(3)) ?? v("check", say("kit.say.test"));
+  // no list of unittest's options was read: with any, it asks
+  if (mod === "unittest") return words.slice(3).some((w) => w.startsWith("-")) ? unknownProgram(words[0]) : v("check", say("kit.say.test"));
   if (["mypy", "black", "isort", "ruff", "flake8", "pylint"].includes(mod)) return checker(mod, words.slice(2));
   if (mod === "pip") return pip(words.slice(2));
   if (mod === "venv") return v("change", say("kit.say.change"), 3);
@@ -1212,7 +1441,9 @@ function python(words: string[]): Verdict {
 
 function pip(words: string[]): Verdict {
   const sub = words[1];
-  if (["list", "show", "freeze", "check", "--version"].includes(sub)) return v("read", say("kit.say.read"));
+  if (words.length === 2 && ["--version", "-V"].includes(sub)) return v("read", say("kit.say.read"));
+  // read only with its own options known to change nothing: `--log` appends to a file, `--python` names a program
+  if (["list", "show", "freeze", "check"].includes(sub)) return knownOptions(`pip ${sub}`, words.slice(2)) ? unknownProgram(words[0]) : v("read", say("kit.say.read"));
   if (["install", "uninstall"].includes(sub)) return thisMac();
   return unknownProgram(words[0]);
 }
@@ -1254,13 +1485,17 @@ function deployer(name: string, words: string[]): Verdict | null {
       if (hasNamed(words, "kubeconfig", "kuberc")) return unknownProgram(name);
       // its cache and a profile are files it writes (a profile lands in the folder it runs in)
       if (hasNamed(words, "cache-dir", "profile-output") || words.some((w, i) => optName(w) === "profile" && (w.split("=")[1] ?? words[i + 1]) !== "none")) return v("change", say("kit.say.change"), "exact");
+      // a secret's data is printed by `get` and its keys by `describe`: a key of a computer elsewhere, read as printenv is
+      if (["get", "describe"].includes(sub) && words.slice(2).some((w) => !w.startsWith("-") && /(^|,)secrets?($|[,/.])/i.test(w))) return thisMac();
       if (["get", "describe", "logs", "explain", "version", "diff"].includes(sub)) return look();
       return ["apply", "create", "delete", "replace", "patch", "rollout", "scale", "set", "edit", "run"].includes(sub) ? live() : unknownProgram(name);
     case "terraform":
     case "tofu":
       // a plan saved to a file, and configuration it writes for what it imports, are files it writes
       if (sub === "plan" && hasNamed(words, "out", "generate-config-out", "state-out")) return v("change", say("kit.say.change"), "exact");
-      if (["plan", "validate", "show", "output"].includes(sub)) return look();
+      // its outputs, sensitive ones among them, are printed in plain text with `-json` or `-raw`
+      if (sub === "output") return thisMac();
+      if (["plan", "validate", "show"].includes(sub)) return look();
       if (["apply", "destroy", "import"].includes(sub)) return live();
       return sub === "init" ? v("install", say("kit.say.update"), 2) : sub === "fmt" ? v("change", say("kit.say.format"), 2) : unknownProgram(name);
     case "pulumi":
@@ -1299,11 +1534,15 @@ function docker(words: string[]): Verdict {
     if (act.startsWith("-")) return unknownProgram("docker");
     // `config -o` saves what it prints into a file
     if (act === "config" && hasIn("", words.slice(3), "-o", "--output")) return v("change", say("kit.say.change"), "exact");
+    // config prints the settings with every variable filled in from the person's environment, unless it only lists names
+    if (act === "config" && !hasExactly(words.slice(3), "--services", "--volumes", "--profiles", "--images", "--networks")) return thisMac();
     if (["ps", "logs", "config", "ls"].includes(act)) return v("read", say("kit.say.read"));
     if (["up", "down", "build", "start", "stop", "restart"].includes(act)) return v("change", say("kit.say.run"), 3);
     return unknownProgram("docker");
   }
-  if (["ps", "images", "logs", "inspect", "version", "info"].includes(sub)) return v("read", say("kit.say.read"));
+  // inspect prints a container's environment, keys among them, as printenv does
+  if (sub === "inspect" || (["container", "image"].includes(sub) && words[2] === "inspect")) return thisMac();
+  if (["ps", "images", "logs", "version", "info"].includes(sub)) return v("read", say("kit.say.read"));
   if (["rm", "rmi", "prune"].includes(sub) || (["system", "volume", "image", "container"].includes(sub) && ["prune", "rm"].includes(words[2] ?? ""))) return v("delete", say("kit.say.delete"), "exact");
   return unknownProgram("docker");
 }
@@ -1314,6 +1553,37 @@ function docker(words: string[]): Verdict {
 function web(name: string, words: string[]): Verdict {
   if (name === "curl" && words.length === 2 && ["--version", "-V", "--help", "-h", "--manual", "-M"].includes(words[1])) return v("read", say("kit.say.read"));
   return sends();
+}
+
+/** cd's own options (bash's and zsh's) that only choose how a link in the path is followed or how much it says. */
+const CD_FLAGS = /^-[PLqse@]+$/;
+
+/** A `cd` (or zsh's `chdir`). It reads nothing, but it decides where every later command of the session runs (item 116):
+ *  one into a folder a change to which always asks asks too, and one whose folder cannot be known (`cd -`, a folder
+ *  from the stack as `+1` or `-2`, zsh's two-word form, `~user`, the home folder when it is not known) asks and leaves
+ *  the folder unknown. */
+function changeFolder(words: string[], where: Where): Verdict {
+  const lost = (extra: Partial<Verdict> = {}): Verdict => v("unknown", say("kit.say.opaque"), undefined, { lost: true, ...extra });
+  const ops: string[] = [];
+  for (let i = 1; i < words.length; i++) {
+    const w = words[i];
+    if (w === "--" && !ops.length) {
+      ops.push(...words.slice(i + 1));
+      break;
+    }
+    if (!ops.length && w.length > 1 && /^[+-]/.test(w)) {
+      if (CD_FLAGS.test(w)) continue;
+      return lost();
+    }
+    ops.push(w);
+  }
+  if (ops.length > 1 || ops[0] === "-") return lost();
+  const to = ops[0] ?? "~";
+  const abs = to === "~" ? (where.home ?? null) : resolve(to, where.cwd, where.home);
+  // the path is kept so that the line reads it as outside, as it did before
+  if (abs === null) return lost({ cd: to });
+  if (guardedPath(abs, where)) return v("unknown", say("kit.say.opaque"), undefined, { cd: to });
+  return v("read", say("kit.say.read"), undefined, { cd: to });
 }
 
 /** One simple command's words as a step, wrappers taken off. Word numbers in the result (the rule's head, the words
@@ -1344,7 +1614,8 @@ function classify(words: string[], where: Where): Verdict {
       // `sync` installs and removes packages to match a list, and `compile` writes one
       if (["install", "uninstall", "sync"].includes(words[2] ?? "")) return v("install", say("kit.say.update"), 3);
       if (words[2] === "compile") return v("change", say("kit.say.change"), 3);
-      return ["list", "show", "freeze", "tree", "check"].includes(words[2] ?? "") ? v("read", say("kit.say.read")) : unknownProgram(name);
+      // read only with its own options known to change nothing (`--python` runs the program it names)
+      return ["list", "show", "freeze", "tree", "check"].includes(words[2] ?? "") && !knownOptions(`uv pip ${words[2]}`, words.slice(3)) ? v("read", say("kit.say.read")) : unknownProgram(name);
     }
     if (name === "uv" && sub === "tool") return thisMac();
     if (["add", "remove", "sync", "lock", "install", "update"].includes(sub ?? "")) return v("install", say("kit.say.update"), 2);
@@ -1354,7 +1625,14 @@ function classify(words: string[], where: Where): Verdict {
     return unknownProgram(name);
   }
 
-  if (/(^|[\\/])node_modules[\\/]\.bin[\\/]/.test(raw)) return classify([name, ...words.slice(1)], where);
+  // A tool run by its path is the tool of that name only where the path really leads, `..` taken out, to a
+  // `node_modules/.bin` of the project or of a folder in it (item 116). Any other path is a program nobody has read.
+  if (/[\\/]/.test(raw)) {
+    const abs = resolve(raw, where.cwd || where.root, where.home);
+    const p = abs === null ? null : parts(abs).list;
+    const inBin = p !== null && p.length >= 3 && p[p.length - 3] === "node_modules" && p[p.length - 2] === ".bin";
+    if (inBin && abs !== null && within(abs, where.root)) return classify([p[p.length - 1], ...words.slice(1)], where);
+  }
   if (raw.includes("/") || raw.includes("\\")) {
     // a script of the project's own, run by its path: known by name only when it deploys
     const base = name.replace(/\.[A-Za-z0-9]+$/, "");
@@ -1456,25 +1734,30 @@ function classify(words: string[], where: Where): Verdict {
     // With `-f` the filter comes from a file: jq takes the first file it is given as the filter wherever `-f` stands, and
     // every word is a file it reads, so none is text and each is checked as any path is.
     if (hasIn("L", words.slice(1), "-f", "--from-file")) return v("read", say("kit.say.read"));
-    const ops = jqOperands(words);
+    const all = jqOperands(words);
+    // yq takes its expression after `eval` or `eval-all` (`e`, `ea`) when one is written
+    const ops = name === "yq" && ["eval", "e", "eval-all", "ea"].includes(words[all[0]] ?? "") ? all.slice(1) : all;
     // a module a filter imports or includes is read from a folder of jq's own, `~/.jq` among them, or one `-L` names
     if (name === "jq" && ops.length && /\b(import|include)\b/.test(words[ops[0]])) return unknownProgram(name);
     // `env` and `$ENV` (jq), `env(NAME)` and `strenv(NAME)` (yq) print the variables set for this program, keys among them,
     // as printenv does, so they are read as it is. A field or a key called env (`.env`, `{env: 1}`) and jq's own `$env`
-    // variable are only names.
+    // variable are only names. yq's `load` and its kinds (`load_str`, `load_xml`) read any file the expression names,
+    // which no word shows as a path (item 116).
     if (ops.length && /(?<![.\w$])(?:env|strenv|envsubst)\b(?!\s*:)|\$ENV\b|\$__prog_args\b/.test(words[ops[0]])) return thisMac();
+    if (name === "yq" && ops.length && /(?<![.\w$])load(_\w+)?\s*\(/.test(words[ops[0]])) return thisMac();
     return (v("read", say("kit.say.read"), undefined, { text: new Set(ops.slice(0, 1)) }));
   }
   if (name === "sort") return (hasIn("ktST", words.slice(1), "-o", "--output") ? v("change", say("kit.say.change"), 1) : v("read", say("kit.say.read")));
   if (name === "tee") return (v("change", say("kit.say.change"), 1));
-  if (name === "cd") {
-    const ops = operands(words, 1);
-    const to = ops.length ? words[ops[0]] : "~";
-    return to === "-" ? v("unknown", say("kit.say.opaque")) : v("read", say("kit.say.read"), undefined, { cd: to });
-  }
+  if (name === "cd" || name === "chdir") return changeFolder(words, where);
+  // the folder stack, a script read into this shell and text run as a command can each move the shell anywhere
+  if (["pushd", "popd", "source", ".", "eval"].includes(name)) return { ...unknownProgram(name), lost: true };
   // bash's and zsh's printf take one option, `-v NAME`, which puts its text into a variable instead of printing it: into
   // PATH, it decides which program every later word of the line runs
   if (name === "printf" && /^-./.test(words[1] ?? "") && words[1] !== "--") return v("unknown", say("kit.say.opaque"));
+  // ps prints every program's environment, keys among them, with `-E`, or with `e` in BSD's form without a dash (ps(1));
+  // `-e` alone is every process, outside legacy mode
+  if (name === "ps" && words.slice(1).some((w, i) => (w.startsWith("-") ? w.slice(1).includes("E") : i === 0 && /^[a-zA-Z]*e[a-zA-Z]*$/.test(w)))) return thisMac();
   if (ONLY_TEXT.has(name)) return v("read", say("kit.say.read"), undefined, { text: new Set(words.map((_, i) => i).slice(1)) });
   if (READS.has(name)) return v("read", say("kit.say.read"));
   if (DELETES.has(name)) return v("delete", say("kit.say.delete"), "exact");
@@ -1522,9 +1805,23 @@ function classify(words: string[], where: Where): Verdict {
   }
   if (FRAMEWORKS.has(name)) {
     const sub = words[1] && !words[1].startsWith("-") ? words[1] : "";
-    if (name === "turbo" || name === "nx") return sub === "run" && words[2] ? (script(words[2], 3)) : sub ? (script(sub, 2)) : unknownProgram(name);
+    if (name === "turbo" || name === "nx") {
+      const task = sub === "run" ? 2 : 1;
+      if (!sub || !words[task] || words[task].startsWith("-")) return unknownProgram(name);
+      const s = script(words[task], task + 1);
+      if (s.action !== "check") return s;
+      // its own options are read from its list (nx's from none), and the words after `--` as a script's
+      const rest = words.slice(task + 1);
+      const dash = rest.indexOf("--");
+      const own = dash >= 0 ? rest.slice(0, dash) : rest;
+      if (knownOptions(name, own)) return unknownProgram(name);
+      if (dash < 0) return s;
+      const handed = knownOptions("", rest.slice(dash + 1), true);
+      return handed === "unknown" ? unknownProgram(name) : (checkOptions("", rest.slice(dash + 1)) ?? (handed === "change" ? v("change", say("kit.say.format"), task + 1) : s));
+    }
     if (sub === "build" || ["webpack", "rollup", "esbuild", "tsup", "parcel"].includes(name)) return (v("change", say("kit.say.build"), sub ? 2 : 1));
-    if (sub === "lint") return v("check", say("kit.say.check"));
+    // a framework's lint hands its options to the linter, and no list of them was read: with any, it asks
+    if (sub === "lint") return words.slice(2).some((w) => w.startsWith("-")) ? unknownProgram(name) : v("check", say("kit.say.check"));
     if (sub === "deploy") return live();
     return (v("change", say("kit.say.run"), sub ? 2 : 1));
   }
@@ -1673,44 +1970,117 @@ function reachesOut(words: string[], verdict: Verdict): boolean {
   });
 }
 
-/** What `line` does when it runs at `where`. */
+/** Programs that name no file and read nothing from the folder they run in: the only ones read as they are from a folder
+ *  that cannot be known. */
+const NO_FILE = new Set(["pwd", "echo", "printf", "date", "whoami", "uname", "true", "false", "sleep", "id", "sw_vers", "uptime", "which", "type", "wait", "exit"]);
+/** Words that, as a command, may move the shell to another folder. */
+const MOVES = new Set(["cd", "chdir", "pushd", "popd", "source", ".", "eval"]);
+/** Words before a program that only change how it runs (`builtin cd x` is a `cd`). */
+const WRAPS = new Set(["time", "nohup", "command", "builtin", "exec", "stdbuf", "caffeinate", "nice", "timeout"]);
+/** The most folders a session's shell is followed through. Past it, where it is cannot be known. */
+const MAX_FOLDERS = 32;
+
+/** The program a simple command runs, assignments and wrappers taken off, as written. */
+const programOf = (words: readonly string[]) => words.find((w) => !ASSIGNMENT.test(w) && !WRAPS.has(w) && !w.startsWith("-") && !/^[0-9]+$/.test(w)) ?? "";
+
+/** One way through a line: the folder the shell is in (null when it cannot be known), as written, and whether the last
+ *  step that decides a `&&` or a `||` succeeded (`ok`: a `cd` that went; `fail`: one that did not; `any`: not known). */
+interface Flow {
+  dir: string | null;
+  written: string;
+  st: "ok" | "fail" | "any";
+}
+
+/** Folders as a list with no two the same. */
+function distinct(list: readonly (string | null)[]): (string | null)[] {
+  const out: (string | null)[] = [];
+  for (const f of list) if (!out.some((x) => (x === null || f === null ? x === f : samePath(x, f)))) out.push(f);
+  return out;
+}
+
+/** What `line` does when it runs at `where`: read from `cwd` and from every folder in `from`, the strictest reading
+ *  speaking for all of them. */
 export function readCommand(line: string, where: Where): ReadCommand {
-  const { cmds, opaque } = lex(line);
+  const lexed = lex(line);
+  const session = where.cwd || where.root;
+  const reads = distinct([session, ...(where.from ?? [])]).map((start) => readFrom(lexed, where, start));
+  const first = reads[0];
+  const worst = reads.reduce((a, b) => (RANK[b.action] > RANK[a.action] ? b : a));
+  const outside: string[] = [];
+  for (const r of reads) for (const p of r.outside) if (!outside.includes(p)) outside.push(p);
+  const sameRule = reads.every((r) => JSON.stringify(r.rule) === JSON.stringify(first.rule));
+  // only a `cd` to the project's or the session's folder, written in full: that folder is there, so the shell is in it
+  const only = lexed.cmds.length === 1 && !lexed.opaque ? lexed.cmds[0].words : null;
+  const to = only && only.length === 2 && ["cd", "chdir"].includes(only[0]) && isAbs(only[1]) ? only[1] : null;
+  const resets = to !== null && (samePath(to, where.root) || samePath(to, session)) ? to : null;
+  return {
+    action: worst.action,
+    outside,
+    saves: reads.some((r) => r.saves),
+    rule: sameRule && !outside.length ? first.rule : null,
+    say: worst.say,
+    ends: distinct(reads.flatMap((r) => r.ends)),
+    ...(resets ? { resets } : {}),
+  };
+}
+
+/** The folders a session's shell may be in after a command read as `read`, from those it may have been in before. They
+ *  only grow: a command may fail, and an agent may keep the folder it failed in. Only a command that is a `cd` to the
+ *  project's folder (`resets`) sets them again. */
+export function foldersAfter(before: readonly (string | null)[], read: Pick<ReadCommand, "ends" | "resets">): (string | null)[] {
+  if (read.resets) return [read.resets];
+  const all = distinct([...before, ...read.ends]);
+  return all.includes(null) || all.length > MAX_FOLDERS ? [null] : all;
+}
+
+/** `line` read as it runs from the folder `start` (null: a folder that cannot be known), followed through each way the
+ *  shell can take: a `cd` may fail, `&&` runs the next command only after one that went, `||` only after one that did
+ *  not, and `;` runs it either way. */
+function readFrom({ cmds, opaque }: Lexed, where: Where, start: string | null): Omit<ReadCommand, "resets"> {
   const allowed = where.allowed ?? [];
+  const session = where.cwd || where.root;
   const outside: string[] = [];
   const out = (written: string) => {
     if (!outside.includes(written)) outside.push(written);
   };
-  let cwd = where.cwd || where.root;
-  // where the commands run so far, as written: the folder they started in, or the last `cd`
-  let cwdWritten = cwd;
-  if (!insideProject(cwd, where.root, allowed)) out(cwd);
+  if (start !== null && !insideProject(start, where.root, allowed)) out(start);
 
   const verdicts: Verdict[] = [];
   let saves = false;
   let wipes = false;
   /** A step that changes something names a path in git's own folder, or another whose change always asks. */
   let gitOwn = false;
-  for (const c of cmds) {
+
+  /** One simple command read in the folder of `f`: what it moves the shell to, or that the folder is lost after it. */
+  const readOne = (c: Simple, f: Flow): { to?: { dir: string; written: string }; lost?: true } => {
+    const unknownHere = f.dir === null;
+    const cwd = f.dir ?? session;
+    // where the commands run so far, as written: the folder they started in, or the last `cd`
+    const cwdWritten = f.dir === null ? session : f.written;
     let at = 0;
     while (at < c.words.length && ASSIGNMENT.test(c.words[at])) at++;
     const words = c.words.slice(at);
     // a variable set for this command can make the same words run another program, unless it is a harmless one
     if (c.words.slice(0, at).some((w) => !SAFE_VAR.test(w))) {
       verdicts.push(v("unknown", say("kit.say.opaque")));
-      continue;
+      return MOVES.has(programOf(words)) ? { lost: true } : {};
     }
     // a pipe into a shell or a runtime runs text nobody has read
     if (c.piped && words.length && (OPAQUE_PROGRAMS.has(words[0]) || RUNTIMES.has(words[0]) || ["python", "python3"].includes(words[0]))) {
       verdicts.push(v("unknown", say("kit.say.opaque")));
-      continue;
+      return {};
     }
     const classified = classify(words, { ...where, cwd });
     // reaching another computer is not reading or changing the project, whatever the program
     const read = RANK[classified.action] < RANK.unknown && reachesOut(words, classified) ? { ...sends(), text: classified.text } : classified;
     // writing the output into a file changes the project, whatever the program is
     const writesFile = c.writes.some((w) => !NULL_DEVICES.has(w));
-    const verdict = writesFile && RANK[read.action] < RANK.change ? { ...read, action: "change" as const, say: say("kit.say.change"), head: undefined } : read;
+    let verdict: Verdict = writesFile && RANK[read.action] < RANK.change ? { ...read, action: "change" as const, say: say("kit.say.change"), head: undefined } : read;
+    // From a folder that cannot be known, a relative path may be anywhere: only a command that names no file, or a `cd`
+    // to a folder written in full, is read as it is. Anything else asks.
+    const absCd = verdict.cd !== undefined && (isAbs(verdict.cd) || verdict.cd === "~" || verdict.cd.startsWith("~/"));
+    const plain = NO_FILE.has(words[0] ?? "") && RANK[verdict.action] <= RANK.read && !c.redirects.length;
+    if (unknownHere && !absCd && !plain && RANK[verdict.action] < RANK.unknown) verdict = { ...verdict, action: "unknown", say: say("kit.say.opaque"), head: undefined };
     verdicts.push(verdict);
     if (verdict.saves) saves = true;
     // an allowed folder is for reading: a step that changes anything stays inside the project itself
@@ -1741,17 +2111,61 @@ export function readCommand(line: string, where: Where): ReadCommand {
     const here = { cwd, root: where.root, home: where.home };
     const named = (w: string) => [...valuesIn(w), ...(/^-[^-]./.test(w) ? Array.from({ length: w.length - 2 }, (_, k) => w.slice(k + 2)) : [])];
     if (c.writes.some((w) => IN_GIT_DIR.test(w) || guardedPath(w, here))) gitOwn = true;
+    // An option's value that is such a file asks even on a read or a check (item 116): an option this reading does not
+    // know may write it (`--log CLAUDE.md`). An option that only leaves something out (`--exclude-dir=.git`) is not one.
+    // A file named as an operand (`cat package.json`) stays a read.
+    const leavesOut = (w: string) => /^-+(exclude|ignore|skip|prune)/i.test(w);
+    if (reads && words.some((w, i) => i > 0 && w.startsWith("-") && !leavesOut(w) && !verdict.text?.has(i) && named(w).some((x) => x !== "" && (IN_GIT_DIR.test(x) || guardedPath(x, here)))))
+      gitOwn = true;
     if (!reads && (guardedPath(cwd, here) || words.some((w, i) => i > 0 && !verdict.text?.has(i) && (IN_GIT_DIR.test(w) || named(w).some((x) => x !== "" && guardedPath(x, here)))))) gitOwn = true;
 
     if (verdict.cd !== undefined) {
-      const to = verdict.cd === "~" ? (where.home ?? null) : resolve(verdict.cd, cwd, where.home);
-      if (to === null || !insideProject(to, where.root, allowed)) out(verdict.cd);
-      if (to) {
-        cwd = to;
-        cwdWritten = verdict.cd;
-      }
+      // from a folder that cannot be known, a relative `cd` goes nowhere that can be said: it asks, and is not outside
+      const known = !unknownHere || absCd;
+      const to = !known ? null : verdict.cd === "~" ? (where.home ?? null) : resolve(verdict.cd, cwd, where.home);
+      if (known && (to === null || !insideProject(to, where.root, allowed))) out(verdict.cd);
+      if (to !== null && !verdict.lost) return { to: { dir: to, written: verdict.cd } };
+      return { lost: true };
     }
+    return verdict.lost ? { lost: true } : {};
+  };
+
+  let flows: Flow[] = [{ dir: start, written: start ?? session, st: "any" }];
+  for (let i = 0; i < cmds.length; ) {
+    // a pipeline: each of its commands runs in a shell of its own, started where the pipeline starts
+    let j = i + 1;
+    while (j < cmds.length && cmds[j].sep === "|") j++;
+    const pipe = cmds.slice(i, j);
+    const sep = cmds[i].sep;
+    // a `cd` moves the shell itself only alone, not in a pipeline or in the background
+    const alone = pipe.length === 1 && pipe[0].after !== "&";
+    const runs = (f: Flow) => !((sep === "&&" && f.st === "fail") || (sep === "||" && f.st === "ok"));
+    // a command no way through runs is read all the same, from every folder: nothing goes unread
+    const taken = flows.some(runs) ? flows : flows.map((f) => ({ ...f, st: "any" as const }));
+    const next: Flow[] = [];
+    for (const f of taken) {
+      if (!runs(f)) {
+        next.push(f);
+        continue;
+      }
+      const moved: { dir: string; written: string }[] = [];
+      let lost = false;
+      for (const c of pipe) {
+        const r = readOne(c, f);
+        if (r.lost) lost = true;
+        if (r.to) moved.push(r.to);
+      }
+      if (lost) next.push({ dir: null, written: session, st: "any" });
+      else if (moved.length && alone) next.push({ ...moved[0], st: "ok" }, { ...f, st: "fail" });
+      else next.push({ ...f, st: "any" }, ...moved.map((m) => ({ ...m, st: "any" as const })));
+    }
+    flows = next.filter((f, k) => next.findIndex((g) => g.st === f.st && (g.dir === null || f.dir === null ? g.dir === f.dir : samePath(g.dir, f.dir))) === k);
+    if (flows.length > MAX_FOLDERS * 2) flows = [{ dir: null, written: session, st: "any" }];
+    i = j;
   }
+  // a line that cannot be read in advance and holds a command that may move the shell (a `cd` in a subshell or a brace
+  // group, a `source`) leaves it where nobody can say
+  const ends = opaque && cmds.some((c) => MOVES.has(programOf(c.words))) ? [null] : distinct(flows.map((f) => f.dir));
 
   const whole = verdicts.length ? strictest(verdicts) : v("unknown", say("kit.say.opaque"));
   let action: KitAction = whole.action;
@@ -1772,9 +2186,9 @@ export function readCommand(line: string, where: Where): ReadCommand {
   const only = cmds.length === 1 ? cmds[0] : null;
   const ruleable = action === "change" || action === "install" || action === "delete" || action === "push";
   if (only && ruleable && !opaque && !outside.length && !only.redirects.length && !ASSIGNMENT.test(only.words[0] ?? "") && whole.head !== undefined) {
-    rule = whole.head === "exact" ? { words: [...only.words], exact: true } : { words: only.words.slice(0, whole.head) };
+    rule = whole.head === "exact" ? { words: [...only.words], exact: true, action } : { words: only.words.slice(0, whole.head), action };
   }
-  return { action, outside, saves, rule, say: s };
+  return { action, outside, saves, rule, say: s, ends };
 }
 
 /** A package manager's own subcommands: none of them runs a script of the project's by its name. */
@@ -1812,6 +2226,26 @@ export function ruleMatches(rule: Rule, line: string): boolean {
   if (ASSIGNMENT.test(words[0] ?? "")) return false;
   if (rule.exact && words.length !== rule.words.length) return false;
   return rule.words.every((w, i) => words[i] === w);
+}
+
+/** Options that make a command do more of what it does, or something harsher: force, delete, hard, clear, recursive. */
+const HARSHER = /^--(force|force-with-lease|force-if-includes|delete|hard|clear|recursive|mirror|prune|discard-changes)(=|$)/;
+/** The short ones, where the program reads its letters so (git's `-f`, `-d`, `-D`, `-r`; a package manager's `-f` and
+ *  `-r`), counted inside a bundle (`-fu`). Elsewhere a letter means something else (`pnpm add -D` saves a tool). */
+const HARSHER_SHORT: Record<string, RegExp> = { git: /^-[^-]*[fdDrR]/, pnpm: /^-[^-]*[fr]/, npm: /^-[^-]*[fr]/, yarn: /^-[^-]*[fr]/, bun: /^-[^-]*[fr]/ };
+
+/** The step a kept rule covers: the one it was kept for, or, for a rule saved before rules named one, the least strict
+ *  step its own words can mean (read as on a branch of Kit's own, so `git push` is a push). */
+const ruleAction = (rule: Rule): KitAction => rule.action ?? readCommand(rule.words.join(" "), { cwd: "/rule", root: "/rule", branch: "kit/rule" }).action;
+
+/** Whether a kept rule covers `line`, read as `action` (item 116): its words begin the line (`ruleMatches`), the line is
+ *  the very step the rule was kept for, and no word after the rule's own is an option that makes it harsher. So a rule
+ *  kept from a push never covers a forced push or a delete, nor one kept from a new branch a branch's delete. */
+export function ruleCovers(rule: Rule, line: string, action: KitAction): boolean {
+  if (!ruleMatches(rule, line) || ruleAction(rule) !== action) return false;
+  const words = lex(line).cmds[0].words;
+  const short = HARSHER_SHORT[words[0] ?? ""];
+  return !words.slice(rule.words.length).some((w) => HARSHER.test(w) || short?.test(w));
 }
 
 /** A rule as the developer reads it: "pnpm add …", or the whole command. */

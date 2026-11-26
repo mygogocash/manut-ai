@@ -40,8 +40,8 @@ describe("reading an ask by what the shell names", () => {
     const ask = cmd("pnpm add dayjs\nrm -rf src");
     expect(decide(ask, p)).toMatchObject({ answer: "ask" });
     expect(decide(cmd("pnpm add dayjs"), p)).toEqual({ answer: "alone" });
-    // by its card's words it is one `pnpm add`, which the rule covers
-    expect(decide({ ...ask, tool: undefined }, p)).toEqual({ answer: "alone" });
+    // by its card's words it is one `pnpm add` that carries `-rf`, which no rule kept for an install covers (item 116)
+    expect(decide({ ...ask, tool: undefined }, p)).toMatchObject({ answer: "ask" });
   });
 
   it("reads a command in the folder the agent names for it", () => {

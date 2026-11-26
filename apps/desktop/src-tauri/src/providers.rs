@@ -842,7 +842,38 @@ pub fn session_env(id: &str, s: &Stored, account_env: &[(String, String)], with_
         }
     }
     env.extend(account_env.iter().cloned());
+    env.extend(fixed_env(id).iter().map(|(k, v)| (k.to_string(), v.to_string())));
+    let git = bare_explicit(&env);
+    env.extend(git);
     env
+}
+
+/// Every agent's own git works with a bare repository only when one is named with `--git-dir` or `GIT_DIR`
+/// (`safe.bareRepository=explicit`, which `git help config` says is read only from protected configuration, the command
+/// scope that `GIT_CONFIG_COUNT` gives among it). A folder of plain files an agent wrote that git would take for a bare
+/// repository can name a program git runs on a read (item 116); a normal repository, a lane's worktree and `.git` itself
+/// work as before (checked with git 2.54). The setting goes after any the person set through `GIT_CONFIG_COUNT`, in the
+/// variables they gave the agent or in the app's own environment, never over one.
+fn bare_explicit(env: &[(String, String)]) -> Vec<(String, String)> {
+    let set = env.iter().rev().find(|(k, _)| k == "GIT_CONFIG_COUNT").map(|(_, v)| v.clone()).or_else(|| std::env::var("GIT_CONFIG_COUNT").ok());
+    let n = set.and_then(|v| v.trim().parse::<usize>().ok()).unwrap_or(0);
+    vec![
+        (format!("GIT_CONFIG_KEY_{n}"), "safe.bareRepository".to_string()),
+        (format!("GIT_CONFIG_VALUE_{n}"), "explicit".to_string()),
+        ("GIT_CONFIG_COUNT".to_string(), (n + 1).to_string()),
+    ]
+}
+
+/// Variables every session of agent `id` starts with, after everything the person or an account set, so neither takes
+/// one back. Kit's dial reads each command from the folder the session started in (src/code/ask.ts). Claude Code's shell
+/// otherwise keeps a `cd` for its next command; with `CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR` set it goes back to the
+/// folder it started in after every command, so the folder the dial reads a command from is the one it runs in (read in
+/// Claude Code 2.1.332's Bash tool, which then says "Every call starts in the start folder: a `cd` does not carry over").
+pub fn fixed_env(id: &str) -> &'static [(&'static str, &'static str)] {
+    match id {
+        "claude" => &[("CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR", "1")],
+        _ => &[],
+    }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1533,26 +1564,68 @@ mod tests {
     fn the_variables_go_first_the_home_after_and_an_added_account_wins() {
         let st = Stored { home: "/Users/k/.claude-work".into(), env: vec![var("ANTHROPIC_BASE_URL", "https://x"), var("MY_TOKEN", "t0p")], ..Stored::default() };
         let env = session_env("claude", &st, &[], true);
+        let keep = ("CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR".to_string(), "1".to_string());
+        // the app's own settings for every agent come last (`fixed_env`, `bare_explicit`)
+        let mine = |env: Vec<(String, String)>| -> Vec<(String, String)> { env.into_iter().filter(|(k, _)| !k.starts_with("GIT_CONFIG_")).collect() };
+        let env = mine(env);
         assert_eq!(
             env,
             vec![
                 ("ANTHROPIC_BASE_URL".to_string(), "https://x".to_string()),
                 ("MY_TOKEN".to_string(), "t0p".to_string()),
-                ("CLAUDE_CONFIG_DIR".to_string(), "/Users/k/.claude-work".to_string())
+                ("CLAUDE_CONFIG_DIR".to_string(), "/Users/k/.claude-work".to_string()),
+                keep.clone()
             ]
         );
         // an added account's folder replaces the home, never both
         let acct = vec![("CLAUDE_CONFIG_DIR".to_string(), "/Users/k/.manut/accounts/claude/work".to_string())];
-        let env = session_env("claude", &st, &acct, true);
+        let env = mine(session_env("claude", &st, &acct, true));
         assert_eq!(env.iter().filter(|(k, _)| k == "CLAUDE_CONFIG_DIR").count(), 1);
-        assert_eq!(env.last(), Some(&acct[0]));
+        assert_eq!(env[env.len() - 2], acct[0]);
         // Buddy: the home only, no variable of the person's
-        assert_eq!(session_env("claude", &st, &[], false), vec![("CLAUDE_CONFIG_DIR".to_string(), "/Users/k/.claude-work".to_string())]);
+        assert_eq!(mine(session_env("claude", &st, &[], false)), vec![("CLAUDE_CONFIG_DIR".to_string(), "/Users/k/.claude-work".to_string()), keep.clone()]);
         // a variable changed by hand into one the page refuses adds none
         let bad = Stored { env: vec![var("PATH", "/evil"), var("OK", "1")], ..Stored::default() };
-        assert!(session_env("claude", &bad, &[], true).is_empty());
+        assert_eq!(mine(session_env("claude", &bad, &[], true)), vec![keep]);
         // an agent without a home variable gets no home
-        assert!(session_env("opencode", &Stored { home: "/x".into(), ..Stored::default() }, &[], true).is_empty());
+        assert!(mine(session_env("opencode", &Stored { home: "/x".into(), ..Stored::default() }, &[], true)).is_empty());
+    }
+
+    /// Every Claude Code the app starts (a chat, Buddy, a terminal, a title run) gets its environment here, and its shell
+    /// then starts every command in the session's folder: the last value of the variable is the app's, whatever the person
+    /// or an account set (item 116).
+    #[test]
+    fn every_claude_code_starts_each_command_in_its_session_folder() {
+        const KEEP: &str = "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR";
+        let last = |env: &[(String, String)]| env.iter().rev().find(|(k, _)| k == KEEP).map(|(_, v)| v.clone());
+        let theirs = Stored { home: "/Users/k/.claude-work".into(), env: vec![var(KEEP, "0")], ..Stored::default() };
+        let acct = vec![("CLAUDE_CONFIG_DIR".to_string(), "/Users/k/.manut/accounts/claude/work".to_string())];
+        for (st, a, with_vars) in [(&Stored::default(), &[][..], true), (&theirs, &[][..], true), (&theirs, &acct[..], true), (&theirs, &[][..], false)] {
+            let env = session_env("claude", st, a, with_vars);
+            assert_eq!(last(&env).as_deref(), Some("1"), "{with_vars}");
+        }
+        // the other agents read no such variable and get none
+        for id in ["codex", "opencode", "pi", "omp", "gemini"] {
+            assert_eq!(last(&session_env(id, &Stored::default(), &[], true)), None, "{id}");
+        }
+    }
+
+    /// Every agent's own git reads a bare repository only when one is named with `--git-dir` or `GIT_DIR` (item 116):
+    /// a folder of plain files that git would take for one can name a program it runs on a read. The setting goes after
+    /// any the person set through `GIT_CONFIG_COUNT`, never over one.
+    #[test]
+    fn every_agents_git_reads_a_bare_repository_only_when_one_is_named() {
+        let git = |env: &[(String, String)]| -> Vec<(String, String)> { env.iter().filter(|(k, _)| k.starts_with("GIT_CONFIG_")).cloned().collect() };
+        let ours = |n: usize| vec![(format!("GIT_CONFIG_KEY_{n}"), "safe.bareRepository".to_string()), (format!("GIT_CONFIG_VALUE_{n}"), "explicit".to_string()), ("GIT_CONFIG_COUNT".to_string(), (n + 1).to_string())];
+        for id in ["claude", "codex", "opencode", "pi", "omp", "gemini", "cursor-agent"] {
+            assert_eq!(git(&session_env(id, &Stored::default(), &[], true)), ours(0), "{id}");
+            assert_eq!(git(&session_env(id, &Stored::default(), &[], false)), ours(0), "{id}");
+        }
+        // after the person's own settings, which stay as they are
+        let theirs = Stored { env: vec![var("GIT_CONFIG_COUNT", "1"), var("GIT_CONFIG_KEY_0", "core.pager"), var("GIT_CONFIG_VALUE_0", "less")], ..Stored::default() };
+        let env = session_env("codex", &theirs, &[], true);
+        assert_eq!(git(&env)[..3], [("GIT_CONFIG_COUNT".to_string(), "1".to_string()), ("GIT_CONFIG_KEY_0".to_string(), "core.pager".to_string()), ("GIT_CONFIG_VALUE_0".to_string(), "less".to_string())]);
+        assert_eq!(git(&env)[3..], ours(1)[..]);
     }
 
     /// A value given once stays in the file and never comes back: not in a view, not in `{:?}`, not in a refusal.

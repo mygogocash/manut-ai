@@ -286,6 +286,100 @@ program or reaches the network. What it does not understand is `unknown`, and as
   retractions. A kubeconfig or kuberc named on the line asks (it can name a program kubectl runs), and `turbo.json`,
   which can name where turbo sends its cache, is a file a change to which always asks.
 
+#### Secrets a read prints from outside the project (item 116)
+
+Some reads print a key kept outside the project without naming a path. They are read as `printenv` is, and ask:
+`kubectl get` or `describe` of a secret (`secret`, `secrets`, `secret/name`, in a list too), `terraform output` (and
+`tofu output`), `docker inspect` (and `container inspect`, `image inspect`), `docker compose config` but for its
+`--services`, `--volumes`, `--profiles`, `--images` and `--networks` listings, `git config --list`, `--get-regexp`,
+`--get-urlmatch` and a setting whose name says it holds a key, from every scope but the project's own (`--local`,
+`--worktree`, `--file`), `git var -l`, `ps` with `-E` or BSD's `e` (`ps eww`, `ps aeux`; `-e` alone is every process),
+yq's `load` and its kinds and its `env` read after `eval` or `eval-all` too, and a package manager's `config` but a
+`get` of a setting whose name says nothing of a key (a listing, a `get` of a token, any option after `config`). Each
+plain twin (`kubectl get pods`, `terraform plan`, `docker ps`, `git config --get user.name`, `ps aux`) stays a read.
+`pnpm config list` and a bare `yarn config` now ask.
+
+#### git in another folder, and a program named by a path (item 116)
+
+- **git reads only the project's own folder.** `git -C` naming any folder but the project's (one folder after another
+  for several), and `--git-dir` or `--work-tree`, ask: a folder of a few plain files git takes for a repository can
+  name a program git runs on a read. Every agent the app starts also runs git with `safe.bareRepository=explicit`
+  (`bare_explicit` in `src-tauri/src/providers.rs`, through `GIT_CONFIG_COUNT`, after any the person set), so its git
+  refuses such a folder found by `-C` or by its own folder. For a person this means a bare repository works in an
+  agent's session only when named with `--git-dir` or `GIT_DIR`; a normal repository, a lane's worktree and `.git`
+  itself work as before.
+- **A tool by its path.** A program named by a path is read by where the path leads once `..` is taken out: only
+  `node_modules/.bin/<name>` in the project or a folder of it is the tool of that name. Anything else
+  (`node_modules/.bin/../../scripts/test`, `/tmp/x/node_modules/.bin/vitest`, `../node_modules/.bin/vitest`) is a
+  program nobody has read, and asks.
+
+#### What a kept rule covers (item 116)
+
+"Always allow in this project" keeps a command's first words and, since item 116, the step it was kept for (a change,
+an install, a delete or a push). A later command is covered only when it begins with those words, is that very step,
+and carries no option after them that makes it harsher: `--force`, `--delete`, `--hard`, `--clear`, `--recursive`,
+`--mirror`, `--prune`, `--discard-changes`, and git's `-f`, `-d`, `-D` and `-r` or a package manager's `-f` and `-r`,
+in a bundle too. So a rule kept from `git push origin kit/x` covers another push of a branch, never `git push --force`
+or `git push --delete`, and one kept from `git branch kit/new` never covers `git branch -D`. A rule saved before item
+116 names no step; it covers only the step its own words mean when read alone (`git push` a push of a branch of Kit's
+own, `git branch kit/new` a change). Kit's card offers a rule again for a harsher command, since the kept one does not
+cover it.
+
+#### A check's options, from a list (item 116)
+
+Four reviews each found an option a deny-list did not know that makes a check or a read write a file, run a program the
+line names, open a debugger on an address, or fetch and install. So a check is now read from a list of the options its
+program is known to take harmlessly (`KNOWN` in `src/code/command.ts`), and any other option makes the line ask:
+
+- **Every checker.** vitest, jest, mocha, playwright, tsc and vue-tsc, eslint, prettier, pytest, mypy, ruff, pylint,
+  black, isort, shellcheck, actionlint, `go test` and `go vet`, `cargo test`, `check`, `bench` and `clippy`. Each list
+  was read from the program's own `--help` on this Mac or, for one not installed here, from its own documentation
+  (jest, eslint, prettier, mocha, pylint, go test). A checker whose options were not read (ava, tap, pyright, flake8,
+  knip, depcheck, cspell, stylelint, markdownlint, hadolint, cypress, biome, a framework's `lint`, nx,
+  `python -m unittest`) takes none: with any option it asks. An option that fixes or updates (`--fix`, `--fix-only`,
+  `--add-noqa`, `-u`) makes the line the change it is.
+- **Subcommands too.** `ruff` is a check only as `check` or `format`, `biome` as `check`, `lint`, `format` or `ci`, and
+  `vitest init` is none.
+- **Words handed on.** What a package manager hands to a test script (`pnpm test -- …`, `bun test …`) and what turbo
+  hands to a task after `--` are read from a short list harmless in every common runner. turbo's own options are
+  `--filter` alone.
+- **pip and uv.** `pip list`, `show`, `freeze` and `check`, and the same under `uv pip`, are reads only with their own
+  listed options: `--log` appends to a file and `--python` names a program to run.
+- **A guarded file as an option's value.** On any read or check, an option's value that is a file a change to which
+  always asks (`--log CLAUDE.md`, `--x=.husky/pre-commit`) asks; one that only leaves something out
+  (`--exclude-dir=.git`) does not, and a file named as an operand (`cat package.json`) stays a read.
+
+None of the 221 everyday commands changed. Not yet on a list: the reads that item 112 checked against their manuals
+(cat, ls, head, diff and the like), git's, gh's, docker's, kubectl's, terraform's and helm's reads, the words
+`cargo test` hands its test binary after `--`, and jq and yq; their deny-lists and the option-value check above still
+apply.
+
+#### The folder a session's commands run in (item 116)
+
+An ask names the folder a command runs in as the session's own, but an agent's shell may keep a `cd` for its next
+command. Claude Code no longer does (it starts with `CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR=1`, see the open notes
+below), but the dial does not rely on any agent:
+
+- **A `cd` asks when it goes somewhere that matters.** A `cd` into a folder a change to which always asks (`.git`,
+  `.claude`, `.husky`, `.github`, `.vscode` and the rest) asks, as one outside the project is stopped. One whose folder
+  cannot be known asks too: `cd -`, a folder from the stack (`cd +1`, `cd -2`), zsh's two-word form, `~user`, `pushd`,
+  `popd`, `source`, `.` and `eval`.
+- **Each session's folders are carried.** The app keeps, for each session, every folder its shell may be in after the
+  commands it has asked about, and reads each new command from the session's folder and from each of those, the
+  strictest reading speaking. A command the dial stopped never ran and moves nothing; one the person may still allow is
+  counted as if it ran. The list only grows, since a command may fail and an agent may then stay where it was; a command
+  that is only `cd` to the project's folder, written in full, sets it back to that folder.
+- **Every way through a line.** Within one line, a `cd` may fail: `;` and a line break run the next command either way,
+  `&&` only after a `cd` that went, `||` only after one that did not. A `cd` in a pipeline or in the background moves
+  nothing, but both folders are kept. So `cd x; cat ../secret` is read from the project's folder too.
+- **A folder that cannot be known.** After a command that leaves the folder unknown (the forms above, a subshell or a
+  brace group that holds a `cd`, or a shell command the dial could not read at all), every later command of the session
+  asks, except one that names no file (`pwd`, `echo`, `date` and the like) and a `cd` to a folder written in full, until
+  a command that is only `cd` to the project's folder.
+- **Not seen.** A command an agent runs without asking (its own allow rules) is never read, so a `cd` in it is not
+  carried; a shell function or alias from the person's own shell setup that moves the folder, zsh's `AUTO_CD`, and a
+  `CDPATH` that sends `cd name` elsewhere are not followed either. With Claude Code these no longer carry past one command.
+
 `command.hostile.test.ts` holds over 300 such lines, each beside the plain line it imitates, which reads as it did, and
 221 everyday commands, each pinned to what it read as before item 112 (only `cdk synth` moved, to a build).
 
@@ -1999,11 +2093,10 @@ all three on the mock host, by mouse and by keyboard, with pictures in light and
   (`previewSecrets` already takes them as `added`); an address read from the ports a preview listens on when it prints none; a
   preview kept through a reload or a restart of the app (every one stops); and a lane that runs in its own terminal, which has no
   pane.
-- Where Claude Code's shell is. Its ask does not say, and a `cd` in one command carries to the next inside the project
-  and the session's attachments folder (the shell adds it with `--add-dir`), so the dial reads a command from the
-  session's folder. It does check the path Claude Code itself found outside. Starting Claude Code with
-  `CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR=1` would start every command in the project; that changes how the
-  developer's own agent works, so it wants its own decision.
+- Where an agent's shell is. Since item 116 every Claude Code the app starts (a chat, Buddy, a terminal, a title run)
+  runs with `CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR=1` (`fixed_env` in `src-tauri/src/providers.rs`, set after the
+  person's own variables), so its shell starts every command in the session's folder and a `cd` no longer carries to
+  the next command. The dial does not rely on that: see "The folder a session's commands run in".
 - Asks that still name no path, so they ask the person: a search that names no folder, or a Glob whose pattern
   reaches past its folder; oh-my-pi's own edit, which names its file inside its patch; and an ACP agent's search or
   move.
