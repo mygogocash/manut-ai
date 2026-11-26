@@ -53,7 +53,7 @@ while IFS=$'\t' read -r number sha branch title; do
   if [ $waitci -eq 1 ]; then minutes=${CI_WAIT_MINUTES:-45}; else minutes=0; fi
   if [ $waitci -eq 1 ]; then quick=""; else quick="CI_WAIT_TRIES=1 CI_WAIT_POLL=2"; fi
   # shellcheck disable=SC2086 # $quick is two assignments
-  ciout=$(env $quick CI_WAIT_EVENTS="pull_request push workflow_dispatch" CI_WAIT_MINUTES=$minutes CI_WAIT_REMOTE="${CI_WAIT_REMOTE:-$(git -C "$clone" remote get-url origin)}" "$here/ci-wait.sh" "$branch" "$sha"); ci=$?
+  env $quick CI_WAIT_EVENTS="pull_request push workflow_dispatch" CI_WAIT_MINUTES=$minutes CI_WAIT_REMOTE="${CI_WAIT_REMOTE:-$(git -C "$clone" remote get-url origin)}" "$here/ci-wait.sh" "$branch" "$sha" > /dev/null; ci=$?
   if [ "$ci" -ne 0 ]; then
     case "$ci" in
       1) echo "review   $tag: low risk, but CI is red on ${sha:0:7}" ;;
