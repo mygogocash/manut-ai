@@ -13,6 +13,7 @@ import { t } from "../../i18n";
 import { hhmm } from "../../app/time";
 import { QueueMark, type QueueChoice, type QueueOffReasons } from "./QueueMark";
 import type { Quote } from "./answers";
+import { Icon } from "../../ui/icons";
 
 /** Messenger bubble, filled on both sides. Bot text renders markdown; user text stays plain. Files the bot
  * sent (`MEDIA:` lines) leave the text and show under it in the same column as the bubble, in order; while
@@ -203,10 +204,7 @@ export const Bubble = memo(function Bubble({
     <>
       <div className={`msg-quotes${bot ? " face" : ""}`} data-testid="bubble-quote">
         <span className="msg-quote-h" data-testid="bubble-quote-head">
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <path d="M9 14 4 9l5-5" />
-            <path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11" />
-          </svg>
+          <Icon name="reply" />
           {t("bub.repliedTo", { n: quote.lines.length + quote.more })}
         </span>
         {quote.more > 0 && <span className="msg-quote-n">{t("bub.quoteMore", { n: quote.more })}</span>}

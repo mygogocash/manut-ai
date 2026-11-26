@@ -357,7 +357,7 @@
   display: inline-block;
   margin-right: 6px;
   color: var(--aui-muted);
-  vertical-align: -1px;
+  vertical-align: -3px;
 }
 .sb .rec-li.settled .rec {
   padding-top: 3px;

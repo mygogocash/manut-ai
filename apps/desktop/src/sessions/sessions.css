@@ -450,7 +450,7 @@ body.side-resizing * {
 /* the + in the nav icons' 18px column, so "New session" starts where "Settings" does */
 .ss-start > svg {
   flex: none;
-  width: 18px;
+  width: 16px;
   height: 16px;
   color: var(--muted);
 }
@@ -822,9 +822,10 @@ body.split-dragging .xterm {
   border-radius: var(--r-sm);
   color: var(--muted);
 }
+/* The set's x at its small size (src/ui/icons.tsx: 12px, a simple shape). */
 .ss-split-x svg {
-  width: 9px;
-  height: 9px;
+  width: 12px;
+  height: 12px;
 }
 .ss-split-x:hover {
   color: var(--ink);

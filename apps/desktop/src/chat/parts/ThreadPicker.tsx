@@ -16,7 +16,7 @@ export function ThreadPicker({ bot, active, onPick, popRef }: { bot: string; act
         onMouseDown={(e) => e.preventDefault()}
         onClick={onPick}
       >
-        <NewThreadIcon size={14} />
+        <NewThreadIcon />
         <code className="sk-pill">{THREAD_CMD}</code>
         <span className="sk-d">{t("thread.cmdHint", { name: bot })}</span>
       </div>

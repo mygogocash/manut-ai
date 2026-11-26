@@ -6,6 +6,7 @@ import { showNote } from "../lib/notify";
 import { gb, startDiskWatch, useDisk, type DiskState } from "../lib/disk";
 import { notifyEnabled, useStore } from "../state/store";
 import { getHost } from "../sessions/host";
+import { Icon } from "../ui/icons";
 
 /** The chip for reading `d`, or nothing while the disk is fine. */
 export function DiskChipView({ d, onOpen }: { d: DiskState; onOpen: () => void }) {
@@ -19,11 +20,7 @@ export function DiskChipView({ d, onOpen }: { d: DiskState; onOpen: () => void }
       data-testid="disk-chip"
       data-level={d.level}
     >
-      <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
-        <rect x="2" y="3" width="12" height="10" rx="2" fill="none" stroke="currentColor" strokeWidth="1.5" />
-        <path d="M5 10h3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-        <circle cx="11" cy="10" r="1" fill="currentColor" />
-      </svg>
+      <Icon name="hard-drive" />
       <span>{t("disk.chip", { free: gb(d.free_bytes) })}</span>
     </button>
   );

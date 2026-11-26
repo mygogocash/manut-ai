@@ -29,8 +29,8 @@
   white-space: nowrap;
 }
 .pn-tab svg {
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
   flex: none;
 }
 /* hover lights the icon only: the fill is the selected tab's. Leaving Details widens the panel by 100px, which

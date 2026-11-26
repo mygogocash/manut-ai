@@ -35,6 +35,7 @@ import { goneOut, jobsLine, memberNames, pausedJobLine, PAUSE_START, pauseReduce
 import { useJobs } from "./RecentWork";
 import { asksOf, memberActions, memberStatus, tryAction, type MemberAction, type MemberMenuItem, type MemberStatus } from "./team";
 import { lineWords, teamLine, type TeamLine } from "./teamLine";
+import { Icon } from "../ui/icons";
 
 /** One member as its row shows it. */
 export interface TeamRow {
@@ -201,11 +202,7 @@ function PauseQuestion({ p, state }: { p: TeamPauseProps; state: TeamState }) {
 /** The three dots of the More button. */
 function MoreGlyph() {
   return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-      <circle cx="5" cy="12" r="1.8" />
-      <circle cx="12" cy="12" r="1.8" />
-      <circle cx="19" cy="12" r="1.8" />
-    </svg>
+    <Icon name="dots" />
   );
 }
 
@@ -369,7 +366,7 @@ export function TeamView({
                     }}
                     data-testid={`team-menu-${item.action}-${m.name}`}
                   >
-                    {item.action === "new" && <NewThreadIcon size={14} />}
+                    {item.action === "new" && <NewThreadIcon />}
                     <span className="tmenu-l">{itemLabel(item.action, m.displayName)}</span>
                   </button>
                 ))}

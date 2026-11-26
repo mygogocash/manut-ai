@@ -14,6 +14,7 @@ import { useMates } from "./restart";
 import type { RowDrag } from "./useRowDrag";
 import { NewThreadIcon } from "../threads/NewThreadIcon";
 import { termLinkText } from "../sessions/termShare";
+import { Icon } from "../ui/icons";
 
 /** The newest thing said in a bot's threads: when, and the line. The bot row shows it when it is newer than the main
  *  chat's own last line. A thread with nothing said yet gives nothing: its title is listed right under the bot, so
@@ -160,7 +161,7 @@ function Menu({ menu, onClose, name, bot, at }: { menu: RowMenu; onClose: () => 
         kind === "new" && fn ? (
           <div key={label} role="none" className="row-mg">
             <button type="button" role="menuitem" className="row-mi row-mi-new" onClick={run(fn)} data-testid="row-new-thread">
-              <NewThreadIcon size={14} />
+              <NewThreadIcon />
               <span className="row-mi-l">{label}</span>
             </button>
             <div role="separator" className="row-sep" data-testid="row-menu-sep" />
@@ -329,7 +330,7 @@ export function BotRow({
           data-testid={`bot-new-${bot.name}`}
           onClick={menu.onNewThread}
         >
-          <NewThreadIcon size={14} />
+          <NewThreadIcon />
         </button>
       )}
       {menu && (
@@ -347,11 +348,7 @@ export function BotRow({
             place(r.right - MENU_W, (row?.bottom ?? r.bottom) + 2);
           }}
         >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-            <circle cx="5" cy="12" r="1.8" />
-            <circle cx="12" cy="12" r="1.8" />
-            <circle cx="19" cy="12" r="1.8" />
-          </svg>
+          <Icon name="dots" />
         </button>
       )}
       {menu && at && <Menu menu={menu} at={at} name={bot.display_name} bot={bot.name} onClose={() => setAt(null)} />}

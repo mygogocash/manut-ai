@@ -50,6 +50,7 @@ import {
   type RoutinesAction,
   type RoutinesUi,
 } from "./routines";
+import { Icon } from "../ui/icons";
 
 /** A fact's words with each run of Thai set in its own language, as the canvas does for "ค่ะ", so it is drawn in a Thai face.
  *  The baht sign sits in the Thai block but belongs to the amount beside it, so it stays out. */
@@ -447,9 +448,7 @@ function RoutinesPane({ p, automations, plugins }: { p: RoutinesPaneProps } & Cu
         <h2 className="h2">{t("routines.title")}</h2>
         {state.kind === "ready" && (
           <button type="button" className="btn" disabled={ui.saving} onClick={() => p.dispatch({ type: "open" })} data-testid="routine-new">
-            <svg className="ic" viewBox="0 0 16 16" aria-hidden="true">
-              <path d="M8 3v10M3 8h10" />
-            </svg>
+            <Icon name="plus" />
             {t("routines.new")}
           </button>
         )}

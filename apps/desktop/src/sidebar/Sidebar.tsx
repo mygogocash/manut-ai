@@ -32,6 +32,7 @@ import { threadRowKey, useRowMarks } from "./rows";
 import { RowsWatcher } from "./RowsWatcher";
 import { togglePalette } from "../palette/state";
 import { BrandMark, MenuIcon, SearchGlyph } from "./menuIcons";
+import { Icon } from "../ui/icons";
 import { DiskChip } from "./DiskChip";
 import { ModeLine } from "./ModeLine";
 import { ShopSwitcher } from "./ShopSwitcher";
@@ -79,12 +80,9 @@ function RecentRow({ item }: { item: RecentItem }) {
   );
 }
 
+/** A pinned chat's mark: the set's pin (src/ui/icons.tsx). */
 function PinGlyph() {
-  return (
-    <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-      <path d="M14.5 2.5l7 7-3 1-3.5 3.5.5 4.5-2 2-4-4-5.5 5.5-1-1L7 14.5l-4-4 2-2 4.5.5L13 5.5z" />
-    </svg>
-  );
+  return <Icon name="pin" />;
 }
 
 export function SideMenu({

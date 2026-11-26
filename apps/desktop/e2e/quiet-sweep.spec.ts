@@ -36,6 +36,44 @@ test("the side menu is the canvas's 196px, and its foot names the person with th
 
 const PAGES = ["new", "needs", "team", "code", "artifacts", "customize", "history"] as const;
 
+/** Every icon a person can see on the page that is not 16px with a 1.4 line (the line measured as drawn, so a 24-unit
+ *  drawing at 14px reads 1.17). Marks, faces, meters and state glyphs are not icons of the set (src/ui/icons.test.tsx
+ *  names them). */
+async function offSetIcons(page: Page): Promise<string[]> {
+  return page.evaluate(() => {
+    const out: string[] = [];
+    const notIcon = ".face, .sb-mark, [data-agent], .usage-ring, .src-ic, .tk-mark, .th-g, .ss-st, .agent-ic, .model-ic";
+    for (const svg of Array.from(document.querySelectorAll("svg"))) {
+      const r = svg.getBoundingClientRect();
+      if (r.width === 0 || r.height === 0 || svg.closest(notIcon) || svg.matches(notIcon)) continue;
+      const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      if (!hit || !(svg.contains(hit) || hit.contains(svg) || svg.parentElement?.contains(hit))) continue;
+      const shape = svg.querySelector("path, circle, rect");
+      const vb = Number((svg.getAttribute("viewBox") ?? "0 0 16 16").split(/\s+/)[2]);
+      const line = shape ? (parseFloat(getComputedStyle(shape).strokeWidth) * r.width) / vb : 0;
+      if (Math.round(r.width) !== 16 || Math.round(r.height) !== 16 || Math.abs(line - 1.4) > 0.02)
+        out.push(`${Math.round(r.width)}x${Math.round(r.height)} line ${line.toFixed(2)} in ${svg.parentElement?.className}`);
+    }
+    return out;
+  });
+}
+
+test("one icon set: every icon on the menu's pages and in Settings is the brand's, 16px with a 1.4 line", async ({ page }) => {
+  test.setTimeout(90_000);
+  await start(page);
+  for (const row of PAGES) {
+    await page.getByTestId(`menu-${row}`).click();
+    await expect(page.getByTestId(row === "new" ? "page-home" : `page-${row}`)).toBeVisible();
+    expect(await offSetIcons(page), row).toEqual([]);
+  }
+  await page.getByTestId("nav-settings").click();
+  for (const id of ["general", "voice", "terminal", "providers", "worktrees", "source", "artifacts", "mcp", "workflows", "developer"]) {
+    await page.getByTestId(`settings-nav-${id}`).click();
+    await expect(page.getByTestId(`settings-page-${id}`)).toBeVisible();
+    expect(await offSetIcons(page), id).toEqual([]);
+  }
+});
+
 test("pictures of every menu page and Settings, at 1280 and 900, light and dark", async ({ page }) => {
   test.skip(!SHOTS, "QUIET_SHOTS=<dir> keeps the pictures");
   test.setTimeout(240_000);

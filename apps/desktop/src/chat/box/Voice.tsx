@@ -14,18 +14,14 @@ import { createMic, type MicView } from "../../voice/mic";
 import { createVoiceMode, OFF, type ModeState } from "../../voice/mode";
 import { usePlace, type BoxPlace } from "../../palette/places";
 import { decide, onPrefs, readPrefs, refusalOf, refusalText, routeText, savePrefs, spokenName, type Spoken } from "../../voice/voice";
+import { Icon } from "../../ui/icons";
 
 const MicMark = () => (
-  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-    <rect x="9" y="3" width="6" height="11" rx="3" />
-    <path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21" />
-  </svg>
+  <Icon name="mic" />
 );
 
 const WaveMark = () => (
-  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" aria-hidden="true">
-    <path d="M4 10v4M8 7v10M12 4v16M16 7v10M20 10v4" />
-  </svg>
+  <Icon name="audio-lines" />
 );
 
 /** Whether a microphone or voice mode view is on (listening, starting, or going on in some phase). */

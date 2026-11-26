@@ -272,8 +272,9 @@
   color: var(--aui-muted);
 }
 .st-nav-i svg {
-  width: 14px;
-  height: 14px;
+  /* The brand set's size (src/ui/icons.tsx). */
+  width: 16px;
+  height: 16px;
 }
 .st-dot.working {
   background: var(--g-accent);
@@ -413,8 +414,8 @@
   flex: none;
 }
 .be-pen svg {
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
 }
 .be-link:hover:not(:disabled) {
   background: var(--raise2);

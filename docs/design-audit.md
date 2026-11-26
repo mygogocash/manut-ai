@@ -51,7 +51,14 @@ The fixes are items 85e to 85i in `docs/plan.md`; the motion is items 85a to 85c
    button, and a button is 34px. `chat/cards/cards.css`. Seen in both themes. Rebuilt in item 85g (26 Nov): the kit's
    card, Allow once the one black button, no tints and no rail (`e2e/ask-cards.spec.ts` pictures every kind).
 9. **Two icon sets.** The side menu's is the brand's (16px, a 1.4 line). Pages use `ui/icons.tsx` (9 to 15px, a 1.8 to
-   2.6 line): 257 of the icons measured are 14px with a 2px line. Measured.
+   2.6 line): 257 of the icons measured are 14px with a 2px line. Measured. Fixed in item 85i (26 Nov): every icon is a
+   drawing of `src/ui/icons.tsx`, 16px with a 1.4 line; the board's 65 word for word, and 29 the board does not have,
+   drawn on its grid with its line, ends and corners for the board to take in or redraw: arrow-left, panel-right,
+   terminal, grid, gear, expand, shrink, pin, bolt, wrench, database, globe, chip, cube, folder, chevrons-up-down,
+   chevrons-down-up, git-branch, diff, camera, hard-drive, columns-2, message-plus, list, paperclip, audio-lines, reply,
+   home, nodes. `src/ui/icons.test.tsx` fails on a line icon drawn anywhere else (marks, faces, meters, state glyphs
+   and the run graph are listed with why), and `e2e/quiet-sweep.spec.ts` measures every icon on the menu's pages and in
+   Settings.
 10. **Two segmented switches.** Home's is a 28px pill; Settings' (`.mseg`) are 22px rectangles with 11.5px text. Seen.
 11. **Two greys for second-line text.** `--quiet` (the placeholder's colour) is text in 219 rules beside `--muted`. On
     grey bands, the side menu and hovered rows it measures 4.0 to 4.3 to 1, under the 4.5 the Contrast board asks.

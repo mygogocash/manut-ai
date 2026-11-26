@@ -159,7 +159,7 @@ function PaneTools({ rec, focused, onClose }: { rec: SessionRec; focused: boolea
   return (
     <div className="ss-split-tools" data-testid="split-tools" data-session={rec.id} data-focused={focused ? "true" : "false"} title={`${name} · ${tildePath(rec.cwd, ss.home)}`}>
       <button type="button" className="ss-split-x" aria-label={t("key.zoomPane")} title={t("key.zoomPane")} onClick={zoom} data-testid="split-zoom">
-        <ExpandIcon size={11} />
+        <ExpandIcon />
       </button>
       <button type="button" className="ss-split-x" aria-label={t("split.closeSide", { name })} title={t("split.closeSide", { name })} onClick={onClose} data-testid="split-close">
         <CloseIcon />
