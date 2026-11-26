@@ -17,6 +17,7 @@ import { type AgentConfig } from "../settings/mcp/agentConfig";
 import { type InstallAsk, type InstallDone, type LinkRead, type ReadSkill } from "../runtime/skillBundle";
 import { type MergeMethod, type NewProjectMade, type Pulled, type RepoAsk, type ReviewAsk, type ReviewDone, type ReviewDraft, type SourceTools } from "../code/source";
 import { type ProviderPatch, type ProviderView, type SignIn } from "../settings/providers/model";
+import { type ImportFound } from "../importPast/offer";
 import { inTauri } from "../lib/tauri";
 import { TauriHost } from "./host.tauri";
 import { MockHost } from "./host.mock";
@@ -276,6 +277,14 @@ export interface SessionHost extends HistoryHost {
   pastChats(agent: "claude" | "codex", cwds: string[]): Promise<PastChat[]>;
   /** The last messages of `agent`'s conversation `id` in `cwd`. */
   pastMessages(agent: "claude" | "codex", id: string, cwd: string): Promise<PastMsg[]>;
+  /** The newest `max` conversations of `agent` across all of `cwds` together (the folders brought over, item 101e), for History
+   *  (src-tauri/src/past_chats.rs `recent`): read-only, the files read bounded by `max` however many folders. Absent on a shell
+   *  older than the item. */
+  pastRecent?(agent: "claude" | "codex", cwds: string[], max: number): Promise<PastChat[]>;
+  /** Bring over (item 101e, src-tauri/src/import_past.rs): the folders Claude Code and Codex worked in that are still on this Mac,
+   *  each with its conversations counted, newest first, and what was skipped (folders gone, compressed or unreadable files,
+   *  files past the bounds). Read-only: only folders and counts come back. Absent on a shell older than the item. */
+  importScan?(): Promise<ImportFound>;
   /** Whether the file of `agent`'s conversation `id` is where the CLI looks for it, in the home of `account` (none =
    *  the account new sessions use): `unknown` when that could not be told (a folder that cannot be read, an account
    *  whose folder is gone). Only names are looked at (rule 30). */

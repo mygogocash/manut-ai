@@ -10,4 +10,6 @@ export const history = {
   "history.lane.all": "All",
   "history.archive": "Archive",
   "history.archiveN": "Archive ({n})",
+  // under the list when the folders brought over from Claude Code and Codex hold more conversations than it shows (item 101e)
+  "history.pastMore": "Showing the newest {n} conversations of each of Claude Code and Codex from the projects brought over.",
 };

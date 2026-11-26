@@ -452,6 +452,14 @@
 .mpage .hist-li[data-place="settled"] .rowl {
   opacity: 0.7;
 }
+/* A Claude Code or Codex conversation brought over (item 101e): the agent's mark in the 24px place of a member's face */
+.mpage .hist-agent {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 24px;
+  height: 24px;
+}
 /* Several rows selected (item 94): the kit's selected row (KitLists, data-sel and its blue band) */
 .mpage .hist-li[data-sel="true"] .rowl {
   background: var(--bluebg);

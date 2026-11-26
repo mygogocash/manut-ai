@@ -1,0 +1,209 @@
+/* Bring over (ImportPast.tsx, item 101e): a calm card over a dimmed app, the update confirm's look (sidebar.css .upd-veil and
+   .upd-dlg: 8px radius, --pop, one line), wide enough for a list of folders that scrolls inside it. Colour is kept for its four
+   meanings: the picks are ink, second lines grey, and the one primary action is the neutral ink fill, never an accent. */
+.imp-veil {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  background: rgba(4, 3, 6, 0.7);
+  --rise-by: 0px;
+  animation: var(--anim-arrive);
+}
+[data-theme="light"] .imp-veil {
+  background: rgba(20, 16, 22, 0.32);
+}
+.imp-dlg {
+  display: flex;
+  flex-direction: column;
+  width: min(560px, calc(100vw - 48px));
+  max-height: calc(100vh - 64px);
+  padding: 18px;
+  border-radius: 8px;
+  background: var(--pop);
+  border: 1px solid var(--line-strong);
+  box-shadow: var(--pop-shadow);
+  color: var(--body);
+  font-size: 12.5px;
+  line-height: 1.5;
+  animation: var(--anim-arrive);
+}
+.imp-t {
+  margin: 0 0 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.imp-t:focus {
+  outline: none;
+}
+.imp-b {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+}
+.imp-b p {
+  margin: 0;
+}
+.imp-lead {
+  color: var(--body);
+}
+.imp-promise,
+.imp-note {
+  color: var(--muted);
+}
+.imp-looking {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.imp-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 4px;
+  color: var(--muted);
+}
+.imp-lk {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted);
+  text-decoration: underline;
+}
+.imp-lk:hover {
+  color: var(--ink);
+}
+.imp-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 300px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.imp-list.compact {
+  max-height: 180px;
+}
+.imp-li + .imp-li {
+  border-top: 1px solid var(--line);
+}
+.imp-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 6px 10px;
+}
+label.imp-row {
+  cursor: pointer;
+}
+label.imp-row:hover {
+  background: var(--hover);
+}
+.imp-box {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--ink);
+}
+.imp-name {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+.imp-n1 {
+  color: var(--ink);
+  font-weight: 560;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.imp-n2 {
+  color: var(--muted);
+  font-size: 11.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.imp-count {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.imp-agent {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.imp-total {
+  color: var(--body);
+}
+.imp-when {
+  flex: none;
+  min-width: 28px;
+  text-align: right;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.imp-li.here .imp-n1,
+.imp-li.here .imp-count,
+.imp-li.here .imp-total {
+  color: var(--muted);
+}
+.imp-tag {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 11px;
+}
+.imp-f {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+.imp-btn {
+  height: 28px;
+  padding: 0 12px;
+  border-radius: var(--r);
+  font-size: 12px;
+  font-weight: 560;
+  color: var(--body);
+  background: var(--seg-on);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+[data-theme="light"] .imp-btn {
+  background: var(--raise2);
+}
+.imp-btn:hover:not(:disabled) {
+  color: var(--ink);
+}
+.imp-btn.primary {
+  background: var(--ink);
+  color: var(--bg);
+  box-shadow: none;
+}
+.imp-btn.primary:hover:not(:disabled) {
+  background: var(--body);
+  color: var(--bg);
+}
+.imp-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.imp-btn:focus-visible,
+.imp-lk:focus-visible,
+.imp-box:focus-visible {
+  outline: 2px solid var(--line-strong);
+  outline-offset: 2px;
+}
