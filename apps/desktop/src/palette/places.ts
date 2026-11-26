@@ -25,6 +25,10 @@ export interface Places {
   lane?: { newLane(): void };
   /** the Team page's Pause everyone button; it opens the question and nothing more */
   pause?: { ask(): void };
+  /** The Code page's open project: its Open in <editor> (item 107), for the developer's own folder of the project */
+  editorProject?: { open(): void };
+  /** The open session or lane: its Open in <editor>, for the folder it works in (a lane's own folder when it has one) */
+  editorSession?: { open(): void };
   /** Settings › Developer's Practice or Connected: the segment shown and the press of the other */
   runtime?: { mode: "practice" | "connected"; set(mode: "practice" | "connected"): void };
 }

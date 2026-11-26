@@ -42,8 +42,8 @@ const ACTION: Partial<Record<RowChoice, RowAction>> = {
   restore: { do: "restore" },
 };
 
-/** The menu's size, to keep it inside the window: 168 wide, 26 per row plus its padding. */
-const W = 168;
+/** The menu's size, to keep it inside the window: 168 wide, or the widest word (an editor's name) up to about 208, 26 per row plus its padding. */
+const W = 208;
 const height = (rows: number) => rows * 26 + 14;
 
 /** Where a menu of `rows` rows opens for a pointer or a button at (`x`, `y`): inside the window. */
@@ -74,8 +74,8 @@ export function pickStart(now: number): { date: string; time: string } {
 
 /** `onDismiss(back)`: the menu closes; `back` when it closed by a choice or Escape, so the focus goes back to the row (where ⌘Z undoes
  *  what was just done), and not when the person clicked somewhere else. `working`: the row's turn runs, so Snooze also offers
- *  "Until it finishes". `keys`: several selected rows the menu acts on at once (item 94), which `name` then counts. */
-export function RowMenu({ rowKey, kind, mark, name, at, onDismiss, extra, working = false, keys }: { rowKey: string; kind: RowKind; mark: RowMark | undefined; name: string; at: { x: number; y: number }; onDismiss: (back?: boolean) => void; extra?: ReactNode; working?: boolean; keys?: readonly string[] }) {
+ *  "Until it finishes". `extra`: more rows after the choices, given a function that closes the menu. `keys`: several selected rows the menu acts on at once (item 94), which `name` then counts. */
+export function RowMenu({ rowKey, kind, mark, name, at, onDismiss, extra, working = false, keys }: { rowKey: string; kind: RowKind; mark: RowMark | undefined; name: string; at: { x: number; y: number }; onDismiss: (back?: boolean) => void; extra?: ReactNode | ((done: () => void) => ReactNode); working?: boolean; keys?: readonly string[] }) {
   const ref = useRef<HTMLDivElement>(null);
   const [step, setStep] = useState<"main" | "snooze" | "pick">("main");
   const [pick, setPick] = useState(() => pickStart(Date.now()));
@@ -180,7 +180,7 @@ export function RowMenu({ rowKey, kind, mark, name, at, onDismiss, extra, workin
               {t(LABEL[c])}
             </button>
           ))}
-          {!many && extra}
+          {!many && (typeof extra === "function" ? extra(() => onDismiss(true)) : extra)}
         </>
       )}
     </div>
@@ -188,7 +188,7 @@ export function RowMenu({ rowKey, kind, mark, name, at, onDismiss, extra, workin
 }
 
 /** A row's menu state: `open(x, y)` shows it, `menu` is the element to draw inside the row, `onContextMenu` opens it at the pointer. */
-export function useRowMenu(props: { rowKey: string; kind: RowKind; mark: RowMark | undefined; name: string; working?: boolean; keys?: readonly string[] }) {
+export function useRowMenu(props: { rowKey: string; kind: RowKind; mark: RowMark | undefined; name: string; working?: boolean; keys?: readonly string[]; extra?: ReactNode | ((done: () => void) => ReactNode) }) {
   const [at, setAt] = useState<{ x: number; y: number } | null>(null);
   // what had the focus when the menu opened (its "more" button), or the row a right-click opened it on: where the focus goes back
   const opener = useRef<HTMLElement | null>(null);
@@ -204,7 +204,7 @@ export function useRowMenu(props: { rowKey: string; kind: RowKind; mark: RowMark
     const active = typeof document !== "undefined" ? document.activeElement : null;
     opener.current = from ?? (active instanceof HTMLElement && active !== document.body ? active : null);
     // the snooze step is the longest: Back, three times, until it finishes and a picked time
-    setAt(menuAt(x, y, Math.max(rowChoices(props.kind, props.mark).length, 6)));
+    setAt(menuAt(x, y, Math.max(rowChoices(props.kind, props.mark).length + (props.extra ? 1 : 0), 6)));
   };
   const menu = at ? <RowMenu {...props} at={at} onDismiss={close} /> : null;
   const onContextMenu = (e: ReactMouseEvent<HTMLElement>) => {
