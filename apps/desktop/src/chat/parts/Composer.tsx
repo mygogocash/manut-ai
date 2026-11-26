@@ -18,7 +18,8 @@ import { addAt, matchMembers, mentionAt, putMention, withAction, withFolders, ty
 import { FolderChips, MentionPicker } from "../box/BoxParts";
 import { useBoxVoice } from "../box/Voice";
 import { voiceOffered } from "../../voice/engine";
-import { keysCaption, sendKey, useFollowUp, whileRunning, type FollowUp } from "../box/keys";
+import { keysCaption, sendKey, stashKey, useFollowUp, whileRunning, type FollowUp } from "../box/keys";
+import { filesOf, stashDraft, takeHanded } from "../../app/stash";
 
 const MAX_H = 200;
 
@@ -38,7 +39,8 @@ const MAX_H = 200;
  * With `voice` (item 81, the Mac app), the microphone and voice mode sit before Send (chat/box/Voice.tsx).
  * While an answer runs (item 95), Enter does Settings' "While an answer is running" (wait for it, or add it now) and
  * Cmd+Enter the other, for that one message (chat/box/keys.ts); a quiet line under the box says which. With no answer
- * running both keys send. */
+ * running both keys send. Cmd+S puts the draft aside, words, folders and files, in Drafts on Home (app/stash.ts), and a
+ * draft taken from there into this chat brings its files along. */
 export function Composer({
   bot,
   running,
@@ -132,6 +134,8 @@ export function Composer({
   const [forced, setForced] = useState(false);
   const [sending, setSending] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  /** Cmd+S just put the draft aside: one quiet line says where it went, until the person types again. */
+  const [aside, setAside] = useState(false);
   const ref = useRef<HTMLTextAreaElement>(null);
   const wrap = useRef<HTMLDivElement>(null);
   const mirror = useRef<HTMLDivElement>(null);
@@ -149,6 +153,7 @@ export function Composer({
   const edit = (next: string) => {
     recall.current = null;
     setForced(false);
+    setAside(false);
     setText(next);
   };
 
@@ -418,6 +423,41 @@ export function Composer({
       return cur.filter((c) => c.id !== id);
     });
 
+  // A draft taken from Home's Drafts into this chat (app/stash.ts): its files join the box, read back from their saved
+  // copies. Its words came as the chat's draft.
+  const draftN = store.ui.draft?.n;
+  useEffect(() => {
+    const h = takeHanded(bot.name);
+    if (!h) return;
+    void filesOf(h).then(({ files, missing }) => {
+      if (files.length) add(files);
+      if (missing.length) setErr(t("stash.missing", { names: missing.join(", ") }));
+    });
+  }, [bot.name, draftN, add]);
+
+  /** Cmd+S: the draft leaves the box for Drafts on Home, with its folders and files. Nothing is sent. A file that cannot
+   *  be saved keeps the whole draft in the box, with the reason. */
+  const putAside = async () => {
+    if (!has || sending || offline) return;
+    const body = folders.length ? withFolders(text, folders) : text;
+    setSending(true);
+    setErr(null);
+    try {
+      await stashDraft({ text: body, files: good, from: bot.name });
+      edit("");
+      setFolders([]);
+      setChips((cur) => {
+        cur.forEach((c) => !c.reason && c.url && URL.revokeObjectURL(c.url));
+        return cur.filter((c) => c.reason);
+      });
+      setAside(true);
+    } catch (e) {
+      setErr(t("stash.failed", { error: e instanceof Error ? e.message : String(e) }));
+    } finally {
+      setSending(false);
+    }
+  };
+
   // Unsent chips let go of their local copies when the composer goes; sent ones live on in the bubble.
   const latest = useRef(chips);
   latest.current = chips;
@@ -531,6 +571,12 @@ export function Composer({
         }}
         onKeyDown={(e) => {
           const composing = imeComposing(e);
+          // Cmd+S puts the draft aside (never the browser's Save, which would save the page)
+          if (stashKey(e)) {
+            e.preventDefault();
+            void putAside();
+            return;
+          }
           // Tab takes the suggestion into the box, where it is the person's own text to edit and send; nothing is sent
           if (ghost && e.key === "Tab" && !e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey && !composing) {
             e.preventDefault();
@@ -746,6 +792,11 @@ export function Composer({
       {heldNote && has && (
         <div className="cmp-held" role="note" data-testid="composer-held">
           {heldNote}
+        </div>
+      )}
+      {aside && (
+        <div className="cmp-keys" role="status" data-testid="composer-stashed">
+          {t("stash.put")}
         </div>
       )}
       {/* While an answer runs, what Enter does with what is typed, and what Cmd+Enter does instead (item 95). */}

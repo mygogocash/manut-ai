@@ -458,6 +458,7 @@ const SHORTCUTS: [string, Key][] = [
   [`${MOD}J`, "key.nextAsk"],
   [MOD === "⌘" ? `${MOD}N · ${MOD}T` : `${MOD}N`, "key.newSession"],
   [`${MOD}Enter`, "key.sendOther"],
+  [`${MOD}S`, "key.stash"],
   [MOD === "⌘" ? "⌘D · ⌘⇧D" : "Ctrl+Shift+D · Alt+Shift+D", "key.splitPane"],
   [MOD === "⌘" ? "⌘W" : "Ctrl+Shift+W", "key.closePane"],
   [MOD === "⌘" ? "⌘⌥ ←↑↓→" : "Ctrl+Alt+ ←↑↓→", "key.focusPane"],

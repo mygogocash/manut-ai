@@ -94,7 +94,7 @@ keeps them:
 | Steer or queue, a key to swap, a default | has (item 95): Settings › General › Chat box, Wait for it by default; Cmd+Enter does the other for one message; the held message keeps its buttons | 95 |
 | Select several rows; bulk snooze, settle, new titles | no | 94, 96 |
 | Auto-settle after some days | no | 94 |
-| Several drafts; stash one | part: one draft a chat, no pictures | 95 |
+| Several drafts; stash one | has (item 95): Drafts at the top of Home, five kept with their pictures and files; Cmd+S puts a chat's draft there, to take into any chat or project | 95 |
 | Snapshot of any app with a global key | no | 104 |
 | Swipes on the phone; Live Activities | no (Live Activities need a native app) | 78c, 111 |
 

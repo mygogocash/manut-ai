@@ -8,6 +8,7 @@ import { MockHost, MockRuntime } from "../runtime/mock";
 import { APPROVAL_SEED, CLARIFY_SEED } from "../runtime/mock/seed";
 import { settleApproval } from "../chat/cards/respond";
 import { HomeView, needsYouRows, workingRows, type HomeAskRow, type HomeViewProps, type WorkingRow } from "./HomePage";
+import { DraftsView, draftWords, type DraftRow } from "./HomeDrafts";
 
 /** The text a person would read: tags and attribute values removed, entities decoded where tests compare them. */
 const words = (html: string) =>
@@ -298,5 +299,45 @@ describe("Home on the demo runtime", () => {
     // once the turn ends, nobody is working
     await vi.advanceTimersByTimeAsync(3_000);
     expect(workingRows(store.getSnapshot(), Date.now())).toEqual([]);
+  });
+});
+
+describe("Drafts at the top of Home (item 95)", () => {
+  const row = (over: Partial<DraftRow> = {}): DraftRow => ({
+    id: "d1",
+    words: "Plan the 12.12 sale",
+    meta: "From Home · 3m",
+    back: noop,
+    backTo: "Home",
+    places: [{ key: "nam", label: "Nam's chat", pick: noop }],
+    remove: noop,
+    ...over,
+  });
+  const drawDrafts = (rows: DraftRow[], dropped: string | null = null) => {
+    setLang("en");
+    return renderToString(<DraftsView rows={rows} dropped={dropped} onUndo={noop} />);
+  };
+
+  it("draws nothing without drafts, and a band over the rows with them, each with Move to and ×", () => {
+    expect(drawDrafts([])).toBe("");
+    const html = drawDrafts([row(), row({ id: "d2", words: "Reply to Khun Mali", meta: "1 file · From Kami · now" })]);
+    expect(html).toMatch(/role="region" aria-labelledby="home-drafts-h" data-testid="home-drafts"/);
+    expect(words(html)).toContain("Drafts 2 of 5");
+    expect(count(html, 'data-testid="home-draft"')).toBe(2);
+    expect(words(html)).toContain("Reply to Khun Mali 1 file · From Kami · now");
+    expect(html).toMatch(/title="Put it back into Home"/);
+    expect(count(html, 'data-testid="home-draft-move"')).toBe(2);
+    expect(html).toMatch(/aria-label="Delete the draft “Plan the 12.12 sale”"/);
+  });
+
+  it("says which draft went when a sixth let the oldest go, with Undo", () => {
+    const html = drawDrafts([row()], "the oldest one");
+    expect(words(html)).toContain("Drafts keeps 5, so the oldest went: the oldest one Undo");
+    expect(html).toMatch(/role="status" data-testid="home-draft-dropped"/);
+  });
+
+  it("puts a draft's first line with words on one line, cut where a row would cut it", () => {
+    expect(draftWords("\n\n  first   line \nsecond")).toBe("first line");
+    expect(draftWords("x".repeat(100))).toHaveLength(90);
   });
 });

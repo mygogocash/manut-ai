@@ -5,9 +5,11 @@
 // Home shows only what the store already holds. Left out until the runtime has them: the budget pill (no money data),
 // the quick links to Sales, Content, Books and Stock, Updates, Careful (no setting it fits), adding a file and
 // speaking. Automations shows, with its count, only when the runtime offers them.
-import { useRef, useState, type ReactNode, type Ref } from "react";
+import { useEffect, useRef, useState, type ReactNode, type Ref } from "react";
 import { firstWords } from "../threads/types";
-import { modLabel, sendKey, staysHome, useAfterSend } from "../chat/box/keys";
+import { modLabel, sendKey, stashKey, staysHome, useAfterSend } from "../chat/box/keys";
+import { joinDraft, stashDraft } from "../app/stash";
+import { HomeDrafts } from "./HomeDrafts";
 import "./home.css";
 import { t } from "../i18n";
 import { can } from "../runtime";
@@ -96,6 +98,10 @@ export interface HomeViewProps {
   stays?: boolean;
   /** The last send that left the person here: one quiet line that says it went, and opens it. */
   started?: { name: string; words: string; open: () => void } | null;
+  /** Cmd+S in the box: its words go to Drafts, at the top of this page (item 95). */
+  onStash?: () => void;
+  /** The drafts kept for later, drawn at the top of the page (HomeDrafts.tsx). */
+  drafts?: ReactNode;
   /** why the last ask did not go (the store's error); the box keeps its words */
   sendError?: string | null;
   /** a suggestion was picked: its words go into the box, and nothing is sent until Send */
@@ -160,6 +166,7 @@ export function HomeView(p: HomeViewProps) {
       }
     >
       <div className="home hero" data-arrive="home" data-arrive-rows=".rows > li">
+        {p.drafts}
         <div className="lockup">
           <BrandMark size={46} />
           <span>Manut AI</span>
@@ -196,6 +203,11 @@ export function HomeView(p: HomeViewProps) {
             // Enter and Cmd+Enter: one opens what it started, the other stays here (keys.ts); the form's own submit is
             // held back so a send happens once
             onKeyDown={(e) => {
+              // Cmd+S puts the words aside in Drafts, never the browser's Save
+              if (stashKey(e)) {
+                e.preventDefault();
+                return p.onStash?.();
+              }
               const k = sendKey(e);
               if (!k) return;
               e.preventDefault();
@@ -450,6 +462,9 @@ export function HomePage() {
   const submit = async (stay: boolean) => {
     const words = text.trim();
     if (!words || !route || sending) return;
+    // these words are on their way: a send that opens the chat leaves Home before the box empties, and must not keep
+    // them as a draft too
+    typed.current = "";
     setSending(true);
     setSendError(null);
     setStarted(null);
@@ -469,6 +484,30 @@ export function HomePage() {
     }
   };
   const nameOf = (bot: string) => s.bots.find((b) => b.name === bot)?.display_name ?? bot;
+
+  // Words left unsent in this box are a new chat's draft: leaving Home, or the app closing, keeps them in Drafts at the
+  // top of this page (app/stash.ts), so the next new chat starts from an empty box and nothing typed is lost.
+  const typed = useRef(text);
+  typed.current = text;
+  useEffect(() => {
+    const keep = () => {
+      const words = typed.current;
+      typed.current = "";
+      if (words.trim()) void stashDraft({ text: words, from: "home" }).catch(() => undefined);
+    };
+    window.addEventListener("pagehide", keep);
+    return () => {
+      window.removeEventListener("pagehide", keep);
+      keep();
+    };
+  }, []);
+  const stash = () => {
+    const words = text;
+    if (!words.trim()) return;
+    typed.current = "";
+    setText("");
+    void stashDraft({ text: words, from: "home" }).catch(() => setText(words));
+  };
 
   const approve = async (a: Ask) => {
     const key = askKey(a);
@@ -497,6 +536,17 @@ export function HomePage() {
         setSendError(null);
       }}
       onSubmit={(stay) => void submit(stay)}
+      onStash={stash}
+      drafts={
+        <HomeDrafts
+          s={s}
+          nowMs={now}
+          here={(words) => {
+            setText((cur) => joinDraft(cur, words));
+            input.current?.focus();
+          }}
+        />
+      }
       stays={after === "stay"}
       started={
         started && {

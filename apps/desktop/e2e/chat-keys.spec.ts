@@ -5,7 +5,10 @@
 // - An open chat while its answer runs, on the mock bridge with Kami's turns driven by hand: Enter waits for the answer
 //   (the default) and Cmd+Enter hands that one message in now; Settings swaps them; the line under the box says which.
 //   Buddy's own coding agent takes no message mid-answer, so there both keys wait and the line says so.
-// What each key does in each state is pinned in src/chat/box/keys.test.ts; this spec presses them.
+// - Drafts (Practice): words left in Home's box wait in Drafts at the top of Home; Cmd+S in a chat box puts the draft
+//   aside there, picture and all; from there it is put back, or moved into another chat's box, and nothing is sent.
+// What each key does in each state is pinned in src/chat/box/keys.test.ts, and the list in src/app/stash.test.ts; this
+// spec presses them.
 import { expect, test, type Page } from "@playwright/test";
 import { chatOpen, homeOpen, openChat } from "./start";
 
@@ -153,5 +156,72 @@ test.describe("an agent that cannot take a message mid-answer", () => {
     await expect(page.getByTestId("composer-keys")).toHaveText(/^Buddy takes it when this answer is done, with Enter or (⌘|Ctrl\+)Enter$/);
     await box(page).press(CMD);
     await expect(page.locator("[data-testid=bubble-user][data-held]", { hasText: "and the docs" })).toBeVisible();
+  });
+});
+
+test.describe("Drafts at the top of Home", () => {
+  test.beforeEach(async ({ page }) => practice(page));
+  const rows = (page: Page) => page.getByTestId("home-draft");
+
+  test("words left in Home's box wait in Drafts; the row puts them back in the box", async ({ page }) => {
+    await expect(page.getByTestId("home-drafts")).toHaveCount(0);
+    await ask(page).fill("Plan the 12.12 sale");
+    await page.getByTestId("menu-team").click();
+    await page.getByTestId("menu-new").click();
+    await expect(ask(page)).toHaveValue("");
+    await expect(rows(page)).toHaveCount(1);
+    await expect(rows(page)).toContainText("Plan the 12.12 sale");
+    await expect(rows(page)).toContainText("From Home");
+    await rows(page).getByTestId("home-draft-back").click();
+    await expect(ask(page)).toHaveValue("Plan the 12.12 sale");
+    await expect(page.getByTestId("home-drafts")).toHaveCount(0);
+  });
+
+  test("Cmd+S in Home's box puts it aside; five are kept, a sixth lets the oldest go with an Undo; × deletes one", async ({ page }) => {
+    for (let n = 1; n <= 6; n++) {
+      await ask(page).fill(`draft ${n}`);
+      await ask(page).press("ControlOrMeta+s");
+      await expect(ask(page)).toHaveValue("");
+    }
+    await expect(rows(page)).toHaveCount(5);
+    await expect(rows(page).first()).toContainText("draft 6");
+    await expect(page.getByTestId("home-draft-dropped")).toContainText("draft 1");
+    await page.getByTestId("home-draft-undo").click();
+    await expect(rows(page)).toHaveCount(6);
+    await expect(page.getByTestId("home-draft-dropped")).toHaveCount(0);
+    await rows(page).filter({ hasText: "draft 3" }).getByTestId("home-draft-delete").click();
+    await expect(rows(page)).toHaveCount(5);
+    await expect(rows(page).filter({ hasText: "draft 3" })).toHaveCount(0);
+  });
+
+  test("Cmd+S in a chat puts the draft aside with its picture; Move to puts it into another chat's box, and nothing is sent", async ({ page }) => {
+    await openChat(page, "buddy", "Buddy");
+    const chooser = page.waitForEvent("filechooser");
+    await page.getByTestId("attach").click();
+    await page.getByTestId("attach-files").click();
+    await (await chooser).setFiles([{ name: "shelf.png", mimeType: "image/png", buffer: Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]) }]);
+    await expect(page.getByTestId("attach-chips").locator("[data-testid=attach-remove]")).toHaveCount(1);
+    await box(page).fill("Which shelf is the jasmine candle on?");
+    await box(page).press("ControlOrMeta+s");
+    await expect(box(page)).toHaveValue("");
+    await expect(page.getByTestId("attach-chips")).toHaveCount(0);
+    await expect(page.getByTestId("composer-stashed")).toHaveText("Put aside in Drafts, at the top of Home.");
+    await expect(page.getByTestId("bubble-user").filter({ hasText: "jasmine candle" })).toHaveCount(0);
+
+    await page.getByTestId("menu-new").click();
+    const row = rows(page);
+    await expect(row).toHaveCount(1);
+    await expect(row).toContainText("1 file · From Buddy");
+    await row.getByTestId("home-draft-move").click();
+    // a draft with a picture goes to a chat whose box holds pictures: no Home box, no coding session
+    await expect(page.getByTestId("home-draft-place").first()).toHaveText("Nam's chat");
+    await page.locator("[data-testid=home-draft-place][data-place=nam]").click();
+    await chatOpen(page, "nam", "Nam");
+    await expect(box(page)).toHaveValue("Which shelf is the jasmine candle on?");
+    await expect(page.getByTestId("attach-chips").locator("[data-testid=attach-remove]")).toHaveCount(1);
+    await expect(page.getByTestId("attach-chips")).toContainText("shelf.png");
+    await expect(page.getByTestId("bubble-user").filter({ hasText: "jasmine candle" })).toHaveCount(0);
+    await page.getByTestId("menu-new").click();
+    await expect(page.getByTestId("home-drafts")).toHaveCount(0);
   });
 });
