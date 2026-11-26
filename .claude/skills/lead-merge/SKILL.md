@@ -59,8 +59,10 @@ Read its report for what it did NOT do or could not check, then:
    fix and wait again. `gh run view <id> --log-failed` shows why. A browser spec that failed once and passed on its retry
    shows as flaky, not red. A test that fails only under load is in `docs/handoff.md`, "Known flaky tests".
 4. Several items ready together need not wait for each other: each was checked on its own push. Merge them one after
-   another; each merge moves the lead's branch, so the next item merges it in, pushes and waits once more (a docs-only
-   change takes about two minutes, a desktop change about ten).
+   another; each merge moves the lead's branch, so the next item merges it in, pushes and waits once more. A full run
+   took about 12 minutes on 26 Nov when runners were free (its longest shard is `panel-max.spec.ts` alone, about 8
+   minutes), and a docs-only push a few. When the organisation's 20 job places are taken (a burst of Dependabot pull
+   requests, each a full run, held one run queued for 30 minutes that day), a run waits for places.
 
 **When CI is down** (GitHub's status page, or runs that never start), gate on this Mac instead:
 `.claude/skills/lead-merge/scripts/gate.sh <item worktree>` installs, runs every package's tests, type checks and the
