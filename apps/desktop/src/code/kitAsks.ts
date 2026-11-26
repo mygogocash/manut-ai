@@ -116,6 +116,10 @@ export function afterBranchRead(chat: string, token: number): void {
   if ((moved.get(chat) ?? 0) === token) stale.delete(chat);
 }
 
+/** Per chat: the tags its commands made that the dial did not stop (item 120), so a later push of one by its bare name is
+ *  read as the tag's push it is. */
+const tagsMade = new Map<string, string[]>();
+
 /** The branch an ask of chat `chat` is read with: none while a step that may have moved it has run since it was read. */
 const branchOf = (ctx: AskContext): string | undefined => (stale.has(ctx.chat) ? undefined : ctx.branch);
 
@@ -126,7 +130,7 @@ const isCommand = (ev: EventOf<"approval.request">) =>
 function readIn(ev: EventOf<"approval.request">, ctx: AskContext, from: readonly (string | null)[], branch: string | undefined = branchOf(ctx)): AskRead | null {
   if (ev.outdated) return null;
   const project = projectFor(ctx);
-  return readAsk(wordsOf(ev), { cwd: ev.cwd || ctx.root, root: ctx.root, home: ctx.home ?? undefined, allowed: project.folders, branch, from });
+  return readAsk(wordsOf(ev), { cwd: ev.cwd || ctx.root, root: ctx.root, home: ctx.home ?? undefined, allowed: project.folders, branch, from, tags: tagsMade.get(ctx.chat) ?? [] });
 }
 
 /** A name standing for a read of what is saved that could not be made: never shown, only counted, so the dial asks. */
@@ -195,6 +199,7 @@ export function kitAnswer(
   const d = decideAsk(read, project, weighed, now);
   if (read.what === "command" && read.ends && d.answer !== "blocked") folders.set(ctx.chat, foldersAfter(from, { ends: read.ends, ...(read.resets ? { resets: read.resets } : {}) }));
   if (d.answer !== "blocked" && (read.movesHead || read.action === "unknown" || read.action === "live")) noteMoved(ctx.chat);
+  if (d.answer !== "blocked" && read.tags?.length) tagsMade.set(ctx.chat, [...new Set([...(tagsMade.get(ctx.chat) ?? []), ...read.tags])]);
   let out: { choice: ApprovalChoice; answer: KitAnswer } | null = null;
   if (d.answer === "alone" && ev.choices.includes("once")) {
     const byLevel = decideAsk(read, { ...project, rules: [] }, weighed, now).answer === "alone";
@@ -293,6 +298,7 @@ export function resetKitAsks(): void {
   readWith.clear();
   moved.clear();
   stale.clear();
+  tagsMade.clear();
   resetPreview();
   version++;
 }

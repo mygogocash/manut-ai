@@ -307,6 +307,25 @@ yq's `load` and its kinds and its `env` read after `eval` or `eval-all` too, and
 plain twin (`kubectl get pods`, `terraform plan`, `docker ps`, `git config --get user.name`, `ps aux`) stays a read.
 `pnpm config list` and a bare `yarn config` now ask.
 
+Since item 120 these ask too: git's own `git config get` with `--regexp` or `--url` (a listing; its other options are read
+from its own list), `kubectl get` or `describe` with `-f`, `--filename`, `-k`, `--kustomize` or `--raw` (a file can name a
+Secret), yq's `load` and `env` and jq's `$ENV` and `env` wherever they stand (after `-o json`, joined to
+`--expression=`), yq's `eval(…)`, which builds an expression as it runs, a jq or yq filter read from a file (`-f`,
+`--from-file`), `helm status` with any output but the table, `terraform show -json` (and tofu's), and
+`pulumi … --show-secrets`. So `kubectl get -f k8s/web.yaml` and `jq --from-file=filter.jq data.json`, plain before, ask.
+
+#### Tags, and a branch moved back (item 120)
+
+A push of a tag goes live, as a release starts from one: `--tags`, `--follow-tags`, `refs/tags/…`, `tags/…`, a name that
+reads as a version (`v2`, `v2.0.0`, `1.4.2`, `desktop-v0.1.1`), and a tag the line or an earlier step of the chat made
+(`git tag nightly`, then `git push origin nightly`). A tag of another name made before the chat is not known by its name.
+`git branch -f`, `-M` and `-C`, `git checkout -B`, `git switch -C` (`--force-create`), `git worktree add -B` or `--force`,
+and `git update-ref` move a branch's tip as `reset --hard` does, so they read as a discard; `-B`, `-C`, `-M` and
+`--force-create` are harsher options a kept rule never covers. A commit named from another before `--` (`HEAD~5`,
+`main^`, `@~2`) is no path, so it is no longer read as a Windows short file name: `git rebase -i HEAD~3`,
+`git reset HEAD~1`, `git revert HEAD~1`, `git cherry-pick main~2`, `git checkout HEAD~1` and the like read as the change
+they are instead of asking.
+
 #### git in another folder, and a program named by a path (item 116)
 
 - **git reads only the project's own folder.** `git -C` naming any folder but the project's (one folder after another

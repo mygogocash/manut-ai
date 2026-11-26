@@ -415,6 +415,25 @@ describe("Kit's dial on a commit or a push whose key the read of the folder does
   });
 });
 
+describe("Kit's dial on a tag the session made, pushed in a later ask (item 120)", () => {
+  beforeEach(() => {
+    resetKitProjects();
+    resetKitAsks();
+    updateKitProjects((p) => setLevel(p, ROOT, "everything_in_project"));
+  });
+  afterEach(() => {
+    resetKitProjects();
+    resetKitAsks();
+  });
+
+  it("asks before a push that names the tag by its bare name, and lets the plain branch push go", async () => {
+    const s = await session(async () => ({ files: [], unread: false, history: { files: [], unread: false } }));
+    expect((await s.ask("t1", "Run this command?", "git tag nightly")).resolved).toBe("once");
+    expect((await s.ask("t2", "Run this command?", "git push origin nightly")).resolved).toBeUndefined();
+    expect((await s.ask("t3", "Run this command?", "git push origin kit/promptpay-qr")).resolved).toBe("once");
+  });
+});
+
 describe("Kit's dial for a lane in a folder of its own", () => {
   const LANE = "/w/.manut/lanes/baanmali-preorder/promptpay-qr";
   const ctx = { chat: "agent:s9", root: LANE, project: ROOT, home: "/w" };

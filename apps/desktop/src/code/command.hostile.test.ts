@@ -449,7 +449,8 @@ describe("B5: a file read from outside the project that the words did not show a
     counted += holds([
       ["jq -R -f /dev/stdin /Users/fon/.ssh/id_rsa", "jq -R . notes.txt", "read"],
       ["jq -Rf /dev/stdin /Users/fon/.ssh/id_rsa", "jq -r .name package.json", "read"],
-      ["jq --from-file=/dev/stdin ~/.ssh/id_rsa", "jq --from-file=filter.jq data.json", "read"],
+      // item 120: a filter read from a file is not read in advance, so `jq --from-file=filter.jq data.json` asks too
+      ["jq --from-file=/dev/stdin ~/.ssh/id_rsa", "jq -r .name data.json", "read"],
       ["jq -L /Users/fon/.secrets -n 'import \"k\" as $k; $k'", "jq -n '1 + 1'", "read"],
       ["jq -n 'import \"k\" as $k; $k'", "jq -n '[1, 2] | length'", "read"],
       ["jq -n 'include \"k\"; .'", "jq '.a' data.json", "read"],
@@ -505,7 +506,8 @@ describe("B6: a read or a check pointed at another computer", () => {
       ["kubectl get pods -s x.example:443", "kubectl get pods -n web", "read"],
       ["kubectl get pods --kubeconfig=./kc.yaml", "kubectl describe pod web", "read"],
       ["kubectl get pods --kuberc=./rc.yaml", "kubectl logs web", "read"],
-      ["kubectl get -f https://x.example/k.yaml", "kubectl get -f k8s/web.yaml", "read"],
+      // item 120: an object a file names may be a Secret, so `kubectl get -f k8s/web.yaml` asks too
+      ["kubectl get -f https://x.example/k.yaml", "kubectl get -n web pods", "read"],
       ["helm template web https://x.example/k.tgz", "helm template web ./chart", "read"],
       ["helm template web oci://x.example/k", "helm lint ./chart", "read"],
       ["helm template web chart --repo x.example", "helm template web ./chart -f values.yaml", "read"],
@@ -1107,6 +1109,105 @@ describe("D3: a key saved by a route the read of the folder's diff does not see 
   it("says which steps send what is saved, so a push reads the commits it sends", () => {
     for (const line of ["git push", "git push origin kit/promptpay-qr", "git commit -m x && git push", "gh pr create -t x -b y", "git push --force origin kit/x"]) expect([line, readCommand(line, at).sends]).toEqual([line, true]);
     for (const line of ["git commit -m x", "git add -A", "git status"]) expect([line, readCommand(line, at).sends]).toEqual([line, false]);
+  });
+});
+
+describe("D4: a read that prints secrets, a tag pushed, a branch moved back (item 120)", () => {
+  it("reads git config's new `get` listing, kubectl's file and raw reads, yq's load anywhere, helm's and terraform's JSON as printing secrets", () => {
+    counted += holds([
+      ["git config get --all --regexp .", "git config get user.email", "read"],
+      ["git config get --regexp 'http\\..*'", "git config get --all remote.origin.fetch", "read"],
+      ["git config get --reg .", "git config get --show-origin user.name", "read"],
+      ["git config get --url=https://github.com http.extraheader", "git config get --default=main init.defaultBranch", "read"],
+      ["git config get --url https://github.com http.extraHeader", "git config get -t bool core.bare", "read"],
+      ["git config get --show-names --regexp .", "git config get --local --regexp remote", "read"],
+      ["printf 'apiVersion: v1\\nkind: Secret\\nmetadata:\\n  name: db\\n' | kubectl get -f - -o yaml", "kubectl get pods -o yaml", "read"],
+      ["kubectl get -f k8s/db-secret.yaml -o yaml", "kubectl get deploy web -o yaml", "read"],
+      ["kubectl get --filename=k8s/db.yaml -o json", "kubectl get svc -o wide", "read"],
+      ["kubectl get -k overlays/prod -o yaml", "kubectl get ns", "read"],
+      ["kubectl get --raw /api/v1/namespaces/default/secrets", "kubectl get pods -n web -o name", "read"],
+      ["kubectl describe -f k8s/db-secret.yaml", "kubectl describe deploy web", "read"],
+      ["kubectl get -Rf k8s/ -o yaml", "kubectl get pods -A", "read"],
+      ["yq -n --expression='load_str(\"/Users/fon/.aws/credentials\")'", "yq -n --expression='.a'", "read"],
+      ["yq -n 'eval(\"lo\" + \"ad_str(\\\"/Users/fon/.aws/credentials\\\")\")'", "yq -n '.a + 1'", "read"],
+      ["yq -n 'eval(\"e\" + \"nv(AWS_SECRET_ACCESS_KEY)\")'", "yq '.a' a.yaml", "read"],
+      ["yq -o json 'load_str(\"/Users/fon/.aws/credentials\")' a.yaml", "yq -o json '.a' a.yaml", "read"],
+      ["yq -I 4 -n 'env(HOME)'", "yq -I 4 '.a' a.yaml", "read"],
+      ["yq --from-file expr.yq a.yaml", "yq e '.a' a.yaml", "read"],
+      ["jq -f filter.jq package.json", "jq .name package.json", "read"],
+      ["jq --from-file filter.jq package.json", "jq -r .version package.json", "read"],
+      ["jq -n --arg x 1 '$ENV'", "jq -n --arg x 1 '$x'", "read"],
+      ["helm status web -o json", "helm status web", "read"],
+      ["helm status web --output=yaml", "helm list -o json", "read"],
+      ["terraform show -json", "terraform show", "read"],
+      ["tofu show -json plan.out", "tofu show plan.out", "read"],
+      ["pulumi preview --show-secrets", "pulumi preview", "read"],
+    ]);
+  });
+
+  it("reads a push of a tag as one that goes live", () => {
+    const ROWS: [line: string, as: KitAction][] = [
+      ["git push origin v2.0.0", "live"],
+      ["git push origin refs/tags/v2.0.0", "live"],
+      ["git push origin tags/v2.0.0", "live"],
+      ["git push origin desktop-v0.1.1", "live"],
+      ["git push origin HEAD:refs/tags/x", "live"],
+      ["git push --tags", "live"],
+      ["git push --follow-tags origin kit/promptpay-qr", "live"],
+      ["git tag release-1 && git push origin release-1", "live"],
+      ["git tag -a nightly -m x; git push origin nightly", "live"],
+      // the plain twins
+      ["git push origin kit/promptpay-qr", "push"],
+      ["git push origin kit/v2-checkout", "push"],
+    ];
+    const wrong = ROWS.filter(([line, as]) => read(line).action !== as).map(([line, as]) => `${line}: ${read(line).action}, not ${as}`);
+    expect(wrong).toEqual([]);
+    // a tag the session made earlier, pushed by its bare name
+    expect(readCommand("git push origin release-1", { ...at, tags: ["release-1"] }).action).toBe("live");
+    expect(readCommand("git tag release-1", at).tags).toEqual(["release-1"]);
+    expect(readCommand("git tag -a nightly -m 'the nightly'", at).tags).toEqual(["nightly"]);
+    expect(readCommand("git tag -l", at).tags).toEqual([]);
+  });
+
+  it("reads a branch moved back as a discard, which a kept rule for a new branch never covers", () => {
+    for (const line of ["git branch -f main 1a2b3c4", "git branch --force main 1a2b3c4", "git branch -M kit/x main", "git branch -C kit/x main", "git checkout -B main 1a2b3c4", "git switch -C main 1a2b3c4", "git switch --force-create main 1a2b3c4", "git update-ref refs/heads/main 1a2b3c4", "git update-ref HEAD 1a2b3c4", "git worktree add -B main wt/x"])
+      expect([line, read(line).action]).toEqual([line, "delete"]);
+    for (const line of ["git branch kit/new", "git branch -m kit/z", "git checkout -b kit/y", "git switch -c kit/y"]) expect([line, read(line).action]).toEqual([line, "change"]);
+    const decide = (line: string, rule: Rule) => {
+      const c = readCommand(line, at);
+      return decideAsk({ what: "command", action: c.action, outside: c.outside, folder: null, saves: c.saves, rule: c.rule, line, say: c.say }, { ...emptyProject(), level: "edits_and_safe_commands", rules: [rule] }, [], 0).answer;
+    };
+    for (const [kept, harsher] of [
+      ["git branch kit/new", "git branch -M kit/x main"],
+      ["git branch kit/new", "git branch -C kit/x main"],
+      ["git checkout kit/a", "git checkout -B main 1a2b3c4"],
+      ["git switch kit/a", "git switch -C main 1a2b3c4"],
+      ["git switch kit/a", "git switch --force-create main 1a2b3c4"],
+    ])
+      expect([kept, harsher, decide(harsher, readCommand(kept, at).rule!)]).toEqual([kept, harsher, "ask"]);
+  });
+
+  it("does not read a commit named from another (`HEAD~5`, `main^`) as a Windows short file name", () => {
+    const EVERYDAY_GIT: [line: string, as: KitAction][] = [
+      ["git rebase -i HEAD~3", "change"],
+      ["git rebase --onto main HEAD~3", "change"],
+      ["git reset HEAD~1", "change"],
+      ["git reset --soft HEAD~1", "change"],
+      ["git revert HEAD~1", "change"],
+      ["git revert --no-edit HEAD^", "change"],
+      ["git cherry-pick main~2", "change"],
+      ["git commit --fixup HEAD~2", "change"],
+      ["git branch kit/y HEAD~2", "change"],
+      ["git switch -c kit/y HEAD~1", "change"],
+      ["git tag v1 HEAD^", "change"],
+      ["git checkout HEAD~1", "change"],
+      ["git stash push -m wip && git rebase -i @~2", "change"],
+      ["git merge kit/x~1", "change"],
+    ];
+    const wrong = EVERYDAY_GIT.filter(([line, as]) => read(line).action !== as).map(([line, as]) => `${line}: ${read(line).action}, not ${as}`);
+    expect(wrong).toEqual([]);
+    // a word that is a path still counts, short name and all
+    for (const line of ["git add PACKAG~1.JSO", "cp a.json PACKAG~1.JSO", "printf x > GITHUB~1/workflows/ci.yml", "git checkout HEAD~1 -- PACKAG~1.JSO"]) expect([line, read(line).action]).toEqual([line, "unknown"]);
   });
 });
 

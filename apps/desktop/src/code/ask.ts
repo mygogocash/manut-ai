@@ -54,6 +54,8 @@ export interface AskRead {
   unseen?: boolean;
   /** For a command: it sends what is saved, so the commits it sends are read too (item 120). */
   sends?: boolean;
+  /** For a command: the tags it makes (item 120). */
+  tags?: string[];
 }
 
 const RUN = "Run this command?";
@@ -105,12 +107,13 @@ function listed(paths: string[], where: Where): string {
 }
 
 /** Where a command leaves its shell, for the session's next command. */
-const folders = (c: ReadCommand): Pick<AskRead, "ends" | "resets" | "movesHead" | "unseen" | "sends"> => ({
+const folders = (c: ReadCommand): Pick<AskRead, "ends" | "resets" | "movesHead" | "unseen" | "sends" | "tags"> => ({
   ends: c.ends,
   ...(c.resets ? { resets: c.resets } : {}),
   movesHead: c.movesHead,
   unseen: c.unseen,
   sends: c.sends,
+  tags: c.tags,
 });
 
 /** `v` when it is text that is not blank. */
