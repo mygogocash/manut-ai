@@ -1306,12 +1306,21 @@ still goes through the asks (How an ask is read, Kit's dial, Buddy's card).
   `build`); when an argument, a part of one (an option's value after `=`, a bind mount's `.:/app`), or a variable's value names
   something of the lane's (an absolute path inside it, a path from `.` or `..`, or a relative name whose first part is in
   the lane, such as `mcp/server.js` or `server.py`); when `NODE_OPTIONS` loads a module; or when a variable ending in `PATH` or
-  `LIB` has an empty entry. The chat says "Not started in this lane: <names>. It runs files from the lane's own folder, which
-  the lane's agent can change. It starts in a chat in your project folder." (`mcp_lane_files`, names only). What a person
-  loses: in a lane, a project server started through `npx` or `uvx` (the usual way to name one) no longer starts, nor one
-  whose argument happens to name a file the lane has; in their own folder every approved server starts as before. Not
-  ruled out: a program named alone that reads its working folder by itself, with no word naming it (a server that loads
-  `./config.js` on its own). This one source because `.mcp.json` lives in the folder the agent already works in, so its
+  `LIB` has an empty entry; or (item 118) when it is an agent's own CLI (`claude mcp serve`, `codex mcp-server`, any agent),
+  which started in the lane's folder reads that folder's own agent settings as its project's (hooks in
+  `.claude/settings.json`, `.codex/config.toml`, `opencode.json`), files the lane's agent can change. An agent's CLI is read
+  as `fg.rs` reads which agent runs in a terminal (`acp_mcp::an_agents_cli`, `fg::agent_for_process`): the agents the app
+  starts and the few a person runs themselves (`hermes`, `amp`, `goose`, `aider`), by name (with a Windows ending in any
+  case; `grok`, `pi` and `dsh`, which other programs share, count by name here too), by its real path, found on `PATH` when
+  it is named alone (a link of another name leads to the agent it is), by an npm package's folder in that path, and for
+  `node` and the other interpreters by the script they run. The chat says "Not started in this lane: <names>. It runs files
+  from the lane's own folder, which the lane's agent can change. It starts in a chat in your project folder."
+  (`mcp_lane_files`, names only), for an agent's CLI too, whose settings are such files. What a person loses: in a lane, a
+  project server started through `npx` or `uvx` (the usual way to name one) no longer starts, nor one whose argument
+  happens to name a file the lane has, nor an agent's own MCP server; in their own folder every approved server starts as
+  before. Not ruled out: a program named alone that reads its working folder by itself, with no word naming it (a server
+  that loads `./config.js` on its own), and an agent this reader does not know, or one copied (not linked) under another
+  name outside an npm package, or a server built on an agent's SDK that starts the agent's CLI itself. This one source because `.mcp.json` lives in the folder the agent already works in, so its
   literal values are ones the agent can read anyway, and its `${VAR}` and `${VAR:-default}` are filled in from the environment
   the agent already runs with (a server with a variable that is not set is left out). The servers the person added to Claude
   Code or Codex themselves are not handed on: their secrets were given to those agents. Shapes from the protocol's Session

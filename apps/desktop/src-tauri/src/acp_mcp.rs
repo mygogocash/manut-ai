@@ -327,6 +327,29 @@ fn node_loads_lane(words: &[&str], lane: &Path) -> bool {
     false
 }
 
+/// Agent names other programs share, which `fg.rs` counts only in a known install place (so a terminal's row never shows a
+/// wrong mark). Here a wrong guess only keeps a server from starting in a lane, so each counts by its name alone.
+const SHARED_AGENT_NAMES: [&str; 3] = ["grok", "pi", "dsh"];
+
+/// Whether a stdio server's `command` with `args` is an agent's own CLI (item 118): started by the agent in a lane's folder, it
+/// reads that folder's own agent settings as its project's (Claude Code's `.claude/settings.json` and its hooks, Codex's
+/// `.codex/config.toml`, OpenCode's `opencode.json`), which the lane's agent can change. Read as `fg.rs` reads which agent
+/// runs in a terminal ([`crate::fg::agent_for_process`]: the agents the app starts and the few a person runs themselves, by
+/// install place, by name, and for `node` and the other interpreters by the script they run), from the program's real path,
+/// found on `PATH` when it is named alone, so a link of another name leads to the agent it is.
+fn an_agents_cli(command: &str, args: &[String], env: &dyn Fn(&str) -> Option<String>) -> bool {
+    let real = |p: &Path| p.canonicalize().ok().map(|r| r.to_string_lossy().into_owned());
+    let found = if command.contains(['/', '\\']) {
+        real(Path::new(command))
+    } else {
+        env("PATH").and_then(|path| std::env::split_paths(&path).map(|d| d.join(command)).find(|c| c.is_file()).and_then(|c| real(&c)))
+    };
+    let argv: Vec<&str> = std::iter::once(command).chain(args.iter().map(String::as_str)).collect();
+    let script_real = |s: &str| real(Path::new(s));
+    let named = SHARED_AGENT_NAMES.contains(&program(command).as_str());
+    named || crate::fg::agent_for_process(found.as_deref().unwrap_or(command), &argv, script_real).is_some() || crate::fg::agent_for_exe(command).is_some()
+}
+
 /// Whether stdio server `s`, started by the agent in a lane's folder `cwd` (the lane's top being `lane`), would run what the
 /// lane's agent can change (item 114). The entry is the one the person approved in their own folder, but there its words
 /// named the developer's files; here they name the lane's. So it is not started when:
@@ -338,7 +361,8 @@ fn node_loads_lane(words: &[&str], lane: &Path) -> bool {
 ///   `podman` with `compose` or `build` (the folder's compose file or build context);
 /// - any argument, or any part of one, names something of the lane's ([`names_lane`]);
 /// - any variable's value does, or `NODE_OPTIONS` loads a module, or a variable whose name ends in `PATH` or `LIB` has an
-///   empty entry (the working folder).
+///   empty entry (the working folder);
+/// - it is an agent's own CLI, which reads the lane's own agent settings ([`an_agents_cli`], item 118).
 ///
 /// An address (HTTP, SSE) starts no program here. What this cannot see: a program that reads its working folder by itself
 /// (a server that loads `./config.js` with no word naming it). `docs/code-editor.md` lists the class.
@@ -357,7 +381,7 @@ fn runs_the_lane(s: &Server, lane: &Path, cwd: &Path, env: &dyn Fn(&str) -> Opti
     let python = name.starts_with("python") && words.iter().any(|w| w.starts_with('-') && !w.starts_with("--") && w.contains(['m', 'c']));
     let node = matches!(name.as_str(), "node" | "nodejs") && node_loads_lane(&words, lane);
     let container = matches!(name.as_str(), "docker" | "podman" | "nerdctl") && words.iter().any(|w| matches!(*w, "compose" | "build" | "buildx"));
-    if RUN_THE_FOLDER.contains(&name.as_str()) || python || node || container {
+    if RUN_THE_FOLDER.contains(&name.as_str()) || python || node || container || an_agents_cli(command, args, env) {
         return true;
     }
     if words.iter().any(|w| any_part_names_lane(w, lane, cwd)) {
@@ -828,6 +852,88 @@ mod tests {
         // a PATH with a relative entry finds a program named alone in the working folder: nothing of that kind starts
         let relative_path = |k: &str| if k == "PATH" { Some("node_modules/.bin:/usr/bin".to_string()) } else { env(k) };
         assert!(!approved(&home, &wt, &relative_path).names().contains(&format!("s{:02}", hostile.len())));
+        let _ = fs::remove_dir_all(home);
+    }
+
+    /// Item 118 (fourth security review, 26 Nov 2026): an approved server that is itself an agent's CLI (`claude mcp serve`,
+    /// `codex mcp-server`), started by the agent in a lane's folder, reads that folder's own agent settings as its project's
+    /// (hooks in `.claude/settings.json`, `.codex/config.toml`, `opencode.json`), which the lane's agent can change. It is not
+    /// started in a lane, however the entry reaches it, and the chat names it as it names the others.
+    #[test]
+    fn a_lanes_server_that_is_an_agent_s_own_cli_is_not_started() {
+        let Some((home, d)) = setup("acpmcp-agentcli", true, json!({"enableAllProjectMcpServers": true})) else { return };
+        fs::write(d.join(".gitignore"), "node_modules/\n.mcp.json\n").unwrap();
+        sh(&d, &["add", ".gitignore"]);
+        sh(&d, &["commit", "-q", "-m", "ignore"]);
+        let made = crate::lane::make(&home, &d, &crate::lane::tests::names(&["kit/agentcli"])).unwrap();
+        let wt = PathBuf::from(&made.worktree);
+        // stand-ins outside the lane for where agents are installed: a native file, npm packages, and links to them
+        let bin = home.join("bin");
+        let lib = home.join("lib/node_modules");
+        for f in ["@anthropic-ai/claude-code/cli.js", "cline/bin/cline", "@google/gemini-cli/dist/index.js", "some-mcp/index.js"] {
+            fs::create_dir_all(lib.join(f).parent().unwrap()).unwrap();
+            fs::write(lib.join(f), "x").unwrap();
+        }
+        fs::create_dir_all(&bin).unwrap();
+        fs::write(bin.join("claude"), "x").unwrap();
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(bin.join("claude"), bin.join("my-helper")).unwrap();
+            std::os::unix::fs::symlink(lib.join("@google/gemini-cli/dist/index.js"), bin.join("ask")).unwrap();
+        }
+        let p = |x: &Path| x.to_string_lossy().into_owned();
+        let mut hostile: Vec<(&str, Value)> = vec![
+            ("Claude Code's own MCP server", json!({"command": "claude", "args": ["mcp", "serve"]})),
+            ("Codex's own MCP server", json!({"command": "codex", "args": ["mcp-server"]})),
+            ("OpenCode", json!({"command": "opencode", "args": ["mcp"]})),
+            ("Gemini CLI", json!({"command": "gemini"})),
+            ("Cursor's agent", json!({"command": "cursor-agent", "args": ["mcp"]})),
+            ("oh-my-pi", json!({"command": "omp"})),
+            ("pi, a name other programs share", json!({"command": "pi"})),
+            ("Grok, a name other programs share", json!({"command": "grok"})),
+            ("Qwen Code", json!({"command": "qwen"})),
+            ("Kimi Code", json!({"command": "kimi"})),
+            ("Copilot CLI", json!({"command": "copilot"})),
+            ("Cline", json!({"command": "cline"})),
+            ("Antigravity", json!({"command": "agy"})),
+            ("an agent a person runs themselves", json!({"command": "goose", "args": ["mcp"]})),
+            ("a Windows ending, in any case", json!({"command": "Codex.EXE", "args": ["mcp-server"]})),
+            ("an agent by its whole path", json!({"command": p(&bin.join("claude")), "args": ["mcp", "serve"]})),
+            ("node running an agent package's script", json!({"command": "node", "args": [p(&lib.join("@anthropic-ai/claude-code/cli.js")), "mcp", "serve"]})),
+            ("node running another agent package's script", json!({"command": "node", "args": [p(&lib.join("cline/bin/cline"))]})),
+        ];
+        #[cfg(unix)]
+        hostile.extend([
+            ("a link of another name to an agent, by its whole path", json!({"command": p(&bin.join("my-helper")), "args": ["mcp", "serve"]})),
+            ("a link of another name to an agent, found on the PATH", json!({"command": "my-helper", "args": ["mcp", "serve"]})),
+            ("a link to an agent package's script, found on the PATH", json!({"command": "ask"})),
+        ]);
+        let fine: Vec<(&str, Value)> = vec![
+            ("a server on the PATH named like no agent", json!({"command": "gh-mcp", "args": ["--token", "${GH_TOKEN}"]})),
+            ("node running another package's script outside the lane", json!({"command": "node", "args": [p(&lib.join("some-mcp/index.js"))]})),
+            ("an agent's name as a plain word", json!({"command": "gh-mcp", "args": ["--for", "claude"]})),
+        ];
+        let mut servers = serde_json::Map::new();
+        for (i, (_, e)) in hostile.iter().chain(fine.iter()).enumerate() {
+            servers.insert(format!("s{i:02}"), e.clone());
+        }
+        let mcp = json!({"mcpServers": servers}).to_string();
+        fs::write(d.join(".mcp.json"), &mcp).unwrap();
+        fs::write(wt.join(".mcp.json"), &mcp).unwrap();
+        let path = format!("{}:/usr/bin:/bin", bin.display());
+        let with_path = |k: &str| if k == "PATH" { Some(path.clone()) } else { env(k) };
+        let got = approved(&home, &wt, &with_path);
+        for (i, (what, _)) in hostile.iter().enumerate() {
+            assert!(!got.names().contains(&format!("s{i:02}")), "{what}: started in the lane");
+        }
+        for (i, (what, _)) in fine.iter().enumerate() {
+            assert!(got.names().contains(&format!("s{:02}", hostile.len() + i)), "{what}: not started");
+        }
+        // named to the chat by name alone, as a server that runs the lane's files is
+        let expected: Vec<String> = (0..hostile.len()).map(|i| format!("s{i:02}")).filter(|n| got.lane_files().contains(n)).collect();
+        assert_eq!(expected.len(), hostile.len(), "{:?}", got.lane_files());
+        // in the developer's own folder the person's approval stands, as before
+        assert!(approved(&home, &d, &with_path).lane_files().is_empty());
         let _ = fs::remove_dir_all(home);
     }
 
