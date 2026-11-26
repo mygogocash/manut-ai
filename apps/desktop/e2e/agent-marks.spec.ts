@@ -10,10 +10,12 @@ for (const theme of ["light", "dark"] as const) {
     await page.setViewportSize({ width: 920, height: 420 });
     await page.goto(`/e2e/agents.html?theme=${theme}`);
     const grid = page.getByTestId("agent-grid");
-    // 24 published marks and 5 monograms (OmO, DSH, oh-my-hermes, oh-my-pi, VS Code), each drawn twice
+    // 23 published marks and 6 monograms (OmO, DSH, oh-my-hermes, oh-my-pi, VS Code, and Xcode, since Apple's marks are
+    // never drawn), each drawn twice
     await expect(grid.locator("[data-testid^=agent-cell-]")).toHaveCount(29);
-    await expect(grid.locator('svg.agent-ic:not([data-agent="letter"])')).toHaveCount(48);
-    await expect(grid.locator('.agent-mono[data-agent="letter"]')).toHaveCount(10);
+    await expect(grid.locator('svg.agent-ic:not([data-agent="letter"])')).toHaveCount(46);
+    await expect(grid.locator('.agent-mono[data-agent="letter"]')).toHaveCount(12);
+    await expect(grid.getByTestId("agent-cell-xcode").locator('svg[data-agent="xcode"]')).toHaveCount(0);
     // each mark fills the box it is given, and a monogram's letter is the stylesheet's, centred on its tile
     const boxes = await grid.locator(".agent-ic").evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().width)));
     expect(new Set(boxes)).toEqual(new Set([22, 16]));

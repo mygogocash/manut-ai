@@ -10,7 +10,7 @@ const theme = new URLSearchParams(location.search).get("theme") === "light" ? "l
 document.documentElement.dataset.theme = theme;
 
 /** The agents and the editor the app offers with no published mark, by the names the app shows. */
-export const MONOGRAMS: [string, string][] = [["omo", "OmO"], ["dsh", "DSH"], ["omh", "oh-my-hermes"], ["omp", "oh-my-pi"], ["vscode", "Visual Studio Code"]];
+export const MONOGRAMS: [string, string][] = [["omo", "OmO"], ["dsh", "DSH"], ["omh", "oh-my-hermes"], ["omp", "oh-my-pi"], ["vscode", "Visual Studio Code"], ["xcode", "Xcode"]];
 
 function Grid() {
   return (

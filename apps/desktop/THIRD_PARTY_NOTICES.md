@@ -568,9 +568,9 @@ SOFTWARE.
 ### Simple Icons (simple-icons/simple-icons)
 
 Source: <https://github.com/simple-icons/simple-icons>, npm package `simple-icons` 16.38.1, `icons/`: zedindustries
-(Zed) and xcode (Xcode), each an editor's mark in its Open in menu. Simple Icons is dedicated to the public domain
-under CC0 1.0 Universal (<https://creativecommons.org/publicdomain/zero/1.0/>); its own disclaimer says the brands'
-trademarks stay their owners'.
+(Zed), the editor's mark in its Open in menu. Simple Icons is dedicated to the public domain under CC0 1.0 Universal
+(<https://creativecommons.org/publicdomain/zero/1.0/>); its own disclaimer says the brands' trademarks stay their
+owners'. No Apple mark is taken: Xcode draws its monogram.
 
 ## The pairing code's QR image
 

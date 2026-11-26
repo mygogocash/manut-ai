@@ -40,9 +40,9 @@ describe("agentIcon", () => {
     for (const a of ACP) expect(fileMark(a.mark, a.label), a.id).toMatchObject({ kind: "svg", id: drawn(a.id) });
   });
 
-  it("draws the providers and the editors the app names by their own logos; VS Code has none published", () => {
+  it("draws the providers and the editors the app names by their own logos; VS Code has none published, and Xcode, Apple's, is never drawn", () => {
     expect(["deepseek", "zai", "z.ai", "hermes", "openai", "meta", "openrouter"].map((id) => drawn(id))).toEqual(["deepseek", "zai", "zai", "hermes", "openai", "meta", "openrouter"]);
-    expect(EDITOR_IDS.map((id) => drawn(id))).toEqual(["letter:V", "cursor", "windsurf", "zed", "xcode"]);
+    expect(EDITOR_IDS.map((id) => drawn(id))).toEqual(["letter:V", "cursor", "windsurf", "zed", "letter:X"]);
   });
 
   it("takes the vendors' own spellings and any case", () => {

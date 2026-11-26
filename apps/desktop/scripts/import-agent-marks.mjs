@@ -47,7 +47,8 @@ const MARKS = [
   ["roo", "Roo Code", LOBE, "roocode.svg"],
   ["windsurf", "Windsurf", LOBE, "windsurf.svg"],
   ["zed", "Zed", SIMPLE, "zedindustries.svg"],
-  ["xcode", "Xcode", SIMPLE, "xcode.svg"],
+  // No Apple mark (Xcode): the Mac App Store build may not show Apple's logos or icons without Apple's written permission
+  // (Apple's trademark guidelines, App Review guideline 5.2.5), so Xcode draws its monogram, as VS Code does.
 ];
 
 const [lobeDir, simpleDir] = process.argv.slice(2);
