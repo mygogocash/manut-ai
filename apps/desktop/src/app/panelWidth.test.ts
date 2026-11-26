@@ -15,16 +15,16 @@ describe("panel width", () => {
   });
 
   it("keeps the chat column its room and the panel its minimum", () => {
-    expect(panelMax(1280, 248)).toBe(1280 - 248 - CHAT_MIN);
-    expect(clampPanel(2000, 1280, 248)).toBe(1280 - 248 - CHAT_MIN);
-    expect(clampPanel(100, 1280, 248)).toBe(PANEL_MIN);
-    expect(clampPanel(431.6, 1280, 248)).toBe(432);
+    expect(panelMax(1280, 196)).toBe(1280 - 196 - CHAT_MIN);
+    expect(clampPanel(2000, 1280, 196)).toBe(1280 - 196 - CHAT_MIN);
+    expect(clampPanel(100, 1280, 196)).toBe(PANEL_MIN);
+    expect(clampPanel(431.6, 1280, 196)).toBe(432);
     // a window too small for both: the panel keeps its minimum
     expect(clampPanel(500, 1100, 900)).toBe(PANEL_MIN);
     // under 1100px the panel slides over the chat: it may grow up to the window less 300px (the sidebar and a strip
     // of chat stay in sight)
-    expect(panelMax(900, 248)).toBe(600);
-    expect(clampPanel(610, 900, 248)).toBe(600);
+    expect(panelMax(900, 196)).toBe(600);
+    expect(clampPanel(610, 900, 196)).toBe(600);
   });
 
   it("saves per kind, forgets one on reset, and ignores junk", () => {
@@ -40,12 +40,12 @@ describe("panel width", () => {
   });
 
   it("maximised takes every pixel right of the sidebar, in a wide window and in the overlay", () => {
-    expect(maxedPanel(1440, 248)).toBe(1192);
-    expect(maxedPanel(1280, 248.4)).toBe(1032);
-    expect(maxedPanel(900, 248)).toBe(652); // under 1100px: the overlay, full width minus the sidebar
+    expect(maxedPanel(1440, 196)).toBe(1244);
+    expect(maxedPanel(1280, 196.4)).toBe(1084);
+    expect(maxedPanel(900, 196)).toBe(704); // under 1100px: the overlay, full width minus the sidebar
     expect(maxedPanel(400, 300)).toBe(PANEL_MIN);
-    expect(shownPanelWidth(true, 500, 1440, 248)).toBe(1192);
-    expect(shownPanelWidth(true, undefined, 1440, 248)).toBe(1192);
+    expect(shownPanelWidth(true, 500, 1440, 196)).toBe(1244);
+    expect(shownPanelWidth(true, undefined, 1440, 196)).toBe(1244);
   });
 
   it("restores the exact width each tab had before, and saves nothing while maximised", () => {
@@ -54,14 +54,14 @@ describe("panel width", () => {
     const before = readPanelWidths();
     for (const tab of ["details", "runs", "terminal"]) {
       const saved = before[panelKind(tab)];
-      const prior = shownPanelWidth(false, saved, 1440, 248);
-      expect(shownPanelWidth(true, saved, 1440, 248)).toBe(1192);
-      expect(shownPanelWidth(false, saved, 1440, 248)).toBe(prior);
+      const prior = shownPanelWidth(false, saved, 1440, 196);
+      expect(shownPanelWidth(true, saved, 1440, 196)).toBe(1244);
+      expect(shownPanelWidth(false, saved, 1440, 196)).toBe(prior);
     }
-    expect(shownPanelWidth(false, before.runs, 1440, 248)).toBe(640);
-    expect(shownPanelWidth(false, before.details, 1440, 248)).toBe(352);
+    expect(shownPanelWidth(false, before.runs, 1440, 196)).toBe(640);
+    expect(shownPanelWidth(false, before.details, 1440, 196)).toBe(352);
     // a tab with no saved width goes back to the stylesheet's own
-    expect(shownPanelWidth(false, before.tools, 1440, 248)).toBeNull();
+    expect(shownPanelWidth(false, before.tools, 1440, 196)).toBeNull();
     expect(readPanelWidths()).toEqual(before);
   });
 });

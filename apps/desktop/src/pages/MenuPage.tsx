@@ -2,6 +2,7 @@
 // over a body that scrolls) and its empty state. A menu page is a place of its own, like the chat, so it has no back
 // arrow: the menu beside it is the way on.
 import type { ReactNode } from "react";
+import { t } from "../i18n";
 import type { MenuPage } from "../state/store";
 import "./menuPages.css";
 
@@ -55,6 +56,26 @@ export function Empty({ icon, title, text, testId }: { icon: ReactNode; title: s
       </span>
       <h2>{title}</h2>
       <p>{text}</p>
+    </div>
+  );
+}
+
+/** A read that failed in a way the app did not word for people: the system-states board's "Something went wrong" (StatesSystem,
+ *  item 85i). The page says it did not load and that nothing was changed, offers Try again, and keeps the runtime's own words
+ *  for whoever is asked to look, under a small Details that stays shut until it is opened. */
+export function LoadFailed({ details, onRetry, testId }: { details: string; onRetry: () => void; testId: string }) {
+  return (
+    <div className="failed" data-testid={testId}>
+      <div className="banner err" role="alert">
+        <span className="grow">{t("failed.text")}</span>
+        <button type="button" className="btn" onClick={onRetry} data-testid={`${testId}-retry`}>
+          {t("failed.retry")}
+        </button>
+      </div>
+      <details className="failed-d">
+        <summary>{t("failed.details")}</summary>
+        <code data-testid={`${testId}-details`}>{details}</code>
+      </details>
     </div>
   );
 }

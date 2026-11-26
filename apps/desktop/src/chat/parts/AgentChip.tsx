@@ -13,6 +13,7 @@ import { whyText, type CustomPreview } from "../../sessions/custom";
 import { getStore } from "../../state/store";
 import { t } from "../../i18n";
 import { draftBot, draftsAllowed, parseDrafts, type DraftBlock } from "./agentDraft";
+import { Icon } from "../../ui/icons";
 
 /** The chips for reply `text` in chat `chatKey`; nothing outside a bot's main chat or a Hermes folder chat. */
 export function AgentChips({ chatKey, text }: { chatKey: string; text: string }) {
@@ -78,9 +79,7 @@ function AgentChip({ chatKey, block }: { chatKey: string; block: DraftBlock }) {
         data-testid="agent-chip"
         data-why={block.why ?? undefined}
       >
-        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true">
-          <path d="M12 5v14M5 12h14" />
-        </svg>
+        <Icon name="plus" />
         <span className="agent-chip-t">{added ? t("ag.added") : t("ag.add")}</span>
         {block.draft?.name && <span className="agent-chip-k">{block.draft.name}</span>}
       </button>

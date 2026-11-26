@@ -108,7 +108,7 @@ export function NeedsStrip({ asks }: { asks: Ask[] }) {
           {/Mac|iPhone|iPad/.test(navigator.platform) ? "⌘J" : "Ctrl+J"}
         </span>
         <span className="needs-chev" aria-hidden="true">
-          <ChevronDown size={10} />
+          <ChevronDown />
         </span>
       </button>
       {open && (

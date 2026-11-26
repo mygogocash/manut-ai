@@ -118,6 +118,8 @@ span.face[data-st="rest"] .o-z{display:block;animation:fzz 3s ease-in-out infini
    every rule that sizes or places `.ui-av` or `.msg-face` keeps working; the face fills that box and spills over by its
    negative margin. The box is a block, as the picture was, so the face's own inline box never sits on a line's
    baseline. Buddy's blue face fills the box as the boards draw it (Report, Updates), with no frame. */
-.ui-av{display:block;flex:none}
+/* flow-root: the face's negative margin must not collapse through the box and carry it up with it (inside the live
+   ring, a block, the face sat 4.75px above its ring and the typing bubble's centre) */
+.ui-av{display:flow-root;flex:none}
 .ui-av>.face{display:block}
 .ui-av>.buddy-face{display:block;width:100%;height:100%}

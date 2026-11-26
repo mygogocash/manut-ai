@@ -35,8 +35,8 @@ test("empty session background opens a pointer menu, reuses the chooser and neve
   const at = await background(page);
   const menu = page.getByTestId("sessions-context-menu");
   // the menu's two items: New session, then New folder… (session-folder-create.spec.ts runs the same walk unskipped)
-  await expect(menu.getByRole("menuitem")).toHaveText(["New session", "New folder…"]);
-  const item = menu.getByRole("menuitem", { name: "New session", exact: true });
+  await expect(menu.getByRole("menuitem")).toHaveText(["New chat or terminal", "New folder…"]);
+  const item = menu.getByRole("menuitem", { name: "New chat or terminal", exact: true });
   const folder = menu.getByRole("menuitem", { name: "New folder…", exact: true });
   await expect(item).toBeFocused();
   const box = (await menu.boundingBox())!;
@@ -143,7 +143,7 @@ test("row, rename input, buttons and chooser keep their own context; filter-empt
   await page.getByTestId("bot-search").fill("no-matching-session");
   await expect(page.getByTestId("session-none-match")).toBeVisible();
   await background(page);
-  await expect(page.getByTestId("sessions-context-menu").getByRole("menuitem")).toHaveText(["New session", "New folder…"]);
+  await expect(page.getByTestId("sessions-context-menu").getByRole("menuitem")).toHaveText(["New chat or terminal", "New folder…"]);
 });
 
 test("background context menu fits a narrow viewport, follows resize and dismisses on Tab", async ({ page }) => {

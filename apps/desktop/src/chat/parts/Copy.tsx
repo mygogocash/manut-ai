@@ -4,17 +4,13 @@
 import { useEffect, useRef, useState } from "react";
 import { t } from "../../i18n";
 import "./copy.css";
+import { Icon } from "../../ui/icons";
 
 const CopyIcon = () => (
-  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinejoin="round" aria-hidden="true">
-    <rect x="8.5" y="8.5" width="11.5" height="11.5" rx="2" />
-    <path d="M15.5 8.5V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7.5a2 2 0 0 0 2 2h2.5" />
-  </svg>
+  <Icon name="copy" />
 );
 const CheckIcon = () => (
-  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-    <path d="m5 12.5 4.5 4.5L19 7.5" />
-  </svg>
+  <Icon name="check" />
 );
 
 /** Copies `text` (a function: read when clicked, so a code block's text is never held twice). */

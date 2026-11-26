@@ -1,17 +1,19 @@
-// The side menu, as the design canvas draws it (`<nav class="sb">` in Approvals.dc.html): the brand mark and Search,
-// then New, Needs you (with the count of open asks), Team, Code, Artifacts, Customize and History, a Recent list of the
-// three newest threads, and the account row that opens Settings. New and the brand mark open Home. A person in two or
-// more shops also has the shop switcher at the end of the account row (ShopSwitcher.tsx), and is told above the row when
-// their place in a shop ended (docs/several-shops.md). It replaces the
-// sidebar the fork took from Oh My Hermes (a search box, a tasks bar, a needs strip, the BOTS and TERMINALS lists and a
-// foot of icon buttons), and each of those now lives on one of the menu's pages (src/pages). The canvas's budget pill
-// waits until the runtime has a budget to show, and hiding the menu is not built yet.
+// The side menu, as the design canvas draws it (`<nav class="sb">` in Main.dc.html and KitNavigation.dc.html, 196px
+// wide): the brand mark and Search, then New, Needs you (with the count of open asks), Team, Code, Artifacts, Customize and
+// History, a Recent list of the three newest threads, and at the foot the budget pill and the account row, which names
+// the person with their shop and opens Settings. New and the brand mark open Home. A person in two or more shops also has
+// the shop switcher at the end of the account row (ShopSwitcher.tsx), and is told above the row when their place in a
+// shop ended (docs/several-shops.md). It replaces the sidebar the fork took from Oh My Hermes (a search box, a tasks bar, a
+// needs strip, the BOTS and TERMINALS lists and a foot of icon buttons), and each of those now lives on one of the menu's
+// pages (src/pages). The coding tools' use, which sat in the foot as three small marks, is on the Code page, one click
+// away (item 85i). The budget pill shows only what the runtime gives it, and no runtime gives a budget yet; hiding the
+// menu is not built yet.
 //
 // menu.ts decides which row is current. `SideMenu` draws whatever it is given, so tests can draw any state, and
 // `Sidebar` feeds it from the app's store.
 import type { ReactNode } from "react";
-// sidebar.css still styles what the menu's foot carries (the disk chip, the usage meters, the update control) and
-// .vh, and sessions.css styles the terminal view and the Code page's list.
+// sidebar.css still styles what the menu's foot carries (the disk chip, the update control), the usage meters the Code
+// page shows, and .vh, and sessions.css styles the terminal view and the Code page's list.
 import "./sidebar.css";
 import "../sessions/sessions.css";
 import "./menu.css";
@@ -25,16 +27,21 @@ import { isDesktop } from "../settings/accounts/native";
 import { accountLabel, EMPTY_SHOP } from "../onboarding/shop";
 import { currentRow, MENU_ROWS, recentParts, rowPage, type MenuRow } from "./menu";
 import { rowStatus } from "../threads/ThreadTree";
-import { MoreButton, useRowMenu } from "./RowMenu";
+import { MoreButton, settledWhy, useRowMenu } from "./RowMenu";
 import { threadRowKey, useRowMarks } from "./rows";
 import { RowsWatcher } from "./RowsWatcher";
+import { useInbox } from "./inbox";
+import { useRowSelect, useSelectionEscape } from "./useRowSelect";
+
+type RowSelect = ReturnType<typeof useRowSelect>;
 import { togglePalette } from "../palette/state";
 import { BrandMark, MenuIcon, SearchGlyph } from "./menuIcons";
+import { Icon } from "../ui/icons";
 import { DiskChip } from "./DiskChip";
 import { ModeLine } from "./ModeLine";
 import { ShopSwitcher } from "./ShopSwitcher";
 import { UpdateButton } from "./UpdateButton";
-import { Usage } from "./Usage";
+import { satangText } from "../pages/job";
 
 const LABEL: Record<MenuRow, Key> = {
   new: "menu.new",
@@ -55,21 +62,35 @@ export interface RecentItem {
   place?: "pinned" | "settled";
   /** The row's key for its menu (rows.ts); a row without one has no menu. */
   rowKey?: string;
+  /** Its turn runs: Snooze also offers "Until it finishes" (item 94). */
+  working?: boolean;
+  /** Why it settled by itself, on its quiet second line ("Done after 3 quiet days"); none for a row the person settled. */
+  why?: string | null;
 }
 
-/** One chat of Recent: the row, and the menu of what can be done to it (Pin, Snooze, Done for now, Archive). */
-function RecentRow({ item }: { item: RecentItem }) {
+/** One chat of Recent: the row, and the menu of what can be done to it (Pin, Snooze, Done for now, Archive), to it alone or to every
+ *  row selected with it (item 94). */
+function RecentRow({ item, select }: { item: RecentItem; select: RowSelect }) {
   const marks = useRowMarks();
-  const menu = useRowMenu({ rowKey: item.rowKey ?? "", kind: "chat", mark: item.rowKey ? marks[item.rowKey] : undefined, name: item.title });
+  const keys = item.rowKey ? select.actsOn(item.rowKey) : [];
+  const many = keys.length > 1;
+  const menu = useRowMenu({ rowKey: item.rowKey ?? "", kind: "chat", mark: item.rowKey ? marks[item.rowKey] : undefined, name: many ? t("row.count", { n: keys.length }) : item.title, working: item.working, keys });
+  const selected = select.selected(item.rowKey);
   return (
-    <li className={`rec-li${item.place ? ` ${item.place}` : ""}${menu.isOpen ? " menu-open" : ""}`} data-place={item.place} data-flip={item.key} onContextMenu={item.rowKey ? menu.onContextMenu : undefined}>
-      <button type="button" className="rec" title={item.title} onClick={item.open} data-testid="menu-recent">
+    <li className={`rec-li${item.place ? ` ${item.place}` : ""}${menu.isOpen ? " menu-open" : ""}`} data-place={item.place} data-flip={item.key} data-row-key={item.rowKey} data-sel={selected || undefined} onContextMenu={item.rowKey ? menu.onContextMenu : undefined}>
+      <button type="button" className="rec" title={item.title} onClick={(e) => select.click(e, item.rowKey, item.open)} onKeyDown={(e) => select.keyDown(e, item.rowKey)} data-testid="menu-recent">
         {item.place === "pinned" && (
           <span className="rec-pin" role="img" aria-label={t("row.pinned")} title={t("row.pinned")} data-testid="menu-recent-pin">
             <PinGlyph />
           </span>
         )}
         {item.title}
+        {item.why && (
+          <span className="rec-why" data-testid="menu-recent-why">
+            {item.why}
+          </span>
+        )}
+        {selected && <span className="vh">, {t("row.selected")}</span>}
       </button>
       {item.rowKey && <MoreButton name={item.title} onOpen={menu.open} className="rec-more" />}
       {menu.menu}
@@ -77,18 +98,16 @@ function RecentRow({ item }: { item: RecentItem }) {
   );
 }
 
+/** A pinned chat's mark: the set's pin (src/ui/icons.tsx). */
 function PinGlyph() {
-  return (
-    <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-      <path d="M14.5 2.5l7 7-3 1-3.5 3.5.5 4.5-2 2-4-4-5.5 5.5-1-1L7 14.5l-4-4 2-2 4.5.5L13 5.5z" />
-    </svg>
-  );
+  return <Icon name="pin" />;
 }
 
 export function SideMenu({
   current,
   needs,
   recent,
+  working = [],
   settings,
   account = accountLabel(EMPTY_SHOP),
   helping = false,
@@ -98,12 +117,15 @@ export function SideMenu({
   onSearch,
   onAccount,
   foot,
+  budget = null,
 }: {
   /** the row marked current, or none (a thread, Settings) */
   current: MenuRow | null;
   /** how many asks wait on the person; no count shows at 0 */
   needs: number;
   recent: RecentItem[];
+  /** The Working group (item 94): chats whose turn runs, when the person turned the group on; nothing is drawn while it is empty. */
+  working?: RecentItem[];
   /** Settings is open: the account row is current, as on the canvas's Settings board */
   settings: boolean;
   /** who the account row names and the initial in its avatar (onboarding/shop.ts `accountLabel`); "You" by default */
@@ -117,11 +139,17 @@ export function SideMenu({
   onRow: (row: MenuRow) => void;
   onSearch: () => void;
   onAccount: () => void;
-  /** what the runtime and this computer add above the account row: the disk chip, usage meters, an update */
+  /** what the runtime and this computer add above the account row: the disk chip, an update, which data this is */
   foot?: ReactNode;
+  /** the shop's AI spend this month against its cap, in integer satang, when the runtime gives them; none draws no pill */
+  budget?: Budget | null;
 }) {
+  // Recent and the Working group are one list to select in, in the order they are drawn
+  const order = [...recent, ...working].flatMap((r) => (r.rowKey ? [r.rowKey] : []));
+  const select = useRowSelect("recent", order);
+  useSelectionEscape();
   return (
-    <nav className="sb" aria-label={t("menu.label")} data-testid="sidebar">
+    <nav className="sb" aria-label={t("menu.label")} data-testid="sidebar" data-select-scope="recent">
       <div className="brand">
         {/* The mark leads where New does, as the canvas's mark links to Home. */}
         <button type="button" className="sb-home" aria-label={t("menu.home")} onClick={() => onRow("new")} data-testid="menu-home">
@@ -156,7 +184,19 @@ export function SideMenu({
           </div>
           <ul className="sb-recent" aria-labelledby="menu-recent-h" data-arrive="sidebar" data-arrive-rows=".rec-li" data-flip-list>
             {recent.map((r) => (
-              <RecentRow key={r.key} item={r} />
+              <RecentRow key={r.key} item={r} select={select} />
+            ))}
+          </ul>
+        </>
+      )}
+      {working.length > 0 && (
+        <>
+          <div className="sb-h" id="menu-working-h">
+            {t("menu.working")}
+          </div>
+          <ul className="sb-recent sb-working" aria-labelledby="menu-working-h" data-testid="menu-working">
+            {working.map((r) => (
+              <RecentRow key={r.key} item={r} select={select} />
             ))}
           </ul>
         </>
@@ -174,6 +214,9 @@ export function SideMenu({
             </button>
           </div>
         )}
+        {/* The canvas's plan pill: the AI budget this month, read and never guessed, so it shows only with the runtime's
+            numbers. */}
+        {budget && <BudgetPill budget={budget} />}
         <div className="acct-row">
           <button type="button" className="acct" aria-current={settings ? "page" : undefined} title={t("nav.settings")} onClick={onAccount} data-testid="nav-settings">
             <span className="av" aria-hidden="true">
@@ -196,6 +239,25 @@ export function SideMenu({
   );
 }
 
+/** The shop's AI spend this month and its cap, both integer satang (money is never a float). */
+export interface Budget {
+  spentSatang: number;
+  capSatang: number;
+}
+
+/** "฿186 of ฿300", the canvas's `.planp` in the menu's foot. Anything that is not two whole, non-negative amounts draws
+ *  nothing rather than a guess. */
+export function BudgetPill({ budget }: { budget: Budget }) {
+  const ok = (n: number) => Number.isSafeInteger(n) && n >= 0;
+  if (!ok(budget.spentSatang) || !ok(budget.capSatang)) return null;
+  const words = { spent: satangText(budget.spentSatang), cap: satangText(budget.capSatang) };
+  return (
+    <span className="planp" role="img" aria-label={t("menu.budgetAria", words)} data-testid="menu-budget">
+      {t("menu.budget", words)}
+    </span>
+  );
+}
+
 /** The newest shop the person's place in ended and that they have not dismissed, in words, or null. */
 export function shopNotice(shops: Pick<ShopsState, "left" | "dismissed">, dismiss: (id: string) => void): { text: string; dismiss: () => void } | null {
   const left = shops.left.find((l) => !shops.dismissed.includes(l.id));
@@ -207,13 +269,16 @@ export function Sidebar() {
   const members = selectSidebarBots(s).map((b) => b.name);
   const untitled = t("thread.untitled");
   const marks = useRowMarks();
-  const parts = recentParts(s.threads, members, marks, (bot, row) => rowStatus(s, bot, row) === "needs_you", Date.now());
-  const item = (place: RecentItem["place"]) => (r: { bot: string; thread: string; title: string }): RecentItem => ({
+  const inbox = useInbox();
+  const parts = recentParts(s.threads, members, marks, (bot, row) => rowStatus(s, bot, row) === "needs_you", Date.now(), 3, { working: (bot, row) => rowStatus(s, bot, row) === "running", group: inbox.working });
+  const item = (place: RecentItem["place"]) => (r: { bot: string; thread: string; title: string; working?: boolean }): RecentItem => ({
     key: `${r.bot}:${r.thread}`,
     title: r.title || untitled,
     open: () => void s.openThread(r.bot, r.thread),
     place,
     rowKey: threadRowKey(r.bot, r.thread),
+    working: r.working,
+    why: place === "settled" ? settledWhy(marks[threadRowKey(r.bot, r.thread)]) : null,
   });
   const recent = [...parts.pinned.map(item("pinned")), ...parts.recent.map(item(undefined)), ...parts.settled.map(item("settled"))];
   // New (and the brand mark) opens Home; every other row opens its own page.
@@ -225,6 +290,7 @@ export function Sidebar() {
       current={currentRow(s.ui, s.selectedBot)}
       needs={selectAsks(s).length}
       recent={recent}
+      working={parts.working.map(item(undefined))}
       settings={s.ui.view === "settings"}
       account={accountLabel({ person: s.ui.shop.person, shop: viewedShopName(s) })}
       helping={!!helpedShop(s.shops)}
@@ -237,8 +303,6 @@ export function Sidebar() {
         <>
           {/* A chip when the home folder's volume is low on space (src/lib/disk.ts), and nothing while it is fine. */}
           <DiskChip />
-          {/* The coding CLIs' subscription usage, which only a runtime that reads their logins has. */}
-          {can("accounts") && <Usage />}
           {/* the desktop app's shell keeps the accounts in every mode (item 74); a runtime may keep them too */}
           {(can("accounts") || isDesktop()) && <AccountsWatcher />}
           {/* A newer signed release, which shows nothing until in-app updates are turned on (updater.ts). */}

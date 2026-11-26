@@ -72,8 +72,7 @@ test("sharing skills is a second switch, off by default, and Install skills from
   });
   await page.goto("/");
   await page.getByTestId("nav-settings").click();
-  // Artifacts and MCP and Skills are developer pages, under Settings' "Under the hood"
-  await openHood(page);
+  await openHood(page); // item 85h: Artifacts, MCP and Skills are under "Under the hood", closed in this spec's storage
   await page.getByTestId("settings-nav-artifacts").click();
   await expect(page.getByTestId("art-set-publish")).toHaveAttribute("aria-checked", "false");
   await expect(page.getByTestId("art-set-skills")).toHaveAttribute("aria-checked", "false");

@@ -151,7 +151,7 @@
   font-size: 12px;
 }
 .media-err span {
-  color: var(--quiet);
+  color: var(--muted);
 }
 
 .media-lightbox {

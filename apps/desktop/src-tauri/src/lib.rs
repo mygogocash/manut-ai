@@ -26,6 +26,7 @@ mod lane_clean;
 mod lane_config;
 mod lane_diff;
 mod past_chats;
+mod project_notes;
 mod platform;
 mod outpost;
 mod power;
@@ -44,6 +45,7 @@ mod shop_cache_key;
 mod skill_links;
 mod tailscale;
 mod tasks;
+mod title_run;
 mod term_history;
 mod term_import;
 mod term_link;
@@ -1023,6 +1025,27 @@ async fn source_pull(cwd: String) -> Result<git_pull::Pulled, String> {
     tauri::async_runtime::spawn_blocking(move || git_pull::pull(&home, std::path::Path::new(&cwd))).await.map_err(|e| e.to_string())
 }
 
+/// One short run of the person's own coding agent that writes a chat's title or a pull request's words (title_run.rs, item 96):
+/// no tools, no project, the person's own settings only, bounded (one at a time, a time limit, a count a minute). The page asks
+/// only when the person turned it on. Returns the cleaned words; nothing is written, committed or opened.
+#[tauri::command]
+async fn title_run(request: title_run::Request) -> Result<title_run::Written, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let home = user_home()?;
+        let account_env = accounts::session_env_for(&home, &request.agent, None);
+        accounts::prepare(&home, &request.agent, &account_env);
+        title_run::run(&home, &account_env, &request)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Stops the title run made for `key` (a chat's id), when it is the one running.
+#[tauri::command]
+fn title_cancel(key: String) {
+    title_run::shared().cancel(&key);
+}
+
 /// A lane put up for review (item 75): what it would go up with, its branch, base and commits' subjects (review.rs `draft`).
 /// Only reads.
 #[tauri::command]
@@ -1686,6 +1709,8 @@ fn commands(invoke: tauri::ipc::Invoke) -> bool {
         lane_clean_merged,
         source_pull,
         review_draft,
+        title_run,
+        title_cancel,
         review_ask_open,
         review_ask_merge,
         review_settle,

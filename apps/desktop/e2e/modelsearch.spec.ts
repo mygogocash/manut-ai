@@ -59,8 +59,8 @@ test("search is focused on open and filters by model and provider as you type", 
   await expect(names(pop)).toHaveText(["llama-4-maverick", "my-local-model"]);
 
   // reasoning row and footer stay
-  await expect(pop.getByRole("radiogroup", { name: "Reasoning" })).toBeVisible();
-  await expect(pop.getByRole("button", { name: "Bot settings" })).toBeVisible();
+  await expect(pop.getByRole("radiogroup", { name: "Thinking" })).toBeVisible();
+  await expect(pop.getByRole("button", { name: "Team member's settings" })).toBeVisible();
 });
 
 test("compact match: 'opus55' finds claude-opus-5-5 and Opus 5.5", async ({ page }) => {

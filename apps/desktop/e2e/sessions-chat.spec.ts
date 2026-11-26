@@ -161,7 +161,7 @@ test("an approval card in a session: Deny first, answered with Allow for session
   await expect(row.getByTestId("bot-time")).toHaveText("waiting");
   await expect(row.getByTestId("live-ring")).toHaveCount(0);
   // the activity line waits with the card
-  await expect(page.getByTestId("activity-text")).toContainText("Waiting for approval");
+  await expect(page.getByTestId("activity-text")).toContainText("Needs you");
 
   await card.getByRole("button", { name: "Allow for session" }).click();
   await expect(page.getByTestId("card-line")).toContainText("Allowed for session");

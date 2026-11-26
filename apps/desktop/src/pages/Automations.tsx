@@ -189,7 +189,7 @@ export function AutomationsPage() {
               aria-expanded={addingWatch}
               data-testid="watch-new"
             >
-              <PlusIcon size={12} />
+              <PlusIcon />
               {t("watch.new")}
             </button>
             <button
@@ -202,7 +202,7 @@ export function AutomationsPage() {
               aria-expanded={adding}
               data-testid="auto-new"
             >
-              <PlusIcon size={12} />
+              <PlusIcon />
               {t("auto.new")}
             </button>
           </div>

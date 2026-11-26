@@ -1,5 +1,5 @@
 /* The side menu (Sidebar.tsx), as the design canvas draws it: the shell rules of packages/ui-kit/app.css, lines 43 to
-   59 (.sb, .brand, .nav, .rec, .cnt, .acct; .planp waits for a budget to show), with the canvas's .ic, .ib and .av,
+   59 (.sb, .brand, .nav, .rec, .cnt, .acct, .planp), with the canvas's .ic, .ib and .av,
    copied and scoped under the menu's root class, .sb. The scope matters: the desktop already has global .brand and .nav
    rules (sidebar.css, still loaded for the disk chip, the usage meters and .vh), so the copied rules also set back what
    those would otherwise lend the menu; each such line says so. The canvas's short token names map onto the desktop's
@@ -147,7 +147,7 @@
   inset: -5px 0;
 }
 
-/* The foot: what the runtime and this computer add, then the account row. */
+/* The foot: what the runtime and this computer add, then the budget pill and the account row. */
 .sb .sb-foot {
   margin-top: auto;
   display: flex;
@@ -175,6 +175,21 @@
 .sb .sb-foot .disk-chip {
   /* The desktop's own: the chip keeps its own width in a column, as it did in the old foot's grid. */
   align-self: flex-start;
+}
+/* The canvas's plan pill (.planp, and .sb .planp inside the menu): the AI budget this month, on the surface with a hairline. */
+.sb .planp {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  min-height: 28px;
+  margin: 0 6px 6px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--rad-pill);
+  background: var(--aui-surface);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
 }
 .sb .acct {
   display: flex;
@@ -342,11 +357,25 @@
   display: inline-block;
   margin-right: 6px;
   color: var(--aui-muted);
-  vertical-align: -1px;
+  vertical-align: -3px;
 }
 .sb .rec-li.settled .rec {
   padding-top: 3px;
   padding-bottom: 3px;
   font-size: 12px;
   opacity: 0.7;
+}
+
+/* Several rows selected (item 94): the kit's selected row (KitLists, data-sel and its blue band) */
+.sb .rec-li[data-sel="true"] > .rec {
+  background: var(--bluebg);
+  color: var(--ink);
+}
+/* Why a chat settled by itself (item 94): its quiet second line */
+.sb .rec .rec-why {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 12px;
+  color: var(--muted);
 }

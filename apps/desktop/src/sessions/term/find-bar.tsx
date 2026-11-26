@@ -144,11 +144,11 @@ export function FindBar({ req, onClose }: { req: FindRequest; onClose: () => voi
       </button>
       <button type="button" className="tfind-b" aria-label={t("find.prev")} title={t("find.prev")} disabled={!text || res.count === 0} onClick={() => go("previous")} data-testid="term-find-prev">
         <span className="tfind-up">
-          <ChevronDown size={10} />
+          <ChevronDown />
         </span>
       </button>
       <button type="button" className="tfind-b" aria-label={t("find.next")} title={t("find.next")} disabled={!text || res.count === 0} onClick={() => go("next")} data-testid="term-find-next">
-        <ChevronDown size={10} />
+        <ChevronDown />
       </button>
       <button type="button" className="tfind-b" aria-label={t("find.close")} title={t("find.close")} onClick={close} data-testid="term-find-close">
         <CloseIcon />
