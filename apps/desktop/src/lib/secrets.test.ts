@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { maskCommand, maskSecrets } from "./secrets";
+import { maskCommand, maskSecrets, sameShape, shellWords, showCommand } from "./secrets";
 import table from "./secrets.cases.json";
 
 const X = (n: number) => "X".repeat(n);
@@ -25,7 +25,26 @@ describe("maskSecrets (the one masker; patterns in secrets.json)", () => {
 
   it("runs the shared command table: what an approval shows (secrets.cases.json `command`, also run by tasks.rs)", () => {
     expect(table.command.length).toBeGreaterThan(25);
-    for (const [text, want] of table.command) expect(maskCommand(text), text).toBe(want);
+    for (const [text, want, notes = ""] of table.command) {
+      const shown = showCommand(text);
+      expect(shown.text, text).toBe(want);
+      // a row's third field names the notes the card adds: `unmasked` when the line is shown as it is (item 121)
+      expect(shown.unmasked, text).toBe(notes.split(" ").includes("unmasked"));
+      expect(maskCommand(text), text).toBe(want);
+    }
+  });
+
+  it("splits a shown command into the same shell words as the command, on every row of both tables (item 121)", () => {
+    // a mask stands for part of one word and never for a blank, a quote, `#` or a second word, so the line a person
+    // reads splits where the line that runs does
+    for (const [text] of [...table.command, ...table.cases]) {
+      expect(shellWords(maskCommand(text)).length, text).toBe(shellWords(text).length);
+    }
+  });
+
+  it("accepts a masked line only when its words are the command's, each with only a key's part replaced (item 121)", () => {
+    expect(table.shape.length).toBeGreaterThan(8);
+    for (const [before, after, same] of table.shape) expect(sameShape(before as string, after as string), `${before} -> ${after}`).toBe(same);
   });
 
   it("never hides a character the shell acts on, nor a line, in a command (item 117)", () => {

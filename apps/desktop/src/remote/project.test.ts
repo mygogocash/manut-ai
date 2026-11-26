@@ -112,6 +112,15 @@ describe("what a phone is shown", () => {
     expect(new Projector().view(fits).asks[0]).not.toHaveProperty("long");
   });
 
+  it("never sends a phone a command its card shows as it is because it may hold a key, nor its folder: only No (item 121)", () => {
+    const command = "echo •••• && API_KEY=abc123 pnpm deploy";
+    const source: ChatSource = { ...chat(), items: [{ kind: "approval", id: "r", ts: 2, open: true, title: "Run this command?", command, cwd: "/w/token=abc123", choices: ["once", "deny"] }] };
+    const ask = new Projector().view(source).asks[0]!;
+    expect(ask).toMatchObject({ kind: "approval", keyed: true, command: "", offers: ["deny"] });
+    expect(ask).not.toHaveProperty("cwd");
+    expect(JSON.stringify(ask)).not.toContain("abc123");
+  });
+
   it("gives a command that masks to the same view as another its own revision (item 117)", () => {
     const projector = new Projector();
     const at = (command: string): ChatSource => ({ ...chat(), items: [{ kind: "approval", id: "r", ts: 2, open: true, title: "Run this command?", command, choices: ["once", "deny"] }] });

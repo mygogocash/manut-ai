@@ -123,6 +123,11 @@ describe("Approve on Home", () => {
     expect(canApproveHere(approval({ subagent: { id: "s1", name: "Draft the replies" } }))).toBe(false);
   });
 
+  it("is not offered for a command its card shows as it is, with the note that it may hold a key (item 121)", () => {
+    expect(canApproveHere(approval({ command: "echo •••• && API_KEY=abc123 pnpm test" }))).toBe(false);
+    expect(canApproveHere(approval({ command: "API_KEY=abc123 pnpm test" }))).toBe(true);
+  });
+
   it("is not offered without Allow once, the choice it sends, or without an exact action", () => {
     expect(canApproveHere(approval({ choices: ["session", "deny"] }))).toBe(false);
     expect(canApproveHere(approval({ command: "" }))).toBe(false);

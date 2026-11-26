@@ -5,7 +5,7 @@ import { t, type Key } from "../i18n";
 import type { Bot } from "../lib/protocol";
 import { askText, type Actions, type ApprovalItem, type Ask, type Chat, type ClarifyItem } from "../state/store";
 import { riskOf } from "../chat/cards/risk";
-import { maskCommand } from "../lib/secrets";
+import { maskCommand, showCommand } from "../lib/secrets";
 import { asksOf, memberStatus } from "./team";
 
 export type HomeMode = "chat" | "team" | "code";
@@ -101,8 +101,9 @@ export async function sendAsk(actions: Pick<Actions, "sendTo" | "sendAway" | "ne
 
 /** Whether Home may offer Approve on an ask, beside Look first. Only for an approval whose chat card would show no more
  *  than Home does: one that offers Allow once (the choice Approve sends) and names its exact action (the command), with
- *  no plan to read, no folder it runs in, no risk warning and no subagent asking. Every other ask is settled on its
- *  card, after Look first. Either way it goes through the one approval path the card uses (chat/cards/respond.ts). */
+ *  no plan to read, no folder it runs in, no risk warning, no subagent asking, and a command its card shows with no note
+ *  (item 121: not one shown as it is because it may hold a key). Every other ask is settled on its card, after Look first.
+ *  Either way it goes through the one approval path the card uses (chat/cards/respond.ts). */
 export function canApproveHere(item: ApprovalItem | ClarifyItem): item is ApprovalItem {
   return (
     item.kind === "approval" &&
@@ -111,7 +112,8 @@ export function canApproveHere(item: ApprovalItem | ClarifyItem): item is Approv
     !item.plan &&
     !item.cwd &&
     !item.subagent &&
-    riskOf(item.command).length === 0
+    riskOf(item.command).length === 0 &&
+    (!!item.whole || !showCommand(item.command).unmasked)
   );
 }
 

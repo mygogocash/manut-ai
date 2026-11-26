@@ -3,15 +3,17 @@
 // from the store (fromStore.ts reads it) and every text in it goes through the one masker every surface of the app uses
 // (lib/secrets.ts), so a token in a chat, a command or a step never reaches the phone. An ask is shown whole, with every
 // field its card shows (the title, the whole command with its line breaks, the folder, the plan, who asks), never cut
-// short. The command and the folder go through `maskCommand`, which masks a key and never anything the shell acts on, so
+// short. The command and the folder go through `showCommand`, which masks a key and never anything the shell acts on, so
 // what a person allows is what runs (item 117). A command longer than a phone is sent (`PHONE_COMMAND_CHARS`) arrives as
-// its start, marked `long`, and cannot be allowed from the phone at all: No stays.
+// its start, marked `long`, and cannot be allowed from the phone at all: No stays. A command the card shows as it is,
+// because masking it could change what it seems to do and so it may hold a key, is not sent at all, nor its folder: it is
+// marked `keyed`, and the phone offers only No (item 121).
 //
 // From a phone an approval offers at most Allow once and No: Always allow and Allow for the session stay on the Mac, and
 // an ask the card marks as needing an app update offers nothing. Each ask carries a revision, which goes up whenever what
 // it shows changes or anything it was built from changes, a key the masker hides included, so an Allow the phone sends
 // counts only for the very command the person saw (approval-core's `seenRevision`).
-import { maskCommand, maskSecrets } from "../lib/secrets";
+import { maskSecrets, showCommand } from "../lib/secrets";
 
 export type ChatState = "working" | "needs_you" | "done";
 
@@ -99,6 +101,8 @@ export type AskView =
       readonly command: string;
       /** The command is longer than a phone is sent: `command` is its start, and it is allowed only on the Mac. */
       readonly long?: true;
+      /** The card shows the command as it is, since it may hold a key: `command` is empty, and it is allowed only on the Mac. */
+      readonly keyed?: true;
       readonly cwd?: string;
       readonly plan?: string;
       readonly from?: string;
@@ -162,11 +166,15 @@ export function chatRow(source: ChatSource): ChatRow {
 const mask = (text: string | undefined): string | undefined => (text === undefined ? undefined : maskSecrets(text));
 
 function approvalView(item: SourceApproval): Omit<Extract<AskView, { kind: "approval" }>, "revision"> {
-  const whole = maskCommand(item.command);
+  const shown = showCommand(item.command);
+  const folder = item.cwd === undefined ? undefined : showCommand(item.cwd);
+  // a key the card could not mask safely never leaves the Mac: the command and its folder stay there
+  const keyed = shown.unmasked || !!folder?.unmasked;
+  const whole = keyed ? "" : shown.text;
   const long = whole.length > PHONE_COMMAND_CHARS;
-  const offers: PhoneOption[] = item.outdated ? [] : (["once", "deny"] as const).filter((o) => item.choices.includes(o) && !(long && o === "once"));
+  const offers: PhoneOption[] = item.outdated ? [] : (["once", "deny"] as const).filter((o) => item.choices.includes(o) && !((long || keyed) && o === "once"));
   const outcome = item.resolved ? (item.resolved === "deny" ? "declined" : "allowed") : item.expired ? "expired" : undefined;
-  const cwd = item.cwd === undefined ? undefined : maskCommand(item.cwd);
+  const cwd = keyed ? undefined : folder?.text;
   const plan = mask(item.plan);
   const from = mask(item.from);
   return {
@@ -177,6 +185,7 @@ function approvalView(item: SourceApproval): Omit<Extract<AskView, { kind: "appr
     title: maskSecrets(item.title),
     command: long ? start(whole, PHONE_COMMAND_CHARS) : whole,
     ...(long ? { long: true as const } : {}),
+    ...(keyed ? { keyed: true as const } : {}),
     ...(cwd ? { cwd } : {}),
     ...(plan ? { plan } : {}),
     ...(from ? { from } : {}),

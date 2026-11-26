@@ -130,7 +130,10 @@ The states whose rules are pure functions, with their tests, then the screens th
   for text that never runs, and `maskCommand` for what an ask's card shows, which masks a key and never a substitution, a
   pipe, a second command or a command's own operand (a token-shaped word is a key only as a whole word with a key's
   shape); a private key block keeps its BEGIN and END lines around one masked line only inside a quoted string or a heredoc's
-  body, where the shell reads it as data, and its body holds only key characters; anywhere else it is shown whole. The card shows a command whole, its line breaks kept, scrolling in its block.
+  body that a writer (`cat`, `tee`, `echo`, `printf`) leading the command only writes out, and its body holds only base64
+  and PEM header lines; anywhere else it is shown whole. Since item 121 a masked value also stops at a blank, a quote, `#`
+  and a glob character, and the masked command must split into the command's own shell words or it is shown as it is with
+  a note that it may hold a key (docs/remote-access.md, "An approval shows what runs"). The card shows a command whole, its line breaks kept, scrolling in its block.
 - `apps/desktop/src/code/kitAsks.ts`: the dial at work on a session's asks, through the asks' own cards.
 - `apps/desktop/src/code/KitCardParts.tsx`, `KitPanel.tsx`, `kit.css`: Kit's words on an ask's card, and Kit on the
   Code page.

@@ -26,7 +26,7 @@ import { riskOf } from "./risk";
 import { t, type Key } from "../../i18n";
 import { Markdown } from "../parts/Markdown";
 import { composing, holdImeEnter } from "../../lib/ime";
-import { maskCommand, maskSecrets } from "../../lib/secrets";
+import { maskCommand, maskSecrets, showCommand } from "../../lib/secrets";
 import { KitSays, kitButtons, kitDoneText, useKitCard } from "../../code/KitCardParts";
 import { addRule, updateKitProjects } from "../../code/project";
 import { computerAsk } from "../../computer/computer";
@@ -81,6 +81,22 @@ function CommandBlock({ text }: { text: string }) {
     >
       {text}
     </pre>
+  );
+}
+
+/** A command as an approval shows it (showCommand): its keys masked, or, when masking it could change what it seems to do,
+ *  whole with a plain note that it may hold a key (item 121). */
+function ShownCommandBlock({ command }: { command: string }) {
+  const shown = showCommand(command);
+  return (
+    <>
+      <CommandBlock text={shown.text} />
+      {shown.unmasked && (
+        <div className="card-note" data-testid="card-cmd-key" role="note">
+          {t("card.cmdMayHoldKey")}
+        </div>
+      )}
+    </>
   );
 }
 
@@ -221,9 +237,10 @@ function Approval({ bot, item }: { bot: string; item: ApprovalItem }) {
       )}
       {/* a browser write's sentence is read whole before it is approved, exactly as the API wrote it: its block grows
           with it (cards.css .whole), and nothing in it is masked, since what is approved must be what is typed. Every
-          other command arrives whole, its line breaks kept, and hides only the keys in it (maskCommand: never a
-          substitution, a pipe or a second command); a long one scrolls in its block, which the keyboard can scroll too
-          (item 117). */}
+          other command arrives whole, its line breaks kept, and hides only the keys in it (showCommand: never a
+          substitution, a pipe, a second command or another word); a long one scrolls in its block, which the keyboard can
+          scroll too (item 117). One that masking could change is shown as it is, with a note that it may hold a key
+          (item 121). */}
       {said ? (
         <>
           <pre className="card-cmd whole" data-testid="card-computer">
@@ -237,7 +254,7 @@ function Approval({ bot, item }: { bot: string; item: ApprovalItem }) {
         (item.whole ? (
           <pre className="card-cmd whole">{item.command}</pre>
         ) : (
-          <CommandBlock text={maskCommand(item.command)} />
+          <ShownCommandBlock command={item.command} />
         ))
       )}
       {kit && <KitSays card={kit} />}

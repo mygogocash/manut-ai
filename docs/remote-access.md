@@ -176,12 +176,23 @@ needs a QR reader, which the repository does not have: the browser's own is used
   (`maskCommand`, the shell's `tasks::mask_command`, the table's `command` rows), on the Mac's card and on the phone alike:
   it masks a key and nothing else. It reads a command line by line, never joins two words, and a masked value stops at
   the first character the shell acts on (a backtick, `$`, `(`, `)`, `|`, `;`, `&`, `<`, `>`, `{`, `}`, a backslash, a
-  line break), so a substitution, a pipe, a second command or a redirection is always shown. A private key block in a command
-  (a heredoc, an `echo`, a `printf` or a JSON value with `\n` between its lines) keeps its BEGIN and END lines and shows its
-  body as one masked line, when every line of its body holds only base64 and the header characters old PEM files use and the
-  shell reads it as data: inside a quoted string opened on its BEGIN line and closed after its END line, or inside a heredoc's
-  body that does not end before its END line. A block anywhere else, or one the reading cannot follow, is shown whole, line for
-  line, since those characters are enough to write a command (`rm -rf /`). A token-shaped word is
+  line break), so a substitution, a pipe, a second command or a redirection is always shown. Since item 121 it also stops at
+  a blank (a space, a tab, a non-breaking or other Unicode space), either quote, `#` and a glob character (`*`, `?`, `[`,
+  `]`), so a masked value never runs over a word the shell reads on its own (`git push -o cookie:•••• --force origin
+  main`), and a quote the masker sees is never taken for the shell's. A private key block in a command (a heredoc, an
+  `echo`, a `printf` or a JSON value with `\n` between its lines) keeps its BEGIN and END lines and shows its body as one
+  masked line only when every body line is base64 or a PEM header (`Proc-Type: 4,ENCRYPTED`), the shell reads the whole
+  block as data (inside a quoted string or a heredoc's body), and that data belongs to the command's first simple command,
+  which is `cat`, `tee`, `echo` or `printf` (they only write it out), with no `|`, `(` or `)` anywhere in the command,
+  since a shell (`bash -c`, `sh <<EOF`, `| sh`, `eval`) would run those lines. The reading follows `$'...'`, a here-string's
+  `<<<`, a heredoc's whole terminator word, a comment only where a word starts, and stops at a substitution or arithmetic
+  (`$(`, `${`, a backtick, `$[`, `((`), and in an unquoted heredoc's body at its first `$(`, `${`, backtick or
+  backslash. A block anywhere else, or one the reading cannot follow, is shown whole, line for line. Then a structural
+  check (item 121): the masked command must split into exactly the command's own shell words (as many, each the same or
+  with only a key's part masked), and a command that already holds the mask's `•` cannot be told from a masked one; when
+  either fails the command is shown as it is, and the card says it may hold a key. Such a command never leaves the Mac:
+  the phone gets it marked `keyed`, with no command and no folder, offers only No, and says only the Mac can allow it; a
+  notification says only that a command may hold a key; Home offers no Approve beside it. A token-shaped word is
   masked only when it is a whole word with a key's shape, so a command's own operand (`rm -rf sk-releases-backup`) is
   shown. The shell sends the card the whole command with its line breaks (it used to fold it to one line and cut it at
   160 characters), and the phone gets it unclipped up to 20,000 characters; past that the phone gets the start, marked

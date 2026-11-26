@@ -13,7 +13,7 @@ import type { BridgeEvent } from "./protocol";
 import { t } from "../i18n";
 import { outsideSettings, presentOutside, routeAction, type Outside, type PresentContext, type Shown, type ShownAction } from "./outside";
 import { isMacPlatform } from "./power";
-import { maskCommand } from "./secrets";
+import { showCommand } from "./secrets";
 
 export interface Note {
   title: string;
@@ -101,6 +101,15 @@ export function spoken(text: string, max = 140): string {
 /** `spoken(text)`, or the plain clipped text when nothing sayable is left (an answer that is only a code block). */
 const say = (text: string) => spoken(text) || clip(shortenRefs(text));
 
+/** What an approval's notification says of its command: a browser write's sentence as typed, any other command as its card
+ *  shows it, or, for one its card shows as it is because it may hold a key, the plain words that it may (item 121). */
+function noteCommand(ev: { command?: string; whole?: boolean }): string {
+  if (!ev.command) return "";
+  if (ev.whole) return ev.command;
+  const shown = showCommand(ev.command);
+  return shown.unmasked ? t("note.mayHoldKey") : shown.text;
+}
+
 /** The notification for `ev`, or null when there is nothing worth interrupting for: an answer, an approval, a question.
  *  A turn that ended with an error only marks its chat unless `ctx.errors` ("Also notify on errors"). Pure: no globals. */
 export function noteFor(
@@ -119,9 +128,10 @@ export function noteFor(
         // an ask from one of several shops says whose it is: "Buddy at Ran Pa Noi needs your approval"
         title: t("note.approval", { bot: ev.shop?.name ? t("note.atShop", { bot: who, shop: ev.shop.name }) : who }),
         // a request whose whole text is too long for a notification says its own short line instead (Ton's append of the books).
-        // A command's keys are masked as on its card (maskCommand): Notification Centre keeps what it was shown, and a body
-        // a masker changed is no longer the exact action below, so it never offers Approve (item 117).
-        body: clip(shortenRefs(ev.brief || (ev.command ? (ev.whole ? ev.command : maskCommand(ev.command)) : "") || ev.title || t("ask.allowThis"))),
+        // A command's keys are masked as on its card (showCommand): Notification Centre keeps what it was shown, and a body
+        // a masker changed is no longer the exact action below, so it never offers Approve (item 117). A command its card
+        // shows as it is, since it may hold a key, is not put here at all: the body says so (item 121).
+        body: clip(shortenRefs(ev.brief || noteCommand(ev) || ev.title || t("ask.allowThis"))),
         bot,
         tag: `${bot}:approval`,
         // only the connected runtime's asks carry an approval-core kind; any other has none and is owner-only
