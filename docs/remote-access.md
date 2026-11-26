@@ -183,9 +183,11 @@ needs a QR reader, which the repository does not have: the browser's own is used
   prompt, and the passkey signs what the phone computed from its own screen. Allow once tries the prompt at once and,
   when the browser refuses one that did not come from a tap, offers Confirm while the challenge lasts.
 - **Answers to questions** go through the same signed path as Allow once (`#decide`), following the security review of
-  26 Nov 2026 (item 115): a Mac that sends a challenge for an answer gets it checked against the exact answer's digest,
-  and the signature back; today's Mac takes the answer at once. The digest (`answerOption`) and the field step two
-  carries it in (`passkey`) are in `decision.ts`, to be matched to item 115's final shape.
+  26 Nov 2026 (item 115): the Mac's challenge is checked against the package's `answerOption` of the exact answer (an
+  interview's questions in the order the ask lists them) before any prompt, and step two repeats the request with the
+  passkey's answer as `passkey` (`decision.ts`). The phone sends exactly the questions its screen shows. Through the
+  real relay, `remote-phone.test.ts` has the Mac take a correct answer and refuse one with no challenge, a replayed
+  challenge, and a signature over other words than the ones sent.
 - **The greyed view.** When the session drops, what was shown stays greyed with when the Mac last confirmed it, offers
   no answer, and is cleared from memory 15 minutes after that time (checked again when the app comes back into view,
   since a phone that slept ran no timer). The phone dials again after one second, doubling to a minute. A phone the Mac
