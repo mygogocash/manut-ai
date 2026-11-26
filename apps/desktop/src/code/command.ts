@@ -130,6 +130,25 @@ const GUARDED_FILES = new Set([
 ]);
 const GUARDED_NAMES = [/^\.pnpmfile\./, /^\.lintstagedrc/, /^lint-staged\.config\./, /\.code-workspace$/, /^\.?mise\..+\.toml$/];
 
+/** Whether `root` is a lane's own working folder in the app's folder: exactly two names below `.manut/lanes`
+ *  (`~/.manut/lanes/<project>/<words>`, src-tauri/src/lane.rs). */
+const laneFolder = (root: string) => {
+  const r = parts(root).list.map(fold);
+  const k = r.lastIndexOf(".manut");
+  return k >= 0 && r[k + 1] === "lanes" && r.length === k + 4;
+};
+
+/** Whether `path` is in the app's own storage, which holds what the app runs and trusts later: its workflows, the lanes'
+ *  records, the accounts, the providers' settings, the terminals' history, and the web view's own data and caches. All of
+ *  `.manut` is, but for the folder the session itself works in when that is a lane's own: every other lane's folder, and
+ *  everything above the lane, is the app's. A name in another letter case is never the session's own folder. */
+function appOwn(path: string, root: string): boolean {
+  const full = parts(path).list.map(fold);
+  for (let i = 0; i + 2 < full.length; i++) if (full[i] === "library" && (full[i + 1] === "webkit" || full[i + 1] === "caches") && full[i + 2] === "xyz.manut.desktop") return true;
+  if (!full.includes(".manut")) return false;
+  return !(laneFolder(root) && within(path, root));
+}
+
 /** A file name as a disk that ignores letter case compares it (macOS's, by default): upper case and back folds the
  *  Kelvin sign and the long s as that disk does. A Windows disk also drops dots and spaces at a name's end and reads
  *  `name::$DATA` as the file itself. */
@@ -140,6 +159,7 @@ const fold = (part: string) => part.normalize("NFC").toUpperCase().toLowerCase()
  *  (a project kept inside a folder of that name is not one). A Windows short name (`PACKAG~1.JSO`) may be any of them. */
 export function guardedPath(written: string, where: Pick<Where, "cwd" | "root" | "home">): boolean {
   const abs = resolve(written, where.cwd, where.home);
+  if (appOwn(abs ?? written, where.root)) return true;
   const p = parts(abs ?? written);
   const r = parts(where.root);
   const inside = abs !== null && within(abs, where.root);

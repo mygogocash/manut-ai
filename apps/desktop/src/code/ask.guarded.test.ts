@@ -171,3 +171,53 @@ describe("a command that changes one of them", () => {
       expect([line, action(line)]).toEqual([line, "read"]);
   });
 });
+
+describe("the app's own storage", () => {
+  const home = "/Users/fon";
+  const lane = `${home}/.manut/lanes/baanmali-preorder/promptpay-qr`;
+  const inLane: Where = { cwd: lane, root: lane, home };
+  const read = (w: Where, paths: string[], cwd = w.cwd) => readAsk(named({ kind: "write", name: "Write", paths, cwd }), w)!;
+  /** Asked at every level: read as `unknown`, and never taken alone, at Everything in this project either. */
+  const asks = (w: Where, p: string, cwd?: string) => {
+    const r = read(w, [p], cwd);
+    return r.action === "unknown" && decideAsk(r, at("everything_in_project"), []).answer !== "alone";
+  };
+
+  it("asks before any change in it, from a lane, from the home folder, or from a project inside it", () => {
+    const wrong: string[] = [];
+    const cases: [Where, string][] = [
+      [inLane, `${home}/.manut/workflows/x.json`],
+      [inLane, `${home}/.manut/lanes/baanmali-preorder/other-lane/src/a.ts`],
+      [inLane, "../other-lane/src/a.ts"],
+      [inLane, `${home}/.manut/lanes/baanmali-preorder/promptpay-qr.json`],
+      [inLane, `${home}/.manut/lanes/.no-hooks`],
+      [inLane, "~/.manut/providers.json"],
+      [inLane, "~/.manut/custom-agents.json.tmp"],
+      [inLane, `${home}/.MANUT/Workflows/x.json`],
+      [inLane, `${home}/.Manut/lanes/baanmali-preorder/promptpay-qr/src/a.ts`],
+      [inLane, `${lane}/../../../peers.json`],
+      [inLane, `${home}/Library/WebKit/xyz.manut.desktop/WebsiteData/x`],
+      [inLane, `${home}/Library/Caches/XYZ.Manut.Desktop/x`],
+      [{ cwd: home, root: home, home }, ".manut/workflows/x.json"],
+      [{ cwd: home, root: home, home }, ".manut/computer/x.json"],
+      [{ cwd: home, root: home, home }, "Library/Caches/xyz.manut.desktop/x"],
+      [{ cwd: `${home}/.manut`, root: `${home}/.manut`, home }, "workflows/x.json"],
+      [{ cwd: `${home}/.manut`, root: `${home}/.manut`, home }, "buddy/chat/a.md"],
+      // a folder above the lane is the app's, not the session's own
+      [{ cwd: `${home}/.manut/lanes/baanmali-preorder`, root: `${home}/.manut/lanes/baanmali-preorder`, home }, "promptpay-qr/src/a.ts"],
+      // the home folder not known: `~` cannot be placed, and is the app's all the same
+      [{ cwd: lane, root: lane }, "~/.manut/workflows/x.json"],
+    ];
+    for (const [w, p] of cases) if (!asks(w, p)) wrong.push(`${w.root}: ${p}`);
+    expect(wrong).toEqual([]);
+    // a command that writes there, by a redirect, a copy, or from a folder it went into first
+    for (const line of ["echo '{}' > ~/.manut/workflows/x.json", "cp x.json ~/.manut/workflows/", "cd ../other-lane && touch a.ts", "ln -s ~/.manut/workflows wf"])
+      expect([line, readCommand(line, inLane).action]).toEqual([line, "unknown"]);
+  });
+
+  it("lets the lane change its own folder as any project's", () => {
+    for (const p of ["src/a.ts", `${lane}/src/checkout.tsx`, "./docs/notes.md"]) expect([p, decideAsk(read(inLane, [p]), at("edits_alone"), [])]).toEqual([p, { answer: "alone" }]);
+    expect(readCommand("echo x > src/a.txt", inLane).action).toBe("change");
+    expect(readCommand("cat ~/.manut/lanes/baanmali-preorder/promptpay-qr.json", inLane).action).toBe("read");
+  });
+});
