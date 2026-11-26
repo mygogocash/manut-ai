@@ -77,6 +77,33 @@ const SUBMODULES_MAX: usize = 100;
 /// turn: they only look.
 static WRITING: Mutex<()> = Mutex::new(());
 
+/// A test's own step at a named moment between one of the app's reads and the write it allows (`added`: a lane's folder made
+/// with nothing checked out yet; `fetched`: the automatic pull's fetch done, its one write still to come), standing in for
+/// another process writing the repository's shared config in that moment. Nothing at all outside a test.
+#[cfg(test)]
+pub(crate) mod between {
+    use std::cell::RefCell;
+    use std::path::Path;
+
+    type Step = Box<dyn Fn(&str, &Path)>;
+
+    thread_local! {
+        static STEP: RefCell<Option<Step>> = const { RefCell::new(None) };
+    }
+
+    pub(crate) fn set(step: Option<Step>) {
+        STEP.with(|s| *s.borrow_mut() = step);
+    }
+
+    pub(crate) fn at(name: &str, dir: &Path) {
+        STEP.with(|s| {
+            if let Some(f) = s.borrow().as_ref() {
+                f(name, dir)
+            }
+        });
+    }
+}
+
 /// What was made: the lane's branch, the one it was made from (a short commit when the folder was detached), the folder the
 /// lane works in, and the worktree's own folder, which names the lane to the shell when it goes. `dir` is the worktree, or
 /// the folder inside it that matches the developer's (a lane started in `apps/web` of a repository works in `apps/web` of
@@ -274,6 +301,12 @@ pub(crate) struct Git {
 /// `core.protectHFS` and `.protectNTFS` (a checkout's guard against names that write into `.git`), and a
 /// `submodule.<name>.update` that names a command (`!`). `docs/code-editor.md` has each family's decision.
 ///
+/// Item 118 (fourth security review, 26 Nov 2026): every `include.*` and `includeIf.*` key. An include can hold only where a
+/// condition holds (`onbranch:`, `gitdir:`, `gitdir/i:`, `hasconfig:remote.*.url:`), and the read lists only the include's own
+/// key wherever it does not, so a file that names a filter only on a lane's branch or in a lane's git folder was hidden from
+/// the read made in the developer's folder. The app cannot read what an included file would say in every folder git runs in,
+/// so any include stops automatic work, whatever its condition.
+///
 /// What the app's own runs switch off instead is not listed: hooks (`core.hooksPath`), `core.fsmonitor`, an external diff and
 /// a text conversion (`--no-ext-diff --no-textconv` on every diff), a signature check's `gpg.program`
 /// (`--no-verify-signatures` on the pull's one write), a configured fetch refspec (`--refmap=` on the fetch), and a pager or
@@ -295,6 +328,8 @@ fn runs_or_redirects(key: &str, value: &str) -> bool {
         "core" => !sub && matches!(name, "sshcommand" | "gitproxy" | "askpass" | "alternaterefscommand" | "protecthfs" | "protectntfs"),
         // every key of these: each says where a fetch goes, what it trusts or what it sends, or is a program
         "credential" | "url" | "ssh" | "protocol" => true,
+        // another file of settings, read only where its condition holds (item 118)
+        "include" | "includeif" => true,
         // and every http key but the few that only pace a transfer (`HTTP_PACING`): a repository often has one of those set
         // for a large push, and it sends a fetch nowhere else and changes nothing it trusts or sends
         "http" => !HTTP_PACING.contains(&name),
@@ -309,7 +344,8 @@ fn runs_or_redirects(key: &str, value: &str) -> bool {
 /// (`scoped`: each entry is its scope, then `key\nvalue`) or of `git config --list --local --includes -z` (every entry the
 /// repository's own). Only the repository's own scopes count (`local`, `worktree`, and the files they include): the person's
 /// global and system settings are theirs, and run in their terminal too. A subsection that is an address (`url.<base>`,
-/// `credential.<url>`) is shown as `*`, since it can hold a token, and the rest passes the one masker.
+/// `credential.<url>`, `http.<url>`) or a condition that can hold one (`includeif.hasconfig:remote.*.url:<address>`) is shown
+/// as `*`, since it can hold a token, and the rest passes the one masker.
 pub(crate) fn risky_setting(listing: &str, scoped: bool) -> Option<String> {
     risky_by(listing, scoped, runs_or_redirects)
 }
@@ -338,7 +374,7 @@ fn risky_by(listing: &str, scoped: bool, risky: fn(&str, &str) -> bool) -> Optio
         if risky(key, value) {
             let lower = key.to_ascii_lowercase();
             let shown = match lower.split_once('.') {
-                Some((section @ ("url" | "credential" | "http"), rest)) if rest.contains('.') => format!("{section}.*.{}", rest.rsplit('.').next().unwrap_or("")),
+                Some((section @ ("url" | "credential" | "http" | "includeif"), rest)) if rest.contains('.') => format!("{section}.*.{}", rest.rsplit('.').next().unwrap_or("")),
                 _ => key.to_string(),
             };
             return Some(tasks::mask_secrets(&shown));
@@ -527,6 +563,14 @@ impl Git {
     /// elsewhere, or None: [`config_risk_by`], through this runner.
     pub(crate) fn config_risk(&self, cwd: &Path) -> Option<String> {
         config_risk_by(&|args: &[&str]| self.run(cwd, args).ok(), cwd)
+    }
+
+    /// [`Git::config_risk`] for a lane's folder `wt`, and then the repository's own config as git reads it in its common git
+    /// folder `repo`, where the app lists worktrees and removes a lane's folder and branch (item 118). There git reads the
+    /// developer's folder's own worktree config (`extensions.worktreeConfig`), which the lane's read does not see. A git folder
+    /// has no work tree, so its submodules are the ones read with `wt`.
+    pub(crate) fn lane_config_risk(&self, wt: &Path, repo: &Path) -> Option<String> {
+        self.config_risk(wt).or_else(|| listing_risk(&|args: &[&str]| self.run(repo, args).ok(), None, runs_or_redirects))
     }
 
     /// `git -C <cwd> <args>`, at most `limit`.
@@ -984,7 +1028,10 @@ pub fn make(home: &Path, cwd: &Path, names: &[String]) -> Result<Made, String> {
 /// made, checked out, counted or fetched while the repository's own config, or a submodule's, names a program git would run
 /// or another address to fetch from. `git worktree add` runs a smudge filter as it checks the files out, the count of what
 /// did not come along a clean filter, and a start from the remote an `ext::` address or a proxy. The answer is then
-/// `config:<setting>`, the setting named as the automatic pull names it.
+/// `config:<setting>`, the setting named as the automatic pull names it. The folder is then added with nothing checked out,
+/// its config read again from inside it, and only then checked out ([`check_out_alone`], item 118): a condition in the config
+/// is tested where it would hold, and a setting written in between is seen. What that read finds takes the folder, its branch
+/// and its record back, with the same answer.
 pub fn make_with(home: &Path, cwd: &Path, names: &[String], start: &Start) -> Result<Made, String> {
     if names.is_empty() || names.len() > NAMES_MAX || !names.iter().all(|n| valid_name(n)) {
         return Err("bad_name".into());
@@ -1082,10 +1129,27 @@ pub fn make_with(home: &Path, cwd: &Path, names: &[String], start: &Start) -> Re
             return Err("no_folder".into());
         };
         let wt_s = wt.to_string_lossy().into_owned();
-        let ran = git.run_for(cwd, &["worktree", "add", "--no-track", "-b", name, &wt_s, &at], SLOW);
+        // with nobody there the folder is added with nothing checked out (item 118): its config is read again from inside it
+        // below, before git writes a file through a filter
+        let mut add = vec!["worktree", "add", "--no-track", "-b", name, &wt_s, &at];
+        if start.unattended {
+            add.insert(2, "--no-checkout");
+        }
+        let ran = git.run_for(cwd, &add, SLOW);
+        #[cfg(test)]
+        between::at("added", &wt);
         // a step after the checkout may fail the command (or a slow one be stopped): what matters is whether the folder is
         // there, on the lane's branch
         if git_branch::branch(&wt) == *name {
+            if start.unattended {
+                if let Err(e) = check_out_alone(&git, &wt) {
+                    // the folder, its branch and its record were made a moment ago and hold nothing of anyone's
+                    if undo_make(&git, cwd, &wt, name, &at) {
+                        let _ = fs::remove_file(&rec_path);
+                    }
+                    return Err(e);
+                }
+            }
             let inner = wt.join(&prefix);
             let dir = if prefix.is_empty() || !inner.is_dir() { wt.clone() } else { inner };
             // the one exception to "the committed tree only": the project's own agent settings, each kept out of git
@@ -1112,6 +1176,22 @@ pub fn make_with(home: &Path, cwd: &Path, names: &[String], start: &Start) -> Re
     Err("taken".into())
 }
 
+/// The checkout of a lane made with nobody there (item 118), in the folder `wt` that `git worktree add --no-checkout` just made:
+/// the config is read again from inside it, where the lane's branch and git folder are what an `includeIf` condition tests and
+/// whatever was written to the shared config since the first read shows, and only then are its files written, by the command
+/// `git worktree add` runs for its own checkout (`reset --hard --no-recurse-submodules --quiet` in the new folder, which holds
+/// nothing yet; seen with `GIT_TRACE` on git 2.54). Err is `config:<setting>`, or git's own line.
+fn check_out_alone(git: &Git, wt: &Path) -> Result<(), String> {
+    if let Some(setting) = git.config_risk(wt) {
+        return Err(format!("config:{setting}"));
+    }
+    let ran = git.run_for(wt, &["reset", "--hard", "--no-recurse-submodules", "--quiet"], SLOW)?;
+    if ran.code != Some(0) {
+        return Err(tasks::error_line(&ran.err));
+    }
+    Ok(())
+}
+
 /// Takes back a lane's folder that git could not finish making: the folder, when git made one, and the branch, while it is
 /// still where it was made and on no folder. Both are the app's own, made a moment ago with nothing of anyone's in them.
 /// True when nothing of it is left, so its record can go too.
@@ -1123,6 +1203,8 @@ fn undo_make(git: &Git, cwd: &Path, wt: &Path, name: &str, at: &str) -> bool {
             // a folder git does not list as its worktree is not one this call made: it stays, and so does its record
             return false;
         }
+        // `--force` also skips git's own check that the folder is clean, which runs `git status` inside it (and so any clean
+        // filter its config names): this folder was made a moment ago, by this call (checked with git 2.54, item 118)
         let gone = git.run_for(cwd, &["worktree", "remove", "--force", &wt_s], SLOW).map(|r| r.code == Some(0)).unwrap_or(false);
         if !gone {
             return false;
@@ -1295,8 +1377,9 @@ pub fn release(home: &Path, worktree: &str, pushed: bool) -> Result<Released, St
         }
         let keep = |code: &str, changed: Option<u32>, unpushed: Option<u32>| Ok(Released { removed: false, kept: Some(code.into()), changed, unpushed, ignored: Vec::new() });
         // a clean-up is the app's own doing: nothing runs in a repository whose config names a program (a clean filter
-        // `status` and `git worktree remove` would run)
-        if git.config_risk(&wt).is_some() {
+        // `status` and `git worktree remove` would run), read in the lane's folder and in the git folder the removal runs in
+        // (item 118)
+        if git.lane_config_risk(&wt, &repo).is_some() {
             return keep("config", None, None);
         }
         // what a submodule holds is not read by itself, so a folder with any is not the clean-up's to remove (item 90)
@@ -1892,6 +1975,11 @@ pub(crate) mod tests {
             ("remote.up.pushurl\nfd::3", "remote.up.pushurl"),
             ("url.https://TOKEN@evil.example/.insteadof\nhttps://github.com/", "url.*.insteadof"),
             ("url./tmp/x.pushinsteadof\ny", "url.*.pushinsteadof"),
+            // another file of settings, whatever its condition (item 118); a condition can hold an address, so it is `*`
+            ("include.path\n../x", "include.path"),
+            ("includeif.onbranch:kit/**.path\nx.conf", "includeif.*.path"),
+            ("includeif.gitdir:**/.git/worktrees/**.path\nx.conf", "includeif.*.path"),
+            ("includeif.hasconfig:remote.*.url:https://ghp_abcdefghijklmnopqrstuvwxyz0123456789@github.com/**.path\nx.conf", "includeif.*.path"),
         ] {
             assert_eq!(risky_setting(&entry("local", kv), true).as_deref(), Some(shown), "{kv}");
             assert_eq!(risky_setting(&entry("worktree", kv), true).as_deref(), Some(shown), "{kv}");
@@ -1901,19 +1989,22 @@ pub(crate) mod tests {
             // a git that cannot say the scope is asked for the local file only
             assert_eq!(risky_setting(&format!("{kv}\0"), false).as_deref(), Some(shown), "{kv}");
         }
-        for kv in ["remote.origin.url\nhttps://github.com/o/r.git", "remote.origin.url\ngit@github.com:o/r.git", "core.hookspath\n.husky", "core.fsmonitor\ntrue", "diff.external\nx", "user.name\nAna", "core.bare\nfalse", "filter.lfs.required\ntrue", "core.sshcommandx\ny", "include.path\n../x"] {
+        for kv in ["remote.origin.url\nhttps://github.com/o/r.git", "remote.origin.url\ngit@github.com:o/r.git", "core.hookspath\n.husky", "core.fsmonitor\ntrue", "diff.external\nx", "user.name\nAna", "core.bare\nfalse", "filter.lfs.required\ntrue", "core.sshcommandx\ny", "includes.path\n../x"] {
             assert_eq!(risky_setting(&entry("local", kv), true), None, "{kv}");
         }
         // the first one found is named, after any number of plain ones
         let listing = format!("{}{}{}", entry("global", "credential.helper\nosxkeychain"), entry("local", "core.bare\nfalse"), entry("local", "core.sshCommand\nx"));
         assert_eq!(risky_setting(&listing, true).as_deref(), Some("core.sshCommand"));
-        // read from a real repository, a setting in a file its config includes counts as its own
+        // read from a real repository: an include stops it (item 118), and a setting in the file it includes still counts as
+        // the repository's own, read with `--includes`
         let Some((home, d)) = repo("config-risk") else { return };
         let git = Git::new(&home).unwrap();
         assert_eq!(git.config_risk(&d), None);
         fs::write(d.join(".git/more.cfg"), "[credential]\n\thelper = store\n").unwrap();
         sh(&d, &["config", "include.path", "more.cfg"]);
-        assert_eq!(git.config_risk(&d).as_deref(), Some("credential.helper"));
+        assert_eq!(git.config_risk(&d).as_deref(), Some("include.path"));
+        let listed = sh(&d, &["config", "--list", "--show-scope", "--includes", "-z"]);
+        assert_eq!(risky_setting(&listed.replace("local\0include.path\nmore.cfg\0", ""), true).as_deref(), Some("credential.helper"));
         let _ = fs::remove_dir_all(home);
     }
 
@@ -2074,6 +2165,114 @@ pub(crate) mod tests {
         let _ = fs::remove_dir_all(home);
     }
 
+    /// A smudge and clean filter `spy` for every `.txt` (`info/attributes`, which every worktree of `d` shares), defined in
+    /// `d/.git/spy.conf`, a file nothing includes yet. The filter notes that it ran in `home/ran`.
+    fn filter_in_a_file(home: &Path, d: &Path) -> PathBuf {
+        let (script, marker) = spy(home, "smudge", false);
+        let attrs = d.join(".git/info/attributes");
+        fs::create_dir_all(attrs.parent().unwrap()).unwrap();
+        fs::write(&attrs, "*.txt filter=spy\n").unwrap();
+        fs::write(d.join(".git/spy.conf"), format!("[filter \"spy\"]\n\tsmudge = {script}\n\tclean = {script}\n")).unwrap();
+        marker
+    }
+
+    /// Item 118 (fourth security review, 26 Nov 2026). A repository's config can include another file only where a condition
+    /// holds (`includeIf`): on a branch named like a lane's, in a git folder under `worktrees/`. Read in the developer's folder,
+    /// where it does not hold, the config listed only the include's own key, and a lane made with nobody there then ran the
+    /// filter that file names while it checked its files out. Every include in the repository's own scopes now stops work the
+    /// app starts by itself, whatever its condition: the app cannot read what the file would say in every folder git runs in.
+    #[test]
+    fn an_include_in_the_repository_s_config_stops_work_with_nobody_there_whatever_its_condition() {
+        let Some((home, d)) = repo("include") else { return };
+        let unattended: Start = serde_json::from_value(serde_json::json!({ "unattended": true })).unwrap();
+        let marker = filter_in_a_file(&home, &d);
+        let ran = || fs::read_to_string(&marker).unwrap_or_default();
+        sh(&d, &["remote", "add", "origin", "https://example.invalid/o/r.git"]);
+        for (key, named) in [
+            // true only in the lane: its branch, its git folder (as written, and with letter case ignored)
+            ("includeIf.onbranch:kit/**.path", "includeif.*.path"),
+            ("includeIf.gitdir:**/.git/worktrees/**.path", "includeif.*.path"),
+            ("includeIf.gitdir/i:**/.GIT/WORKTREES/**.path", "includeif.*.path"),
+            // true in both folders, and an include with no condition
+            ("includeIf.hasconfig:remote.*.url:https://example.invalid/**.path", "includeif.*.path"),
+            ("include.path", "include.path"),
+        ] {
+            sh(&d, &["config", key, "spy.conf"]);
+            assert_eq!(Git::automatic(&home).unwrap().config_risk(&d).as_deref(), Some(named), "{key}");
+            let got = make_with(&home, &d, &names(&["kit/nightly"]), &unattended);
+            assert_eq!(got, Err(format!("config:{named}")), "{key}");
+            assert!(!marker.exists(), "{key}: a program ran: {}", ran());
+            assert_eq!(sh(&d, &["branch", "--list", "kit/*"]), "", "{key}: a branch was made");
+            assert!(!home.join(".manut/lanes/web-app/nightly").exists() && !home.join(".manut/lanes/web-app/nightly.json").exists(), "{key}: a folder or its record was made");
+            // the automatic pull stops at it too, before it reads anything else
+            let pulled = crate::git_pull::pull(&home, &d);
+            assert_eq!((pulled.why.as_str(), pulled.setting.as_str()), ("config", named), "{key}");
+            sh(&d, &["config", "--unset", key]);
+        }
+        // the person's own includes are theirs, as every global or system setting is
+        assert_eq!(risky_setting("global\0includeif.gitdir:~/work/.path\n~/.gitconfig-work\0", true), None);
+        assert_eq!(risky_setting("system\0include.path\n/etc/more\0", true), None);
+        let _ = fs::remove_dir_all(home);
+    }
+
+    /// Item 118: a lane made with nobody there is added with nothing checked out, its config read again from inside the new
+    /// folder (where its branch and its git folder are the ones a condition tests, and where anything written to the shared
+    /// config since the first read shows), and only then checked out, as `git worktree add` itself checks out. What that read
+    /// finds takes the folder, its branch and its record back, and the answer names the setting.
+    #[test]
+    fn a_lane_made_with_nobody_there_reads_the_config_again_from_inside_its_folder_before_any_file_is_written() {
+        let Some((home, d)) = repo("second-read") else { return };
+        let unattended: Start = serde_json::from_value(serde_json::json!({ "unattended": true })).unwrap();
+        let marker = filter_in_a_file(&home, &d);
+        // written to the repository's config after the first read, as an agent in another lane could write it at any time
+        let plant = d.clone();
+        between::set(Some(Box::new(move |step, _| {
+            if step == "added" {
+                sh(&plant, &["config", "include.path", "spy.conf"]);
+            }
+        })));
+        let got = make_with(&home, &d, &names(&["kit/nightly"]), &unattended);
+        between::set(None);
+        assert_eq!(got, Err("config:include.path".to_string()));
+        assert!(!marker.exists(), "a program ran: {}", fs::read_to_string(&marker).unwrap_or_default());
+        assert_eq!(sh(&d, &["branch", "--list", "kit/*"]), "", "the branch stayed");
+        assert!(!home.join(".manut/lanes/web-app/nightly").exists() && !home.join(".manut/lanes/web-app/nightly.json").exists());
+        assert_eq!(sh(&d, &["worktree", "list", "--porcelain"]).lines().filter(|l| l.starts_with("worktree ")).count(), 1);
+        // with nothing written in between, its files are there as a checkout leaves them, on its own branch
+        sh(&d, &["config", "--unset", "include.path"]);
+        let made = make_with(&home, &d, &names(&["kit/nightly"]), &unattended).unwrap();
+        let wt = Path::new(&made.worktree);
+        assert_eq!((made.branch.as_str(), made.left), ("kit/nightly", 0));
+        assert_eq!(fs::read_to_string(wt.join("a.txt")).unwrap(), "one\n");
+        assert_eq!(fs::read_to_string(wt.join("apps/web/b.txt")).unwrap(), "two\n");
+        assert_eq!(sh(wt, &["status", "--porcelain", "--untracked-files=all"]), "");
+        assert_eq!(sh(wt, &["rev-parse", "HEAD"]), sh(&d, &["rev-parse", "HEAD"]));
+        assert!(!marker.exists());
+        let _ = fs::remove_dir_all(home);
+    }
+
+    /// Item 118: the clean-up removes a lane's folder by running git in the repository's own git folder (`git worktree remove`,
+    /// `git branch`), which reads the developer's folder's own worktree config there (`extensions.worktreeConfig`), not the
+    /// lane's. That config is read too before anything is removed.
+    #[test]
+    fn a_clean_up_reads_the_config_git_reads_where_it_removes_the_folder() {
+        let Some((home, d)) = repo("release-common") else { return };
+        with_origin(&home, &d);
+        let made = pushed_lane(&home, &d, "c");
+        let (script, marker) = spy(&home, "clean", false);
+        sh(&d, &["config", "extensions.worktreeConfig", "true"]);
+        sh(&d, &["config", "--worktree", "filter.spy.clean", &script]);
+        // the lane's own folder does not see it
+        assert_eq!(Git::automatic(&home).unwrap().config_risk(Path::new(&made.worktree)), None);
+        let r = release(&home, &made.worktree, true).unwrap();
+        assert_eq!((r.removed, r.kept.as_deref()), (false, Some("config")), "{r:?}");
+        assert!(Path::new(&made.worktree).join("a.txt").exists());
+        assert!(!marker.exists());
+        sh(&d, &["config", "--worktree", "--unset", "filter.spy.clean"]);
+        assert!(release(&home, &made.worktree, true).unwrap().removed);
+        let _ = fs::remove_dir_all(home);
+    }
+
     #[test]
     fn a_clean_up_never_removes_a_folder_with_submodules_whose_work_it_does_not_count() {
         let Some((home, d)) = repo("sub-release") else { return };
@@ -2160,8 +2359,9 @@ pub(crate) mod tests {
             ("a clean filter in a submodule's own config", Box::new(|| { let m = modules.join("sub"); module(&m); set(&m, "filter.spy.clean", "x"); }), "modules/sub:filter.spy.clean"),
             ("a nested submodule's ssh command", Box::new(|| { let m = modules.join("sub"); module(&m); let n = m.join("modules/inner"); module(&n); set(&n, "core.sshCommand", "x"); }), "modules/sub/modules/inner:core.sshcommand"),
             ("a submodule whose name has a slash", Box::new(|| { let m = modules.join("libs/a"); module(&m); set(&m, "remote.origin.uploadpack", "x"); }), "modules/libs/a:remote.origin.uploadpack"),
-            ("a file a submodule's config includes", Box::new(|| { let m = modules.join("sub"); module(&m); fs::write(m.join("more.cfg"), "[credential]\n\thelper = x\n").unwrap(); set(&m, "include.path", "more.cfg"); }), "modules/sub:credential.helper"),
-            ("a file included only where the submodule is the repository", Box::new(|| { let m = modules.join("sub"); module(&m); fs::write(m.join("more.cfg"), "[filter \"x\"]\n\tsmudge = x\n").unwrap(); set(&m, "includeIf.gitdir:**/modules/sub.path", "more.cfg"); }), "modules/sub:filter.x.smudge"),
+            ("a file a submodule's config includes", Box::new(|| { let m = modules.join("sub"); module(&m); fs::write(m.join("more.cfg"), "[credential]\n\thelper = x\n").unwrap(); set(&m, "include.path", "more.cfg"); }), "modules/sub:include.path"),
+            ("a file included only where the submodule is the repository", Box::new(|| { let m = modules.join("sub"); module(&m); fs::write(m.join("more.cfg"), "[filter \"x\"]\n\tsmudge = x\n").unwrap(); set(&m, "includeIf.gitdir:**/modules/sub.path", "more.cfg"); }), "modules/sub:includeif.*.path"),
+            ("a file included only where a condition the app cannot test holds", Box::new(|| { let m = modules.join("sub"); module(&m); set(&m, "includeIf.onbranch:kit/**.path", "more.cfg"); }), "modules/sub:includeif.*.path"),
             ("a diff driver's program in a submodule", Box::new(|| { let m = modules.join("sub"); module(&m); set(&m, "diff.x.textconv", "x"); }), "modules/sub:diff.x.textconv"),
             ("an external diff in a submodule", Box::new(|| { let m = modules.join("sub"); module(&m); set(&m, "diff.external", "x"); }), "modules/sub:diff.external"),
             ("a fetch sent elsewhere from a submodule", Box::new(|| { let m = modules.join("sub"); module(&m); set(&m, "url.https://x.example/.insteadOf", "https://github.com/"); }), "modules/sub:url.*.insteadof"),

@@ -223,7 +223,8 @@ pub fn read(home: &Path, dir: &str) -> Result<LaneDiff, String> {
     if !ours {
         return Err("not_a_lane".into());
     }
-    if let Some(setting) = git.config_risk(&wt) {
+    // read in the lane's folder, and in the repository's git folder, where the worktree list above ran (item 118)
+    if let Some(setting) = git.lane_config_risk(&wt, &repo) {
         return Err(format!("config:{setting}"));
     }
     let begun = Instant::now();
@@ -488,6 +489,22 @@ mod tests {
         let got = read(&home, &wt.to_string_lossy());
         assert_eq!(got.unwrap_err(), "config:filter.spy.clean");
         assert!(!marker.exists(), "a program ran: {}", fs::read_to_string(&marker).unwrap_or_default());
+        let _ = fs::remove_dir_all(home);
+    }
+
+    /// Item 118 (fourth security review, 26 Nov 2026): the Diff also runs git in the repository's own git folder (to see that
+    /// the lane is still one of its worktrees), where git reads the developer's folder's own worktree config, which the lane's
+    /// read does not see. That config is read too, and an include in the repository's config stops it whatever its condition.
+    #[test]
+    fn the_diff_reads_the_config_of_every_folder_it_runs_git_in() {
+        let Some((home, d, wt)) = lane("ld-common") else { return };
+        sh(&d, &["config", "extensions.worktreeConfig", "true"]);
+        sh(&d, &["config", "--worktree", "filter.spy.clean", "x"]);
+        assert_eq!(read(&home, &wt.to_string_lossy()).unwrap_err(), "config:filter.spy.clean");
+        sh(&d, &["config", "--worktree", "--unset", "filter.spy.clean"]);
+        assert!(read(&home, &wt.to_string_lossy()).is_ok());
+        sh(&d, &["config", "includeIf.onbranch:kit/**.path", "more.conf"]);
+        assert_eq!(read(&home, &wt.to_string_lossy()).unwrap_err(), "config:includeif.*.path");
         let _ = fs::remove_dir_all(home);
     }
 }

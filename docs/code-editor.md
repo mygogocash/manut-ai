@@ -1050,6 +1050,38 @@ What a person sees: a project with any of these in its own `.git/config` is not 
 cleaned up by themselves, and the line names the setting (an address in a subsection shown as `*`). The person's own global
 and system settings, their proxy among them, stay theirs, and a pull in a terminal works as before.
 
+**Includes, and the folder git runs in** (item 118, fourth security review). A repository's config can include another file
+of settings, and `includeIf` includes it only where a condition holds: on a branch with a given name (`onbranch:`), in a git
+folder at a given place (`gitdir:`, `gitdir/i:`), or where a remote has a given address (`hasconfig:remote.*.url:`). git lists
+only the include's own key wherever the condition does not hold, so a file that defined a filter only on a lane's branch, or
+only in a lane's git folder, was invisible to the read made in the developer's folder, and a lane made with nobody there
+then ran it. Now:
+
+- Every `include.*` and `includeIf.*` key in the repository's own scopes stops automatic work, whatever its condition, named
+  `include.path` or `includeif.*.path` (a condition can hold an address, so it is shown as `*`). The app cannot read what the
+  included file would say in every folder git runs in. A submodule's own config is read the same way. The person's own
+  global and system includes stay theirs.
+- A lane made with nobody there is added with nothing checked out (`git worktree add --no-checkout`), its config is read
+  again from inside the new folder, where the lane's branch and git folder are what a condition tests and anything written
+  to the shared config since the first read shows, and only then are its files written, by the command `git worktree add`
+  runs for its own checkout (`git reset --hard --no-recurse-submodules --quiet` in the new, empty folder; seen with
+  `GIT_TRACE` on git 2.54). If that read finds anything, the folder and its branch are taken back (`git worktree remove
+  --force`, which skips git's own clean check and so runs nothing in the folder, then `git branch -D`), its record goes, and
+  the run is skipped with the setting, as before.
+- Every other automatic path was read for a git that runs in a folder other than the one its config was read in. The
+  merged clean-up and a deleted chat's clean-up read the lane's folder, and they remove it by running git in the
+  repository's own git folder (`git worktree remove`, `git branch`), where git reads the developer's folder's own worktree
+  config (`extensions.worktreeConfig`) and the lane's read does not: that git folder's config is now read too
+  (`Git::lane_config_risk`). The lane's Diff lists worktrees there, so it reads it too. The automatic pull runs every
+  command in the folder it read, on the same branch, but its fetch takes up to ten seconds and the config is shared with
+  every lane's agent, so the config is read again just before its one write, beside the folder's cleanliness. The kept
+  list reads each folder it counts in (the developer's, then each lane's), and the main-moved note reads the folder it
+  diffs in, so neither changed. Start from the remote fetches in the developer's folder, which the first read covers.
+
+What a person sees: a project whose own config has any include is not pulled by itself, its merged lanes are not cleaned up,
+its Diff falls back, and a workflow by the clock is skipped, each with the include named, in the words the other settings
+already use.
+
 **Submodules** (item 90). A git that goes into a submodule reads that submodule's own config (`.git/modules/<name>/config`,
 nested ones too) and attributes, which none of the above reached, so a folder someone sent with a submodule whose config names a
 clean filter ran it within a minute of being opened. Two guards now:
@@ -1077,7 +1109,7 @@ main-moved note. Nothing is removed or pulled past because of that: a folder wit
 (`submodules`), Remove never forces it, the automatic pull stops at a checkout with any, and the kept list says so. Elsewhere in
 the same class: a `.git` file that points at another folder, and a bare repository committed inside a project, are read exactly
 as git reads them from the same folder, so the same settings stop the work; `include.path` and `includeIf` are read with
-`--includes`; hooks and the file monitor are switched off by `-c`, which git passes on to every git it starts, a submodule's
+`--includes`, and since item 118 any include stops the work itself (see "Includes, and the folder git runs in"); hooks and the file monitor are switched off by `-c`, which git passes on to every git it starts, a submodule's
 included; the variables that would send git to another repository's files or objects (`GIT_DIR`, `GIT_WORK_TREE`,
 `GIT_INDEX_FILE`, `GIT_OBJECT_DIRECTORY`, `GIT_ALTERNATE_OBJECT_DIRECTORIES`, `GIT_COMMON_DIR`, `GIT_NAMESPACE`) are taken out
 of what git inherits; an alternates file names only where objects are read and runs nothing; and git's own `safe.directory`
@@ -1673,7 +1705,9 @@ runs git as automatic work runs it (`Git::automatic`: no `ext::` remote, never i
 own config and every submodule's (`Git::config_risk`, the same read as "Git the app runs by itself" above). While that names a
 program git would run or another address to fetch from, nothing is made, checked out, counted or fetched: `git worktree add`
 would run a smudge filter as it checks the files out, the count of the developer's files that did not come along a clean
-filter, and Start from the remote an `ext::` address or a proxy. The shell answers `config:<setting>`, no agent starts, and the
+filter, and Start from the remote an `ext::` address or a proxy. Since item 118 the folder is then added with nothing checked
+out and the config read again from inside it before any file is written (see "Includes, and the folder git runs in"). The
+shell answers `config:<setting>`, no agent starts, and the
 run is kept as skipped (`config`) with the setting as its detail; the card says "Did not run: this project's own git settings
 name a program for git to run, or another address to fetch from. The app does not run those by itself while nobody is there;
 press Run now if you trust them." Only a press counts as someone there (`by === "person"`), so any way a run starts later (a
