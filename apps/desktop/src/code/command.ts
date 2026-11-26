@@ -539,7 +539,7 @@ function packageManager(words: string[], where: Where): Verdict {
   }
   // dlx fetches the tool from the registry every time; exec (and bun's x) runs the project's own
   if (sub === "dlx") return v("unknown", say("kit.say.opaque"));
-  if (["exec", "x"].includes(sub)) return at$(tool(words.slice(head), where), head);
+  if (["exec", "x"].includes(sub)) return at$(tool(words.slice(head), where, pm === "npm" ? NPX_FLAGS : undefined), head);
   if (["publish", "deploy"].includes(sub)) return live();
   if (sub === "pack") return v("change", say("kit.say.build"), head);
   // its settings can name the shell every script runs in, so only reading them is a read
@@ -981,7 +981,18 @@ const CHECK_RUNS = new Set([
   "snapshotresolver", "testsequencer", "watchplugins", "exec", "toolexec", "vettool", "overlay", "shellcheck", "pyflakes",
   "customformatter", "customsyntax", "pre", "hostnamebin", "scriptshell", "nodeoptions", "rcfile", "resolvepluginsrelativeto",
   "ldflags", "gccgoflags", "asmflags", "modfile", "overrideini", "basetemp", "preload",
+  // options a runner hands to node for its workers (mocha's `--node-option`, ava's `--node-arguments`, vitest's
+  // `execArgv`), where `--import` and `--require` load a program as `NODE_OPTIONS` would
+  "nodeoption", "nodearguments", "nodeargs", "execargv", "customprovidermodule",
 ]);
+/** Long options only one runner reads this way (another runner's option of the same name is harmless): vitest's diff
+ *  settings, pool and workspace name a module it loads, and its benchmark's JSON is a file it writes. */
+const CHECK_LONG: Record<string, Record<string, "runs" | "writes" | "config" | "loads">> = {
+  vitest: { diff: "loads", pool: "loads", workspace: "config", outputjson: "writes" },
+  jest: { runner: "loads" },
+  // words a package manager hands to a script nobody has read may reach either
+  "": { diff: "loads", pool: "loads", outputjson: "writes", runner: "loads" },
+};
 const CHECK_SENDS = new Set(["pastebin"]);
 /** Options that name what a runner loads: a name of its own (`--reporter=dot`) is fine, a file is a program. */
 const CHECK_LOADS = new Set(["reporter", "reporters", "format", "formatter", "environment", "testenvironment", "ui", "preset", "rules", "sequencer"]);
@@ -997,7 +1008,7 @@ const CHECK_WRITES = new Set([
 const CHECK_SHORT: Record<string, Record<string, "runs" | "writes" | "config" | "loads">> = {
   vitest: { u: "writes", c: "config" },
   jest: { u: "writes", c: "config" },
-  mocha: { r: "runs", R: "loads", u: "loads" },
+  mocha: { r: "runs", R: "loads", u: "loads", n: "runs" },
   pytest: { p: "runs", o: "runs", c: "config" },
   "py.test": { p: "runs", o: "runs", c: "config" },
   eslint: { c: "config", f: "loads", o: "writes" },
@@ -1015,7 +1026,7 @@ const CHECK_SHORT: Record<string, Record<string, "runs" | "writes" | "config" | 
 /** Runners that read `-name` as a long option, as Go's own flags do. */
 const GO_FLAGS = new Set(["go", "actionlint"]);
 const looksLikeSettings = (value: string) =>
-  /(^|[._-])config([._-]|$)|rc(\.[a-z]+)?$|^\.[a-z0-9_-]*rc|^(pyproject\.toml|setup\.cfg|tox\.ini|pytest\.ini|mypy\.ini|ruff\.toml|biome\.jsonc?|t?sconfig.*\.json|jsconfig.*\.json)$/i.test(value.split(/[\\/]/).pop() ?? "");
+  /(^|[._-])(config|workspace)([._-]|$)|rc(\.[a-z]+)?$|^\.[a-z0-9_-]*rc|^(pyproject\.toml|setup\.cfg|tox\.ini|pytest\.ini|mypy\.ini|ruff\.toml|biome\.jsonc?|t?sconfig.*\.json|jsconfig.*\.json)$/i.test(value.split(/[\\/]/).pop() ?? "");
 const namesAFile = (value: string) => /[\\/]/.test(value) || value.startsWith(".") || /\.(c|m)?[jt]sx?$|\.py$/i.test(value);
 
 /** What a check's own options make of it, or null when they leave it a check: an option that loads a program, a settings
@@ -1047,6 +1058,8 @@ function checkOptions(runner: string, args: readonly string[]): Verdict | null {
         if (CHECK_WRITES.has(n)) kind("writes", value);
         if (CHECK_CONFIG.has(n)) kind("config", value);
         if (CHECK_LOADS.has(n)) kind("loads", value);
+        const own = CHECK_LONG[runner]?.[n];
+        if (own) kind(own, value);
         if (go && short[n]) kind(short[n], value);
       }
       continue;
@@ -1062,13 +1075,24 @@ function checkOptions(runner: string, args: readonly string[]): Verdict | null {
   return found;
 }
 
-/** A tool run by name, through npx or a package manager's exec as much as directly. */
-function tool(words: string[], where: Where): Verdict {
-  // npx's own options come before the tool; one that names the package to fetch (`-p`, `--package`, `-c`) runs what
-  // that package holds, not the project's own tool of that name
+/** npx's (and npm exec's) own options that only answer its question about fetching the tool, or say less. npm reads any
+ *  other option before the tool as one of its settings: `--node-options` loads a program into the tool, `--registry`
+ *  fetches the tool from another computer, `--userconfig` and `--script-shell` change what runs. */
+const NPX_FLAGS: ReadonlySet<string> = new Set(["-y", "--yes", "--no", "-q", "--quiet", "-s", "--silent"]);
+
+/** A tool run by name, through npx or a package manager's exec as much as directly. Its runner's own options come before
+ *  the tool, and only those in `flags` are read: any other (`--env-file`, `--shell-mode`, a setting) is not read in
+ *  advance. One that names the package to fetch (`-p`, `--package`, `-c`) runs what that package holds, not the
+ *  project's own tool of that name. */
+function tool(words: string[], where: Where, flags: ReadonlySet<string> = new Set()): Verdict {
   let i = 0;
-  while (i < words.length && words[i].startsWith("-")) i++;
-  if (has(words.slice(0, i), "-p", "--package", "-c", "--call")) return v("unknown", say("kit.say.opaque"));
+  for (; i < words.length && words[i].startsWith("-"); i++) {
+    if (words[i] === "--") {
+      i++;
+      break;
+    }
+    if (!flags.has(words[i])) return v("unknown", say("kit.say.opaque"));
+  }
   if (words.slice(i).some((w) => ["-p", "--package", "-c", "--call"].includes(w) || w.startsWith("--package=") || w.startsWith("--call="))) return v("unknown", say("kit.say.opaque"));
   return i < words.length ? at$(classify(words.slice(i), where), i) : v("unknown", say("kit.say.opaque"));
 }
@@ -1253,9 +1277,9 @@ function classify(words: string[], where: Where): Verdict {
   // xargs adds the words it reads to the program's: options (`--pre=sh`), paths outside the project, anything. What it
   // runs is not known until it runs.
   if (name === "xargs") return v("unknown", say("kit.say.opaque"));
-  if (["npx", "bunx", "pnpx"].includes(name)) {
-    return at$(tool(words.slice(1), where), 1);
-  }
+  // pnpx is `pnpm dlx`, which fetches the tool from the registry every time; bunx's own options are not read here
+  if (name === "pnpx") return v("unknown", say("kit.say.opaque"));
+  if (name === "npx" || name === "bunx") return at$(tool(words.slice(1), where, name === "npx" ? NPX_FLAGS : undefined), 1);
   if (name === "uv" || name === "poetry" || name === "pipenv" || name === "bundle") {
     const sub = words[1];
     if ((sub === "run" || sub === "exec") && words.length > 2) return from(2);

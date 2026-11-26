@@ -231,6 +231,12 @@ program or reaches the network. What it does not understand is `unknown`, and as
   any test or action the list does not know make it no read, and a file it compares with (`-newer`, `-samefile`) is
   checked against the project. A subcommand is read only where its program looks for it: `git stash -m list` is a push
   of the stash, and `docker compose` with its own options before the command asks.
+- **A runner's own options.** npx (and `npm exec`) is read only with `-y`, `--yes`, `--no`, `-q`, `--quiet`, `-s` or
+  `--silent` before the tool: npm reads any other as one of its settings (`--node-options`, `--registry`). `pnpm exec`,
+  `yarn exec`, `bun x` and bunx with any option before the tool ask, and pnpx is `pnpm dlx`, which asks. node itself,
+  `NODE_OPTIONS` and npm's `npm_config_*` in front of a command already asked; a test runner told to hand node options to
+  its workers (mocha's `-n`, ava's `--node-arguments`, vitest's `execArgv`) or to load a module (vitest's `--pool`,
+  `--diff`, `--workspace`, a custom coverage provider; jest's `--runner`) as a file is no check.
 
 `command.hostile.test.ts` holds 170 such lines, each beside the plain line it imitates, which reads as it did.
 

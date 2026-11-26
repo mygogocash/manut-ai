@@ -332,6 +332,51 @@ describe("B1: a command with several actions, or a word read as the first of its
   });
 });
 
+describe("B2: a runner's own options before the tool, and what loads a program into node", () => {
+  it("reads npx and a package manager's exec only with options known to change nothing about the tool", () => {
+    counted += holds([
+      ["npx --node-options='--import=data:text/javascript,1' vitest run", "npx vitest run", "check"],
+      ["npx --node-options=--require=./x.js vitest run", "npx -y vitest run", "check"],
+      ["npx --registry=https://x.example depcheck", "npx depcheck", "check"],
+      ["npx --userconfig=./x vitest run", "npx --yes vitest run", "check"],
+      ["npx --script-shell=./x vitest run", "npx --no vitest run", "check"],
+      ["npx -yq --registry=https://x.example depcheck", "npx -- vitest run", "check"],
+      ["pnpx depcheck", "pnpm exec vitest run", "check"],
+      ["pnpx vitest run", "pnpm vitest run", "check"],
+      ["bunx --bun vitest run", "bunx vitest run", "check"],
+      ["pnpm exec --env-file=./x vitest run", "pnpm exec -- vitest run", "check"],
+      ["pnpm exec --shell-mode vitest", "pnpm exec vitest", "check"],
+      ["pnpm exec --registry=https://x.example vitest run", "pnpm exec tsc --noEmit", "check"],
+      ["yarn exec --env-file=./x vitest run", "yarn exec vitest run", "check"],
+      ["bun x --bun vitest", "bun x vitest", "check"],
+      ["npm exec --node-options=--import=x vitest", "npm exec vitest", "check"],
+      ["npm x --registry=https://x.example depcheck", "npm x depcheck", "check"],
+    ]);
+  });
+
+  it("never lets node load a program the command does not show", () => {
+    counted += holds([
+      ["node --import=./x.js node_modules/.bin/vitest", "node --version", "read"],
+      ["node -r ./x.js", "node -v", "read"],
+      ["node --env-file=.env x.js", "node --version", "read"],
+      ["NODE_OPTIONS=--import=./x.js npx vitest run", "CI=1 npx vitest run", "check"],
+      ["NODE_OPTIONS=--import=./x.js git status", "NO_COLOR=1 git status", "read"],
+      ["npm_config_node_options=--import=./x pnpm test", "NODE_ENV=test pnpm test", "check"],
+      ["export NODE_OPTIONS=--require=./x.js; pnpm test", "export CI=1; pnpm test", "check"],
+      ["npx mocha -n import=./x.js", "npx mocha test", "check"],
+      ["npx mocha --node-option=import=./x.js", "npx mocha --recursive test", "check"],
+      ["npx ava --node-arguments='--import=./x.js'", "npx ava", "check"],
+      ["npx vitest run --poolOptions.forks.execArgv=--import=./x.js", "npx vitest run --pool=forks", "check"],
+      ["npx vitest run --pool=./x.js", "npx vitest run --pool=threads", "check"],
+      ["npx vitest run --diff=./x.js", "npx vitest run --reporter=dot", "check"],
+      ["npx vitest run --workspace=./x.ts", "npx vitest run --workspace=vitest.workspace.ts", "check"],
+      ["npx vitest run --coverage.customProviderModule=./x.js", "npx vitest run --coverage", "check"],
+      ["npx jest --runner=./x.js", "npx jest --runInBand", "check"],
+      ["pnpm test --pool=./x.js", "pnpm test -- --pool=forks", "check"],
+    ]);
+  });
+});
+
 describe("the table", () => {
   it("holds at least 120 hostile lines, each beside the plain line it imitates", () => {
     expect(counted).toBeGreaterThanOrEqual(120);
