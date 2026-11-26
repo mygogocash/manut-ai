@@ -263,7 +263,12 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    written; item 113's check read an indented line under a one-line value differently from a forgiving YAML reader;
    item 112 let jq print the environment. Read a helper's branch, not its report.
    Item 114 merged at 10:25 on 26 Nov, so every finding of the third security read is fixed on the branch (items 112 to
-   115). A fourth read, read-only, started then over the day's merges; its findings are not in yet.
+   115). A FOURTH SECURITY READ, read-only, over the day's merges reported at 11:20: four high, seven medium and several
+   low, each run where it could be. They are items 116 to 118, started at once. Four reads in a row found lines the
+   command reader's lists missed, so item 116 changes its structure: only options named as harmless for a program go
+   without asking. The reader also found most of the rest sound (the lexer, the path checks, skill settings, the phone's
+   decisions, the title run's flags) and its write-ups say what it did not examine. Until 116 to 118 merge, the
+   branch still has those gaps, and the published 0.1.1 has every gap since the first read.
    Item 107 (open in an editor) merged at 11:00. THE GATE DOES NOT RUN THE BROWSER SPECS: on 26 Nov five of them were
    red in CI for hours unseen, because `gate.sh` runs unit tests, the type check and Rust only, and CI's "all shards"
    job reads success when a shard failed. They are repaired (one was real: "Effort" left in English in three
@@ -275,7 +280,8 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    - item 98, a drawing in the chat (`feat/chat-drawing`, Opus, `cc-item98-chat-drawing`): an agent's HTML in a closed
      frame, the safety model first; a no with evidence is an accepted result;
    - item 97, context from one thread to another (`feat/thread-context`, Opus, `cc-item97-thread-context`);
-   - the fourth security read (Opus, read-only, in `cc-review4`).
+   - items 116 to 118, the fourth read's fixes (`fix/dial-reading-4`, `fix/shown-and-masked`, `fix/git-auto-4`, all
+     Opus, worktrees `cc-item116-…` to `cc-item118-…`).
    Next: items 100 and 101; the fourth read's fixes; 78f part 2 (it needs a tailnet and phones to try); and a redeploy
    of dev for the API routes of items 83, 84 and 78b's health answer (all behind flags that are off). The briefs the
    helpers were given are not kept in the repository; each item's row in `docs/plan.md` says what it is.
