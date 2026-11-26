@@ -3574,7 +3574,7 @@ export const en = {
   "prov.version": "Version {v}",
   "prov.foundAt": "Program: {path}",
   "prov.install": "Not installed · install: {cmd}",
-  "prov.installStore": "Not installed · The App Store edition does not install programs: install it yourself, and it is found here",
+  "prov.installStore": "The App Store edition does not install programs: install it yourself, and it is found here",
   "prov.custom": "One of your own agents: its program and arguments are on its entry under Your agents.",
   "prov.name": "Display name",
   "prov.nameHint": "Shown in menus and on its chats instead of {agent}",

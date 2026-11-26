@@ -3539,7 +3539,7 @@ export const ko: Record<Key, string> = {
   "prov.version": "버전 {v}",
   "prov.foundAt": "프로그램: {path}",
   "prov.install": "설치 안 됨 · 설치: {cmd}",
-  "prov.installStore": "설치 안 됨 · App Store 버전은 프로그램을 설치하지 않아요. 직접 설치하면 여기서 찾아요",
+  "prov.installStore": "App Store 버전은 프로그램을 설치하지 않아요. 직접 설치하면 여기서 찾아요",
   "prov.custom": "직접 추가한 에이전트예요. 프로그램과 인수는 내 에이전트의 항목에 있어요.",
   "prov.name": "표시 이름",
   "prov.nameHint": "메뉴와 채팅에서 {agent} 대신 보여요",

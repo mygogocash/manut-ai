@@ -382,8 +382,9 @@ function NewSessionMenu({ onClose, trigger, start }: { onClose: () => void; trig
               {account}
             </span>
           )}
-          {missing && (
-            // whole, on as many lines as it needs; it breaks between its words before it breaks inside one
+          {missing && !!installLine(a.id) && (
+            // whole, on as many lines as it needs; it breaks between its words before it breaks inside one (none in the
+            // App Store edition, whose tooltip says why)
             <span className="ss-as ss-install" data-testid={`session-install-${a.id}`}>
               {installLine(a.id).split(" ").map((word, i) => (
                 <Fragment key={i}>

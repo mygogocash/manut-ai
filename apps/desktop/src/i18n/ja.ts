@@ -3539,7 +3539,7 @@ export const ja: Record<Key, string> = {
   "prov.version": "バージョン {v}",
   "prov.foundAt": "プログラム: {path}",
   "prov.install": "未インストール · インストール: {cmd}",
-  "prov.installStore": "未インストール · App Store 版はプログラムをインストールしません。ご自身でインストールすると、ここで見つかります",
+  "prov.installStore": "App Store 版はプログラムをインストールしません。ご自身でインストールすると、ここで見つかります",
   "prov.custom": "あなたが追加したエージェントです。プログラムと引数は「あなたのエージェント」の項目にあります。",
   "prov.name": "表示名",
   "prov.nameHint": "メニューやチャットで {agent} の代わりに表示します",

@@ -3539,7 +3539,7 @@ export const zh: Record<Key, string> = {
   "prov.version": "版本 {v}",
   "prov.foundAt": "程序：{path}",
   "prov.install": "未安装 · 安装：{cmd}",
-  "prov.installStore": "未安装 · App Store 版不会安装程序：请自行安装，安装后会在这里显示",
+  "prov.installStore": "App Store 版不会安装程序：请自行安装，安装后会在这里显示",
   "prov.custom": "这是你自己添加的代理：它的程序和参数在「你的代理」里它的条目上。",
   "prov.name": "显示名称",
   "prov.nameHint": "在菜单和聊天中代替 {agent} 显示",
