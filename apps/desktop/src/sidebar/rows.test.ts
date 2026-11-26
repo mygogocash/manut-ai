@@ -1,6 +1,7 @@
 // The row marks (item 76): reading a saved record (an older build's, one with a field this build does not know, a broken one), the
 // places a row goes, that an ask always brings a snoozed or settled row back, and what is kept across a restart. Item 94: undo.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { setGateForTests, silencedCount } from "../sound";
 import { actOnRows, applyRow, applyRows, arrange, changedFrom, DAY_MS, finishAll, pickedTime, settleDue, settleRows, type SettleRow, getRowMarks, getRowUndo, markRow, nextWake, parseRowMarks, placeOf, resetRowMarks, restoreRows, ROWS_KEY, setRowMarks, snoozeUntil, sweep, threadRowKey, sessionRowKey, undoRows, UNDO_MS, wakeAll, wakeRows, type RowAction, type RowMark, type RowMarks } from "./rows";
 
 const HOUR = 3_600_000;
@@ -354,5 +355,36 @@ describe("settling by itself (item 94)", () => {
     expect(parseRowMarks(JSON.stringify({ [T]: { why: "quiet" } }))).toEqual({});
     expect(parseRowMarks(JSON.stringify({ [T]: { back: 5 } }))).toEqual({ [T]: { back: 5 } });
     expect(parseRowMarks(JSON.stringify({ [T]: { back: 5, pinned: 2 } }))).toEqual({ [T]: { pinned: 2 } });
+  });
+});
+
+// Item 131: Done for now ticks (GoSpark's settle chime). A test run's gate is shut, and counts the sounds it kept quiet, so
+// reaching the gate is how these see the tick.
+describe("the settle tick", () => {
+  const A = threadRowKey("buddy", "a");
+  const B = threadRowKey("buddy", "b");
+  const ticks = (act: () => void) => {
+    const before = silencedCount();
+    act();
+    return silencedCount() - before;
+  };
+  beforeEach(() => {
+    setGateForTests(null);
+    resetRowMarks({});
+  });
+  afterEach(() => setGateForTests(null));
+
+  it("ticks once when the person puts a row away, however many rows, and not again for rows already away", () => {
+    expect(ticks(() => actOnRows([A], { do: "settle" }, "a", 10))).toBe(1);
+    expect(ticks(() => actOnRows([A], { do: "settle" }, "a", 11))).toBe(0);
+    expect(ticks(() => actOnRows([A, B], { do: "settle" }, "two", 12))).toBe(1);
+  });
+
+  it("is quiet for the other things done to a row, and for a row that puts itself away", () => {
+    expect(ticks(() => actOnRows([A], { do: "pin" }, "a", 10))).toBe(0);
+    expect(ticks(() => actOnRows([A], { do: "archive" }, "a", 11))).toBe(0);
+    resetRowMarks({});
+    const due = [{ key: B, action: { do: "autoSettle", why: "merged" } }] as ReturnType<typeof settleDue>;
+    expect(ticks(() => settleRows(due, 20))).toBe(0);
   });
 });
