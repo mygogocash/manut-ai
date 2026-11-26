@@ -353,7 +353,8 @@ function NewSessionMenu({ onClose, trigger, start }: { onClose: () => void; trig
         className={`ss-item${missing ? " off" : ""}`}
         aria-disabled={missing || undefined}
         title={signedOut ? signedOutTip(a.id, label) : (a.path ?? missingNote(a.id))}
-        onClick={() => (missing ? copyInstall(a.id) : pick(a.id))}
+        // a missing agent copies its install line; with none (a person's own agent, the App Store edition) its tooltip says why
+        onClick={() => (missing ? installLine(a.id) && copyInstall(a.id) : pick(a.id))}
         data-testid={`session-agent-${a.id}`}
       >
         <span className="ss-ic">

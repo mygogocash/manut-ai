@@ -6,6 +6,7 @@ mod acp_mcp;
 mod agent_chat;
 mod agent_config;
 mod app_menu;
+mod app_store;
 mod appimage;
 mod ask_tool;
 mod buddy_chat;
@@ -1616,15 +1617,19 @@ pub fn run() {
             let _ = w.set_focus();
         }
     }));
-    let app = builder
+    let builder = builder
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_dialog::init())
-        // In-app updates: the page checks the one endpoint in tauri.conf.json, which moves only when the owner publishes
-        // a release, and installs only a build signed with the key whose public half is pinned there (docs/releasing.md).
+        .plugin(tauri_plugin_dialog::init());
+    // In-app updates: the page checks the one endpoint in tauri.conf.json, which moves only when the owner publishes
+    // a release, and installs only a build signed with the key whose public half is pinned there (docs/releasing.md).
+    // The Mac App Store edition leaves it out: the App Store updates that edition, and an app that updates itself is
+    // refused there (Guideline 2.4.5(vii), app_store.rs). Its page asks nothing either (src/sidebar/updater.ts).
+    #[cfg(not(app_store))]
+    let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    let app = builder
         // The process plugin does the restart that follows an update.
-        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         // The app's window keeps to the app's own pages and this computer's addresses, frames included (preview.rs)
         .plugin(app_window_guard())
