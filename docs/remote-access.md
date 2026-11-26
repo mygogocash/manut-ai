@@ -130,7 +130,11 @@ which the repository does not have.
 - **Revisions.** The store's approvals carry none, so the Mac counts them for a phone: 1 when an ask is first shown, one
   more whenever what it shows changes. An Allow or a No on another revision is refused as `changed`, also when the ask
   changed while the person looked at Face ID.
-- **What a phone sees** is masked with `lib/secrets.ts`, the command included (the card masks it too), and shown whole.
+- **What a phone sees** is masked with `lib/secrets.ts`, the command included (the card masks it too), and shown whole. The masker's
+  patterns are `lib/secrets.json`, shared with the shell's `tasks::mask_secrets` and held by one table both run
+  (`lib/secrets.cases.json`): tokens by their prefix, private key blocks, JSON web tokens, credentials in HTTP headers,
+  `password:` and `"password":` values, the password in `scheme://user:pass@host`, quoted `KEY="..."` and `--password value`,
+  each with its name kept so the line still reads (item 113).
   An ask the card marks as needing an app update, or that the person may only pass on to the shop's owner, offers
   nothing; an approval offers at most Allow once and No.
 - **The relay's state.** The API's public `/v1/health` now says `relay: "on"` or `"off"`. After a socket that never came

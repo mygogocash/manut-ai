@@ -46,6 +46,11 @@ describe("a bundle's rules", () => {
     expect(refused).toEqual({ reason: "secret", skill: "deploy", path: "notes.md" });
     expect(JSON.stringify(refused)).not.toContain(KEY);
     expect(skillsPlanRefusal({ title: "Mine", skills: [{ name: "x", files: [{ path: "SKILL.md", text: "api_key=abc123def456" }] }] })?.reason).toBe("secret");
+    // the forms the masker learned in item 113 stop a publish too: a key block, a header, a YAML password, a quoted key
+    for (const text of [`-----BEGIN RSA PRIVATE KEY-----\n${"X".repeat(24)}\n-----END RSA PRIVATE KEY-----`, "Authorization: Bearer abc123def456",
+      "db:\n  password: hunter2\n", 'export API_KEY="abc def"', "postgres://u:hunter2@db.test/x"]) {
+      expect(secretFiles([{ name: "x", files: [{ path: "SKILL.md", text: "Plain." }, { path: "ref.md", text }] }]), text).toEqual([{ skill: "x", path: "ref.md" }]);
+    }
     expect(skillsPlanRefusal({ title: "Mine", skills: [SKILL] })).toBeNull();
     // the whole manifest counts against the pages' size
     const big: SkillEntry = { name: "big", files: [{ path: "SKILL.md", text: "a".repeat(MAX_ARTIFACT_BYTES) }] };
