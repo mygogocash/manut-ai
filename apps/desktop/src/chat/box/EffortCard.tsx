@@ -9,15 +9,15 @@
 // is left out: the Motion board lets only work in progress loop (docs/motion.md). No agent reports a fast mode, so the
 // gold of GoSpark's fast mode is left out too (docs/decisions/132-effort-card.md).
 //
-// A drag shows each stop it crosses (the title follows, and each crossing ticks) and sends the level it lets go on,
-// once, so an agent is not sent every level the knob passed over. A click sends the stop clicked, a key the stop it
-// moves to.
+// A drag shows each stop it crosses (the title follows, and each crossing ticks with item 131's effort sound) and sends
+// the level it lets go on, once, so an agent is not sent every level the knob passed over. A click sends the stop
+// clicked, a key the stop it moves to (and ticks for it).
 import { useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent, type Ref } from "react";
 import "./effort.css";
 import { ChevronRight, Icon, ModelIcon } from "../../ui";
 import { Toggle } from "../../pages/kit";
 import { t } from "../../i18n";
-import { effortTitle, isTop, keyStop, nearestStop, pointerFraction, restingIndex, stopFraction, tickStop } from "./effort";
+import { effortTitle, isTop, keyStep, pointerFraction, restingIndex, stopFraction, stopTracker } from "./effort";
 import type { UltrathinkRow } from "./ultrathink";
 
 export interface EffortCardProps {
@@ -128,28 +128,27 @@ function EffortSlider({
   // the pointer has moved since it went down: from then the knob follows it with no delay. Before that, the jump to
   // where it went down slides, as GoSpark's knob springs to the pointer
   const [moving, setMoving] = useState(false);
-  const dragging = useRef(false);
-  const under = useRef(index);
+  // the drag under way: the stop under the pointer, which ticks as the knob crosses into it (effort.ts)
+  const drag = useRef<ReturnType<typeof stopTracker> | null>(null);
   const at = (e: PointerEvent) => {
     const r = track.current?.getBoundingClientRect();
     return r ? pointerFraction(e.clientX - r.left, r.width) : stopFraction(index, count);
   };
   const follow = (f: number) => {
+    const t = drag.current;
+    if (!t) return;
     setHeld(f);
-    const i = nearestStop(f, count);
-    if (i === under.current) return;
-    under.current = i;
-    onPreview(i);
-    // GoSpark ticks each stop the knob crosses (EffortSlider.swift, about line 1193)
-    tickStop(i, count);
+    const before = t.under;
+    if (t.move(f) !== before) onPreview(t.under);
   };
   const end = (send: boolean) => {
-    if (!dragging.current) return;
-    dragging.current = false;
+    const t = drag.current;
+    if (!t) return;
+    drag.current = null;
     setHeld(null);
     setMoving(false);
     onPreview(null);
-    if (send && under.current !== index) onPick(under.current);
+    if (send && t.under !== index) onPick(t.under);
   };
   const onPointerDown = (e: PointerEvent<HTMLDivElement>) => {
     if (disabled || e.button !== 0) return;
@@ -157,19 +156,15 @@ function EffortSlider({
     e.preventDefault();
     e.currentTarget.focus();
     e.currentTarget.setPointerCapture?.(e.pointerId);
-    dragging.current = true;
-    under.current = index;
+    drag.current = stopTracker(index, count);
     follow(at(e));
   };
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     if (disabled) return;
-    const next = keyStop(e.key, index, count);
+    const next = keyStep(e.key, index, count);
     if (next === null) return;
     e.preventDefault();
-    if (next === index) return;
-    // GoSpark ticks on each step the keys take too (EffortSlider.swift, about line 1211)
-    tickStop(next, count);
-    onPick(next);
+    if (next !== index) onPick(next);
   };
   const p = held ?? stopFraction(index, count);
   return (
@@ -188,7 +183,7 @@ function EffortSlider({
       onKeyDown={onKeyDown}
       onPointerDown={onPointerDown}
       onPointerMove={(e) => {
-        if (!dragging.current) return;
+        if (!drag.current) return;
         setMoving(true);
         follow(at(e));
       }}

@@ -6,11 +6,15 @@ import { createElement } from "react";
 import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DICT, LANGS, setLang } from "../../i18n";
-import { brandColour, defaultEffort, effortTitle, isTop, keyStop, nearestStop, pointerFraction, restingIndex, stopFraction, TRACK_H } from "./effort";
+import { setGateForTests, silencedCount } from "../../sound";
+import { brandColour, defaultEffort, effortTitle, isTop, keyStep, keyStop, nearestStop, pointerFraction, restingIndex, stopFraction, stopTracker, TRACK_H } from "./effort";
 import { keywordAt, settingUltrathink, takesSlashPath, ULTRATHINK_LINE, ultrathinkRow, ultrathinkState } from "./ultrathink";
 import { EffortCard, type EffortCardProps } from "./EffortCard";
 
-afterEach(() => setLang("en"));
+afterEach(() => {
+  setLang("en");
+  setGateForTests(null);
+});
 
 const CLAUDE = ["low", "medium", "high", "xhigh", "max"];
 
@@ -81,6 +85,52 @@ describe("where a drag, a click or a key lands", () => {
     expect(keyStop("End", 1, 5)).toBe(4);
     expect(keyStop("Enter", 1, 5)).toBeNull();
     expect(keyStop("ArrowRight", 0, 0)).toBeNull();
+  });
+});
+
+describe("the stops' sound (item 131's effortTick)", () => {
+  it("ticks once for each stop a drag crosses into, with that stop and the count, and not for a move within one", () => {
+    const ticks: [number, number][] = [];
+    const t = stopTracker(2, 5, (i, n) => ticks.push([i, n]));
+    expect(t.move(stopFraction(2, 5) + 0.05)).toBe(2);
+    expect(t.move(0.7)).toBe(3);
+    expect(t.move(0.74)).toBe(3);
+    expect(t.move(1)).toBe(4);
+    // back across the stop it passed: it ticks again, as GoSpark retriggers its tick
+    expect(t.move(0.75)).toBe(3);
+    expect(t.under).toBe(3);
+    expect(ticks).toEqual([
+      [3, 5],
+      [4, 5],
+      [3, 5],
+    ]);
+  });
+
+  it("ticks for each key step, and not for a key at an end or one the slider leaves alone", () => {
+    const ticks: [number, number][] = [];
+    const tick = (i: number, n: number) => ticks.push([i, n]);
+    expect(keyStep("ArrowRight", 1, 5, tick)).toBe(2);
+    expect(keyStep("End", 2, 5, tick)).toBe(4);
+    expect(keyStep("ArrowRight", 4, 5, tick)).toBe(4);
+    expect(keyStep("Home", 4, 5, tick)).toBe(0);
+    expect(keyStep("Enter", 0, 5, tick)).toBeNull();
+    expect(ticks).toEqual([
+      [2, 5],
+      [4, 5],
+      [0, 5],
+    ]);
+  });
+
+  it("plays through the app's sound by default, which asks its gate first and makes no sound in a test", () => {
+    setGateForTests(false);
+    const t = stopTracker(0, 4);
+    t.move(1 / 3);
+    t.move(2 / 3);
+    t.move(2 / 3 + 0.05);
+    expect(silencedCount()).toBe(2);
+    keyStep("ArrowRight", 2, 4);
+    keyStep("ArrowRight", 3, 4);
+    expect(silencedCount()).toBe(3);
   });
 });
 

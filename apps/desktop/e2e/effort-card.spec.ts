@@ -2,8 +2,8 @@
 // in GoSpark): the chat box's model chip opens the card first, with the level large and the model under it; a drag shows
 // each stop it crosses and sends the level it lets go on; a click and the keys land on a stop; Reset goes back to the
 // default; the title opens the model list as the card's second view and Back or a pick returns; at the top level the
-// title and the track take the provider's colour; and a Claude Code chat's one-click Ultrathink row writes a visible line
-// into the draft and takes it out again. Kit's chat runs on the stand-in coding agent of src/sessions/host.mock.ts, as
+// title and the track take the provider's colour; each stop crossed plays item 131's effort sound; and a Claude Code
+// chat's one-click Ultrathink row writes a visible line into the draft and takes it out again. Kit's chat runs on the stand-in coding agent of src/sessions/host.mock.ts, as
 // chat-box.spec.ts's does, and what reaches the agent is read from its calls.
 //
 // EFFORT_SHOTS=<dir> keeps pictures of the card at a low level, at the top level for Claude Code and for Codex, and of
@@ -200,6 +200,65 @@ test("Codex: no Ultrathink row, and its top level is drawn in the ink, as its ma
   await expect(card(page)).toHaveAttribute("data-top", "true");
   await expect(card(page)).toHaveAttribute("data-brand", "ink");
   await expect.poll(() => sentLevels(page)).toEqual(["ultra"]);
+});
+
+test("each stop the knob crosses, and each key step, plays item 131's effort sound once", async ({ page }) => {
+  // a counting AudioContext, as e2e/sounds.spec.ts's: it cannot make a sound, and saying so opens the sound gate
+  await page.addInitScript(() => {
+    const w = window as any;
+    w.__manutFakeAudio = true;
+    w.__started = 0;
+    const param = { setValueAtTime() {}, linearRampToValueAtTime() {}, exponentialRampToValueAtTime() {} };
+    class FakeAudioContext {
+      state = "running";
+      currentTime = 0;
+      destination = {};
+      createOscillator() {
+        return { type: "sine", frequency: param, connect() {}, start() {}, stop() {} };
+      }
+      createGain() {
+        return { gain: { ...param, value: 1 }, connect() {} };
+      }
+      createBuffer(_channels: number, length: number) {
+        return { length, copyToChannel() {} };
+      }
+      createBufferSource() {
+        return { buffer: null, onended: null, connect() {}, start: () => (w.__started += 1), stop() {} };
+      }
+      decodeAudioData(bytes: ArrayBuffer) {
+        return Promise.resolve({ length: bytes.byteLength });
+      }
+      resume() {
+        return Promise.resolve();
+      }
+    }
+    w.AudioContext = FakeAudioContext;
+    w.webkitAudioContext = FakeAudioContext;
+  });
+  await page.reload();
+  await lane(page);
+  const started = () => page.evaluate(() => (window as any).__started as number);
+  await box(page).getByTestId("model-pill").click();
+  await expect(level(page)).toHaveText("High");
+  const before = await started();
+  // a drag from High across Extra High to Max: two stops crossed, two sounds; moving within Max adds none
+  const from = await stopAt(page, 2);
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  const end = await stopAt(page, 4);
+  await page.mouse.move(end.x, end.y, { steps: 8 });
+  await page.mouse.move(end.x + 20, end.y, { steps: 3 });
+  await page.mouse.up();
+  await expect(level(page)).toHaveText("Max");
+  await expect.poll(started).toBe(before + 2);
+  // a key step plays its stop; a key at the end moves nothing and plays nothing
+  await page.keyboard.press("ArrowLeft");
+  await expect(level(page)).toHaveText("Extra High");
+  await expect.poll(started).toBe(before + 3);
+  await page.keyboard.press("Home");
+  await page.keyboard.press("ArrowLeft");
+  await expect(level(page)).toHaveText("Low");
+  await expect.poll(started).toBe(before + 4);
 });
 
 test("pictures of the card and the model list (EFFORT_SHOTS)", async ({ page }) => {

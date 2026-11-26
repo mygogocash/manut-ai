@@ -6,6 +6,7 @@
 // read them directly. Nothing here sends anything: a level reaches the agent only through the caller's `onEffort`, the
 // same path the old segmented control used.
 import { agentIcon } from "../../ui/AgentIcon";
+import { effortTick } from "../../sound";
 
 /** The track's height, and so how far the first and last stops sit in from its ends (GoSpark's `trackHeight`). */
 export const TRACK_H = 34;
@@ -80,9 +81,37 @@ export function brandColour(provider: string | null | undefined): string | null 
   return /^#(fff|ffffff|000|000000)$/.test(only) ? null : only;
 }
 
-/** The sound of a stop crossed: GoSpark ticks once per stop, rising as the knob climbs, and lands an impact on the top
- *  level (`EffortChime.swift`, played at `EffortSlider.swift` lines 1193 and 1211). Item 131 adds `src/sound/` with
- *  `effortTick(index, count)`; until it merges, this is the one place the card calls for a tick, and it plays nothing. */
-export function tickStop(_index: number, _count: number): void {
-  // item 131: effortTick(_index, _count)
+/** A stop's sound: GoSpark ticks once per stop, rising as the knob climbs, and lands an impact on the top level
+ *  (`EffortChime.swift`). Item 131's `effortTick` plays it; it is silent while Settings' effort slider switch is off, and
+ *  its gate keeps every test quiet. */
+export type Tick = (index: number, count: number) => unknown;
+
+/** Follows a drag from the stop it starts on: each move names the stop under the pointer, and a stop the knob has just
+ *  crossed into ticks once, as GoSpark plays its chime where `EffortSlider.swift` sets a new index (about line 1193). A
+ *  move within one stop makes no sound, so a slow drag ticks once a stop. */
+export function stopTracker(start: number, count: number, tick: Tick = effortTick) {
+  let under = start;
+  return {
+    /** The stop under the pointer at `fraction` of the track. */
+    move(fraction: number): number {
+      const i = nearestStop(fraction, count);
+      if (i !== under) {
+        under = i;
+        void tick(i, count);
+      }
+      return under;
+    },
+    get under() {
+      return under;
+    },
+  };
+}
+
+/** Where a key moves the knob from `index`, ticking for the stop it lands on, as GoSpark plays its chime after each
+ *  adjustment by the keys (`EffortSlider.swift`, about line 1211). Null for a key the slider leaves alone; a key at
+ *  either end moves nothing and makes no sound. */
+export function keyStep(key: string, index: number, count: number, tick: Tick = effortTick): number | null {
+  const next = keyStop(key, index, count);
+  if (next !== null && next !== index) void tick(next, count);
+  return next;
 }
