@@ -25,6 +25,7 @@ import { googleRoute } from "./google-connect";
 import { receiveLinearWebhook } from "./inbound";
 import { memoryRoute } from "./memory";
 import { modelAdminRoute } from "./model-gateway";
+import { ACCOUNT_DELETION_PATH, accountRoute } from "./account-deletion";
 import { peopleRoute, queryNamesSession } from "./people";
 import { pilotRoute } from "./pilot";
 import { routinesRoute } from "./routines";
@@ -224,6 +225,9 @@ async function ingressRateGate(request: Request, pathname: string, env: Env, art
   // every try counts before the session is read. Per address, not per person: the deletion ends every session of theirs,
   // so each try needs a sign-in of its own, and only an address is shared by tries from many accounts.
   else if (request.method === "DELETE" && pathname === "/v1/tenant/data") binding = env.TENANT_DELETE_LIMITER;
+  // Deleting one's own account (account-deletion.ts) counts in the same bucket, any method, for the same reasons: it reads
+  // the session and then deletes the person's shops, places and sessions.
+  else if (pathname === ACCOUNT_DELETION_PATH) binding = env.TENANT_DELETE_LIMITER;
   // Any method: the link is a bearer capability, so every probe counts. The
   // owner's two kinds of link share one limit, so probing both doubles nothing.
   else if (pathname.startsWith("/v1/pilot/approvals/") || pathname.startsWith("/v1/pilot/deletions/")) {
@@ -847,6 +851,10 @@ export default {
     const workers = await workersAdminRoute(request, url, env, ctx, () => featureFlags(env));
     if (workers) return workers;
 
+    // A person deleting their own account (account-deletion.ts), with their own signed-in session. Its ingress limit ran
+    // above.
+    const account = await accountRoute(request, url, env);
+    if (account) return account;
     // The people around a shop (people.ts): the operator's routes, under the admin gate above, the owner's own from the
     // shop's session, and a helper's own joining and opening the shop on another device, which need a signed-in session.
     const people = await peopleRoute(request, url, env, ctx);

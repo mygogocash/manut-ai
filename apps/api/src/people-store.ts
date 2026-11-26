@@ -454,21 +454,14 @@ const OPERATIONS: Readonly<Record<string, Operation>> = {
 
   /// `{ helperId, actor }`: the owner removes a helper (`rules.removeHelper`): every session of theirs ends in this same
   /// write, their pending invites and their cover go, and their decisions are refused from now on.
-  "POST /people/remove": (record, body, nowMs) => {
-    if (!text(body.helperId)) return refused(400, "invalid_request");
-    const removed = rules.removeHelper(record.state, body.helperId);
-    if (!removed.ok) return refused(404, removed.refused);
-    const ending = new Set(removed.endSessions);
-    const sessions = Object.fromEntries(Object.entries(record.sessions).map(([hash, session]) =>
-      [hash, session.helperId === body.helperId && ending.has(session.sessionId) && session.endedAt === undefined
-        ? { ...session, endedAt: nowMs } : session]));
-    return {
-      answer: { status: 200, body: { removed: body.helperId, sessionsEnded: removed.endSessions.length,
-        invitesRevoked: removed.revokedInvites, coverEnded: removed.coverEnded } },
-      next: { ...record, state: removed.state, sessions },
-      audit: entry(body.actor, SYSTEM, "helper.removed", { helperId: body.helperId }),
-    };
-  },
+  "POST /people/remove": (record, body, nowMs) => removal(record, body, nowMs, body.actor, "helper.removed"),
+
+  /// `{ helperId }`: a helper leaves the shop because they deleted their own account (item 124, account-deletion.ts). It is
+  /// the owner's removal in every way, sessions, invites, cover and later decisions alike, logged as the helper's own doing
+  /// (`helper.left`). Nothing else of the shop's changes: the name the owner gave them stays, so the shop's log can still say
+  /// who did what.
+  "POST /people/leave": (record, body, nowMs) =>
+    removal(record, body, nowMs, text(body.helperId) ? { kind: "helper", id: body.helperId } : undefined, "helper.left"),
 
   /// `{ helperId, until, actor }`: the owner is away until `until` (ms), and one current helper covers
   /// (`rules.setAway`). Cover adds no power: approval-core decides with the same rule whoever covers.
@@ -578,6 +571,26 @@ const OPERATIONS: Readonly<Record<string, Operation>> = {
     };
   },
 };
+
+/// A helper's removal (`rules.removeHelper`), the owner's or their own leaving: every session of theirs ends in the same
+/// write, their pending invites and their cover go, and their decisions are refused from now on.
+function removal(record: PeopleRecord, body: Record<string, unknown>, nowMs: number, actor: unknown,
+  action: "helper.removed" | "helper.left"): Done {
+  if (!text(body.helperId)) return refused(400, "invalid_request");
+  const helperId = body.helperId;
+  const removed = rules.removeHelper(record.state, helperId);
+  if (!removed.ok) return refused(404, removed.refused);
+  const ending = new Set(removed.endSessions);
+  const sessions = Object.fromEntries(Object.entries(record.sessions).map(([hash, session]) =>
+    [hash, session.helperId === helperId && ending.has(session.sessionId) && session.endedAt === undefined
+      ? { ...session, endedAt: nowMs } : session]));
+  return {
+    answer: { status: 200, body: { removed: helperId, sessionsEnded: removed.endSessions.length,
+      invitesRevoked: removed.revokedInvites, coverEnded: removed.coverEnded } },
+    next: { ...record, state: removed.state, sessions },
+    audit: entry(actor, SYSTEM, action, { helperId }),
+  };
+}
 
 /// The people record of a shop its owner made themselves (docs/several-shops.md, "A shop its owner makes"), and the key it
 /// goes under, for pilot-store.ts to put in the same write as the shop itself: the shop starts with its owner's account

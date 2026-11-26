@@ -471,6 +471,9 @@ const AUDIT_ACTIONS: Readonly<Record<string, (entry: AuditEntry, context: AuditC
   "helper.joined": () => "joined the shop through an invite",
   "helper.session_opened": () => "signed in on another device",
   "helper.removed": (entry, { names }) => `removed ${nameOf(names, entry.subject.helperId) ?? "a helper"}`,
+  // A helper who deleted their own account from the app (docs/pilot-api.md, "Deleting your own account"): the actor is the
+  // helper, so the sentence names them first.
+  "helper.left": () => "deleted their account and left the shop",
   "away.set": (entry, { ownerName, names }) =>
     `set ${nameOf(names, entry.subject.helperId) ?? "a helper"} to cover messages while ${ownerName} is away`,
   "away.cleared": (entry, { names }) => {
@@ -580,6 +583,7 @@ const PEOPLE_CHANGE_ACTIONS: ReadonlySet<string> = new Set([
   "invite.created",
   "invite.revoked",
   "helper.removed",
+  "helper.left",
   "away.set",
   "away.cleared",
   "owner.linked",
