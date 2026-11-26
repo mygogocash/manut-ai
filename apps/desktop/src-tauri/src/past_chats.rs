@@ -68,6 +68,9 @@ pub fn cli_home(home: &Path, agent: &str, account_env: &[(String, String)], env:
     let (var, dir) = match agent {
         "claude" => ("CLAUDE_CONFIG_DIR", ".claude"),
         "codex" => ("CODEX_HOME", ".codex"),
+        // Accounts only (item 101d): their conversations are not read here, `lists` says which agents' are
+        "grok" => ("GROK_HOME", ".grok"),
+        "pi" => ("PI_CODING_AGENT_DIR", ".pi/agent"),
         _ => return None,
     };
     let picked = account_env.iter().find(|(k, _)| k == var).map(|(_, v)| v.clone());
