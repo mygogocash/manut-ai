@@ -209,8 +209,11 @@ describe("the blocks and the card", () => {
     const id = await t.startIn("x");
     t.ss.setHelpers(id, true);
     const before = t.answers(id).length;
+    const unread = t.store.getState().unread[t.ss.chatKey(id)!] ?? 0;
     await t.turn(id, block({ brief: "Do it." }));
     expect(t.answers(id).length).toBe(before);
+    // nothing new to read in the chat but the card
+    expect(t.store.getState().unread[t.ss.chatKey(id)!] ?? 0).toBe(unread);
     expect(t.cards(id)).toHaveLength(1);
   });
 

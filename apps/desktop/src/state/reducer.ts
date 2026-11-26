@@ -46,7 +46,7 @@ import {
   type AppState,
 } from "./types";
 import { activityText, THINKING, THINKING_MAX, parsePlan, answerSoFar, shownText } from "./activity";
-import { hasHelperBlock, streamingHelpers } from "../jobs/helperBlocks";
+import { hasHelperBlock, hideHelperBlocks, streamingHelpers } from "../jobs/helperBlocks";
 import {
   emptyChat,
   shopAskFields,
@@ -312,6 +312,8 @@ function reduceEvent(state: AppState, ev: BridgeEvent, now: number): AppState {
     case "delta":
       return touchChat(state, bot, (c) => patchTurn(c, (t) => askingHelpers({ ...t, streaming: t.streaming + ev.text })));
     case "message": {
+      // a lead lane's answer that was only helper blocks (item 102e): nothing to show, and nothing unread
+      const onlyBlocks = !!state.chats[bot]?.turn?.helpers && !hideHelperBlocks(ev.text);
       const next = touchChat(state, bot, (c) => {
         // the answer came: a steer Hermes took by now runs in this turn or right after it (never dropped by a Stop)
         const read = c.steeredUnread ? consumeSteers(c, c.steeredUnread) : c;
@@ -320,9 +322,9 @@ function reduceEvent(state: AppState, ev: BridgeEvent, now: number): AppState {
         const cleared = patchTurn({ ...acked, steeredUnread: undefined, steerAck: null }, (t) => ({ ...t, streaming: "", cut: undefined }));
         // a lead lane's helper blocks never stay in the answer kept (item 102e): the app has read them for its card. An answer that
         // was only blocks leaves no bubble.
-        const text = c.turn?.helpers ? shownText(c.turn, ev.text) : ev.text;
+        const text = c.turn?.helpers ? hideHelperBlocks(ev.text) : ev.text;
         const exists = cleared.items.some((i) => i.kind === "assistant" && i.id === ev.id);
-        if (!text && c.turn?.helpers && !exists) return cleared;
+        if (onlyBlocks && !exists) return cleared;
         const msg: MessageItem = { kind: "assistant", id: ev.id, ts: now / 1000, text, ...(ev.watch ? { watch: ev.watch } : {}) };
         const slot = answerSlot(cleared);
         const items = exists
@@ -331,7 +333,7 @@ function reduceEvent(state: AppState, ev: BridgeEvent, now: number): AppState {
         return withItems(cleared, items);
       });
       const existed = state.chats[bot]?.items.some((i) => i.kind === "assistant" && i.id === ev.id);
-      return existed ? next : bumpUnread(next, bot);
+      return existed || onlyBlocks ? next : bumpUnread(next, bot);
     }
     case "approval.request":
       return touchChat(state, bot, (c) => {
