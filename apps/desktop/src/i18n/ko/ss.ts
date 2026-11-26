@@ -137,4 +137,7 @@ export const ss: Record<keyof typeof en, string> = {
   "ss.noAsks": "{agent} 자체 설정이 묻지 않고 명령을 실행하고 파일을 바꾸도록 되어 있어 시작하지 않았어요. {agent} 설정에서 Approval mode를 Allowlist로 바꾼 뒤 채팅을 다시 시작하세요.",
   "ss.asksModeSet": "{agent}이(가) 실행 전에 묻지 않는 {mode} 모드여서 Manut AI가 {to}(으)로 바꿨어요.",
   "ss.asksModeKept": "{agent}이(가) 실행 전에 묻지 않는 {mode} 모드에 그대로 있어서 Manut AI는 더 이상 아무것도 보내지 않아요. 이 채팅을 닫고 새로 시작하세요.",
+  // Grok as a chat (item 101b): its own settings that skip asks, and its command that turns them off
+  "ss.noAsksGrok": "{agent} 자체 설정이 묻지 않고 명령을 실행하고 파일을 바꾸도록 되어 있어 시작하지 않았어요. {agent}의 config.toml [ui]에서 permission_mode를 ask로 바꾸고, Claude 설정 파일의 defaultMode가 default나 plan 말고 다른 값이 아닌지 확인한 뒤 채팅을 다시 시작하세요.",
+  "ss.noAsksCommand": "{agent}의 /{cmd}는 확인을 끄기 때문에 Manut AI는 보내지 않아요. 이 명령 없이 메시지를 쓰세요.",
 };
