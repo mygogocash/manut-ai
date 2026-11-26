@@ -20,6 +20,7 @@ import { liveFaceRow } from "./liveFace";
 import { ActivityFallback, CardFallback, RoutineFallback } from "./fallbacks";
 import { PluginAddedCard, RoutineAddedCard } from "../../pages/ChatCards";
 import { ThreadLinkLine, ThreadRouteCard } from "../cards/ThreadNotes";
+import { HelpersAskCard } from "../../jobs/HelpersCard";
 import { BriefNotice, WatchLine } from "../../routines/WatchLine";
 import { t } from "../../i18n";
 import { useBotReady } from "../connect/ready";
@@ -184,6 +185,9 @@ export function Timeline({
         return <ThreadLinkLine item={it} />;
       case "threadRoute":
         return <ThreadRouteCard item={it} />;
+      case "helpersAsk":
+        // a lead lane's Start helpers card (item 102e)
+        return <HelpersAskCard item={it} />;
       case "briefNotice":
         return <BriefNotice bot={bot} />;
       case "system":

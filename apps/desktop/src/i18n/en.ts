@@ -47,6 +47,7 @@ import { google } from "./en/google";
 import { graph } from "./en/graph";
 import { harness } from "./en/harness";
 import { head } from "./en/head";
+import { helpers } from "./en/helpers";
 import { history } from "./en/history";
 import { home } from "./en/home";
 import { id } from "./en/id";
@@ -206,6 +207,7 @@ export const en = {
   ...graph,
   ...harness,
   ...head,
+  ...helpers,
   ...history,
   ...home,
   ...id,

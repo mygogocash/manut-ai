@@ -29,6 +29,7 @@ import type {
   ShopRow,
 } from "../lib/protocol";
 import type { ThreadRow } from "../threads/types";
+import type { HelpersAsk } from "../jobs/helperAsks";
 
 export type PanelTabId = "details" | "terminal" | "schedule" | "worktrees" | "diff" | "runs";
 
@@ -81,6 +82,9 @@ export interface Turn {
   /** The words written between the last tool call and a `clarify` ask: the question's context, which the cut below
    *  would otherwise drop. Held until the ask arrives, then kept as its own row above the card. */
   askNote?: string;
+  /** A lead lane's turn that started with Helpers on in its box (item 102e, src/jobs/): its helper blocks are the app's to read, so
+   *  the chat hides them while the answer streams and takes them out of the answer it keeps (`shownText`). */
+  helpers?: true;
 }
 
 /** One subagent of a fan-out, as its latest event left it. */
@@ -284,6 +288,16 @@ export type ThreadRouteItem = {
   done?: "sent" | "kept";
   error?: string;
 };
+/** A lead lane's Start helpers card (item 102e, src/jobs/HelpersCard.tsx): the round of helper lanes its agent asked for, one
+ *  approval settled once through approval-core (src/jobs/helperAsks.ts). `done`: what became of it here, for the line it collapses
+ *  to. Never saved: after a restart the card is gone and nothing of it starts. */
+export type HelpersAskItem = {
+  kind: "helpersAsk";
+  id: string;
+  ts: number;
+  ask: HelpersAsk;
+  done?: "started" | "notNow" | "gone";
+};
 export type ChatItem =
   | MessageItem
   | ActivityItem
@@ -295,7 +309,8 @@ export type ChatItem =
   | SystemItem
   | BriefNoticeItem
   | ThreadLinkItem
-  | ThreadRouteItem;
+  | ThreadRouteItem
+  | HelpersAskItem;
 export type TimelineItem = ChatItem;
 
 export interface Chat {

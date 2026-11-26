@@ -99,6 +99,14 @@ GoSpark again (at `a7537c80`, the same checkout, 27 Nov 2026) for the helper lan
 ported to TypeScript with their numbers; and their tests (`BuddyBatchingTests`, `BuddyHeadCapTests`, `BuddyReportTests`,
 `BuddyFailureClassTests`, `BuddyBudgetTests`, the tally in `APIKeyToolsTests`), ported case by case as tables in `rules.test.ts`.
 
+GoSpark again (at `a7537c80`, the same checkout, 27 Nov 2026) for the helper blocks (item 102e,
+`apps/desktop/src/jobs/helperBlocks.ts`): Buddy's delegation block parser in `GoGoCode/Models/Buddy.swift`
+(`delegationOutcome`, `streamingOutcome`, `partialDelegations`, `delegatingReply`, `displayText`, `withoutDelegationBlock` and
+`firstDelegationBlock`'s nested fences), ported to TypeScript and made stricter, walked with the fork's own top-level fence walk
+(`hideSplitBlocks`, from Oh My Hermes); its tests (`BuddyDelegationTests`, `BuddyDelegationFenceTests`,
+`BuddyStreamingDelegationTests` and the `delegatingReply` cases of `BuddyHeldBackTests`), ported case by case as tables in
+`helperBlocks.test.ts`; and its `fallbackPolicy`, adapted as the lead's note (`apps/desktop/src/jobs/helperPolicy.ts`).
+
 The Agent Client Protocol's agent registry (Apache-2.0, `agentclientprotocol/registry`, release `v2026.11.26-3667256` at
 commit `36672565f76e7fb9796eb15182e0e14fb9e77c33`) for Settings › Providers › From the ACP registry (item 101c): its
 published `registry.json` is pinned byte for byte in `apps/desktop/src-tauri/acp-registry/` with its `quarantine.json`
