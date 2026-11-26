@@ -150,7 +150,7 @@
   word-break: break-all;
 }
 .ag-card-cmd.missing {
-  color: var(--quiet);
+  color: var(--muted);
 }
 .ag-card .ag-acts {
   justify-content: flex-end;

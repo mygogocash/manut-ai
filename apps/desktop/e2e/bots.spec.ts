@@ -64,7 +64,7 @@ test("rename: pencil, type, Enter saves; the new name shows everywhere and the p
   await field.press("Enter");
   await expect(page.getByTestId("bot-name")).toHaveText("Kami the Helper");
   await expect(page.getByTestId("settings-nav-bot-kami")).toContainText("Kami the Helper");
-  await expect(page.locator(".st-row", { hasText: "Profile ID" })).toContainText("kami"); // the id is unchanged
+  await expect(page.locator(".st-row", { hasText: "Internal name" })).toContainText("kami"); // the id is unchanged
   expect((await callsOf("bots.rename")).map((c) => c.params)).toEqual([{ bot: "kami", name: "Kami   the Helper" }]);
   // the Team page names the member by it, as the sidebar's row did (the member's role follows the name in the same line)
   await page.getByTestId("menu-team").click();

@@ -123,7 +123,7 @@ test("the + menu has one file item and Plugins ›, the plugins open beside it; 
   await page.getByTestId("attach").click();
   const menu = page.getByTestId("attach-menu");
   await expect(menu).toBeVisible();
-  await expect(menu.locator(":scope > [role=menuitem]")).toHaveText([/^Add photos and files.*O$/, /^Plugins›$/]);
+  await expect(menu.locator(":scope > [role=menuitem]")).toHaveText([/^Add photos and files.*O$/, /^Skills and tools›$/]);
   await expect(menu.getByText(/Photos & videos|Paste from clipboard/)).toHaveCount(0);
   expect(await page.getByTestId("attach-file-input").getAttribute("accept")).toBeNull(); // pictures, videos, documents alike
   // the menu slides in 3px: measure once it has settled
@@ -242,11 +242,15 @@ test("send attaches each chip in order, then sends; the bubble shows the files",
   // the files sit under the person's bubble (6px), on its right edge: two pictures side by side, then one
   // compact row per file (icon, name, size)
   const box = (l: import("@playwright/test").Locator) => l.evaluate((e) => e.getBoundingClientRect().toJSON() as DOMRect);
+  // the row and the pictures arrive by moving (docs/motion.md: Rise, Arrive); measure where they come to rest
+  await mine.evaluate((e) =>
+    Promise.all(e.getAnimations({ subtree: true }).filter((a) => a.effect?.getComputedTiming().iterations !== Infinity).map((a) => a.finished)),
+  );
   const bub = await box(mine.locator(".b"));
   const files = mine.getByTestId("sent-files");
   await expect(files).toHaveAttribute("data-grid", "2");
   const [a, b] = await Promise.all((await mine.getByTestId("media-image").all()).map(box));
-  expect(Math.round(a.top - bub.bottom)).toBe(6);
+  expect(a.top - bub.bottom, "the files sit 6px under the bubble").toBeCloseTo(6, 0);
   expect(Math.abs(a.top - b.top)).toBeLessThanOrEqual(1);
   expect(Math.abs(b.right - bub.right)).toBeLessThanOrEqual(1);
   for (const row of await mine.getByTestId("sent-file").all()) {

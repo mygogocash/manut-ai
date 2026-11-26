@@ -450,9 +450,9 @@ body.side-resizing * {
 /* the + in the nav icons' 18px column, so "New session" starts where "Settings" does */
 .ss-start > svg {
   flex: none;
-  width: 18px;
+  width: 16px;
   height: 16px;
-  color: var(--quiet);
+  color: var(--muted);
 }
 .ss-start:hover,
 .ss-start[aria-expanded="true"] {
@@ -515,7 +515,7 @@ body.side-resizing * {
   border-radius: var(--r-sm);
   display: none;
   place-items: center;
-  color: var(--quiet);
+  color: var(--muted);
   background: var(--active-row);
 }
 .ss-row:hover .ss-x,
@@ -579,7 +579,7 @@ body.side-resizing * {
 .ss-head-path {
   flex: 0 1000000000 auto;
   font-size: 11.5px;
-  color: var(--quiet);
+  color: var(--muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -589,7 +589,7 @@ body.side-resizing * {
 .ss-head-st {
   margin-left: 4px;
   font-size: 11.5px;
-  color: var(--quiet);
+  color: var(--muted);
   flex: none;
   display: flex;
   align-items: center;
@@ -782,7 +782,7 @@ body.side-resizing * {
   flex: none;
   font-family: inherit;
   font-size: 11px;
-  color: var(--quiet);
+  color: var(--muted);
 }
 /* a drag onto the open terminal (splitDrag.ts): the half of the pane the drop would fill */
 .split-drop {
@@ -820,11 +820,12 @@ body.split-dragging .xterm {
   width: 20px;
   height: 20px;
   border-radius: var(--r-sm);
-  color: var(--quiet);
+  color: var(--muted);
 }
+/* The set's x at its small size (src/ui/icons.tsx: 12px, a simple shape). */
 .ss-split-x svg {
-  width: 9px;
-  height: 9px;
+  width: 12px;
+  height: 12px;
 }
 .ss-split-x:hover {
   color: var(--ink);
@@ -928,7 +929,7 @@ body.split-dragging .xterm {
   flex: none;
   display: inline-grid;
   place-items: center;
-  color: var(--quiet);
+  color: var(--muted);
   vertical-align: -1px;
 }
 .ss-row.tr.split-focus .tr-split {
@@ -974,7 +975,7 @@ body.split-dragging .xterm {
   width: min(var(--thread-w), calc(100% - 56px));
   margin: 0 auto 6px;
   font-size: 11px;
-  color: var(--quiet);
+  color: var(--muted);
   text-align: center;
   flex: none;
 }
@@ -982,7 +983,7 @@ body.split-dragging .xterm {
   width: min(var(--thread-w), calc(100% - 56px));
   margin: 0 auto 8px;
   font-size: 11.5px;
-  color: var(--quiet);
+  color: var(--muted);
   flex: none;
   display: flex;
   align-items: center;
@@ -1046,7 +1047,7 @@ body.split-dragging .xterm {
 /* a solid shape weighs more than an outline of the same colour: the terminal's takes the quieter gray, so a list of
    terminals is not a column of chips beside the names */
 .ss-view[data-view="terminal"] {
-  color: var(--quiet);
+  color: var(--muted);
 }
 .ss-row:hover .ss-view {
   visibility: hidden;
@@ -1111,7 +1112,7 @@ body.split-dragging .xterm {
 }
 /* a second folder of the same name: its parent, muted, after the name */
 .ss-where {
-  color: var(--quiet);
+  color: var(--muted);
   font-weight: 400;
 }
 /* Rename: the name becomes a field of the same size in the row; the row is not a button meanwhile */
@@ -1182,7 +1183,7 @@ body.split-dragging .xterm {
 /* started: the agent stays where the picker was, quieter, with no chevron and no hover */
 .ss-pick.ro {
   cursor: default;
-  color: var(--quiet);
+  color: var(--muted);
 }
 /* New session: Chat | Terminal beside the agent. Plain words; the picked one is gray, a way the agent lacks is dimmed */
 .ss-way {
@@ -1562,7 +1563,7 @@ body.split-dragging .xterm {
 .tg-chev {
   display: grid;
   place-items: center;
-  color: var(--quiet);
+  color: var(--muted);
 }
 /* a collapsed folder's summary sits on the branch's line, at its right: the folder's name keeps the whole first line */
 .tg-sum {
@@ -1630,7 +1631,7 @@ body.split-dragging .xterm {
   padding: 1px 8px 1px calc(var(--side-x) + 30px);
   font-size: 11px;
   line-height: 16px;
-  color: var(--quiet);
+  color: var(--muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1736,7 +1737,7 @@ body.split-dragging .xterm {
 }
 .tr-dot {
   flex: none;
-  color: var(--quiet);
+  color: var(--muted);
 }
 /* the folder its shell moved to (OSC 7): kept whole before the last line gives way */
 .tr-cwd {
@@ -1847,7 +1848,7 @@ body.split-dragging .xterm {
 .ss-folders .ss-path {
   margin-left: auto;
   font-size: 10.5px;
-  color: var(--quiet);
+  color: var(--muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

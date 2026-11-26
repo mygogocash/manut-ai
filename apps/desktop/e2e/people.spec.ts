@@ -266,7 +266,7 @@ test("People sits under Shop in the Settings list, in its own group, between the
   await page.goto("/");
   await page.getByTestId("nav-settings").click();
   const headings = await page.locator(".st-nav .st-sh").allTextContents();
-  expect(headings.map((h) => h.trim())).toEqual(["Bots", "Shop"]);
+  expect(headings.map((h) => h.trim())).toEqual(["Team members", "Shop"]);
   // the developer pages' one entry comes after the shop's (item 85h)
   const order = await page.locator(".st-nav").evaluate((nav) => [...nav.querySelectorAll("[data-testid]")].map((e) => e.getAttribute("data-testid")));
   expect(order.indexOf("settings-hood")).toBe(order.indexOf("settings-nav-people") + 1);

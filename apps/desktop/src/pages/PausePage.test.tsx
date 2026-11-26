@@ -51,7 +51,8 @@ describe("Pause everyone before it is asked", () => {
   it("offers one button in the top bar, and says what it does and does not do beside the team", async () => {
     const rt = await demoRuntime();
     const html = draw({ kind: "ready", value: await rt.request("team.state", {}) });
-    expect(html).toMatch(/<button[^>]*class="btn danger"[^>]*data-testid="pause-open"[^>]*>Pause everyone<\/button>/);
+    // the Team board's quiet button, not red: pausing can be undone (item 85i)
+    expect(html).toMatch(/<button[^>]*class="btn"[^>]*data-testid="pause-open"[^>]*>Pause everyone<\/button>/);
     expect(html).not.toContain("disabled");
     const side = words(after(html, "pause-side"));
     expect(side).toContain("Pause everyone");
@@ -65,7 +66,7 @@ describe("Pause everyone before it is asked", () => {
 
   it("waits with the button held back while the team's state is being read", () => {
     const html = draw(LOADING);
-    expect(html).toMatch(/<button[^>]*class="btn danger"[^>]*disabled=""[^>]*data-testid="pause-open"/);
+    expect(html).toMatch(/<button[^>]*class="btn"[^>]*disabled=""[^>]*data-testid="pause-open"/);
     expect(html).toContain('aria-busy="true"');
     // the question is never drawn without the state it quotes
     expect(draw(LOADING, { ui: ui({ ask: true }) })).not.toContain('data-testid="pause-dialog"');
@@ -198,7 +199,7 @@ describe("on the connected runtime", () => {
   it("cannot say, so the button stays and the runtime's own \"not yet\" shows when it is pressed, with no question", () => {
     const refusal: Load<TeamState> = { kind: "unavailable", code: "not_yet", message: "Not yet: Connected mode cannot show this for now. It comes in a later version." };
     const idle = draw(refusal);
-    expect(idle).toMatch(/<button[^>]*class="btn danger"[^>]*data-testid="pause-open"/);
+    expect(idle).toMatch(/<button[^>]*class="btn"[^>]*data-testid="pause-open"/);
     expect(idle).not.toContain("disabled");
     const pressed = draw(refusal, { ui: ui({ ask: true, error: "Not yet: Connected mode cannot show this for now. It comes in a later version." }) });
     expect(words(after(pressed, "pause-error"))).toContain("Not yet: Connected mode cannot show this for now. It comes in a later version.");

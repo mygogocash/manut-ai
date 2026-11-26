@@ -8,7 +8,7 @@ import { useStore } from "../state/store";
 import { t } from "../i18n";
 import { setBar, setScope, setSource, useTasks } from "./state";
 import { reviewBadge, shownAccounts, startMePolling, useMeData } from "./me";
-import { ListIcon, SourceMark } from "./marks";
+import { ListIcon } from "./marks";
 import { SOURCES, type TaskSource } from "./types";
 import "./tasks.css";
 
@@ -70,8 +70,10 @@ export function TasksBar() {
       )}
       <span className="tk-bar-src">
         {SOURCES.map((src) => (
+          // On the Code page, an everyday page, a source is named in words and never by its company's logo (item 85i); the
+          // marks stay on Tasks itself, where a developer reads which host a request is on.
           <button key={src} type="button" className="tk-bar-ic" aria-label={t("tasks.openSource", { source: NAME[src] })} title={t("tasks.openSource", { source: NAME[src] })} onClick={() => open(src)} data-testid={`tasks-bar-${src}`}>
-            <SourceMark source={src} />
+            {NAME[src]}
           </button>
         ))}
       </span>

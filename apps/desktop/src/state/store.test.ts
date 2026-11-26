@@ -176,7 +176,7 @@ describe("reducer: a full turn", () => {
       { event: "tool.start", bot: "kami", tool_id: "b1", name: "terminal", detail: "echo one > one.txt" },
       { event: "approval.request", bot: "kami", request_id: "r1", title: "Run this command?", command: "echo one > one.txt", choices: ["once", "deny"] },
     ]);
-    expect(s.chats.kami.turn!.status).toBe("Waiting for approval");
+    expect(s.chats.kami.turn!.status).toBe("Needs you");
     s = reduce(s, { type: "approval.resolved", bot: "kami", request_id: "r1", choice: "once" });
     expect(s.chats.kami.turn!.status).toBe(activityText("terminal", "echo one > one.txt"));
     s = run(s, [{ event: "tool.end", bot: "kami", tool_id: "b1", name: "terminal", ok: true, ms: 5 }]);
@@ -191,7 +191,7 @@ describe("reducer: a full turn", () => {
       { event: "approval.request", bot: "kami", request_id: "r3", title: "Run?", command: "b", choices: ["once", "deny"] },
     ]);
     s = reduce(s, { type: "approval.resolved", bot: "kami", request_id: "r2", choice: "once" });
-    expect(s.chats.kami.turn!.status).toBe("Waiting for approval");
+    expect(s.chats.kami.turn!.status).toBe("Needs you");
     s = reduce(s, { type: "approval.resolved", bot: "kami", request_id: "r3", choice: "deny" });
     expect(s.chats.kami.turn!.status).toBe("");
     // the agent's own status is never rewritten
@@ -309,7 +309,7 @@ describe("reducer: approvals and clarifications", () => {
     let s = run(initialState(), [{ event: "turn.start", bot: "kami" }, approval]);
     const card = s.chats.kami.items.find((i) => i.kind === "approval");
     expect(card).toMatchObject({ request_id: "ap1", command: "rm -rf build" });
-    expect(s.chats.kami.turn!.status).toBe("Waiting for approval");
+    expect(s.chats.kami.turn!.status).toBe("Needs you");
     s = reduce(s, { type: "approval.resolved", bot: "kami", request_id: "ap1", choice: "deny" });
     expect(s.chats.kami.items.find((i) => i.kind === "approval")).toMatchObject({ resolved: "deny" });
   });

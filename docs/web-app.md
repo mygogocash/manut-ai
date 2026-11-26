@@ -29,6 +29,12 @@ else in a real environment. Practice mode shows everything else.
 - **Answered lately**: the newest requests decided or run out, with who and when.
 - **Chat**: chatting with Buddy waits for the model, and the tab says so.
 - **Shops**: each shop, whether the person owns it or helps, what a helper may approve, and Sign out.
+- **Your Mac** (`src/app/mac/`, item 78c, `docs/remote-access.md`): this phone paired with the person's own Mac, with no
+  sign-in, so it shows in the nav before signing in too (Today and Your Mac). The person scans the Mac's code (where the
+  browser can read one) or pastes its link, the phone shows four digits to type on the Mac, and then makes a passkey.
+  Paired, it lists the Mac's chats as Needs you, Working and Done, and a chat shows its messages, its current step and its
+  asks whole, with Allow once (Face ID or the passcode), No, an answer and Stop, and nothing else. It says "not available
+  yet" while the API's `/v1/health` says the relay is off, or when the page is not on the API's own origin.
 
 The web is not told helpers' names, so another helper's decision reads "a helper". What waits is read on opening, every
 minute while the app is in view, when it comes back into view or online, and after each answer.
@@ -69,7 +75,33 @@ itself in `localStorage` or IndexedDB, was weighed and not chosen:
   person's sign-ins. A shop's owner can still end a helper's sessions by removing them, and the operator an owner's by
   unlinking the account.
 - **Nothing else is kept**: no `localStorage`, `sessionStorage`, IndexedDB or cache holds anything of the session or of a
-  request, and no token is ever in a URL. What was read lives in the page's memory until the next read.
+  request, and no token is ever in a URL. What was read lives in the page's memory until the next read. The one exception
+  is Your Mac's pairing, below.
+
+## What Your Mac keeps
+
+This breaks the rule above on purpose (docs/decisions.md, 26 Nov 2026): a pairing that a reload forgot would be no
+pairing. Exactly this is kept, in this origin's IndexedDB, in one database named `manut-mac` (`src/app/mac/vault.ts`):
+
+- **`mac`**, once the Mac said the phone is paired: the Mac's host id (the relay's name for it), this phone's device id,
+  its relay door token (32 bytes), K, the passkey's credential id, the passkey's relying party (this page's host) and when
+  it paired. K is a Web Crypto key made with `extractable: false`, so no script, the page's own included, can read its
+  bytes back; it can only derive a session's keys. The door token is kept as bytes because the relay's hello carries it
+  as text; it opens only the relay's door for this phone, never a session, which needs K.
+- **`spent`**: the door ids of the last 32 pairing codes this phone started, so a code is one try also after a reload. A
+  door id is random and names nothing.
+
+Nothing of a chat is ever kept: chats, asks, messages, answers and the Mac's state live in the page's memory, are dropped
+when the person leaves the tab, and are cleared 15 minutes after the Mac last confirmed them. None of it goes in the
+address (the tab is always `#mac`), a log or a notification, and a pairing link the page was opened with is taken out of
+the address at once.
+
+**Forget this Mac** deletes `mac` and closes the session; `spent` stays, so a code started before is still refused. The
+phone's passkey stays in its passwords (iCloud Keychain, or Google Password Manager) until the person deletes it there,
+under Manut AI's address: a page cannot delete one, and without K and the Mac's record it answers nothing. The Mac keeps
+listing the phone until it is unpaired there, which is what revokes its door on the relay.
+
+Practice mode keeps the pretend Mac's pairing in memory only, so a reload forgets it.
 
 ## What is cached, and what never is
 
@@ -79,7 +111,8 @@ opens offline and says so. Its scope is `/app/`, so it controls no other page.
 - **Cached**: the app's page (`/app/`, from the network first, the kept copy offline), the build's files that page names
   (`/assets/…`, which a newer page replaces), the manifest, the icons, and an offline page (`/app/offline.html`) for when
   even the shell is gone.
-- **Never cached, never answered by the worker**: anything under `/v1/` or `/relay/`, and `/approve/`, `/delete/`,
+- **Never cached, never answered by the worker**: anything under `/v1/` or `/relay/` (the Your Mac tab's relay socket is a
+  WebSocket, which a service worker never sees anyway), and `/approve/`, `/delete/`,
   `/join/` and `/ops`, any request that is not a `GET`, and anything on another origin (the brand's fonts). These go to
   the network exactly as with no worker.
 - **A cached request is never answerable.** No request is ever cached, and the page keeps none past a read. Offline, the
@@ -104,6 +137,11 @@ pretend code 123456 (said on the screen), and a person who owns Baan Mali and he
 whose answers show each outcome: sent, refused by LINE, not sure it was sent, answered first from the LINE link, and
 Ton's books, which a helper sees wait for the owner. approval-core's own store decides each one. `/app/?demo=sign-in-off`
 shows what a real environment shows today. Practice keeps its sign-in in the page's memory, so a reload signs out.
+
+Your Mac in practice pairs with a pretend Mac (`src/app/mac/practice.ts`): any pasted text pairs, the four digits are
+4821 and "Type them for me" stands for typing them at the Mac, the passkey is pretend (the browser is never asked), and
+its three chats answer Allow once, No, an answer and Stop. The phone going offline greys the view.
+`/app/?demo=mac-off#mac` shows the tab as it is wherever the relay is off.
 
 ## Not in it yet
 

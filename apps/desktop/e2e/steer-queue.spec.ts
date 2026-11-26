@@ -1,5 +1,7 @@
-// A message typed in a bot's main chat while the bot answers is steered into the running answer at once (chat.steer,
-// no interrupt), messenger style: a plain sent bubble at the bottom with its read mark, the live dots under it.
+// With Settings' "While an answer is running" on Add it now (item 95; this spec sets it, as every chat did before), a
+// message typed in a bot's main chat while the bot answers is steered into the running answer at once (chat.steer,
+// no interrupt), messenger style: a plain sent bubble at the bottom with its read mark, the live dots under it. The
+// default, Wait for it, and Cmd+Enter for one message are e2e/chat-keys.spec.ts's.
 // Where Hermes refuses the steer (mock.steerMode reject) it waits in manut with the ↵ ↓ × buttons and no text line:
 // ↵ steers it again (or sends it now), ↓ edits, × deletes; untouched, it goes out after the turn, in order.
 // Shots (dark/light, en/ko, 900x600): MANUT_SHOTS=<dir>.
@@ -31,7 +33,8 @@ async function mock(op: string, params: Record<string, unknown> = {}): Promise<a
 const calls = async (op: string) => ((await mock("mock.calls")).calls as { op: string; params: any }[]).filter((c) => c.op === op);
 const sent = async () => (await calls("chat.send")).map((c) => c.params.text as string);
 
-test.beforeEach(async () => {
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem("manut.box.followUp", "steer"));
   await mock("mock.reset");
   await mock("mock.manual", { bot: "kami" });
 });
@@ -54,7 +57,7 @@ const endTurn = (outcome = "done") => mock("mock.endTurn", { bot: "kami", outcom
 const refuse = () => mock("mock.steerMode", { bot: "kami", mode: "reject" });
 const accept = () => mock("mock.steerMode", { bot: "kami", mode: "accept" });
 
-test("default: typed mid-answer it is steered at once (no interrupt), a plain sent bubble at the bottom with Read, the dots under it", async ({ page }) => {
+test("Add it now: typed mid-answer it is steered at once (no interrupt), a plain sent bubble at the bottom with Read, the dots under it", async ({ page }) => {
   await running(page);
   expect(await page.evaluate(() => localStorage.getItem("manut.busySend"))).toBeNull();
   await say(page, "keep the old timeout too");
@@ -80,10 +83,10 @@ test("default: typed mid-answer it is steered at once (no interrupt), a plain se
   expect((await calls("chat.interrupt")).length).toBe(0);
 });
 
-test("there is no setting for it: Settings › General has no While it answers choice", async ({ page }) => {
+test("the choice is Settings › General › Chat box › While an answer is running, here on Add it now", async ({ page }) => {
   await page.goto("/");
   await page.getByTestId("nav-settings").click();
-  await expect(page.getByTestId("set-disk-warn")).toBeVisible();
+  await expect(page.getByTestId("set-follow-up").getByRole("radio", { checked: true })).toHaveText("Add it now");
   await expect(page.getByTestId("busy-send-seg")).toHaveCount(0);
 });
 

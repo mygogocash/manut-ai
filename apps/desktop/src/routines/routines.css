@@ -29,7 +29,7 @@
 .routine-ic {
   width: 12px;
   text-align: center;
-  color: var(--quiet);
+  color: var(--muted);
   font-size: 11px;
   flex: none;
 }
@@ -48,7 +48,7 @@
 }
 .routine-chev {
   display: inline-flex;
-  color: var(--quiet);
+  color: var(--muted);
   flex: none;
   opacity: 0;
 }
@@ -69,7 +69,7 @@
   overflow-wrap: anywhere;
 }
 .routine-k {
-  color: var(--quiet);
+  color: var(--muted);
   flex: none;
 }
 

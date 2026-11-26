@@ -168,3 +168,48 @@ describe("Recent with pinned, settled, snoozed and archived chats", () => {
     expect(asked.settled).toEqual([]);
   });
 });
+
+describe("the Working group (item 94)", () => {
+  const NOW = 10_000;
+  const threads = {
+    buddy: [row("b1", "one", 100, 900), row("b2", "two", 100, 800), row("b3", "three", 100, 700), row("b4", "four", 100, 600), row("b5", "five", 100, 500)],
+  };
+  const key = (t: string) => threadRowKey("buddy", t);
+  const ids = (xs: { thread: string }[]) => xs.map((x) => x.thread);
+  const busy = (...ts: string[]) => (_bot: string, r: { thread: string }) => ts.includes(r.thread);
+
+  it("is empty while it is off, and a working chat stays in Recent", () => {
+    const p = recentParts(threads, ["buddy"], {}, () => false, NOW, 3, { working: busy("b1", "b2") });
+    expect(p.working).toEqual([]);
+    expect(ids(p.recent)).toEqual(["b1", "b2", "b3"]);
+  });
+
+  it("holds the working chats when on, newest first, and the next newest take their places in Recent", () => {
+    const p = recentParts(threads, ["buddy"], {}, () => false, NOW, 3, { working: busy("b1", "b3"), group: true });
+    expect(ids(p.working)).toEqual(["b1", "b3"]);
+    expect(ids(p.recent)).toEqual(["b2", "b4", "b5"]);
+  });
+
+  it("never holds a chat that asks something: it stays in Recent", () => {
+    const p = recentParts(threads, ["buddy"], {}, busy("b1"), NOW, 3, { working: busy("b1", "b2"), group: true });
+    expect(ids(p.working)).toEqual(["b2"]);
+    expect(ids(p.recent)).toEqual(["b1", "b3", "b4"]);
+  });
+
+  it("leaves a pinned, settled or snoozed chat where its mark puts it", () => {
+    const marks = { [key("b1")]: { pinned: 1 }, [key("b2")]: { settled: true as const }, [key("b3")]: { untilDone: 5 } };
+    const p = recentParts(threads, ["buddy"], marks, () => false, NOW, 3, { working: busy("b1", "b2", "b3"), group: true });
+    expect(ids(p.pinned)).toEqual(["b1"]);
+    expect(ids(p.settled)).toEqual(["b2"]);
+    expect(p.working).toEqual([]);
+    expect(ids(p.recent)).toEqual(["b4", "b5"]);
+  });
+
+  it("gives a chat back to the top of Recent when it finishes: its turn's end is its newest activity", () => {
+    // b5 worked; its turn ended now, which the store writes as its last activity (store.ts, turn.end)
+    const after = { buddy: threads.buddy.map((r) => (r.thread === "b5" ? { ...r, last: 1_000 } : r)) };
+    const p = recentParts(after, ["buddy"], {}, () => false, NOW, 3, { working: busy(), group: true });
+    expect(p.working).toEqual([]);
+    expect(ids(p.recent)).toEqual(["b5", "b1", "b2"]);
+  });
+});

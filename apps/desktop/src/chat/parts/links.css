@@ -86,7 +86,7 @@ a.lk-web {
 }
 .lk-bt {
   font-size: 11px;
-  color: var(--quiet);
+  color: var(--muted);
   margin-bottom: 4px;
 }
 .lk-list {
@@ -118,7 +118,7 @@ span.lk.lk-term {
 }
 span.lk.lk-term.gone {
   cursor: default;
-  color: var(--quiet);
+  color: var(--muted);
 }
 /* nothing to open: no underline, no hover */
 span.lk.lk-term.gone .lk-t {
@@ -126,7 +126,7 @@ span.lk.lk-term.gone .lk-t {
 }
 span.lk.lk-term.gone:hover {
   background: none;
-  color: var(--quiet);
+  color: var(--muted);
 }
 .lk-term .lk-term-omh {
   display: inline-block;

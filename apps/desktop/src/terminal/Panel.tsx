@@ -23,6 +23,7 @@ import { isMac } from "../app/shortcuts";
 import { composing } from "../lib/ime";
 import { markPaneClosed } from "../app/menuClose";
 import { fgName, TermRowMark } from "../sessions/TermRowMark";
+import { Icon } from "../ui/icons";
 
 /** The thread view's hook (re-exported from ./state, which loads no terminal code): the open thread's folder. */
 export { setTerminalCwd } from "./state";
@@ -231,12 +232,7 @@ function onPaneKey(e: globalThis.KeyboardEvent): void {
   else equalizePanes(tab.key);
 }
 
-const SplitIcon = () => (
-  <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" aria-hidden="true">
-    <rect x="2" y="2.5" width="12" height="11" rx="1.5" />
-    <path d="M8 2.5v11" />
-  </svg>
-);
+const SplitIcon = () => <Icon name="columns-2" />;
 
 export function TerminalPanel() {
   const s = useStore();
@@ -390,7 +386,7 @@ export function TerminalPanel() {
             );
           })}
           <button type="button" className="termpanel-ib" aria-label={t("termpanel.newTab")} title={t("termpanel.newTab")} data-testid="termpanel-new" onClick={addTerminalTab}>
-            <PlusIcon size={13} />
+            <PlusIcon />
           </button>
         </div>
         <button
@@ -405,7 +401,7 @@ export function TerminalPanel() {
           <SplitIcon />
         </button>
         <button type="button" className="termpanel-ib" aria-label={t("termpanel.hide")} title={t("termpanel.hide")} data-testid="termpanel-hide" onClick={toggleTerminal}>
-          <ChevronDown size={10} />
+          <ChevronDown />
         </button>
       </div>
       <div className="termpanel-bodies">

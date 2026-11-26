@@ -6,6 +6,7 @@
 // read-only too. A chat agent's composer takes files as the bot chat's does (paste, the + menu, a drop on the chat),
 // in a draft too; a file dropped or pasted on a terminal is saved and its path typed at the prompt. A TERMINALS session
 // can split with up to three others on any side (SplitView: ⌘D / ⌘⇧D in its terminal, or a TERMINALS row dragged onto it).
+import { useLimitOffer, WaitingRow } from "../chat/box/LaterRows";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { getStore, selectAsks, useStore, type Chat, type OutFile } from "../state/store";
 import { useResolvedTheme } from "../app/theme";
@@ -15,7 +16,7 @@ import { CheckIcon } from "../chat/model/CheckIcon";
 import "../chat/model/model.css";
 import { ArrowUp, ChatIcon, ChevronDown, Popover, TerminalIcon } from "../ui";
 import { composing } from "../lib/ime";
-import { modesOf, queueOff, usageText } from "./controls";
+import { modesOf, queueOff, steersOf, usageText } from "./controls";
 import { ModelMenu } from "../chat/box/ModelMenu";
 import { ApprovalMenu, DialRows } from "../chat/box/ApprovalMenu";
 import { DEFAULT_KIT_LEVEL, KIT_LEVELS } from "@manut/member-grants";
@@ -52,6 +53,7 @@ import { TermShareCards } from "./TermShareCard";
 import { LanePane } from "../code/LanePane";
 import { LaneReview } from "../code/Review";
 import { isLaneChat } from "../code/laneStore";
+import { Icon } from "../ui/icons";
 
 const STATUS: Record<string, Key> = { starting: "ss.starting", running: "ss.running", exited: "ss.ended", failed: "ss.couldNotStart" };
 
@@ -180,6 +182,7 @@ function ChatPane({ rec, chatKey }: { rec: SessionRec; chatKey: string }) {
   const commands = ss.live[rec.id]?.commands?.length ? ss.live[rec.id]!.commands : undefined;
   // the agent's predicted next message, when the person turned suggestions on and this agent can give one (lib/suggest.ts)
   const suggestion = useSuggestion(chatKey);
+  const limitOffer = useLimitOffer(chatKey, rec);
   return (
     <div className="pane ss-chat" data-pane={chatKey} data-testid="session-chat">
       <Timeline
@@ -191,6 +194,8 @@ function ChatPane({ rec, chatKey }: { rec: SessionRec; chatKey: string }) {
       />
       {rec.paused ? <Paused rec={rec} /> : ended && <Ended rec={rec} />}
       <OwnApprovals agent={rec.agent} />
+      {/* a message kept to send when this chat's account resets (item 95) */}
+      <WaitingRow chatKey={chatKey} />
       <Composer
         key={chatKey}
         bot={bot}
@@ -200,11 +205,17 @@ function ChatPane({ rec, chatKey }: { rec: SessionRec; chatKey: string }) {
         offlineText={offlineText}
         suggestion={suggestion}
         onSuggestionTaken={() => clearSuggestion(chatKey)}
-        onSend={(t) => {
+        onSend={(t, how) => {
           clearSuggestion(chatKey);
-          void getSessions().send(rec.id, t);
+          void getSessions().send(rec.id, t, how);
         }}
-        onSendFiles={takesFiles ? (t, files) => (clearSuggestion(chatKey), getSessions().sendFiles(rec.id, t, files)) : undefined}
+        onSendFiles={takesFiles ? (t, files, how) => (clearSuggestion(chatKey), getSessions().sendFiles(rec.id, t, files, how)) : undefined}
+        // only the agents with a mid-turn input of their own take a message into a running answer (controls.ts STEERS)
+        steers={steersOf(rec.agent)}
+        // a coding chat holds a message typed mid-answer until the person picks otherwise (chat/box/keys.ts FOLLOW_UP_USUAL)
+        boxKind="code"
+        // its account at its limit: Send at the reset keeps what is typed (chat/box/later.ts)
+        limit={limitOffer}
         onStop={() => void getSessions().interrupt(rec.id)}
         commands={commands}
         // Add context: a folder is named by its path (the dial reads one outside the project as blocked, with Allow this
@@ -250,17 +261,9 @@ function LaneSplit({ rec, chatKey, chat }: { rec: SessionRec; chatKey: string; c
   );
 }
 
-const HomeIcon = ({ size = 14 }: { size?: number }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" aria-hidden="true">
-    <path d="M4 10.5 12 4l8 6.5V19a1 1 0 0 1-1 1h-4.5v-5.5h-5V20H5a1 1 0 0 1-1-1z" />
-  </svg>
-);
+const HomeIcon = () => <Icon name="home" />;
 
-const FolderIcon = ({ size = 13 }: { size?: number }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
-    <path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4.4l2 2h8.6A1.5 1.5 0 0 1 21 9.5v8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z" />
-  </svg>
-);
+const FolderIcon = () => <Icon name="folder" />;
 
 /** A person's own agent (Settings › Agents): one quiet line, once per session view, that its approval cards are the
  *  ones the agent itself asks for. manut cannot add asks to an agent it does not know. */
@@ -388,7 +391,7 @@ function Context({ rec, account }: { rec: SessionRec; account?: string }) {
               {recent.length > 0 && <div className="ss-sep" />}
               <button type="button" className="ss-item" onClick={() => void choose()} data-testid="session-choose">
                 <span className="ss-ic">
-                  <FolderIcon size={14} />
+                  <FolderIcon />
                 </span>
                 <span className="ss-n">{t("sessions.choose")}</span>
               </button>
@@ -412,14 +415,7 @@ function Context({ rec, account }: { rec: SessionRec; account?: string }) {
   );
 }
 
-const BranchIcon = () => (
-  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
-    <circle cx="6" cy="5" r="2.2" />
-    <circle cx="6" cy="19" r="2.2" />
-    <circle cx="18" cy="8" r="2.2" />
-    <path d="M6 7.2v9.6M18 10.2c0 4-6 3.4-11.2 7" />
-  </svg>
-);
+const BranchIcon = () => <Icon name="git-branch" />;
 
 /** The rest of the line under a running chat: the folder's git branch (none outside a repository) and how full the
  *  context is, both as the shell and the agent reported them. */
