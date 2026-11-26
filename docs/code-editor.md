@@ -113,7 +113,11 @@ The states whose rules are pure functions, with their tests, then the screens th
 - `apps/desktop/src/code/secrets.ts`: keys in Kit's changes, counted with the app's one masker (`src/lib/secrets.ts`). Since
   item 113 the masker also knows private key blocks, provider-prefixed keys, JSON web tokens, credentials in HTTP headers,
   `password:` and `"password":` values, the password in `scheme://user:pass@host`, quoted `KEY="..."` and `--password value`,
-  so a change holding any of them makes a commit or a push ask too. Since item 117 the count never goes down (a key taken
+  so a change holding any of them makes a commit or a push ask too. Item 117 added `name = value` with blanks round the
+  sign (`~/.aws/credentials`), `DB_PASS`, `MYSQL_PWD`, `SMTP_PASS`, `APP_KEY`, `SECRET_KEY_BASE`, a vendor's `_KEY=`, a JSON
+  `"key"`, `.netrc`'s password, `curl -u`, `mysql -p`, Slack's and Discord's webhook addresses, and the Resend, Replicate,
+  Perplexity, xAI, Docker, age, Google OAuth client, Slack refresh, Atlassian, Postman, Netlify and Mapbox prefixes, each in
+  the shared table beside an ordinary line it leaves alone. Since item 117 the count never goes down (a key taken
   out again may already be in a commit), and a commit or a push the dial would otherwise let go alone first reads what it
   saves: the lane's own diff, from the shell's read-only `lane_diff` (bounded, `--no-ext-diff --no-textconv`, no clean filter,
   each file's diff masked by the shell's twin). A file an added line of which holds a key makes the step ask, whoever wrote it,

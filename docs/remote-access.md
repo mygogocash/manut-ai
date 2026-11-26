@@ -169,7 +169,9 @@ needs a QR reader, which the repository does not have: the browser's own is used
   with the shell's `tasks::mask_secrets` and held by one table both run (`lib/secrets.cases.json`): tokens by their
   prefix, private key blocks, JSON web tokens, credentials in HTTP headers, `password:` and `"password":` values, the
   password in `scheme://user:pass@host`, quoted `KEY="..."` and `--password value`, each with its name kept so the line
-  still reads (item 113).
+  still reads (item 113). Item 117 added `name = value` as `~/.aws/credentials` writes it, `DB_PASS`, `MYSQL_PWD`,
+  `SMTP_PASS`, `APP_KEY`, `SECRET_KEY_BASE`, a vendor's `_KEY=`, a JSON `"key"`, `.netrc`'s password, `curl -u`, `mysql -p`,
+  Slack's and Discord's webhook addresses and a dozen more provider prefixes.
 - **An approval shows what runs** (item 117). The command, and the folder it runs in, go through the masker's command form
   (`maskCommand`, the shell's `tasks::mask_command`, the table's `command` rows), on the Mac's card and on the phone alike:
   it masks a key and nothing else. It reads a command line by line, never joins two words, and a masked value stops at

@@ -42,6 +42,12 @@ describe("maskSecrets (the one masker; patterns in secrets.json)", () => {
     expect(maskCommand(`DEEPSEEK=${key} pnpm test`)).toBe("DEEPSEEK=•••• pnpm test");
   });
 
+  it("masks a Slack refresh token, built here so no scanner reads the table as a live one (item 117)", () => {
+    const token = ["xoxe", "1", "X".repeat(20)].join("-");
+    expect(maskSecrets(`refresh ${token} done`)).toBe("refresh •••• done");
+    expect(maskCommand(`SLACK_REFRESH=${token} node sync.js`)).toBe("SLACK_REFRESH=•••• node sync.js");
+  });
+
   it("masks a token broken by a line break and keeps the prose after it", () => {
     expect(maskSecrets(`before ghp_XXXX\n${X(32)} after`)).toBe("before •••• after");
     expect(maskSecrets(`ghp_${X(36)}\nThe next line`)).toBe("••••\nThe next line");
