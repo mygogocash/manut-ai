@@ -8,6 +8,7 @@ import { hhmm } from "../app/time";
 import { ACTIVITY_KINDS, type ActivityEvent, type ActivityKind } from "../runtime/mission";
 import { toCsv } from "./csv";
 import { byDay, type HistoryDay } from "./history";
+import { pad } from "../lib/pad";
 
 export const ALL = "all";
 
@@ -220,7 +221,6 @@ export interface ExportWords {
   status(status: string): string;
 }
 
-const pad = (n: number) => String(n).padStart(2, "0");
 
 /** A moment (ms) as its day on this computer, `YYYY-MM-DD`: how a range of dates and the file's day column write a day. */
 export function dayOf(ms: number): string {

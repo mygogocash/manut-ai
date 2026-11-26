@@ -1,8 +1,8 @@
 // Small time formatters shared by the sidebar and the timeline. `ts` is seconds since epoch. Words and units
 // follow the current language; weekday and month names come from Intl in that language.
 import { lang, locale, t } from "../i18n";
+import { pad } from "../lib/pad";
 
-const pad = (n: number) => String(n).padStart(2, "0");
 export const hhmm = (d: Date) => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
 /** "Mon" / "周一"; "Monday" / "星期一" with `long`. */

@@ -48,6 +48,7 @@ import { OwnersOnly } from "./OwnersOnly";
 import { saveCsv, type SaveResult } from "./saveFile";
 import { ShowOlder } from "./ShowOlder";
 import { Icon } from "../ui/icons";
+import { pad } from "../lib/pad";
 
 export interface Person {
   id: string;
@@ -145,7 +146,6 @@ export function activityWords(nameOf: (who: string) => string): ExportWords {
   };
 }
 
-const pad = (n: number) => String(n).padStart(2, "0");
 /** The file's name: the day it was made. */
 export function csvName(nowMs: number): string {
   const d = new Date(nowMs);
