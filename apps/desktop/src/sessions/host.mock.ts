@@ -15,6 +15,7 @@ import { type KeptLane, type LaneCleaned, type LaneMade, type LaneReleased, type
 import { readAgentConfig, type AgentConfig } from "../settings/mcp/agentConfig";
 import { readPulled, readTools, type MergeMethod, type NewProjectMade, type Pulled, type RepoAsk, type ReviewAsk, type ReviewDone, type ReviewDraft, type SourceTools } from "../code/source";
 import { checkArgs, checkVars, homeVarOf, rulesOf, signinAgent, versionAgent, type ProviderPatch, type ProviderView, type SignIn } from "../settings/providers/model";
+import { NO_SKIPS, type ImportFound } from "../importPast/offer";
 import type { ChatInput, ChatEvent, PastChat, ConvState, PastMsg, BuddyChatInput, BuddyHost, TitleRequest, TitleWords, SessionHost } from "./host";
 
 // ---- mock (browser, e2e) --------------------------------------------------------------------
@@ -259,7 +260,13 @@ export type MockGlobals = MockTurnGlobals & {
   /** e2e: the conversations Claude Code and Codex keep (none = the built-in ones) */
   __manutPastChats?: PastChat[];
   /** e2e: reads of those conversations, apart from the session calls (opening the + menu lists them) */
-  __manutPastReads?: { op: "list" | "read" | "own"; agent: string; cwds?: string[]; id?: string; cwd?: string; pty?: number }[];
+  __manutPastReads?: { op: "list" | "read" | "own" | "recent"; agent: string; cwds?: string[]; id?: string; cwd?: string; pty?: number; max?: number }[];
+  /** e2e: what the shell's look for work to bring over finds (item 101e); none = nothing found */
+  __manutImportFound?: ImportFound;
+  /** e2e: the look for work to bring over fails with this text */
+  __manutImportFails?: string;
+  /** e2e: how many times the page looked for work to bring over */
+  __manutImportLooks?: number;
   /** e2e: the conversation each mock pty's Codex holds open (pty id -> UUID), as a real Codex once its rollout exists */
   __manutMockCodexOwn?: Record<number, string>;
   /** e2e: the Dock / taskbar count manut last set */
@@ -1123,6 +1130,18 @@ export class MockHost implements SessionHost, BuddyHost {
     (this.g.__manutPastReads ??= []).push({ op: "list", agent, cwds });
     const all = this.g.__manutPastChats ?? MOCK_PAST;
     return all.filter((c) => c.agent === agent && cwds.includes(c.cwd)).sort((a, b) => b.at - a.at);
+  }
+  /** As the shell (past_chats.rs `recent`): the newest `max` of the agent's conversations across `cwds`. */
+  async pastRecent(agent: "claude" | "codex", cwds: string[], max: number) {
+    (this.g.__manutPastReads ??= []).push({ op: "recent", agent, cwds, max });
+    const all = this.g.__manutPastChats ?? MOCK_PAST;
+    return all.filter((c) => c.agent === agent && cwds.includes(c.cwd)).sort((a, b) => b.at - a.at).slice(0, max);
+  }
+  /** As the shell (import_past.rs): what a spec says was found, else nothing; it reads nothing and writes nothing. */
+  async importScan(): Promise<ImportFound> {
+    this.g.__manutImportLooks = (this.g.__manutImportLooks ?? 0) + 1;
+    if (this.g.__manutImportFails) throw new Error(this.g.__manutImportFails);
+    return this.g.__manutImportFound ?? { projects: [], skipped: NO_SKIPS, partial: false };
   }
   async pastMessages(agent: "claude" | "codex", id: string, cwd: string) {
     (this.g.__manutPastReads ??= []).push({ op: "read", agent, id, cwd });

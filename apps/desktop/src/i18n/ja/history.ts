@@ -12,4 +12,5 @@ export const history: Record<keyof typeof en, string> = {
   "history.lane.all": "すべて",
   "history.archive": "アーカイブ",
   "history.archiveN": "アーカイブ ({n})",
+  "history.pastMore": "取り込んだプロジェクトについて、Claude Code と Codex それぞれの新しい会話 {n} 件を表示しています。",
 };

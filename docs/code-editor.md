@@ -2350,3 +2350,45 @@ is never put into a shell string, and nothing is run in it.
   developer's. The palette's "Open the project in <Editor>" opens the open project's folder on the Code page, which is the
   developer's own. When no editor is installed the action is not offered; a failure is said in the app's own words under the
   chat, under the lane, or at the top of the Code page.
+
+## Bring over Claude Code and Codex work (item 101e)
+
+A person who already used Claude Code or Codex on this Mac is offered their folders as projects, and those folders'
+conversations in History. The pieces are `src-tauri/src/import_past.rs` (the look), `past_chats.rs` `recent` (History's
+list), `src/importPast/offer.ts` (the rules and what this computer keeps), `ImportPast.tsx` (the dialog) and
+`broughtOver.ts` (History's rows).
+
+- **When it is offered.** Once, by itself: on the first launch after the first-run setup (finished or skipped), the app
+  looks once, and opens the offer only when a folder that is not a project here yet was found. Closing it in any way
+  (Not now, Esc, a click outside, Done) counts as the offer made (`manut.importPast` `offered`), and so does a look that
+  found nothing new; a look that failed is tried on the next launch. After that, History's **Bring over…** opens it by
+  hand at any time. An install that finished its setup before this item is offered it once on its next launch.
+- **What it looks at.** The homes past chats reads (the one a new session of each agent uses), with past_chats.rs's own
+  readers: Claude Code's `projects/<slug>/<uuid>.jsonl`, whose own `cwd` names its folder, and Codex's
+  `sessions/YYYY/MM/DD/rollout-*.jsonl`, whose `session_meta` does. A conversation is one the + menu would list: the
+  person typed something in it, and a Codex subagent's thread or a fork is not one. Each file is read from its start
+  only until its folder and a typed line are found (at most 256 KiB), the newest 3,000 of each agent and 256 MiB in all.
+  A link anywhere under those folders is refused. Nothing is written, and only folders and counts reach the page.
+- **What is skipped, and said.** A folder no longer on this Mac, a Codex rollout written compressed (`.jsonl.zst`,
+  item 106b), a file that cannot be read or is not JSON lines, and files past the bounds are each counted, and the offer
+  says how many of each in one line. Never offered: the home folder itself, the disk's root, and folders under the app's
+  own `~/.manut` (its lanes and account homes).
+- **The offer.** Each folder newest first, with its conversations of each agent and how long ago the newest changed;
+  one already on the Code page is marked "Already a project" and cannot be picked. Nothing is picked until the person
+  picks, and one line says that nothing in the agents' files is copied, moved or changed and nothing leaves this Mac.
+  Bring over N projects… shows the picks again to confirm; only its Bring over adds anything.
+- **What bringing over does.** Each pick becomes an added folder on the Code page (`folders.ts` `addFolder`, as New
+  folder… and New project add), the newest on top, and is kept in `manut.importPast` `folders`. `addFolder` adds a
+  folder that is listed already only once, so running it again adds nothing twice.
+- **History.** The conversations of the folders brought over that are still on the Code page's list (one removed with
+  Remove from list leaves History too) are Code rows among the days: the agent's mark, the title, the folder's name and
+  the agent's name. History shows the newest 30 of each agent across all those folders (`past_chats.rs` `recent`, which
+  reads about twice that many Claude Code transcripts however many folders there are) and says so under the list when
+  there are more. A row opens the conversation and continues it exactly as the + menu's past conversations do
+  (`sessions.ts` `continuePast`): its last messages shown, then the agent resumes it.
+
+`import_past.rs` and `past_chats.rs` test the look on made-up homes in a temporary folder (counts, skips, links, bounds,
+the folders never offered, and that nothing under the home changes); `offer.test.ts`, `ImportPast.test.tsx`,
+`broughtOver.test.ts` and `historyLanes.test.tsx` hold the rules, the dialog and History's rows; `e2e/import-past.spec.ts`
+walks the offer, the confirmation, the result in History and on the Code page, a second run and Not now on the mock host,
+with pictures in light and dark (`MANUT_SHOTS`).

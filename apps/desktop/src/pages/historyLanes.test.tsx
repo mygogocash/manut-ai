@@ -10,6 +10,7 @@ import type { JobRow } from "../runtime/mission";
 import { createStore } from "../state/store";
 import { HistoryView, historyArchive, historyDays, historyLanes, type HistoryDayView, type HistoryRowView } from "./HistoryPage";
 import { threadRowKey, type RowMarks } from "../sidebar/rows";
+import type { PastChat } from "../sessions/host";
 
 const words = (html: string) =>
   html
@@ -220,5 +221,69 @@ describe("the Archive (item 76)", () => {
     expect(text).toContain("Done for now");
     // a job has no menu: three chats, three buttons
     expect(count(html, 'data-testid="row-more"')).toBe(3);
+  });
+});
+
+describe("the conversations brought over from Claude Code and Codex (item 101e)", () => {
+  afterEach(() => vi.useRealTimers());
+  const now = Date.now();
+  const past: PastChat[] = [
+    { agent: "claude", id: "aaaaaaaa-1111-4222-8333-444444444444", cwd: "/home/you/code/web-app", title: "Fix the login redirect", named: true, at: now / 1000 - 3_600 },
+    { agent: "codex", id: "01a1d060-4ab7-72b2-b02b-1dbee1d5f52c", cwd: "/home/you/code/shop-api", title: "Add a dark theme", named: true, at: now / 1000 - 600 },
+  ];
+
+  it("are Code rows among the days, newest first, each by its agent and folder, opening its conversation", async () => {
+    vi.useFakeTimers();
+    const store = await demoStore();
+    const opened: string[] = [];
+    const rows = historyDays(store.getSnapshot(), "", now, [], "all", {}, past, (c) => opened.push(c.id)).flatMap((d) => d.rows);
+    const mine = rows.filter((r) => r.kind === "past");
+    expect(mine.map((r) => [r.title, r.who, r.folder, r.lane, r.agent])).toEqual([
+      ["Add a dark theme", "Codex", "shop-api", "code", "codex"],
+      ["Fix the login redirect", "Claude Code", "web-app", "code", "claude"],
+    ]);
+    // no chat menu and no marks: they are the agents' conversations, not the team's chats
+    expect(mine.every((r) => r.rowKey === undefined)).toBe(true);
+    mine[1].open();
+    expect(opened).toEqual(["aaaaaaaa-1111-4222-8333-444444444444"]);
+    expect(historyLanes(store.getSnapshot(), [], past)).toContain("code");
+  });
+
+  it("are found by their title, their agent and their folder, and only under All and Code", async () => {
+    vi.useFakeTimers();
+    const store = await demoStore();
+    const find = (q: string, lane: "all" | "chat" | "code" = "all") =>
+      historyDays(store.getSnapshot(), q, now, [], lane, {}, past, () => {})
+        .flatMap((d) => d.rows)
+        .filter((r) => r.kind === "past")
+        .map((r) => r.title);
+    expect(find("login")).toEqual(["Fix the login redirect"]);
+    expect(find("codex")).toEqual(["Add a dark theme"]);
+    expect(find("shop-api")).toEqual(["Add a dark theme"]);
+    expect(find("", "code")).toHaveLength(2);
+    expect(find("", "chat")).toEqual([]);
+  });
+
+  it("draw the agent's mark and the folder's name, with no menu button, and say when History shows only the newest", () => {
+    setLang("en");
+    const r = row({ key: "past:claude:x", bot: "", kind: "past", agent: "claude", folder: "web-app", lane: "code", who: "Claude Code", title: "Fix the login redirect" });
+    const html = renderToString(<HistoryView days={[day([r])]} query="" hasThreads onQuery={noop} pastMore />);
+    expect(html).toContain('data-kind="past"');
+    expect(html).toMatch(/data-testid="history-folder"[^>]*>web-app</);
+    expect(html).toContain('class="hist-agent"');
+    expect(html).not.toContain("hist-more");
+    expect(words(html)).toContain("Showing the newest 30 conversations of each of Claude Code and Codex from the projects brought over.");
+    expect(renderToString(<HistoryView days={[day([r])]} query="" hasThreads onQuery={noop} />)).not.toContain("history-past-more");
+  });
+
+  it("put Bring over… in the top bar only when the offer can open", () => {
+    setLang("en");
+    const onImport = vi.fn();
+    const view = HistoryView({ days: [], query: "", hasThreads: false, onQuery: noop, onImport });
+    const btn = byId(view, "history-import")[0];
+    expect(btn.props.children).toBe("Bring over…");
+    (btn.props.onClick as () => void)();
+    expect(onImport).toHaveBeenCalledTimes(1);
+    expect(byId(HistoryView({ days: [], query: "", hasThreads: false, onQuery: noop }), "history-import")).toEqual([]);
   });
 });

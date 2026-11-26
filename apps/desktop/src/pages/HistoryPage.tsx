@@ -3,6 +3,8 @@
 // is (Chat, Team or Code) and the chips above filter by kind. The search box finds an entry by its title, the last thing said
 // in it and who it is with; history.ts holds the rules. The command palette's last row ("Search History for ...") opens this page
 // with the box focused and the words in it, through the store's `ui.findSeq` and `ui.findQuery`.
+// Item 101e: the Claude Code and Codex conversations of the folders brought over (src/importPast) are Code rows among them, each
+// continuing as the + menu's past conversations do, and Bring over… in the top bar opens the offer again.
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { hhmm } from "../app/time";
 import { t, type Key } from "../i18n";
@@ -27,6 +29,14 @@ import { MoreButton, settledWhy, useRowMenu } from "../sidebar/RowMenu";
 import { NO_SELECT, useRowSelect, useSelectionEscape, type RowSelect } from "../sidebar/useRowSelect";
 import { placeOf, threadRowKey, untilWord, useRowMarks, type RowMark, type RowMarks, type RowPlace } from "../sidebar/rows";
 import { dragRef } from "../chat/box/threadContext";
+import type { PastChat } from "../sessions/host";
+import { AgentMark } from "../sessions/AgentMark";
+import { folderName } from "../sessions/agents";
+import { getSessions } from "../sessions/sessions";
+import { PROVIDER_NAME } from "../sidebar/usageFormat";
+import { HISTORY_PER_AGENT, useBroughtOver } from "../importPast/broughtOver";
+import { canImport } from "../importPast/ImportPast";
+import { openImport } from "../importPast/offer";
 
 /** One thread as its row shows it. */
 export interface HistoryRowView {
@@ -47,8 +57,13 @@ export interface HistoryRowView {
   /** What the person did to the chat (pinned, snoozed, done for now) and where it stands now: shown as a quiet tag. */
   mark?: RowMark;
   place?: RowPlace;
-  /** "job": a job of the team (its page opens), not a thread. Its tag is its stage's, not a thread's status. */
-  kind?: "job";
+  /** "job": a job of the team (its page opens), not a thread. Its tag is its stage's, not a thread's status. "past": a Claude
+   *  Code or Codex conversation of a folder brought over (item 101e), which continues as a session when opened. */
+  kind?: "job" | "past";
+  /** A past conversation's agent, drawn by its mark in place of a member's face. */
+  agent?: PastChat["agent"];
+  /** A past conversation's folder, by its name. */
+  folder?: string;
   tag?: { word: Key; cls: string };
 }
 
@@ -89,16 +104,32 @@ const threadsNotJobs = (s: AppState, members: string[], jobs: readonly JobRow[])
 };
 
 /** The kinds that have an entry, threads and jobs together: what the chips offer, however the list is filtered or searched. */
-export function historyLanes(s: AppState & Actions, jobs: readonly JobRow[] = []): HistoryLane[] {
+export function historyLanes(s: AppState & Actions, jobs: readonly JobRow[] = [], past: readonly PastChat[] = []): HistoryLane[] {
   const who = laneWho(s);
   const members = selectSidebarBots(s).map((b) => b.name);
-  return lanesPresent([...threadsNotJobs(s, members, jobs).map((e) => threadLane(e.bot, who)), ...jobs.map((j) => jobLane(j.bot, who))]);
+  return lanesPresent([
+    ...threadsNotJobs(s, members, jobs).map((e) => threadLane(e.bot, who)),
+    ...jobs.map((j) => jobLane(j.bot, who)),
+    ...past.map(() => "code" as const),
+  ]);
 }
+
+/** A past conversation's agent by its product name (kept in English, as everywhere). */
+const agentName = (a: PastChat["agent"]) => PROVIDER_NAME[a] ?? a;
 
 /** The days and rows for the threads in the store and the runtime's jobs that `query` finds (history.ts `matchWords`) and
  *  that are of the kind pressed (`lane`; all of them for "all"), each opening its thread or its page; threads and jobs are
  *  one list, newest first, as the canvas's History lists them. */
-export function historyDays(s: AppState & Actions, query: string, nowMs: number, jobs: readonly JobRow[] = [], lane: HistoryLane | "all" = "all", marks: RowMarks = {}): HistoryDayView[] {
+export function historyDays(
+  s: AppState & Actions,
+  query: string,
+  nowMs: number,
+  jobs: readonly JobRow[] = [],
+  lane: HistoryLane | "all" = "all",
+  marks: RowMarks = {},
+  past: readonly PastChat[] = [],
+  openPast: (c: PastChat) => void = (c) => void getSessions().continuePast(c),
+): HistoryDayView[] {
   const members = selectSidebarBots(s).map((b) => b.name);
   const names = new Map(s.bots.map((b) => [b.name, b.display_name]));
   const untitled = t("thread.untitled");
@@ -144,8 +175,28 @@ export function historyDays(s: AppState & Actions, query: string, nowMs: number,
       } satisfies HistoryRowView,
     }))
     .filter((x) => lane === "all" || x.row.lane === lane);
+  // a past conversation is code work; it is found by its title, its agent and its folder's name
+  const brought = past
+    .filter((c) => matchWords({ title: c.title, who: `${agentName(c.agent)} ${folderName(c.cwd)}` }, query, untitled))
+    .map((c) => ({
+      ts: c.at,
+      row: {
+        key: `past:${c.agent}:${c.id}`,
+        bot: "",
+        title: c.title || untitled,
+        who: agentName(c.agent),
+        status: "idle" as const,
+        time: hhmm(new Date(c.at * 1000)),
+        open: () => openPast(c),
+        lane: "code" as const,
+        kind: "past" as const,
+        agent: c.agent,
+        folder: folderName(c.cwd),
+      } satisfies HistoryRowView,
+    }))
+    .filter((x) => lane === "all" || x.row.lane === lane);
   // The sort is stable, so a thread and a job of the same moment keep the threads first.
-  return byDay([...threads, ...work].sort((a, b) => b.ts - a.ts), nowMs).map((d) => {
+  return byDay([...threads, ...work, ...brought].sort((a, b) => b.ts - a.ts), nowMs).map((d) => {
     const band = dayBand(d, nowMs);
     return { key: String(d.day), label: band.label, date: band.date, rows: d.entries.map((x) => x.row) };
   });
@@ -245,7 +296,13 @@ export function HistoryView({
   helped = null,
   onNeeds,
   select = NO_SELECT,
+  onImport,
+  pastMore = false,
 }: {
+  /** Bring over… (item 101e): opens the offer of Claude Code and Codex work; not drawn without it */
+  onImport?: () => void;
+  /** History lists fewer past conversations of an agent than the folders brought over hold: a line under the list says so */
+  pastMore?: boolean;
   /** The shop shown, when the person only helps there: its past work and its activity log are its owner's, so the page says
    *  whose they are in place of the list, the search and the log's button. */
   helped?: Pick<ShopRow, "name" | "owner"> | null;
@@ -308,6 +365,11 @@ export function HistoryView({
   );
   const acts = (
     <>
+      {onImport && (
+        <button type="button" className="btn" onClick={onImport} title={t("imp.openTip")} data-testid="history-import">
+          {t("imp.open")}
+        </button>
+      )}
       {onActivity && (
         <button type="button" className="btn" onClick={onActivity} data-testid="history-activity">
           {t("act.title")}
@@ -348,17 +410,29 @@ export function HistoryView({
                         onClick={(e) => select.click(e, r.rowKey, r.open)}
                         onKeyDown={(e) => select.keyDown(e, r.rowKey)}
                         // a chat's row dragged onto an open chat's box brings its context (item 97); a job has no chat to bring
-                        {...(r.rowKey && r.kind !== "job" ? dragRef({ kind: "thread", bot: r.bot, thread: r.key.slice(r.bot.length + 1) }) : {})}
+                        {...(r.rowKey && !r.kind ? dragRef({ kind: "thread", bot: r.bot, thread: r.key.slice(r.bot.length + 1) }) : {})}
                         data-testid="history-row"
+                        data-kind={r.kind}
                       >
                         {r.lane && (
                           <span className="tag kind" data-testid="history-kind">
                             {t(LANE_WORD[r.lane])}
                           </span>
                         )}
-                        <Avatar bot={r.bot} size={24} />
+                        {r.kind === "past" && r.agent ? (
+                          <span className="hist-agent" aria-hidden="true">
+                            <AgentMark agent={r.agent} size={18} />
+                          </span>
+                        ) : (
+                          <Avatar bot={r.bot} size={24} />
+                        )}
                         <span className="grow">{r.title}</span>
                         {r.kind === "job" && <span className="tag">{t("history.kind.job")}</span>}
+                        {r.kind === "past" && r.folder && (
+                          <span className="tag" data-testid="history-folder">
+                            {r.folder}
+                          </span>
+                        )}
                         <span className="when">{r.who}</span>
                         {st && <span className={st.tag}>{t(st.word)}</span>}
                         {(() => {
@@ -386,6 +460,11 @@ export function HistoryView({
         ) : (
           <Empty icon={<MenuIcon row="history" />} title={t("history.emptyTitle")} text={t("history.emptyText")} testId="history-empty" />
         )}
+        {pastMore && (
+          <p className="none" data-testid="history-past-more">
+            {t("history.pastMore", { n: HISTORY_PER_AGENT })}
+          </p>
+        )}
         {archive && archive.length > 0 && <HistoryArchive rows={archive} />}
         {older && <ShowOlder view={older} />}
       </div>
@@ -412,14 +491,16 @@ export function HistoryPage() {
   }, [find]);
   const { jobs, older, reload } = useJobList();
   const more = useShowOlder(reload);
-  const hasThreads = jobs.length > 0 || selectSidebarBots(s).some((b) => (s.threads[b.name]?.length ?? 0) > 0);
+  // the conversations of the folders brought over from Claude Code and Codex (item 101e)
+  const past = useBroughtOver();
+  const hasThreads = jobs.length > 0 || past.chats.length > 0 || selectSidebarBots(s).some((b) => (s.threads[b.name]?.length ?? 0) > 0);
   // A kind that has no entry any more (its last one went) gives way to All, rather than leaving an empty list under a chip
   // that is gone.
   const [picked, setPicked] = useState<HistoryLane | "all">("all");
   const marks = useRowMarks();
-  const lanes = historyLanes(s, jobs);
+  const lanes = historyLanes(s, jobs, past.chats);
   const lane = picked !== "all" && !lanes.includes(picked) ? "all" : picked;
-  const days = historyDays(s, query, Date.now(), jobs, lane, marks);
+  const days = historyDays(s, query, Date.now(), jobs, lane, marks, past.chats);
   // the chats of the days, in the order drawn, are one list to select several in (item 94); a job has no marks
   const select = useRowSelect("history", days.flatMap((d) => d.rows.flatMap((r) => (r.rowKey ? [r.rowKey] : []))));
   useSelectionEscape();
@@ -439,6 +520,8 @@ export function HistoryPage() {
       older={older ? { state: older, ui: more.ui, onShow: more.show } : undefined}
       helped={helpedShop(s.shops)}
       onNeeds={() => s.openPage("needs")}
+      onImport={canImport() ? () => openImport() : undefined}
+      pastMore={past.more}
     />
   );
 }

@@ -1,10 +1,12 @@
-// Four short sounds, synthesized with Web Audio (no audio files): a tick when you send, a two-note pop when a
-// chat finishes out of sight, a rising chime when an approval or question arrives, and one low note when a turn
-// ends with an error. Settings › General turns them off; while off, no AudioContext is made or resumed.
+// Four short sounds: a tick when you send, the finish chime when a chat finishes out of sight, a rising chime when an
+// approval or question arrives, and one low note when a turn ends with an error. The tick, the ask chime and the error note are
+// synthesized with oscillators below; the finish chime is GoSpark's (item 131, src/sound/), which can be one of five tones.
+// Settings › General turns them off; while off, no AudioContext is made or resumed.
 import type { BridgeEvent } from "./protocol";
 import { quietNow } from "./outside";
+import { playFinish, sharedAudio } from "../sound";
 
-export type Sound = "send" | "pop" | "chime" | "error";
+export type Sound = "send" | "finish" | "chime" | "error";
 
 /** One tone: starts `at` ms into the sound, rises to `gain` in `attack` ms, then decays to near silence at `at + dur`. */
 export interface Tone {
@@ -17,14 +19,9 @@ export interface Tone {
 }
 
 /** Peak gains stay at or under 0.126 (-18 dBFS); the tick is quieter, it is your own action. */
-export const RECIPES: Record<Sound, Tone[]> = {
+export const RECIPES: Record<Exclude<Sound, "finish">, Tone[]> = {
   // E6, one short triangle tick
   send: [{ freq: 1318.5, wave: "triangle", at: 0, dur: 60, attack: 2, gain: 0.07 }],
-  // E6 then B5: a fourth down
-  pop: [
-    { freq: 1318.5, wave: "sine", at: 0, dur: 80, attack: 4, gain: 0.11 },
-    { freq: 987.77, wave: "sine", at: 80, dur: 120, attack: 4, gain: 0.11 },
-  ],
   // E5 then B5: a fifth up
   chime: [
     { freq: 659.25, wave: "sine", at: 0, dur: 120, attack: 5, gain: 0.1 },
@@ -78,7 +75,7 @@ export function soundFor(
       return ctx.open(ev.bot, ev.request_id) ? { sound: "chime", ask: ev.request_id } : null;
     case "turn.end":
       if (ev.outcome === "error") return { sound: "error" };
-      return ev.outcome === "done" && !ctx.watching(ev.bot) ? { sound: "pop" } : null;
+      return ev.outcome === "done" && !ctx.watching(ev.bot) ? { sound: "finish" } : null;
     default:
       return null;
   }
@@ -92,6 +89,9 @@ export interface SoundDeps {
   quiet?: () => boolean;
   /** Make the AudioContext (called once, on the first sound that plays). */
   audio: () => AudioLike | null;
+  /** Play the finish chime or the chosen tone, for the finish `key` (it makes no second sound for one finish). Its own switches
+   *  (Settings › Sounds) apply on top of the board's. Without it a finish is silent. */
+  finish?: (key?: string) => void;
   /** Run `fn` once on the person's next click or key. */
   onGesture: (fn: () => void) => void;
 }
@@ -144,7 +144,7 @@ export class SoundBoard {
     }
     // the send tick is the person's own action: only the switch and the gap hold it
     if (sound !== "send" && (this.settledAt === null || t - this.settledAt < SETTLE_MS || t - this.typedAt < TYPING_MS)) return false;
-    return this.sound(sound, t);
+    return this.sound(sound, t, ask ? `${ask.chat}\n${ask.id}` : undefined);
   }
 
   /** Settings' Play button: the chime. */
@@ -152,20 +152,22 @@ export class SoundBoard {
     return this.sound("chime", this.deps.now());
   }
 
-  private sound(s: Sound, t: number): boolean {
+  private sound(s: Sound, t: number, key?: string): boolean {
     if (!this.deps.enabled() || t - this.last < GAP_MS) return false;
     const ctx = (this.ctx ??= this.deps.audio());
     if (!ctx) return false;
     this.last = t;
+    // the finish chime plays through the sound module's own player, on the same one context
+    const go = () => (s === "finish" ? this.deps.finish?.(key) : play(RECIPES[s], ctx));
     if (ctx.state === "running") {
-      play(RECIPES[s], ctx);
+      go();
       return true;
     }
     // A context made a moment ago may still be starting: play if it starts at once. One the browser holds until
     // a gesture is resumed on the next one, and this sound is dropped, never queued.
     ctx.resume().then(
       () => {
-        if (this.deps.now() - t < START_MS && this.deps.enabled()) play(RECIPES[s], ctx);
+        if (this.deps.now() - t < START_MS && this.deps.enabled()) go();
       },
       () => undefined,
     );
@@ -207,15 +209,8 @@ export function typedKey(e: Pick<KeyboardEvent, "key" | "metaKey" | "ctrlKey" | 
   return e.isComposing || e.key.length === 1 || ["Backspace", "Delete", "Enter", "Process"].includes(e.key);
 }
 
-function browserAudio(): AudioLike | null {
-  const w = window as unknown as { AudioContext?: typeof AudioContext; webkitAudioContext?: typeof AudioContext };
-  const Ctor = w.AudioContext ?? w.webkitAudioContext;
-  try {
-    return Ctor ? new Ctor() : null;
-  } catch {
-    return null;
-  }
-}
+/** The page's one AudioContext, shared with the sound module's players. */
+const browserAudio = (): AudioLike | null => sharedAudio();
 
 function onNextGesture(fn: () => void): void {
   const go = () => {
@@ -232,7 +227,7 @@ let board: SoundBoard | null = null;
 /** The app's one board; the first call starts watching for typing. */
 export function appSounds(): SoundBoard {
   if (board) return board;
-  const b = new SoundBoard({ now: Date.now, enabled: soundsEnabled, quiet: () => quietNow(Date.now()), audio: browserAudio, onGesture: onNextGesture });
+  const b = new SoundBoard({ now: Date.now, enabled: soundsEnabled, quiet: () => quietNow(Date.now()), audio: browserAudio, finish: (key) => void playFinish(key), onGesture: onNextGesture });
   if (typeof document !== "undefined") document.addEventListener("keydown", (e) => typedKey(e) && b.typed(), true);
   return (board = b);
 }
