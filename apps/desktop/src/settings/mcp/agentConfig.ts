@@ -5,6 +5,7 @@
 // Whether a server is connected is only known from a chat: Claude Code says it in the first line of every chat
 // (`session.info`'s `mcp`, names and a status word), which `noteMcpSeen` keeps here, in memory, until the app closes.
 import { useSyncExternalStore } from "react";
+import { changes } from "../../lib/changes";
 
 export type ConfigFrom = "home" | "local" | "project" | "plugin";
 export type ConfigState = "on" | "off" | "ask";
@@ -64,7 +65,7 @@ export function readAgentConfig(raw: unknown): AgentConfig[] {
 
 /** What the last chat of each agent said of its servers: name -> status. */
 const seen = new Map<string, Map<string, SeenStatus>>();
-const listeners = new Set<() => void>();
+const listeners = changes();
 let version = 0;
 
 /** A chat's `session.info` `mcp` list for agent `agent`: kept as names and status words, replacing what the agent said before. */
@@ -79,7 +80,7 @@ export function noteMcpSeen(agent: string, raw: unknown): void {
   }
   seen.set(agent, m);
   version++;
-  for (const l of listeners) l();
+  listeners.emit();
 }
 
 /** What agent `agent`'s last chat said, or undefined before one. */
@@ -91,15 +92,14 @@ export function mcpSeen(agent: string): ReadonlyMap<string, SeenStatus> | undefi
 export function forgetMcpSeen(): void {
   seen.clear();
   version++;
-  for (const l of listeners) l();
+  listeners.emit();
 }
 
 /** Re-renders when a chat reports its servers. */
 export function useMcpSeenVersion(): number {
   return useSyncExternalStore(
     (l) => {
-      listeners.add(l);
-      return () => listeners.delete(l);
+      return listeners.subscribe(l);
     },
     () => version,
     () => version,

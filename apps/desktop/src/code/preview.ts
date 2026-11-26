@@ -14,6 +14,7 @@
 import { useSyncExternalStore } from "react";
 import type { DiffFile } from "../lib/protocol";
 import { pathKey } from "../sessions/folders";
+import { changes } from "../lib/changes";
 
 /** What a secret is, for the words about it: the canvas's shop ID (the QR code), or any other key, token or secret. */
 export type NeedKind = "shop_id" | "key";
@@ -113,7 +114,7 @@ export const onSample = (needs: readonly Need[], added: Readonly<Record<string, 
 // ---- what each session's changes read -----------------------------------------------------------------------------
 
 const reads = new Map<string, Reads>();
-const listeners = new Set<() => void>();
+const listeners = changes();
 let version = 0;
 
 /** A session's change arrived (`tool.diff`): what its files read is counted again. */
@@ -123,7 +124,7 @@ export function noteReads(chat: string, files: readonly DiffFile[]): void {
   if (JSON.stringify(after) === JSON.stringify(before)) return;
   reads.set(chat, after);
   version++;
-  listeners.forEach((l) => l());
+  listeners.emit();
 }
 
 /** Every session whose changes read a secret: its chat key and what it reads. */
@@ -147,8 +148,7 @@ export function needsOfProject(root: string, found: readonly { chat: string; nee
 }
 
 const subscribe = (l: () => void) => {
-  listeners.add(l);
-  return () => listeners.delete(l);
+  return listeners.subscribe(l);
 };
 
 /** Re-renders when a session's reads change. */

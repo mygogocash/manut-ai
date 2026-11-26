@@ -4,6 +4,7 @@
 // answer is made fit to read aloud. The listening itself is the shell's (src-tauri/src/voice.rs), the reading aloud the
 // web view's own speechSynthesis (engine.ts); docs/voice.md says what runs where.
 import { t, type Key } from "../i18n";
+import { changes } from "../lib/changes";
 
 /** The languages a person may speak, as the Mac's speech recognition names them. Thai and English are the two the owner
  *  asked for; US English is the English this Mac recognizes by itself. The shell takes no other. */
@@ -76,11 +77,10 @@ export function readPrefs(store: Store | undefined = browserStore()): VoicePrefs
   }
 }
 
-const listeners = new Set<() => void>();
+const listeners = changes();
 /** Settings › Voice and the box follow each other's changes in the same window. */
 export function onPrefs(fn: () => void): () => void {
-  listeners.add(fn);
-  return () => void listeners.delete(fn);
+  return listeners.subscribe(fn);
 }
 
 /** Keep a change of the person's (a language, the yes to Apple or taking it back, a voice). */
@@ -93,7 +93,7 @@ export function savePrefs(change: Partial<VoicePrefs>, store: Store | undefined 
   } catch {
     /* no storage: the choice holds until the window closes */
   }
-  listeners.forEach((fn) => fn());
+  listeners.emit();
   return next;
 }
 

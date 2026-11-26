@@ -17,6 +17,7 @@
 // computer, so they come back after a restart.
 import { useSyncExternalStore } from "react";
 import type { AccountCli, AccountGroup } from "../../lib/protocol";
+import { changes } from "../../lib/changes";
 
 export const WAITING_KEY = "manut.box.waiting";
 /** A message whose reset passed longer ago than this is never sent without the person's yes. */
@@ -104,7 +105,7 @@ export function parseWaiting(raw: string | null): Record<string, Waiting> {
 }
 
 let all: Record<string, Waiting> = parseWaiting(storage()?.getItem(WAITING_KEY) ?? null);
-const listeners = new Set<() => void>();
+const listeners = changes();
 function put(next: Record<string, Waiting>): void {
   all = next;
   try {
@@ -114,11 +115,10 @@ function put(next: Record<string, Waiting>): void {
   } catch {
     /* no storage: it waits for this run */
   }
-  for (const l of [...listeners]) l();
+  listeners.emitSnapshot();
 }
 const subscribe = (l: () => void) => {
-  listeners.add(l);
-  return () => void listeners.delete(l);
+  return listeners.subscribe(l);
 };
 
 export const waitingIn = (key: string): Waiting | null => all[key] ?? null;
@@ -178,5 +178,5 @@ export async function look(groups: readonly AccountGroup[] | null, nowMs: number
 export function reloadWaiting(): void {
   all = parseWaiting(storage()?.getItem(WAITING_KEY) ?? null);
   sending.clear();
-  for (const l of [...listeners]) l();
+  listeners.emitSnapshot();
 }

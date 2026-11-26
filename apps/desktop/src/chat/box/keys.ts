@@ -17,6 +17,7 @@
 import { useSyncExternalStore } from "react";
 import { composing } from "../../lib/ime";
 import { t } from "../../i18n";
+import { changes } from "../../lib/changes";
 
 /** Where Enter leaves the person after sending from Home: in the chat it started (`open`), or still on Home (`stay`). */
 export type AfterSend = "open" | "stay";
@@ -51,8 +52,8 @@ const readPicked = (): FollowUp | null => {
   return v === "" ? null : v;
 };
 let follow: FollowUp | null = readPicked();
-const listeners = new Set<() => void>();
-const tell = () => listeners.forEach((l) => l());
+const listeners = changes();
+const tell = () => listeners.emit();
 
 const save = (key: string, value: string | null, fallback: string | null) => {
   try {
@@ -93,8 +94,7 @@ export function reloadBoxKeys(): void {
 }
 
 const subscribe = (l: () => void) => {
-  listeners.add(l);
-  return () => void listeners.delete(l);
+  return listeners.subscribe(l);
 };
 export const useAfterSend = (): AfterSend => useSyncExternalStore(subscribe, afterSend, afterSend);
 const memberFollowUp = () => followUp("member");

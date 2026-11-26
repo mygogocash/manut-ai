@@ -16,6 +16,7 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { taskHost, type TaskHost } from "./host";
 import type { CliSource, TaskItem, TaskRemote } from "./types";
+import { changes } from "../lib/changes";
 
 /** A pull request as a lane's row shows it. Only open and draft ones are listed: the list is of open requests. */
 export interface LanePull {
@@ -41,11 +42,11 @@ const known = new Map<string, Known>();
 const merged = new Map<string, Set<string>>();
 /** When each repository was last asked for, by this module, whether it answered or not. */
 const asked = new Map<string, number>();
-const listeners = new Set<() => void>();
+const listeners = changes();
 let version = 0;
 const bump = () => {
   version++;
-  listeners.forEach((l) => l());
+  listeners.emit();
 };
 
 const keyOf = (source: CliSource, repo: string) => `${source}:${repo}`;
@@ -132,8 +133,7 @@ export function remoteOf(host: Pick<TaskHost, "remote">, cwd: string): Promise<T
 }
 
 const subscribe = (l: () => void) => {
-  listeners.add(l);
-  return () => void listeners.delete(l);
+  return listeners.subscribe(l);
 };
 
 /** Re-renders when the cache learns anything (a chat's linked request reads its state from it, code/chatPull.ts). */
