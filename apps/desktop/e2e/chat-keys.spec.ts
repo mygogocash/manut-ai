@@ -114,7 +114,29 @@ test.describe("an open chat while its answer runs", () => {
   }
   const held = (page: Page, text: string) => page.locator("[data-testid=bubble-user][data-held]", { hasText: text });
 
-  test("by default Enter waits for the answer and Cmd+Enter adds that one message now; the line under the box says so", async ({ page }) => {
+  test("with nothing picked a team member's chat takes a message in at once, as it always did, and Cmd+Enter waits; Settings shows Usual", async ({ page }) => {
+    await page.goto("/");
+    await page.getByTestId("nav-settings").click();
+    await expect(page.getByTestId("set-follow-up").getByRole("radio", { name: "Usual" })).toHaveAttribute("aria-checked", "true");
+    await mock("mock.manual", { bot: "kami" });
+    await running(page);
+    await expect(page.getByTestId("composer-keys")).toHaveCount(0);
+    await box(page).fill("keep the old timeout too");
+    await expect(page.getByTestId("composer-keys")).toHaveText(/^Enter adds it to this answer now · (⌘|Ctrl\+)Enter waits until it is done$/);
+    await box(page).press("Enter");
+    await expect.poll(async () => (await calls("chat.steer")).map((c) => c.params.text)).toEqual(["keep the old timeout too"]);
+    await expect(page.locator("[data-testid=bubble-user]", { hasText: "keep the old timeout too" })).toHaveAttribute("data-steered", "true");
+    await box(page).fill("then run the tests");
+    await box(page).press(CMD);
+    await expect(held(page, "then run the tests").getByTestId("queue-mark")).toBeVisible();
+    expect((await calls("chat.steer")).length).toBe(1);
+  });
+
+  test("Settings on Wait for it: Enter waits for the answer and Cmd+Enter adds that one message now; the line under the box says so", async ({ page }) => {
+    await page.goto("/");
+    await page.getByTestId("nav-settings").click();
+    await page.getByTestId("set-follow-up").getByRole("radio", { name: "Wait for it" }).click();
+    await mock("mock.manual", { bot: "kami" });
     await running(page);
     await expect(page.getByTestId("composer-keys")).toHaveCount(0);
     await box(page).fill("keep the old timeout too");
