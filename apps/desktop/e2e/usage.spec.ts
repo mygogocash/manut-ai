@@ -1,10 +1,10 @@
-// Sidebar usage meters (usage.read) and the agent marks. Read-only: the meters only read the CLIs' own files and
-// manut's own record of the usage Claude Code reported.
+// The coding tools' usage meters (usage.read), on the Code page since item 85i (they sat in the side menu's foot, one click
+// away). Read-only: the meters only read the CLIs' own files and manut's own record of the usage Claude Code reported.
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test, type Page } from "@playwright/test";
-import { chatOpen } from "./start";
+import { chatOpen, openCode } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 const SHOTS = process.env.MANUT_SHOTS_DIR || join(dirname(fileURLToPath(import.meta.url)), "__shots__");
@@ -30,6 +30,7 @@ async function open(page: Page, theme: "dark" | "light" = "dark") {
   await page.addInitScript((t) => localStorage.setItem("manut.theme", t), theme);
   await page.goto("/");
   await chatOpen(page);
+  await openCode(page);
   await expect(page.getByTestId("usage")).toBeVisible();
 }
 
@@ -41,13 +42,14 @@ test("one mark per provider above the user row; rings only where the source gave
   await open(page);
   const usage = page.getByTestId("usage");
   await expect(usage.locator(".usage-m")).toHaveCount(3);
-  // each provider has one mark (the fork has no agent logos, so each is a letter mark, marked data-agent="letter")
-  await expect(page.getByTestId("usage-codex").locator("[data-agent]")).toHaveCount(1);
-  await expect(page.getByTestId("usage-claude").locator("[data-agent]")).toHaveCount(1);
-  await expect(page.getByTestId("usage-grok").locator("[data-agent]")).toHaveCount(1);
-  // usage sits above the account row (Settings) in the side menu's foot: the marks no longer share Settings' row
-  const [u, me] = await Promise.all([usage.boundingBox(), page.getByTestId("nav-settings").boundingBox()]);
-  expect(u!.y + u!.height).toBeLessThanOrEqual(me!.y + 1);
+  // each provider is named in words, with no maker's mark, as the Code page names a coding agent (item 85i)
+  await expect(page.getByTestId("usage-codex").locator(".usage-name")).toHaveText("Codex");
+  await expect(page.getByTestId("usage-claude").locator(".usage-name")).toHaveText("Claude Code");
+  await expect(page.getByTestId("usage-grok").locator(".usage-name")).toHaveText("Grok");
+  await expect(usage.locator("[data-agent]")).toHaveCount(0);
+  // the marks are on the Code page under their band, and no longer in the side menu's foot (item 85i)
+  await expect(page.getByTestId("code-plans").locator(".band")).toHaveText("Your coding plans");
+  await expect(page.getByTestId("sidebar").getByTestId("usage")).toHaveCount(0);
   // codex 73 %: amber ring; claude and grok: no ring fill, a state dot instead
   await expect(page.getByTestId("usage-codex").getByTestId("usage-fill")).toHaveClass(/lv-amber/);
   await expect(page.getByTestId("usage-claude").getByTestId("usage-fill")).toHaveCount(0);
@@ -170,6 +172,8 @@ test("Claude shows the % Claude Code reported, per login, and says when a login 
   ]);
   await mock("mock.usage", { fixture: "claudeNone" });
   await page.reload();
+  // a reload may open where the app left off, so the Code page is asked for again
+  if (!(await page.getByTestId("page-code").isVisible())) await openCode(page);
   await expect(page.getByTestId("usage-claude")).toHaveAttribute("aria-label", "Claude Code usage: Shows after your next Claude turn in Manut AI");
   await page.getByTestId("usage-claude").hover();
   await expect(page.getByTestId("usage-card").getByTestId("usage-empty")).toHaveText("Shows after your next Claude turn in Manut AI");

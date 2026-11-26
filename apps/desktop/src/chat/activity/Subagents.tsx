@@ -139,7 +139,7 @@ function EditStep({ text, diff }: { text: string; diff: NonNullable<NonNullable<
       <button type="button" className={`sa-step sa-edit${open ? " open" : ""}`} aria-expanded={open} onClick={() => setOpen((o) => !o)} data-testid="subagent-step">
         <code>{text}</code>
         <span className="sa-chev" aria-hidden>
-          <ChevronRight size={9} />
+          <ChevronRight />
         </span>
       </button>
       {open && <DiffView files={diff} />}

@@ -496,3 +496,109 @@
   --rise-by: 0px;
   animation: var(--anim-arrive);
 }
+
+/* The Code page's coding plans (CodePage.tsx, item 85i): the usage marks the side menu's foot carried, under a grey band.
+   A ring near its limit is the colour of Needs you and a limited one the colour of failed, the two of the four meanings
+   it can have. The card opens over the marks at a reading width, not across the whole column. */
+.mpage .code-plans {
+  --usage-amber: var(--aui-warning);
+  --usage-red: var(--aui-danger);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.mpage .code-plans .usage {
+  margin: 0;
+  padding: 4px 6px;
+}
+.mpage .code-plans .usage-card {
+  left: 0;
+  right: auto;
+  width: 320px;
+}
+/* Each tool named in words beside its ring, a quiet pill, as an everyday page names a coding agent. */
+.mpage .code-plans .usage-m.named {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: auto;
+  height: 30px;
+  padding: 0 10px 0 2px;
+  border-radius: var(--rad-pill);
+}
+.mpage .code-plans .usage-m.named > * {
+  grid-area: auto;
+}
+.mpage .code-plans .usage-m.named:not(:has(.usage-ring)) {
+  padding-left: 10px;
+}
+.mpage .code-plans .usage-name {
+  font-size: 13px;
+}
+
+/* The Code page (item 85i): Kit's lanes come first under their grey band, with the canvas's empty state while there are
+   none (StatesCode, Code), then the terminals' list under a grey band in sentence case, not the old capitals. */
+.mpage .lanes-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.mpage .terms .side-sh {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 32px;
+  padding: 0 4px 0 10px;
+  border-radius: var(--rad);
+  background: var(--aui-subtle);
+  color: var(--aui-muted);
+  font-size: 13px;
+  font-weight: 400;
+  letter-spacing: normal;
+  text-transform: none;
+  height: auto;
+}
+
+/* A read that failed in a way the app did not word for people (MenuPage.tsx `LoadFailed`, item 85i): the system-states
+   board's banner (StatesSystem, "Something went wrong"; packages/ui-kit app.css `.banner.err`), then the runtime's own
+   words under a small Details. */
+.mpage .failed {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.mpage .banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--rad-lg);
+  background: var(--aui-subtle);
+  font-size: 13.5px;
+}
+.mpage .banner.err {
+  border-color: transparent;
+  background: var(--errbg);
+  color: var(--aui-danger);
+}
+.mpage .banner.err .btn {
+  color: var(--ink);
+}
+.mpage .failed-d {
+  padding: 0 12px;
+  color: var(--aui-muted);
+  font-size: 12px;
+}
+.mpage .failed-d summary {
+  cursor: pointer;
+  width: max-content;
+}
+.mpage .failed-d code {
+  display: block;
+  margin-top: 4px;
+  font-family: var(--aui-font-mono);
+  overflow-wrap: anywhere;
+}

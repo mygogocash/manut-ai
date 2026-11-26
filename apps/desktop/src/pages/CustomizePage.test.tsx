@@ -382,6 +382,18 @@ describe("the memory when it cannot be shown as a list", () => {
     expect(words(html)).toContain("What your team knows");
   });
 
+  it("says in the system-states board's words that a half did not load, with Try again, the raw error only under Details (item 85i)", () => {
+    const failed: Load<never> = { kind: "unavailable", code: "unknown_op", message: "no such op: memory.list" };
+    const html = draw(memoryPane(failed), routinesPane({ kind: "unavailable", code: "internal", message: "no such op: routine.list" }));
+    for (const id of ["memory-failed", "routines-failed"]) {
+      expect(words(between(html, id))).toContain("This page did not load. Nothing was changed. Try again");
+      expect(html).toContain(`data-testid="${id}-retry"`);
+    }
+    expect(html).not.toContain('data-testid="memory-unavailable"');
+    expect(html).toMatch(/<summary>Details<\/summary><code data-testid="memory-failed-details">no such op: memory.list<\/code>/);
+    expect(html.split("no such op: memory.list").length - 1).toBe(1);
+  });
+
   it("says in the canvas's words that there is nothing remembered yet, and still offers the box", () => {
     const html = draw(memoryPane(ready([])), routinesPane(ready([])));
     expect(words(between(html, "customize-empty"))).toContain("Nothing remembered yet");
@@ -563,7 +575,7 @@ describe("Automations and Plugins, when the runtime has them", () => {
     expect(html).toContain('data-testid="nav-plugins"');
     expect(text).toContain("Jobs the team runs on a schedule");
     expect(text).toContain("Skills and tools a team member can use");
-    expect(text).toMatch(/Automations .*3/);
+    expect(text).toMatch(/All routines .*3/);
     expect(html.indexOf('data-testid="routines"')).toBeLessThan(html.indexOf('data-testid="nav-automations"'));
   });
 });

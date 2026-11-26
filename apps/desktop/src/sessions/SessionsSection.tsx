@@ -46,6 +46,7 @@ import { SESSION_CLI } from "./sessionCli";
 import { agentSignedOut, signedOutTip, signedOutWord } from "./signedOut";
 import { useAccounts } from "../settings/accounts/useAccounts";
 import { accountForNewSessions } from "../settings/accounts/rules";
+import { Icon } from "../ui/icons";
 
 
 /** `work@example.com` -> `work@…`. */
@@ -116,7 +117,7 @@ export function SessionsHeader() {
           }}
           data-testid="session-new"
         >
-          <PlusIcon size={14} />
+          <PlusIcon />
         </button>
         {open && <NewSessionMenu onClose={() => setOpen(false)} trigger={plus} start={start} />}
       </span>
@@ -507,7 +508,7 @@ function NewSessionMenu({ onClose, trigger, start }: { onClose: () => void; trig
                 onClick={() => setShellsOpen((v) => !v)}
                 data-testid="session-shell-more"
               >
-                <ChevronRight size={10} />
+                <ChevronRight />
               </button>
             )}
           </div>
@@ -554,7 +555,7 @@ function NewSessionMenu({ onClose, trigger, start }: { onClose: () => void; trig
             onClick={() => list.current?.scrollBy({ top: list.current.clientHeight - 32, behavior: "smooth" })}
             data-testid="session-menu-more-below"
           >
-            <ChevronDown size={10} />
+            <ChevronDown />
             {t("term.moreBelow")}
           </button>
         )}
@@ -752,7 +753,7 @@ function SessionStart() {
           onClick={() => setOpen((v) => !v)}
           data-testid="session-start"
         >
-          <PlusIcon size={16} />
+          <PlusIcon />
           {t("sessions.new")}
         </button>
         {open && <NewSessionMenu onClose={() => setOpen(false)} trigger={btn} />}
@@ -928,9 +929,7 @@ export function SessionList({ needle = "", query = "" }: { needle?: string; quer
 /** A small folder outline, the TERMINALS group header's icon. */
 function FolderGlyph() {
   return (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinejoin="round" aria-hidden="true">
-      <path d="M3.5 7.5A2 2 0 0 1 5.5 5.5h4l2 2.2h7a2 2 0 0 1 2 2v7.8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2Z" />
-    </svg>
+    <Icon name="folder" />
   );
 }
 
@@ -944,9 +943,7 @@ function CollapseAllButton() {
   const label = shut ? t("term.expandAll") : t("term.collapseAll");
   return (
     <button type="button" className="ss-plus ss-fold-all" aria-label={label} title={label} onClick={() => setFolderPrefs(setAllFolders(getFolderPrefs(), all, !shut))} data-testid="term-collapse-all" data-all={shut ? "collapsed" : "expanded"}>
-      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        {shut ? <path d="m7 9 5-5 5 5M7 15l5 5 5-5" /> : <path d="m7 4 5 5 5-5M7 20l5-5 5 5" />}
-      </svg>
+      <Icon name={shut ? "chevrons-up-down" : "chevrons-down-up"} />
     </button>
   );
 }
@@ -1040,7 +1037,7 @@ function FolderHead({ cwd, home, shut, index, all, added, summary: base, flowIds
       }}
     >
       <button type="button" className="tg-open" aria-expanded={!shut} aria-label={t(shut ? "term.folderOpen" : "term.folderClose", { name })} onClick={toggle} data-testid="term-group-toggle">
-        <span className="tg-chev" aria-hidden="true">{shut ? <ChevronRight size={9} /> : <ChevronDown size={9} />}</span>
+        <span className="tg-chev" aria-hidden="true">{shut ? <ChevronRight /> : <ChevronDown />}</span>
         <span className="tg-ic">
           <FolderGlyph />
         </span>

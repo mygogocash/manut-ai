@@ -129,8 +129,8 @@ describe("Home's ask box", () => {
     expect(draw()).not.toContain('data-testid="home-automations"');
     const html = draw({ automations: { count: 5, open: noop } });
     expect(html).toContain('data-testid="home-automations"');
-    expect(words(html)).toMatch(/Automations 5/);
-    expect(words(draw({ automations: { count: 0, open: noop } }))).not.toMatch(/Automations 0/);
+    expect(words(html)).toMatch(/Routines 5/);
+    expect(words(draw({ automations: { count: 0, open: noop } }))).not.toMatch(/Routines 0/);
   });
 });
 

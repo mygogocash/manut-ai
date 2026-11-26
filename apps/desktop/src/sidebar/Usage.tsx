@@ -30,13 +30,13 @@ export function Ring({ p }: { p: UsageProvider }) {
   );
 }
 
-function Card({ p, now, caret, cardRef }: { p: UsageProvider; now: number; caret: number; cardRef: Ref<HTMLDivElement> }) {
+function Card({ p, now, caret, cardRef, named }: { p: UsageProvider; now: number; caret: number; cardRef: Ref<HTMLDivElement>; named: boolean }) {
   const plan = planText(p.plan);
   return (
     <div ref={cardRef} className="usage-card ui-pop ui-pop-top ui-pop-left" role="dialog" aria-label={t("use.card", { name: PROVIDER_NAME[p.id] ?? p.id })}
       style={{ "--caret": `${caret}px` } as CSSProperties} data-testid="usage-card">
       <div className="uc-head">
-        <AgentIcon id={p.id} size={14} />
+        {!named && <AgentIcon id={p.id} size={14} />}
         <b>{PROVIDER_NAME[p.id] ?? p.id}</b>
         {/* nothing to show: the state takes the plan's place, so the card stays one line */}
         {p.windows.length === 0 ? (
@@ -83,7 +83,9 @@ function Card({ p, now, caret, cardRef }: { p: UsageProvider; now: number; caret
   );
 }
 
-export function Usage() {
+/** `named`: each tool is named in words beside its ring, with no maker's mark, as an everyday page names a coding agent (the
+ *  Code page, item 85i). */
+export function Usage({ named = false }: { named?: boolean } = {}) {
   const conn = useStore().conn;
   const [providers, setProviders] = useState<UsageProvider[]>([]);
   const [open, setOpen] = useState<{ id: string; pinned: boolean } | null>(null);
@@ -150,7 +152,7 @@ export function Usage() {
             else marks.current.delete(p.id);
           }}
           type="button"
-          className={`usage-m${open?.id === p.id ? " on" : ""}`}
+          className={`usage-m${named ? " named" : ""}${open?.id === p.id ? " on" : ""}`}
           data-testid={`usage-${p.id}`}
           data-state={p.state}
           aria-label={meterLabel(p)}
@@ -160,11 +162,11 @@ export function Usage() {
           onClick={() => setOpen((o) => (o?.id === p.id && o.pinned ? null : { id: p.id, pinned: true }))}
         >
           <Ring p={p} />
-          <AgentIcon id={p.id} size={14} className="usage-mark" />
+          {named ? <span className="usage-name">{PROVIDER_NAME[p.id] ?? p.id}</span> : <AgentIcon id={p.id} size={14} className="usage-mark" />}
           {meterDot(p) && <span className={`usage-dot st-${meterDot(p)}`} aria-hidden="true" />}
         </button>
       ))}
-      {shown && <Card p={shown} now={now} caret={caret} cardRef={cardRef} />}
+      {shown && <Card p={shown} now={now} caret={caret} cardRef={cardRef} named={named} />}
     </div>
   );
 }

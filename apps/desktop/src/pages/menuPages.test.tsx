@@ -44,7 +44,9 @@ describe("Needs you", () => {
     expect(text).toContain("Needs you");
     expect(count(html, 'data-testid="needs-row"')).toBe(2);
     expect(text.indexOf("Nam")).toBeLessThan(text.indexOf("Pim"));
-    expect(text).toContain("Approve");
+    // the kind on its tag is a noun, as the Approvals board tags a card (item 85i), never the verb Approve
+    expect(text).toContain("Approval");
+    expect(text).not.toMatch(/\bApprove\b/);
     expect(text).toContain("Question");
     expect(text).toContain("Which page should the post go on?");
     // A command in the ask is set as code, not shown with its backticks.

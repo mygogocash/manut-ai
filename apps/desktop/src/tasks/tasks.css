@@ -28,9 +28,9 @@
   text-align: left;
 }
 .tk-bar-main svg {
-  width: 18px;
-  height: 14px;
-  color: var(--quiet);
+  width: 16px;
+  height: 16px;
+  color: var(--muted);
   flex: none;
 }
 .tk-bar:hover .tk-bar-main,
@@ -43,14 +43,15 @@
   gap: 2px;
   padding-right: 4px;
 }
+/* A task source, named in words (item 85i): a quiet link-sized word, not its company's mark. */
 .tk-bar-ic {
-  width: 20px;
-  height: 20px;
-  display: grid;
-  place-items: center;
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 8px;
   border-radius: var(--r-sm);
-  color: var(--quiet);
-  opacity: 0.75;
+  color: var(--muted);
+  font-size: 13px;
 }
 .tk-bar-ic:hover,
 .tk-bar-ic:focus-visible {
@@ -196,11 +197,11 @@
   padding: 0 8px;
   border-radius: var(--r);
   background: var(--search-bg);
-  color: var(--quiet);
+  color: var(--muted);
   min-width: 160px;
 }
 .tk-search svg {
-  width: 14px;
+  width: 16px;
   flex: none;
 }
 .tk-search input {
@@ -319,7 +320,7 @@
   min-width: 28px;
   text-align: right;
   font-size: 11px;
-  color: var(--quiet);
+  color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
 .tk-issue[data-state="open"] {
@@ -510,7 +511,7 @@
   overflow-x: auto;
 }
 .tk-quiet {
-  color: var(--quiet);
+  color: var(--muted);
   font-size: 12px;
 }
 .tk-check {
@@ -539,7 +540,7 @@
 }
 .tk-check-st {
   margin-left: auto;
-  color: var(--quiet);
+  color: var(--muted);
   font-size: 11px;
 }
 .tk-cmt {
@@ -591,7 +592,7 @@
   vertical-align: 0;
 }
 .tk-seg button[data-state="relogin"] {
-  color: var(--quiet);
+  color: var(--muted);
 }
 .tk-relogin {
   margin-left: 6px;
@@ -604,7 +605,7 @@
 .tk-me-keys {
   margin-left: auto;
   font-size: 11px;
-  color: var(--quiet);
+  color: var(--muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -637,14 +638,14 @@
 }
 .tk-me-n {
   font-weight: 400;
-  color: var(--quiet);
+  color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
 .tk-me-none {
   margin: 0;
   padding: 4px 8px 8px;
   font-size: 12px;
-  color: var(--quiet);
+  color: var(--muted);
 }
 .tk-me-row.cur:focus-visible {
   outline: 0;
@@ -681,7 +682,7 @@
   color: #d4a72c;
 }
 .tk-chip[data-tone="quiet"] {
-  color: var(--quiet);
+  color: var(--muted);
 }
 .tk-me-more {
   margin: 6px 8px 0;
