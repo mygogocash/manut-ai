@@ -1,0 +1,1555 @@
+// The store: the state, its actions and the bridge, as one object a view subscribes to. Split out of store.ts
+// (item 125d), which keeps the app's one store and re-exports every name here.
+import { recordError } from "../report/errors";
+import { bareText } from "../chat/box/carry";
+import { SESSIONS_ENTRY } from "../sessions/entry";
+import type { RuntimeAdapter } from "../runtime";
+import type { MemoryFact } from "../runtime/memory";
+import type { ActivityEvent, Job, JobRow, OlderState, TeamState } from "../runtime/mission";
+import type { NewRoutine, RoutineRow } from "../runtime/routines";
+import { promptText } from "../chat/parts/attachFiles";
+import { findTokens, toWire } from "../chat/parts/skillTokens";
+import { forBots, type ResumeSnap } from "../app/resume";
+import { getDraft } from "../app/drafts";
+import { followUp as savedFollowUp, type FollowUp } from "../chat/box/keys";
+import { moveInSidebar } from "./order";
+import { LANG_KEY, setLang, t as tr, type Lang } from "../i18n";
+import { flowReduce, ONBOARDED_KEY, startFlow, type FlowEvent } from "../onboarding/flow";
+import { cleanShop, SHOP_KEY, type ShopProfile } from "../onboarding/shop";
+import type {
+  LinkPlaces,
+  ApprovalChoice,
+  Bot,
+  BotReady,
+  BridgeEvent,
+  ChatOpenResult,
+  ClarifyAnswers,
+  FolderOpenResult,
+  FolderResumeResult,
+  ModelCurrent,
+  BotInfo,
+  TerminalRun,
+  Worktree,
+  UsageProvider,
+  WorktreeDiff,
+  MediaFile,
+  AttachResult,
+  AccountCli,
+  AccountGroup,
+  Skill,
+  SlashCommand,
+  CatalogResult,
+  InspectResult,
+  OpMap,
+  PluginRow,
+  Msg,
+} from "../lib/protocol";
+import type { AgentRunSummary, CliAgent, NodePr, RunDetail } from "../lib/runs";
+import { firstWords, threadEvent, threadKey, type ThreadOps, type ThreadRow } from "../threads/types";
+import {
+  isMenuPage,
+  type PanelTabId,
+  type MessageItem,
+  type SentFile,
+  type OutFile,
+  type ThreadRouteItem,
+  type Chat,
+  type ReplyChip,
+  type Theme,
+  type Look,
+  type MenuPage,
+  type AppState,
+} from "./types";
+import { PENDING_TURN_MS, STEER_REFUSED } from "./activity";
+import { savedLook, ROSTER_KEY, seedRoster, saveList, writeStored, initialState } from "./prefs";
+import { setChatRoute, chatRoute, folderKey, isSessionChat, chatTarget } from "./chatRoutes";
+import { queueReady, mustHold } from "./queue";
+import { selectSidebarBots, selectUnlisted } from "./selectors";
+import { reduce, type Action } from "./reducer";
+
+// ---- store ----------------------------------------------------------------------------------
+
+export interface Actions {
+  init(): Promise<void>;
+  selectBot(bot: string): Promise<void>;
+  /** Sends to the main chat; a "Reply there" chip goes along as `reply_to` and is then cleared. Skill tokens
+   *  (`$name`) go out hoisted to the front as `/name`; the bubble keeps the text as typed. While a turn runs, `how`
+   *  says whether it waits for the turn or is steered in (chat/box/keys.ts; absent: Settings' choice). */
+  send(text: string, how?: FollowUp): Promise<void>;
+  /** Sends to `bot`'s main chat without opening it (Home's Cmd+Enter): the person stays where they are. */
+  sendAway(bot: string, text: string): Promise<void>;
+  /** Put (or clear, with null) the composer's "Reply there" chip for a bot. Sends nothing. */
+  setReplyTo(chip: ReplyChip | null, bot?: string): void;
+  /** Attach each file in order (`chat.attach`), then send. Rejects, sending nothing, if any attach fails. */
+  sendWithFiles(text: string, files: OutFile[], how?: FollowUp): Promise<void>;
+  /** A message with files in `bot`'s thread `thread`, as `sendWithFiles` sends one in a main chat. */
+  threadSendWithFiles(bot: string, thread: string, text: string, files: OutFile[], how?: FollowUp): Promise<void>;
+  /** Stops the running turn of `bot`'s chat (the selected bot's by default), as the chat's Stop does. */
+  interrupt(bot?: string): Promise<void>;
+  /** Steer queue, on a held row of `bot`'s main chat (the selected bot's by default). Send now: stop the running
+   *  turn (one `chat.interrupt`) and send this one first when it ends. */
+  queueSendNow(id: string, bot?: string): Promise<void>;
+  /** Steer it into the running turn (`chat.steer`); when Hermes refuses or no turn runs, it goes out next instead. */
+  queueSteer(id: string, bot?: string): Promise<void>;
+  /** A steer that got no answer (it may be in the answer already): send it anyway, as the next normal message. */
+  queueResend(id: string, bot?: string): void;
+  /** Take it out of the queue and put its text back into the composer. */
+  queueEdit(id: string, bot?: string): void;
+  queueDelete(id: string, bot?: string): void;
+  /** `by`: who decided, when it is not the person at this Mac (a paired phone's device id); kept on the card. */
+  respondApproval(requestId: string, choice: ApprovalChoice, bot?: string, by?: string): Promise<void>;
+  /** A helper passes an ask of their shop on to its owner with a note (`approval.pass_on`); the card shows the note once
+   *  the runtime took it. */
+  passOnApproval(requestId: string, note: string, bot?: string): Promise<void>;
+  /** Shows another of the person's shops on every page (`shops.switch`); its pages are read again. */
+  switchShop(shop: string): Promise<void>;
+  /** Hides the notice about a shop the person's place in ended. */
+  dismissShopNotice(id: string): void;
+  /** A text answer for one question, or every answer of an interview at once (one `clarify.respond`). */
+  respondClarify(requestId: string, answer: string | ClarifyAnswers, bot?: string): Promise<void>;
+  loadElsewhere(bot?: string): Promise<void>;
+  loadRoutines(bot?: string): Promise<void>;
+  /** Re-read every bot's automations (files only; no gateway). */
+  loadAutomations(): Promise<void>;
+  /** Open the Automations page, on one job (`<bot>:<id>`) when given. */
+  openAutomations(job?: string | null): void;
+  /** Open the Plugins page, scoped to `bot` when given (else the last one, else the selected bot). */
+  openPlugins(bot?: string | null): void;
+  /** Open the Tasks page (src/tasks: issues and pull requests, read-only). */
+  openTasks(): void;
+  /** Open one of the side menu's pages; `find` (the palette's "Search History for ...") also focuses History's search box, with `query` in it. */
+  openPage(page: MenuPage, opts?: { find?: boolean; query?: string }): void;
+  /** Open one job's page (`jobs.list`'s id), and the shop's activity log. Each returns to where it was opened from. */
+  openJob(job: string): void;
+  openActivity(): void;
+  /** Mission Control's reads and Pause everyone, straight from the runtime (never cached in the store: a page keeps its
+   *  own copy). They reject with the runtime's own error, as the connected runtime's "not yet" for a team it is not told of
+   *  (the signed-in tenant's) and "only the owner" for a shop the person helps at. */
+  missionJobs(): Promise<{ jobs: JobRow[]; older?: OlderState }>;
+  missionJob(job: string): Promise<Job>;
+  missionActivity(): Promise<{ events: ActivityEvent[]; keptMonths: number | null; older?: OlderState }>;
+  /** Show older: the runtime reads the next page of the shop's older work, and the lists above, read again, hold it. Rejects with
+   *  the runtime's own error: `offline` while it cannot be reached, `unavailable` for a page it could not read. */
+  missionOlder(): Promise<{ older: OlderState }>;
+  teamState(): Promise<TeamState>;
+  /** Stops every member but the lead at the next safe point; unsends nothing. The members' rows learn of it through
+   *  `bots.update`. */
+  teamPause(): Promise<TeamState>;
+  teamResume(): Promise<TeamState>;
+  /** Customize: what the team knows and its routines, straight from the runtime and never cached in the store (the page keeps
+   *  its own copy). A list says the shop it was read for, and each change names that shop, so it never lands on another one
+   *  because the switcher moved meanwhile. They reject with the runtime's own error: a refusal from the rules (`already_known`,
+   *  `must_ask_first`), `owner_only` for a shop the person only helps at, or "not yet" for what the connected runtime cannot do. */
+  memoryList(): Promise<{ shop: string | null; facts: MemoryFact[] }>;
+  memoryRemember(shop: string | null, text: string): Promise<{ fact: MemoryFact }>;
+  memoryConfirm(shop: string | null, fact: string): Promise<{ fact: MemoryFact }>;
+  memoryCorrect(shop: string | null, fact: string, text: string): Promise<{ fact: MemoryFact }>;
+  memoryForget(shop: string | null, fact: string): Promise<{ fact: string }>;
+  routineList(): Promise<{ shop: string | null; routines: RoutineRow[] }>;
+  routineCreate(shop: string | null, params: NewRoutine): Promise<{ routine: RoutineRow }>;
+  routinePause(shop: string | null, routine: string): Promise<{ routine: RoutineRow }>;
+  routineResume(shop: string | null, routine: string): Promise<{ routine: RoutineRow }>;
+  routineRemove(shop: string | null, routine: string): Promise<{ routine: string }>;
+  /** The Artifacts page (item 83): the shop's public links, and a publish or a removal of one by the id of the ask the person
+   *  settled with a yes (src/runtime/artifactAsks.ts). Nothing else can publish or remove a link. */
+  artifactsList(): Promise<OpMap["artifacts.list"]["result"]>;
+  artifactsPublish(ask: string): Promise<OpMap["artifacts.publish"]["result"]>;
+  /** A bundle of skills (item 84), by the id of the ask the person settled with a yes after looking at every file. */
+  artifactsPublishSkills(ask: string): Promise<OpMap["artifacts.publishSkills"]["result"]>;
+  artifactsRemove(ask: string): Promise<OpMap["artifacts.remove"]["result"]>;
+  /** Tasks › Linear: whether `bot`'s config names a Linear MCP server (bridge `tasks.linear`, config only). */
+  tasksLinear(bot: string): Promise<{ configured: boolean; server: string }>;
+  /** Tasks › Start in thread: a new thread under `bot` titled `title`, opened, whose first message is `text`. */
+  startTaskThread(bot: string, title: string, text: string): Promise<string | null>;
+  /** Open `bot`'s main chat and send `text` there (the pages' "say it in words" box, Run now). */
+  sendTo(bot: string, text: string): Promise<void>;
+  /** The bot's own `cron.manage` through the bridge: pause, resume or remove one job, or add one. Rejects with
+   *  the bridge's error (Hermes' own text when it refused). */
+  automationDo(bot: string, job: string, action: "pause" | "resume" | "remove"): Promise<void>;
+  addAutomation(p: OpMap["automations.add"]["params"]): Promise<{ job: string; name: string }>;
+  /** Plugins: reads and the bot's own `plugins.manage` (the page keeps its own copy). */
+  pluginsList(bot: string): Promise<PluginRow[]>;
+  pluginsCatalog(bot: string, query?: string, category?: string): Promise<CatalogResult>;
+  pluginsInspect(bot: string, catalogName: string): Promise<InspectResult>;
+  pluginsInstall(bot: string, catalogName: string, sha: string): Promise<OpMap["plugins.install"]["result"]>;
+  pluginsToggle(bot: string, key: string, enable: boolean): Promise<OpMap["plugins.toggle"]["result"]>;
+  pluginsUpdate(bot: string, name: string): Promise<OpMap["plugins.update"]["result"]>;
+  pluginsRemove(bot: string, name: string): Promise<void>;
+  /** Settings › General › Language: saved on this computer, applied at once (no restart). */
+  setLanguage(lang: Lang): void;
+  /** First-run setup (src/onboarding/flow.ts): one move. A Next that leaves a step keeps what was typed so far on this
+   *  computer, so quitting halfway loses nothing; Back and typing write nothing. */
+  firstRunDo(e: FlowEvent): void;
+  /** Skip for now, and Open Manut AI on the last step: keeps what was typed, marks the setup done so it never opens on
+   *  its own again, and opens Home. */
+  firstRunEnd(): void;
+  /** Settings › General: open the setup again on Your shop, holding what was saved. */
+  openFirstRun(): void;
+  loadModels(bot?: string): Promise<void>;
+  /** Read the chat box's own choices of `bot`'s main chat, or of its thread `thread` (`agent.box`). */
+  loadAgentBox(bot: string, thread?: string): Promise<void>;
+  /** A choice in that box; resolves to the runtime's reason when it refused, else null (the box then shows it). */
+  setAgentBox(change: { model?: string; effort?: string; approval?: string }, bot: string, thread?: string): Promise<string | null>;
+  peek(sessionId: string, limit?: number, bot?: string): Promise<void>;
+  /** Change the main chat's model (the selected bot's, or `bot`'s). */
+  setModel(change: { model?: string; provider?: string; reasoning?: string }, bot?: string): Promise<void>;
+  /** Hermes' own readiness probe for a bot (`bots.ready`); never cached in the store (chat/connect/ready.ts keeps it). */
+  botReady(bot: string, provider?: string): Promise<BotReady>;
+  togglePanel(open?: boolean): void;
+  /** Open the side panel on one tab (Details, Terminal, Schedule, Worktrees, Diff). */
+  setPanelTab(tab: PanelTabId): void;
+  /** Open the Runs tab on one run (null: the first in the list). */
+  openRun(run: string | null): void;
+  /** Maximise the side panel in place (every pixel right of the sidebar) or restore it to its own width; `tab`
+   *  also picks the tab it opens on. */
+  setPanelMax(open: boolean, tab?: PanelTabId): void;
+  /** Put text in the selected bot's composer and focus it. Never sends. */
+  prefill(text: string): void;
+  setTheme(theme: Theme): void;
+  setLook(look: Partial<Look>): void;
+  openSettings(page?: string): void;
+  closeSettings(): void;
+  /** Sidebar row menu: pin to top (saved on this computer). */
+  pinBot(bot: string, on: boolean): void;
+  /** Put a bot in the roster (the sidebar list) or take it out ("Remove from list"; the profile stays). The last
+   *  listed bot is never taken out; taking out the open bot opens the first one left. Saved on this computer. */
+  listBot(bot: string, on: boolean): void;
+  /** Move a sidebar row to index `to` (held and dragged, or ⌥↑/⌥↓), inside its own group: pinned bots among the
+   *  pinned, the rest below them. Saved on this computer; ⌘1…⌘9 follow the new order. */
+  moveBot(bot: string, to: number): void;
+  /** Open the bot's chat and scroll to / focus one of its ask cards. */
+  jumpToAsk(bot: string, id: string): Promise<void>;
+  /** Show terminal session `id` in the main column; null goes back to the selected bot's chat. */
+  openSession(id: string | null): void;
+  /** A new Hermes chat for `bot` in folder `cwd` (SESSIONS > oh-my-hermes). */
+  folderOpen(bot: string, cwd: string): Promise<FolderOpenResult>;
+  /** Attach again folder chat `stored` (Hermes' stored id `folderOpen` returned) after a restart. */
+  folderResume(bot: string, cwd: string, stored: string): Promise<FolderResumeResult>;
+  folderClose(bot: string, session: string): Promise<void>;
+  /** Change the model of folder chat `session`. */
+  folderSetModel(bot: string, session: string, change: { model: string; provider?: string }): Promise<ModelCurrent>;
+  folderSend(bot: string, session: string, text: string): Promise<void>;
+  folderInterrupt(bot: string, session: string): Promise<void>;
+  folderApprove(bot: string, session: string, requestId: string, choice: ApprovalChoice): Promise<void>;
+  folderClarify(bot: string, session: string, requestId: string, answer: string | ClarifyAnswers): Promise<void>;
+  /** Re-read bots.list (names, status, picture revisions). */
+  reloadBots(): Promise<void>;
+  renameBot(bot: string, name: string): Promise<void>;
+  setAvatar(bot: string, data: string | null): Promise<void>;
+  botInfo(bot: string): Promise<BotInfo>;
+  /** The bot's skills for the composer's `$` picker, read once per bot (`fresh`: read again, e.g. right after an
+   *  install); [] when the bridge cannot list them. */
+  skills(bot: string, fresh?: boolean): Promise<Skill[]>;
+  /** The slash commands Hermes answers for this bot (its own registry), for the composer's `/` menu; read once
+   *  per bot, [] when the bridge cannot list them. */
+  slashCommands(bot: string, fresh?: boolean): Promise<SlashCommand[]>;
+  /** Channel names for Slack / Discord link chips, read once per bot; empty when the bridge cannot say. */
+  linkPlaces(bot: string): Promise<LinkPlaces>;
+  avatarOf(bot: string): Promise<{ rev: number | null; data: string | null }>;
+  /** Side panel reads (never cached in the store; the panel keeps its own copy). */
+  panelTerminal(bot: string): Promise<{ runs: TerminalRun[] }>;
+  panelWorktrees(bot: string): Promise<{ worktrees: Worktree[] }>;
+  panelDiff(bot: string, path: string): Promise<WorktreeDiff>;
+  /** A file the bot sent (`MEDIA:` line); never cached in the store. */
+  readMedia(bot: string, path: string, info?: boolean): Promise<MediaFile>;
+  /** Runs tab reads (read-only: nothing here retries or cancels a run). */
+  runsList(bot: string): Promise<{ runs: AgentRunSummary[] }>;
+  runsGet(bot: string, run: string): Promise<RunDetail>;
+  /** The GitHub state of the PRs a run's nodes name (the bridge asks `gh`, apart from `runsGet`). */
+  runsPrs(bot: string, run: string): Promise<{ prs: Record<string, NodePr> }>;
+  runsCli(params?: { agent?: CliAgent; cwd?: string; since?: number }): Promise<{ runs: AgentRunSummary[] }>;
+  /** A SESSIONS chat's title from the agent's own session files (`cli.title`). */
+  cliTitle(agent: "claude" | "codex", session: string, cwd?: string): Promise<{ title: string }>;
+  /** Subscription usage meters (sidebar); the meter keeps its own copy. */
+  usage(): Promise<{ providers: UsageProvider[] }>;
+  /** Settings › Accounts (the page keeps its own copy). */
+  accounts(): Promise<{ groups: AccountGroup[] }>;
+  addAccount(cli: AccountCli, label: string): Promise<{ id: string; dir: string }>;
+  setActiveAccount(cli: AccountCli, id: string): Promise<void>;
+  removeAccount(cli: AccountCli, id: string): Promise<void>;
+  labelAccount(cli: AccountCli, id: string, label: string): Promise<void>;
+  /** A cancelled sign-in: the new, still empty folder goes. */
+  discardAccount(cli: AccountCli, id: string): Promise<void>;
+  /** A quiet manut line in a bot's main chat (the selected bot when none is given). */
+  systemNote(text: string, bot?: string): void;
+  /** Every bridge event, for views that keep their own copy (Accounts listens for `accounts.update`). */
+  onBridgeEvent(fn: (ev: BridgeEvent) => void): () => void;
+  /** Hermes' own restart of the gateway that serves `bot`, only on the person's press (`interrupt` only for "Restart anyway"). */
+  restartBot(bot: string, interrupt?: boolean): Promise<OpMap["bots.restart"]["result"]>;
+  /** The gateway that serves `bot` and every bot that goes down with its restart. */
+  restartScope(bot: string): Promise<OpMap["bots.restart_scope"]["result"]>;
+  /** Hermes' own `reload-plugins` on the bot's gateway (restarts nothing). */
+  reloadPlugins(bot: string, name?: string): Promise<OpMap["plugins.reload"]["result"]>;
+  /** Re-read a bot's threads (`thread.list`). */
+  loadThreads(bot: string): Promise<void>;
+  /** A new, empty thread under `bot`, opened in the main column (the composer takes focus). `away`: made and listed, but
+   *  not opened, so the person stays where they are (Home's Cmd+Enter). */
+  newThread(bot: string, away?: boolean): Promise<string | null>;
+  /** `./thread <text>`: a new thread under `bot`, opened, with `first` sent as its first message (it names the
+   *  thread); an empty `first` is the same as newThread. Nothing goes to the bot's main chat. `away`: the thread is not
+   *  opened (Home's Cmd+Enter). */
+  newThreadWith(bot: string, first: string, away?: boolean): Promise<string | null>;
+  /** Show thread `thread` of `bot` (reads its messages the first time); null = the bot's main chat. */
+  openThread(bot: string, thread: string | null): Promise<void>;
+  /** A thread's messages as the runtime keeps them, read and nothing more: no chat opens, nothing in the store changes (item 97,
+   *  another chat's context brought into a box). */
+  readThread(bot: string, thread: string): Promise<{ role: "user" | "assistant"; text: string }[]>;
+  /** Send in a thread; the first message names it. `how` as `send`'s. */
+  threadSend(bot: string, thread: string, text: string, how?: FollowUp): Promise<void>;
+  threadInterrupt(bot: string, thread: string): Promise<void>;
+  /** Stop the thread when it runs, then archive it in Hermes (hidden, kept, restorable). Rejects on refusal. */
+  removeThread(bot: string, thread: string): Promise<void>;
+  /** A route card's answer: `send` sends the person's message to the card's thread (and adds a link line); `keep`
+   *  only closes the card. */
+  answerRoute(bot: string, id: string, choice: "send" | "keep"): Promise<void>;
+}
+
+/** What the store needs of a runtime adapter (`src/runtime`); tests hand in a fake with just these. */
+export type BridgeLike = Pick<RuntimeAdapter, "connect" | "request" | "onAny" | "onStatus">;
+
+export interface Store {
+  /** Settles once init has put back what was saved before a restart (or found nothing to put back). */
+  resumed: Promise<void>;
+  getState(): AppState;
+  /** State plus actions, one stable object per state version (for useSyncExternalStore). */
+  getSnapshot(): AppState & Actions;
+  subscribe(fn: () => void): () => void;
+  dispatch(a: Action): void;
+  actions: Actions;
+}
+
+function lastUserReplied(state: AppState, bot: string): boolean {
+  const items = state.chats[bot]?.items ?? [];
+  for (let i = items.length - 1; i >= 0; i -= 1) {
+    const it = items[i];
+    if (it.kind === "user") return !!it.reply;
+  }
+  return false;
+}
+
+const errText = (e: unknown) =>
+  typeof e === "object" && e && "message" in e ? String((e as { message: unknown }).message) : String(e);
+
+export interface StoreOptions {
+  now?: () => number;
+  /** Called for every bridge event after it is applied; the app uses it for system notifications. */
+  onEvent?: (ev: BridgeEvent, state: AppState) => void;
+  /** Called for every action after it is applied, and once the first state (or a reconnect's re-read) has
+   *  loaded; the app uses them for sounds. */
+  onAction?: (a: Action, state: AppState) => void;
+  onSettled?: () => void;
+  /** The snapshot saved before manut last closed (resume.ts), read once the bot list is known. */
+  resume?: () => ResumeSnap | null;
+  /** Bots hidden from the sidebar before the roster (`manut.hidden`): read once, when the first roster is chosen. */
+  hiddenBots?: () => string[];
+  /** Who the sidebar lists on a first run with nothing saved. `default` (Oh My Hermes' rule, and the store's own):
+   *  the default bot alone, the others joining from a + menu. `all`: every bot the runtime reports, which is what
+   *  the app passes, because Manut AI's team is the runtime's to name and there is no + menu to add one from. */
+  firstRoster?: "default" | "all";
+  /** When the person last saw each bot's automation answers (unix s; null: never recorded). Default: localStorage. */
+  watchSeen?: { get(bot: string): number | null; set(bot: string, ts: number): void };
+  /** What a message typed during a turn does when its sender did not say (Settings › General › Chat box; default the
+   *  saved choice, chat/box/keys.ts). */
+  followUp?: () => FollowUp;
+  /** Automation answers found on (re)opening a chat that the person has not seen: the app shows one note per bot. */
+  onWatchMissed?: (bot: string, rows: Msg[], state: AppState) => void;
+}
+
+/** The automation answers in `msgs` the person has not seen: newer than `seen` and not already in `chat`. A bot with
+ *  no record yet (`seen` null) has none, so a first start never floods with old answers. */
+export function newWatchRows(chat: Chat | undefined, msgs: readonly Msg[], seen: number | null): Msg[] {
+  if (seen === null) return [];
+  const have = new Set((chat?.items ?? []).map((i) => i.id));
+  return msgs.filter((m) => m.role === "assistant" && m.watch && m.ts > seen && !have.has(m.id));
+}
+
+const WATCH_SEEN_KEY = "manut.watchSeen";
+const localWatchSeen = {
+  get(bot: string): number | null {
+    try {
+      const v = (JSON.parse((typeof localStorage !== "undefined" && localStorage.getItem(WATCH_SEEN_KEY)) || "{}") as Record<string, unknown>)[bot];
+      return typeof v === "number" ? v : null;
+    } catch {
+      return null;
+    }
+  },
+  set(bot: string, ts: number): void {
+    try {
+      if (typeof localStorage === "undefined") return;
+      const all = JSON.parse(localStorage.getItem(WATCH_SEEN_KEY) || "{}") as Record<string, number>;
+      localStorage.setItem(WATCH_SEEN_KEY, JSON.stringify({ ...all, [bot]: ts }));
+    } catch {
+      /* no storage */
+    }
+  },
+};
+
+/** Every bridge event, after the store applied it (SESSIONS listens for `folder.closed`). */
+const bridgeListeners = new Set<(ev: BridgeEvent) => void>();
+export function onBridgeEvent(fn: (ev: BridgeEvent) => void): () => void {
+  bridgeListeners.add(fn);
+  return () => bridgeListeners.delete(fn);
+}
+
+export function createStore(bridge: BridgeLike, opts: StoreOptions = {}): Store {
+  const now = opts.now ?? Date.now;
+  let state = initialState();
+  const listeners = new Set<() => void>();
+  let localSeq = 0;
+  let snapshot: (AppState & Actions) | null = null;
+  let started = false;
+  let markResumed: () => void = () => {};
+  const resumed = new Promise<void>((r) => (markResumed = r));
+  const eventFns = new Set<(ev: BridgeEvent) => void>();
+  // skills.list per bot: the promise (asked once) and the names, for hoisting tokens when a message is sent
+  const skillLists = new Map<string, Promise<Skill[]>>();
+  const skillNames = new Map<string, string[]>();
+  // commands.list per bot: the composer's `/` menu, asked once (empty rows mean: keep the hint, no menu)
+  const slashLists = new Map<string, Promise<SlashCommand[]>>();
+  const tokenNames = (text: string, bot: string) => [...new Set(findTokens(text, skillNames.get(bot) ?? []).map((k) => k.name))];
+
+  // Steer queue: what each held row sends (the wire text, a Reply there target, its files), kept out of the state
+  const held = new Map<string, { bot: string; text: string; wire: string; reply_to?: string; files?: OutFile[] }>();
+  const flushing = new Set<string>();
+  const interrupting = new Set<string>();
+  const dispatch = (a: Action) => {
+    // what Settings › Report a problem lists (kept in memory only, one masked line each)
+    if (a.type === "error" && a.message) recordError("chat", a.message);
+    else if (a.type === "send.failed") recordError("chat", a.error);
+    else if (a.type === "chat.failed") recordError("chat", a.message);
+    const next = reduce(state, a);
+    if (next === state) return;
+    state = next;
+    snapshot = null;
+    for (const l of [...listeners]) l();
+    opts.onAction?.(a, state);
+    flushQueues();
+  };
+  // The first-run setup's profile as it is kept: cleaned (no stray spaces, known places only), in the state for the
+  // account row and Home, and on this computer for the next start.
+  const keepShop = (draft: ShopProfile) => {
+    const shop = cleanShop(draft);
+    dispatch({ type: "ui.shop", shop });
+    writeStored(SHOP_KEY, JSON.stringify(shop));
+  };
+  // Thread chats (`fold:<bot>:<thread>` keys threadRoute made) and the ones removed here: a removed thread's held
+  // rows never go out, not even when the archive itself ends its turn
+  const threadKeys = new Set<string>();
+  const goneThreads = new Set<string>();
+  /** A thread chat whose thread is removed, archived or no longer listed: nothing of it is sent. */
+  const threadGone = (key: string) => {
+    if (goneThreads.has(key)) return true;
+    if (!threadKeys.has(key)) return false;
+    const { bot, session } = chatTarget(key);
+    return !(state.threads[bot] ?? []).some((r) => r.thread === session);
+  };
+  /** Every chat whose held head can go out now sends it (exactly once: it leaves the queue before the request). */
+  const flushQueues = () => {
+    for (const bot of Object.keys(state.chats)) {
+      if (threadGone(bot)) continue;
+      const id = queueReady(state, bot);
+      if (id && !flushing.has(bot)) void sendHeld(bot, id);
+    }
+  };
+  const sendHeld = async (bot: string, id: string) => {
+    const p = held.get(id);
+    flushing.add(bot);
+    try {
+      dispatch({ type: "queue.take", bot, id, now: now() });
+      if (!p) return;
+      held.delete(id);
+      const to = chatTarget(bot);
+      try {
+        let wire = p.wire;
+        if (p.files?.length) {
+          const results: AttachResult[] = [];
+          for (const f of p.files) results.push(await bridge.request("chat.attach", { bot: to.bot, kind: f.attach, name: f.name, data_base64: await f.read() }));
+          wire = toWire(promptText(p.text, results), skillNames.get(bot) ?? []);
+        }
+        // queued: when Hermes is still busy (its own next turn: a steer it took during the final answer, or one held
+        // through a compression), this waits behind it in Hermes' FIFO instead of steering or interrupting it
+        await bridge.request("chat.send", p.reply_to ? { ...to, text: wire, reply_to: p.reply_to, queued: true } : { ...to, text: wire, queued: true });
+        dispatch({ type: "send.ok", bot, id, now: now() });
+        idleLater(bot, id);
+      } catch (e) {
+        dispatch({ type: "send.failed", bot, id, error: errText(e) });
+      }
+    } finally {
+      flushing.delete(bot);
+      flushQueues();
+    }
+  };
+  /** A send Hermes ran no turn for (a command it answered at once) must not hold the queue forever. */
+  const idleLater = (bot: string, id: string) => {
+    setTimeout(() => dispatch({ type: "queue.idle", bot, id }), PENDING_TURN_MS);
+  };
+  /** A held row of `bot`: the text it carries, or null when it is not waiting. */
+  const heldRow = (bot: string, id: string) =>
+    state.chats[bot]?.queue?.includes(id) ? (held.get(id) ?? null) : null;
+  /** After a turn: drop the texts kept for rows that can no longer go out (steered in and read, or gone). */
+  const pruneHeld = (bot: string) => {
+    const c = state.chats[bot];
+    for (const [id, p] of held) {
+      if (p.bot !== bot) continue;
+      const row = c?.items.find((i) => i.kind === "user" && i.id === id);
+      if (!row || (row.kind === "user" && !row.held && !row.steerUnknown)) held.delete(id);
+    }
+  };
+  /** A row of `bot` whose steer got no answer (it waits for Send or Delete): the text it carries, or null. */
+  const unknownRow = (bot: string, id: string) =>
+    state.chats[bot]?.items.some((i) => i.kind === "user" && i.id === id && i.steerUnknown) ? (held.get(id) ?? null) : null;
+  /** Typed in chat `key` (a bot's main chat or a thread) while its turn runs. `how` (the sender's key, else Settings'
+   *  choice, chat/box/keys.ts) says what it does: `steer` hands it to that turn at once (messenger style: the bot keeps
+   *  working and takes it in, no interrupt); `queue` holds it (steer queue, the ↵ ↓ × buttons) and sends it when the
+   *  turn ends. Where it cannot be steered (files, a Reply there target, a `/` command Hermes runs itself, no turn yet,
+   *  the bridge coming back, a refused steer ahead of it) it is held whatever `how` says. False when nothing runs
+   *  there: send it now. */
+  const followUpOf = opts.followUp ?? (() => savedFollowUp("member"));
+  const holdIfBusy = (key: string, id: string, p: { text: string; wire: string; reply_to?: string; files?: OutFile[] }, row: Extract<Action, { type: "local.user" }>, how?: FollowUp) => {
+    if (!mustHold(state, key)) return false;
+    held.set(id, { bot: key, ...p });
+    const c = state.chats[key];
+    // only behind rows that are themselves being steered in: never ahead of one that waits
+    const ahead = (c?.queue ?? []).every((q) => c?.items.some((i) => i.kind === "user" && i.id === q && i.autoSteer));
+    const wanted = (how ?? followUpOf()) === "steer";
+    const steer = wanted && !!c?.turn && !c.stale && !p.files?.length && !p.reply_to && !p.wire.trimStart().startsWith("/") && ahead;
+    dispatch({ ...row, held: true, ...(steer ? { steer } : {}) });
+    steerNext(key);
+    return true;
+  };
+  /** The queue head of `key`, when it is a message being steered in and nothing is steering: steer it now. */
+  const steerNext = (key: string) => {
+    const c = state.chats[key];
+    const head = c?.queue?.[0];
+    if (!head || !c.turn || c.steering) return;
+    if (c.items.some((i) => i.kind === "user" && i.id === head && i.autoSteer)) void actions.queueSteer(head, key);
+  };
+  /** A message in `bot`'s main chat, open or not (the open one's Send, and Home's Cmd+Enter, which leaves it closed). */
+  const sendIn = async (bot: string | null, text: string, how?: FollowUp) => {
+    const t = text.trim();
+    if (!bot || !t) return;
+    const id = `local-${++localSeq}`;
+    const chip = state.replyTo[bot] ?? null;
+    const reply = chip ? { source: chip.source, label: chip.place } : undefined;
+    const wire = toWire(t, skillNames.get(bot) ?? []);
+    // a turn runs: manut holds it (steer queue) and sends it when the turn ends, or steers it in (`how`)
+    if (holdIfBusy(bot, id, { text: t, wire, ...(chip ? { reply_to: chip.session_id } : {}) }, { type: "local.user", bot, id, text: t, now: now(), reply, sent: wire, skills: tokenNames(t, bot) }, how)) {
+      if (chip) dispatch({ type: "reply.set", bot, chip: null });
+      return;
+    }
+    dispatch({ type: "local.user", bot, id, text: t, now: now(), reply, sent: wire, skills: tokenNames(t, bot) });
+    if (chip) dispatch({ type: "reply.set", bot, chip: null });
+    try {
+      await bridge.request("chat.send", chip ? { bot, text: wire, reply_to: chip.session_id } : { bot, text: wire });
+      dispatch({ type: "send.ok", bot, id, now: now() });
+    } catch (e) {
+      dispatch({ type: "send.failed", bot, id, error: errText(e) });
+    }
+  };
+  const fail = (e: unknown) => dispatch({ type: "error", message: errText(e) });
+  const botArg = (bot?: string) => bot ?? state.selectedBot;
+
+  const watchSeen = opts.watchSeen ?? localWatchSeen;
+  /** The person saw `bot`'s automation answers up to now. */
+  const markWatchSeen = (bot: string) => watchSeen.set(bot, now() / 1000);
+  /** Answers in a (re)opened chat the person has not seen: unread, and one note for the bot. */
+  const counted = new Map<string, number>(); // per bot: the newest missed answer already counted (a re-peek adds none)
+  const catchUpWatch = (bot: string, msgs: readonly Msg[]) => {
+    const seen = watchSeen.get(bot);
+    if (seen === null || bot === state.selectedBot) return markWatchSeen(bot);
+    const rows = newWatchRows(state.chats[bot], msgs, Math.max(seen, counted.get(bot) ?? -Infinity));
+    if (!rows.length) return;
+    counted.set(bot, Math.max(...rows.map((m) => m.ts)));
+    dispatch({ type: "watch.missed", bot, count: rows.length });
+    opts.onWatchMissed?.(bot, rows, state);
+  };
+  const loadChat = async (bot: string) => {
+    let res: ChatOpenResult;
+    const since = now();
+    try {
+      res = await bridge.request("chat.open", { bot });
+    } catch (e) {
+      // Without this the chat stays unloaded and the timeline shows "Loading…" forever (bot offline).
+      dispatch({ type: "chat.failed", bot, message: errText(e) });
+      throw e;
+    }
+    catchUpWatch(bot, res.messages);
+    dispatch({ type: "chat.opened", bot, res, now: now(), since });
+  };
+  /** A bot outside the sidebar list: ask its existing Bot Chat for the prompts waiting on the person. The bridge
+   *  replays them as approval/clarify events, which reach Needs you; the chat itself is not kept, the bot is not
+   *  listed, and a bot with no Bot Chat yet gets none (`existing_only`; it answers not_found, which is fine).
+   *  One peek per bot at a time. */
+  const peeking = new Set<string>();
+  const peekAsks = async (bot: string) => {
+    if (peeking.has(bot)) return;
+    peeking.add(bot);
+    try {
+      const res = await bridge.request("chat.open", { bot, existing_only: true });
+      catchUpWatch(bot, res.messages ?? []);
+    } catch {
+      /* no Bot Chat, or it cannot start: nothing can be waiting in it */
+    } finally {
+      peeking.delete(bot);
+    }
+  };
+  /** Every bot outside the list whose chat is not loaded: asked at start, after a reconnect (events were missed),
+   *  and when the bot list changes (a new profile). bots.list reads offline for any profile not attached yet, so
+   *  this does not filter by status. */
+  const peekUnlisted = () => selectUnlisted(state).filter((b) => !state.chats[b.name]?.loaded).map((b) => peekAsks(b.name));
+  const loadElsewhere = async (bot?: string) => {
+    const b = botArg(bot);
+    if (!b) return;
+    try {
+      const r = await bridge.request("elsewhere.list", { bot: b });
+      dispatch({ type: "elsewhere", bot: b, sessions: r.sessions });
+    } catch (e) {
+      fail(e);
+    }
+  };
+  const loadRoutines = async (bot?: string) => {
+    const b = botArg(bot);
+    if (!b) return;
+    try {
+      const r = await bridge.request("routines.list", { bot: b });
+      dispatch({ type: "routines", bot: b, routines: r.routines });
+    } catch (e) {
+      fail(e);
+    }
+  };
+  const loadAutomations = async () => {
+    try {
+      dispatch({ type: "automations", automations: (await bridge.request("automations.list", {})).automations });
+    } catch {
+      /* an older bridge without the op, or a failed read: the page shows what it last had */
+    }
+  };
+  const loadModels = async (bot?: string) => {
+    const b = botArg(bot);
+    if (!b) return;
+    try {
+      dispatch({ type: "models", bot: b, options: await bridge.request("models.options", { bot: b }) });
+    } catch (e) {
+      fail(e);
+    }
+  };
+
+  const loadAgentBox = async (bot: string, thread?: string) => {
+    const key = thread ? folderKey(bot, thread) : bot;
+    // the WebSocket bridge is Hermes', whose bots answer through no agent of the person's: it is not asked
+    if ((bridge as Partial<RuntimeAdapter>).kind === "websocket") {
+      if (state.agentBox[key] !== null) dispatch({ type: "agentBox", key, box: null });
+      return;
+    }
+    try {
+      const { box } = await bridge.request("agent.box", thread ? { bot, session: thread } : { bot });
+      dispatch({ type: "agentBox", key, box });
+    } catch {
+      // a runtime without the op (the WebSocket bridge, an older one) has no box of its own: the chat shows none
+      dispatch({ type: "agentBox", key, box: null });
+    }
+  };
+  const setAgentBox = async (change: { model?: string; effort?: string; approval?: string }, bot: string, thread?: string): Promise<string | null> => {
+    try {
+      const { box } = await bridge.request("agent.set", { ...(thread ? { bot, session: thread } : { bot }), ...change });
+      dispatch({ type: "agentBox", key: thread ? folderKey(bot, thread) : bot, box });
+      return null;
+    } catch (e) {
+      return errText(e);
+    }
+  };
+
+  const online = (b: Bot) => b.status !== "offline";
+
+  const setRoster = (roster: string[]) => {
+    dispatch({ type: "ui.roster", roster });
+    saveList(ROSTER_KEY, roster);
+  };
+  const listBot = (bot: string, on: boolean) => {
+    const roster = state.ui.roster ?? [];
+    if (on) {
+      if (!roster.includes(bot)) setRoster([...roster, bot]);
+      return;
+    }
+    const shown = selectSidebarBots(state).map((b) => b.name);
+    if (!shown.includes(bot) || shown.length <= 1) return;
+    setRoster(roster.filter((b) => b !== bot));
+    if (state.ui.pinned.includes(bot)) {
+      dispatch({ type: "ui.pin", bot, on: false });
+      saveList("manut.pinned", state.ui.pinned);
+    }
+    if (state.selectedBot === bot) void selectBot(selectSidebarBots(state)[0].name);
+  };
+
+  /** The roster is chosen once, on the first run of this build that sees a bot (seedRoster); when none of its
+   *  bots is on this computer any more, it gets one again the same way. */
+  const ensureRoster = (resumeBot: string | null = null) => {
+    const { bots } = state;
+    const { roster } = state.ui;
+    if (!bots.length || (roster !== null && selectSidebarBots(state).length > 0)) return;
+    const seed = seedRoster(bots, resumeBot, state.ui.pinned, roster === null ? (opts.hiddenBots?.() ?? []) : [], opts.firstRoster === "all");
+    setRoster([...(roster ?? []), ...seed.filter((n) => !roster?.includes(n))]);
+  };
+
+  const selectBot = async (bot: string, behind = false) => {
+    // the open chat always has its row: a bot opened from Needs you, an @mention or Settings joins the list
+    if (state.ui.roster && state.bots.some((b) => b.name === bot)) listBot(bot, true);
+    dispatch({ type: "select", bot, ...(behind ? { behind: true } : {}) });
+    if (!behind) markWatchSeen(bot);
+    const jobs: Promise<unknown>[] = [loadElsewhere(bot), loadRoutines(bot), loadModels(bot)];
+    if (!state.threads[bot]) jobs.push(loadThreads(bot));
+    if (!state.chats[bot]?.loaded) jobs.push(loadChat(bot).catch(fail));
+    await Promise.all(jobs);
+  };
+
+  const reloadBots = async () => {
+    try {
+      const before = new Set(state.bots.map((b) => b.name));
+      const r = await bridge.request("bots.list", {});
+      dispatch({ type: "bots", bots: r.bots });
+      ensureRoster();
+      // a reconnect whose bots.list failed left chats unread (stale): read them now, so their held rows go out
+      const names = new Set(state.bots.map((b) => b.name));
+      const stale = Object.entries(state.chats).filter(([n, c]) => c.stale && c.loaded && names.has(n)).map(([n]) => n);
+      await Promise.allSettled(stale.map(loadChat));
+      // a profile that appeared since: ask it too (only new names, so a bots.update storm asks nobody twice)
+      await Promise.allSettled(
+        selectUnlisted(state).filter((b) => !before.has(b.name) && !state.chats[b.name]?.loaded).map((b) => peekAsks(b.name)),
+      );
+    } catch (e) {
+      fail(e);
+    }
+  };
+
+  /** After a reconnect: events were missed, so re-read the lists and every loaded chat, and ask the bots outside
+   *  the list again for the prompts that may have arrived meanwhile. */
+  const resync = async () => {
+    try {
+      const r = await bridge.request("bots.list", {});
+      dispatch({ type: "bots", bots: r.bots });
+      ensureRoster();
+    } catch (e) {
+      return fail(e);
+    }
+    const names = new Set(state.bots.map((b) => b.name));
+    const loaded = Object.entries(state.chats).filter(([n, c]) => c.loaded && names.has(n)).map(([n]) => n);
+    const threaded = Object.keys(state.threads).filter((n) => names.has(n));
+    await Promise.allSettled([...loaded.map(loadChat), ...threaded.map(loadThreads), ...peekUnlisted(), loadElsewhere(), loadRoutines(), loadAutomations(), loadShops()]);
+  };
+
+  /** The person's shops (`shops.list`), for the switcher in the account row. A runtime with no shops to show (or one
+   *  that does not know the op) lists none. When the shop every page shows is not the one it was, every page is read
+   *  again for it (`shop.switched`), whoever moved it: the switcher, or a runtime whose viewed shop left. */
+  const loadShops = async (): Promise<void> => {
+    let r: OpMap["shops.list"]["result"];
+    try {
+      r = await bridge.request("shops.list", {});
+    } catch (e) {
+      // A runtime that says the person is signed out holds no shop of theirs: the account row and the switcher stop naming
+      // them (a deleted account's shop above all, item 124). Any other refusal keeps the list as it was.
+      if ((e as { code?: unknown } | null)?.code === "signed_out" && state.shops.list.length > 0) {
+        dispatch({ type: "shops", list: [], current: null, left: state.shops.left });
+      }
+      return;
+    }
+    const before = state.shops;
+    dispatch({ type: "shops", list: Array.isArray(r.shops) ? r.shops : [], current: r.current ?? null, left: Array.isArray(r.left) ? r.left : [] });
+    if (before.loaded && before.current !== state.shops.current) await showShop();
+  };
+
+  /** Reads every page again for the shop now shown, as the start reads them: the team, the chat open with its asks, the
+   *  other members' chats and threads, and the lists. */
+  const showShop = async (): Promise<void> => {
+    dispatch({ type: "shop.switched" });
+    try {
+      const { bots } = await bridge.request("bots.list", {});
+      dispatch({ type: "bots", bots });
+      ensureRoster();
+    } catch (e) {
+      return fail(e);
+    }
+    const listed = selectSidebarBots(state).map((b) => b.name);
+    const first = state.selectedBot && state.bots.some((b) => b.name === state.selectedBot) ? state.selectedBot : listed[0];
+    if (first) await selectBot(first).catch(fail);
+    await Promise.allSettled([
+      ...selectSidebarBots(state).filter((b) => b.name !== first && online(b)).map((b) => loadChat(b.name)),
+      ...selectSidebarBots(state).filter((b) => b.name !== first && online(b)).map((b) => loadThreads(b.name)),
+      ...peekUnlisted(),
+      loadAutomations(),
+    ]);
+  };
+
+  // ---- threads under a bot (bridge `thread.*`) ----
+  const threadReq = <K extends keyof ThreadOps>(op: K, params: ThreadOps[K]["params"]): Promise<ThreadOps[K]["result"]> =>
+    (bridge.request as unknown as (op: string, p: unknown) => Promise<ThreadOps[K]["result"]>)(op, params);
+  const threadRoute = (bot: string, thread: string) => {
+    const key = threadKey(bot, thread);
+    threadKeys.add(key);
+    setChatRoute(key, {
+      label: `${(state.threads[bot] ?? []).find((r) => r.thread === thread)?.title || tr("thread.untitled")} · ${
+        state.bots.find((b) => b.name === bot)?.display_name ?? bot
+      }`,
+      open: () => void actions.openThread(bot, thread),
+      send: (text) => actions.threadSend(bot, thread, text),
+      interrupt: () => actions.threadInterrupt(bot, thread),
+      approve: async (request_id, choice) => {
+        await bridge.request("approval.respond", { bot, session: thread, request_id, choice });
+      },
+      clarify: async (request_id, answer) => {
+        await bridge.request(
+          "clarify.respond",
+          typeof answer === "string" ? { bot, session: thread, request_id, answer } : { bot, session: thread, request_id, answers: answer },
+        );
+      },
+    });
+    return key;
+  };
+  const loadThreads = async (bot: string) => {
+    try {
+      const r = await threadReq("thread.list", { bot });
+      dispatch({ type: "threads", bot, threads: r.threads });
+      for (const row of r.threads) threadRoute(bot, row.thread);
+    } catch {
+      /* an offline bot, or a bridge without threads: the bot row shows none */
+    }
+  };
+  const loadThread = async (bot: string, thread: string) => {
+    const key = threadRoute(bot, thread);
+    const since = now();
+    try {
+      const res = await threadReq("thread.open", { bot, thread });
+      dispatch({ type: "chat.opened", bot: key, res: { ...res, session_id: res.thread }, now: now(), since });
+      // the folder the open thread runs in (a restored row may have listed none): the terminal's next tab starts there
+      const row = (state.threads[bot] ?? []).find((r) => r.thread === thread);
+      if (row && res.cwd && res.cwd !== row.cwd) dispatch({ type: "thread.upsert", bot, row: { ...row, cwd: res.cwd } });
+    } catch (e) {
+      dispatch({ type: "chat.failed", bot: key, message: errText(e) });
+    }
+  };
+  /** The thread a `session`-tagged event belongs to, when it is one of the bot's threads. */
+  const threadOf = (ev: BridgeEvent) => (ev.session ? (state.threads[ev.bot] ?? []).find((r) => r.thread === ev.session) : undefined);
+  let threadSeq = 0;
+
+  const actions: Actions = {
+    async init() {
+      if (started) return;
+      started = true;
+      let opened = false;
+      bridge.onStatus((status) => {
+        dispatch({ type: "conn", status, now: now() });
+        if (status === "open") {
+          if (opened) void resync().then(() => opts.onSettled?.());
+          opened = true;
+        }
+      });
+      bridge.onAny((ev) => {
+        dispatch({ type: "event", ev, now: now() });
+        // a removed thread's late events (its turn's end) leave no blank chat behind
+        if (ev.session && goneThreads.has(folderKey(ev.bot, ev.session))) dispatch({ type: "chat.forget", bot: folderKey(ev.bot, ev.session) });
+        for (const l of [...bridgeListeners]) l(ev);
+        opts.onEvent?.(ev.session ? { ...ev, bot: folderKey(ev.bot, ev.session) } : ev, state);
+        for (const fn of [...eventFns]) fn(ev);
+        if (ev.event === "elsewhere.update") void loadElsewhere(ev.bot);
+        if (ev.event === "turn.end") pruneHeld(ev.session ? folderKey(ev.bot, ev.session) : ev.bot);
+        // After a turn the person pointed at a thread, re-read the places so the bot's new reply shows there.
+        if (ev.event === "turn.end" && lastUserReplied(state, ev.bot)) void loadElsewhere(ev.bot);
+        if (ev.event === "routine.ran") void loadRoutines(ev.bot);
+        if (ev.event === "message" && ev.watch && !ev.session && ev.bot === state.selectedBot) markWatchSeen(ev.bot);
+        if (ev.event === "routine.ran" || ev.event === "routines.update" || ev.event === "routine.added" || ev.event === "brief.ready")
+          void loadAutomations();
+        if (ev.event === "bots.update") void reloadBots();
+        // a bot's chat boxes changed: each one this page has read is read again
+        if (ev.event === "agent.box")
+          for (const key of Object.keys(state.agentBox)) {
+            if (key === ev.bot) void loadAgentBox(ev.bot);
+            else if (key.startsWith(folderKey(ev.bot, ""))) void loadAgentBox(ev.bot, key.slice(folderKey(ev.bot, "").length));
+          }
+        if (ev.event === "shops.update") void loadShops();
+        const tev = threadEvent(ev);
+        if (tev) {
+          if (tev.event === "thread.removed") {
+            // removed elsewhere (another window, the bot): its held rows go with it, as for the x here
+            const key = threadKey(tev.bot, tev.thread);
+            goneThreads.add(key);
+            for (const [id, p] of held) if (p.bot === key) held.delete(id);
+            dispatch({ type: "thread.gone", bot: tev.bot, thread: tev.thread });
+          }
+          else if (tev.event === "thread.split") {
+            // the bot opened a thread from its answer: the row at once (the list re-read confirms it), a link line
+            const known = (state.threads[tev.bot] ?? []).find((r) => r.thread === tev.thread);
+            const row: ThreadRow = known
+              ? { ...known, title: known.title || tev.title, last: now() / 1000 }
+              : { thread: tev.thread, title: tev.title, cwd: "", started_at: now() / 1000, running: false, needs: false, message_count: 0, last: now() / 1000 };
+            dispatch({ type: "thread.upsert", bot: tev.bot, row });
+            threadRoute(tev.bot, tev.thread);
+            dispatch({ type: "thread.note", bot: tev.bot, message: tev.message, item: { kind: "threadLink", id: `split-${tev.thread}`, ts: now() / 1000, bot: tev.bot, thread: tev.thread, title: tev.title } });
+          } else if (tev.event === "thread.route") {
+            // the bot thinks the person's last message belongs in an open thread: ask, move nothing
+            const items = state.chats[tev.bot]?.items ?? [];
+            const at = items.findIndex((i) => i.kind === "assistant" && i.id === tev.message);
+            const upTo = at < 0 ? items : items.slice(0, at);
+            const said = [...upTo].reverse().find((i): i is MessageItem => i.kind === "user");
+            if (said && (state.threads[tev.bot] ?? []).some((r) => r.thread === tev.thread))
+              dispatch({ type: "thread.note", bot: tev.bot, message: tev.message, item: { kind: "threadRoute", id: `route-${tev.message}`, ts: now() / 1000, bot: tev.bot, thread: tev.thread, title: tev.title, text: said.text } });
+          }
+          // a thread the bot opened itself (or another window made): the list re-reads
+          else if (!(state.threads[tev.bot] ?? []).some((r) => r.thread === tev.thread)) void loadThreads(tev.bot);
+        } else {
+          const row = threadOf(ev);
+          if (row && (ev.event === "turn.start" || ev.event === "turn.end" || ev.event === "message" || ev.event === "session.title")) {
+            const title = ev.event === "session.title" ? ev.title.trim() : row.title;
+            dispatch({ type: "thread.upsert", bot: ev.bot, row: { ...row, title, last: now() / 1000, running: ev.event === "turn.start" || (ev.event !== "turn.end" && row.running) } });
+          }
+        }
+        // a restarted bot is attached again: its chat re-reads itself, as after a reconnect; a bot outside the list
+        // is asked again, because the restart dropped the bridge's link to its Bot Chat
+        if (ev.event === "bot.restarted" && ev.ok) {
+          if (state.chats[ev.bot]?.loaded) void loadChat(ev.bot).catch(() => {});
+          else if (selectUnlisted(state).some((b) => b.name === ev.bot)) void peekAsks(ev.bot);
+        }
+      });
+      await bridge.connect();
+      try {
+        dispatch({ type: "hello", hello: await bridge.request("hello", {}) });
+        const { bots } = await bridge.request("bots.list", {});
+        dispatch({ type: "bots", bots });
+        // pick up where the person left off: the bot, panel and Plans view saved before a restart (a bot that
+        // is gone takes them with it)
+        const saved = opts.resume?.();
+        const back = saved ? forBots(saved, bots.map((b) => b.name)) : null;
+        ensureRoster(back?.bot ?? null);
+        const listed = selectSidebarBots(state).map((b) => b.name);
+        const first =
+          state.selectedBot && bots.some((b) => b.name === state.selectedBot)
+            ? state.selectedBot
+            : back?.bot && listed.includes(back.bot)
+              ? back.bot
+              : listed[0];
+        void loadAutomations();
+        // The person may already have opened a page while the app was connecting (the side menu answers at once): the
+        // first member is then chosen behind that page, and nothing below takes the person away from it. Before this, the
+        // start chose the member's chat and then Home, and undid the click.
+        const moved = state.ui.view !== "chat" || state.ui.thread !== null || !!state.ui.session;
+        // the panel and view come back as the bot is selected, before its chat and lists load: put back only once
+        // those reads ended, a click on the panel in the meantime (the places chip, ⌘.) was undone by it
+        const loading = first ? selectBot(first, moved) : Promise.resolve();
+        if (moved) {
+          // the page the person opened stays; what was saved before the restart is not put back over it
+        } else if (back?.bot && back.bot === first) {
+          const { panelOpen, panelTab, runsFull, runId } = back;
+          // a TERMINALS session comes back open (sessions/entry.ts)
+          const session = SESSIONS_ENTRY ? back.session : null;
+          dispatch({ type: "ui.restore", ui: { panelOpen, panelTab, runsFull, runId, session } });
+        } else if (back?.session && SESSIONS_ENTRY) dispatch({ type: "ui.session", id: back.session });
+        // Home is where the app starts: on a first run, after a restart that left Home open, and when the member saved
+        // before the restart is gone. The first member is still chosen above, so its chat, lists and drafts load behind
+        // Home. A chat or a terminal session the person left open comes back instead (resume.ts).
+        if (!moved && state.ui.view === "chat" && (!back?.bot || back.view === "home")) dispatch({ type: "ui.page", page: "home" });
+        await loading;
+        // Load the other listed chats too, so the sidebar can show previews and unread counts. A profile outside
+        // the list is not opened as a chat (that would make its Bot Chat, and list it): it is only asked for the
+        // prompts its existing Bot Chat holds, so an approval or question it is waiting on still reaches Needs you.
+        await Promise.allSettled([
+          ...selectSidebarBots(state).filter((b) => b.name !== first && online(b)).map((b) => loadChat(b.name)),
+          ...selectSidebarBots(state).filter((b) => b.name !== first && online(b)).map((b) => loadThreads(b.name)),
+          // every bot outside the list, not only `online` ones: bots.list reads offline for any profile the bridge
+          // has not attached yet, which is every one of these at start; chat.open attaches on demand, and one that
+          // cannot start just fails and is skipped
+          ...selectUnlisted(state).map((b) => peekAsks(b.name)),
+          loadShops(),
+        ]);
+      } catch (e) {
+        fail(e);
+      }
+      markResumed();
+      opts.onSettled?.();
+    },
+    selectBot,
+    send: (text, how) => sendIn(state.selectedBot, text, how),
+    async sendAway(bot, text) {
+      if (!text.trim()) return;
+      // the chat is read first when it never was, so its answer lands in a chat that knows its history
+      if (!state.chats[bot]?.loaded) await loadChat(bot).catch(fail);
+      await sendIn(bot, text);
+    },
+    setReplyTo(chip, bot) {
+      const b = botArg(bot);
+      if (b) dispatch({ type: "reply.set", bot: b, chip });
+    },
+    async sendWithFiles(text, files, how) {
+      const bot = state.selectedBot;
+      if (!bot) return;
+      if (!files.length) return actions.send(text, how);
+      if (mustHold(state, bot)) {
+        // held with its files: they are attached when it goes out (an attach stages for the very next send)
+        const id = `local-${++localSeq}`;
+        const t = text.trim();
+        const shown: SentFile[] = files.map(({ name, size, kind, url }) => ({ name, size, kind, url }));
+        holdIfBusy(bot, id, { text, wire: toWire(t, skillNames.get(bot) ?? []), files }, { type: "local.user", bot, id, text: t, now: now(), files: shown, skills: tokenNames(t, bot) });
+        return;
+      }
+      const results: AttachResult[] = [];
+      for (const f of files) {
+        try {
+          results.push(await bridge.request("chat.attach", { bot, kind: f.attach, name: f.name, data_base64: await f.read() }));
+        } catch (e) {
+          throw new Error(tr("att.failed", { name: f.name, error: errText(e) }));
+        }
+      }
+      const sent = toWire(promptText(text, results), skillNames.get(bot) ?? []);
+      const id = `local-${++localSeq}`;
+      const shown: SentFile[] = files.map(({ name, size, kind, url }) => ({ name, size, kind, url }));
+      dispatch({ type: "local.user", bot, id, text: text.trim(), now: now(), files: shown, sent, skills: tokenNames(text.trim(), bot) });
+      try {
+        await bridge.request("chat.send", { bot, text: sent });
+        dispatch({ type: "send.ok", bot, id, now: now() });
+      } catch (e) {
+        dispatch({ type: "send.failed", bot, id, error: errText(e) });
+      }
+    },
+    async queueSendNow(id, which) {
+      const bot = botArg(which);
+      if (!bot || !heldRow(bot, id)) return;
+      dispatch({ type: "queue.front", bot, id });
+      // one interrupt, however often it is pressed; the turn's end sends this one first
+      if (!state.chats[bot]?.turn || interrupting.has(bot)) return;
+      interrupting.add(bot);
+      try {
+        await bridge.request("chat.interrupt", chatTarget(bot));
+      } catch (e) {
+        fail(e);
+      } finally {
+        interrupting.delete(bot);
+      }
+    },
+    async queueSteer(id, which) {
+      const bot = botArg(which);
+      const p = bot ? heldRow(bot, id) : null;
+      if (!bot || !p || state.chats[bot]?.steering) return;
+      // no turn to steer (it ended), or a message Hermes cannot take as a steer (files, a Reply there target):
+      // it goes out next as a normal message
+      if (!state.chats[bot]?.turn || p.files?.length || p.reply_to) {
+        dispatch({ type: "queue.front", bot, id });
+        return;
+      }
+      dispatch({ type: "queue.steering", bot, id });
+      let ok = false;
+      let unknown = false;
+      try {
+        const status = (await bridge.request("chat.steer", { ...chatTarget(bot), text: p.wire })).status;
+        ok = status === "queued";
+        // Hermes could not say whether the agent saw it: the same as no answer, the person decides
+        unknown = status === "uncertain";
+      } catch (e) {
+        // a clear refusal is sent normally after the turn; no answer at all (the bridge dropped, the bot went
+        // offline, a timeout) may mean Hermes took it: never sent again on its own, the person decides
+        unknown = !STEER_REFUSED.has((e as { code?: string } | null)?.code ?? "");
+      }
+      dispatch({ type: "queue.steered", bot, id, ok, now: now(), ...(unknown ? { unknown } : {}) });
+      // a message typed while this one was steering: steered next, in order
+      if (ok) steerNext(bot);
+    },
+    queueResend(id, which) {
+      const bot = botArg(which);
+      if (!bot || !unknownRow(bot, id)) return;
+      dispatch({ type: "queue.resend", bot, id });
+    },
+    queueEdit(id, which) {
+      const bot = botArg(which);
+      const p = bot ? heldRow(bot, id) : null;
+      if (!bot || !p) return;
+      held.delete(id);
+      dispatch({ type: "queue.drop", bot, id });
+      const typed = getDraft(bot).trim();
+      dispatch({ type: "ui.draft", bot, text: typed ? `${p.text}\n${typed}` : p.text });
+    },
+    queueDelete(id, which) {
+      const bot = botArg(which);
+      if (!bot || !(heldRow(bot, id) || unknownRow(bot, id))) return;
+      held.delete(id);
+      dispatch({ type: "queue.drop", bot, id });
+    },
+    async interrupt(which) {
+      const bot = botArg(which);
+      if (!bot) return;
+      try {
+        await bridge.request("chat.interrupt", { bot });
+      } catch (e) {
+        fail(e);
+      }
+    },
+    async respondApproval(requestId, choice, bot, by) {
+      const b = botArg(bot);
+      if (!b) return;
+      try {
+        const route = chatRoute(b);
+        if (route) await route.approve(requestId, choice);
+        else if (isSessionChat(b)) throw new Error(tr("ask.sessionEnded"));
+        else await bridge.request("approval.respond", { bot: b, request_id: requestId, choice });
+        dispatch({ type: "approval.resolved", bot: b, request_id: requestId, choice, ...(by ? { by } : {}) });
+      } catch (e) {
+        fail(e);
+      }
+    },
+    async passOnApproval(requestId, note, bot) {
+      const b = botArg(bot);
+      if (!b) return;
+      try {
+        const { passed_on } = await bridge.request("approval.pass_on", { bot: b, request_id: requestId, note });
+        dispatch({ type: "approval.passed", bot: b, request_id: requestId, passed: passed_on });
+      } catch (e) {
+        fail(e);
+      }
+    },
+    async switchShop(shop) {
+      if (shop === state.shops.current) return;
+      try {
+        await bridge.request("shops.switch", { shop });
+      } catch (e) {
+        return fail(e);
+      }
+      await loadShops();
+    },
+    dismissShopNotice(id) {
+      dispatch({ type: "shops.dismiss", id });
+    },
+    async respondClarify(requestId, answer, bot) {
+      const b = botArg(bot);
+      if (!b) return;
+      try {
+        const route = chatRoute(b);
+        const say = (x: string | ClarifyAnswers) =>
+          route
+            ? route.clarify(requestId, x)
+            : isSessionChat(b)
+              ? Promise.reject(new Error(tr("ask.sessionEnded")))
+              : bridge.request("clarify.respond", typeof x === "string" ? { bot: b, request_id: requestId, answer: x } : { bot: b, request_id: requestId, answers: x });
+        await say(answer);
+        if (typeof answer === "string") {
+          dispatch({ type: "clarify.resolved", bot: b, request_id: requestId, answer });
+          return;
+        }
+        const given = Object.values(answer).filter((v) => v !== null).length;
+        const total = Object.keys(answer).length;
+        const summary = `${given} of ${total}`;
+        dispatch({ type: "clarify.resolved", bot: b, request_id: requestId, answer: summary, answers: answer });
+      } catch (e) {
+        fail(e);
+      }
+    },
+    loadElsewhere,
+    loadRoutines,
+    loadAutomations,
+    loadModels,
+    loadAgentBox,
+    setAgentBox,
+    openAutomations: (job) => {
+      dispatch({ type: "ui.automations", job });
+      void loadAutomations();
+    },
+    openTasks: () => dispatch({ type: "ui.tasks" }),
+    openPage: (page, opts) => dispatch({ type: "ui.page", page, find: opts?.find, query: opts?.query }),
+    openJob: (job) => dispatch({ type: "ui.job", job }),
+    openActivity: () => dispatch({ type: "ui.activity" }),
+    missionJobs: () => bridge.request("jobs.list", {}),
+    missionJob: (job) => bridge.request("jobs.get", { job }),
+    missionActivity: () => bridge.request("activity.list", {}),
+    missionOlder: () => bridge.request("jobs.older", {}),
+    teamState: () => bridge.request("team.state", {}),
+    teamPause: () => bridge.request("team.pause", {}),
+    teamResume: () => bridge.request("team.resume", {}),
+    memoryList: () => bridge.request("memory.list", {}),
+    memoryRemember: (shop, text) => bridge.request("memory.remember", { shop, text }),
+    memoryConfirm: (shop, fact) => bridge.request("memory.confirm", { shop, fact }),
+    memoryCorrect: (shop, fact, text) => bridge.request("memory.correct", { shop, fact, text }),
+    memoryForget: (shop, fact) => bridge.request("memory.forget", { shop, fact }),
+    routineList: () => bridge.request("routine.list", {}),
+    routineCreate: (shop, params) => bridge.request("routine.create", { shop, ...params }),
+    routinePause: (shop, routine) => bridge.request("routine.pause", { shop, routine }),
+    routineResume: (shop, routine) => bridge.request("routine.resume", { shop, routine }),
+    routineRemove: (shop, routine) => bridge.request("routine.remove", { shop, routine }),
+    artifactsList: () => bridge.request("artifacts.list", {}),
+    artifactsPublish: (ask) => bridge.request("artifacts.publish", { ask }),
+    artifactsPublishSkills: (ask) => bridge.request("artifacts.publishSkills", { ask }),
+    artifactsRemove: (ask) => bridge.request("artifacts.remove", { ask }),
+    tasksLinear: (bot) => (bridge.request as unknown as (op: string, p: unknown) => Promise<{ configured: boolean; server: string }>)("tasks.linear", { bot }),
+    async startTaskThread(bot, title, text) {
+      try {
+        const key = `t${Date.now().toString(36)}${(threadSeq += 1)}`;
+        const r = await threadReq("thread.create", { bot, key, title });
+        const { model, provider, reasoning, ...row } = r;
+        dispatch({ type: "thread.upsert", bot, row: { ...row, title: row.title || title, last: now() / 1000 } });
+        const ck = threadRoute(bot, row.thread);
+        dispatch({ type: "chat.opened", bot: ck, res: { session_id: row.thread, messages: [], running: false, model, provider, reasoning }, now: now() });
+        dispatch({ type: "ui.thread", bot, thread: row.thread });
+        await actions.threadSend(bot, row.thread, text);
+        return row.thread;
+      } catch (e) {
+        fail(e);
+        return null;
+      }
+    },
+    openPlugins: (bot) => dispatch({ type: "ui.plugins", bot: bot ?? state.ui.pluginsBot ?? state.selectedBot ?? state.bots[0]?.name ?? null }),
+    async sendTo(bot, text) {
+      if (!text.trim()) return;
+      if (state.selectedBot !== bot || state.ui.view !== "chat") await selectBot(bot);
+      await actions.send(text);
+    },
+    async automationDo(bot, job, action) {
+      await bridge.request(`automations.${action}` as "automations.pause", { bot, job });
+      await loadAutomations();
+    },
+    async addAutomation(p) {
+      const r = await bridge.request("automations.add", p);
+      await loadAutomations();
+      return r;
+    },
+    pluginsList: async (bot) => (await bridge.request("plugins.list", { bot })).plugins,
+    pluginsCatalog: (bot, query, category) =>
+      bridge.request("plugins.catalog", { bot, ...(query ? { query } : {}), ...(category ? { category } : {}) }),
+    pluginsInspect: (bot, catalogName) => bridge.request("plugins.inspect", { bot, catalog_name: catalogName }),
+    pluginsInstall: (bot, catalogName, sha) => bridge.request("plugins.install", { bot, catalog_name: catalogName, inspected_sha: sha }),
+    pluginsToggle: (bot, key, enable) => bridge.request("plugins.toggle", { bot, key, enable }),
+    pluginsUpdate: (bot, name) => bridge.request("plugins.update", { bot, name }),
+    async pluginsRemove(bot, name) {
+      await bridge.request("plugins.remove", { bot, name });
+    },
+    setLanguage(lang) {
+      try {
+        if (typeof localStorage !== "undefined") localStorage.setItem(LANG_KEY, lang);
+      } catch {
+        /* no storage */
+      }
+      setLang(lang);
+      dispatch({ type: "ui.lang", lang });
+    },
+    firstRunDo(e) {
+      const cur = state.ui.firstRun;
+      if (!cur) return;
+      const next = flowReduce(cur, e);
+      if (next === cur) return;
+      dispatch({ type: "ui.firstRun", flow: next });
+      // Welcome holds nothing typed, so only a step's own Next keeps anything.
+      if (e.type === "next" && cur.screen !== "welcome" && next.screen !== cur.screen) keepShop(next.draft);
+    },
+    firstRunEnd() {
+      const cur = state.ui.firstRun;
+      if (!cur) return;
+      keepShop(cur.draft);
+      writeStored(ONBOARDED_KEY, "1");
+      dispatch({ type: "ui.firstRun", flow: null });
+      // The setup ends on Home, as the canvas's Open Manut AI does, wherever the app was behind it.
+      dispatch({ type: "ui.page", page: "home" });
+    },
+    openFirstRun: () => dispatch({ type: "ui.firstRun", flow: startFlow("shop", state.ui.shop) }),
+    async peek(sessionId, limit, bot) {
+      const b =
+        bot ?? Object.keys(state.elsewhere).find((n) => state.elsewhere[n].some((a) => a.id === sessionId)) ?? state.selectedBot;
+      if (!b) return;
+      dispatch({ type: "peek.loading", id: sessionId });
+      try {
+        const r = await bridge.request("elsewhere.peek", { bot: b, session_id: sessionId, ...(limit ? { limit } : {}) });
+        dispatch({ type: "peek.loaded", id: sessionId, messages: r.messages, total: r.total });
+      } catch (e) {
+        dispatch({ type: "peek.failed", id: sessionId, error: errText(e) });
+      }
+    },
+    async setModel(change, which) {
+      const bot = which ?? state.selectedBot;
+      if (!bot) return;
+      try {
+        const current = await bridge.request("chat.set_model", { bot, ...change });
+        dispatch({ type: "model.set", bot, current });
+      } catch (e) {
+        fail(e);
+      }
+    },
+    botReady: (bot, provider) => bridge.request("bots.ready", provider ? { bot, provider } : { bot }),
+    togglePanel: (open) => dispatch({ type: "ui.panel", open }),
+    setPanelTab: (tab) => dispatch({ type: "ui.panelTab", tab }),
+    openRun: (run) => dispatch({ type: "ui.run", run }),
+    setPanelMax: (open, tab) => dispatch({ type: "ui.panelMax", open, tab }),
+    prefill(text) {
+      const bot = state.selectedBot;
+      if (!bot) return;
+      if (state.ui.view !== "chat") dispatch({ type: "ui.closeSettings" });
+      // The draft goes into the chat's composer, so a menu page that the closed page returned to gives way to the chat.
+      if (isMenuPage(state.ui.view)) dispatch({ type: "ui.thread", bot, thread: state.ui.thread });
+      dispatch({ type: "ui.draft", bot, text });
+    },
+    setTheme(theme) {
+      try {
+        if (typeof localStorage !== "undefined") localStorage.setItem("manut.theme", theme);
+      } catch {
+        /* no storage */
+      }
+      dispatch({ type: "ui.theme", theme });
+    },
+    setLook(look) {
+      dispatch({ type: "ui.look", look });
+      try {
+        if (typeof localStorage !== "undefined") localStorage.setItem("manut.look", savedLook(state.ui.look));
+      } catch {
+        /* no storage */
+      }
+    },
+    openSettings: (page) => dispatch({ type: "ui.settings", page }),
+    closeSettings: () => dispatch({ type: "ui.closeSettings" }),
+    pinBot(bot, on) {
+      dispatch({ type: "ui.pin", bot, on });
+      saveList("manut.pinned", state.ui.pinned);
+    },
+    listBot,
+    moveBot(bot, to) {
+      const order = selectSidebarBots(state).map((b) => b.name);
+      const next = moveInSidebar(order, state.ui.pinned, state.ui.roster ?? [], bot, to);
+      if (!next) return;
+      dispatch({ type: "ui.order", ...next });
+      saveList("manut.pinned", next.pinned);
+      saveList(ROSTER_KEY, next.roster);
+    },
+    async jumpToAsk(bot, id) {
+      dispatch({ type: "ui.focusAsk", bot, id });
+      // a SESSIONS chat's ask opens that session; a bot's opens the bot's chat
+      const route = isSessionChat(bot) ? chatRoute(bot) : undefined;
+      if (route) route.open();
+      else if (state.selectedBot !== bot || state.ui.view !== "chat") await selectBot(bot);
+    },
+    openSession: (id) => dispatch({ type: "ui.session", id }),
+    folderOpen: (bot, cwd) => bridge.request("folder.open", { bot, cwd }),
+    folderResume: (bot, cwd, stored) => bridge.request("folder.resume", { bot, cwd, stored }),
+    async folderClose(bot, session) {
+      await bridge.request("folder.close", { bot, session });
+    },
+    folderSetModel: (bot, session, change) => bridge.request("chat.set_model", { bot, session, ...change }),
+    async folderSend(bot, session, text) {
+      await bridge.request("chat.send", { bot, session, text });
+    },
+    async folderInterrupt(bot, session) {
+      await bridge.request("chat.interrupt", { bot, session });
+    },
+    async folderApprove(bot, session, requestId, choice) {
+      await bridge.request("approval.respond", { bot, session, request_id: requestId, choice });
+    },
+    async folderClarify(bot, session, requestId, answer) {
+      await bridge.request(
+        "clarify.respond",
+        typeof answer === "string" ? { bot, session, request_id: requestId, answer } : { bot, session, request_id: requestId, answers: answer },
+      );
+    },
+    reloadBots,
+    async renameBot(bot, name) {
+      const r = await bridge.request("bots.rename", { bot, name });
+      dispatch({ type: "bots", bots: state.bots.map((b) => (b.name === bot ? { ...b, display_name: r.display_name } : b)) });
+    },
+    async setAvatar(bot, data) {
+      const r = await bridge.request("bots.set_avatar", data === null ? { bot, clear: true } : { bot, data });
+      dispatch({ type: "bots", bots: state.bots.map((b) => (b.name === bot ? { ...b, avatar_rev: r.avatar_rev } : b)) });
+    },
+    botInfo: (bot) => bridge.request("bots.info", { bot }),
+    skills(bot, fresh) {
+      if (fresh) skillLists.delete(bot);
+      let list = skillLists.get(bot);
+      if (!list) {
+        list = bridge
+          .request("skills.list", { bot })
+          .then((r) => {
+            skillNames.set(bot, r.skills.map((x) => x.name));
+            return r.skills;
+          })
+          .catch(() => {
+            skillLists.delete(bot); // an older bridge without the op, or a failed read: no picker, no toast
+            return [];
+          });
+        skillLists.set(bot, list);
+      }
+      return list;
+    },
+    slashCommands(bot, fresh) {
+      if (fresh) slashLists.delete(bot);
+      let list = slashLists.get(bot);
+      if (!list) {
+        list = bridge
+          .request("commands.list", { bot })
+          .then((r) => r.commands)
+          .catch(() => {
+            slashLists.delete(bot); // an older bridge without the op, or a failed read: no menu, no toast
+            return [];
+          });
+        slashLists.set(bot, list);
+      }
+      return list;
+    },
+    linkPlaces: (bot) =>
+      bridge
+        .request("links.places", { bot })
+        .then((r) => r.places)
+        .catch(() => ({ slack: {}, discord: {} })), // an older bridge without the op: chips keep their fallback
+    avatarOf: (bot) => bridge.request("bots.avatar", { bot }),
+    panelTerminal: (bot) => bridge.request("panel.terminal", { bot }),
+    panelWorktrees: (bot) => bridge.request("panel.worktrees", { bot }),
+    panelDiff: (bot, path) => bridge.request("panel.diff", { bot, path }),
+    readMedia: (bot, path, info) => bridge.request("media.read", info ? { bot, path, info } : { bot, path }),
+    runsList: (bot) => bridge.request("runs.list", { bot }),
+    runsGet: (bot, run) => bridge.request("runs.get", { bot, run }),
+    runsPrs: (bot, run) => bridge.request("runs.prs", { bot, run }),
+    runsCli: (params = {}) => bridge.request("runs.cli", params),
+    cliTitle: (agent, session, cwd) => bridge.request("cli.title", { agent, session, ...(cwd ? { cwd } : {}) }),
+    usage: () => bridge.request("usage.read", {}),
+    accounts: () => bridge.request("accounts.list", {}),
+    addAccount: (cli, label) => bridge.request("accounts.add", { cli, label }),
+    async setActiveAccount(cli, id) {
+      await bridge.request("accounts.set_active", { cli, account: id });
+    },
+    async removeAccount(cli, id) {
+      await bridge.request("accounts.remove", { cli, account: id });
+    },
+    async labelAccount(cli, id, label) {
+      await bridge.request("accounts.label", { cli, account: id, label });
+    },
+    async discardAccount(cli, id) {
+      await bridge.request("accounts.discard", { cli, account: id });
+    },
+    systemNote(text, bot) {
+      const b = bot ?? state.selectedBot ?? state.bots[0]?.name;
+      if (b) dispatch({ type: "system.note", bot: b, text, now: now() });
+    },
+    onBridgeEvent(fn) {
+      eventFns.add(fn);
+      return () => eventFns.delete(fn);
+    },
+    restartBot: (bot, interrupt) => bridge.request("bots.restart", interrupt ? { bot, interrupt: true } : { bot }),
+    restartScope: (bot) => bridge.request("bots.restart_scope", { bot }),
+    reloadPlugins: (bot, name) => bridge.request("plugins.reload", name ? { bot, name } : { bot }),
+    loadThreads,
+    async newThread(bot, away = false) {
+      try {
+        const key = `t${Date.now().toString(36)}${(threadSeq += 1)}`;
+        const r = await threadReq("thread.create", { bot, key });
+        const { model, provider, reasoning, ...row } = r;
+        dispatch({ type: "thread.upsert", bot, row: { ...row, last: now() / 1000 } });
+        const ck = threadRoute(bot, row.thread);
+        dispatch({ type: "chat.opened", bot: ck, res: { session_id: row.thread, messages: [], running: false, model, provider, reasoning }, now: now() });
+        if (!away) dispatch({ type: "ui.thread", bot, thread: row.thread });
+        return row.thread;
+      } catch (e) {
+        fail(e);
+        return null;
+      }
+    },
+    async newThreadWith(bot, first, away = false) {
+      const thread = await actions.newThread(bot, away);
+      if (thread && first.trim()) await actions.threadSend(bot, thread, first);
+      return thread;
+    },
+    async readThread(bot, thread) {
+      const res = await threadReq("thread.open", { bot, thread });
+      return (res.messages ?? []).flatMap((m) => (m.role === "user" || m.role === "assistant" ? [{ role: m.role, text: m.text }] : []));
+    },
+    async openThread(bot, thread) {
+      if (state.ui.roster && state.bots.some((b) => b.name === bot)) listBot(bot, true);
+      if (!thread) return selectBot(bot);
+      dispatch({ type: "ui.thread", bot, thread });
+      if (!state.chats[threadKey(bot, thread)]?.loaded) await loadThread(bot, thread);
+    },
+    async threadSend(bot, thread, text, how) {
+      const key = threadRoute(bot, thread);
+      const id = `local-${++localSeq}`;
+      const t = text.trim();
+      // typed while the thread's turn runs: the same steer queue as the main chat (held, ↵ ↓ × buttons, sent in order)
+      if (holdIfBusy(key, id, { text: t, wire: t }, { type: "local.user", bot: key, id, text: t, now: now() }, how)) return;
+      dispatch({ type: "local.user", bot: key, id, text: t, now: now() });
+      const row = (state.threads[bot] ?? []).find((r) => r.thread === thread);
+      // the row reads the first words at once; Hermes' own title replaces them when it lands
+      if (row && !row.title) dispatch({ type: "thread.upsert", bot, row: { ...row, title: firstWords(bareText(text)), last: now() / 1000 } });
+      try {
+        await bridge.request("chat.send", { bot, session: thread, text: text.trim() });
+        dispatch({ type: "send.ok", bot: key, id, now: now() });
+      } catch (e) {
+        dispatch({ type: "send.failed", bot: key, id, error: errText(e) });
+      }
+    },
+    async threadSendWithFiles(bot, thread, text, files, how) {
+      if (!files.length) return actions.threadSend(bot, thread, text, how);
+      const key = threadRoute(bot, thread);
+      const id = `local-${++localSeq}`;
+      const t = text.trim();
+      const shown: SentFile[] = files.map(({ name, size, kind, url }) => ({ name, size, kind, url }));
+      // held with its files while the thread's turn runs: they are attached when it goes out (sendHeld)
+      if (holdIfBusy(key, id, { text: t, wire: t, files }, { type: "local.user", bot: key, id, text: t, now: now(), files: shown })) return;
+      const results: AttachResult[] = [];
+      for (const f of files) {
+        try {
+          results.push(await bridge.request("chat.attach", { bot, kind: f.attach, name: f.name, data_base64: await f.read() }));
+        } catch (e) {
+          throw new Error(tr("att.failed", { name: f.name, error: errText(e) }));
+        }
+      }
+      const sent = promptText(text, results);
+      dispatch({ type: "local.user", bot: key, id, text: t, now: now(), files: shown, sent });
+      const row = (state.threads[bot] ?? []).find((r) => r.thread === thread);
+      if (row && !row.title) dispatch({ type: "thread.upsert", bot, row: { ...row, title: firstWords(bareText(t) || files[0].name), last: now() / 1000 } });
+      try {
+        await bridge.request("chat.send", { bot, session: thread, text: sent });
+        dispatch({ type: "send.ok", bot: key, id, now: now() });
+      } catch (e) {
+        dispatch({ type: "send.failed", bot: key, id, error: errText(e) });
+      }
+    },
+    async threadInterrupt(bot, thread) {
+      try {
+        await bridge.request("chat.interrupt", { bot, session: thread });
+      } catch (e) {
+        fail(e);
+      }
+    },
+    async removeThread(bot, thread) {
+      const key = threadKey(bot, thread);
+      // its held rows (and its chat) go first: the archive ends the thread's turn, and that turn's end must not
+      // drain them to the archived session
+      goneThreads.add(key);
+      const texts = (state.chats[key]?.queue ?? []).map((id) => held.get(id)?.text).filter((t): t is string => !!t);
+      for (const [id, p] of held) if (p.bot === key) held.delete(id);
+      dispatch({ type: "chat.forget", bot: key });
+      try {
+        await threadReq("thread.remove", { bot, thread });
+      } catch (e) {
+        // not removed: the thread reads again, and what it held is back in its box, unsent
+        goneThreads.delete(key);
+        const typed = getDraft(key).trim();
+        if (texts.length) dispatch({ type: "ui.draft", bot: key, text: [...texts, ...(typed ? [typed] : [])].join("\n") });
+        if (state.ui.thread === thread) void loadThread(bot, thread);
+        throw e;
+      }
+      setChatRoute(key, null);
+      dispatch({ type: "thread.gone", bot, thread });
+    },
+    async answerRoute(bot, id, choice) {
+      const card = state.chats[bot]?.items.find((i): i is ThreadRouteItem => i.kind === "threadRoute" && i.id === id);
+      if (!card || card.done) return;
+      if (choice === "keep") return dispatch({ type: "thread.routed", bot, id, done: "kept" });
+      const key = threadRoute(bot, card.thread);
+      const local = `local-${++localSeq}`;
+      try {
+        await bridge.request("chat.send", { bot, session: card.thread, text: card.text });
+      } catch (e) {
+        return dispatch({ type: "thread.routed", bot, id, error: errText(e) });
+      }
+      dispatch({ type: "local.user", bot: key, id: local, text: card.text, now: now() });
+      dispatch({ type: "thread.routed", bot, id, done: "sent" });
+      dispatch({ type: "thread.note", bot, message: id, item: { kind: "threadLink", id: `${id}-link`, ts: now() / 1000, bot, thread: card.thread, title: card.title } });
+    },
+  };
+
+  return {
+    resumed,
+    getState: () => state,
+    getSnapshot: () => (snapshot ??= { ...state, ...actions }),
+    subscribe(fn) {
+      listeners.add(fn);
+      return () => listeners.delete(fn);
+    },
+    dispatch,
+    actions,
+  };
+}
