@@ -58,7 +58,7 @@ export interface KitPanelProps {
    *  (KitPanel fills these: the panel under a Reverted lane reads the stores). */
   /** The pull request on a lane's row was pressed: Tasks opens on it (tasks/state.ts `showPull`). */
   onOpenPull?: LanesProps["onPull"];
-  laneBack?: Pick<LanesProps, "backOpen" | "onBack" | "below" | "marks" | "away" | "onAway" | "jobOpen" | "onJob">;
+  laneBack?: Pick<LanesProps, "backOpen" | "onBack" | "below" | "marks" | "away" | "onAway" | "jobOpen" | "onJob" | "onJobView">;
   onProject: (root: string) => void;
   onLevel: (level: KitLevel) => void;
   onAllow: (folder: string) => void;
@@ -236,7 +236,7 @@ export function LanesEmpty({ onNew }: { onNew: () => void }) {
   );
 }
 
-export function KitPanel() {
+export function KitPanel({ onJobView }: { onJobView?: (job: string) => void } = {}) {
   const ss = useSessions();
   const prefs = useFolderPrefs();
   useKeysVersion();
@@ -323,6 +323,7 @@ export function KitPanel() {
           onAway: () => setAwayOpen((v) => !v),
           jobOpen: jobsOpen,
           onJob: (job) => setJobsOpen((cur) => (cur.includes(job) ? cur.filter((j) => j !== job) : [...cur, job])),
+          onJobView,
         }}
         onProject={setPicked}
         onLevel={(level) => updateKitProjects((x) => setLevel(x, root, level))}

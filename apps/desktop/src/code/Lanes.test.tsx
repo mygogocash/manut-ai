@@ -446,7 +446,20 @@ describe("a job's row (Ask several agents, item 102a)", () => {
     expect(rowButtons).toHaveLength(3);
     (rowButtons[0].props.onClick as () => void)();
     expect(onOpen).toHaveBeenCalledWith("s1");
+    (els.find((e) => e.props["data-testid"] === "lane-job-toggle")!.props.onClick as () => void)();
+    expect(onJob).toHaveBeenCalledWith("jk7m2");
+  });
+
+  it("opens the side-by-side view when the row is pressed (item 102b), and the chevron before it still shows or hides the lanes", () => {
+    const onJob = vi.fn();
+    const onJobView = vi.fn();
+    const els = drawn(LanesView({ rows: job(), now: 100_000, onOpen: vi.fn(), onJob, onJobView }));
     (els.find((e) => e.props["data-testid"] === "lane-job-open")!.props.onClick as () => void)();
+    expect(onJobView).toHaveBeenCalledWith("jk7m2");
+    expect(onJob).not.toHaveBeenCalled();
+    // without a view to open the row toggles the lanes, as it did
+    const bare = drawn(LanesView({ rows: job(), now: 100_000, onOpen: vi.fn(), onJob }));
+    (bare.find((e) => e.props["data-testid"] === "lane-job-open")!.props.onClick as () => void)();
     expect(onJob).toHaveBeenCalledWith("jk7m2");
   });
 

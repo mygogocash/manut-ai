@@ -145,17 +145,38 @@
 .kitp .lane-job .job-head {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 6px;
   width: 100%;
   text-align: left;
 }
 .kitp .lane-job .job-chev {
   flex: none;
+  display: inline-flex;
+  align-items: center;
+  padding: 4px;
+  border: 0;
+  border-radius: var(--rad);
+  background: transparent;
   color: var(--aui-muted);
+  cursor: pointer;
   transition: transform var(--tr-hover);
 }
-.kitp .lane-job .job-head[aria-expanded="true"] .job-chev {
+.kitp .lane-job .job-chev[aria-expanded="true"] {
   transform: rotate(90deg);
+}
+/* the row itself: the job's name, and each agent's state, opening the side-by-side view */
+.kitp .lane-job .job-open {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 .kitp .lane-job .job-who {
   display: inline-flex;
@@ -176,4 +197,11 @@
   margin-left: 18px;
   padding-left: 8px;
   border-left: 1px solid var(--line);
+}
+.kitp .lane-job .job-head:hover {
+  background: var(--hov);
+}
+.kitp .lane-job .job-open .l1 {
+  flex: 1 1 auto;
+  min-width: 0;
 }

@@ -262,6 +262,8 @@ export interface LanesProps {
   /** The jobs whose lanes are shown under their row, and the press that opens or closes one. */
   jobOpen?: readonly string[];
   onJob?: (job: string) => void;
+  /** The job's row was pressed: its side-by-side view opens (item 102b). Without it the press shows or hides the lanes, as the chevron does. */
+  onJobView?: (job: string) => void;
 }
 
 /** A job's lanes in the order they started, with the job's name: the first message's words, as each lane is titled. */
@@ -303,36 +305,39 @@ export function helperGroups(rows: readonly LaneRow[]): { of: Map<string, LaneRo
   return { of, under };
 }
 
-function JobItem({ group, now, open, onToggle, lane }: { group: JobGroup; now: number; open: boolean; onToggle: () => void; lane: (r: LaneRow) => ReactNode }) {
+function JobItem({ group, now, open, onToggle, onView, lane }: { group: JobGroup; now: number; open: boolean; onToggle: () => void; onView?: () => void; lane: (r: LaneRow) => ReactNode }) {
   const needs = group.lanes.some((l) => l.status === "needs_you");
   return (
     <div className="lane lane-job" data-testid={`lane-job-${group.job}`} data-job={group.job} data-needs={needs ? "true" : undefined}>
-      <button type="button" className="rowl job-head" aria-expanded={open} onClick={onToggle} title={t("several.jobTip")} data-testid="lane-job-open">
-        <span className="job-chev" aria-hidden="true">
+      {/* the row opens the side-by-side view (item 102b); the chevron before it shows or hides the lanes as rows, as 102a's row did */}
+      <div className="rowl job-head">
+        <button type="button" className="job-chev" aria-expanded={open} aria-label={t("several.jobTip")} onClick={onToggle} title={t("several.jobTip")} data-testid="lane-job-toggle">
           <Icon name="chevron-right" size={12} />
-        </span>
-        <span className="grow l1">{t("several.jobRow", { n: group.lanes.length, title: group.title })}</span>
-        <span className="mut who job-who">
-          {group.lanes.map((l) => {
-            const tag = laneTag(l.status);
-            return (
-              <span key={l.id} className="job-one" data-testid={`lane-job-agent-${l.id}`} data-status={l.status}>
-                {l.agentId && <AgentMark agent={l.agentId} size={16} />}
-                <span className={`tag ${tag.tone}`.trim()}>
-                  {l.status === "working" ? (
-                    <>
-                      {l.testing ? t("lane.testing") : l.step || t(tag.key)}
-                      {l.since !== null && <span className="when">{elapsed(now - l.since)}</span>}
-                    </>
-                  ) : (
-                    t(tag.key)
-                  )}
+        </button>
+        <button type="button" className="job-open grow" onClick={onView ?? onToggle} title={t("jobview.openTip")} data-testid="lane-job-open">
+          <span className="l1">{t("several.jobRow", { n: group.lanes.length, title: group.title })}</span>
+          <span className="mut who job-who">
+            {group.lanes.map((l) => {
+              const tag = laneTag(l.status);
+              return (
+                <span key={l.id} className="job-one" data-testid={`lane-job-agent-${l.id}`} data-status={l.status}>
+                  {l.agentId && <AgentMark agent={l.agentId} size={16} />}
+                  <span className={`tag ${tag.tone}`.trim()}>
+                    {l.status === "working" ? (
+                      <>
+                        {l.testing ? t("lane.testing") : l.step || t(tag.key)}
+                        {l.since !== null && <span className="when">{elapsed(now - l.since)}</span>}
+                      </>
+                    ) : (
+                      t(tag.key)
+                    )}
+                  </span>
                 </span>
-              </span>
-            );
-          })}
-        </span>
-      </button>
+              );
+            })}
+          </span>
+        </button>
+      </div>
       {open && (
         <div className="job-lanes" data-testid="lane-job-lanes">
           {group.lanes.map((l) => lane(l))}
@@ -511,7 +516,7 @@ function awayWord(mark: RowMark | undefined, now: number): string {
 }
 
 
-export function LanesView({ rows, now, onOpen, onPull, onNew, backOpen = null, onBack, below, marks = {}, away = false, onAway, jobOpen = [], onJob }: LanesProps) {
+export function LanesView({ rows, now, onOpen, onPull, onNew, backOpen = null, onBack, below, marks = {}, away = false, onAway, jobOpen = [], onJob, onJobView }: LanesProps) {
   if (rows.length === 0 && !onNew) return null;
   // pinned on top, in the order pinned, then the rest, then the settled ones, small and quiet. Snoozed and archived lanes are put
   // away: a line under the list counts them and opens them. A lane that asks something is never put away (rows.ts `placeOf`).
@@ -558,7 +563,7 @@ export function LanesView({ rows, now, onOpen, onPull, onNew, backOpen = null, o
         <div className="lanes" data-testid="lanes">
           {shown.map(({ r, place }) => {
             const group = jobs.head.get(r.id);
-            if (group) return <JobItem key={`job-${group.job}`} group={group} now={now} open={jobOpen.includes(group.job)} onToggle={() => onJob?.(group.job)} lane={(l) => item(l, shown.find((x) => x.r.id === l.id)?.place ?? place)} />;
+            if (group) return <JobItem key={`job-${group.job}`} group={group} now={now} open={jobOpen.includes(group.job)} onToggle={() => onJob?.(group.job)} onView={onJobView ? () => onJobView(group.job) : undefined} lane={(l) => item(l, shown.find((x) => x.r.id === l.id)?.place ?? place)} />;
             return isShown(r.id) ? item(r, place) : null;
           })}
           {hidden.length > 0 && (

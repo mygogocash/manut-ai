@@ -1,7 +1,7 @@
 # Several agents on one job (item 102)
 
 The design for plan item 102 (`docs/plan.md`; `docs/t3code-parity.md`, "Orchestration", group 3 of its order: "must be
-designed first because it can act for the person"). Status on 27 Nov 2026: design, with slice 102a built (Ask several agents: the + menu row, its panel, one send starting one lane for each row, the job saved with each session and its row in the Lanes band), slice 102d (the helper lanes' rules, pure), slice 102e (the helper blocks and the Start helpers card), slice 102f (a helper lane made from a snapshot of its lead's folder, in the shell), slice 102g (a helper lane's work landed in its lead's folder, and Take back, in the shell), slice 102h (running helper lanes) and slice 102k (chats that reach other chats); see "Phases and slices". The rest is not built. It covers three
+designed first because it can act for the person"). Status on 27 Nov 2026: design, with slice 102a built (Ask several agents: the + menu row, its panel, one send starting one lane for each row, the job saved with each session and its row in the Lanes band), slice 102b (the side-by-side view the row opens), slice 102d (the helper lanes' rules, pure), slice 102e (the helper blocks and the Start helpers card), slice 102f (a helper lane made from a snapshot of its lead's folder, in the shell), slice 102g (a helper lane's work landed in its lead's folder, and Take back, in the shell), slice 102h (running helper lanes) and slice 102k (chats that reach other chats); see "Phases and slices". The rest is not built. It covers three
 things:
 
 1. **Ask several agents.** One message from the person starts lanes on different agents and models side by side, and their
@@ -411,10 +411,16 @@ the screens are built on tested ground.
   "Agent's own" until a lane of that agent has run; the job's row is closed until pressed and groups only two or more lanes;
   there is no "This Mac runs 2 at once" line and the lanes start one after the other until 102d and 102h give the cap; a
   folder that is not a repository starts nothing.
-- **102b. The side-by-side view.** Columns at wide, tabs at narrow, each with its state tag, compact chat, ask card, Open
-  lane and Stop; Stop all; Ask them again. Tests: the view's props-only component, an e2e spec on the stand-in agent
-  (`e2e/several-agents.spec.ts`) with pictures at 1280 and 900, light and dark. Safety test: an ask answered in a column is
-  shown decided in Needs you and in the lane's own chat, and a second press there is refused.
+- **102b. The side-by-side view. Built 27 Nov 2026** (`src/jobs/SideBySide.tsx`, `jobview.css`, the job row in `code/Lanes.tsx`, the page switch in `pages/CodePage.tsx`; decisions in `docs/decisions/102b-side-by-side.md`).
+  Columns where the page is wide (three side by side at 1280), tabs where it is not (900 and narrower), each with its state tag,
+  the lane's own chat, the ask card, Open lane and Stop; Stop all asks once; Ask them again. Tests: `SideBySide.test.tsx` (the
+  view's props-only component, and the one approval settled once), `e2e/several-agents.spec.ts` on the stand-in agent with
+  pictures at 1280 and 900, light and dark. Safety test: an ask answered in a column is shown decided in Needs you and in the
+  lane's own chat, and a second press there is refused.
+  What changed from the design: the view fills the Code page in place of its reading column, and the job's row in the Lanes
+  band opens it, with a chevron before the row that still shows the lanes as rows; the chat in a column is the lane's own
+  `Timeline` (not `harness/AgentChat.tsx`, which reads a subagent's session from the host) with the open ask drawn under it as
+  the same card; Ask them again carries the rows and the first message, not attached files.
 - **102c. The gathered answers.** The Gathered block, each answer whole, files and tests, Compare in a chat through item
   97's picker. Tests: `gathered.test.ts` (when a job counts as answered, a lane waiting on an ask), the e2e spec. Safety
   test: Compare in a chat only fills a box: no `chat.send` reaches the stand-in host.
