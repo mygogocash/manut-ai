@@ -1,7 +1,7 @@
 // Tests for playwright-summary.mjs, run by `node --test` (the root `pnpm test` does). They run the script as CI does,
 // on reports written the way Playwright's JSON reporter writes them, and read what it prints.
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -17,6 +17,14 @@ function summarise(...args) {
   const env = { ...process.env };
   delete env.GITHUB_STEP_SUMMARY;
   return execFileSync(process.execPath, [script, ...args], { env, encoding: "utf8" });
+}
+
+/** The exit status, what it printed and what it logged, for a run that may fail. */
+function check(...args) {
+  const env = { ...process.env };
+  delete env.GITHUB_STEP_SUMMARY;
+  const out = spawnSync(process.execPath, [script, ...args], { env, encoding: "utf8" });
+  return { status: out.status, stdout: out.stdout, stderr: out.stderr };
 }
 
 /** A report with the fields the script reads. `failed` is a list of [file, line, title, projects], where `projects` is
@@ -147,5 +155,56 @@ describe("the note under the title", () => {
     const out = summarise("--note", "<b>bold</b> & more", file);
     assert.match(out, /&lt;b&gt;bold&lt;\/b&gt; &amp; more/);
     assert.doesNotMatch(out, /<b>/);
+  });
+});
+
+describe("shards run on lists of files", () => {
+  // e2e-shards.mjs gives each shard its files, so Playwright writes no shard into the report; the file name says which.
+  it("names a shard that left no report from the file names and --shards", () => {
+    const dir = run("lists", [report({ expected: 10 }), report({ expected: 20 }), report({ expected: 5 })]);
+    const out = summarise("--shards", "5", dir);
+    assert.match(out, /\| 35 \| 0 \| 0 \| 0 \|/);
+    assert.match(out, /Only 3 of 5 shards left a report; shards 4, 5 did not/);
+    assert.doesNotMatch(summarise("--shards", "3", dir), /did not/);
+  });
+
+  it("puts the shard from the file name in front of an error that belongs to no test", () => {
+    const dir = run("list-errors", [report({}), report({ errors: ["Timed out waiting 1500s for the test suite to run"] })]);
+    assert.match(summarise("--shards", "2", dir), /- shard 2: Timed out waiting 1500s/);
+  });
+});
+
+describe("--strict, for the job whose result is the suite's", () => {
+  it("passes a run where every shard reported and nothing failed, flaky tests included", () => {
+    const dir = run("strict-green", [report({ shard: [1, 2], expected: 10, flaky: 2 }), report({ expected: 3, skipped: 1 })]);
+    const result = check("--strict", "--shards", "2", dir);
+    assert.equal(result.status, 0, result.stderr);
+    assert.doesNotMatch(result.stdout, /This fails the run/);
+  });
+
+  it("fails, after writing the summary, on a failed test, a missing shard, an unreadable report or an error", () => {
+    const cases = [
+      [run("strict-failed", [report({ expected: 1, unexpected: 1, failed: [["a.spec.ts", 3, "breaks"]] }), report({ expected: 1 })]), /1 failed test/],
+      [run("strict-missing", [report({ expected: 1 })]), /a shard left no report/],
+      [run("strict-unreadable", [report({ expected: 1 })], { "playwright-results-2.json": "{" }), /1 report could not be read/],
+      [run("strict-error", [report({ expected: 1 }), report({ errors: ["Error: web server"] })]), /1 error outside the tests/],
+    ];
+    for (const [dir, why] of cases) {
+      const result = check("--strict", "--shards", "2", dir);
+      assert.equal(result.status, 1, dir);
+      assert.match(result.stdout, /^### Desktop Playwright\n/);
+      assert.match(result.stdout, new RegExp(`\\*\\*This fails the run:\\*\\* .*${why.source}`));
+      assert.match(result.stderr, why);
+    }
+  });
+
+  it("fails when there is no report at all, and never fails without --strict", () => {
+    const empty = join(root, "strict-empty");
+    mkdirSync(empty);
+    assert.equal(check("--strict", "--shards", "2", empty).status, 1);
+    assert.match(check("--strict", "--shards", "2", empty).stderr, /no report/);
+    const failedDir = run("lenient", [report({ unexpected: 3 })]);
+    assert.equal(check("--shards", "4", failedDir).status, 0);
+    assert.equal(check(empty).status, 0);
   });
 });

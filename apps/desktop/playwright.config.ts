@@ -2,9 +2,10 @@ import { defineConfig } from "@playwright/test";
 import { chatResume } from "./e2e/start";
 // The Playwright suite inherited from Oh My Hermes. It reaches the app through the WebSocket runtime adapter
 // (VITE_MANUT_BRIDGE below) and the Node mock bridge in e2e/mock-bridge.mjs, not the in-process runtime the app
-// uses by default. CI runs it as six shards (job `e2e` in .github/workflows/ci.yml); on a small machine run one
-// file at a time: `pnpm exec playwright test e2e/<file>`. The specs of screens the fork removed were deleted, or are
-// skipped with the reason beside them.
+// uses by default. CI runs it as eight shards of whole spec files balanced by their measured time (job `e2e` in
+// .github/workflows/ci.yml, .github/scripts/e2e-shards.mjs and e2e/timings.json); on a small machine run one file at a
+// time: `pnpm exec playwright test e2e/<file>`. The specs of screens the fork removed were deleted, or are skipped with
+// the reason beside them.
 // Each dag node runs its own ports (MANUT_PORT for vite, MANUT_MOCK_PORT for the mock bridge) so
 // parallel e2e runs never collide. Defaults are for a person running `pnpm e2e` alone.
 const port = Number(process.env.MANUT_PORT || 5307);

@@ -49,6 +49,15 @@ describe("what a changed file needs", () => {
   it("runs the jobs that test the other scripts and workflows for a change to one", () => {
     assert.deepEqual(on(areasOf([".github/workflows/release-desktop.yml"])), ["api", "desktop"]);
     assert.deepEqual(on(areasOf([".github/scripts/check-dev-deploys.mjs"])), ["api", "desktop"]);
+    assert.deepEqual(on(areasOf([".github/scripts/e2e-timings.mjs"])), ["api", "desktop"]);
+  });
+
+  it("runs the browser jobs too for the scripts they run: the shards' split and the summary that passes them", () => {
+    for (const path of [".github/scripts/e2e-shards.mjs", ".github/scripts/playwright-summary.mjs"]) {
+      assert.deepEqual(on(areasOf([path])), ["api", "desktop", "e2e", "phones"], path);
+    }
+    // New timings move files between shards, so the shards run on them.
+    assert.deepEqual(on(areasOf(["apps/desktop/e2e/timings.json"])), ["e2e", "typecheck"]);
   });
 
   it("runs everything for CI's own parts and for what every package installs from", () => {

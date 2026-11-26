@@ -44,15 +44,19 @@ jobs:
       rust: ${{ steps.areas.outputs.rust }}
       packages: ${{ steps.areas.outputs.packages }}
     steps:
-      # Only the scripts and the workflows: the decision needs nothing else, and the job stays a few seconds long.
+      # Only the scripts, the workflows and the desktop's spec folder: the decisions need nothing else, and the job
+      # stays a few seconds long.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           sparse-checkout: |
             .github/scripts
             .github/workflows
-      - name: Check the script that decides
-        run: node --test .github/scripts/changed-areas.test.mjs
+            apps/desktop/e2e
+      # The other script whose mistake nobody would see: the one that splits the desktop's spec files across the
+      # shards, where a file left out of every shard would never run.
+      - name: Check the scripts that decide
+        run: node --test .github/scripts/changed-areas.test.mjs .github/scripts/e2e-shards.test.mjs
       # The answer goes to the job's outputs, and why goes to the log and the run's summary.
       - name: Decide which jobs run
         id: areas
@@ -179,9 +183,10 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup-workspace
       - run: pnpm --filter @manut/desktop test
-      # The release workflow's rules (it never publishes, and the app's updater is tied to it) and the Playwright
-      # summary's counts: they read the workflows and the desktop's config, so they run where a change to either does.
-      - run: node --test .github/scripts/release-desktop.test.mjs .github/scripts/playwright-summary.test.mjs
+      # The release workflow's rules (it never publishes, and the app's updater is tied to it), the Playwright summary's
+      # counts and the spec timings: they read the workflows and the desktop's config, so they run where a change to
+      # either does.
+      - run: node --test .github/scripts/release-desktop.test.mjs .github/scripts/playwright-summary.test.mjs .github/scripts/e2e-timings.test.mjs
 
   packages:
     name: Package tests
@@ -237,24 +242,28 @@ jobs:
         run: cargo test --locked
 
   e2e:
-    # The Playwright suite inherited from Oh My Hermes (156 spec files), run as six shards side by side. One job
-    # stopped at its 35 minutes with a fifth of the suite never started, so each shard takes what `--shard` gives it
-    # (whole spec files, the same number of tests each) and finishes in a quarter of an hour or less. Some specs may
-    # still fail (apps/desktop/README.md), so these jobs may fail without failing the run. Each shard writes its counts
-    # and failing tests to its job summary, and the job below adds them up. None of them is one of the checks main
-    # will require.
+    # The desktop's Playwright suite (apps/desktop/e2e, about 210 spec files) as eight shards side by side. Each shard
+    # runs one worker against one mock bridge (apps/desktop/playwright.config.ts), so the suite's time is split, not
+    # shared. Playwright's own --shard splits by test count, and a few files are far longer than the rest: on 26 Nov
+    # 2026 its six shards took from 6 to 17 minutes. So each shard runs whole spec files chosen by their measured time
+    # (.github/scripts/e2e-shards.mjs, reading apps/desktop/e2e/timings.json), and the shards end within a minute of
+    # each other. One file, panel-max.spec.ts, takes nearly eight minutes alone, and no shard can be shorter than it:
+    # eight is the fewest shards for which it is the longest. Some specs may still fail (apps/desktop/README.md), so
+    # these jobs may fail without failing the run; each writes its counts to its job summary, and the job below adds
+    # them up.
     name: Desktop Playwright (shard ${{ matrix.shard }} of ${{ strategy.job-total }})
     needs: changes
     if: needs.changes.outputs.e2e == 'true'
     runs-on: ubuntu-latest
     continue-on-error: true
-    timeout-minutes: 45
+    timeout-minutes: 30
     strategy:
       # A shard that fails says nothing about the others, so none of them is cancelled for it. Adding a shard is one
-      # more number here: the divisor below is the matrix's own size.
+      # more number here and in the all-shards job's --shards below (e2e-shards.test.mjs checks that they agree); the
+      # split takes the matrix's own size.
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -264,17 +273,30 @@ jobs:
       - name: Install Chromium
         working-directory: apps/desktop
         run: pnpm exec playwright install --with-deps chromium
-      # --global-timeout ends a shard after 35 minutes with its report still written, so a hung run still leaves
+      # The shard's files, one Playwright filter a line, and what the shard holds in the log and the job summary. A
+      # shard with no file fails here, because Playwright given no filter would run every file. (The step's shell stops
+      # at a failing command, so the script's status is kept until its words are written.)
+      - name: Pick the shard's spec files
+        run: |
+          code=0
+          node .github/scripts/e2e-shards.mjs --total ${{ strategy.job-total }} --shard ${{ matrix.shard }} > "$RUNNER_TEMP/shard-files" 2> "$RUNNER_TEMP/shard-plan" || code=$?
+          tee -a "$GITHUB_STEP_SUMMARY" < "$RUNNER_TEMP/shard-plan"
+          exit $code
+      # --forbid-only fails a shard where a test.only left in a file would quietly skip the rest of its tests.
+      # --global-timeout ends a shard after 25 minutes with its report still written, so a hung run still leaves
       # counts behind instead of being killed by the job's timeout.
       - name: Run the shard
         working-directory: apps/desktop
         env:
           PLAYWRIGHT_JSON_OUTPUT_FILE: ${{ runner.temp }}/playwright-results-${{ matrix.shard }}.json
-        run: pnpm exec playwright test --shard=${{ matrix.shard }}/${{ strategy.job-total }} --reporter=list,json --global-timeout=2100000
+        run: |
+          mapfile -t files < "$RUNNER_TEMP/shard-files"
+          pnpm exec playwright test --forbid-only --reporter=list,json --global-timeout=1500000 "${files[@]}"
       - name: Write the counts to the job summary
         if: ${{ !cancelled() }}
         run: node .github/scripts/playwright-summary.mjs --title "Desktop Playwright, shard ${{ matrix.shard }} of ${{ strategy.job-total }}" "$RUNNER_TEMP/playwright-results-${{ matrix.shard }}.json"
-      # The shard's JSON report, for the job below. A shard that left none is named there.
+      # The shard's JSON report, for the job below. Its name carries the shard's number, which the report itself does
+      # not when Playwright is given files rather than --shard. A shard that left none is named there.
       - name: Keep the report for the all-shards summary
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -285,8 +307,10 @@ jobs:
           retention-days: 7
 
   e2e-summary:
-    # The shards' counts added up in one summary, with the failing tests of every shard in one list. It does not run
-    # the suite, so it needs no workspace: only the script and Node, which the runner has.
+    # The shards' counts added up in one summary, with the failing tests of every shard in one list. It also writes the
+    # spec files' fresh times as the `e2e-timings` artifact, which the lead commits with .github/scripts/e2e-timings.mjs <run id>
+    # when the shards drift apart; nothing here writes to the repository. It does not run the suite, so it needs no
+    # workspace: only the scripts, the spec folder and Node, which the runner has.
     name: Desktop Playwright (all shards)
     needs: [changes, e2e]
     if: ${{ !cancelled() && needs.changes.outputs.e2e == 'true' }}
@@ -297,6 +321,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          sparse-checkout: |
+            .github/scripts
+            apps/desktop/e2e
       # A run whose shards all left nothing finds no artifact; the summary then says it has no report.
       - name: Fetch the shards' reports
         continue-on-error: true
@@ -306,4 +333,15 @@ jobs:
           path: ${{ runner.temp }}/playwright-results
           merge-multiple: true
       - name: Write the counts of all shards to the job summary
-        run: node .github/scripts/playwright-summary.mjs --title "Desktop Playwright, all shards" "$RUNNER_TEMP/playwright-results"
+        run: node .github/scripts/playwright-summary.mjs --title "Desktop Playwright, all shards" --shards 8 "$RUNNER_TEMP/playwright-results"
+      - name: Measure each spec file's time
+        if: ${{ !cancelled() }}
+        run: node .github/scripts/e2e-timings.mjs --reports "$RUNNER_TEMP/playwright-results" --out "$RUNNER_TEMP/timings.json"
+      - name: Keep the timings
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-timings
+          path: ${{ runner.temp }}/timings.json
+          if-no-files-found: ignore
+          retention-days: 30

@@ -37,8 +37,11 @@ function areasOfPath(path) {
   // Words. The desktop's and the API's tests read the docs (a test walks every file for a retired name, others quote
   // docs/pilot-api.md), so those two run; nothing else can see a doc.
   if (path.endsWith(".md") || path.startsWith("docs/")) return only("desktop", "api");
+  // The scripts the browser jobs run: the shards' split and the Playwright summary, which decides whether the shards
+  // pass. Their tests are in the first job and the desktop's.
+  if (path === ".github/scripts/e2e-shards.mjs" || path === ".github/scripts/playwright-summary.mjs") return only("desktop", "api", "e2e", "phones");
   // The other scripts and workflows are read by tests in the API's job (the deploy check) and the desktop's (the
-  // release workflow's rules, the Playwright summary).
+  // release workflow's rules, the Playwright summary, the spec timings).
   if (path.startsWith(".github/scripts/") || path.startsWith(".github/workflows/")) return only("desktop", "api");
   if (path.startsWith(".github/") || path.startsWith(".claude/") || path.startsWith(".vscode/") ||
       [".gitignore", ".gitattributes", ".editorconfig", "LICENSE", "NOTICE"].includes(path)) return flags(false);
