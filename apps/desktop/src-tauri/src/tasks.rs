@@ -390,7 +390,7 @@ fn secrets() -> &'static Secrets {
             whole: entries("whole").iter().map(|e| (compiled(e), e.get(2).and_then(Value::as_str).unwrap_or("").to_string())).collect(),
             blocks: entries("blocks")
                 .iter()
-                .map(|e| (pattern(e[0].as_str().expect("block pattern"), "", &names, &prefixes), e[1].as_str().expect("block break").to_string(), e.get(2).and_then(Value::as_str) == Some("unended")))
+                .map(|e| (pattern(e[0].as_str().expect("block pattern"), e.get(3).and_then(Value::as_str).unwrap_or(""), &names, &prefixes), e[1].as_str().expect("block break").to_string(), e.get(2).and_then(Value::as_str) == Some("unended")))
                 .collect(),
             block_begin: one("blockBegin"),
             block_end: one("blockEnd"),
@@ -456,8 +456,138 @@ fn mask_whole(s: &Secrets, mut t: String, command: bool) -> String {
     t
 }
 
-/// A command's private key blocks whose body holds only key characters: the BEGIN and END lines stay, the body is one mask
-/// line (src/lib/secrets.ts `maskCommand`). A block with no END of its own is masked only when none comes before the next BEGIN.
+/// A heredoc still to come or being read: its terminator word, and whether tabs before it are allowed (`<<-`).
+struct Heredoc {
+    word: String,
+    dash: bool,
+}
+
+/// One line read as the shell reads it, from quote state `quote` (src/lib/secrets.ts `scanLine`): the quote open at its end and
+/// the heredocs it begins, or None when it holds what this reading cannot follow. `stop` (a byte offset) ends it early.
+fn scan_line(l: &str, mut quote: Option<char>, stop: usize) -> Option<(Option<char>, Vec<Heredoc>)> {
+    static WORD: OnceLock<Regex> = OnceLock::new();
+    let word = WORD.get_or_init(|| Regex::new(r#"^<<(-?)[ \t]*(?:'([^']+)'|"([^"]+)"|\\?([A-Za-z0-9_]+))"#).expect("heredoc"));
+    let mut heredocs = Vec::new();
+    let b: Vec<(usize, char)> = l.char_indices().take_while(|(i, _)| *i < stop).collect();
+    let mut k = 0;
+    while k < b.len() {
+        let (i, c) = b[k];
+        let next = b.get(k + 1).map(|x| x.1);
+        if quote == Some('\'') {
+            if c == '\'' {
+                quote = None;
+            }
+            k += 1;
+            continue;
+        }
+        if c == '`' || (c == '$' && matches!(next, Some('(') | Some('{'))) {
+            return None;
+        }
+        if c == '\\' {
+            k += 2;
+            continue;
+        }
+        if quote == Some('"') {
+            if c == '"' {
+                quote = None;
+            }
+            k += 1;
+            continue;
+        }
+        if c == '\'' || c == '"' {
+            quote = Some(c);
+        } else if c == '#' && (k == 0 || b[k - 1].1.is_whitespace()) {
+            break;
+        } else if c == '<' && next == Some('<') && b.get(k + 2).map(|x| x.1) != Some('<') {
+            let m = word.captures(&l[i..])?;
+            let w = m.get(2).or_else(|| m.get(3)).or_else(|| m.get(4)).map(|x| x.as_str().to_string()).unwrap_or_default();
+            heredocs.push(Heredoc { word: w, dash: &m[1] == "-" });
+            let past = i + m[0].len();
+            while k < b.len() && b[k].0 < past {
+                k += 1;
+            }
+            continue;
+        }
+        k += 1;
+    }
+    Some((quote, heredocs))
+}
+
+/// How the shell reads `text` up to the start of its line at byte `line` (src/lib/secrets.ts `readTo`): the quote still open
+/// there and the heredoc whose body that line is in, or None when the reading cannot be followed.
+fn read_to(text: &str, line: usize) -> Option<(Option<char>, Option<Heredoc>)> {
+    let mut quote = None;
+    let mut queue: std::collections::VecDeque<Heredoc> = std::collections::VecDeque::new();
+    let mut body: Option<Heredoc> = None;
+    let mut at = 0;
+    while at < line {
+        let end = text[at..].find('\n').map_or(text.len(), |i| at + i);
+        let l = text[at..end].strip_suffix('\r').unwrap_or(&text[at..end]);
+        if let Some(h) = &body {
+            let shown = if h.dash { l.trim_start_matches('\t') } else { l };
+            if shown == h.word {
+                body = queue.pop_front();
+            }
+        } else {
+            let (q, found) = scan_line(l, quote, l.len())?;
+            quote = q;
+            if !found.is_empty() {
+                if quote.is_some() {
+                    return None;
+                }
+                queue.extend(found);
+                body = queue.pop_front();
+            }
+        }
+        at = end + 1;
+    }
+    Some((quote, body))
+}
+
+/// Whether the shell reads the key block from byte `from` to `to` of `text` as data, never as commands (src/lib/secrets.ts
+/// `shellData`): in a quoted string opened on its BEGIN line, still open at its end and closing after it, or in a heredoc's body
+/// whose terminator line does not come before its end. Anything else, and anything unsure, is no.
+fn shell_data(text: &str, from: usize, to: usize) -> bool {
+    let line = text[..from].rfind('\n').map_or(0, |i| i + 1);
+    let Some((quote, heredoc)) = read_to(text, line) else { return false };
+    if let Some(h) = heredoc {
+        let last = text[to..].find('\n').map_or(text.len(), |i| to + i);
+        return !text[line..last].split('\n').any(|l| {
+            let l = l.strip_suffix('\r').unwrap_or(l);
+            (if h.dash { l.trim_start_matches('\t') } else { l }) == h.word
+        });
+    }
+    if quote.is_some() {
+        return false;
+    }
+    let end = text[line..].find('\n').map_or(text.len(), |i| line + i);
+    let Some((Some(q), found)) = scan_line(&text[line..end], None, from - line) else { return false };
+    if !found.is_empty() {
+        return false;
+    }
+    let mut rest = text[to..].chars();
+    while let Some(c) = rest.next() {
+        if q == '\'' {
+            if c == '\'' {
+                return true;
+            }
+            continue;
+        }
+        if c == '`' || c == '$' {
+            return false;
+        }
+        if c == '\\' {
+            rest.next();
+        } else if c == '"' {
+            return true;
+        }
+    }
+    false
+}
+
+/// A command's private key blocks whose body holds only key characters, where the shell reads them as data ([`shell_data`]):
+/// the BEGIN and END lines stay, the body is one mask line (src/lib/secrets.ts `maskCommand`). A block with no END of its own is
+/// masked only when none comes before the next BEGIN.
 fn mask_blocks(s: &Secrets, mut t: String) -> String {
     for (rx, sep, open) in &s.blocks {
         t = rx.replace_all(&t, |c: &regex::Captures| {
@@ -468,6 +598,9 @@ fn mask_blocks(s: &Secrets, mut t: String) -> String {
                 if s.block_end.is_match(scope) {
                     return m.as_str().to_string();
                 }
+            }
+            if !shell_data(&t, m.start(), m.end()) {
+                return m.as_str().to_string();
             }
             format!("{}{}{}{}", &c[1], sep, s.mask, &c[3])
         }).into_owned();

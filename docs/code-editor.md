@@ -129,8 +129,8 @@ The states whose rules are pure functions, with their tests, then the screens th
   developer's own folder always asks. Since item 117 the masker has two forms: `maskSecrets`
   for text that never runs, and `maskCommand` for what an ask's card shows, which masks a key and never a substitution, a
   pipe, a second command or a command's own operand (a token-shaped word is a key only as a whole word with a key's
-  shape); a private key block keeps its BEGIN and END lines around one masked line, unless its body holds anything but key
-  characters, when it is shown whole. The card shows a command whole, its line breaks kept, scrolling in its block.
+  shape); a private key block keeps its BEGIN and END lines around one masked line only inside a quoted string or a heredoc's
+  body, where the shell reads it as data, and its body holds only key characters; anywhere else it is shown whole. The card shows a command whole, its line breaks kept, scrolling in its block.
 - `apps/desktop/src/code/kitAsks.ts`: the dial at work on a session's asks, through the asks' own cards.
 - `apps/desktop/src/code/KitCardParts.tsx`, `KitPanel.tsx`, `kit.css`: Kit's words on an ask's card, and Kit on the
   Code page.

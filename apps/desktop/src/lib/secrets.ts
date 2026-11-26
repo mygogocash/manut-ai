@@ -15,9 +15,108 @@ const compile = (pattern: string, flags = ""): RegExp => new RegExp(pattern.repl
  *  command masks through `BLOCKS` instead), or none. */
 const WHOLE = spec.whole.map((e) => [compile(e[0] as string, e[1] as string), (e[2] as string | undefined) ?? ""] as const);
 /** A command's private key blocks: [pattern with (BEGIN)(body)(END) groups, the line break that goes before the mask]. */
-const BLOCKS = spec.blocks.map((e) => [compile(e[0] as string), e[1] as string, e[2] === "unended"] as const);
+const BLOCKS = spec.blocks.map((e) => [compile(e[0] as string, (e[3] as string | undefined) ?? ""), e[1] as string, e[2] === "unended"] as const);
 const BLOCK_BEGIN = new RegExp(spec.blockBegin);
 const BLOCK_END = new RegExp(spec.blockEnd);
+
+/** A heredoc still to come or being read: its terminator word, and whether tabs before it are allowed (`<<-`). */
+interface Heredoc {
+  word: string;
+  dash: boolean;
+}
+
+/** How the shell reads `text` up to the start of its line `line` (an offset): the quote still open there, the heredoc whose
+ *  body that line is in, or null when the reading cannot be followed (a `$(`, a backtick, `${`, a heredoc word it cannot read,
+ *  a heredoc begun inside a quote). */
+function readTo(text: string, line: number): { quote: string | null; heredoc: Heredoc | null } | null {
+  let quote: string | null = null;
+  let queue: Heredoc[] = [];
+  let body: Heredoc | null = null;
+  let at = 0;
+  while (at < line) {
+    const nl = text.indexOf("\n", at);
+    const end = nl < 0 ? text.length : nl;
+    const l = text.slice(at, end).replace(/\r$/, "");
+    if (body) {
+      if ((body.dash ? l.replace(/^\t+/, "") : l) === body.word) body = queue.shift() ?? null;
+    } else {
+      const got = scanLine(l, quote);
+      if (!got) return null;
+      quote = got.quote;
+      if (got.heredocs.length) {
+        if (quote) return null;
+        queue = [...queue, ...got.heredocs];
+        body = queue.shift() ?? null;
+      }
+    }
+    at = end + 1;
+  }
+  return { quote, heredoc: body };
+}
+
+/** One line read as the shell reads it, from quote state `quote`: the quote open at its end and the heredocs it begins, or
+ *  null when it holds what this reading cannot follow. `stop` ends the reading early (at a key block's BEGIN marker). */
+function scanLine(l: string, quote: string | null, stop = l.length): { quote: string | null; heredocs: Heredoc[] } | null {
+  const heredocs: Heredoc[] = [];
+  for (let i = 0; i < stop; i++) {
+    const c = l[i];
+    if (quote === "'") {
+      if (c === "'") quote = null;
+      continue;
+    }
+    if (c === "`" || (c === "$" && (l[i + 1] === "(" || l[i + 1] === "{"))) return null;
+    if (c === "\\") {
+      i++;
+      continue;
+    }
+    if (quote === '"') {
+      if (c === '"') quote = null;
+      continue;
+    }
+    if (c === "'" || c === '"') quote = c;
+    else if (c === "#" && (i === 0 || /\s/.test(l[i - 1]))) break;
+    else if (c === "<" && l[i + 1] === "<" && l[i + 2] !== "<") {
+      const m = /^<<(-?)[ \t]*(?:'([^']+)'|"([^"]+)"|\\?([A-Za-z0-9_]+))/.exec(l.slice(i));
+      if (!m) return null;
+      heredocs.push({ word: m[2] ?? m[3] ?? m[4], dash: m[1] === "-" });
+      i += m[0].length - 1;
+    }
+  }
+  return { quote, heredocs };
+}
+
+/** Whether the shell reads the key block from `from` to `to` in `text` as data, never as commands (item 117): inside a quoted
+ *  string opened on its BEGIN line before the marker that is still open at its end and closes after it, or inside a heredoc's
+ *  body whose terminator line does not come before its end. Anything else, and anything unsure, is no. */
+function shellData(text: string, from: number, to: number): boolean {
+  const line = text.lastIndexOf("\n", from - 1) + 1;
+  const before = readTo(text, line);
+  if (!before) return false;
+  if (before.heredoc) {
+    const { word, dash } = before.heredoc;
+    const last = text.indexOf("\n", to);
+    const lines = text.slice(line, last < 0 ? text.length : last).split("\n");
+    return !lines.some((l) => (dash ? l.replace(/\r$/, "").replace(/^\t+/, "") : l.replace(/\r$/, "")) === word);
+  }
+  if (before.quote) return false;
+  const end = text.indexOf("\n", line);
+  const own = text.slice(line, end < 0 ? text.length : end);
+  const at = scanLine(own, null, from - line);
+  if (!at?.quote || at.heredocs.length) return false;
+  // the same string closes after the block: the next quote of its kind, nothing it cannot read before it
+  const q = at.quote;
+  for (let i = to; i < text.length; i++) {
+    const c = text[i];
+    if (q === "'") {
+      if (c === "'") return true;
+      continue;
+    }
+    if (c === "`" || c === "$") return false;
+    if (c === "\\") i++;
+    else if (c === '"') return true;
+  }
+  return false;
+}
 
 /** Whether the block that ends its base64 lines at `from` in `text` has no END of its own: none before the next BEGIN. */
 function unended(text: string, from: number): boolean {
@@ -124,10 +223,11 @@ function commandLine(line: string): string {
  *  follows it. What a person approves is then what runs, less the
  *  keys in it (item 117; the table's `command` rows, which the shell's twin runs too). */
 export function maskCommand(text: string): string {
-  // a private key block whose body holds nothing the shell acts on: its BEGIN and END lines stay, its body is one mask line
+  // a private key block whose body holds nothing the shell acts on, where the shell reads it as data (`shellData`): its BEGIN
+  // and END lines stay, its body is one mask line
   for (const [rx, sep, open] of BLOCKS) {
     text = text.replace(rx, (m: string, begin: string, _body: string, end: string, offset: number, whole: string) =>
-      open && !unended(whole, offset + m.length) ? m : `${begin}${sep}${spec.mask}${end}`,
+      (open && !unended(whole, offset + m.length)) || !shellData(whole, offset, offset + m.length) ? m : `${begin}${sep}${spec.mask}${end}`,
     );
   }
   return text.split("\n").map(commandLine).join("\n");
