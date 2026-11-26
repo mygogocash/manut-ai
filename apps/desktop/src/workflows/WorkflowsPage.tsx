@@ -25,6 +25,7 @@ import { standingOf, type Allowances, type Standing } from "./allow";
 import { getWorkflows, useWorkflows, type LiveRun, type RunRefusal, type WorkflowsState } from "./runner";
 import { keptOk, useWorkflowSettings, type WorkflowSettings } from "./settings";
 import { fileWhyWords, nextWords, refusedWords, runLine, standingWords, whenWords } from "./words";
+import { Icon } from "../ui/icons";
 
 /** How many runs each workflow shows; the rest stay kept, within the history's bounds. */
 export const HISTORY_SHOWN = 10;
@@ -88,9 +89,7 @@ function Look({ wf, standing, agents, onAllow, onDisallow }: { wf: Workflow; sta
     <div className="wf-look">
       <button type="button" className="wf-look-h" aria-expanded={open} aria-controls={id} onClick={() => setShown(!open)} data-testid="workflow-look">
         <span>{t("wf.look")}</span>
-        <svg className="wf-chev" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-          <path d="M4.5 6.5L8 10l3.5-3.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
+        <Icon name="chevron-down" className="wf-chev" />
       </button>
       <div id={id} className="wf-look-p" role="region" aria-label={t("wf.look")} hidden={!open} data-testid="workflow-steps">
         <dl className="wf-facts">

@@ -71,7 +71,11 @@ Labs switch that is off by default and runs nothing in the workflows folder whil
 a time missed while the app was down kept as skipped rather than made up, and "Run workflow" in the command palette
 (its `docs/user/workflows.md`, `apps/server/src/workflows/triggers.ts` and `packages/contracts/src/settings.ts`, read for
 behaviour and wording); `apps/desktop/src/workflows/` and `src-tauri/src/workflows.rs` are written here, with a JSON file of
-plain-text steps in place of its TypeScript workflows, no code copied. Orca
+plain-text steps in place of its TypeScript workflows, no code copied. T3 Code again (MIT, at `e75534b`) for the sidebar as an
+inbox (item 94): undoing a settle, a snooze, a pin or an archive (`packages/client-runtime/src/state/threadUndo.ts`), a snooze
+until a picked time with its check that the date and time exist and are ahead (`resolveCustomSnooze` in `threadSettled.ts`,
+lifted into `pickedTime` in `apps/desktop/src/sidebar/rows.ts`), a Working group and settling by itself (`threadInbox.ts`, read
+for behaviour); the rest of `rows.ts`, `selection.ts` and `inbox.ts` is written here. Orca
 (MIT, Copyright (c) 2026 Lovecast Inc., `stablyai/orca` at `a634526a1d0995af34a75cc4845e3eef17610085`) for computer use
 (`apps/desktop/src-tauri/src/computer/`, `docs/computer-use.md`): its command names as the MCP tools, its
 `orca-computer-use` skill adapted as `computer/SKILL.md`, the macOS shortcuts it never sends

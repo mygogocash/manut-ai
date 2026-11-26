@@ -46,7 +46,7 @@ keeps them:
 | The ACP registry, and any ACP agent by hand | part: any ACP agent by hand (Settings, Providers); seven fixed rows, no registry | 101 |
 | Reuses installed agents and their sign-ins | has | |
 | Several accounts of one provider | part: Claude Code and Codex; not Grok or pi; off on Windows | 101 |
-| Pick the model that writes titles, commit messages and PR words | no | 96 |
+| Pick the model that writes titles, commit messages and PR words | part: chat titles and PR words by Claude Code only, off by default; no commit messages | 96 |
 
 ## Orchestration
 
@@ -84,16 +84,16 @@ keeps them:
 
 | Feature | Today | Plan |
 | --- | --- | --- |
-| Settle instead of archive, with undo | part: Done for now; no undo | 94 |
-| Snooze until a time or until it finishes | part: three fixed times; lanes lose the mark on restart | 94 |
+| Settle instead of archive, with undo | has (item 94: Undo in a toast and with ⌘Z) | 94 |
+| Snooze until a time or until it finishes | has (item 94; lanes and terminals keep their marks across a restart) | 94 |
 | Archive; pin | has | |
-| A Working section | no | 94 |
+| A Working section | has, off by default (item 94) | 94 |
 | Threads that wait on you rise to the top | has (Needs you) | |
 | Cmd+Enter sends in the background | has (item 95): from Home, with a line that opens it; Settings swaps Enter and Cmd+Enter | 95 |
 | A thread on a schedule | off (workflows, item 77b; routines for the shop's team) | 94 |
-| Steer or queue, a key to swap, a default | has (item 95): Settings › General › Chat box, Wait for it by default; Cmd+Enter does the other for one message; the held message keeps its buttons | 95 |
-| Select several rows; bulk snooze, settle, new titles | no | 94, 96 |
-| Auto-settle after some days | no | 94 |
+| Steer or queue, a key to swap, a default | has (item 95): Settings › General › Chat box; until the person picks, a team member's chat takes it in and a coding chat waits, as each did; Cmd+Enter does the other for one message; the held message keeps its buttons | 95 |
+| Select several rows; bulk snooze, settle, new titles | part: select and bulk Pin, Snooze, Done for now, Archive in Recent and History (item 94); Write the title again is one row at a time (item 96) | 94, 96 |
+| Auto-settle after some days | has (item 94: 3 days by default) | 94 |
 | Several drafts; stash one | has (item 95): Drafts at the top of Home, five kept with their pictures and files; Cmd+S puts a chat's draft there, to take into any chat or project | 95 |
 | Snapshot of any app with a global key | no | 104 |
 | Swipes on the phone; Live Activities | no (Live Activities need a native app) | 78c, 111 |
@@ -104,7 +104,7 @@ keeps them:
 | --- | --- | --- |
 | A thread links the PR it opened; a PR viewer | part: lanes show their open PR, read only | 100 |
 | A PR tab to review and merge, by merge readiness | part: the Tasks page lists and sorts by what needs attention; merging is from a lane, asked first | 100 |
-| A thread settles when its PR merges | no (the folder can be removed then; the thread stays) | 94 |
+| A thread settles when its PR merges | has, for a lane, when the host said it merged (item 94) | 94 |
 | Frugal PR monitoring | part: caches and one query; no conditional requests | 100 |
 | GitHub, GitLab, Bitbucket, Azure DevOps, Forgejo | part: GitHub and GitLab | 100 |
 | Control worktrees; no-project threads; new project with GitHub | part: where and how; no new project | 100 |

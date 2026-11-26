@@ -85,7 +85,7 @@ test("the chat column keeps its room and the panel its minimum", async ({ page }
   await openPanel(page);
   const vw = page.viewportSize()!.width;
   await dragBy(page, -2000);
-  await expect.poll(() => width(page)).toBe(vw - 248 - 360);
+  await expect.poll(() => width(page)).toBe(vw - 196 - 360);
   const main = (await page.locator("main.main").boundingBox())!;
   expect(Math.round(main.width)).toBeGreaterThanOrEqual(359);
   await dragBy(page, 2000);

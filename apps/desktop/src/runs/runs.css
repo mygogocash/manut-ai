@@ -362,7 +362,7 @@
   color: var(--ink);
 }
 .ph-dim {
-  color: var(--quiet);
+  color: var(--muted);
 }
 .ph .ph-note {
   flex: 0 1 auto;
@@ -485,7 +485,7 @@
 .bx-via {
   flex: none;
   white-space: pre;
-  color: var(--quiet);
+  color: var(--muted);
 }
 /* the status: an icon in the state's colour, the word, then the time, quieter */
 .bx-status .bx-ic {
@@ -521,7 +521,7 @@
   text-underline-offset: 2px;
 }
 .bx-dim {
-  color: var(--quiet);
+  color: var(--muted);
 }
 .bx.s-done,
 .bv-card.s-done,
@@ -565,7 +565,7 @@
 }
 .bx.s-off .bx-l,
 .bx.s-off .bx-title {
-  color: var(--quiet);
+  color: var(--muted);
 }
 /* under the pointer: the outline at full strength, a highlight inside the top edge, a soft shadow */
 .bx:hover {
@@ -738,7 +738,7 @@
   vertical-align: top;
 }
 .bv-dep-k {
-  color: var(--quiet);
+  color: var(--muted);
 }
 /* a node it waits for: that node's own status icon before its name, so a row says what is still open. A name
    breaks only where the name itself is longer than the line. */
@@ -993,14 +993,14 @@
 }
 .rn-routeline,
 .rn-after {
-  color: var(--quiet);
+  color: var(--muted);
 }
 .rn-atts {
   margin: 8px 0 0;
   padding: 0;
   list-style: none;
   font-size: 11px;
-  color: var(--quiet);
+  color: var(--muted);
 }
 .rn-sum,
 .rn-md {
@@ -1029,7 +1029,7 @@
 .rn-none {
   margin: 8px 0 0;
   font-size: 11px;
-  color: var(--quiet);
+  color: var(--muted);
 }
 .rn-ask {
   display: flex;
@@ -1037,7 +1037,7 @@
   gap: 8px;
   margin-top: 12px;
   font-size: 11px;
-  color: var(--quiet);
+  color: var(--muted);
 }
 .rn-askb {
   flex: none;
@@ -1058,7 +1058,7 @@
   margin-left: auto;
   padding-left: 12px;
   font-size: 11px;
-  color: var(--quiet);
+  color: var(--muted);
 }
 .act-dag .act-dag-st.working {
   color: var(--accent);
@@ -1085,14 +1085,14 @@
 }
 .rn-row.stale .rn-title,
 .rn-row.stale .rn-n {
-  color: var(--quiet);
+  color: var(--muted);
 }
 .ph-dot.stale {
   background: transparent;
   box-shadow: inset 0 0 0 1px var(--quiet);
 }
 .ph-w.stale {
-  color: var(--quiet);
+  color: var(--muted);
 }
 /* the empty Plans tab: three plain lines, no illustration or card */
 .rn-empty {

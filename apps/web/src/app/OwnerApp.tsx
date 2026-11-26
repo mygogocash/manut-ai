@@ -9,6 +9,8 @@ import { BrandMark, ChatIcon, CloudOffIcon, useColorScheme } from "../ui/marks";
 import { Loading, Notice, OWNER_CARD as CARD, Pulse, whenText } from "../ui/owner";
 import { answeredWords, AskCard, outcomeWords, type Tone } from "./AskCard";
 import { askId, type Outcome } from "./asks";
+import { MacTab } from "./mac/MacTab";
+import { macSetup, takeOpenedLink, type OpenedLink } from "./mac/setup";
 import { decideAsk, isOver, readNeeds, type Ask, type NeedsRead } from "./needs";
 import { appStrings, type AppStrings } from "./strings";
 
@@ -17,8 +19,9 @@ import { appStrings, type AppStrings } from "./strings";
 /// decline each request with its exact words, through that shop's own session.
 ///
 /// The session is in cookies the API sets and this page cannot read (docs/pilot-api.md, "The web app's session"), so the
-/// page holds no token, and keeps nothing at all beyond the page's own memory: no `localStorage`, `sessionStorage`,
-/// IndexedDB or cache, and nothing in a URL. What waits is read again on opening, every minute while the app is in view,
+/// page holds no token, and keeps nothing at all beyond the page's own memory: no `localStorage`, `sessionStorage` or
+/// cache, and nothing in a URL. The one exception is the Your Mac tab's pairing, in IndexedDB as keys script cannot read
+/// back (src/app/mac/vault.ts, docs/web-app.md "What Your Mac keeps"); that tab needs no sign-in. What waits is read again on opening, every minute while the app is in view,
 /// when the phone comes back online and after each answer. Offline, the app says so and offers no answer: what it read
 /// before may have changed, and an answer must go to the API to count.
 
@@ -34,12 +37,15 @@ type Phase =
   | { name: "unreachable"; offline: boolean }
   | { name: "in"; shops: WebShop[] };
 
-export type Tab = "today" | "needs" | "chat" | "shops";
-const TABS: readonly Tab[] = ["today", "needs", "chat", "shops"];
+export type Tab = "today" | "needs" | "chat" | "shops" | "mac";
+const TABS: readonly Tab[] = ["today", "needs", "chat", "shops", "mac"];
+/// The tabs before signing in: what the sign-in shows, and Your Mac, which needs none.
+const SIGNED_OUT_TABS: readonly Tab[] = ["today", "mac"];
 
-/// The tab the address names (`#needs`), Today by default.
+/// The tab the address names (`#needs`), Today by default. A pairing link (`#pair=…`) opens Your Mac.
 export function tabOf(hash: string): Tab {
   const name = hash.replace(/^#/, "");
+  if (name.startsWith("pair=")) return "mac";
   return (TABS as readonly string[]).includes(name) ? (name as Tab) : "today";
 }
 
@@ -113,6 +119,19 @@ export function OwnerApp() {
   const [signOutError, setSignOutError] = useState<string | null>(null);
   const inFlight = useRef(false);
   const readSeq = useRef(0);
+  // The Your Mac tab's backend, made once: practice mode's pretend Mac, or the relay on this origin.
+  const [mac] = useState(() => macSetup(mode, s.mac.passkeyName));
+  // A pairing link the page was opened with, taken out of the address as soon as the page runs.
+  const [opened, setOpened] = useState<OpenedLink | null>(null);
+  useEffect(() => {
+    const take = () => {
+      const found = takeOpenedLink();
+      if (found) setOpened(found);
+    };
+    take();
+    window.addEventListener("hashchange", take);
+    return () => window.removeEventListener("hashchange", take);
+  }, []);
   const flow = useCodeSignIn(js, {
     api,
     exchange: (address, code) => api.webSignIn({ email: address, code }),
@@ -235,7 +254,9 @@ export function OwnerApp() {
   }
 
   let body: ReactNode;
-  switch (phase.name) {
+  if (tab === "mac" && phase.name !== "starting") {
+    body = <MacTab s={s} backend={mac.backend} practice={mac.practice} opened={opened} />;
+  } else switch (phase.name) {
     case "starting":
       body = <Loading label={s.opening} />;
       break;
@@ -307,7 +328,7 @@ export function OwnerApp() {
             <span className="grow">{phase.name === "in" ? `${s.practiceMode} ${s.practiceReload}` : s.practiceMode}</span>
           </div>
         )}
-        {phase.name === "in" && (!online || offline) && (
+        {phase.name === "in" && tab !== "mac" && (!online || offline) && (
           <div className="banner warn" role="status">
             <CloudOffIcon />
             <span className="grow">
@@ -319,12 +340,12 @@ export function OwnerApp() {
           {body}
         </main>
       </div>
-      {phase.name === "in" && <Tabs s={s} tab={tab} />}
+      {phase.name !== "starting" && <Tabs s={s} tab={tab} tabs={phase.name === "in" ? TABS : SIGNED_OUT_TABS} />}
     </div>
   );
 }
 
-function Tabs({ s, tab }: { s: AppStrings; tab: Tab }) {
+function Tabs({ s, tab, tabs }: { s: AppStrings; tab: Tab; tabs: readonly Tab[] }) {
   return (
     <nav
       aria-label={s.sections}
@@ -340,7 +361,7 @@ function Tabs({ s, tab }: { s: AppStrings; tab: Tab }) {
     >
       <div style={{ maxWidth: 528, margin: "0 auto", display: "flex", gap: 4, padding: 4, borderRadius: "var(--rad-pill)",
         background: "var(--band)" }}>
-        {TABS.map((name) => (
+        {tabs.map((name) => (
           <a
             key={name}
             href={`#${name}`}

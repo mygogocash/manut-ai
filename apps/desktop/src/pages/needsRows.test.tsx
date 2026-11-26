@@ -53,7 +53,8 @@ describe("an ask on Needs you", () => {
     // one time: when it was asked, not also how long ago
     expect(text).not.toContain("3m");
     // the kind is the card's amber mark, not a button
-    expect(html).toMatch(/<span class="tag warn">Approve<\/span>/);
+    // the kind as a noun on its tag, as the Approvals board tags a card (item 85i)
+    expect(html).toMatch(/<span class="tag warn">Approval<\/span>/);
     expect(html.match(/<button/g)).toHaveLength(2);
   });
 
@@ -63,7 +64,7 @@ describe("an ask on Needs you", () => {
     expect(html).toContain("<code>ls</code>");
     expect(html).not.toContain('class="act"');
     // with no time it was asked, the one time is how long ago
-    expect(words(html)).toContain("Nam · 3m Approve");
+    expect(words(html)).toContain("Nam · 3m Approval");
     expect(words(html)).not.toContain("Waiting since");
   });
 

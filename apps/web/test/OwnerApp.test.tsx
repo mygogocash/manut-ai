@@ -56,12 +56,13 @@ async function openNeeds() {
 const card = (id: string) => document.querySelector(`[data-ask="${id}"]`) as HTMLElement;
 
 describe("opening the app", () => {
-  it("says plainly that signing in isn't on yet, and offers nothing else", async () => {
+  it("says plainly that signing in isn't on yet, and offers nothing else but Your Mac, which needs no sign-in", async () => {
     renderWithApi(<OwnerApp />, stubApi({ webShops: async () => ({ signedIn: false, emailSignIn: false }) }));
     expect(await screen.findByText(s.offTitle)).toBeTruthy();
     expect(screen.getByText(s.offBody)).toBeTruthy();
     expect(screen.queryByLabelText("Email")).toBeNull();
-    expect(screen.queryByRole("navigation")).toBeNull();
+    const nav = screen.getByRole("navigation");
+    expect(within(nav).getAllByRole("link").map((a) => a.textContent)).toEqual(["Today", "Your Mac"]);
   });
 
   it("asks a signed-out person to sign in, after asking twice in case another tab was refreshing the sign-in", async () => {
@@ -252,6 +253,8 @@ describe("the other tabs", () => {
     expect(tabOf("#needs")).toBe("needs");
     expect(tabOf("#shops")).toBe("shops");
     expect(tabOf("#chat")).toBe("chat");
+    expect(tabOf("#mac")).toBe("mac");
+    expect(tabOf("#pair=AQID")).toBe("mac");
     expect(tabOf("#elsewhere")).toBe("today");
   });
 });

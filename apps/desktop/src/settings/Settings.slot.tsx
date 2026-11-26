@@ -36,11 +36,14 @@ import { ArtifactLinksPage } from "./ArtifactLinksPage";
 import { RemotePage } from "./RemotePage";
 import { setSuggestOn, useSuggestOn } from "../lib/suggest";
 import { modLabel, setAfterSend, setFollowUp, useAfterSend, usePickedFollowUp, type AfterSend, type FollowUp } from "../chat/box/keys";
+import { QUIET_DAYS, setInbox, useInbox } from "../sidebar/inbox";
+import { TITLE_EFFORTS, TITLE_MODELS, setTitleModel, useTitleModel } from "../lib/titleModel";
 import { VoicePage } from "./VoicePage";
 import { ComputerPage } from "./ComputerPage";
 import { McpSkillsPage } from "./mcp/McpSkillsPage";
 import { WorkflowsPage } from "../workflows/WorkflowsPage";
 import { APP_PAGES, EVERYDAY_PAGES, HOOD_PAGES, inHood } from "./pages";
+import { Icon } from "../ui/icons";
 
 export const slot = "settings";
 
@@ -81,11 +84,7 @@ function useHood(current: string): [boolean, () => void] {
 }
 
 /** The disclosure's chevron, in the canvas's icon style (16px, a 1.4 line). */
-const HoodChevron = () => (
-  <svg className="st-ic st-hood-ic" viewBox="0 0 16 16" aria-hidden="true">
-    <path d="M4.5 6.5L8 10l3.5-3.5" />
-  </svg>
-);
+const HoodChevron = () => <Icon name="chevron-down" className="st-ic st-hood-ic" />;
 
 
 const STATUS: Record<string, Key> = { online: "bot.online", offline: "bot.offline", starting: "bot.starting" };
@@ -457,8 +456,6 @@ const SHORTCUTS: [string, Key][] = [
   [`${MOD},`, "key.settings"],
   [`${MOD}J`, "key.nextAsk"],
   [MOD === "⌘" ? `${MOD}N · ${MOD}T` : `${MOD}N`, "key.newSession"],
-  [`${MOD}Enter`, "key.sendOther"],
-  [`${MOD}S`, "key.stash"],
   [MOD === "⌘" ? "⌘D · ⌘⇧D" : "Ctrl+Shift+D · Alt+Shift+D", "key.splitPane"],
   [MOD === "⌘" ? "⌘W" : "Ctrl+Shift+W", "key.closePane"],
   [MOD === "⌘" ? "⌘⌥ ←↑↓→" : "Ctrl+Alt+ ←↑↓→", "key.focusPane"],
@@ -669,6 +666,70 @@ function SuggestToggle() {
   return <Toggle on={on} label={t("suggest.title")} onChange={setSuggestOn} testId="set-suggest" />;
 }
 
+/** Settings › General › Recent chats › Working group (item 94, sidebar/inbox.ts): off until the person turns it on. */
+function WorkingToggle() {
+  const inbox = useInbox();
+  return <Toggle on={inbox.working} label={t("inbox.working")} onChange={(working) => setInbox({ working })} testId="set-working" />;
+}
+
+/** Settings › General › Side menu › Done after quiet days (item 94): 3 days by default, Off turns it off. */
+function QuietDaysSeg() {
+  const inbox = useInbox();
+  return (
+    <Modes
+      label={t("inbox.quiet")}
+      value={String(inbox.quietDays)}
+      options={QUIET_DAYS.map((n) => ({ value: String(n), label: n === 0 ? t("set.off") : n === 1 ? t("inbox.day1") : t("inbox.days", { n }) }))}
+      onChange={(v) => setInbox({ quietDays: Number(v) })}
+      testId="set-quiet-days"
+    />
+  );
+}
+
+/** Settings › General › Side menu › Done when its pull request merges (item 94): on by default. */
+function MergedToggle() {
+  const inbox = useInbox();
+  return <Toggle on={inbox.merged} label={t("inbox.merged")} onChange={(merged) => setInbox({ merged })} testId="set-settle-merged" />;
+}
+
+/** Settings › General › Titles and words (lib/titleModel.ts, item 96): off until the person turns it on, since each title is an extra
+ *  request on their own plan; the model and the effort that write them. */
+export function TitlesRows() {
+  const m = useTitleModel();
+  return (
+    <>
+      <div className="st-gh">{t("titles.group")}</div>
+      <div className="st-grp" data-testid="set-titles">
+        <Row title={t("titles.on.title")} hint={t("titles.on.hint")}>
+          <Toggle on={m.on} label={t("titles.on.title")} onChange={(on) => setTitleModel({ on })} testId="set-titles-on" />
+        </Row>
+        <Row title={t("titles.reads")} hint={t("titles.reads.hint")} />
+        <Row title={t("titles.model")} hint={t("titles.model.hint")}>
+          <select className="dev-in" value={m.model} aria-label={t("titles.model")} onChange={(e) => setTitleModel({ model: e.currentTarget.value as (typeof TITLE_MODELS)[number] })} data-testid="set-titles-model">
+            {TITLE_MODELS.map((v) => (
+              <option key={v} value={v}>
+                {t(`titles.model.${v || "default"}` as Key)}
+              </option>
+            ))}
+          </select>
+        </Row>
+        <Row title={t("titles.effort")}>
+          <select className="dev-in" value={m.effort} aria-label={t("titles.effort")} onChange={(e) => setTitleModel({ effort: e.currentTarget.value as (typeof TITLE_EFFORTS)[number] })} data-testid="set-titles-effort">
+            {TITLE_EFFORTS.map((v) => (
+              <option key={v} value={v}>
+                {t(`titles.effort.${v || "default"}` as Key)}
+              </option>
+            ))}
+          </select>
+        </Row>
+        <Row title={t("suggest.agents")} hint={t("titles.agentsHint")}>
+          <Value>{t("suggest.agentsValue")}</Value>
+        </Row>
+      </div>
+    </>
+  );
+}
+
 /** Settings › General › Chat box › After sending from Home (item 95): what Enter does there; Cmd+Enter does the other. */
 function AfterSendSeg() {
   const v = useAfterSend();
@@ -761,11 +822,23 @@ function GeneralPage() {
           <Value>{t("suggest.agentsValue")}</Value>
         </Row>
       </div>
-      <div className="st-grp">
+      {/* the side menu's own choices (item 94), with the menu's other one, the tasks bar */}
+      <div className="st-gh">{t("inbox.group")}</div>
+      <div className="st-grp" data-testid="set-inbox">
+        <Row title={t("inbox.working")} hint={t("inbox.workingHint")}>
+          <WorkingToggle />
+        </Row>
+        <Row title={t("inbox.quiet")} hint={t("inbox.quietHint")}>
+          <QuietDaysSeg />
+        </Row>
+        <Row title={t("inbox.merged")} hint={t("inbox.mergedHint")}>
+          <MergedToggle />
+        </Row>
         <Row title={t("tasks.barSetting")} hint={t("tasks.barSettingHint")}>
           <TasksBarToggle />
         </Row>
       </div>
+      <TitlesRows />
       <div className="st-gh">{t("set.system")}</div>
       <div className="st-grp" data-testid="set-system">
         <Row title={t("win.close")} hint={t(isMacPlatform() ? "win.closeHint" : "win.closeHintOther")}>

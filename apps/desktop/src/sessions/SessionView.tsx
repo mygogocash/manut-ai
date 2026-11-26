@@ -53,6 +53,7 @@ import { TermShareCards } from "./TermShareCard";
 import { LanePane } from "../code/LanePane";
 import { LaneReview } from "../code/Review";
 import { isLaneChat } from "../code/laneStore";
+import { Icon } from "../ui/icons";
 
 const STATUS: Record<string, Key> = { starting: "ss.starting", running: "ss.running", exited: "ss.ended", failed: "ss.couldNotStart" };
 
@@ -260,17 +261,9 @@ function LaneSplit({ rec, chatKey, chat }: { rec: SessionRec; chatKey: string; c
   );
 }
 
-const HomeIcon = ({ size = 14 }: { size?: number }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" aria-hidden="true">
-    <path d="M4 10.5 12 4l8 6.5V19a1 1 0 0 1-1 1h-4.5v-5.5h-5V20H5a1 1 0 0 1-1-1z" />
-  </svg>
-);
+const HomeIcon = () => <Icon name="home" />;
 
-const FolderIcon = ({ size = 13 }: { size?: number }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
-    <path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4.4l2 2h8.6A1.5 1.5 0 0 1 21 9.5v8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z" />
-  </svg>
-);
+const FolderIcon = () => <Icon name="folder" />;
 
 /** A person's own agent (Settings › Agents): one quiet line, once per session view, that its approval cards are the
  *  ones the agent itself asks for. manut cannot add asks to an agent it does not know. */
@@ -398,7 +391,7 @@ function Context({ rec, account }: { rec: SessionRec; account?: string }) {
               {recent.length > 0 && <div className="ss-sep" />}
               <button type="button" className="ss-item" onClick={() => void choose()} data-testid="session-choose">
                 <span className="ss-ic">
-                  <FolderIcon size={14} />
+                  <FolderIcon />
                 </span>
                 <span className="ss-n">{t("sessions.choose")}</span>
               </button>
@@ -422,14 +415,7 @@ function Context({ rec, account }: { rec: SessionRec; account?: string }) {
   );
 }
 
-const BranchIcon = () => (
-  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
-    <circle cx="6" cy="5" r="2.2" />
-    <circle cx="6" cy="19" r="2.2" />
-    <circle cx="18" cy="8" r="2.2" />
-    <path d="M6 7.2v9.6M18 10.2c0 4-6 3.4-11.2 7" />
-  </svg>
-);
+const BranchIcon = () => <Icon name="git-branch" />;
 
 /** The rest of the line under a running chat: the folder's git branch (none outside a repository) and how full the
  *  context is, both as the shell and the agent reported them. */

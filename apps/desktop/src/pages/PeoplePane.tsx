@@ -44,6 +44,7 @@ import {
   type PeopleUi,
 } from "./people";
 import "./people.css";
+import { Icon } from "../ui/icons";
 
 /** What the page needs of what draws it: the runtime's word on the shop's people, the one form or question open, and what each
  *  button does. */
@@ -83,11 +84,7 @@ function Avatar({ name, tone }: { name: string; tone: number }) {
   );
 }
 
-const Check = () => (
-  <svg className="ic" viewBox="0 0 16 16" aria-hidden="true">
-    <path d="M3.5 8.5l3 3 6-7" />
-  </svg>
-);
+const Check = () => <Icon name="check" />;
 
 /** What the last change said, shown in the part of the page it was in. */
 function Said({ ui, at }: { ui: PeopleUi; at: PeopleUi["at"] }) {

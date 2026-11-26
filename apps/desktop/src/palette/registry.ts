@@ -9,6 +9,7 @@ import type { MenuPage } from "../state/store";
 import { APP_PAGES } from "../settings/pages";
 import { MENU_ROWS, rowPage, type MenuRow } from "../sidebar/menu";
 import type { Places } from "./places";
+import type { IconName } from "../ui/icons";
 
 /** What the registry needs of the app: plain data and the functions the app's own buttons call. */
 export interface PaletteCtx {
@@ -40,8 +41,22 @@ export interface Row {
   label: string;
   /** a quiet second line or tail (who a chat is with) */
   hint?: string;
+  /** the row's icon, from the brand's set: every row of the command menu has one before its word (the canvas's Search
+   *  board); a row given none takes its group's */
+  icon?: IconName;
   run(): void;
 }
+
+/** Each page's icon, the drawing its row has in the side menu (sidebar/menuIcons.tsx). */
+const MENU_ICON: Record<MenuRow, IconName> = {
+  new: "plus",
+  needs: "bell",
+  team: "users",
+  code: "code",
+  artifacts: "panels",
+  customize: "sliders",
+  history: "clock",
+};
 
 const MENU_WORDS: Record<MenuRow, Key> = {
   new: "menu.new",
@@ -55,9 +70,9 @@ const MENU_WORDS: Record<MenuRow, Key> = {
 
 /** "Go to": every page of the side menu, then every Settings page, by the names the app already shows. */
 export function goRows(c: PaletteCtx): Row[] {
-  const pages: Row[] = MENU_ROWS.map((row) => ({ id: `go:${row}`, label: t(MENU_WORDS[row]), run: () => c.openPage(rowPage(row)) }));
+  const pages: Row[] = MENU_ROWS.map((row) => ({ id: `go:${row}`, label: t(MENU_WORDS[row]), icon: MENU_ICON[row], run: () => c.openPage(rowPage(row)) }));
   const settings = t("set.title");
-  const own = (id: string, name: string): Row => ({ id: `go:settings:${id}`, label: `${settings} › ${name}`, run: () => c.openSettings(id) });
+  const own = (id: string, name: string): Row => ({ id: `go:settings:${id}`, label: `${settings} › ${name}`, icon: "gear", run: () => c.openSettings(id) });
   return [
     ...pages,
     own("general", t("set.general")),
@@ -84,17 +99,17 @@ export const ACTIONS: ActionDef[] = [
     // the Team page's member menu, "New thread with ..."; the chat box offers it too
     id: "new-chat",
     elsewhere: "s.newThread(b.name)",
-    offer: (c) => (c.buddy ? [{ id: "do:new-chat", label: t("thread.newWith", { name: c.buddy.displayName }), run: () => c.newThread(c.buddy!.name) }] : []),
+    offer: (c) => (c.buddy ? [{ id: "do:new-chat", label: t("thread.newWith", { name: c.buddy.displayName }), icon: "message-plus", run: () => c.newThread(c.buddy!.name) }] : []),
   },
   {
     id: "new-session",
     elsewhere: "session-new",
-    offer: (c) => [{ id: "do:new-session", label: t("sessions.new"), run: () => c.openNewSessionMenu() }],
+    offer: (c) => [{ id: "do:new-session", label: t("sessions.new"), icon: "terminal", run: () => c.openNewSessionMenu() }],
   },
   {
     id: "new-lane",
     elsewhere: "lane-new",
-    offer: (c) => (c.places.lane ? [{ id: "do:new-lane", label: t("lane.new"), run: () => c.places.lane!.newLane() }] : []),
+    offer: (c) => (c.places.lane ? [{ id: "do:new-lane", label: t("lane.new"), icon: "plus", run: () => c.places.lane!.newLane() }] : []),
   },
   {
     id: "microphone",
@@ -102,7 +117,7 @@ export const ACTIONS: ActionDef[] = [
     offer: (c) => {
       const b = c.places.box;
       if (!b) return [];
-      return [{ id: "do:microphone", label: b.micLive() ? t("voice.micStop") : t("voice.mic", { lang: b.spoken() }), run: () => b.toggleMic() }];
+      return [{ id: "do:microphone", label: b.micLive() ? t("voice.micStop") : t("voice.mic", { lang: b.spoken() }), icon: "mic", run: () => b.toggleMic() }];
     },
   },
   {
@@ -111,26 +126,26 @@ export const ACTIONS: ActionDef[] = [
     offer: (c) => {
       const b = c.places.box;
       if (!b) return [];
-      return [{ id: "do:voice-mode", label: b.modeLive() ? t("voice.modeStop") : t("voice.mode", { lang: b.spoken() }), run: () => b.toggleMode() }];
+      return [{ id: "do:voice-mode", label: b.modeLive() ? t("voice.modeStop") : t("voice.mode", { lang: b.spoken() }), icon: "audio-lines", run: () => b.toggleMode() }];
     },
   },
   {
     // opens the Team page's own question ("Pause everyone?"); the pause itself is still that card's button
     id: "pause-question",
     elsewhere: "pause-open",
-    offer: (c) => (c.places.pause ? [{ id: "do:pause-question", label: t("pause.button"), run: () => c.places.pause!.ask() }] : []),
+    offer: (c) => (c.places.pause ? [{ id: "do:pause-question", label: t("pause.button"), icon: "pause", run: () => c.places.pause!.ask() }] : []),
   },
   {
     // Settings › Workflows' Run now, a row for each workflow it is offered for now: the run is a lane whose every ask is still its
     // card's, and the dial reads it at its most careful level
     id: "workflow",
     elsewhere: "workflow-run-now",
-    offer: (c) => c.workflows.map((w) => ({ id: `do:workflow:${w.file}`, label: t("wf.palette", { name: w.name }), run: () => c.runWorkflow(w.file) })),
+    offer: (c) => c.workflows.map((w) => ({ id: `do:workflow:${w.file}`, label: t("wf.palette", { name: w.name }), icon: "nodes", run: () => c.runWorkflow(w.file) })),
   },
   {
     id: "language",
     elsewhere: "language",
-    offer: (c) => LANGS.filter((l) => l !== c.lang).map((l) => ({ id: `do:language:${l}`, label: `${t("lang.title")}: ${LANG_NAMES[l]}`, run: () => c.setLanguage(l) })),
+    offer: (c) => LANGS.filter((l) => l !== c.lang).map((l) => ({ id: `do:language:${l}`, label: `${t("lang.title")}: ${LANG_NAMES[l]}`, icon: "globe", run: () => c.setLanguage(l) })),
   },
   {
     id: "runtime",
@@ -139,7 +154,7 @@ export const ACTIONS: ActionDef[] = [
       const r = c.places.runtime;
       if (!r) return [];
       const other = r.mode === "practice" ? "connected" : "practice";
-      return [{ id: `do:runtime:${other}`, label: `${t("dev.runtime")}: ${t(other === "practice" ? "dev.practice" : "dev.connected")}`, run: () => r.set(other) }];
+      return [{ id: `do:runtime:${other}`, label: `${t("dev.runtime")}: ${t(other === "practice" ? "dev.practice" : "dev.connected")}`, icon: "plug", run: () => r.set(other) }];
     },
   },
 ];

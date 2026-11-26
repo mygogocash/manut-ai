@@ -57,7 +57,7 @@
   white-space: nowrap;
 }
 .dv-kind {
-  color: var(--quiet);
+  color: var(--muted);
   flex: none;
 }
 .dv-add,
@@ -95,7 +95,7 @@
 .dv-l::before {
   position: absolute;
   left: 9px;
-  color: var(--quiet);
+  color: var(--muted);
 }
 .dv-l.add {
   background: color-mix(in srgb, var(--ok) 11%, transparent);
@@ -113,7 +113,7 @@
 }
 .dv-l.hunk,
 .dv-l.more {
-  color: var(--quiet);
+  color: var(--muted);
 }
 
 /* the agent's todo list: one compact checklist that changes in place; under way reads in ink */
@@ -185,7 +185,7 @@
 }
 .th-chev {
   display: inline-flex;
-  color: var(--quiet);
+  color: var(--muted);
   transition: transform var(--tr-switch);
 }
 .th.open .th-chev {

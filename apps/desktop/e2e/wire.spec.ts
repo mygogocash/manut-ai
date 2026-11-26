@@ -856,6 +856,8 @@ test("one running colour: a working thread's spinner is the running terminals' a
 
 test("the usage meter's state is a short bar, never a dot (a red dot means a failed turn only)", async ({ page }) => {
   await open(page);
+  // the marks left the side menu's foot for the Code page (item 85i)
+  await page.getByTestId("menu-code").click();
   const marks = page.locator(".usage-dot");
   await expect(page.getByTestId("usage")).toBeVisible();
   for (const el of await marks.all()) {

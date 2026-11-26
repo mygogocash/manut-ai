@@ -5,7 +5,8 @@ settings: network access, a tunnel, new devices approved first, permissions, age
 linked environments, a preview tunnel, webhooks held while offline. It was written by a read-only design pass over
 this repository and GoSpark's remote access, which the relay in `apps/api` was lifted from. Built so far: that relay,
 the channel (78a, `packages/remote-channel`), the Mac's side with Settings › Sharing and access, switched off (78b,
-below), and the read of Tailscale's state (78f's first part, below). The plan's rows are 78a to 78f.
+below), the phone's Your Mac tab (78c, below), and the read of Tailscale's state (78f's first part, below). The plan's
+rows are 78a to 78f.
 
 ## The first version
 
@@ -61,8 +62,8 @@ If the page's socket is held back while the window is hidden or the Mac is locke
 
 **On the phone:** a Your Mac tab inside the existing `/app/` (new `apps/web/src/app/mac/`), usable without signing in.
 Its service worker already never answers `/relay/`. Keys are kept in IndexedDB in a form script cannot read back, which
-breaks `docs/web-app.md`'s "nothing kept" rule on purpose and must be written down there. Scanning needs a QR reader,
-which the repository does not have.
+breaks `docs/web-app.md`'s "nothing kept" rule on purpose and is written down there ("What Your Mac keeps"). Scanning
+needs a QR reader, which the repository does not have: the browser's own is used where there is one (78c, below).
 
 **A new package `packages/remote-channel`, used by both sides:**
 
@@ -146,6 +147,79 @@ which the repository does not have.
   for an idle socket only if Cloudflare closes idle sockets sooner than a slowed timer fires; that is to be checked in
   phase 2 with the window hidden for an hour and the Mac locked, watching the relay's `lastHostSeen`. If it does not
   hold, `link.ts` moves into the Rust shell as planned.
+
+**What building 78c added** (`apps/web/src/app/mac/`, the phone's side, built so it does nothing while the relay is off):
+
+- **The pieces.** `relay.ts` (the phone's relay socket: `hello`, `ready`, the close codes read as reasons, a `ping`
+  every 30 seconds), `vault.ts` (what the phone keeps, `docs/web-app.md` "What Your Mac keeps"), `passkeys.ts` (the
+  browser's WebAuthn), `pair.ts` (pairing), `session.ts` (a session and its requests), `decision.ts` (the answers the
+  passkey signs, and every field they use), `remote.ts` (the tab's state: `MacRemote`), `live.ts` and `setup.ts` (the
+  relay on this page's own origin), `practice.ts` (practice mode's pretend Mac), `scan.ts` (the camera) and
+  `MacTab.tsx`. The tab is in the nav whether or not the person signed in, and says "not available yet" while
+  `/v1/health` says `relay: "off"`, or when the page is not on the API's own origin (the passkey and the relay are tied
+  to that exact host).
+- **Pairing.** A code's door is written to the vault as spent before the relay is dialled, so the code is one try on the
+  phone across reloads, tabs and Forget; nothing ever starts again on its own. A link for another Manut AI address is
+  refused before anything is spent. The digits show, 44 pixels high, only once the Mac's proof checked out; nothing is
+  sent on the pairing channel until the grant. The Mac's passkey request must name this page's host and the grant's
+  device id. The passkey is made from the person's tap on "Make a passkey" (Safari opens a passkey prompt only from a
+  tap), may be pressed again after the prompt was closed while the Mac waits, and the phone is kept only after the Mac's
+  `paired`. Every failure says what to do next, which is always to start again on the Mac.
+- **A link opened outside the installed app** pairs nothing: the page takes it out of the address at once and offers
+  Copy link, to paste inside the app on the Home Screen. Inside the installed app the field is filled and waits for Pair.
+- **Scanning** uses the browser's own `BarcodeDetector` (Chrome on Android), and the camera only after Scan is pressed.
+  Safari on an iPhone has no reader, so there it is paste only, and no reader of our own is shipped yet
+  (docs/decisions.md). On an iPhone the quickest road is Copy link on the Mac and paste, which Universal Clipboard carries
+  when both are signed in to the same Apple Account.
+- **The six requests.** `list` on connecting, every 20 seconds while the list is shown, and on going back to it; `open`;
+  `catchup` after a reconnect and after an event that skips a number; `allow` in its two steps; `reply` for No (never
+  signed) and for an answer; `stop`. A challenge is checked against the screen (chat, ask, revision, choice) before any
+  prompt, and the passkey signs what the phone computed from its own screen. Allow once tries the prompt at once and,
+  when the browser refuses one that did not come from a tap, offers Confirm while the challenge lasts.
+- **Answers to questions** go through the same signed path as Allow once (`#decide`), following the security review of
+  26 Nov 2026 (item 115): a Mac that sends a challenge for an answer gets it checked against the exact answer's digest,
+  and the signature back; today's Mac takes the answer at once. The digest (`answerOption`) and the field step two
+  carries it in (`passkey`) are in `decision.ts`, to be matched to item 115's final shape.
+- **The greyed view.** When the session drops, what was shown stays greyed with when the Mac last confirmed it, offers
+  no answer, and is cleared from memory 15 minutes after that time (checked again when the app comes back into view,
+  since a phone that slept ran no timer). The phone dials again after one second, doubling to a minute. A phone the Mac
+  revoked, or the relay no longer knows, says "Your Mac doesn't know this phone" and dials once a minute, since the relay
+  also forgets a Mac unseen for 30 days and the Mac registers its phones again when it returns.
+- **Links in replies** are plain text, never something to tap, and the chat says so.
+- **The content policy** is unchanged: `connect-src 'self'` covers a `wss:` socket to the page's own host in CSP Level 3.
+- **Tested** in `apps/web/test` (`macPair`, `macSession`, `macRemote`, `MacTab`) against a relay socket whose Mac the test
+  plays from the package's Mac side, and a hand-answered Mac; through the real relay object in
+  `apps/api/test/remote-phone.test.ts`, where the web app's own code pairs with the desktop's `RemoteMac`, registers its
+  passkey (the desktop's stand-in authenticator), does all six requests, drops, catches up, and hears Unpair, and no
+  frame holds a chat's or an ask's words, the phone's name, K or the code's secret; in the web app's phone tests
+  (`e2e/states.ts`, every Your Mac state on four phones, light and dark, three text sizes); and the IndexedDB vault in each
+  real engine (`e2e/mac-vault.spec.ts`).
+
+**What only a real phone shows, and what the owner should try** (with the dev relay on, which is the owner's call):
+
+1. On the iPhone, open `https://dev.manut.xyz/app/` in Safari, Share, Add to Home Screen, and open Manut AI from the Home
+   Screen. Go to Your Mac: it should offer the paste field and say the browser cannot scan.
+2. On the Mac, Settings, Sharing and access: turn on reaching the Mac from a phone, accept the consent sheet, press Pair a
+   phone, then Copy link. Paste on the iPhone (Universal Clipboard) and press Pair.
+3. The iPhone shows four digits. Type them on the Mac. The iPhone says "Your Mac took the code": press Make a passkey and
+   answer Face ID. The Mac should list "iPhone, Safari", and the iPhone the Mac's chats.
+4. Start a chat on the Mac that asks for an approval. On the iPhone open it: the command must read exactly as the Mac's
+   card. Press Allow once: Face ID should open at once, or the card should offer Confirm, whose tap opens it. The Mac's
+   card should settle as allowed by the phone.
+5. Try No, an answer to a question, and Stop on a running turn.
+6. Lock the iPhone for a minute and open the app again: the view should catch up. Turn on Airplane Mode: the view greys
+   and says when it was last current. Leave it over 15 minutes: it clears.
+7. Scan the Mac's code with the iPhone's Camera app: Safari opens and says to pair from the Home Screen app, with Copy
+   link. Then try the same code again in the installed app: it should be refused as used if it was started there before.
+8. Unpair the phone on the Mac: the iPhone says the Mac no longer knows it. Press Forget this Mac. In Settings,
+   Passwords, the passkey for `dev.manut.xyz` is still there until deleted.
+9. On an Android phone with Chrome: install from the menu, press Scan, allow the camera, and pair from the QR code.
+
+Only a real phone shows: Face ID and the passcode prompt, and whether Safari opens it straight after the Mac's challenge
+or needs Confirm; the camera and Chrome's QR reading; the installed app's own storage partition on iOS (that a pairing
+there survives Safari's clearing of website data, and that Safari's own tab keeps nothing for it); Universal Clipboard;
+how the relay socket behaves while the phone is locked or the app is in the background; that an iCloud Keychain passkey's
+public key comes in the COSE form the Mac requires; and that Safari takes a `wss:` socket under `connect-src 'self'`.
 
 **Lifted from GoSpark:** `docs/relay-protocol-v1.md` and `docs/security/remote-relay-threat-model.md` (this
 repository's relay code cites both; copied into `docs/` by 78b, each with a note on where this app differs); `GoGoCode/Remote/RemoteEventJournal.swift`

@@ -41,7 +41,7 @@
 }
 .act-ic.interrupted,
 .act-ic.ended {
-  color: var(--quiet);
+  color: var(--muted);
   font-size: 8px;
 }
 .act-ic.error {
@@ -127,14 +127,14 @@
   overflow-wrap: anywhere;
 }
 .act-el {
-  color: var(--quiet);
+  color: var(--muted);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
   flex: none;
 }
 .act-chev {
   display: inline-flex;
-  color: var(--quiet);
+  color: var(--muted);
   flex: none;
   /* a chevron turns as the kit's accordion's does: the Switch on the curve */
   transition: transform var(--tr-switch);
@@ -182,7 +182,7 @@
   padding-left: 12px;
   flex: none;
   font-size: 11px;
-  color: var(--quiet);
+  color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
 .act-step.fail .k,
@@ -343,7 +343,7 @@
 }
 .sa-chev {
   display: inline-flex;
-  color: var(--quiet);
+  color: var(--muted);
   flex: none;
   transition: transform var(--tr-switch);
 }
@@ -381,7 +381,7 @@
 .sa-st.cancelled,
 .sa-st.stopped,
 .sa-st.queued {
-  color: var(--quiet);
+  color: var(--muted);
 }
 /* its approval or question waits on the person: the sidebar's amber for a waiting session */
 .sa-st.waiting {

@@ -24,9 +24,9 @@ import type { RoutineRow } from "../runtime/routines";
 import { MenuIcon, OnGlyph } from "../sidebar/menuIcons";
 import { getStore, useStore } from "../state/store";
 import { formKeys } from "./formKeys";
-import { LOADING, load, type Load } from "./load";
+import { LOADING, load, saysWhy, type Load } from "./load";
 import { Loading } from "./Loading";
-import { Empty, MenuPageFrame } from "./MenuPage";
+import { Empty, LoadFailed, MenuPageFrame } from "./MenuPage";
 import { ShopOutpostsPane, useConnections, VaultPane, type ConnectionsProps } from "./ConnectionsPane";
 import { GooglePane, useGoogle, type GoogleProps } from "./GooglePane";
 import { thisMacRecord } from "./connections";
@@ -50,6 +50,7 @@ import {
   type RoutinesAction,
   type RoutinesUi,
 } from "./routines";
+import { Icon } from "../ui/icons";
 
 /** A fact's words with each run of Thai set in its own language, as the canvas does for "ค่ะ", so it is drawn in a Thai face.
  *  The baht sign sits in the Thai block but belongs to the amount beside it, so it stays out. */
@@ -92,6 +93,8 @@ export interface MemoryPaneProps {
   onCorrect: (id: string) => void;
   /** Forget it, in the open question of this fact */
   onForget: (id: string) => void;
+  /** Try again, after a read that failed in a way the app did not word for people */
+  onRetry?: () => void;
 }
 
 function FactRow({ fact, p, waiting }: { fact: MemoryFact; p: MemoryPaneProps; waiting: boolean }) {
@@ -203,11 +206,14 @@ function MemoryPane(p: MemoryPaneProps) {
         {loading && (
           <Loading label={t("memory.loading")} testId="memory-loading" strip={false} />
         )}
-        {state.kind === "unavailable" && (
-          <p className="none" role="status" data-testid="memory-unavailable">
-            {state.message}
-          </p>
-        )}
+        {state.kind === "unavailable" &&
+          (saysWhy(state) ? (
+            <p className="none" role="status" data-testid="memory-unavailable">
+              {state.message}
+            </p>
+          ) : (
+            <LoadFailed details={state.message} onRetry={p.onRetry ?? (() => {})} testId="memory-failed" />
+          ))}
         {state.kind === "ready" && known.length === 0 && <Empty icon={<MenuIcon row="customize" />} title={t("customize.emptyTitle")} text={t("customize.emptyText")} testId="customize-empty" />}
         {known.map((f) => (
           <FactRow key={f.id} fact={f} p={p} waiting={false} />
@@ -258,6 +264,8 @@ export interface RoutinesPaneProps {
   onSwitch: (row: RoutineRow) => void;
   /** Remove it, in the open question of this routine */
   onRemove: (row: RoutineRow) => void;
+  /** Try again, after a read that failed in a way the app did not word for people */
+  onRetry?: () => void;
 }
 
 /** Monday first, as a shop's week runs; a weekday is 0 for Sunday, as the package counts. */
@@ -447,9 +455,7 @@ function RoutinesPane({ p, automations, plugins }: { p: RoutinesPaneProps } & Cu
         <h2 className="h2">{t("routines.title")}</h2>
         {state.kind === "ready" && (
           <button type="button" className="btn" disabled={ui.saving} onClick={() => p.dispatch({ type: "open" })} data-testid="routine-new">
-            <svg className="ic" viewBox="0 0 16 16" aria-hidden="true">
-              <path d="M8 3v10M3 8h10" />
-            </svg>
+            <Icon name="plus" />
             {t("routines.new")}
           </button>
         )}
@@ -464,11 +470,14 @@ function RoutinesPane({ p, automations, plugins }: { p: RoutinesPaneProps } & Cu
       {loading && (
         <Loading label={t("routines.loading")} testId="routines-loading" strip={false} rows={2} />
       )}
-      {state.kind === "unavailable" && (
-        <p className="none" role="status" data-testid="routines-unavailable">
-          {state.message}
-        </p>
-      )}
+      {state.kind === "unavailable" &&
+        (saysWhy(state) ? (
+          <p className="none" role="status" data-testid="routines-unavailable">
+            {state.message}
+          </p>
+        ) : (
+          <LoadFailed details={state.message} onRetry={p.onRetry ?? (() => {})} testId="routines-failed" />
+        ))}
       {state.kind === "ready" && rows.length === 0 && (
         <p className="none" data-testid="routines-empty">
           {t("routines.empty")}
@@ -489,7 +498,7 @@ function RoutinesPane({ p, automations, plugins }: { p: RoutinesPaneProps } & Cu
             <li>
               <button type="button" className="rowl" onClick={automations.open} data-testid="nav-automations">
                 <span className="grow">
-                  <span className="l1">{t("nav.automations")}</span>
+                  <span className="l1">{t("customize.allRoutines")}</span>
                   <span className="l2">{t("customize.automations")}</span>
                 </span>
                 {automations.count > 0 && <span className="when">{automations.count}</span>}
@@ -699,6 +708,11 @@ export function CustomizePage() {
       if (ask?.kind === "correct" && ask.fact === fact) void remember({ what: "correct", fact, text: ask.draft });
     },
     onForget: (fact) => void remember({ what: "forget", fact }),
+    onRetry: () => {
+      const at = viewingRef.current;
+      setFacts(LOADING);
+      void readFacts().then((r) => viewingRef.current === at && setFacts(r));
+    },
   };
   const routines: RoutinesPaneProps = {
     state: itemsOf(rows),
@@ -716,6 +730,11 @@ export function CustomizePage() {
     onSwitch: (row) => void routine({ what: "switch", row }),
     onRemove: (row) => {
       if (routinesUi.ask === row.id) void routine({ what: "remove", row });
+    },
+    onRetry: () => {
+      const at = viewingRef.current;
+      setRows(LOADING);
+      void readRows().then((r) => viewingRef.current === at && setRows(r));
     },
   };
   return (

@@ -35,6 +35,7 @@ import { goneOut, jobsLine, memberNames, pausedJobLine, PAUSE_START, pauseReduce
 import { useJobs } from "./RecentWork";
 import { asksOf, memberActions, memberStatus, tryAction, type MemberAction, type MemberMenuItem, type MemberStatus } from "./team";
 import { lineWords, teamLine, type TeamLine } from "./teamLine";
+import { Icon } from "../ui/icons";
 
 /** One member as its row shows it. */
 export interface TeamRow {
@@ -201,11 +202,7 @@ function PauseQuestion({ p, state }: { p: TeamPauseProps; state: TeamState }) {
 /** The three dots of the More button. */
 function MoreGlyph() {
   return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-      <circle cx="5" cy="12" r="1.8" />
-      <circle cx="12" cy="12" r="1.8" />
-      <circle cx="19" cy="12" r="1.8" />
-    </svg>
+    <Icon name="dots" />
   );
 }
 
@@ -277,7 +274,9 @@ export function TeamView({
   const state = pause?.state.kind === "ready" ? pause.state.value : null;
   const paused = !!state?.paused;
   const loading = pause?.state.kind === "loading";
-  // With no one but the lead to stop (or no team at all) there is nothing to pause, so the button is not offered.
+  // With no one but the lead to stop (or no team at all) there is nothing to pause, so the button is not offered. Pausing can
+  // be undone, so it is the Team board's quiet button, not red, which means failed (item 85i, finding 12); its question's
+  // own Pause everyone stays as the PauseAll board draws it.
   const offered = !!pause && members.length > 0 && !(state && state.members.length === 0);
   const acts =
     pause &&
@@ -287,7 +286,7 @@ export function TeamView({
         {t("pause.resume")}
       </button>
     ) : (
-      <button type="button" className="btn danger" disabled={loading || pause.ui.busy} aria-busy={loading || undefined} onClick={pause.onAsk} data-testid="pause-open">
+      <button type="button" className="btn" disabled={loading || pause.ui.busy} aria-busy={loading || undefined} onClick={pause.onAsk} data-testid="pause-open">
         {t("pause.button")}
       </button>
     ));
@@ -369,7 +368,7 @@ export function TeamView({
                     }}
                     data-testid={`team-menu-${item.action}-${m.name}`}
                   >
-                    {item.action === "new" && <NewThreadIcon size={14} />}
+                    {item.action === "new" && <NewThreadIcon />}
                     <span className="tmenu-l">{itemLabel(item.action, m.displayName)}</span>
                   </button>
                 ))}
