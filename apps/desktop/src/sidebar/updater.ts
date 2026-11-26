@@ -5,6 +5,11 @@
 // The updater is on (`UPDATER_ENABLED`) with Manut AI's own key: tauri.conf.json pins the public half and names a
 // `latest.json` under GitHub's releases/latest, which skips drafts, so it moves only when the owner publishes a
 // release (docs/releasing.md). The flag stays so a build can be made that asks nothing, and so tests can see it.
+//
+// The Mac App Store edition never asks (`isAppStore`, docs/app-store.md): the App Store updates it, an app that updates
+// itself is refused there (Guideline 2.4.5(vii)), and its shell does not even carry the updater plugin. Settings ›
+// General › System says so instead.
+import { isAppStore } from "../appStore";
 import { t } from "../i18n";
 
 /** Download progress: bytes so far and the total when the server sent one. */
@@ -67,8 +72,10 @@ export function tauriHost(): UpdateHost {
   };
 }
 
-export function updateHost(): UpdateHost | null {
+export function updateHost(appStore: boolean = isAppStore()): UpdateHost | null {
   if (typeof window === "undefined") return null;
+  // before e2e's stand-in too, so a page shown as the App Store edition has no update button at all
+  if (appStore) return null;
   const injected = (window as unknown as { __manutUpdateHost?: UpdateHost }).__manutUpdateHost;
   if (injected) return injected;
   return UPDATER_ENABLED && inTauri() ? tauriHost() : null;

@@ -13,6 +13,7 @@ import { termFontsReady } from "../sessions/term/fonts";
 import { onTermSettings, readTermSettings } from "../sessions/term/settings";
 import { termTheme } from "../sessions/term/themes";
 import { t } from "../i18n";
+import { sandboxSaid } from "../appStore";
 import { getShellHost } from "./host";
 import { GH_LOGIN_ENDED, closePane, ringPane, setPaneCwd, setPaneFg, setPaneSaid } from "./state";
 import { onSessionFg } from "../sessions/fg";
@@ -202,7 +203,8 @@ async function start(key: number, p: PanelTerm, want: string | null, restored: b
       },
       (e) => {
         p.ended = true;
-        feed(p.term, `\x1b[31m${t("termpanel.couldNotStart", { error: e instanceof Error ? e.message : String(e) })}\x1b[0m\r\n`);
+        // (a terminal the App Store edition's sandbox refused is said in plain words, src/appStore.ts)
+        feed(p.term, `\x1b[31m${t("termpanel.couldNotStart", { error: sandboxSaid(e instanceof Error ? e.message : String(e), t) })}\x1b[0m\r\n`);
       },
     );
 }
