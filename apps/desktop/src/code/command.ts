@@ -125,7 +125,7 @@ const GUARDED_FILES = new Set([
   "lefthook-local.yml", "lefthook-local.yaml", ".simple-git-hooks.json", ".simple-git-hooks.js", ".simple-git-hooks.cjs",
   "simple-git-hooks.json", ".gitlab-ci.yml", "azure-pipelines.yml", "bitbucket-pipelines.yml", "jenkinsfile", "makefile",
   "gnumakefile", "justfile", ".justfile", "taskfile.yml", "taskfile.yaml", "taskfile.dist.yml", "taskfile.dist.yaml", "mise.toml",
-  ".mise.toml", "mise.local.toml", ".mise.local.toml", "composer.json", "deno.json", "deno.jsonc", "project.json", "nx.json",
+  ".mise.toml", "mise.local.toml", ".mise.local.toml", "composer.json", "deno.json", "deno.jsonc", "project.json", "nx.json", "turbo.json",
   ".nvim.lua", ".nvimrc", ".exrc",
 ]);
 const GUARDED_NAMES = [/^\.pnpmfile\./, /^\.lintstagedrc/, /^lint-staged\.config\./, /\.code-workspace$/, /^\.?mise\..+\.toml$/];
@@ -1143,8 +1143,9 @@ function lang(name: string, words: string[]): Verdict {
       if (opts) return opts;
     }
     if (["test", "vet"].includes(sub)) return v("check", sub === "test" ? say("kit.say.test") : say("kit.say.check"));
-    // a module at a version is looked up through the module proxy, which fetches it from the host its name begins with
-    if (sub === "list" && words.slice(2).some((w) => !w.startsWith("-") && w.includes("@"))) return sends();
+    // a module at a version, its versions, its updates or its retractions are looked up through the module proxy, which
+    // fetches them from the host the module's name begins with
+    if (sub === "list" && (words.slice(2).some((w) => !w.startsWith("-") && w.includes("@")) || hasNamed(words.slice(2), "versions", "u", "retracted"))) return sends();
     if (["build", "generate"].includes(sub)) return v("change", say("kit.say.build"), 2);
     if (sub === "fmt") return v("change", say("kit.say.format"), 2);
     if (sub === "get" || (sub === "mod" && ["tidy", "download", "vendor"].includes(third))) return v("install", say("kit.say.update"), sub === "mod" ? 3 : 2);
@@ -1224,6 +1225,10 @@ function deployer(name: string, words: string[]): Verdict | null {
       if (["deploy", "up", "redeploy"].includes(sub)) return live();
       return ["status", "logs"].includes(sub) ? look() : unknownProgram(name);
     case "kubectl":
+      // `-s` is its short `--server`, whose value need not be a link; a kubeconfig or kuberc it is pointed at can name a
+      // program it runs for a key (`exec`) and the server it sends to
+      if (hasNamed(words, "server", "s")) return sends();
+      if (hasNamed(words, "kubeconfig", "kuberc")) return unknownProgram(name);
       // its cache and a profile are files it writes (a profile lands in the folder it runs in)
       if (hasNamed(words, "cache-dir", "profile-output") || words.some((w, i) => optName(w) === "profile" && (w.split("=")[1] ?? words[i + 1]) !== "none")) return v("change", say("kit.say.change"), "exact");
       if (["get", "describe", "logs", "explain", "version", "diff"].includes(sub)) return look();
@@ -1239,6 +1244,8 @@ function deployer(name: string, words: string[]): Verdict | null {
       if (sub === "preview" && hasNamed(words, "save-plan")) return v("change", say("kit.say.change"), "exact");
       return sub === "preview" ? look() : ["up", "destroy", "refresh"].includes(sub) ? live() : unknownProgram(name);
     case "helm":
+      if (hasNamed(words, "kube-apiserver")) return sends();
+      if (hasNamed(words, "kubeconfig")) return unknownProgram(name);
       // a post-renderer is a program it runs on what it renders; `--output-dir` writes what it renders into files
       if (hasNamed(words, "post-renderer")) return unknownProgram(name);
       if (hasNamed(words, "output-dir")) return v("change", say("kit.say.change"), "exact");
@@ -1618,6 +1625,27 @@ function valuesIn(w: string): string[] {
 
 const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
 
+/** Options whose value is a computer to talk to: a server, an API, a registry, a proxy, a link (`--index-url`). turbo's
+ *  `--token` and `--team` send its cache to that team. Compared by name in lower case, a dotted one (`--api.host`) by its
+ *  first part. */
+const ELSEWHERE = /^(server|api|repo|repository|registry|endpoint|url|host|hostname|remote|proxy)$|-(url|host|proxy|server|endpoint|registry|api|repo)$/;
+
+/** Whether a step reaches another computer by its words: any word but text that holds an address (`scheme://`, a file://
+ *  link aside), and, for a read or a check, an option that names a server. git and gh read their own addresses (a remote
+ *  is the project's own, github.com is GitHub's), and curl and wget always send. */
+function reachesOut(words: string[], verdict: Verdict): boolean {
+  const prog = (words[0] ?? "").split(/[\\/]/).pop() ?? "";
+  if (["git", "gh", "curl", "wget"].includes(prog)) return false;
+  const looks = verdict.action === "read" || verdict.action === "check";
+  return words.some((w, i) => {
+    if (i === 0 || verdict.text?.has(i)) return false;
+    if (w.includes("://") && !/^(-[^=]*=)?file:\/\//i.test(w)) return true;
+    if (!looks || !w.startsWith("--")) return false;
+    const n = optName(w);
+    return ELSEWHERE.test(n) || ELSEWHERE.test(n.split(".")[0]) || (prog === "turbo" && ["token", "team"].includes(n));
+  });
+}
+
 /** What `line` does when it runs at `where`. */
 export function readCommand(line: string, where: Where): ReadCommand {
   const { cmds, opaque } = lex(line);
@@ -1650,7 +1678,9 @@ export function readCommand(line: string, where: Where): ReadCommand {
       verdicts.push(v("unknown", say("kit.say.opaque")));
       continue;
     }
-    const read = classify(words, { ...where, cwd });
+    const classified = classify(words, { ...where, cwd });
+    // reaching another computer is not reading or changing the project, whatever the program
+    const read = RANK[classified.action] < RANK.unknown && reachesOut(words, classified) ? { ...sends(), text: classified.text } : classified;
     // writing the output into a file changes the project, whatever the program is
     const writesFile = c.writes.some((w) => !NULL_DEVICES.has(w));
     const verdict = writesFile && RANK[read.action] < RANK.change ? { ...read, action: "change" as const, say: say("kit.say.change"), head: undefined } : read;

