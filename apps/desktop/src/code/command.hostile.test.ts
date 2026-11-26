@@ -1245,7 +1245,8 @@ describe("D5: a `cd` in a form the reader does not follow as one (item 120)", ()
   });
 
   it("says which lines define a function, an alias or a trap, which no later `cd` to the project's folder undoes", () => {
-    for (const line of ["f() { cd .git/hooks; }; f", "f () { :; }", "function f { :; }", "alias c='cd .git/hooks'", "trap 'cd .git/hooks' DEBUG", "eval 'g() { cd x; }'", "source ./x.sh", ". ./x.sh"])
+    // zsh's AUTO_CD and bash's autocd make a folder's bare name a `cd`
+    for (const line of ["f() { cd .git/hooks; }; f", "f () { :; }", "function f { :; }", "alias c='cd .git/hooks'", "trap 'cd .git/hooks' DEBUG", "eval 'g() { cd x; }'", "source ./x.sh", ". ./x.sh", "setopt AUTO_CD", "shopt -s autocd"])
       expect([line, readCommand(line, at).defines]).toEqual([line, true]);
     for (const line of ["cd src", "pnpm test", "git commit -m 'make foo() pure'", "echo 'f() { :; }'", "git add ."]) expect([line, readCommand(line, at).defines]).toEqual([line, false]);
   });

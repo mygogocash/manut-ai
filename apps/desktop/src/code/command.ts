@@ -2165,8 +2165,9 @@ const MOVE_NAMES = new Set(["cd", "chdir", "pushd", "popd", "source", "eval", "t
 /** Words the shell reads before the program of a simple command: `!`, the reserved words that open or go on with a
  *  compound command, and the wrappers and zsh's precommand modifiers (`repeat` takes a count). */
 const SHELL_PREFIX = new Set(["!", "if", "then", "else", "elif", "while", "until", "do", "{", "time", "noglob", "nocorrect", "command", "builtin", "exec", "coproc", "repeat", "nohup", "nice", "stdbuf", "caffeinate", "timeout", "-"]);
-/** Programs that define what a later command of the same shell runs (item 120). */
-const DEFINES = new Set(["alias", "function", "trap", "eval", "source", "."]);
+/** Programs that define what a later command of the same shell runs (item 120), zsh's `setopt` and bash's `shopt` among them:
+ *  with AUTO_CD (autocd) a folder's bare name is a `cd`. */
+const DEFINES = new Set(["alias", "function", "trap", "eval", "source", ".", "setopt", "shopt"]);
 /** Words before a program that only change how it runs (`builtin cd x` is a `cd`). */
 const WRAPS = new Set(["time", "nohup", "command", "builtin", "exec", "stdbuf", "caffeinate", "nice", "timeout"]);
 /** The most folders a session's shell is followed through. Past it, where it is cannot be known. */

@@ -415,7 +415,8 @@ below), but the dial does not rely on any agent:
 - **A `cd` the reading does not follow (item 120).** A simple command that holds `cd`, `chdir`, `pushd`, `popd`,
   `source`, `eval` or `trap` anywhere but as text (`! cd x`, `command -p cd x`, `noglob cd x`, `repeat 1 cd x`, `then
   cd x`, `do cd x`, a function's body), or runs `.` past such words, leaves the folder unknown. A line that defines a
-  function (`f()`, `function f`), an alias or a trap, or reads text into the shell (`eval`, `source`, `.`), and any shell
+  function (`f()`, `function f`), an alias or a trap, sets an option of the shell (`setopt`, `shopt`: with zsh's AUTO_CD a
+  folder's bare name is a `cd`), or reads text into the shell (`eval`, `source`, `.`), and any shell
   command the dial cannot read, may move the shell whenever a later command runs: the folder then stays unknown for the
   rest of the chat, a `cd` to the project's folder included.
 - **Not seen.** A command an agent runs without asking (its own allow rules) is never read, so a `cd` in it is not
