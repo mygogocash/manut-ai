@@ -49,7 +49,8 @@ describe("the shell's updater config", () => {
     // above the record's Mac 1.1.1; the build number is a UTC timestamp the script passes (scripts/appstore-mac.sh)
     expect(store.version).toBe("2.0.0");
     expect(store.bundle.macOS.bundleVersion).toBeUndefined();
-    expect(store.bundle.category).toBe("DeveloperTool");
+    // filed under Business, with Developer Tools the listing's second category in App Store Connect (owner, 26 Nov)
+    expect(store.bundle.category).toBe("Business");
     expect(store.bundle.macOS.entitlements).toBe("./AppStore.entitlements");
     expect(store.bundle.macOS.signingIdentity).toMatch(/^Apple Distribution: .*\(N66J8AA6TA\)$/);
     // the GitHub build is untouched: its own file still names its own app
