@@ -311,8 +311,9 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    Then 102f (a helper lane from a snapshot). At 04:00 on 27 Nov the first account reached its weekly limit (resets
    30 Nov 17:00) with 102b, 102k and 135 mid-work; the owner signed in another account and they were sent on in their
    own threads. Then 135, 102k (chats that reach other chats), 102g (landing, shell) and 102b (the job's side-by-side
-   view). Running: 102h (running helper lanes). Next: 102c (gathered answers), 102i (landings in the chat), 102j
-   (reports to the lead). Needs the owner from 101b: Grok signed in and `permission_mode = "ask"`
+   view). Then 102c (gathered answers) and 102h (running helper lanes:
+   approving a round starts it; the owner should run one small round of two helpers). Next: 102i (landings in the
+   chat), 102j (reports to the lead). Needs the owner from 101b: Grok signed in and `permission_mode = "ask"`
    under `[ui]` in `~/.grok/config.toml` (it says always-approve, so Grok chats are refused), and Muse Code's CLI. From 101e: all 325 Codex sessions on the owner's Mac are compressed, so
    only Claude Code's conversations are offered until 106b. Needs the owner from 101a: Cursor's Approval mode set to Allowlist (it is Run Everything, so Cursor
    chats are refused), and a Cursor plan with messages left to record a real tool call. GitHub reported 7 Dependabot alerts on `main` (2 critical) at that push, for the owner to look at.
@@ -698,6 +699,9 @@ Every switch that turns a built part on, and what each needs from the owner, is 
 
 ## Known flaky tests (they fail only under heavy load)
 
+- `apps/desktop/e2e/term-link.spec.ts:202` ("a link to a terminal it does not have says so over an open terminal
+  too"): failed once and passed on its retry in item 102h's two runs on 27 Nov (and showed in several runs before).
+  If it fails twice in one run, fix it.
 - Rust `a_grok_chat_reads_its_accounts_own_home_for_its_asks` (item 101d): failed once in item 102g's first whole
   Rust run on this Mac and passed alone and on the next run; it waits a fixed 300 ms for a stand-in process. If it fails
   again, wait on the process instead of the clock.
