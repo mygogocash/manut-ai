@@ -35,6 +35,7 @@ export const Bubble = memo(function Bubble({
   last,
   quote,
   onQuote,
+  drawingsBy,
 }: {
   item: Pick<MessageItem, "kind" | "text" | "error" | "reply" | "files" | "skills" | "wait" | "held" | "steered" | "readAt" | "steerReply" | "steerUnknown" | "steerUnused" | "autoSteer">;
   streaming?: boolean;
@@ -64,6 +65,9 @@ export const Bubble = memo(function Bubble({
    *  scrolls to that message. */
   quote?: Quote | null;
   onQuote?: (id: string) => void;
+  /** A chat's timeline: who its answers' drawings are by. A finished answer's html and svg blocks then offer Show
+   *  drawing (src/chat/drawing/); a bubble anywhere else never does. */
+  drawingsBy?: string;
 }) {
   if (item.kind === "user") {
     // one being steered into the running answer reads as a plain sent message (messenger style), not a held one
@@ -186,7 +190,8 @@ export const Bubble = memo(function Bubble({
       <div className="msg-col">
         {(shown || streaming || (paths.length === 0 && shown === text)) && (
           <div className="b md">
-            <Markdown text={shown} />
+            {/* a drawing only once the answer is finished: never while it is written */}
+            <Markdown text={shown} drawingsBy={streaming ? undefined : drawingsBy} />
             {/* copy the answer: beside the bubble's last line, on hover; it takes no room */}
             {!streaming && shown.trim() && <CopyButton className="msg-copy" text={() => shown} testId="copy-answer" />}
           </div>

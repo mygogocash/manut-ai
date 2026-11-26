@@ -3,7 +3,7 @@
 // unfiltered preconnect link, opens connections no policy covers, so its "why" cases run here only.
 import { existsSync } from "node:fs";
 import { test, webkit } from "@playwright/test";
-import { chatDrawingCases } from "./chat-drawing";
+import { chatDrawingCases, chatDrawingUiCases } from "./chat-drawing";
 
 test.use({ browserName: "webkit" });
 // Only the macOS window is WebKit; CI's Playwright jobs run Chromium on Linux, where this file skips itself, as
@@ -14,3 +14,4 @@ test.skip(
 );
 
 chatDrawingCases({ engine: "webkit" });
+chatDrawingUiCases({ engine: "webkit", layout: false });

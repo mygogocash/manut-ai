@@ -16,6 +16,7 @@
 import { readFileSync } from "node:fs";
 import { createServer, type Server, type Socket } from "node:net";
 import { expect, test, type Page } from "@playwright/test";
+import { chatOpen } from "./start";
 
 const conf = JSON.parse(readFileSync(new URL("../src-tauri/tauri.conf.json", import.meta.url), "utf8")) as { app: { security: { csp: Record<string, string> } } };
 /** The policy Tauri sends with the app's page in a release build (Tauri adds a hash or a nonce only for an inline script
@@ -379,6 +380,301 @@ export function chatDrawingCases({ engine }: { engine: "chromium" | "webkit" }):
         await draw(page, `<script nonce="why">const l = document.createElement("link"); l.rel = "preconnect"; l.href = "${L()}"; document.head.append(l)</script>`, "with-scripts");
         await expect.poll(() => trap.hits.length - before, { timeout: 5000 }).toBeGreaterThan(0);
       });
+    }
+  });
+}
+
+// ---- in the chat: the card, the sheet and the limits, in the app itself ------------------------------------------------
+
+const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
+/** A test-control op on the mock bridge (as markdown.spec.ts sends them). */
+async function mock(op: string, params: Record<string, unknown> = {}): Promise<unknown> {
+  const ws = new WebSocket(`ws://127.0.0.1:${MOCK}/?token=e2e`);
+  await new Promise<void>((done, fail) => {
+    ws.onopen = () => done();
+    ws.onerror = () => fail(new Error("mock websocket error"));
+  });
+  const reply = await new Promise<{ ok: boolean; result: unknown }>((done) => {
+    ws.onmessage = (m) => {
+      const msg = JSON.parse(String(m.data));
+      if (msg.id === "dw1") done(msg);
+    };
+    ws.send(JSON.stringify({ id: "dw1", op, ...params }));
+  });
+  ws.close();
+  expect(reply.ok, JSON.stringify(reply)).toBe(true);
+  return reply.result;
+}
+let said = 0;
+/** Kami answers with `text`. */
+const answer = (text: string) => mock("mock.emit", { events: [{ event: "message", bot: "kami", id: `dw-${++said}`, text }] });
+
+/** A bar chart as an agent draws one: a style sheet, one SVG, a rising move of its own and a fade by SVG animation. */
+export const CHART = `<style>
+  .bar { fill: #4DA3FF; transform-origin: bottom; transform-box: fill-box; animation: grow .6s ease-out both }
+  @keyframes grow { from { transform: scaleY(0) } to { transform: scaleY(1) } }
+  text { font: 13px -apple-system, sans-serif; fill: #5c5b57 } .t { font-size: 16px; fill: #1f2022; font-weight: 600 }
+</style>
+<svg viewBox="0 0 640 280" role="img" aria-label="Pre-orders by day">
+  <text class="t" x="24" y="32">Pre-orders this week</text>
+  <line x1="24" y1="240" x2="616" y2="240" stroke="#d9d8d2"/>
+  ${[42, 68, 55, 90, 120, 150, 98]
+    .map((v, i) => `<rect class="bar" x="${40 + i * 82}" y="${240 - v}" width="48" height="${v}" rx="4"/><text x="${64 + i * 82}" y="262" text-anchor="middle">${["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][i]}</text>`)
+    .join("\n  ")}
+  <circle cx="598" cy="40" r="6" fill="#22b455"><animate attributeName="opacity" values="1;0.3;1" dur="2s" repeatCount="indefinite"/></circle>
+</svg>`;
+const chartAnswer = (lang = "html") => "Here is this week's chart.\n\n```" + lang + "\n" + CHART + "\n```\n";
+
+/** The app's page served with the policy of a debug build (tauri.conf.json `devCsp`: the stand-in bridge and Vite's own
+ *  scripts need it), so a drawing's frames inherit an app policy as they do in the window. */
+async function withAppPolicy(page: Page) {
+  const dev = (JSON.parse(readFileSync(new URL("../src-tauri/tauri.conf.json", import.meta.url), "utf8")) as { app: { security: { devCsp: Record<string, string> } } }).app.security
+    .devCsp;
+  const csp = Object.entries(dev)
+    .map(([k, v]) => `${k} ${v}`)
+    .join("; ");
+  await page.route(
+    (u) => u.hostname === "127.0.0.1" && u.pathname === "/",
+    async (route) => {
+      if (route.request().resourceType() !== "document") return route.continue();
+      const response = await route.fetch();
+      return route.fulfill({ response, headers: { ...response.headers(), "content-security-policy": csp } });
+    },
+  );
+}
+
+const lastAnswer = (page: Page) => page.getByTestId("bubble-bot").last();
+const cardFrame = (page: Page, n = 0) => page.getByTestId("drawing-frame").nth(n);
+
+export function chatDrawingUiCases({ engine, layout }: { engine: "chromium" | "webkit"; layout: boolean }): void {
+  test.describe("in the chat", () => {
+    const trap = new Trap();
+    test.beforeAll(async () => trap.open());
+    test.afterAll(async () => trap.close());
+
+    test.beforeEach(async ({ page }) => {
+      await mock("mock.reset");
+      await withAppPolicy(page);
+      // every `message` listener the app adds, counted: a drawing must add none
+      await page.addInitScript(() => {
+        const add = window.addEventListener.bind(window);
+        (window as any).__messageListeners = 0;
+        window.addEventListener = ((type: string, ...rest: unknown[]) => {
+          if (type === "message") (window as any).__messageListeners++;
+          return (add as any)(type, ...rest);
+        }) as typeof window.addEventListener;
+      });
+      await page.goto("/");
+      await chatOpen(page);
+    });
+
+    test("a chart: Show drawing under its block, the card with the app's band and line, the closed box at the chart's shape, Open larger, Hide", async ({ page }) => {
+      await answer(chartAnswer());
+      const bubble = lastAnswer(page);
+      await expect(bubble.locator("pre")).toContainText("Pre-orders this week");
+      await expect(bubble.getByTestId("copy-code")).toHaveCount(1);
+      await expect(bubble.getByTestId("drawing-card")).toHaveCount(0);
+      await expect(page.locator("iframe")).toHaveCount(0);
+      const listeners = await page.evaluate(() => (window as any).__messageListeners);
+
+      await bubble.getByTestId("drawing-show").click();
+      const card = bubble.getByTestId("drawing-card");
+      await expect(card).toBeVisible();
+      await expect(bubble.getByTestId("drawing-show")).toHaveText("Hide drawing");
+      await expect(card.locator(".dw-by")).toHaveText("Drawn by Kami");
+      await expect(card.getByTestId("drawing-note")).toHaveText("A closed box: no scripts, no network, no access to your files or this app.");
+      await expect(card.getByTestId("drawing-no-scripts")).toHaveCount(0);
+      const frame = card.getByTestId("drawing-frame");
+      await expect(frame).toHaveAttribute("sandbox", "");
+      await expect(frame).toHaveAttribute("title", "A drawing by Kami");
+      expect(await frame.getAttribute("srcdoc")).toMatch(/^<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'none';/);
+      await expect(card.frameLocator("iframe").frameLocator("iframe").locator("text.t")).toHaveText("Pre-orders this week");
+      // its height is the chart's own shape at the card's width (640 by 280)
+      const box = (await frame.boundingBox())!;
+      expect(Math.abs(box.height - Math.round(box.width * (280 / 640)))).toBeLessThanOrEqual(2);
+      // inside the answer's column, and nothing of it outside its card
+      const col = (await bubble.locator(".b.md").boundingBox())!;
+      const c = (await card.boundingBox())!;
+      expect(box.x).toBeGreaterThanOrEqual(c.x - 1);
+      expect(box.x + box.width).toBeLessThanOrEqual(c.x + c.width + 1);
+      expect(c.x + c.width).toBeLessThanOrEqual(col.x + col.width + 1);
+
+      // Open larger: the same closed box in a sheet of the app's own, its band and line, closed by Escape
+      await card.getByTestId("drawing-larger").click();
+      const sheet = page.getByTestId("drawing-sheet");
+      await expect(sheet).toBeVisible();
+      await expect(sheet).toHaveAttribute("role", "dialog");
+      await expect(sheet.locator(".dw-by")).toHaveText("Drawn by Kami");
+      await expect(page.getByTestId("drawing-sheet-close")).toBeFocused();
+      const big = sheet.getByTestId("drawing-frame");
+      await expect(big).toHaveAttribute("sandbox", "");
+      expect(await big.getAttribute("srcdoc")).toBe(await frame.getAttribute("srcdoc"));
+      await expect(sheet.frameLocator("iframe").frameLocator("iframe").locator("text.t")).toHaveText("Pre-orders this week");
+      expect((await big.boundingBox())!.height).toBeGreaterThan(box.height);
+      await page.keyboard.press("Escape");
+      await expect(sheet).toHaveCount(0);
+      await expect(card.getByTestId("drawing-larger")).toBeFocused();
+      // and by a press outside it
+      await card.getByTestId("drawing-larger").click();
+      await page.getByTestId("drawing-sheet-back").click({ position: { x: 6, y: 6 } });
+      await expect(page.getByTestId("drawing-sheet")).toHaveCount(0);
+
+      // the app heard nothing from either frame and listens for nothing new
+      expect(await page.evaluate(() => (window as any).__messageListeners)).toBe(listeners);
+
+      await bubble.getByTestId("drawing-show").click();
+      await expect(bubble.getByTestId("drawing-card")).toHaveCount(0);
+      await expect(page.locator("iframe")).toHaveCount(0);
+    });
+
+    test("an svg block offers it too; a block in another language does not", async ({ page }) => {
+      await answer("```svg\n" + CHART.slice(CHART.indexOf("<svg")) + "\n```\n\n```js\nconsole.log('<svg></svg>')\n```");
+      const bubble = lastAnswer(page);
+      await expect(bubble.locator("pre")).toHaveCount(2);
+      await expect(bubble.getByTestId("drawing-show")).toHaveCount(1);
+      await bubble.getByTestId("drawing-show").click();
+      await expect(bubble.getByTestId("drawing-frame")).toHaveAttribute("sandbox", "");
+    });
+
+    test("a hostile drawing, through the chat itself, reaches nothing and says its scripts did not run", async ({ page }) => {
+      let popups = 0;
+      page.on("popup", () => popups++);
+      const L = `http://localhost:${trap.port}`;
+      const I = `http://127.0.0.1:${trap.port}`;
+      await answer(
+        "```html\n" +
+          `<meta http-equiv="refresh" content="0;url=${L}/chat-refresh"><link rel="preconnect" href="${L}"><img src="${I}/chat-img">` +
+          `<style>p{background:url(${L}/chat-css)}</style><p id="go"><a href="${L}/chat-link" target="_blank">Open the shop</a></p>` +
+          `<script>fetch("${L}/chat-fetch"); top.postMessage("ran", "*")</script>\n` +
+          "```",
+      );
+      const bubble = lastAnswer(page);
+      const before = trap.hits.length;
+      await bubble.getByTestId("drawing-show").click();
+      await expect(bubble.getByTestId("drawing-no-scripts")).toHaveText("Its scripts do not run here, so a part drawn by code may be missing.");
+      const inner = bubble.frameLocator("iframe").frameLocator("iframe");
+      await expect(inner.locator("a")).toHaveText("Open the shop");
+      await inner.locator("a").click();
+      await page.waitForTimeout(1500);
+      expect(trap.hits.slice(before)).toEqual([]);
+      expect(popups).toBe(0);
+      expect(new URL(page.url()).pathname).toBe("/");
+    });
+
+    test("at most three live: a fourth puts the oldest back to a still card, and Show there brings it back", async ({ page }) => {
+      const svg = (n: number) => "```svg\n" + `<svg viewBox="0 0 200 60"><text x="10" y="35">Drawing ${n}</text></svg>` + "\n```";
+      await answer([1, 2, 3, 4].map(svg).join("\n\n"));
+      const bubble = lastAnswer(page);
+      const shows = bubble.getByTestId("drawing-show");
+      await expect(shows).toHaveCount(4);
+      for (let i = 0; i < 4; i++) await shows.nth(i).click();
+      await expect(page.getByTestId("drawing-frame")).toHaveCount(3);
+      const cards = bubble.getByTestId("drawing-card");
+      await expect(cards.nth(0).getByTestId("drawing-still")).toBeVisible();
+      await expect(cards.nth(0).getByTestId("drawing-still")).toContainText("Put away to keep the chat light.");
+      for (const i of [1, 2, 3]) await expect(cards.nth(i).getByTestId("drawing-frame")).toHaveCount(1);
+      await cards.nth(0).getByTestId("drawing-again").click();
+      await expect(cards.nth(0).getByTestId("drawing-frame")).toHaveCount(1);
+      await expect(cards.nth(1).getByTestId("drawing-still")).toBeVisible();
+      await expect(page.getByTestId("drawing-frame")).toHaveCount(3);
+    });
+
+    test("far out of the chat's view its frame goes, and the chat closing takes every frame", async ({ page }) => {
+      await answer(chartAnswer());
+      await lastAnswer(page).getByTestId("drawing-show").click();
+      await expect(page.getByTestId("drawing-frame")).toHaveCount(1);
+      // enough answers under it to put it far above the view
+      const long = Array.from({ length: 40 }, (_, i) => `Line ${i + 1} of a long answer that pushes the drawing up.`).join("\n\n");
+      for (let i = 0; i < 4; i++) await answer(long);
+      await expect(page.getByTestId("bubble-bot")).not.toHaveCount(0);
+      await page.getByTestId("timeline").evaluate((el) => (el.scrollTop = el.scrollHeight));
+      await expect(page.getByTestId("drawing-frame")).toHaveCount(0);
+      const card = page.getByTestId("drawing-card");
+      await card.scrollIntoViewIfNeeded();
+      await expect(card.getByTestId("drawing-still")).toBeVisible();
+      await card.getByTestId("drawing-again").click();
+      await expect(page.getByTestId("drawing-frame")).toHaveCount(1);
+      await page.getByTestId("menu-home").click();
+      await expect(page.locator("iframe")).toHaveCount(0);
+    });
+
+    test("under reduced motion the card arrives still, and the drawing's own animation is left out", async ({ page }) => {
+      await page.emulateMedia({ reducedMotion: "reduce" });
+      await answer(chartAnswer());
+      await lastAnswer(page).getByTestId("drawing-show").click();
+      const card = page.getByTestId("drawing-card");
+      await expect(card).toBeVisible();
+      // the Rise ends at once in its end state
+      const moving = await card.evaluate((el) => el.getAnimations().filter((a) => a.playState === "running").length);
+      expect(moving).toBe(0);
+      const inner = card.frameLocator("iframe").frameLocator("iframe");
+      await expect(inner.locator("text.t")).toHaveText("Pre-orders this week");
+      expect(await inner.locator("animate").count()).toBe(0);
+      expect(await inner.locator("rect.bar").first().evaluate((el) => getComputedStyle(el).animationName)).toBe("none");
+    });
+
+    if (layout) {
+      const shots = process.env.DRAWING_SHOTS;
+      const save = async (page: Page, name: string, info: import("@playwright/test").TestInfo) => {
+        const body = await page.screenshot();
+        await info.attach(name, { body, contentType: "image/png" });
+        if (shots) (await import("node:fs")).writeFileSync(`${shots}/${engine}-${name}.png`, body);
+      };
+      for (const theme of ["light", "dark"] as const)
+        for (const width of [1280, 900])
+          test(`pictures: the chart, the larger view and a still card, ${theme} at ${width}`, async ({ page }, info) => {
+            await page.evaluate((th) => localStorage.setItem("manut.theme", th), theme);
+            await page.setViewportSize({ width, height: 820 });
+            await page.reload();
+            await chatOpen(page);
+            await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
+            await answer(chartAnswer());
+            await lastAnswer(page).getByTestId("drawing-show").click();
+            // the chart's own card (the answers that follow take the newest place)
+            const card = page.getByTestId("drawing-card").first();
+            await expect(card.frameLocator("iframe").frameLocator("iframe").locator("text.t")).toHaveText("Pre-orders this week");
+            expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+            await card.scrollIntoViewIfNeeded();
+            // a frame that was out of view is painted a moment after it comes in
+            await page.waitForTimeout(900);
+            await save(page, `${theme}-${width}-card`, info);
+            await card.getByTestId("drawing-larger").click();
+            await expect(page.getByTestId("drawing-sheet").frameLocator("iframe").frameLocator("iframe").locator("text.t")).toBeVisible();
+            await page.waitForTimeout(400);
+            await save(page, `${theme}-${width}-larger`, info);
+            await page.keyboard.press("Escape");
+            // three more drawings put this one back to a still card
+            const svg = (n: number) => "```svg\n" + `<svg viewBox="0 0 400 80"><text x="10" y="45" font-size="20">Drawing ${n}</text></svg>` + "\n```";
+            await answer([1, 2, 3].map(svg).join("\n\n"));
+            const shows = lastAnswer(page).getByTestId("drawing-show");
+            await expect(shows).toHaveCount(3);
+            for (let i = 0; i < 3; i++) await shows.nth(i).click();
+            await expect(card.getByTestId("drawing-still")).toBeVisible();
+            await card.scrollIntoViewIfNeeded();
+            await page.waitForTimeout(700);
+            await save(page, `${theme}-${width}-still`, info);
+          });
+
+      for (const [lang, show, by, closed] of [
+        ["ko", "그림 보기", "Kami의 그림", "닫힌 상자 안에서 보여 줘요. 스크립트와 네트워크는 쓸 수 없고, 파일이나 이 앱에도 접근할 수 없어요."],
+        ["ja", "図を表示", "Kami が描いた図", "閉じた箱の中の表示です。スクリプトもネットワークも使えず、ファイルやこのアプリにも触れられません。"],
+        ["zh", "显示图", "Kami 画的图", "在封闭的框中显示：不运行脚本，不联网，也无法访问你的文件或本应用。"],
+      ] as const)
+        test(`speaks ${lang}`, async ({ page }, info) => {
+          await page.evaluate((l) => localStorage.setItem("manut.lang", l), lang);
+          await page.reload();
+          await chatOpen(page);
+          await answer(chartAnswer());
+          const bubble = lastAnswer(page);
+          await expect(bubble.getByTestId("drawing-show")).toHaveText(show);
+          await bubble.getByTestId("drawing-show").click();
+          await expect(bubble.locator(".dw-by")).toHaveText(by);
+          await expect(bubble.getByTestId("drawing-note")).toHaveText(closed);
+          await expect(bubble.getByTestId("drawing-larger")).not.toHaveText("Open larger");
+          await bubble.getByTestId("drawing-card").scrollIntoViewIfNeeded();
+          await page.waitForTimeout(900);
+          await save(page, `lang-${lang}`, info);
+        });
     }
   });
 }
