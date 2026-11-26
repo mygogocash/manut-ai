@@ -76,12 +76,19 @@ export async function addTermFolder(): Promise<void> {
   const before = sx.getState();
   const picked = await sx.pickFolder(draftFolder(before.recent, before.home));
   if (!picked || isTildePath(picked)) return;
+  listFolder(picked);
+}
+
+/** Lists folder `folder` as a group on the Code page, with or without a session (one already listed stays as it is), and brings
+ *  it into view: "New folder…", and a new project once the shell made it (code/NewProject.tsx). */
+export function listFolder(folder: string): void {
+  const sx = getSessions();
   // the folder as the list names it: another spelling of a listed folder (`…/web-app/`) is that folder
-  const got = pathKey(picked);
+  const got = pathKey(folder);
   const now = sx.getState();
   const listed = folderGroups(now.list.filter((r) => isTerminalRec(now.agents, r))).map((g) => g.cwd);
   const prefs = getFolderPrefs();
-  // picked in the dialog just now, so it is on disk (again)
+  // picked in the dialog or made just now, so it is on disk (again)
   setFolderGone(got, false);
   setFolderPrefs(addFolder(prefs, got, [...listed, ...addedFolders(prefs)]));
   // the group comes into view (a long list may hold it below the fold)

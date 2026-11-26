@@ -1382,6 +1382,23 @@ bytes). It answers a `data:` address of that type, kept by path, size and modifi
 header keeps its folder glyph and Kit's band its name alone, as before. The side menu and the palette list no projects today, so
 neither has a row to draw it on.
 
+**A new project** (item 100b, `code/NewProject.tsx`, `src-tauri/src/new_project.rs`). New project in the Code page's top bar opens
+a panel at the top of the column: a folder path (starting at `~/`, with Choose to pick one in the system's dialog) and Make the
+project. The shell takes only an absolute path with no `.` or `..` part whose nearest existing folder's real path is inside the
+person's home folder (not the home folder itself), refuses a path that is a link, a file, or a folder with anything in it (hidden
+files count), makes the folder, checks its real path once more, and runs `git init --quiet --template=` through `lane::Git` (no
+hook can run; an empty template copies no sample hook and no exclude file, whatever `init.templateDir` says). The page lists the
+folder at once (`listFolder`, what New folder… does). That writes only on this computer.
+
+**Make it on GitHub too** is offered beside what was made, and is the third write behind review.rs's one ask (`ask_repo`): the
+shell checks the folder (in home, a repository's own top whose `.git` is a real folder, no `origin` yet), the name (`name` or
+`owner/name`, letters, digits, `.`, `_`, `-`) and that gh is here and signed in, writes down `gh repo create <name> --private
+--source <folder> --remote origin` (`--public` only when the person picked "Public: anyone on the internet can see it and copy
+it.") and answers the ask with that line (`plan`), which the page shows whole. The page opens it in approval-core; a Yes reaches
+`review_settle` by its id alone, the folder is read again (still a repository with no `origin`, else `changed`), and the line runs
+once. Nothing is pushed: the argv has no `--push`, no step here pushes, and none is offered; the project's first push is the
+person's, and a lane's Put up for review asks for it as always.
+
 ### MCP servers and skills
 
 What a person already has works wherever an agent runs here (item 72). Chats, terminals and Buddy start the agent with the
