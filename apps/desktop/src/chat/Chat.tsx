@@ -9,6 +9,7 @@ import { can } from "../runtime";
 import { ThreadChat } from "../threads/ThreadChat";
 import { AgentBoxTools, pickFolder, teammates, useAgentBox } from "./box/AgentBox";
 import { slots } from "../features";
+import { chatScope } from "./box/scope";
 
 /** The selected bot's one main chat: header, timeline, composer. A chat that answers through the person's own coding
  *  agent (Buddy in Practice) has the chat box's own choices (item 80): the model and its effort and the approval level
@@ -71,6 +72,8 @@ export function Chat() {
           actions={!!box}
           rows={!!box}
           voice={!!box}
+          // a note or another chat's context made in this shop goes only to this shop's chats (item 97)
+          scope={chatScope(bot.name, s.shops.current, null, null)}
         />
       </div>
     </>

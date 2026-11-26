@@ -70,6 +70,10 @@ function snapshot(): ResumeSnap {
         ...(r.lane ? { lane: r.lane } : {}),
         // a workflow's lane stays careful after a restart (src/workflows/)
         ...(r.workflow ? { workflow: r.workflow } : {}),
+        // Continue with's links both ways, and a continued chat's model still to set (item 97)
+        ...(r.continuedFrom ? { continuedFrom: r.continuedFrom } : {}),
+        ...(r.continuedIn ? { continuedIn: r.continuedIn } : {}),
+        ...(r.modelWant ? { modelWant: r.modelWant } : {}),
       })),
       messages: (id) => {
         const key = ss.chatKey(id);

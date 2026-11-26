@@ -11,6 +11,7 @@ import { threadKey } from "./types";
 import { rowStatus } from "./ThreadTree";
 import { StatusGlyph } from "./StatusGlyph";
 import { AgentBoxTools, pickFolder, teammates, useAgentBox } from "../chat/box/AgentBox";
+import { chatScope } from "../chat/box/scope";
 
 export function ThreadChat({ bot, thread }: { bot: Bot; thread: string }) {
   const s = useStore();
@@ -72,6 +73,8 @@ export function ThreadChat({ bot, thread }: { bot: Bot; thread: string }) {
           actions={!!box}
           rows={!!box}
           voice={!!box}
+          // a note or another chat's context made in this shop goes only to this shop's chats (item 97)
+          scope={chatScope(key, s.shops.current, null, null)}
         />
       </div>
     </>

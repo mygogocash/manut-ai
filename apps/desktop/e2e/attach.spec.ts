@@ -123,7 +123,7 @@ test("the + menu has one file item and Plugins ›, the plugins open beside it; 
   await page.getByTestId("attach").click();
   const menu = page.getByTestId("attach-menu");
   await expect(menu).toBeVisible();
-  await expect(menu.locator(":scope > [role=menuitem]")).toHaveText([/^Add photos and files.*O$/, /^Skills and tools›$/]);
+  await expect(menu.locator(":scope > [role=menuitem]")).toHaveText([/^Add photos and files.*O$/, /^Bring context from…$/, /^Skills and tools›$/]);
   await expect(menu.getByText(/Photos & videos|Paste from clipboard/)).toHaveCount(0);
   expect(await page.getByTestId("attach-file-input").getAttribute("accept")).toBeNull(); // pictures, videos, documents alike
   // the menu slides in 3px: measure once it has settled

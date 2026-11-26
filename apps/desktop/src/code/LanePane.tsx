@@ -147,7 +147,8 @@ function TestsPane({ tests, time }: { tests: LaneTests; time: (ms: number) => st
 
 export function LanePaneView({ view, onView, files, moreFiles, needs, asked, onAdd, preview, tests, time = (ms) => hhmm(new Date(ms)), review }: LanePaneProps) {
   return (
-    <aside className="lpane" data-testid="lane-pane" data-view={view}>
+    // the diff, the tests and a preview's text can be selected and noted for the chat beside it (item 97, chat/box/SelectionNote.tsx)
+    <aside className="lpane" data-testid="lane-pane" data-view={view} data-note-source>
       {review}
       <div className="fgroup" role="group" aria-label={t("lane.pane.title")}>
         {VIEWS.map((v) => (

@@ -66,6 +66,7 @@ export function AttachButton({
   onFolder,
   onMention,
   onActions,
+  onBring,
 }: {
   disabled: boolean;
   /** Files are taken here; without it there is no files row. */
@@ -80,6 +81,9 @@ export function AttachButton({
   onMention?: () => void;
   /** Actions: the `/` menu opens in the box. */
   onActions?: () => void;
+  /** Bring context from… (item 97): another chat's context as a chip. Only in a + that already opens a menu: a + whose one row
+   *  is files still opens the file picker at once. */
+  onBring?: () => void;
 }) {
   const menu = !!(plugins || onFolder || onMention || onActions);
   const input = useRef<HTMLInputElement>(null);
@@ -208,6 +212,14 @@ export function AttachButton({
               </span>
               <span className="att-n">{t("box.actions")}</span>
               <kbd>/</kbd>
+            </button>
+          )}
+          {onBring && (
+            <button type="button" role="menuitem" className="att-row" onClick={then(onBring)} onMouseEnter={() => setSub(false)} data-testid="attach-bring">
+              <span className="att-ic">
+                <Icon name="message" />
+              </span>
+              <span className="att-n">{t("carry.bring")}</span>
             </button>
           )}
           {plugins && (
