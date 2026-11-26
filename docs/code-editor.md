@@ -906,7 +906,10 @@ Read family by family from `git help config`, the repository's own scopes now al
 - `http.*` and `http.<url>.*`, every key: a proxy with its authentication and certificates, a name resolved to another
   address (`curloptResolve`), redirects, which certificates and keys are trusted (`sslVerify`, `sslCAInfo`, `sslCAPath`,
   `pinnedPubkey`, `sslBackend`), what is sent (`sslCert`, `sslKey`, `extraHeader`, `cookieFile`, `saveCookies`, `emptyAuth`,
-  `proactiveAuth`, `delegation`, `userAgent`), and the few that only tune a transfer, which are not worth telling apart.
+  `proactiveAuth`, `delegation`, `userAgent`). Ten keys that only pace a transfer do not stop it (`postBuffer`,
+  `lowSpeedLimit`, `lowSpeedTime`, `maxRequests`, `minSessions`, `version`, the three `keepAlive` keys and `noEPSV`): a
+  repository often has `http.postBuffer` set for a large push, and none of them names an address, a program, a file, a
+  header, a credential or a certificate. Any other `http` key stops it, a new one git adds included.
 - `remote.<name>.proxy` and `.proxyAuthMethod`, beside `.uploadpack`, `.receivepack`, `.vcs` and a `<transport>::` address.
   The remote's own plain address stays: the fetch goes to the remote the repository names, as in a terminal. `.fetch` is not
   read: the app's fetch now passes an empty `--refmap=`, since a configured refspec otherwise writes the fetched commit onto

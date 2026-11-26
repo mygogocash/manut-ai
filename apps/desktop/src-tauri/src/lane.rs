@@ -280,6 +280,11 @@ pub(crate) struct Git {
 /// an editor, which git starts only for a terminal. `key` is as `git config --list` prints it (section and name in lower
 /// case).
 fn runs_or_redirects(key: &str, value: &str) -> bool {
+    // The `http.*` settings that only pace a transfer: buffer and request sizes, the speed below which git gives up, how many
+    // connections it keeps, the HTTP version, keep-alive timing and passive FTP. `git help config` (git 2.54), read one by
+    // one: none names an address, a program, a file, a header, a credential or a certificate.
+    const HTTP_PACING: &[&str] =
+        &["postbuffer", "lowspeedlimit", "lowspeedtime", "maxrequests", "minsessions", "version", "keepaliveidle", "keepaliveinterval", "keepalivecount", "noepsv"];
     let lower = key.to_ascii_lowercase();
     let (section, rest) = lower.split_once('.').unwrap_or((lower.as_str(), ""));
     let name = rest.rsplit('.').next().unwrap_or("");
@@ -289,7 +294,10 @@ fn runs_or_redirects(key: &str, value: &str) -> bool {
         "filter" => sub && matches!(name, "clean" | "smudge" | "process"),
         "core" => !sub && matches!(name, "sshcommand" | "gitproxy" | "askpass" | "alternaterefscommand" | "protecthfs" | "protectntfs"),
         // every key of these: each says where a fetch goes, what it trusts or what it sends, or is a program
-        "http" | "credential" | "url" | "ssh" | "protocol" => true,
+        "credential" | "url" | "ssh" | "protocol" => true,
+        // and every http key but the few that only pace a transfer (`HTTP_PACING`): a repository often has one of those set
+        // for a large push, and it sends a fetch nowhere else and changes nothing it trusts or sends
+        "http" => !HTTP_PACING.contains(&name),
         "remote" => sub && (matches!(name, "uploadpack" | "receivepack" | "vcs" | "proxy" | "proxyauthmethod") || (matches!(name, "url" | "pushurl") && helper(value))),
         "fetch" | "transfer" => !sub && name == "bundleuri",
         "submodule" => sub && name == "update" && value.trim_start().starts_with('!'),
@@ -1987,6 +1995,18 @@ pub(crate) mod tests {
             "core.worktree\n../w",
             "core.autocrlf\ninput",
             "branch.main.remote\norigin",
+            // http settings that only pace a transfer, which a repository often has for a large push
+            "http.postbuffer\n524288000",
+            "http.https://github.com/.postbuffer\n524288000",
+            "http.lowspeedlimit\n1000",
+            "http.lowspeedtime\n60",
+            "http.maxrequests\n5",
+            "http.minsessions\n1",
+            "http.version\nHTTP/1.1",
+            "http.keepaliveidle\n30",
+            "http.keepaliveinterval\n30",
+            "http.keepalivecount\n3",
+            "http.noepsv\ntrue",
         ] {
             assert_eq!(risky_setting(&entry("local", kv), true), None, "{kv}");
         }
