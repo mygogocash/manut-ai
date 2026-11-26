@@ -53,7 +53,7 @@ state that needs the owner: a real GitHub account, money, a real sign-in or real
 | State | Desktop | Where |
 | --- | --- | --- |
 | Kit needs a secret: typed once into the vault, Kit uses it without seeing it | Lacks on the desktop. The API's vault keeps the shop's sign-ins; the desktop keeps only its own session in the keychain (Owner: real secrets) | `apps/api/src/sign-in-vault.ts`, `src-tauri/src/api_link.rs` |
-| A secret found in the code: moved out, never committed | Part (this branch): a key in Kit's changes is found and named, a commit or push then asks at every level, and no diff shows it. Moving it to a vault lacks | `code/secrets.ts`, `code/kitAsks.ts`, `chat/activity/Work.tsx` |
+| A secret found in the code: moved out, never committed | Part (this branch): a key in Kit's changes is found and named, a commit or push then asks at every level, and no diff shows it. Since item 117 a commit or a push the dial would let go alone first reads what it saves (the lane's own diff), so a key a command wrote makes it ask too, as does a diff that could not be read. Moving it to a vault lacks | `code/secrets.ts`, `code/kitAsks.ts`, `chat/activity/Work.tsx` |
 | No secret in the preview: a sample until the owner adds one | Part (this branch): the state and its words. A secret Kit's changed code reads by name (`process.env.PROMPTPAY_SHOP_ID`) shows as Sample, "The preview has no shop ID yet, so the QR code is a sample", with Add the shop ID, which says the vault comes later. The rule for what a preview runs with (a sample unless the owner added that secret) is `previewEnv`, and the preview of a lane runs with it (this branch), with a sample too for each secret the lane folder's `.env.example` names. Nothing adds a secret: the owner has not said where a developer's secrets live (Owner: real secrets) | `code/preview.ts`, `code/previewRun.ts` (`previewSecrets`), `code/PreviewSample.tsx` |
 
 ### The project and its history
@@ -113,7 +113,24 @@ The states whose rules are pure functions, with their tests, then the screens th
 - `apps/desktop/src/code/secrets.ts`: keys in Kit's changes, counted with the app's one masker (`src/lib/secrets.ts`). Since
   item 113 the masker also knows private key blocks, provider-prefixed keys, JSON web tokens, credentials in HTTP headers,
   `password:` and `"password":` values, the password in `scheme://user:pass@host`, quoted `KEY="..."` and `--password value`,
-  so a change holding any of them makes a commit or a push ask too.
+  so a change holding any of them makes a commit or a push ask too. Item 117 added `name = value` with blanks round the
+  sign (`~/.aws/credentials`), `DB_PASS`, `MYSQL_PWD`, `SMTP_PASS`, `APP_KEY`, `SECRET_KEY_BASE`, a vendor's `_KEY=`, a JSON
+  `"key"`, `.netrc`'s password, `curl -u`, `mysql -p`, Slack's and Discord's webhook addresses, and the Resend, Replicate,
+  Perplexity, xAI, Docker, age, Google OAuth client, Slack refresh, Atlassian, Postman, Netlify and Mapbox prefixes, each in
+  the shared table beside an ordinary line it leaves alone. Ordinary text stays as it is, so it is no key in the changes
+  either: a CSS class or a name that starts with `sk-` (`sk-folding-cube`, `sk-learn-pipeline`), a value that is a
+  reference (`${DB_PASSWORD}`, `` `Bearer ${token}` ``), and a word that says there is none (`Token: none`, `null`, `false`).
+  Since item 117 the count never goes down (a key taken
+  out again may already be in a commit), and a commit or a push the dial would otherwise let go alone first reads what it
+  saves: the lane's own diff, from the shell's read-only `lane_diff` (bounded, `--no-ext-diff --no-textconv`, no clean filter,
+  each file's diff masked by the shell's twin). A file an added line of which holds a key makes the step ask, whoever wrote it,
+  and so does a file it could not read whole (binary, too large, past its budget or its list) or a read that failed or took
+  more than five seconds. That read only reaches a folder the app made, so a commit or a push from a session in the
+  developer's own folder always asks. Since item 117 the masker has two forms: `maskSecrets`
+  for text that never runs, and `maskCommand` for what an ask's card shows, which masks a key and never a substitution, a
+  pipe, a second command or a command's own operand (a token-shaped word is a key only as a whole word with a key's
+  shape); a private key block keeps its BEGIN and END lines around one masked line only inside a quoted string or a heredoc's
+  body, where the shell reads it as data, and its body holds only key characters; anywhere else it is shown whole. The card shows a command whole, its line breaks kept, scrolling in its block.
 - `apps/desktop/src/code/kitAsks.ts`: the dial at work on a session's asks, through the asks' own cards.
 - `apps/desktop/src/code/KitCardParts.tsx`, `KitPanel.tsx`, `kit.css`: Kit's words on an ask's card, and Kit on the
   Code page.
@@ -184,8 +201,9 @@ The states whose rules are pure functions, with their tests, then the screens th
 
 ### How an ask is read
 
-An ask's title and command are for the person: the shell cuts them to one short line. So the shell also names what
-the agent asked, from the agent's own message, and the dial reads that:
+An ask's title and command are for the person: since item 117 the command is whole, its line breaks kept, and the card
+masks only its keys (`maskCommand`). The dial does not decide from those words, which the masker has been over, so the
+shell also names what the agent asked, from the agent's own message, and the dial reads that:
 
 | Agent | Where it comes from | What is named |
 | --- | --- | --- |
@@ -534,8 +552,11 @@ and no other agent here has been checked. The setting says so.
 - **The run** (`src-tauri/src/title_run.rs`, commands `title_run` and `title_cancel`): `claude -p` with `--tools ""`, `--strict-mcp-config`
   and no MCP config, `--disable-slash-commands`, `--permission-mode default`, `--no-session-persistence`, `--setting-sources user`, and the
   chosen `--model` and `--effort` (each checked). It starts as a chat does (the allow-list, the child `PATH`, the account's home) in the
-  empty folder `~/.manut/titles`. The text goes in on standard input, masked and cut to 6,000 characters. One run at a time, 45 seconds, four
-  starts a minute, cancel by key. The answer is cleaned and only returned. Its rate-limit event reaches the usage the meter reads.
+  empty folder `~/.manut/titles`. The text goes in on standard input, masked and cut to 6,000 characters, inside a fence one backtick
+  longer than any run of backticks it holds, so nothing in it can close the fence (item 117). One run at a time, 45 seconds, four
+  starts a minute, cancel by key. The answer is cleaned and only returned: since item 117 a title and a description are plain words
+  only, with every image, link target, bare address and HTML tag dropped (`plain`), so a description cannot make GitHub fetch an
+  address that carries a private diff's words when the pull request is shown. Its rate-limit event reaches the usage the meter reads.
 - **A chat's title** (`sessions/titleWords.ts`): after a turn ends done, from the first message and first answer. It becomes
   `SessionRec.modelTitle`, which `pickTitle` ranks below a name the person gave and above the agent's title and the summary. A result that
   arrives after a rename is dropped. Row menu › Write the title again asks for another, and is offered only for a chat the person has not

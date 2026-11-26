@@ -12,6 +12,7 @@ import { bringToFront, createNoteGate, noteFor, sessionNote, sessionRings, showN
 import { noteAsk } from "../chat/cards/askNote";
 import { settleApproval } from "../chat/cards/respond";
 import { appSounds, soundFor, type SoundBoard } from "../lib/sounds";
+import { maskCommand } from "../lib/secrets";
 import { promptText } from "../chat/parts/attachFiles";
 import { findTokens, toWire } from "../chat/parts/skillTokens";
 import { forBots, parseResume, RESUME_KEY, type ResumeSnap } from "../app/resume";
@@ -2064,9 +2065,10 @@ export function askFrom(state: AppState, key: string): string {
   return chatRoute(key)?.label ?? state.bots.find((b) => b.name === key)?.display_name ?? key;
 }
 
-/** One plain line for an ask: "Allow `rm -rf build/`?" or the (first) question. */
+/** One plain line for an ask: "Allow `rm -rf build/`?" or the (first) question. A command's keys are masked as on its
+ *  card (maskCommand), never anything else in it; a browser write's sentence is as typed. */
 export function askText(it: ApprovalItem | ClarifyItem): string {
-  if (it.kind === "approval") return it.command ? tr("ask.allowCmd", { cmd: `\`${it.command}\`` }) : it.title || tr("ask.allowThis");
+  if (it.kind === "approval") return it.command ? tr("ask.allowCmd", { cmd: `\`${it.whole ? it.command : maskCommand(it.command)}\`` }) : it.title || tr("ask.allowThis");
   const n = it.questions?.length ?? 0;
   return n > 1 ? tr("ask.questions", { n, first: it.questions![0].question }) : it.question;
 }

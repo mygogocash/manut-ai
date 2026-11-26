@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { maskSecrets } from "./secrets";
+import { maskCommand, maskSecrets } from "./secrets";
 import table from "./secrets.cases.json";
 
 const X = (n: number) => "X".repeat(n);
@@ -21,6 +21,37 @@ describe("maskSecrets (the one masker; patterns in secrets.json)", () => {
   it("runs the shared table (secrets.cases.json, also run by tasks.rs and the bridge)", () => {
     expect(table.cases.length).toBeGreaterThan(120);
     for (const [text, want] of table.cases) expect(maskSecrets(text), text).toBe(want);
+  });
+
+  it("runs the shared command table: what an approval shows (secrets.cases.json `command`, also run by tasks.rs)", () => {
+    expect(table.command.length).toBeGreaterThan(25);
+    for (const [text, want] of table.command) expect(maskCommand(text), text).toBe(want);
+  });
+
+  it("never hides a character the shell acts on, nor a line, in a command (item 117)", () => {
+    // what the shell reads as structure must survive the masker exactly, in order, on every row of both tables. A value
+    // also stops at a backslash; a key block on one line (a JSON string's `\n`) keeps its own, which escape only its own
+    // masked characters, since the block starts and ends with its dashes.
+    const shell = (s: string) => s.replace(/[^`$()|;&<>{}\n]/g, "");
+    const block = /-{4,5} ?BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY/;
+    for (const [text] of [...table.command, ...table.cases]) {
+      // a private key block keeps its BEGIN and END lines and shows its body as one line: only its body's line breaks go
+      const out = maskCommand(text);
+      const lines = (s: string) => (block.test(text) ? s.replace(/\n/g, "") : s);
+      expect(lines(shell(out)), text).toBe(lines(shell(text)));
+    }
+  });
+
+  it("masks an sk- key of 32 lowercase hex, built here so no scanner reads the table as a live key (item 117)", () => {
+    const key = `sk-${"0a1b2c3d".repeat(4)}`;
+    expect(maskSecrets(`deepseek ${key} done`)).toBe("deepseek •••• done");
+    expect(maskCommand(`DEEPSEEK=${key} pnpm test`)).toBe("DEEPSEEK=•••• pnpm test");
+  });
+
+  it("masks a Slack refresh token, built here so no scanner reads the table as a live one (item 117)", () => {
+    const token = ["xoxe", "1", "X".repeat(20)].join("-");
+    expect(maskSecrets(`refresh ${token} done`)).toBe("refresh •••• done");
+    expect(maskCommand(`SLACK_REFRESH=${token} node sync.js`)).toBe("SLACK_REFRESH=•••• node sync.js");
   });
 
   it("masks a token broken by a line break and keeps the prose after it", () => {

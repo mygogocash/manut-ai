@@ -5,6 +5,7 @@ import { t, type Key } from "../i18n";
 import type { Bot } from "../lib/protocol";
 import { askText, type Actions, type ApprovalItem, type Ask, type Chat, type ClarifyItem } from "../state/store";
 import { riskOf } from "../chat/cards/risk";
+import { maskCommand } from "../lib/secrets";
 import { asksOf, memberStatus } from "./team";
 
 export type HomeMode = "chat" | "team" | "code";
@@ -120,7 +121,9 @@ export function canApproveHere(item: ApprovalItem | ClarifyItem): item is Approv
  *  question. */
 export function askLines(item: ApprovalItem | ClarifyItem): { title: string; action: string | null; whole: boolean } {
   if (item.kind === "clarify") return { title: askText(item), action: null, whole: false };
-  const action = item.command.trim() ? item.command : null;
+  // as its card shows it: a browser write's sentence exactly as typed, any other command whole with only its keys masked
+  // (maskCommand, item 117)
+  const action = item.command.trim() ? (item.whole ? item.command : maskCommand(item.command)) : null;
   return {
     title: item.plan ? t("card.startPlan") : item.title || t("card.approvalNeeded"),
     action,

@@ -7,7 +7,9 @@
 // way an approval is answered. Every other ask waits on the person, with Kit's words on its card (`kitCard`).
 //
 // The keys typed into each session's changes are counted here from its `tool.diff` events (secrets.ts): while a
-// session's changes hold one, a commit or a push from it asks the person, at every level.
+// session's changes hold one, a commit or a push from it asks the person, at every level. Since item 117 a commit or a push
+// the dial would otherwise let go alone also waits for a read of what it saves (the lane's own diff, `savedKeys`): a key there,
+// written by a command or anything else, or a read that could not be made whole and in time, makes it ask too.
 import { useSyncExternalStore } from "react";
 import type { ApprovalChoice, DiffFile, EventOf } from "../lib/protocol";
 import { appSounds } from "../lib/sounds";
@@ -17,7 +19,7 @@ import { ruleMatches, scriptRun, type Rule, type Say } from "./command";
 import { scriptText } from "./previewRun";
 import { noteReads, resetPreview } from "./preview";
 import { kitProjects, noteBlocked, projectOf, updateKitProjects, type KitProject } from "./project";
-import { keyFiles, keysAfter } from "./secrets";
+import { keyFiles, keysAfter, type SavedKeys } from "./secrets";
 import { DEFAULT_KIT_LEVEL, type KitLevel } from "@manut/member-grants";
 
 /** Where a session's ask is asked: its chat, the folder the dial reads as inside (`root`: where the session works, a lane's own
@@ -81,16 +83,56 @@ function readIn(ev: EventOf<"approval.request">, ctx: AskContext): AskRead | nul
   return readAsk(wordsOf(ev), { cwd: ev.cwd || ctx.root, root: ctx.root, home: ctx.home ?? undefined, allowed: project.folders, branch: ctx.branch });
 }
 
+/** A name standing for a read of what is saved that could not be made: never shown, only counted, so the dial asks. */
+const UNREAD = "\u0000unread";
+
+/** The files with a key that the dial weighs for step `read`: the session's own count, and for a step that saves or sends the
+ *  change what the read of it found (`saved`), a read that was not made whole counting as a key. */
+function keysFor(read: AskRead, chat: string, saved: SavedKeys | null | undefined): string[] {
+  const counted = keysIn(chat);
+  if (!read.saves) return counted;
+  if (!saved || saved.unread) return [...counted, UNREAD];
+  return [...new Set([...counted, ...saved.files])];
+}
+
+/** Whether ask `ev` saves or sends the change (a commit, a push) and the dial would let it go alone were nothing found in
+ *  what it saves: such an ask waits for `savedKeys` first, and `kitAnswer` is then given what the read found. */
+export function savesAlone(ev: EventOf<"approval.request">, ctx: AskContext, now: number = Date.now()): boolean {
+  const read = readIn(ev, ctx);
+  if (!read?.saves || !ev.choices.includes("once")) return false;
+  return decideAsk(read, projectFor(ctx), keysIn(ctx.chat), now).answer === "alone";
+}
+
+/** The files a read of what is saved found a key in, added to session `chat`'s own count so its card names them. Nothing is
+ *  taken away. */
+export function noteSaved(chat: string, files: readonly string[]): void {
+  const before = keys.get(chat) ?? {};
+  const after = { ...before };
+  for (const f of files) after[f] = Math.max(after[f] ?? 0, 1);
+  if (JSON.stringify(after) === JSON.stringify(before)) return;
+  keys.set(chat, after);
+  version++;
+  listeners.forEach((l) => l());
+}
+
 /** The answer Kit's dial gives ask `ev` by itself, or null when it waits on the person. A step outside the project is
- *  noted on the Code page as it is denied. The answer never rings: the app gave it, nobody needs to look. */
-export function kitAnswer(ev: EventOf<"approval.request">, ctx: AskContext, now: number = Date.now()): { choice: ApprovalChoice; answer: KitAnswer } | null {
+ *  noted on the Code page as it is denied. The answer never rings: the app gave it, nobody needs to look. `saved` is what a
+ *  read of what the step saves found (`savedKeys`); for a step that saves or sends the change, none given (or none read) means
+ *  it was not read, and the step asks. */
+export function kitAnswer(
+  ev: EventOf<"approval.request">,
+  ctx: AskContext,
+  now: number = Date.now(),
+  saved?: SavedKeys | null,
+): { choice: ApprovalChoice; answer: KitAnswer } | null {
   const read = readIn(ev, ctx);
   if (!read) return null;
   const project = projectFor(ctx);
-  const d = decideAsk(read, project, keysIn(ctx.chat), now);
+  const weighed = keysFor(read, ctx.chat, saved);
+  const d = decideAsk(read, project, weighed, now);
   let out: { choice: ApprovalChoice; answer: KitAnswer } | null = null;
   if (d.answer === "alone" && ev.choices.includes("once")) {
-    const byLevel = decideAsk(read, { ...project, rules: [] }, keysIn(ctx.chat), now).answer === "alone";
+    const byLevel = decideAsk(read, { ...project, rules: [] }, weighed, now).answer === "alone";
     const answer: KitAnswer = read.action === "read" || read.action === "check" ? { by: "reads" } : byLevel ? { by: "dial", level: project.level } : { by: "rule" };
     out = { choice: "once", answer };
   } else if (d.answer === "blocked" && ev.choices.includes("deny")) {
