@@ -7,6 +7,10 @@
 // header names the request, the request's row in Tasks › Pull requests names the chat, and the chat's row on the Code page
 // shows it as a lane's row shows its own.
 //
+// Since item 120 the request must also be one made from the chat's own branch (a lane's own, else the branch its folder had
+// when it was read): the output is the agent's to write, so an address printed by `echo` beside a `gh pr create` could name a
+// colleague's request of the same repository. A `gh pr create --dry-run` makes no request, and opens none here.
+//
 // Read only: nothing here asks the host for anything but the folder's remote and one view of the address the command printed.
 // The links are of this run, as the lanes' pull requests are (tasks/pulls.ts): a request's state is not something to show from
 // last week. GitHub's requests are read on github.com only: the dial reads `gh` sent to another host as a step that sends, never as
@@ -58,6 +62,8 @@ export function pullAddress(output: string): { source: CliSource; repo: string; 
  *  with `gh pr create` or `glab mr create` among its commands. */
 export function opensPull(command: string, where: Where): boolean {
   const c = readCommand(command, where);
+  // `--dry-run` (gh 2.104) prints what it would do and makes no request (item 120)
+  if (/(^|\s)--dry-run(\s|=|$)/.test(command)) return false;
   return (c.action === "push" || c.action === "live") && /(^|[\s;&|(])(gh\s+pr|glab\s+mr)\s+create(\s|$)/.test(command);
 }
 
@@ -99,13 +105,14 @@ export function asLanePull(p: ChatPull | null): LanePull | null {
 /** The chat that opened request `number` of `repo`, by its key, or null. */
 export const chatOfPull = (source: CliSource, repo: string, number: number): string | null => byPull.get(pullKey(source, repo, number)) ?? null;
 
-/** Why a command's end linked nothing, for tests: `not_a_pull` (no `gh pr create` the dial read as a push, or it failed or was
- *  refused), `no_address`, `no_remote`, `other_repo` (the address is not the chat's own repository), `fork` (the branch is not
- *  that repository's own), `unread` (the view failed or named another request). */
-export type LinkResult = { linked: ChatPull } | { why: "not_a_pull" | "no_address" | "no_remote" | "other_repo" | "fork" | "unread" };
+/** Why a command's end linked nothing, for tests: `not_a_pull` (no `gh pr create` the dial read as a push, or it failed, was
+ *  refused or was a dry run), `no_address`, `no_remote`, `other_repo` (the address is not the chat's own repository), `fork` (the
+ *  branch is not that repository's own), `other_branch` (the request is not made from the chat's own branch, or that branch is
+ *  not known), `unread` (the view failed or named another request). */
+export type LinkResult = { linked: ChatPull } | { why: "not_a_pull" | "no_address" | "no_remote" | "other_repo" | "fork" | "other_branch" | "unread" };
 
-/** One event of the coding chat with key `chat`, which works in `where.cwd`: a command's end that opened a pull request links the
- *  chat to it, after the checks at the top of this file. Uses only the host it is given. */
+/** One event of the coding chat with key `chat`, which works in `where.cwd` on its own branch `where.branch`: a command's end that
+ *  opened a pull request links the chat to it, after the checks at the top of this file. Uses only the host it is given. */
 export async function noteChatPull(host: Pick<TaskHost, "remote" | "view">, chat: string, ev: { event: string; [k: string]: unknown }, where: Where): Promise<LinkResult> {
   if (ev.event !== "tool.end" || !chat) return { why: "not_a_pull" };
   const command = typeof ev.command === "string" ? ev.command : "";
@@ -124,6 +131,8 @@ export async function noteChatPull(host: Pick<TaskHost, "remote" | "view">, chat
   }
   if (item.number !== at.number) return { why: "unread" };
   if (item.same !== true || !item.head) return { why: "fork" };
+  // only a request made from the chat's own branch is the one it opened (item 120)
+  if (!where.branch || item.head !== where.branch) return { why: "other_branch" };
   const linked: ChatPull = { source: remote.source, repo: remote.repo, number: at.number, url: item.url || at.url, title: item.title, state: item.state, head: item.head };
   link(chat, linked);
   return { linked };

@@ -63,12 +63,100 @@ pub struct LaneFile {
 }
 
 /// What the lane's folder says: where it started from (a short commit id), the files, and how many more there were than
-/// `MAX_FILES`.
+/// `MAX_FILES`; and, when asked (a push about to go, item 120), what the commits it would send hold.
 #[derive(Serialize, Debug, PartialEq)]
 pub struct LaneDiff {
     pub start: String,
     pub files: Vec<LaneFile>,
     pub more_files: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub history: Option<History>,
+}
+
+/// The most commits a push's read goes through (item 120); with more, it says it could not read them all.
+const MAX_COMMITS: usize = 200;
+/// The most bytes of the commits' messages, and of their patches, a push's read takes in.
+const MAX_HISTORY: usize = 4 << 20;
+
+/// What a push of the lane's branch sends besides what its folder shows (item 120): every commit on HEAD that no
+/// remote-tracking branch holds, each one's added lines and message read with the masker, so a key added in one commit and taken
+/// out in the next, or written into a message, is seen. `files` are the paths an added line of which holds a key and, for a
+/// message that holds one, the commit's short id; nothing of a key itself. `unread` when the commits could not all be read
+/// whole and in time (too many, too large, a binary change, git refusing), which makes the push ask.
+#[derive(Serialize, Debug, PartialEq, Default, Clone)]
+pub struct History {
+    pub files: Vec<String>,
+    pub unread: bool,
+}
+
+/// The commits on HEAD in `wt` that no remote-tracking branch holds, at most `max`, read within `left`, through the lane's own
+/// read-only `Git` (no hook, no external diff, no text conversion, never into a submodule).
+fn history(git: &Git, wt: &Path, left: Duration, max: usize) -> History {
+    let unread = || History { files: Vec::new(), unread: true };
+    let began = Instant::now();
+    let count = format!("--max-count={}", max + 1);
+    // each commit's full id and its message, each ended by a NUL: git keeps no NUL in a message
+    let msgs = match git.run_with(wt, &["log", &count, "--no-color", "--format=%H%x00%B%x00", "HEAD", "--not", "--remotes"], left.max(Duration::from_secs(1)), ENV) {
+        Ok(r) if r.code == Some(0) && r.out.len() < MAX_HISTORY => r.out,
+        _ => return unread(),
+    };
+    let mut files: Vec<String> = Vec::new();
+    let note = |name: String, files: &mut Vec<String>| {
+        if !files.contains(&name) {
+            files.push(name);
+        }
+    };
+    let mut commits = 0usize;
+    let mut parts = msgs.split('\0');
+    while let Some(id) = parts.next() {
+        let id = id.trim();
+        if id.is_empty() {
+            break;
+        }
+        // anything but a commit's id where one stands is output this does not understand
+        if !matches!(id.len(), 40 | 64) || !id.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return unread();
+        }
+        let Some(body) = parts.next() else { return unread() };
+        commits += 1;
+        if mask_secrets(body) != body {
+            note(id[..12].to_string(), &mut files);
+        }
+    }
+    if commits > max {
+        return unread();
+    }
+    let Some(left) = left.checked_sub(began.elapsed()) else { return unread() };
+    // their patches, a merge's against its first parent; no message is printed here, so every line is the patch's own
+    let mut argv: Vec<&str> = vec!["log", &count, "-p", "--diff-merges=first-parent", "--no-ext-diff", "--no-textconv", "--no-color", "--format="];
+    argv.extend_from_slice(SUBMODULES);
+    argv.extend(["HEAD", "--not", "--remotes"]);
+    let patches = match git.run_with(wt, &argv, left.max(Duration::from_secs(1)), ENV) {
+        Ok(r) if r.code == Some(0) && r.out.len() < MAX_HISTORY => r.out,
+        _ => return unread(),
+    };
+    let mut path = String::new();
+    let mut binary = false;
+    for line in patches.lines() {
+        if line.starts_with("Binary files ") || line.starts_with("GIT binary patch") {
+            binary = true;
+            continue;
+        }
+        // Every added line is read, a line that looks like a file's header (`+++ x`, an added `++ x`) among them: masking a
+        // real header only ever finds a key in a file's name. A new name from a rename or a copy is read the same way.
+        let added = line.strip_prefix('+').or_else(|| line.strip_prefix("rename to ")).or_else(|| line.strip_prefix("copy to "));
+        if let Some(text) = added {
+            if mask_secrets(text) != text {
+                note(if path.is_empty() { "?".to_string() } else { path.clone() }, &mut files);
+            }
+        }
+        if let Some(p) = line.strip_prefix("+++ ") {
+            path = p.strip_prefix("b/").unwrap_or(p).to_string();
+        } else if line.starts_with("diff --git ") {
+            path.clear();
+        }
+    }
+    History { files, unread: binary }
 }
 
 /// The folder `dir` and its record when it is a lane the app made: the worktree itself, or the folder inside it that a lane
@@ -211,10 +299,15 @@ fn diff_of(git: &Git, wt: &Path, start: &str, e: &Entry, left: Duration) -> Resu
     Ok(mask_secrets(&ran.out))
 }
 
-/// What changed in the lane's folder `dir` since the lane started. `Err` is a short code: `not_a_lane` (a folder the app did not
-/// make, or one git does not list as a worktree of the recorded repository), `git_missing`, `unread`, `config:<setting>` (the
-/// repository's own config names a program git would run).
+/// What changed in the lane's folder `dir` since the lane started, for the Diff pane. `Err` is a short code: `not_a_lane` (a
+/// folder the app did not make, or one git does not list as a worktree of the recorded repository), `git_missing`, `unread`,
+/// `config:<setting>` (the repository's own config names a program git would run).
 pub fn read(home: &Path, dir: &str) -> Result<LaneDiff, String> {
+    read_with(home, dir, false)
+}
+
+/// `read`, and with `with_history` what the commits a push would send hold (item 120), within the same budget.
+pub fn read_with(home: &Path, dir: &str, with_history: bool) -> Result<LaneDiff, String> {
     let (wt, rec) = own_folder(home, dir)?;
     let git = Git::automatic(home)?;
     let repo = real(Path::new(&rec.repo));
@@ -248,7 +341,11 @@ pub fn read(home: &Path, dir: &str) -> Result<LaneDiff, String> {
         };
         files.push(LaneFile { path: e.path.clone(), from: e.from.clone(), state: e.state.to_string(), diff, note });
     }
-    Ok(LaneDiff { start: start.chars().take(12).collect(), files, more_files })
+    let history = with_history.then(|| match BUDGET.checked_sub(begun.elapsed()) {
+        Some(left) => history(&git, &wt, left, MAX_COMMITS),
+        None => History { files: Vec::new(), unread: true },
+    });
+    Ok(LaneDiff { start: start.chars().take(12).collect(), files, more_files, history })
 }
 
 #[cfg(test)]
@@ -505,6 +602,83 @@ mod tests {
         assert!(read(&home, &wt.to_string_lossy()).is_ok());
         sh(&d, &["config", "includeIf.onbranch:kit/**.path", "more.conf"]);
         assert_eq!(read(&home, &wt.to_string_lossy()).unwrap_err(), "config:includeif.*.path");
+        let _ = fs::remove_dir_all(home);
+    }
+
+    /// Item 120 (fifth security review, 26 Nov 2026): a push sends the lane's commits, not its folder's diff. A key added in one
+    /// commit and taken out in the next, or written into a message, is in no diff of the folder.
+    fn pushed(home: &Path, wt: &Path) -> History {
+        read_with(home, &wt.to_string_lossy(), true).unwrap().history.expect("asked for the history")
+    }
+
+    #[test]
+    fn a_key_added_and_taken_out_again_is_in_the_history_a_push_sends() {
+        let Some((home, _, wt)) = lane("ld-hist-key") else { return };
+        let key = format!("ghp_{}", "b".repeat(36));
+        commit_in(&wt, "notes.txt", &format!("token={key}\n"));
+        sh(&wt, &["rm", "-q", "notes.txt"]);
+        sh(&wt, &["commit", "-q", "-m", "tidy"]);
+        // the folder shows nothing: the lane's net change is empty
+        assert!(get(&home, &wt).files.is_empty());
+        let h = pushed(&home, &wt);
+        assert_eq!(h, History { files: vec!["notes.txt".into()], unread: false });
+        assert!(!format!("{h:?}").contains(&key));
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn a_key_in_a_commit_s_message_names_the_commit() {
+        let Some((home, _, wt)) = lane("ld-hist-msg") else { return };
+        let key = format!("ghp_{}", "c".repeat(36));
+        sh(&wt, &["commit", "-q", "--allow-empty", "-m", &format!("notes\n\ntoken={key}")]);
+        let id = sh(&wt, &["rev-parse", "HEAD"]);
+        let h = pushed(&home, &wt);
+        assert_eq!(h, History { files: vec![id[..12].to_string()], unread: false });
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn an_added_line_that_looks_like_a_file_s_header_is_read_as_the_line_it_is() {
+        let Some((home, _, wt)) = lane("ld-hist-header") else { return };
+        let key = format!("ghp_{}", "d".repeat(36));
+        // `++ x` added is `+++ x` in the patch, as a file's header is
+        commit_in(&wt, "notes.txt", &format!("++ {key}\n"));
+        assert!(!pushed(&home, &wt).files.is_empty());
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn commits_a_remote_holds_are_not_read_and_clean_ones_hold_nothing() {
+        let Some((home, d)) = repo("ld-hist-remote") else { return };
+        let key = format!("ghp_{}", "e".repeat(36));
+        // a key already on the remote, before the lane was made: a push of the lane does not send it again
+        commit_in(&d, "old.txt", &format!("token={key}\n"));
+        let bare = home.join("origin.git");
+        sh(&home, &["init", "-q", "--bare", &bare.to_string_lossy()]);
+        sh(&d, &["remote", "add", "origin", &bare.to_string_lossy()]);
+        sh(&d, &["push", "-q", "origin", "main"]);
+        let made = lane::make(&home, &d, &names(&["kit/x"])).unwrap();
+        let wt = PathBuf::from(made.worktree);
+        commit_in(&wt, "clean.txt", "nothing here\n");
+        assert_eq!(pushed(&home, &wt), History { files: vec![], unread: false });
+        // the pane's own read does not ask for it
+        assert!(get(&home, &wt).history.is_none());
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn more_commits_than_it_reads_or_a_binary_one_are_unread() {
+        let Some((home, _, wt)) = lane("ld-hist-caps") else { return };
+        let git = Git::automatic(&home).unwrap();
+        commit_in(&wt, "one.txt", "1\n");
+        commit_in(&wt, "two.txt", "2\n");
+        // with the first commit of the repository, three commits; a read of two at most says it could not read them all
+        assert!(history(&git, &wt, BUDGET, 2).unread);
+        assert!(!history(&git, &wt, BUDGET, 3).unread);
+        fs::write(wt.join("logo.bin"), [0u8, 159, 146, 150, 0, 1, 2]).unwrap();
+        sh(&wt, &["add", "logo.bin"]);
+        sh(&wt, &["commit", "-q", "-m", "logo"]);
+        assert!(pushed(&home, &wt).unread);
         let _ = fs::remove_dir_all(home);
     }
 }

@@ -578,7 +578,8 @@ export class TauriHost implements SessionHost, BuddyHost {
   }
   async laneKeys(worktree: string) {
     const { invoke } = await this.core();
-    return savedKeys(await invoke<unknown>("lane_diff", { worktree }));
+    // with the commits a push would send (item 120)
+    return savedKeys(await invoke<unknown>("lane_diff", { worktree, history: true }));
   }
   async mainMoved(cwd: string, o: { base?: string | null; show?: string[] } = {}) {
     const { invoke } = await this.core();

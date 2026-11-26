@@ -95,6 +95,16 @@ describe("keys in what a commit or a push saves, from the lane's own diff (item 
     for (const raw of [null, undefined, "x", [], {}, { files: "no" }, { files: [{ diff: "+TOKEN=••••" }] }]) expect(savedKeys(raw), JSON.stringify(raw)).toBeNull();
   });
 
+  it("keeps what the shell read of the commits a push would send, apart from the folder's diff (item 120)", () => {
+    // a key added in one commit and taken out in the next is in no diff of the folder, but in the history a push sends
+    expect(savedKeys({ ...answer([]), history: { files: ["notes.txt", "1a2b3c4d5e6f"], unread: false } })).toEqual({ files: [], unread: false, history: { files: ["1a2b3c4d5e6f", "notes.txt"], unread: false } });
+    expect(savedKeys({ ...answer([]), history: { files: [], unread: true } })?.history).toEqual({ files: [], unread: true });
+    // a history this does not understand was not read
+    for (const h of ["x", [], { files: "no" }, { files: [1], unread: false }, { files: [] }]) expect(savedKeys({ ...answer([]), history: h })?.history, JSON.stringify(h)).toEqual({ files: [], unread: true });
+    // an answer with no history (the pane's own read, an older shell) says nothing of it
+    expect(savedKeys(answer([]))).toEqual({ files: [], unread: false });
+  });
+
   it("gives up on a read that takes too long, or fails, as unread", async () => {
     expect(await readSaved(() => new Promise(() => {}), 20)).toBeNull();
     expect(await readSaved(() => Promise.reject(new Error("not a lane")), 20)).toBeNull();

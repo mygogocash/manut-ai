@@ -35,6 +35,11 @@ export function keysAfter(before: Readonly<Record<string, number>>, files: reado
 export interface SavedKeys {
   files: string[];
   unread: boolean;
+  /** What a push would send besides the folder's diff (item 120): the commits on the lane's branch that no remote-tracking
+   *  branch holds, each one's added lines and message read by the shell's masker. `files` are the paths an added line of
+   *  which holds a key and, for a message that holds one, the commit's short id. Absent when the read did not ask for it
+   *  (the Diff pane's) or the shell is older: a push then asks. */
+  history?: { files: string[]; unread: boolean };
 }
 
 /** The keys in the shell's `lane_diff` answer (src-tauri/src/lane_diff.rs): every file that differs from where the lane started,
@@ -57,7 +62,17 @@ export function savedKeys(raw: unknown): SavedKeys | null {
     const added = diff.split("\n").some((l) => l.startsWith("+") && !l.startsWith("+++ ") && l.includes(spec.mask));
     if (added && !files.includes(o.path)) files.push(o.path);
   }
-  return { files: files.sort(), unread };
+  if (r.history === undefined || r.history === null) return { files: files.sort(), unread };
+  return { files: files.sort(), unread, history: historyOf(r.history) };
+}
+
+/** The shell's read of the commits a push sends (item 120), or unread for one this does not understand. */
+function historyOf(raw: unknown): { files: string[]; unread: boolean } {
+  const unread = { files: [], unread: true };
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return unread;
+  const h = raw as Record<string, unknown>;
+  if (!Array.isArray(h.files) || typeof h.unread !== "boolean" || !h.files.every((f) => typeof f === "string" && f !== "")) return unread;
+  return { files: [...new Set(h.files as string[])].sort(), unread: h.unread };
 }
 
 /** How long a commit or a push waits for the read of what it saves before it asks instead. */
