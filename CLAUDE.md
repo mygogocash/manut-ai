@@ -4,7 +4,8 @@ One app for Thai shop owners who are not technical: a chat with Buddy, an AI tea
 before anything public, costly or irreversible, and a code editor. Write the product name as "Manut AI".
 
 Read `README.md` for the layout and commands, `docs/plan.md` for where things stand and the task queue,
-`docs/pilot-api.md` for the backend and web contract, and `docs/decisions.md` for every decision so far. The plan is the implementation plan doc
+`docs/pilot-api.md` for the backend and web contract, and `docs/decisions/` for every decision so far (`archive.md` up
+to 26 Nov 2026, then one file per item; its `README.md` says how to add one). The plan is the implementation plan doc
 (https://claude.ai/artifact/UBrAFtxwR159AM2rxbLTMr); the screen spec is the design canvas
 (https://claude.ai/artifact/Qd8PtNKK48ji7cFU4SpTsG).
 
@@ -28,8 +29,8 @@ skill of anything repetitive). Read the one that fits before doing the work by h
 - `helper`: the standing rules for building one plan item in a worktree. A helper reads it first, so a brief only
   says what to build.
 - `lead-merge`: the lead's routine for an item (start a worktree, wait for CI on the helper's push, merge on green,
-  mark, clean up), with `ci-wait.sh`, `finish-item.sh --ci`, `gate.sh` (for when CI is down), `keep-both.py` and
-  `start-item.sh`.
+  mark, clean up), with `ci-wait.sh`, `finish-item.sh --ci`, `gate.sh` (for when CI is down), `keep-both.py`,
+  `place-keys.py` (dictionary lines into their area files) and `start-item.sh`.
 - `release-desktop`: cutting a desktop release and checking its files and signatures (`verify-release.mjs`).
 - `ci-read`: reading the newest CI run, failed browser specs included (`ci-failures.sh`).
 
@@ -42,7 +43,8 @@ mechanical edits use Haiku or a script. `lead-merge` has the table.
 Do these without asking:
 
 1. Push branches and open draft pull requests on `mygogocash/manut-ai`.
-2. Decide product, design and technical calls that can be undone later, and add each to `docs/decisions.md`.
+2. Decide product, design and technical calls that can be undone later, and add each to your item's own file in
+   `docs/decisions/` (`docs/decisions/README.md`).
 3. Update the design canvas and the implementation plan doc, and say afterwards what changed.
 4. Deploy `apps/api` to the Cloudflare dev environment (`manut-api-dev`) only.
 

@@ -1,8 +1,8 @@
-# Everything a job needs before it can run a pnpm script: the pnpm that package.json pins, Node 22, and the
+# Everything a job needs before it can run a pnpm script: the pnpm that package.json pins, Node 26, and the
 # workspace's dependencies exactly as pnpm-lock.yaml records them. It lives in one place so that a version change
 # is one edit and every job installs the same way.
 name: Set up the workspace
-description: Install the pinned pnpm, Node 22 and the workspace's dependencies, with pnpm's store cached.
+description: Install the pinned pnpm, Node 26 and the workspace's dependencies, with pnpm's store cached.
 
 runs:
   using: composite
@@ -13,10 +13,11 @@ runs:
       with:
         cache: true
 
-    # Node 22 matches `engines`, and wrangler 4.166 needs at least 22.12; "22" takes the newest 22.x release.
+    # Node 26 matches `engines` and `.nvmrc`: the LTS line since 26.13.0 (28 Oct 2026), and the version the lead's Mac
+    # runs the gate on, so CI and the Mac test the same Node. "26" takes the newest 26.x release.
     - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
       with:
-        node-version: 22
+        node-version: 26
 
     # Installs exactly what the lockfile records and fails if a package.json disagrees with it. Only esbuild and
     # workerd may run install scripts (pnpm-workspace.yaml).

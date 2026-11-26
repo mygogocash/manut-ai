@@ -5,8 +5,9 @@
 // snapshot src/app/resume.ts writes before the app closes, with Kami's main chat, so the app opens on that chat
 // through the same start a restart takes: no click, no page in between, and the same bridge calls the specs were
 // written against. A spec that removes `manut.resume` before the page loads starts on Home, as a first run does.
+import { readFileSync } from "node:fs";
 import { expect, type Page } from "@playwright/test";
-import { HOOD_PAGES } from "../src/settings/pages";
+import { hoodIds } from "./hoodIds";
 
 /** The mock bridge's members and the names their chat headers show (BOT_SEED in e2e/mock-bridge.mjs). */
 export const MEMBERS: Readonly<Record<string, string>> = { kami: "Kami", friren: "Friren", default: "Hermes", "omh-tui": "OMH TUI" };
@@ -60,8 +61,9 @@ export async function openCustomize(page: Page, entry: "automations" | "plugins"
   await page.getByTestId(`nav-${entry}`).click();
 }
 
-/** Settings' developer pages, which live under its "Under the hood" entry. */
-export const HOOD_IDS: readonly string[] = HOOD_PAGES.map((p) => p.id);
+/** Settings' developer pages, which live under its "Under the hood" entry: read from src/settings/pages.ts's text
+ *  (hoodIds.ts says why it is not imported). */
+export const HOOD_IDS: readonly string[] = hoodIds(readFileSync(new URL("../src/settings/pages.ts", import.meta.url), "utf8"));
 
 /** Settings is open: its "Under the hood" entry is opened when it is closed, so the developer pages are in its list. A
  *  spec that starts without `manut.settings.hood` (the config seeds it) reaches a developer page this way. */

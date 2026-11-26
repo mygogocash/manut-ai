@@ -1,0 +1,15 @@
+export const att = {
+  "att.attach": "Attach",
+  "att.addFiles": "Add photos and files",
+  "att.plugins": "Skills and tools",
+  "att.pluginsLoading": "Loading plugins…",
+  "att.pluginsManage": "Manage plugins",
+  "att.pluginsNone": "No plugins yet · Add one",
+  "att.usePlugin": "Use {plugin}: ",
+  "att.removeOf": "Remove {name}",
+  "att.drop": "Drop to attach",
+  "att.tooMany": "Over {n} files",
+  "att.tooBig": "Over 100 MB",
+  "att.failed": "Couldn't attach {name} · {error}",
+  "att.readFailed": "could not read the file",
+};

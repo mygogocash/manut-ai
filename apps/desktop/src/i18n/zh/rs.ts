@@ -1,0 +1,26 @@
+import type { rs as en } from "../en/rs";
+
+export const rs: Record<keyof typeof en, string> = {
+  "rs.restart": "重启",
+  "rs.start": "启动",
+  "rs.restarting": "正在重启",
+  "rs.starting": "正在启动",
+  "rs.cancel": "取消",
+  "rs.anyway": "仍然重启",
+  "rs.again": "重试",
+  "rs.busyTitle": "{bot} 正在工作",
+  "rs.busy1": "有一项正在进行的工作。现在重启会中断它：",
+  "rs.busy": "有 {n} 项正在进行的工作。现在重启会把它们全部中断：",
+  "rs.failed": "{bot} 没有重启成功。",
+  "rs.w.chat": "一轮对话",
+  "rs.w.cron": "定时任务",
+  "rs.w.cronNamed": "定时任务 {name}",
+  "rs.w.task": "后台任务",
+  "rs.w.run": "{name} 运行",
+  "rs.w.other": "其他工作",
+  "rs.w.otherOf": "{bot}：其他工作",
+  "rs.w.more1": "还有 1 项工作在进行",
+  "rs.w.more": "还有 {n} 项工作在进行",
+  "rs.w.unsaid": "Hermes 没有说明是什么工作。",
+  "rs.w.of": "{bot}：{what}",
+};

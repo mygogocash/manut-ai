@@ -1,7 +1,8 @@
 # Handoff: where the build stands (23 Nov 2026, about 14:45 Bangkok)
 
 Written so a new session in any tool can continue without the earlier conversations. Read `CLAUDE.md` first
-(rules and the owner's standing permissions), then this file, `docs/plan.md` and `docs/decisions.md`.
+(rules and the owner's standing permissions), then this file, `docs/plan.md` and `docs/decisions/` (since item 128,
+one file per item beside `archive.md`, which holds every decision made before; its `README.md` says how to add one).
 
 ## What this is
 
@@ -210,7 +211,8 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    The owner asked on 25 Nov, after the first release, for the smaller desktop items that need no decision (items 68 to
    71 in `docs/plan.md`), and reported that Buddy "doesn't response" in Practice mode, where it gave a sample answer
    (item 67). Two helpers run at a time, each on its own branch from `pilot/week-1`; review each, merge it after the
-   full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
+   full root gate, check its decisions are in its own `docs/decisions/<item>-<short-name>.md` (since item 128; before
+   then the lead added them to `docs/decisions.md`) and mark both trackers in `docs/plan.md`:
    Late on 25 Nov the owner said the account had credits to spare for the next 22 hours and to use them, and set the
    session's goal: every feature highlighted on 25 Nov, then whatever needs nothing from the owner, and an app that
    feels premium and quiet, with motion on its states and details (the canvas's Motion board is the rule:
@@ -289,6 +291,11 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    value on a card could still hide words that run) and several medium, fixed as items 120 and 121. On the owner's
    word the app is also going to the Mac App Store in GoSpark's listing (item 119), and the GitHub 0.1.2 waits for the
    Apple Developer ID secrets, to go out as a pre-release (owner, 26 Nov).
+   On 26 Nov at 16:50 the owner had the README merged to main (#22) and then the pilot itself (#1, merge commit
+   `374c49ee`). The repository deletes a pull request's head branch when it merges (`delete_branch_on_merge`), so
+   merging #1 deleted `pilot/week-1`; the lead pushed it back at the same commit about ten minutes later. Before the
+   next pilot-to-main merge, the owner protects `pilot/week-1` or turns that setting off, or the branch goes again.
+   Merging also switched on Dependabot, whose pull requests target main.
    Running at 14:15: items 100b, 119, 120 and 121, each a subagent in its own `cc-item…` worktree.
    By 15:35 on 26 Nov items 100b, 119 (the App Store edition), 120 (the fifth read's dial fixes) and 123 (the App
    Privacy draft) are merged. Item 121 (what an ask shows) is reviewed and in its gate; 122 (icon-led menus and

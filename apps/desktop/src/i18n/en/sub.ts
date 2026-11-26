@@ -1,0 +1,16 @@
+export const sub = {
+  "sub.queued": "queued",
+  "sub.running": "running",
+  "sub.thinking": "thinking",
+  "sub.done": "done",
+  "sub.failed": "failed",
+  "sub.cancelled": "stopped",
+  "sub.stopped": "no word",
+  "sub.waiting": "waiting",
+  "sub.untitled": "Subagent {n}",
+  "sub.runningDone": "Running · {done} of {n} done · {t}",
+  "sub.waitingDone": "Waiting · {done} of {n} done · {t}",
+  "sub.ran1": "Ran 1 subagent · {t}",
+  "sub.ranN": "Ran {n} subagents · {t}",
+  "sub.nfailed": "{n} failed",
+};

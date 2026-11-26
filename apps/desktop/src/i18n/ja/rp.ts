@@ -1,0 +1,25 @@
+import type { rp as en } from "../en/rp";
+
+export const rp: Record<keyof typeof en, string> = {
+  "rp.lead": "このコンピュータで起きている問題をまとめ、お使いのコーディングエージェントに渡すか、Issue の下書きにできます。あなたが選ばない限り、何もこの Mac の外には出ません。",
+  "rp.what": "レポート",
+  "rp.reading": "このコンピュータを読み取り中…",
+  "rp.never": "含まれるのは、バージョン、インストールとサインインの状況、直近の問題、いくつかのスイッチです。アカウント、メール、チャット、プロンプト、ファイルの中身は含まれず、キーとホームフォルダは隠されます。",
+  "rp.copy.title": "コピー",
+  "rp.copy.hint": "レポートをクリップボードに入れます。",
+  "rp.copied": "コピーしました",
+  "rp.agent.title": "コーディングエージェントに直してもらう",
+  "rp.agent.hint": "レポートを入力欄に入れた新しいコーディングチャットを始めます。内容を読んでから送信を押します。",
+  "rp.agent.none": "チャットできるコーディングエージェントがこのコンピュータにありません。",
+  "rp.agent.which": "コーディングエージェント",
+  "rp.agent.go": "チャットを開く",
+  "rp.folder.choose": "フォルダを選ぶ",
+  "rp.folder.in": "{path} 内",
+  "rp.issue.title": "Issue の下書き",
+  "rp.issue.hint": "レポートを入力した新規 Issue ページをブラウザで開きます。",
+  "rp.issue.none": "このビルドにはリポジトリが指定されていません。",
+  "rp.issue.ask": "{address} をブラウザで開きますか。レポートの文章がアドレスに入り、投稿するとそのリポジトリの Issue を見られる人は誰でも読めます。",
+  "rp.issue.open": "ページを開く",
+  "rp.issue.cancel": "キャンセル",
+  "rp.refresh": "もう一度読み取る",
+};

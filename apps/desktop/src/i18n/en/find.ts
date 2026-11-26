@@ -1,0 +1,15 @@
+export const find = {
+  "find.label": "Find in the terminal",
+  "find.placeholder": "Find",
+  "find.count": "{n} of {total}",
+  "find.countMore": "{n} of {total}+",
+  "find.none": "No matches",
+  "find.prev": "Previous match",
+  "find.next": "Next match",
+  "find.close": "Close find",
+  "find.matchCase": "Match case",
+  "find.matchCaseTip": "Match case (Alt+C)",
+  "find.regex": "Regular expression",
+  "find.regexTip": "Regular expression (Alt+R)",
+  "find.badRegex": "Invalid pattern",
+};

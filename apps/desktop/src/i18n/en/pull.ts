@@ -1,0 +1,18 @@
+export const pull = {
+  "pull.why.pulled": "Brought {branch} up to date with {remote}: {n} new commits ({from} to {to}).",
+  "pull.why.pulledOne": "Brought {branch} up to date with {remote}: 1 new commit ({from} to {to}).",
+  "pull.why.current": "{branch} is up to date with {remote}.",
+  "pull.why.git_missing": "Did not pull: git is not on this computer.",
+  "pull.why.config": "Did not pull: this project's own git settings name a program for git to run, or another address to fetch from ({setting}). The app does not run those by itself; pull in a terminal if you trust them.",
+  "pull.why.busy": "Did not pull {branch}: git is partway through something in this folder.",
+  "pull.why.detached": "Did not pull: this folder is on no branch.",
+  "pull.why.no_upstream": "Did not pull {branch}: it does not track a branch on a remote.",
+  "pull.why.not_default": "Did not pull: this folder is on {branch}, not the default branch of its remote.",
+  "pull.why.unread": "Did not pull {branch}: git could not say what is in the folder.",
+  "pull.why.changes": "Did not pull {branch}: the folder has changed or new files.",
+  "pull.why.submodules": "Did not pull {branch}: this project has submodules, and the app does not look inside them by itself. Pull in a terminal.",
+  "pull.why.ahead": "Did not pull {branch}: it has commits that are not on a remote yet.",
+  "pull.why.fetch_failed": "Did not pull {branch}: {remote} could not be reached within 10 seconds without a password.",
+  "pull.why.diverged": "Did not pull {branch}: it and {remote} have each moved, so it cannot simply move forward.",
+  "pull.why.failed": "Did not pull {branch}: git refused to move it forward.",
+};

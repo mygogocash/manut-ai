@@ -64,11 +64,15 @@ list names only.
 
 ## Words and docs
 
-- Every string goes through `apps/desktop/src/i18n/` in all four dictionaries (`en`, `ja`, `ko`, `zh`). No Thai yet. A
+- Every string goes through `apps/desktop/src/i18n/` in all four dictionaries (`en`, `ja`, `ko`, `zh`), in the area
+  file named after the key's prefix (`i18n/en/lane.ts` for `lane.*`; a new feature adds its own area file in all four,
+  as `src/i18n/README.md` says), and then writes `src/i18n/snapshot/` again with `UPDATE_I18N_SNAPSHOT=1`. No Thai yet. A
   word the app keeps in English everywhere stays so (`src/i18n/i18n.test.ts`); a new Settings page whose name stays
   English joins the names `e2e/i18n-zh.spec.ts` keeps.
 - Comments say why, in full sentences. No emojis and no em-dashes anywhere.
-- Each reversible call you make is a row in `docs/decisions.md` (newest first, five columns, "By" is "Claude").
+- Each reversible call you make is a row in your item's own file, `docs/decisions/<item>-<short-name>.md` (newest
+  first, five columns, "By" is "Claude"; `docs/decisions/README.md` has the form). Never add to
+  `docs/decisions.md` or `docs/decisions/archive.md`: they are frozen.
   Update the doc that describes what you changed. Do not edit `docs/handoff.md` or the status column of
   `docs/plan.md`: the lead does that at merge.
 

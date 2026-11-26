@@ -1,6 +1,6 @@
 ---
 name: lead-merge
-description: The lead's routine for one plan item in Manut AI - start a helper's worktree, wait for CI on its pushed branch (or gate it when CI is down), merge it, mark it and clean up. Use when a helper reports an item finished, when starting a new item, or when a merge conflicts in docs/decisions.md or the dictionaries.
+description: The lead's routine for one plan item in Manut AI - start a helper's worktree, wait for CI on its pushed branch (or gate it when CI is down), merge it, mark it and clean up. Use when a helper reports an item finished, when starting a new item, or when a merge conflicts in the decisions or the dictionaries.
 ---
 
 # Merging an item as the lead
@@ -47,8 +47,28 @@ Read its report for what it did NOT do or could not check, then:
    branch has moved since, merge it again in the item's worktree (`git merge --no-edit feat/continue-pilot-week-1`) and
    push. Conflicts are nearly always two items adding at one place:
    ```bash
-   .claude/skills/lead-merge/scripts/keep-both.py docs/decisions.md apps/desktop/src/i18n/{en,ja,ko,zh}.ts
+   .claude/skills/lead-merge/scripts/keep-both.py $(git diff --name-only --diff-filter=U -- apps/desktop/src/i18n)
    ```
+   Since item 128 each language's words are a folder of area files, one per key prefix (`apps/desktop/src/i18n/README.md`),
+   so two items meet only when both add to one area, at the end of its object, or both add an area (its import and
+   spread in `<lang>.ts`); `keep-both.py` keeps both of either. A conflict in `src/i18n/snapshot/*.json` is settled by
+   taking either side and writing it again once the dictionaries are merged: `UPDATE_I18N_SNAPSHOT=1 pnpm
+   --filter @manut/desktop exec vitest run src/i18n/snapshot.test.ts`. A branch made before item 128 adds its keys to
+   the old one-file `en.ts`, `ja.ts`, `ko.ts` and `zh.ts`: take the lead's four (`git checkout --theirs
+   apps/desktop/src/i18n/{en,ja,ko,zh}.ts`), then carry the branch's keys into their areas:
+   ```bash
+   for l in en ja ko zh; do
+     git diff <merge base> <item branch> -- apps/desktop/src/i18n/$l.ts | sed -n 's/^+\( *[/"]\)/\1/p' |
+       .claude/skills/lead-merge/scripts/place-keys.py apps/desktop/src/i18n $l
+   done
+   ```
+   It adds or replaces each key in its area and makes a new area's files; a key the branch removed is yours to remove.
+   Decisions no longer conflict: since item 128 each item writes its own `docs/decisions/<item>-<short-name>.md`, and
+   `docs/decisions.md` and `docs/decisions/archive.md` are frozen. A branch made before item 128 still adds rows to
+   `docs/decisions.md`: keep the lead's short note there (`git checkout --theirs docs/decisions.md`, since the lead's
+   branch is the one merged in), and put the branch's own rows, `git diff <merge base> <item branch> -- docs/decisions.md |
+   sed -n 's/^+| /| /p'`, at the top of a new `docs/decisions/<item>-<short-name>.md` under the README's heading and
+   table head.
    Read any other conflict yourself. Two functions added at one place share the closing brace after the marker; a
    sentence both sides extended is joined by hand.
 3. Wait for CI on that exact commit:

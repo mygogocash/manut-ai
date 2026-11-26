@@ -1,0 +1,28 @@
+import type { key as en } from "../en/key";
+
+export const key: Record<keyof typeof en, string> = {
+  "key.openBot": "봇 1~9 열기",
+  "key.search": "명령 팔레트: 어디로든 이동, 무엇이든 실행",
+  "key.details": "상세 보기/숨기기",
+  "key.settings": "설정",
+  "key.nextAsk": "다음 승인이나 질문",
+  "key.newSession": "새 채팅 또는 터미널",
+  "key.cardKeys": "거부 · 한 번 허용 · 이 세션 동안 허용 (선택한 카드)",
+  "key.stop": "진행 중인 답변 멈추기",
+  "key.stepPane": "다음 · 이전 터미널 창",
+  "key.movePane": "터미널 창 옮기기",
+  "key.zoomPane": "터미널 창 확대, 또는 모두 보기",
+  "key.equalizePanes": "터미널 창 크기 고르게",
+  "key.termFont": "터미널 글자 크게, 작게, 기본 크기",
+  "key.termLine": "줄 처음, 줄 끝, 줄 처음까지 지우기, 줄 끝까지 지우기 (터미널)",
+  "key.termWord": "단어 왼쪽, 단어 오른쪽 (터미널)",
+  "key.termClear": "터미널 화면 지우기",
+  "key.termScroll": "스크롤 맨 위, 맨 아래 (터미널)",
+  "key.termCopyPaste": "복사, 붙여넣기 (터미널)",
+  "key.splitPane": "터미널을 오른쪽 · 아래로 나누기",
+  "key.closePane": "터미널 창 닫기. 분할 없는 터미널은 세션을 닫음(되돌리기 가능)",
+  "key.focusPane": "터미널 창 사이 이동",
+  "key.copyLink": "터미널 링크 복사",
+  "key.sendOther": "그 메시지 하나만 다른 방식으로 보내기: 홈에 머물기, 또는 기다리기와 지금 더하기 중 다른 쪽",
+  "key.stash": "임시 글을 홈의 임시 보관함에 넣어 두기",
+};
