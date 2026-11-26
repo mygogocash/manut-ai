@@ -1280,6 +1280,7 @@ export const zh: Record<Key, string> = {
   "ss.modelNotChanged": "模型未更改：{error}",
   "ss.noChatMode": "{agent} 没有以聊天模式响应，可能是旧版本：{install}",
   "ss.newConversation": "没有找到之前的对话，已在这里开始新对话。",
+  "ss.mcpDiffers": "未在此泳道中启动：{names}。泳道的 .mcp.json 条目与你在项目文件夹中批准的不同。",
   "ss.modelNext": "下一轮：{model}",
   "ss.modelNextTip": "当前这一轮继续使用 {model}，所选模型从下一轮开始生效",
 

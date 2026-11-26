@@ -46,6 +46,7 @@ async function setup(o: { files?: ShellFile[]; agents?: { id: string; path?: str
   const sent: string[] = [];
   const inputs: ChatInput[] = [];
   const started: string[] = [];
+  const modes: (string | undefined)[] = [];
   const host = {
     kind: "mock",
     reset: async () => {},
@@ -53,8 +54,9 @@ async function setup(o: { files?: ShellFile[]; agents?: { id: string; path?: str
     home: async () => "/w",
     pickFolder: async () => null,
     branch: async (cwd: string) => (cwd === LANE ? "kit/nightly-tests" : "main"),
-    chatStart: async (_a: string, cwd: string, on: (e: ChatEvent) => void, _r?: string, _acc?: string, session?: string) => {
+    chatStart: async (_a: string, cwd: string, on: (e: ChatEvent) => void, _r?: string, _acc?: string, session?: string, _s?: boolean, mode?: string) => {
       started.push(cwd);
+      modes.push(mode);
       sinks.set(session ?? "", on);
       return sinks.size;
     },
@@ -93,7 +95,7 @@ async function setup(o: { files?: ShellFile[]; agents?: { id: string; path?: str
     await emit(sid, { event: "turn.start" });
     await emit(sid, { event: "turn.end", outcome, ...(error ? { error } : {}) });
   };
-  return { ss, store, wf, sent, inputs, started, live, runs, emit, turn, settle, storage, files, at: (t: number) => (clock = t) };
+  return { ss, store, wf, sent, inputs, started, modes, live, runs, emit, turn, settle, storage, files, at: (t: number) => (clock = t) };
 }
 
 beforeEach(() => {
@@ -116,8 +118,9 @@ describe("a run", () => {
     expect(row).toMatchObject({ agent: "claude", cwd: DEV, title: "Nightly tests", workflow: "Nightly tests", status: "running", mode: "default" });
     expect(row.lane).toMatchObject({ name: "kit/nightly-tests", dir: LANE });
     expect(t.started).toEqual([LANE]);
-    // the agent's Ask mode is set before the first message goes
-    expect(t.inputs.map((i) => i.kind)).toEqual(["mode", "send"]);
+    // the agent starts in its Ask mode, named on its command line (item 89), so its first turn already asks
+    expect(t.modes).toEqual(["default"]);
+    expect(t.inputs.map((i) => i.kind)).toEqual(["send"]);
     expect(t.sent).toEqual(["Run the tests."]);
     expect(t.runs()[0]).toMatchObject({ by: "person", state: "running", reached: 1, steps: 3, session: sid });
     // the chat says it runs a workflow and why it asks before every change

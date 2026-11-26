@@ -1285,6 +1285,7 @@ export const en = {
   "ss.modelNotChanged": "Model not changed: {error}",
   "ss.noChatMode": "{agent} did not answer in chat mode; it may be an old version: {install}",
   "ss.newConversation": "The earlier conversation was not found, so a new one started here.",
+  "ss.mcpDiffers": "Not started in this lane: {names}. The lane's .mcp.json entry differs from the one you approved in your project folder.",
   "ss.modelNext": "Next turn: {model}",
   "ss.modelNextTip": "The running turn keeps {model}; your pick applies from the next turn",
 

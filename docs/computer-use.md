@@ -93,10 +93,20 @@ macOS never asked, and it could spend a yes the person gave for that chat's own 
   process is named, nothing is served.
 - Parents, not "the parent": a `claude` on the person's `PATH` can be a wrapper that stays Claude Code's parent instead
   of replacing itself (one on this Mac does), and then the process the shell started is the server's grandparent.
-- What is still let in, and why that is the same chat: a program that chat's own Claude Code started (its shell
-  commands, its hooks) can run Manut AI's program with the token. It reaches only that chat's room: the apps the person
-  let that chat look at and the yeses they gave on that chat's cards, each for exactly one call. Another chat, a
-  terminal or anything started outside the chat is refused whatever it holds.
+- The first caller holds the room (item 89, security review of 26 Nov 2026; `hub.rs` `holds_room`, test
+  `a_chats_room_answers_only_its_first_caller_while_that_caller_lives`). A program the chat's own Claude Code starts (a
+  hook in the person's own `~/.claude/settings.json`, which another program of theirs may have written) passes both
+  checks above once it runs Manut AI's program with the token. So the first caller that reaches a chat's room is pinned by
+  the pid and audit token the kernel reported, and every other caller for that chat is refused ("answers only the first
+  server that reached this chat") while that first one lives, which the kernel says by its token still naming a running
+  process. Once it has ended or run another program (Claude Code starting its server again), the next caller that passes
+  the checks takes its place. A new chat starts with an empty room.
+- What is still let in: a program under that chat's own Claude Code that calls before the chat's server first does, or
+  after the server ended. It reaches only that chat's room: the apps the person let that chat look at and the yeses they
+  gave on that chat's cards, each for exactly one call, and the chat's own server is then the one refused. A project's own
+  files can no longer add such a hook (chats start with `--setting-sources user`, see docs/code-editor.md, "What a
+  project's own files cannot do"). Another chat, a terminal or anything started outside the chat is refused whatever it
+  holds.
 - Checked on this Mac with the real kernel (`the_kernel_names_the_caller_and_a_token_read_before_an_exec_names_nothing`):
   the peer's process and parent read right, and the kernel gives a peer's audit token as the process is when asked, so
   a token read before an exec names nothing after it. Starting Claude Code for real is a step for the owner (below).

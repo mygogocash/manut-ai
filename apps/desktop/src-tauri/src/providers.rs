@@ -221,6 +221,7 @@ pub const ARG_RULES: [ArgRules; 8] = [
             "allowedTools",
             "allowed-tools",
             "settings",
+            "setting-sources",
             "agents",
             "add-dir",
         ],
@@ -550,8 +551,9 @@ pub fn rules(id: &str) -> Option<&'static ArgRules> {
 pub const VERSION_AGENTS: [&str; 7] = ["claude", "codex", "opencode", "gemini", "grok", "cursor-agent", "agy"];
 
 /// Variables the app sets on an agent's process itself (the terminal's, the child's `PATH`, the app's own `MANUT_*`, and
-/// the ask rules OpenCode gets in `OPENCODE_CONFIG_CONTENT`): a person's variable of the same name would fight one of them.
-pub const APP_VARS: [&str; 6] = ["PATH", "TERM", "COLORTERM", "TERM_PROGRAM", "HOME", "OPENCODE_CONFIG_CONTENT"];
+/// the ask rules OpenCode gets in `OPENCODE_CONFIG_CONTENT`, and `OPENCODE_DISABLE_PROJECT_CONFIG`, which keeps a project's own
+/// configuration out of an OpenCode chat, item 89): a person's variable of the same name would fight one of them.
+pub const APP_VARS: [&str; 7] = ["PATH", "TERM", "COLORTERM", "TERM_PROGRAM", "HOME", "OPENCODE_CONFIG_CONTENT", "OPENCODE_DISABLE_PROJECT_CONFIG"];
 
 /// The agent's home variable ([`crate::accounts::home_var`]: Claude Code, Codex, pi, oh-my-pi, Grok, Gemini CLI).
 pub fn home_var(id: &str) -> Option<&'static str> {
@@ -1224,6 +1226,8 @@ mod tests {
                     "--allowedTools=Bash",
                     "--allowed-tools=Edit",
                     "--settings={\"permissions\":{\"allow\":[\"Bash\"]}}",
+                    "--setting-sources=user,project,local",
+                    "--setting_sources=project",
                     "--agents={}",
                     "--add-dir=/",
                     "--DANGEROUSLY_SKIP_PERMISSIONS",
@@ -1461,6 +1465,8 @@ mod tests {
             (var("TERM", "x"), Why::VarOwn),
             (var("MANUT_TERMINAL_LINK", "x"), Why::VarOwn),
             (var("OPENCODE_CONFIG_CONTENT", "{}"), Why::VarOwn),
+            (var("OPENCODE_DISABLE_PROJECT_CONFIG", "0"), Why::VarOwn),
+            (var("opencode_disable_project_config", ""), Why::VarOwn),
             (var("CLAUDE_CONFIG_DIR", "/x"), Why::VarHome),
             (var("X", "a\0b"), Why::VarValue),
             (var("X", &"v".repeat(VAR_VALUE_MAX + 1)), Why::VarValue),

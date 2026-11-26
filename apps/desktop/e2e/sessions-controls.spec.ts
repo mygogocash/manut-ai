@@ -25,6 +25,9 @@ test.beforeEach(async () => {
   await mock("mock.reset");
 });
 
+const calls = (page: Page) =>
+  page.evaluate(() => (window as unknown as { __manutSessionCalls?: { op: string; mode?: string }[] }).__manutSessionCalls ?? []);
+
 const inputs = (page: Page) =>
   page.evaluate(() =>
     ((window as unknown as { __manutSessionCalls?: { op: string; input?: Record<string, unknown> }[] }).__manutSessionCalls ?? [])
@@ -70,7 +73,7 @@ test("Claude Code: the mode is a quiet label in the composer row; picking one se
   expect(border).toBe("0px");
 });
 
-test("the mode survives a reload: the restarted chat is set to it again", async ({ page }) => {
+test("the mode survives a reload: the restarted chat starts in it", async ({ page }) => {
   await running(page);
   await page.getByTestId("session-mode").click();
   await page.getByTestId("session-mode-opt").filter({ hasText: "Accept edits" }).click();
@@ -79,13 +82,16 @@ test("the mode survives a reload: the restarted chat is set to it again", async 
   await page.reload();
   await expect(page.getByTestId("session-status")).toHaveText("Ready");
   await expect(page.getByTestId("session-mode")).toHaveText("Accept edits");
-  expect((await inputs(page)).filter((i) => i.kind === "mode")).toEqual([{ kind: "mode", mode: "acceptEdits" }]);
+  // named when the agent starts (item 89), never sent again after it runs
+  expect((await calls(page)).filter((c) => c.op === "chat.start").map((c) => c.mode)).toEqual(["acceptEdits"]);
+  expect((await inputs(page)).filter((i) => i.kind === "mode")).toEqual([]);
 });
 
-test("Codex: read-only, ask and auto in the folder; its own setting shows as the agent's", async ({ page }) => {
+test("Codex: read-only, ask and auto in the folder; a new chat starts in Ask", async ({ page }) => {
   await running(page, "codex");
   const mode = page.getByTestId("session-mode");
-  await expect(mode).toHaveText("Agent's own");
+  // the shell starts its thread in Ask when the page names no mode (item 89), whatever Codex's own config says
+  await expect(mode).toHaveText("Ask");
   await mode.click();
   await expect(page.getByTestId("session-mode-opt")).toHaveText([/^Read-only/, /^Ask/, /^Auto in folder/]);
   await expect(page.getByTestId("session-mode-menu")).toContainText("Applies from the next message");
