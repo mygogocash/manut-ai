@@ -35,6 +35,7 @@ import { dock } from "./ko/dock";
 import { drafts } from "./ko/drafts";
 import { dw } from "./ko/dw";
 import { editor } from "./ko/editor";
+import { ef } from "./ko/ef";
 import { ew } from "./ko/ew";
 import { failed } from "./ko/failed";
 import { fb } from "./ko/fb";
@@ -191,6 +192,7 @@ export const ko: Record<Key, string> = {
   ...drafts,
   ...dw,
   ...editor,
+  ...ef,
   ...ew,
   ...failed,
   ...fb,

@@ -140,7 +140,8 @@ describe("the model button", () => {
     );
     expect(html).toContain('data-testid="model-pill"');
     expect(html).toMatch(/data-testid="model-label"[^>]*>Opus</);
-    expect(html).toMatch(/data-testid="reasoning-label"[^>]*>high</);
+    // the level by GoSpark's title for it (item 132), as the effort card names it
+    expect(html).toMatch(/data-testid="reasoning-label"[^>]*>High</);
     expect(html).toContain("bx-pick");
     // no effort shown when the agent offers none
     expect(renderToString(createElement(ModelMenu, { label: "Claude Code", mark: { model: "", provider: "claude" }, live: false, options: [], isOn: () => false, onPick: async () => {}, canPick: false, efforts: [], effort: "", onEffort: vi.fn(), empty: "", foot: "" }))).not.toContain("reasoning-label");

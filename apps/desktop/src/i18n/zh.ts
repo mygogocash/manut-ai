@@ -35,6 +35,7 @@ import { dock } from "./zh/dock";
 import { drafts } from "./zh/drafts";
 import { dw } from "./zh/dw";
 import { editor } from "./zh/editor";
+import { ef } from "./zh/ef";
 import { ew } from "./zh/ew";
 import { failed } from "./zh/failed";
 import { fb } from "./zh/fb";
@@ -191,6 +192,7 @@ export const zh: Record<Key, string> = {
   ...drafts,
   ...dw,
   ...editor,
+  ...ef,
   ...ew,
   ...failed,
   ...fb,
