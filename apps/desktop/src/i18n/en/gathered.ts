@@ -1,0 +1,23 @@
+export const gathered = {
+  // The gathered answers of a job (item 102c)
+  "gathered.tab": "Gathered {n}/{total}",
+  "gathered.count": "Gathered: {n} of {total} answered",
+  "gathered.compare": "Compare in a chat…",
+  "gathered.compareTip": "Put these answers in a chat's box, unsent. Nothing is sent until you press Send there.",
+  "gathered.compareNeed": "Compare needs two answers.",
+  "gathered.answer": "Answer",
+  "gathered.waitingCount": "{n} waiting on you",
+  "gathered.laneLabel": "{agent}'s answer",
+  "gathered.waiting": "Waiting on your answer. Nothing it wrote so far counts as an answer.",
+  "gathered.working": "Still working.",
+  "gathered.failed": "Stopped without an answer.",
+  "gathered.none": "Has not answered yet.",
+  "gathered.files": "Files changed: {n}",
+  "gathered.noFiles": "No files changed",
+  "gathered.filesMore": "and {n} more",
+  "gathered.tests": "Tests",
+  "gathered.noTests": "No tests run",
+  "gathered.put": "In the box of {title}: {n} answers. Nothing is sent until you press Send there.",
+  "gathered.open": "Open that chat",
+  "gathered.gone": "{title} is not there any more.",
+};

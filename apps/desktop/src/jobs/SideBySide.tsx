@@ -29,6 +29,11 @@ import { getSessions, useSessions } from "../sessions/sessions";
 import { selectAsks, useStore } from "../state/store";
 import { Icon } from "../ui/icons";
 import type { AskPick } from "./ask";
+import { Gathered, type GatheredInput } from "./GatheredBlock";
+import { lastAnswer, tally, answerState } from "./gathered";
+
+/** The tab that stands for the Gathered block where the columns are tabs. */
+export const GATHERED_TAB = "gathered";
 
 /** One column: a lane of the job as the view draws it. */
 export interface JobColumn {
@@ -71,6 +76,9 @@ export interface SideBySideProps {
   onConfirm: () => void;
   onCancel: () => void;
   onAgain: () => void;
+  /** The Gathered block (item 102c), drawn under the columns, and its tab's words ("Gathered 2/3"). Left out: no block. */
+  gathered?: ReactNode;
+  gatheredTab?: string;
 }
 
 /** A lane's state as a tag: Working with the step and its time, else the words the Lanes band uses. */
@@ -93,7 +101,7 @@ export function StateTag({ c, now }: { c: Pick<JobColumn, "id" | "status" | "ste
 export function SideBySideView(p: SideBySideProps) {
   const running = p.columns.filter((c) => c.stoppable);
   return (
-    <div className="jv" data-testid="jv" style={{ "--jv-n": p.columns.length } as React.CSSProperties}>
+    <div className="jv" data-testid="jv" data-tab={p.active === GATHERED_TAB ? "gathered" : "lane"} style={{ "--jv-n": p.columns.length } as React.CSSProperties}>
       <div className="jv-bar">
         <button type="button" className="btn jv-back" onClick={p.onBack} data-testid="jv-back">
           <Icon name="chevron-left" size={14} />
@@ -134,6 +142,11 @@ export function SideBySideView(p: SideBySideProps) {
             <StateTag c={c} now={p.now} />
           </button>
         ))}
+        {p.gathered && (
+          <button type="button" role="tab" className="jv-tab" aria-selected={p.active === GATHERED_TAB} onClick={() => p.onActive(GATHERED_TAB)} data-testid="jv-tab-gathered">
+            <span className="jv-tab-n">{p.gatheredTab}</span>
+          </button>
+        )}
       </div>
       <div className="jv-cols" data-testid="jv-cols">
         {p.columns.map((c) => (
@@ -174,6 +187,11 @@ export function SideBySideView(p: SideBySideProps) {
           </section>
         ))}
       </div>
+      {p.gathered && (
+        <div className="jv-gathered" data-testid="jv-gathered" data-active={p.active === GATHERED_TAB ? "true" : "false"}>
+          {p.gathered}
+        </div>
+      )}
     </div>
   );
 }
@@ -234,7 +252,7 @@ export function SideBySide({ job, onBack, onAgain }: { job: string; onBack: () =
   const here = recs.filter((r) => byId.has(r.id));
   const [picked, setPicked] = useState<string | null>(null);
   const [confirm, setConfirm] = useState(false);
-  const active = picked && here.some((r) => r.id === picked) ? picked : (here[0]?.id ?? "");
+  const active = picked && (picked === GATHERED_TAB || here.some((r) => r.id === picked)) ? picked : (here[0]?.id ?? "");
   const now = useNow(here.some((r) => byId.get(r.id)?.status === "working"), 1_000);
   const sessions = getSessions();
   const keyOf = (id: string) => sessions.chatKey(id) ?? "";
@@ -270,8 +288,22 @@ export function SideBySide({ job, onBack, onAgain }: { job: string; onBack: () =
     );
   const first = recs.find((r) => app.chats[keyOf(r.id)]?.items.some((i) => i.kind === "user"));
   const text = first ? ((app.chats[keyOf(first.id)]?.items.find((i) => i.kind === "user") as { text?: string } | undefined)?.text ?? "") : "";
+  // Answer: the lane's column comes forward (its tab where they are tabs), and its ask card is brought into view
+  const answer = (id: string) => {
+    setPicked(id);
+    requestAnimationFrame(() => document.querySelector(`[data-testid="jv-col-${id}"]`)?.scrollIntoView({ block: "nearest" }));
+  };
+  // the Gathered block reads each lane's last answer from its chat, and its files and tests as the lane's pane does
+  const inputs: GatheredInput[] = here.map((rec) => {
+    const row = byId.get(rec.id) as LaneRow;
+    const key = keyOf(rec.id);
+    return { id: rec.id, agentId: rec.agent, agent: row.agent, model: rec.model ? modelName(rec.model) : "", status: row.status, answer: lastAnswer(app.chats[key]?.messages), error: row.error, chatKey: key, dir: row.dir };
+  });
+  const count = tally(inputs.map((i) => answerState({ status: i.status, answer: i.answer })));
   return (
     <SideBySideView
+      gathered={<Gathered inputs={inputs} onAnswer={answer} />}
+      gatheredTab={t("gathered.tab", { n: count.answered, total: count.total })}
       title={byId.get(here[0].id)?.title ?? ""}
       columns={shown}
       now={now}

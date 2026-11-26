@@ -43,6 +43,7 @@ import { failed } from "./en/failed";
 import { fb } from "./en/fb";
 import { find } from "./en/find";
 import { gate } from "./en/gate";
+import { gathered } from "./en/gathered";
 import { google } from "./en/google";
 import { graph } from "./en/graph";
 import { harness } from "./en/harness";
@@ -205,6 +206,7 @@ export const en = {
   ...fb,
   ...find,
   ...gate,
+  ...gathered,
   ...google,
   ...graph,
   ...harness,

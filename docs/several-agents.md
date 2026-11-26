@@ -1,7 +1,7 @@
 # Several agents on one job (item 102)
 
 The design for plan item 102 (`docs/plan.md`; `docs/t3code-parity.md`, "Orchestration", group 3 of its order: "must be
-designed first because it can act for the person"). Status on 27 Nov 2026: design, with slice 102a built (Ask several agents: the + menu row, its panel, one send starting one lane for each row, the job saved with each session and its row in the Lanes band), slice 102b (the side-by-side view the row opens), slice 102d (the helper lanes' rules, pure), slice 102f (a helper lane made from a snapshot of its lead's folder, in the shell) and slice 102g (a helper lane's work landed in its lead's folder, and Take back, in the shell); see "Phases and slices". The rest is not built. It covers three
+designed first because it can act for the person"). Status on 27 Nov 2026: design, with slice 102a built (Ask several agents: the + menu row, its panel, one send starting one lane for each row, the job saved with each session and its row in the Lanes band), slice 102b (the side-by-side view the row opens), slice 102c (the gathered answers under it), slice 102d (the helper lanes' rules, pure), slice 102f (a helper lane made from a snapshot of its lead's folder, in the shell) and slice 102g (a helper lane's work landed in its lead's folder, and Take back, in the shell); see "Phases and slices". The rest is not built. It covers three
 things:
 
 1. **Ask several agents.** One message from the person starts lanes on different agents and models side by side, and their
@@ -421,9 +421,14 @@ the screens are built on tested ground.
   band opens it, with a chevron before the row that still shows the lanes as rows; the chat in a column is the lane's own
   `Timeline` (not `harness/AgentChat.tsx`, which reads a subagent's session from the host) with the open ask drawn under it as
   the same card; Ask them again carries the rows and the first message, not attached files.
-- **102c. The gathered answers.** The Gathered block, each answer whole, files and tests, Compare in a chat through item
+- **102c. The gathered answers. Built 27 Nov 2026** (`src/jobs/gathered.ts`, `GatheredBlock.tsx`, `gathered.css`, the block and its tab in `SideBySide.tsx`; decisions in `docs/decisions/102c-gathered.md`). The Gathered block, each answer whole, files and tests, Compare in a chat through item
   97's picker. Tests: `gathered.test.ts` (when a job counts as answered, a lane waiting on an ask), the e2e spec. Safety
   test: Compare in a chat only fills a box: no `chat.send` reaches the stand-in host.
+  What changed from the design: the block shows from the start, counting "n of m answered" and drawing a lane's card only once
+  it has answered (a lane that works, waits or failed shows a line instead), not only after every lane ended; Compare in a
+  chat is offered for two answers or more, and its list is item 97's own, which picks the chat that receives the chips, with the
+  job's own lanes among the chats it offers (a lane picked carries the other lanes' answers, not its own); the chip's text is
+  item 97's context, so its last answer is cut at that item's cap while the block shows each answer whole.
 
 ### Phase 2: helper lanes
 

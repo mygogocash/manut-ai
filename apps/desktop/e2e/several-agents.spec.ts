@@ -202,6 +202,104 @@ test("SAFETY: an ask answered in a column is decided in Needs you and in the lan
   await expect(page.getByTestId("needs-row")).toHaveCount(1);
 });
 
+// ---- the gathered answers (item 102c) ------------------------------------------------------------------------------------
+
+const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
+/** The calls the stand-in bridge has logged for `op` (member and thread chats go through it). */
+async function bridgeCalls(op: string): Promise<unknown[]> {
+  const ws = new WebSocket(`ws://127.0.0.1:${MOCK}/?token=e2e`);
+  await new Promise<void>((res, rej) => {
+    ws.onopen = () => res();
+    ws.onerror = () => rej(new Error("mock websocket error"));
+  });
+  const reply = await new Promise<{ result: { calls: { op: string }[] } }>((res) => {
+    ws.onmessage = (m) => {
+      const msg = JSON.parse(String(m.data));
+      if (msg.id === "g1") res(msg);
+    };
+    ws.send(JSON.stringify({ id: "g1", op: "mock.calls" }));
+  });
+  ws.close();
+  return reply.result.calls.filter((c) => c.op === op);
+}
+const sends = async (page: Page) => (await calls(page)).filter((c) => c.op === "chat.input" && c.input?.kind === "send").length;
+
+test("the Gathered block under the columns: each lane's last answer whole, its files and its tests, once all three answered", async ({ page }) => {
+  await jobPage(page, "/kit pass", { width: 1280 });
+  await watch(page);
+  const ids = await laneIds(page);
+  await expect(page.getByTestId("gt-count")).toHaveText("Gathered: 3 of 3 answered", { timeout: 15_000 });
+  // under the columns, not beside them
+  const cols = await page.getByTestId("jv-cols").boundingBox();
+  const block = await page.getByTestId("gt").boundingBox();
+  expect(block!.y).toBeGreaterThanOrEqual(cols!.y + cols!.height - 1);
+  for (const id of ids) {
+    const lane = page.getByTestId(`gt-lane-${id}`);
+    await expect(lane).toHaveAttribute("data-state", "answered");
+    await expect(lane.getByTestId(`gt-answer-${id}`)).toHaveText("I replaced bank transfer with a PromptPay QR. All 14 tests pass.");
+    await expect(lane.getByTestId(`gt-files-${id}`)).toContainText("src/checkout.tsx");
+    await expect(lane.getByTestId(`gt-result-${id}`)).toHaveAttribute("data-tone", "ok");
+  }
+  // nothing was started or sent by looking at it
+  expect(await bridgeCalls("chat.send")).toEqual([]);
+});
+
+test("a lane waiting on an ask is shown as waiting, not answered, with Answer, which brings its column forward", async ({ page }) => {
+  await jobPage(page, "/kit install", { width: 900, agents: ["claude", "claude"] });
+  await watch(page);
+  const ids = await laneIds(page);
+  await expect(page.getByTestId("gt-count")).toBeHidden();
+  await page.getByTestId("jv-tab-gathered").click();
+  await expect(page.getByTestId("gt-count")).toHaveText("Gathered: 0 of 2 answered");
+  await expect(page.getByTestId("jv-cols")).toBeHidden();
+  for (const id of ids) {
+    await expect(page.getByTestId(`gt-lane-${id}`)).toHaveAttribute("data-state", "waiting");
+    await expect(page.getByTestId(`gt-answer-${id}`)).toHaveCount(0);
+  }
+  await expect(page.getByTestId("gt-wait")).toContainText("2 waiting on you");
+  await expect(page.getByTestId("gt-compare")).toBeDisabled();
+  await page.getByTestId(`gt-answer-${ids[1]}-btn`).click();
+  await expect(page.getByTestId(`jv-col-${ids[1]}`)).toBeVisible();
+  await expect(page.getByTestId(`jv-col-${ids[1]}`).getByTestId("card-approval")).toBeVisible();
+});
+
+test("at 900 wide the Gathered block is a tab of its own, with the count in its name", async ({ page }) => {
+  await jobPage(page, "/kit pass", { width: 900, agents: ["claude", "codex"] });
+  await watch(page);
+  await expect(page.getByTestId("jv-tab-gathered")).toHaveText("Gathered 2/2", { timeout: 15_000 });
+  await expect(page.getByTestId("gt")).toBeHidden();
+  await page.getByTestId("jv-tab-gathered").click();
+  await expect(page.getByTestId("gt")).toBeVisible();
+  await expect(page.getByTestId("jv-tab-gathered")).toHaveAttribute("aria-selected", "true");
+  await page.getByTestId(`jv-tab-${(await laneIds(page))[0]}`).click();
+  await expect(page.getByTestId("gt")).toBeHidden();
+});
+
+test("SAFETY: Compare in a chat only fills a box, with a chip for each answer, and no chat.send reaches the stand-in host", async ({ page }) => {
+  await jobPage(page, "/kit pass", { width: 1280 });
+  await watch(page);
+  const ids = await laneIds(page);
+  await expect(page.getByTestId("gt-count")).toHaveText("Gathered: 3 of 3 answered", { timeout: 15_000 });
+  const startsBefore = (await starts(page)).length;
+  const sendsBefore = await sends(page);
+  const bridgeBefore = (await bridgeCalls("chat.send")).length;
+  await page.getByTestId("gt-compare").click();
+  // item 97's own list, with the job's lanes among the chats it offers
+  await expect(page.getByTestId("bring-pop")).toBeVisible();
+  await page.locator(`[data-testid="bring-option"][data-ref="session:${ids[0]}"]`).click();
+  await expect(page.getByTestId("gt-note")).toContainText("In the box of");
+  await expect(page.getByTestId("gt-note")).toContainText("2 answers");
+  // the lane picked does not carry itself: the other two answers are its chips, and its box still holds nothing to send
+  await page.getByTestId("gt-open").click();
+  const chat = page.getByTestId("session-chat");
+  await expect(chat.getByTestId("carry-chip")).toHaveCount(2);
+  await expect(chat.getByTestId("composer")).toHaveValue("");
+  // nothing started, nothing sent, to any lane or through the bridge, until the person presses Send
+  expect((await starts(page)).length).toBe(startsBefore);
+  expect(await sends(page)).toBe(sendsBefore);
+  expect((await bridgeCalls("chat.send")).length).toBe(bridgeBefore);
+});
+
 for (const [theme, width] of [["light", 1280], ["dark", 1280], ["light", 900], ["dark", 900]] as const) {
   test(`pictures: the side-by-side view, ${theme}, ${width} wide`, async ({ page }) => {
     test.skip(!SHOTS, "set MANUT_SHOTS=<dir> to write the pictures");
@@ -216,5 +314,23 @@ for (const [theme, width] of [["light", 1280], ["dark", 1280], ["light", 900], [
     await watch(page);
     await expect(page.getByTestId(`jv-col-${ids[0]}`)).toBeVisible();
     await page.screenshot({ path: join(SHOTS, `several-agents-view-${theme}-${width}.png`), animations: "disabled" });
+  });
+}
+
+for (const [theme, width] of [["light", 1280], ["dark", 1280], ["light", 900], ["dark", 900]] as const) {
+  test(`pictures: the Gathered block, ${theme}, ${width} wide`, async ({ page }) => {
+    test.skip(!SHOTS, "set MANUT_SHOTS=<dir> to write the pictures");
+    mkdirSync(SHOTS, { recursive: true });
+    await jobPage(page, "/kit pass", { theme, width, agents: ["claude", "codex", "claude"] });
+    const ids = await laneIds(page);
+    // two lanes answered with their tests; the third one is told to fail its tests, so the block shows both readings
+    await page.evaluate(async (id) => {
+      await (window as any).__manutSessions.send(id, "/kit fail");
+    }, ids[2]);
+    await watch(page);
+    await expect(page.getByTestId("gt-count")).toHaveText("Gathered: 3 of 3 answered", { timeout: 20_000 });
+    await expect(page.getByTestId(`gt-result-${ids[2]}`)).toHaveAttribute("data-tone", "err");
+    if (width < 1000) await page.getByTestId("jv-tab-gathered").click();
+    await page.screenshot({ path: join(SHOTS, `several-agents-gathered-${theme}-${width}.png`), animations: "disabled" });
   });
 }

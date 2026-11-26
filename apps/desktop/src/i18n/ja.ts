@@ -42,6 +42,7 @@ import { failed } from "./ja/failed";
 import { fb } from "./ja/fb";
 import { find } from "./ja/find";
 import { gate } from "./ja/gate";
+import { gathered } from "./ja/gathered";
 import { google } from "./ja/google";
 import { graph } from "./ja/graph";
 import { harness } from "./ja/harness";
@@ -204,6 +205,7 @@ export const ja: Record<Key, string> = {
   ...fb,
   ...find,
   ...gate,
+  ...gathered,
   ...google,
   ...graph,
   ...harness,
