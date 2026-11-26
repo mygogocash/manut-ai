@@ -97,47 +97,115 @@ pub struct AcpAgent {
     /// `modes`, or as its `mode` configuration option), the first being the one manut sets whenever the agent reports
     /// another. Empty: the agent is not held to a mode here.
     pub asks_in: &'static [&'static str],
-    /// A value in the agent's own settings file that makes it act without asking (Cursor's Run Everything): a chat of an
-    /// agent whose file holds it does not start ([`SettingCheck`]). `None`: nothing is read.
-    pub settings: Option<SettingCheck>,
+    /// The values in the agent's own settings files that make it act without asking (Cursor's Run Everything, Grok's
+    /// always-approve): a chat of an agent whose files hold one does not start ([`SettingCheck`]). Empty: nothing is read.
+    pub settings: &'static [SettingCheck],
+    /// The agent's own commands that turn its asks off when a message starts with them (Grok's `/always-approve`,
+    /// item 101b): such a message is never sent ([`no_asks_command`]), and the agent's command list in the chat leaves
+    /// them out. Written without the slash.
+    pub ask_switches: &'static [&'static str],
 }
 
-/// One value of an agent's own settings file that turns its asks off, read before its chat starts. The file is where the
-/// agent itself looks: the folder named by the first of `dir_vars` that is set to something other than blanks (joined
-/// with its subfolder), else `home_dir` under the home folder; then `file` in it. The chat starts only when the file is
-/// not there, or is a JSON object whose `key` is absent or one of `allowed`. Anything else (another value, a file that is
-/// not a JSON object, one that cannot be read) refuses the start with [`no_asks`]: a file the agent itself might read
-/// differently is not taken as safe.
+/// How a settings file is written: JSON, TOML, or (a file a variable names) TOML unless its name ends in `.json`, as Grok
+/// reads `GROK_CONFIG_PATH`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Format {
+    Json,
+    Toml,
+    ByExtension,
+}
+
+/// Where the agent itself reads a settings file.
+#[derive(Debug)]
+pub enum Place {
+    /// `file` in the folder named by the first of `vars` set to something other than blanks (joined with its subfolder),
+    /// else in `dir` under the home folder. An absolute `dir` (`/etc/grok`) is that folder itself.
+    Home { vars: &'static [(&'static str, &'static str)], dir: &'static str, file: &'static str },
+    /// `file` in `dir` of the chat's folder and of every folder above it (a project's own settings, which an agent reads
+    /// up to its repository's root; every folder up to the top is read, which reads that and more).
+    Up { dir: &'static str, file: &'static str },
+    /// The file variable `var` names; nothing when it is not set.
+    FileVar(&'static str),
+    /// The text of variable `var` itself (inline settings); nothing when it is not set.
+    TextVar(&'static str),
+}
+
+/// One settings file of an agent whose values can turn its asks off, read before its chat starts, where the agent itself
+/// reads it ([`Place`]). Each of `keys` is a path of keys (`ui.permission_mode`) and the values with which the agent still
+/// asks; a boolean is compared as `true` or `false`. The chat starts only when the file is not there, or is an object in
+/// which each key is absent or one of its values. Anything else (another value, a value of another kind, a file that is not
+/// an object or cannot be read) refuses the start with [`no_asks`]: a file the agent itself might read differently is not
+/// taken as safe.
 #[derive(Debug)]
 pub struct SettingCheck {
-    pub dir_vars: &'static [(&'static str, &'static str)],
-    pub home_dir: &'static str,
-    pub file: &'static str,
-    pub key: &'static str,
-    pub allowed: &'static [&'static str],
+    pub place: Place,
+    pub format: Format,
+    pub keys: &'static [(&'static str, &'static [&'static str])],
+}
+
+/// The value of variable `name` that counts as set: something other than blanks.
+fn set_var(var: &dyn Fn(&str) -> Option<String>, name: &str) -> Option<String> {
+    var(name).filter(|v| !v.trim().is_empty())
 }
 
 impl SettingCheck {
-    /// The settings file the agent reads with the variables `var` gives (the chat's own, then the app's) and home `home`.
-    pub fn path(&self, var: &dyn Fn(&str) -> Option<String>, home: &std::path::Path) -> std::path::PathBuf {
-        for (name, sub) in self.dir_vars {
-            if let Some(v) = var(name).filter(|v| !v.trim().is_empty()) {
-                let dir = std::path::PathBuf::from(v);
-                return if sub.is_empty() { dir.join(self.file) } else { dir.join(sub).join(self.file) };
+    /// The settings files the agent reads, with the variables `var` gives (the chat's own, then the app's), home `home`
+    /// and the chat's folder `cwd`. A [`Place::TextVar`] has none.
+    pub fn paths(&self, var: &dyn Fn(&str) -> Option<String>, home: &std::path::Path, cwd: &std::path::Path) -> Vec<std::path::PathBuf> {
+        match &self.place {
+            Place::Home { vars, dir, file } => {
+                for (name, sub) in *vars {
+                    if let Some(v) = set_var(var, name) {
+                        let d = std::path::PathBuf::from(v);
+                        return vec![if sub.is_empty() { d.join(file) } else { d.join(sub).join(file) }];
+                    }
+                }
+                vec![home.join(dir).join(file)]
             }
+            Place::Up { dir, file } => cwd.ancestors().map(|a| a.join(dir).join(file)).collect(),
+            Place::FileVar(name) => set_var(var, name).map(|v| vec![std::path::PathBuf::from(v)]).unwrap_or_default(),
+            Place::TextVar(_) => Vec::new(),
         }
-        home.join(self.home_dir).join(self.file)
     }
 
-    /// Whether the file's text `text` (`None`: there is no such file) leaves the agent asking.
+    /// The one file of a [`Place::Home`] check (Cursor's), for its tests.
+    #[cfg(test)]
+    pub fn path(&self, var: &dyn Fn(&str) -> Option<String>, home: &std::path::Path) -> std::path::PathBuf {
+        self.paths(var, home, std::path::Path::new("")).into_iter().next().unwrap_or_default()
+    }
+
+    /// Whether the settings text `text` (`None`: there is no such file) leaves the agent asking, read as `self.format`
+    /// says (a [`Format::ByExtension`] file read here is TOML). The start reads each file through [`settings_allow`].
+    #[cfg(test)]
     pub fn keeps_asking(&self, text: Option<&str>) -> bool {
+        self.keeps_asking_as(if self.format == Format::Json { Format::Json } else { Format::Toml }, text)
+    }
+
+    fn keeps_asking_as(&self, format: Format, text: Option<&str>) -> bool {
         let Some(text) = text else { return true };
-        let Ok(Value::Object(m)) = serde_json::from_str::<Value>(text) else { return false };
-        match m.get(self.key) {
-            None => true,
-            Some(Value::String(v)) => self.allowed.contains(&v.as_str()),
-            Some(_) => false,
-        }
+        let doc = match format {
+            Format::Json => serde_json::from_str::<Value>(text).ok(),
+            _ => text.parse::<toml::Table>().ok().and_then(|t| serde_json::to_value(t).ok()),
+        };
+        let Some(doc @ Value::Object(_)) = doc else { return false };
+        self.keys.iter().all(|(path, allowed)| {
+            let mut at = &doc;
+            for part in path.split('.') {
+                match at {
+                    Value::Object(m) => match m.get(part) {
+                        Some(v) => at = v,
+                        None => return true,
+                    },
+                    // a key's table that is something else is not a file the agent reads as meant
+                    _ => return false,
+                }
+            }
+            match at {
+                Value::String(v) => allowed.contains(&v.as_str()),
+                Value::Bool(b) => allowed.contains(&if *b { "true" } else { "false" }),
+                _ => false,
+            }
+        })
     }
 }
 
@@ -146,25 +214,56 @@ pub fn no_asks(label: &str) -> String {
     format!("{label} did not start because its own settings let it run commands and change files without asking first.")
 }
 
+/// Why a message that starts with one of an agent's [`AcpAgent::ask_switches`] was not sent (`ss.noAsksCommand`).
+pub fn no_asks_command(label: &str, command: &str) -> String {
+    format!("{label}'s /{command} turns off its asks, so Manut AI does not send it. Write your message without it.")
+}
+
 /// The largest settings file read for a [`SettingCheck`]; a bigger one refuses.
 const SETTINGS_MAX: u64 = 4 << 20;
 
-/// Whether agent `label` may start as far as its own settings file says ([`SettingCheck`]): read where the agent reads
-/// it, with `var` giving the variables its chat runs with (the chat's own, then the app's) and the home folder from them.
-/// No home, a file that is not a plain file, is larger than [`SETTINGS_MAX`] or cannot be read refuses with [`no_asks`].
-pub fn settings_allow(check: &SettingCheck, label: &str, var: &dyn Fn(&str) -> Option<String>) -> Result<(), String> {
-    let home = var(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).filter(|h| !h.trim().is_empty()).ok_or_else(|| no_asks(label))?;
-    let path = check.path(var, std::path::Path::new(&home));
-    let text = match std::fs::metadata(&path) {
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-        Ok(m) if m.is_file() && m.len() <= SETTINGS_MAX => Some(std::fs::read_to_string(&path).map_err(|_| no_asks(label))?),
-        _ => return Err(no_asks(label)),
-    };
-    if check.keeps_asking(text.as_deref()) {
-        Ok(())
-    } else {
-        Err(no_asks(label))
+/// Whether agent `label` may start as far as its own settings files say ([`SettingCheck`]): each read where the agent
+/// reads it, with `var` giving the variables its chat runs with (the chat's own, then the app's) and the home folder from
+/// them, and `cwd` the chat's folder. No home, a file that is not a plain file, is larger than [`SETTINGS_MAX`] or cannot be
+/// read refuses with [`no_asks`].
+pub fn settings_allow(checks: &[SettingCheck], label: &str, var: &dyn Fn(&str) -> Option<String>, cwd: &std::path::Path) -> Result<(), String> {
+    if checks.is_empty() {
+        return Ok(());
     }
+    let home = set_var(var, if cfg!(windows) { "USERPROFILE" } else { "HOME" }).ok_or_else(|| no_asks(label))?;
+    for check in checks {
+        if let Place::TextVar(name) = check.place {
+            let text = set_var(var, name);
+            if !check.keeps_asking_as(if check.format == Format::Toml { Format::Toml } else { Format::Json }, text.as_deref()) {
+                return Err(no_asks(label));
+            }
+            continue;
+        }
+        for path in check.paths(var, std::path::Path::new(&home), cwd) {
+            let text = match std::fs::metadata(&path) {
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+                Ok(m) if m.is_file() && m.len() <= SETTINGS_MAX => Some(std::fs::read_to_string(&path).map_err(|_| no_asks(label))?),
+                _ => return Err(no_asks(label)),
+            };
+            let format = match check.format {
+                Format::ByExtension if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("json")) => Format::Json,
+                Format::ByExtension => Format::Toml,
+                f => f,
+            };
+            if !check.keeps_asking_as(format, text.as_deref()) {
+                return Err(no_asks(label));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The first word of message `text` when it is one of `switches` written as a command (`/always-approve`, `/auto on`):
+/// a slash, the name, then nothing or a space. Leading blanks are skipped, as an agent reading a command would.
+pub fn ask_switch<'a>(switches: &[&'a str], text: &str) -> Option<&'a str> {
+    let rest = text.trim_start().strip_prefix('/')?;
+    let word = rest.split(|c: char| c.is_whitespace()).next().unwrap_or("");
+    switches.iter().copied().find(|s| s.eq_ignore_ascii_case(word))
 }
 
 /// An agent whose own default runs tools without asking. Before the chat starts, the shell runs the agent's fixed
@@ -230,26 +329,84 @@ pub fn no_rules(label: &str) -> String {
     NO_RULES.replace("OpenCode", label)
 }
 
-/// The built-in ACP agents: OpenCode, whose own default runs tools unasked, with its rule check. The generic ones
-/// are rows of [`crate::acp_agents::ACP_LIST`].
+/// The built-in ACP agents: OpenCode, whose own default runs tools unasked, with its rule check, and Grok (item 101b),
+/// held to its asking mode and to its own settings. The generic ones are rows of [`crate::acp_agents::ACP_LIST`].
 ///
 /// OpenCode lists its agents two ways (item 114). 2.x: `opencode debug agents --standalone`, JSON, read by
 /// [`opencode2_ask`]; `--standalone` because without it the listing comes from OpenCode's background service, started
 /// earlier with other variables, while `opencode acp` always starts a server of its own that inherits the chat's (read in
 /// 2.3.0's bundle). 1.x: `opencode agent list`, read by [`opencode_ask`]; 2.3.0 has no such command and prints its help.
 /// The newer comes first, so a current OpenCode is listed once and the older command never reaches it.
-pub const ACP_AGENTS: [AcpAgent; 1] = [AcpAgent {
-    id: "opencode",
-    label: "OpenCode",
-    login: "opencode auth login",
-    skill_tool: Some("skill"),
-    rules: Some(RuleProbe {
-        forms: &[ProbeForm { args: &["debug", "agents", "--standalone"], build: opencode2_ask, kept: opencode2_kept }, ProbeForm { args: &["agent", "list"], build: opencode_ask, kept: opencode_kept }],
-        var: "OPENCODE_CONFIG_CONTENT",
-    }),
-    asks_in: &[],
-    settings: None,
-}];
+///
+/// Grok Build 1.0.93 (`grok agent stdio`, its ACP server; `crate::sessions::chat_args`) reports two session modes,
+/// `default` and `plan` (its `current_mode_update`s, counted in its own session logs on this Mac), and is held to
+/// `default`: its plan mode lets its own plan file, and on some of its tool sets any Markdown file, be written without a
+/// card (its `plan-mode.md`). Its permission mode (ask, auto-review, always-approve) is not one of those: it comes from its
+/// own settings ([`GROK_SETTINGS`]), from `/always-approve` and its siblings typed in a message ([`AcpAgent::ask_switches`]),
+/// or from the client (`_meta.yoloMode`, which manut never sends).
+pub const ACP_AGENTS: [AcpAgent; 2] = [
+    AcpAgent {
+        id: "opencode",
+        label: "OpenCode",
+        login: "opencode auth login",
+        skill_tool: Some("skill"),
+        rules: Some(RuleProbe {
+            forms: &[ProbeForm { args: &["debug", "agents", "--standalone"], build: opencode2_ask, kept: opencode2_kept }, ProbeForm { args: &["agent", "list"], build: opencode_ask, kept: opencode_kept }],
+            var: "OPENCODE_CONFIG_CONTENT",
+        }),
+        asks_in: &[],
+        settings: &[],
+        ask_switches: &[],
+    },
+    AcpAgent {
+        id: "grok",
+        label: "Grok",
+        login: "grok login",
+        skill_tool: None,
+        rules: None,
+        asks_in: &["default"],
+        settings: &GROK_SETTINGS,
+        // its permission toggles (`/always-approve`, `/auto-review`, and `/auto`, which "still runs the same toggle and is
+        // omitted from the menu", its `slash-commands.md`), and `yolo`, its command line's name for always-approve
+        ask_switches: &["always-approve", "auto-review", "auto", "yolo"],
+    },
+];
+
+/// The values of Grok's own settings that start its sessions without asks: `[ui] permission_mode` (`default`, `ask`,
+/// `auto` or `always-approve`; "Permission mode new sessions start in", its `config-reference.md`), its deprecated name
+/// `approval_mode`, and `[ui] yolo` ("Always-approve tool calls"). Only `default` and `ask` are taken, and a `yolo` of
+/// `false`.
+const GROK_UI: &[(&str, &[&str])] = &[("ui.permission_mode", &["default", "ask"]), ("ui.approval_mode", &["default", "ask"]), ("ui.yolo", &["false"])];
+
+/// Claude Code's `defaultMode`, which Grok also reads from Claude's settings files ("Claude-compatible `defaultMode` in
+/// `.claude/settings.json` is also supported", its `permissions-and-safety.md`), under `permissions` or, when that is
+/// absent, at the top. `default` asks; `plan` "is accepted. It does not enter plan mode". Any other (`acceptEdits`,
+/// `auto`, `bypassPermissions`, `dontAsk`) refuses.
+const CLAUDE_MODE: &[(&str, &[&str])] = &[("permissions.defaultMode", &["default", "plan"]), ("defaultMode", &["default", "plan"])];
+
+/// Every file in which Grok Build 1.0.93 documents a value that starts its sessions without asks, where it reads each
+/// (its `config-reference.md`, "How to configure", and `permissions-and-safety.md`): its own `config.toml`,
+/// `managed_config.toml` and `requirements.toml` in `$GROK_HOME` (else `~/.grok`, where an account's home points it) and
+/// the fleet's two in `/etc/grok`; the `GROK_CONFIG` (inline JSON) and `GROK_CONFIG_PATH` (a JSON or TOML file, by its
+/// name) overlays; and Claude Code's settings it reads, the person's, every folder's from the chat's up (it reads them up to
+/// the repository's root), and Claude's managed settings on macOS and Linux. A project's `.grok/config.toml` cannot set the
+/// mode ("only `[mcp_servers]`, `[plugins]`, `[permission]`, `[env]`"). Not read: macOS device management (`ai.x.grok`)
+/// and a default Grok's servers send after a sign-in, which no file holds.
+pub const GROK_SETTINGS: [SettingCheck; 13] = [
+    SettingCheck { place: Place::Home { vars: &[("GROK_HOME", "")], dir: ".grok", file: "config.toml" }, format: Format::Toml, keys: GROK_UI },
+    SettingCheck { place: Place::Home { vars: &[("GROK_HOME", "")], dir: ".grok", file: "managed_config.toml" }, format: Format::Toml, keys: GROK_UI },
+    SettingCheck { place: Place::Home { vars: &[("GROK_HOME", "")], dir: ".grok", file: "requirements.toml" }, format: Format::Toml, keys: GROK_UI },
+    SettingCheck { place: Place::Home { vars: &[], dir: "/etc/grok", file: "managed_config.toml" }, format: Format::Toml, keys: GROK_UI },
+    SettingCheck { place: Place::Home { vars: &[], dir: "/etc/grok", file: "requirements.toml" }, format: Format::Toml, keys: GROK_UI },
+    SettingCheck { place: Place::TextVar("GROK_CONFIG"), format: Format::Json, keys: GROK_UI },
+    SettingCheck { place: Place::FileVar("GROK_CONFIG_PATH"), format: Format::ByExtension, keys: GROK_UI },
+    SettingCheck { place: Place::Home { vars: &[], dir: ".claude", file: "settings.json" }, format: Format::Json, keys: CLAUDE_MODE },
+    SettingCheck { place: Place::Home { vars: &[], dir: ".claude", file: "settings.local.json" }, format: Format::Json, keys: CLAUDE_MODE },
+    SettingCheck { place: Place::Up { dir: ".claude", file: "settings.json" }, format: Format::Json, keys: CLAUDE_MODE },
+    SettingCheck { place: Place::Up { dir: ".claude", file: "settings.local.json" }, format: Format::Json, keys: CLAUDE_MODE },
+    SettingCheck { place: Place::Home { vars: &[], dir: "/Library/Application Support/ClaudeCode", file: "managed-settings.json" }, format: Format::Json, keys: CLAUDE_MODE },
+    SettingCheck { place: Place::Home { vars: &[], dir: "/etc/claude-code", file: "managed-settings.json" }, format: Format::Json, keys: CLAUDE_MODE },
+];
 
 /// One UTF-16 unit as the agents' matcher compares it. On Windows (`fold`) the agents match without case, as a
 /// JavaScript RegExp with the `i` flag does: a unit stands for its upper case when that is one unit too, and a unit
@@ -888,6 +1045,43 @@ impl Acp {
         format!("{} stayed in its {} mode, which does not ask before it acts, so Manut AI sends it nothing more. Close this chat and start a new one.", self.agent.label, self.mode_from)
     }
 
+    /// Grok's own notice that a session's always-approve or auto-review was turned on (`x.ai/yolo_mode_changed`, item
+    /// 101b): neither is a session mode manut can set back, so for a row held to its asking modes it is treated as a
+    /// refused switch. A running turn is stopped and its cards expire, the chat says so once, and nothing more is sent to
+    /// this process. Its shape (`yolo_mode`, `auto_mode`) is read from Grok 1.0.93's binary, not from a recording, and an
+    /// update that names another conversation is not this chat's.
+    fn permission_notice(&mut self, st: &mut Step, p: &Value) {
+        if self.agent.asks_in.is_empty() || self.mode_refused {
+            return;
+        }
+        if self.session.as_deref().is_some_and(|sid| !s(p, "sessionId").is_empty() && s(p, "sessionId") != sid) {
+            return;
+        }
+        let on = |k: &str| p.get(k).and_then(Value::as_bool) == Some(true);
+        let mode = if on("yolo_mode") || on("yoloMode") {
+            "always-approve"
+        } else if on("auto_mode") || on("autoMode") {
+            "auto"
+        } else {
+            return;
+        };
+        self.mode_refused = true;
+        self.mode_from = mode.to_string();
+        if let Some(sid) = self.session.clone().filter(|_| self.turn && self.prompt_id.is_some()) {
+            for (rid, a) in self.pending.drain() {
+                out(st, json!({"jsonrpc": "2.0", "id": a.rpc_id, "result": {"outcome": {"outcome": "cancelled"}}}));
+                emit(st, ev("prompt.expired", json!({"request_id": rid, "reason": "cancelled"})));
+            }
+            out(st, json!({"jsonrpc": "2.0", "method": "session/cancel", "params": {"sessionId": sid}}));
+        }
+        emit(st, ev("session.note", json!({"kind": "asks_mode", "agent": self.agent.label, "mode": mode, "to": "", "ok": false})));
+        if self.turn && self.prompt_id.is_none() {
+            self.queued.clear();
+            let why = self.mode_refusal();
+            self.end(st, "error", Some(why));
+        }
+    }
+
     fn tool_detail(&self, kind: &str, tc: &Value) -> String {
         clip(&self.whole_detail(kind, tc), 160)
     }
@@ -923,6 +1117,30 @@ impl Acp {
         let title = s(tc, "title");
         // the title stands in only when it says more than the tool's name (`Reply with kiwi`, not `bash`)
         self.subject(kind, tc).unwrap_or_else(|| if title.trim().contains(' ') { title } else { String::new() })
+    }
+
+    /// The ACP kind of tool call `tc` as the agent named it: its `kind`, else the kind or tool Grok names in its own
+    /// `_meta["x.ai/tool"]` (Grok leaves `kind` off almost every call, as GoSpark's `ACPToolMapping` reads it: its `bash`
+    /// runs a command, `search_replace`, `write_file` and `edit_file` change a file, `read_file` reads one). Only the
+    /// card's words and the step's name read it: Kit's dial reads ACP's own `kind` alone (`ask_tool::acp_tool`), so a
+    /// call that names its tool only there asks.
+    fn call_kind(tc: &Value) -> String {
+        let own = s(tc, "kind");
+        if !own.is_empty() {
+            return own;
+        }
+        let tool = tc.get("_meta").and_then(|m| m.get("x.ai/tool")).unwrap_or(&Value::Null);
+        let kind = s(tool, "kind");
+        if !kind.is_empty() {
+            return kind;
+        }
+        match s(tool, "name").as_str() {
+            "bash" => "execute",
+            "search_replace" | "write_file" | "edit_file" => "edit",
+            "read_file" => "read",
+            _ => "",
+        }
+        .into()
     }
 
     /// The manut tool name for an ACP tool call: from its `kind`, else its title (OpenCode titles a call by the
@@ -994,7 +1212,7 @@ impl Acp {
                 // text before a tool call is its own message, as in the other adapters
                 self.flush(st);
                 let title = s(u, "title");
-                let name = Acp::kind_of(&s(u, "kind"), &title);
+                let name = Acp::kind_of(&Acp::call_kind(u), &title);
                 let skill = self.agent.skill_tool.is_some_and(|t| t == title);
                 self.tools.insert(id.clone(), Tool { started: Instant::now(), name, skill, shown: false });
                 self.show(st, &id, u);
@@ -1035,6 +1253,8 @@ impl Acp {
                     .into_iter()
                     .flatten()
                     .filter(|c| !s(c, "name").trim().is_empty())
+                    // an agent's own switch that turns its asks off is never offered (Grok's `always-approve`, item 101b)
+                    .filter(|c| ask_switch(self.agent.ask_switches, &format!("/{}", s(c, "name").trim())).is_none())
                     .take(500)
                     .map(|c| {
                         let hint = c.get("input").map(|i| s(i, "hint")).unwrap_or_default();
@@ -1087,7 +1307,7 @@ impl Acp {
             return;
         }
         let title = s(&tc, "title");
-        let kind = Acp::kind_of(&s(&tc, "kind"), &title);
+        let kind = Acp::kind_of(&Acp::call_kind(&tc), &title);
         let detail = self.whole_detail(&kind, &tc);
         let (title, command) = match kind.as_str() {
             "terminal" => ("Run this command?".to_string(), detail),
@@ -1290,6 +1510,11 @@ impl Adapter for Acp {
                         self.update(&mut st, u);
                     }
                 }
+                // an ACP extension notification goes out with a leading underscore (Grok's `_x.ai/session/setup`)
+                (Some(method), None) if method.trim_start_matches('_') == "x.ai/yolo_mode_changed" => {
+                    let p = v.get("params").cloned().unwrap_or(Value::Null);
+                    self.permission_notice(&mut st, &p);
+                }
                 _ => {}
             }
         }
@@ -1311,6 +1536,10 @@ impl Adapter for Acp {
                 }
                 if self.mode_refused {
                     return Err(self.mode_refusal());
+                }
+                // the agent's own command that turns its asks off is never sent, whoever wrote it (item 101b)
+                if let Some(c) = ask_switch(self.agent.ask_switches, &text) {
+                    return Err(no_asks_command(self.agent.label, c));
                 }
                 self.turn = true;
                 emit(&mut st, ev("turn.start", json!({})));
@@ -1997,6 +2226,8 @@ fn decide_on(rules: &[(String, String, String)], tool: &str, input: &str, fold: 
             ("kimi", "kimi-signed-out.jsonl", "Kimi Code is not signed in. Run `kimi login` in a terminal and sign in.", "--login"),
             ("copilot", "copilot-signed-out.jsonl", "Copilot CLI is not signed in. Run `copilot login` in a terminal and sign in.", "copilot-darwin-arm64"),
             ("cline", "cline-signed-out.jsonl", "Cline is not signed in. Run `cline auth` in a terminal and sign in.", "Call authenticate"),
+            // item 101b: Grok Build 1.0.93 signed out, its `_x.ai/` setup notices and its MCP list (emptied here) ignored
+            ("grok", "grok-signed-out.jsonl", "Grok is not signed in. Run `grok login` in a terminal and sign in.", "no auth method id provided"),
         ] {
             let mut a = Acp::new(acp_agent(id).unwrap(), "/w/proj", None);
             // the person's first message goes in at once, as a draft's first send does; the conversation never opens
@@ -2334,7 +2565,11 @@ fn decide_on(rules: &[(String, String, String)], tool: &str, input: &str, fold: 
     #[test]
     fn opencode_and_the_list_rows() {
         let rows: Vec<(&str, &str, &str, bool)> = ACP_AGENTS.iter().map(|a| (a.id, a.label, a.login, a.rules.is_some())).collect();
-        assert_eq!(rows, [("opencode", "OpenCode", "opencode auth login", true)]);
+        assert_eq!(rows, [("opencode", "OpenCode", "opencode auth login", true), ("grok", "Grok", "grok login", false)]);
+        // each built-in row is the allow-list's agent of the same name, a chat
+        for a in &ACP_AGENTS {
+            assert_eq!(crate::sessions::agent(a.id).map(|x| (x.label, x.mode)), Some((a.label, crate::sessions::Mode::Chat)), "{}", a.id);
+        }
         for e in &crate::acp_agents::ACP_LIST {
             let a = acp_agent(e.agent.id).unwrap();
             assert_eq!((a.id, a.label, a.login, a.rules.is_some(), a.skill_tool), (e.agent.id, e.agent.label, e.acp.login, false, None));
@@ -2905,19 +3140,283 @@ fn decide_on(rules: &[(String, String, String)], tool: &str, input: &str, fold: 
         std::fs::create_dir_all(home.join(".cursor")).unwrap();
         let h = home.to_string_lossy().into_owned();
         let var = |k: &str| (k == "HOME" || k == "USERPROFILE").then(|| h.clone());
+        let check = [check];
+        let cwd = home.join("proj");
         // no file yet: Cursor writes its default, Allowlist
-        assert_eq!(settings_allow(&check, "Cursor", &var), Ok(()));
+        assert_eq!(settings_allow(&check, "Cursor", &var, &cwd), Ok(()));
         std::fs::write(home.join(".cursor/cli-config.json"), r#"{"approvalMode":"unrestricted"}"#).unwrap();
-        assert_eq!(settings_allow(&check, "Cursor", &var), Err(no_asks("Cursor")));
+        assert_eq!(settings_allow(&check, "Cursor", &var, &cwd), Err(no_asks("Cursor")));
         std::fs::write(home.join(".cursor/cli-config.json"), r#"{"approvalMode":"allowlist"}"#).unwrap();
-        assert_eq!(settings_allow(&check, "Cursor", &var), Ok(()));
+        assert_eq!(settings_allow(&check, "Cursor", &var, &cwd), Ok(()));
         // a folder where the file should be cannot be read as settings
         std::fs::remove_file(home.join(".cursor/cli-config.json")).unwrap();
         std::fs::create_dir(home.join(".cursor/cli-config.json")).unwrap();
-        assert_eq!(settings_allow(&check, "Cursor", &var), Err(no_asks("Cursor")));
+        assert_eq!(settings_allow(&check, "Cursor", &var, &cwd), Err(no_asks("Cursor")));
         // no home folder at all
-        assert_eq!(settings_allow(&check, "Cursor", &|_: &str| None), Err(no_asks("Cursor")));
+        assert_eq!(settings_allow(&check, "Cursor", &|_: &str| None, &cwd), Err(no_asks("Cursor")));
         let _ = std::fs::remove_dir_all(&home);
         assert_eq!(no_asks("Cursor"), "Cursor did not start because its own settings let it run commands and change files without asking first.");
+    }
+
+    // ---- item 101b: Grok as a chat -----------------------------------------------------------------------------------
+
+    /// Grok Build 1.0.93 up to its signed-out `session/new` (`grok-signed-out.jsonl`), then a conversation opened as its
+    /// documentation describes `session/new`'s answer (`configOptions` for its model and effort; `modes` as its own session
+    /// logs name them), since it could not be signed in here. Not a recording past the first file.
+    fn grok_opened(mode: &str) -> Acp {
+        let mut a = Acp::new(row("grok"), "/w/proj", None);
+        a.start();
+        a.on_line(&real("grok-signed-out.jsonl")[0]);
+        let new = json!({"jsonrpc": "2.0", "id": 2, "result": {"sessionId": "g1", "modes": {"currentModeId": mode, "availableModes": [{"id": "default", "name": "Default"}, {"id": "plan", "name": "Plan"}]}, "configOptions": [{"id": "model", "category": "model", "type": "select", "currentValue": "grok-4.6", "options": [{"value": "grok-4.6", "name": "Grok 4.6"}]}, {"id": "reasoning_effort", "category": "thought_level", "type": "select", "currentValue": "high", "options": [{"value": "high", "name": "High"}]}]}});
+        a.on_line(&new.to_string());
+        a
+    }
+
+    fn grok_update(u: Value) -> String {
+        json!({"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "g1", "update": u}}).to_string()
+    }
+
+    /// Grok opens a conversation it can load and resume, and its answer to `initialize` is read as any agent's.
+    #[test]
+    fn real_grok_initialize_offers_resume_and_takes_no_client_files() {
+        let mut a = Acp::new(row("grok"), "/w/proj", Some("01a218bc-0000-7000-8000-000000000003"));
+        let st = a.start();
+        assert_eq!(written(&st)[0]["params"]["clientCapabilities"], json!({"fs": {"readTextFile": false, "writeTextFile": false}, "terminal": false}));
+        let w = written(&a.on_line(&real("grok-signed-out.jsonl")[0]));
+        assert_eq!(w[0]["method"], "session/resume");
+        // never `_meta.yoloMode`, which would turn its asks off for the conversation
+        assert_eq!(w[0]["params"].get("_meta"), None);
+    }
+
+    /// Grok's plan mode is not one in which it always asks first: reported while it works, the turn stops, its card
+    /// expires and `default` is set through `session/set_mode` (Grok has no `mode` option), and the chat says so once.
+    #[test]
+    fn grok_in_plan_mode_is_set_back_to_default() {
+        let mut a = grok_opened("default");
+        let st = a.on_input(Input::send("hi")).unwrap();
+        assert_eq!(written(&st)[0]["method"], "session/prompt");
+        let ask = json!({"jsonrpc": "2.0", "id": 5, "method": "session/request_permission", "params": {"sessionId": "g1", "toolCall": {"toolCallId": "t1", "title": "Run a terminal command", "rawInput": {"command": "ls"}, "_meta": {"x.ai/tool": {"name": "bash"}}}, "options": [{"optionId": "allow_once", "kind": "allow_once", "name": "Allow once"}, {"optionId": "allow_always", "kind": "allow_always", "name": "Always allow"}, {"optionId": "reject_once", "kind": "reject_once", "name": "Reject once"}]}});
+        assert_eq!(of(&a.on_line(&ask.to_string()).events, "approval.request").len(), 1);
+        let st = a.on_line(&grok_update(json!({"sessionUpdate": "current_mode_update", "currentModeId": "plan"})));
+        let w = written(&st);
+        assert_eq!(w[0]["method"], "session/set_mode");
+        assert_eq!(w[0]["params"], json!({"sessionId": "g1", "modeId": "default"}));
+        assert_eq!(w[1]["result"]["outcome"]["outcome"], "cancelled");
+        assert_eq!(w[2]["method"], "session/cancel");
+        assert_eq!(of(&st.events, "prompt.expired").len(), 1);
+        let st = a.on_line(&json!({"jsonrpc": "2.0", "id": w[0]["id"], "result": {}}).to_string());
+        assert_eq!(*of(&st.events, "session.note")[0], json!({"event": "session.note", "kind": "asks_mode", "agent": "Grok", "mode": "plan", "to": "default", "ok": true}));
+        // opened in plan, the first message waits for the switch
+        let mut a = grok_opened("plan");
+        let st = a.on_input(Input::send("hi")).unwrap();
+        assert!(written(&st).is_empty());
+    }
+
+    /// Grok's own always-approve and auto-review are switched by a message that starts with its command: none is sent,
+    /// whoever wrote it, and the chat's command list never offers one. Its other commands go as they are.
+    #[test]
+    fn grok_never_gets_the_command_that_turns_its_asks_off() {
+        let mut a = grok_opened("default");
+        for text in ["/always-approve", "/always-approve on", "  /Always-Approve on", "/auto-review", "/auto", "/yolo", "/auto\nthen go"] {
+            let e = a.on_input(Input::send(text)).unwrap_err();
+            assert!(e.starts_with("Grok's /") && e.ends_with("turns off its asks, so Manut AI does not send it. Write your message without it."), "{text}: {e}");
+            assert!(!a.in_turn(), "{text}");
+        }
+        assert_eq!(no_asks_command("Grok", "always-approve"), "Grok's /always-approve turns off its asks, so Manut AI does not send it. Write your message without it.");
+        // not a command, or another command: sent
+        for text in ["/autonomous goal", "please /always-approve", "/compact", "always-approve"] {
+            let mut a = grok_opened("default");
+            let st = a.on_input(Input::send(text)).unwrap();
+            assert_eq!(written(&st)[0]["params"]["prompt"][0]["text"], text);
+        }
+        // the commands it lists in its answer to `initialize` (real), offered as an update: always-approve is left out
+        let listed = serde_json::from_str::<Value>(&real("grok-signed-out.jsonl")[0]).unwrap()["result"]["_meta"]["availableCommands"].clone();
+        let st = a.on_line(&grok_update(json!({"sessionUpdate": "available_commands_update", "availableCommands": listed})));
+        let names: Vec<String> = of(&st.events, "session.commands")[0]["commands"].as_array().unwrap().iter().map(|c| s(c, "name")).collect();
+        assert_eq!(names, ["compact", "context", "session-info", "deep-research", "workflow", "goal"]);
+        // another agent's commands are its own
+        assert_eq!(ask_switch(row("agy").ask_switches, "/always-approve"), None);
+    }
+
+    /// Grok's notice that always-approve or auto-review came on for this conversation (`_x.ai/yolo_mode_changed`, read
+    /// from its binary): the turn stops, its card expires, the chat says so, and nothing more is sent. Off, another
+    /// conversation's, or an agent not held to a mode: nothing happens.
+    #[test]
+    fn grok_turning_on_always_approve_ends_what_is_sent_to_it() {
+        let notice = |p: Value| json!({"jsonrpc": "2.0", "method": "_x.ai/yolo_mode_changed", "params": p}).to_string();
+        let mut a = grok_opened("default");
+        a.on_input(Input::send("hi")).unwrap();
+        for quiet in [json!({"sessionId": "g1", "yolo_mode": false}), json!({"sessionId": "other", "yolo_mode": true}), json!({"sessionId": "g1"})] {
+            let st = a.on_line(&notice(quiet.clone()));
+            assert!(st.events.is_empty() && st.write.is_empty(), "{quiet}");
+        }
+        let ask = json!({"jsonrpc": "2.0", "id": 6, "method": "session/request_permission", "params": {"sessionId": "g1", "toolCall": {"toolCallId": "t1", "kind": "execute", "title": "Run a terminal command", "rawInput": {"command": "ls"}}, "options": [{"optionId": "allow_once", "kind": "allow_once", "name": "Allow once"}, {"optionId": "reject_once", "kind": "reject_once", "name": "Reject once"}]}});
+        a.on_line(&ask.to_string());
+        let st = a.on_line(&notice(json!({"sessionId": "g1", "yolo_mode": true})));
+        let w = written(&st);
+        assert_eq!(w[0], json!({"jsonrpc": "2.0", "id": 6, "result": {"outcome": {"outcome": "cancelled"}}}));
+        assert_eq!(w[1]["method"], "session/cancel");
+        assert_eq!(of(&st.events, "session.note")[0]["ok"], false);
+        assert_eq!(of(&st.events, "session.note")[0]["mode"], "always-approve");
+        // the prompt answers `cancelled`; then nothing more is sent
+        let prompt = json!({"jsonrpc": "2.0", "id": 3, "result": {"stopReason": "cancelled"}}).to_string();
+        assert_eq!(s(of(&a.on_line(&prompt).events, "turn.end")[0], "outcome"), "interrupted");
+        assert!(a.on_input(Input::send("again")).unwrap_err().starts_with("Grok stayed in its always-approve mode"));
+        // auto-review before any message: the next message is refused
+        let mut a = grok_opened("default");
+        a.on_line(&json!({"jsonrpc": "2.0", "method": "x.ai/yolo_mode_changed", "params": {"auto_mode": true}}).to_string());
+        assert!(a.on_input(Input::send("hi")).unwrap_err().starts_with("Grok stayed in its auto mode"));
+        // OpenCode is not held to a mode: the same notice changes nothing
+        let mut o = Acp::new(opencode(), "/w", None);
+        o.start();
+        assert!(o.on_line(&notice(json!({"yolo_mode": true}))).events.is_empty());
+    }
+
+    /// A Grok call names its tool in `_meta["x.ai/tool"]`, not `kind` (as GoSpark reads it): the card says what runs and
+    /// the step is a command, while Kit's dial, which reads ACP's own `kind` alone, gets `other` and asks.
+    #[test]
+    fn a_grok_call_shows_its_command_from_its_own_tool_name() {
+        let mut a = grok_opened("default");
+        a.on_input(Input::send("list")).unwrap();
+        let call = json!({"sessionUpdate": "tool_call", "toolCallId": "t1", "title": "Run a terminal command", "status": "pending", "rawInput": {"command": "ls -la"}, "_meta": {"x.ai/tool": {"name": "bash"}}});
+        let st = a.on_line(&grok_update(call));
+        assert_eq!((s(of(&st.events, "tool.start")[0], "name"), s(of(&st.events, "tool.start")[0], "detail")), ("terminal".to_string(), "ls -la".to_string()));
+        let ask = json!({"jsonrpc": "2.0", "id": 9, "method": "session/request_permission", "params": {"sessionId": "g1", "toolCall": {"toolCallId": "t1", "title": "Run a terminal command", "rawInput": {"command": "ls -la"}, "_meta": {"x.ai/tool": {"name": "bash"}}}, "options": [{"optionId": "allow_once", "kind": "allow_once", "name": "Allow once"}, {"optionId": "enable_always_approve", "kind": "allow_always", "name": "Enable always-approve mode"}, {"optionId": "reject_once", "kind": "reject_once", "name": "Reject once"}]}});
+        let st = a.on_line(&ask.to_string());
+        let card = of(&st.events, "approval.request")[0];
+        assert_eq!((s(card, "title"), s(card, "command")), ("Run this command?".to_string(), "ls -la".to_string()));
+        // "Enable always-approve mode" (an `allow_always`) is never offered
+        assert_eq!(card["choices"], json!(["deny", "once"]));
+        assert_eq!(card["tool"], json!({"kind": "other", "cwd": "/w/proj"}));
+        // a file it changes, named by its kind in `_meta`
+        let edit = json!({"toolCallId": "t2", "title": "Edit file", "rawInput": {"path": "/w/proj/src/a.ts"}, "_meta": {"x.ai/tool": {"name": "search_replace"}}});
+        assert_eq!(Acp::call_kind(&edit), "edit");
+        assert_eq!(Acp::call_kind(&json!({"kind": "read", "_meta": {"x.ai/tool": {"name": "bash"}}})), "read", "ACP's own kind first");
+        assert_eq!(Acp::call_kind(&json!({"_meta": {"x.ai/tool": {"kind": "fetch", "name": "bash"}}})), "fetch");
+        assert_eq!(Acp::call_kind(&json!({"_meta": {"x.ai/tool": {"name": "spawn_subagent"}}})), "");
+        let st = a.on_line(&json!({"jsonrpc": "2.0", "id": 10, "method": "session/request_permission", "params": {"sessionId": "g1", "toolCall": edit, "options": [{"optionId": "allow_once", "kind": "allow_once", "name": "Allow once"}, {"optionId": "reject_once", "kind": "reject_once", "name": "Reject once"}]}}).to_string());
+        assert_eq!(s(of(&st.events, "approval.request")[0], "title"), "Allow Grok to change src/a.ts?");
+    }
+
+    /// What Grok's settings say about its asks, read as Grok reads each file: only `ask` or `default`, a `yolo` of false,
+    /// and a Claude `defaultMode` of `default` or `plan` leave it asking.
+    #[test]
+    fn only_grok_settings_that_ask_start_its_chat() {
+        let toml = &GROK_SETTINGS[0];
+        for ok in [None, Some(""), Some("[ui]\npermission_mode = \"ask\"\nyolo = false\n"), Some("# permission_mode = \"always-approve\"\n[ui]\npermission_mode = \"default\" # asks\n"), Some("[models]\ndefault = \"grok-4.6\"\n[ui]\nmax_thoughts_width = 120\n"), Some("[ui]\napproval_mode = \"ask\"\n")] {
+            assert!(toml.keeps_asking(ok), "{ok:?}");
+        }
+        for bad in [
+            "[ui]\npermission_mode = \"always-approve\"\n",
+            "[ui]\npermission_mode = \"auto\"\n",
+            "[ui]\nyolo = true\n",
+            "[ui]\napproval_mode = \"always-approve\"\n",
+            "ui.permission_mode = \"always-approve\"\n",
+            "ui = { yolo = true }\n",
+            "ui = \"always-approve\"\n",
+            "[ui]\npermission_mode = 1\n",
+            "[ui\npermission_mode = \"ask\"\n",
+        ] {
+            assert!(!toml.keeps_asking(Some(bad)), "{bad}");
+        }
+        let claude = &GROK_SETTINGS[7];
+        for ok in [Some("{}"), Some(r#"{"permissions":{"defaultMode":"default","allow":["Bash(ls)"]}}"#), Some(r#"{"defaultMode":"plan"}"#), Some(r#"{"permissions":{}}"#)] {
+            assert!(claude.keeps_asking(ok), "{ok:?}");
+        }
+        for bad in [r#"{"permissions":{"defaultMode":"bypassPermissions"}}"#, r#"{"permissions":{"defaultMode":"acceptEdits"}}"#, r#"{"defaultMode":"auto"}"#, r#"{"permissions":{"defaultMode":"dontAsk"}}"#, r#"{"permissions":"all"}"#, "not json"] {
+            assert!(!claude.keeps_asking(Some(bad)), "{bad}");
+        }
+    }
+
+    /// Where Grok reads each file: `$GROK_HOME` (an account's home) else `~/.grok`, the fleet's `/etc/grok`, the overlay a
+    /// variable names, Claude's own and every folder's from the chat's up.
+    #[cfg(unix)]
+    #[test]
+    fn grok_settings_are_read_where_grok_reads_them() {
+        let vars = |pairs: &'static [(&'static str, &'static str)]| move |k: &str| pairs.iter().find(|(n, _)| *n == k).map(|(_, v)| v.to_string());
+        let home = std::path::Path::new("/h");
+        let cwd = std::path::Path::new("/w/proj");
+        let all = |v: &dyn Fn(&str) -> Option<String>| GROK_SETTINGS.iter().flat_map(|c| c.paths(v, home, cwd)).map(|p| p.to_string_lossy().into_owned()).collect::<Vec<_>>();
+        assert_eq!(
+            all(&vars(&[])),
+            [
+                "/h/.grok/config.toml",
+                "/h/.grok/managed_config.toml",
+                "/h/.grok/requirements.toml",
+                "/etc/grok/managed_config.toml",
+                "/etc/grok/requirements.toml",
+                "/h/.claude/settings.json",
+                "/h/.claude/settings.local.json",
+                "/w/proj/.claude/settings.json",
+                "/w/.claude/settings.json",
+                "/.claude/settings.json",
+                "/w/proj/.claude/settings.local.json",
+                "/w/.claude/settings.local.json",
+                "/.claude/settings.local.json",
+                "/Library/Application Support/ClaudeCode/managed-settings.json",
+                "/etc/claude-code/managed-settings.json",
+            ]
+        );
+        let moved = all(&vars(&[("GROK_HOME", "/acct/grok"), ("GROK_CONFIG_PATH", "/o/over.json")]));
+        assert_eq!(moved[..4], ["/acct/grok/config.toml", "/acct/grok/managed_config.toml", "/acct/grok/requirements.toml", "/etc/grok/managed_config.toml"]);
+        assert!(moved.contains(&"/o/over.json".to_string()));
+    }
+
+    /// A Grok chat starts only while every file it reads leaves it asking: its own `config.toml` in its home, the overlay
+    /// variables (inline JSON, or a file read by its name), and a project's own Claude settings in any folder above.
+    #[cfg(unix)]
+    #[test]
+    fn a_grok_chat_does_not_start_while_any_of_its_settings_skip_asks() {
+        let base = std::env::temp_dir().join(format!("manut-101b-grok-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(base.join("g")).unwrap();
+        std::fs::create_dir_all(base.join("repo/app/.claude")).unwrap();
+        let base = base.canonicalize().unwrap();
+        let cwd = base.join("repo/app");
+        let h = base.to_string_lossy().into_owned();
+        let gh = base.join("g").to_string_lossy().into_owned();
+        let extra: std::cell::RefCell<Vec<(String, String)>> = Default::default();
+        let var = |k: &str| match k {
+            "HOME" | "USERPROFILE" => Some(h.clone()),
+            "GROK_HOME" => Some(gh.clone()),
+            _ => extra.borrow().iter().find(|(n, _)| n == k).map(|(_, v)| v.clone()),
+        };
+        let allow = || settings_allow(&GROK_SETTINGS, "Grok", &var, &cwd);
+        assert_eq!(allow(), Ok(()), "no settings at all: Grok's own default, ask");
+        // the owner's own file says always-approve today
+        std::fs::write(base.join("g/config.toml"), "[ui]\nyolo = false\npermission_mode = \"always-approve\"\n").unwrap();
+        assert_eq!(allow(), Err(no_asks("Grok")));
+        std::fs::write(base.join("g/config.toml"), "[ui]\nyolo = false\npermission_mode = \"ask\"\n").unwrap();
+        assert_eq!(allow(), Ok(()));
+        // a repository's own Claude settings, two folders up from the chat's
+        std::fs::create_dir_all(base.join("repo/.claude")).unwrap();
+        std::fs::write(base.join("repo/.claude/settings.json"), r#"{"permissions":{"defaultMode":"bypassPermissions"}}"#).unwrap();
+        assert_eq!(allow(), Err(no_asks("Grok")));
+        std::fs::write(base.join("repo/.claude/settings.json"), r#"{"permissions":{"defaultMode":"plan"}}"#).unwrap();
+        std::fs::write(base.join("repo/app/.claude/settings.local.json"), r#"{"defaultMode":"acceptEdits"}"#).unwrap();
+        assert_eq!(allow(), Err(no_asks("Grok")));
+        std::fs::remove_file(base.join("repo/app/.claude/settings.local.json")).unwrap();
+        assert_eq!(allow(), Ok(()));
+        // the overlays: inline JSON, then a file, JSON or TOML by its name
+        extra.borrow_mut().push(("GROK_CONFIG".into(), r#"{"ui":{"permission_mode":"always-approve"}}"#.into()));
+        assert_eq!(allow(), Err(no_asks("Grok")));
+        extra.borrow_mut().clear();
+        extra.borrow_mut().push(("GROK_CONFIG".into(), r#"{"models":{"default_reasoning_effort":"high"}}"#.into()));
+        assert_eq!(allow(), Ok(()));
+        std::fs::write(base.join("over.json"), r#"{"ui":{"yolo":true}}"#).unwrap();
+        std::fs::write(base.join("over.toml"), "[ui]\nyolo = true\n").unwrap();
+        for f in ["over.json", "over.toml"] {
+            extra.borrow_mut().push(("GROK_CONFIG_PATH".into(), base.join(f).to_string_lossy().into_owned()));
+            assert_eq!(allow(), Err(no_asks("Grok")), "{f}");
+            extra.borrow_mut().pop();
+        }
+        // a JSON overlay named `.json` is not read as TOML, so its asking value starts the chat
+        std::fs::write(base.join("over.json"), r#"{"ui":{"permission_mode":"ask"}}"#).unwrap();
+        extra.borrow_mut().push(("GROK_CONFIG_PATH".into(), base.join("over.json").to_string_lossy().into_owned()));
+        assert_eq!(allow(), Ok(()));
+        // a settings file that is a folder cannot be read as settings
+        std::fs::create_dir(base.join("g/managed_config.toml")).unwrap();
+        assert_eq!(allow(), Err(no_asks("Grok")));
+        let _ = std::fs::remove_dir_all(&base);
     }
 }

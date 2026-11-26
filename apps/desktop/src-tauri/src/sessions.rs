@@ -48,7 +48,9 @@ pub enum Mode {
     Chat,
     /// oh-my-hermes: a Hermes chat through the bridge, no new program.
     Hermes,
-    /// The agent's own terminal UI in a pseudo-terminal.
+    /// The agent's own terminal UI in a pseudo-terminal. No built-in opens only this way since Grok became a chat (item
+    /// 101b); every chat agent can still be opened as its terminal, and the page's agent list keeps the kind.
+    #[allow(dead_code)]
     Terminal,
 }
 
@@ -68,9 +70,9 @@ pub const AGENTS: [Agent; 9] = [
     Agent { id: "omh", program: "omh", label: "oh-my-hermes", mode: Mode::Hermes },
     Agent { id: "pi", program: "pi", label: "pi", mode: Mode::Chat },
     Agent { id: "omp", program: "omp", label: "oh-my-pi", mode: Mode::Chat },
-    // Grok's headless stream is read-only (approvals need ACP, `grok agent stdio`), and grok is not on this
-    // machine to verify against, so it keeps the terminal view.
-    Agent { id: "grok", program: "grok", label: "Grok", mode: Mode::Terminal },
+    // Grok Build speaks the Agent Client Protocol (`grok agent stdio`, crate::acp_chat, item 101b), held there to its asking
+    // mode and its own settings; a session opened as a terminal runs its own TUI, as before.
+    Agent { id: "grok", program: "grok", label: "Grok", mode: Mode::Chat },
     // OpenCode (`opencode-ai`) speaks the Agent Client Protocol (`opencode acp`, crate::acp_chat), checked against 1.19.5.
     Agent { id: "opencode", program: "opencode", label: "OpenCode", mode: Mode::Chat },
 ];
@@ -109,6 +111,14 @@ pub const CLAUDE_CHAT_ARGS: [&str; 12] = [
 /// on the person's own plan, which is why it is off unless asked for. These two arguments are the only ones the setting adds.
 pub const CLAUDE_SUGGEST_ARGS: [&str; 2] = ["--prompt-suggestions", "true"];
 
+/// Grok Build's chat (item 101b): its ACP server, `grok agent stdio` ("Run the agent over stdio", `grok help agent` on
+/// Grok Build 1.0.93), with the permission mode named before it as GoSpark's ACP adapter starts Grok in its supervised mode
+/// (`ACPSession.swift`). Grok documents command-line flags as winning over its settings files and `ask` as the mode a
+/// `grok agent` session starts in when nothing sets one; 1.0.93 takes the flag before `agent` (checked here up to its
+/// signed-out `session/new`), but that it holds a session in ask over an `always-approve` in its own settings could not be
+/// checked without a sign-in, so those settings are read before the start as well (`acp_chat::GROK_SETTINGS`).
+pub const GROK_CHAT_ARGS: [&str; 4] = ["--permission-mode", "default", "agent", "stdio"];
+
 /// The fixed arguments that start agent `id` in its structured mode, or `None` when it has none here. These
 /// are the only arguments manut ever adds besides a conversation id ([`resume_args`]). A generic ACP agent's are
 /// its row in [`crate::acp_agents::ACP_LIST`] (`acp` or `--acp`).
@@ -122,6 +132,7 @@ pub fn chat_args(id: &str) -> Option<&'static [&'static str]> {
             "codex" => &["app-server"][..],
             "pi" | "omp" | "omo" => &["--mode", "rpc"][..],
             "opencode" => &["acp"][..],
+            "grok" => &GROK_CHAT_ARGS[..],
             _ => return None,
         }),
         _ => None,
@@ -1921,7 +1932,7 @@ mod tests {
                 ("omh", Mode::Hermes),
                 ("pi", Mode::Chat),
                 ("omp", Mode::Chat),
-                ("grok", Mode::Terminal),
+                ("grok", Mode::Chat),
                 ("opencode", Mode::Chat)
             ]
         );
@@ -1943,8 +1954,13 @@ mod tests {
             assert_eq!(agent(id).map(|a| (a.label, a.mode)), Some((e.agent.label, Mode::Chat)), "{id}");
         }
         // DSH's chat takes its arguments per message (dsh_turn_args), not here; Kilo Code is gone
-        for none in ["omh", "grok", "dsh", "sh", "", "claude -p", "kilo"] {
+        for none in ["omh", "dsh", "sh", "", "claude -p", "kilo", "grok agent"] {
             assert!(chat_args(none).is_none(), "{none}");
+        }
+        // item 101b: Grok's ACP server, its permission mode named before it, and nothing that skips its asks
+        assert_eq!(chat_args("grok").unwrap(), ["--permission-mode", "default", "agent", "stdio"]);
+        for skip in ["--always-approve", "--yolo", "bypassPermissions", "auto", "acceptEdits"] {
+            assert!(!chat_args("grok").unwrap().contains(&skip), "{skip}");
         }
         let p = Path::new("/h/.manut/dsh/headless.patch.yml");
         assert_eq!(dsh_turn_args(p, None).unwrap(), ["--profile", "headless", "--patch", "/h/.manut/dsh/headless.patch.yml", "--json", "-"].map(OsString::from));
