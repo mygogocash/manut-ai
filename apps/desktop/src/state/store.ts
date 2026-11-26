@@ -246,6 +246,8 @@ export type ApprovalItem = {
    *  to update the app. */
   outdated?: boolean;
   resolved?: ApprovalChoice;
+  /** Who settled it, when it was not the person at this Mac: a paired phone's device id (src/remote/serve.ts). */
+  decidedBy?: string;
   expired?: AskExpiry;
   /** Why it stopped waiting, in words, when the runtime said more than the reason ("Already decided by Mint at 19:42"). */
   expiredNote?: string;
@@ -1067,7 +1069,7 @@ export type Action =
   /** chat.send went through: the bot has the message (its "Read" mark). */
   | { type: "send.ok"; bot: string; id: string; now: number }
   | { type: "event"; ev: BridgeEvent; now: number }
-  | { type: "approval.resolved"; bot: string; request_id: string; choice: ApprovalChoice }
+  | { type: "approval.resolved"; bot: string; request_id: string; choice: ApprovalChoice; by?: string }
   | { type: "approval.passed"; bot: string; request_id: string; passed: PassedOnNote }
   | { type: "shops"; list: ShopRow[]; current: string | null; left: ShopLeft[] }
   | { type: "shops.dismiss"; id: string }
@@ -1639,7 +1641,7 @@ export function reduce(state: AppState, a: Action): AppState {
           withItems(
             c,
             c.items.map((i) =>
-              i.kind === "approval" && i.request_id === a.request_id ? { ...i, resolved: a.choice } : i,
+              i.kind === "approval" && i.request_id === a.request_id ? { ...i, resolved: a.choice, ...(a.by ? { decidedBy: a.by } : {}) } : i,
             ),
           ),
         ),
@@ -2104,7 +2106,8 @@ export interface Actions {
   sendWithFiles(text: string, files: OutFile[]): Promise<void>;
   /** A message with files in `bot`'s thread `thread`, as `sendWithFiles` sends one in a main chat. */
   threadSendWithFiles(bot: string, thread: string, text: string, files: OutFile[]): Promise<void>;
-  interrupt(): Promise<void>;
+  /** Stops the running turn of `bot`'s chat (the selected bot's by default), as the chat's Stop does. */
+  interrupt(bot?: string): Promise<void>;
   /** Steer queue, on a held row of `bot`'s main chat (the selected bot's by default). Send now: stop the running
    *  turn (one `chat.interrupt`) and send this one first when it ends. */
   queueSendNow(id: string, bot?: string): Promise<void>;
@@ -2115,7 +2118,8 @@ export interface Actions {
   /** Take it out of the queue and put its text back into the composer. */
   queueEdit(id: string, bot?: string): void;
   queueDelete(id: string, bot?: string): void;
-  respondApproval(requestId: string, choice: ApprovalChoice, bot?: string): Promise<void>;
+  /** `by`: who decided, when it is not the person at this Mac (a paired phone's device id); kept on the card. */
+  respondApproval(requestId: string, choice: ApprovalChoice, bot?: string, by?: string): Promise<void>;
   /** A helper passes an ask of their shop on to its owner with a note (`approval.pass_on`); the card shows the note once
    *  the runtime took it. */
   passOnApproval(requestId: string, note: string, bot?: string): Promise<void>;
@@ -3054,8 +3058,8 @@ export function createStore(bridge: BridgeLike, opts: StoreOptions = {}): Store 
       held.delete(id);
       dispatch({ type: "queue.drop", bot, id });
     },
-    async interrupt() {
-      const bot = state.selectedBot;
+    async interrupt(which) {
+      const bot = botArg(which);
       if (!bot) return;
       try {
         await bridge.request("chat.interrupt", { bot });
@@ -3063,7 +3067,7 @@ export function createStore(bridge: BridgeLike, opts: StoreOptions = {}): Store 
         fail(e);
       }
     },
-    async respondApproval(requestId, choice, bot) {
+    async respondApproval(requestId, choice, bot, by) {
       const b = botArg(bot);
       if (!b) return;
       try {
@@ -3071,7 +3075,7 @@ export function createStore(bridge: BridgeLike, opts: StoreOptions = {}): Store 
         if (route) await route.approve(requestId, choice);
         else if (isSessionChat(b)) throw new Error(tr("ask.sessionEnded"));
         else await bridge.request("approval.respond", { bot: b, request_id: requestId, choice });
-        dispatch({ type: "approval.resolved", bot: b, request_id: requestId, choice });
+        dispatch({ type: "approval.resolved", bot: b, request_id: requestId, choice, ...(by ? { by } : {}) });
       } catch (e) {
         fail(e);
       }

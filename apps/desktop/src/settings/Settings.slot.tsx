@@ -33,6 +33,7 @@ import { DeveloperPage } from "./DeveloperPage";
 import { WorktreesPage } from "./WorktreesPage";
 import { SourceControlPage } from "./SourceControlPage";
 import { ArtifactLinksPage } from "./ArtifactLinksPage";
+import { RemotePage } from "./RemotePage";
 import { setSuggestOn, useSuggestOn } from "../lib/suggest";
 import { VoicePage } from "./VoicePage";
 import { ComputerPage } from "./ComputerPage";
@@ -174,6 +175,8 @@ export default function Settings({ page }: SlotProps["settings"]) {
           <SourceControlPage />
         ) : current === "artifacts" ? (
           <ArtifactLinksPage />
+        ) : current === "remote" ? (
+          <RemotePage />
         ) : current === "mcp" ? (
           <McpSkillsPage />
         ) : current === "workflows" ? (

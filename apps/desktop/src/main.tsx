@@ -23,6 +23,9 @@ bootResume();
 startTermLinks();
 // the status files bots holding a terminal link read, and the requests they leave (shown as cards, typed only on Allow)
 startTermShare();
+// "Reach this Mac from your phone" comes back on only for a person who turned it on after its consent sheet; for everyone
+// else this reads one saved choice and does nothing (src/remote/state.ts).
+void import("./remote/state").then((m) => m.resumeRemote());
 // pages that name their moves (rows arriving once, rows sliding to a new place) are looked after in one place
 startMotionDriver();
 // No gate in front of the app: Oh My Hermes waited here for its bridge process (and offered to install Hermes).

@@ -9,6 +9,9 @@ export const EVERYDAY_PAGES: Page[] = [
   { id: "general", label: "set.general" },
   // the chat box's microphone and voice mode: the language spoken, this Mac or Apple, the voice (VoicePage.tsx)
   { id: "voice", label: "set.voice" },
+  // reaching this Mac from a paired phone: the switch behind a consent sheet, off by default, pairing with the typed code,
+  // the paired phones and Unpair (item 78b, RemotePage.tsx). An owner's page, not a developer's, so it is not under the hood.
+  { id: "remote", label: "set.remote" },
 ];
 
 /** The developer pages, which live under one entry of Settings' list, "Under the hood" (the Voice board's words for
