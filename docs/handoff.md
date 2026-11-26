@@ -310,7 +310,9 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    Start helpers card, which starts nothing yet). Then 134 (the join page's countdown test, which owns its clock now).
    Then 102f (a helper lane from a snapshot). At 04:00 on 27 Nov the first account reached its weekly limit (resets
    30 Nov 17:00) with 102b, 102k and 135 mid-work; the owner signed in another account and they were sent on in their
-   own threads. Needs the owner from 101b: Grok signed in and `permission_mode = "ask"`
+   own threads. Then 135, 102k (chats that reach other chats), 102g (landing, shell) and 102b (the job's side-by-side
+   view). Running: 102h (running helper lanes). Next: 102c (gathered answers), 102i (landings in the chat), 102j
+   (reports to the lead). Needs the owner from 101b: Grok signed in and `permission_mode = "ask"`
    under `[ui]` in `~/.grok/config.toml` (it says always-approve, so Grok chats are refused), and Muse Code's CLI. From 101e: all 325 Codex sessions on the owner's Mac are compressed, so
    only Claude Code's conversations are offered until 106b. Needs the owner from 101a: Cursor's Approval mode set to Allowlist (it is Run Everything, so Cursor
    chats are refused), and a Cursor plan with messages left to record a real tool call. GitHub reported 7 Dependabot alerts on `main` (2 critical) at that push, for the owner to look at.
