@@ -1055,6 +1055,61 @@ describe("D2: an option that takes a value, read as taking the option after it (
   });
 });
 
+describe("D3: a key saved by a route the read of the folder's diff does not see (item 120)", () => {
+  /** Lines whose commit or push saves what a read of the folder made before they run cannot see: a step that writes files
+   *  beside the save, or a message or body read from a file. */
+  const UNSEEN = [
+    "cp .env notes.txt && git add notes.txt && git commit -m notes && git push origin kit/promptpay-qr",
+    "cp .env n.txt && git add n.txt && git commit -qm a && git rm -q n.txt && git commit -qm b",
+    "cat .env >> notes.md && git commit -am notes",
+    "printf x > a.txt; git commit -am x",
+    "sed -i '' 's/a/b/' src/a.ts && git commit -am x",
+    "git add -f .env && git commit -m x",
+    "git add --force .env && git commit -m x",
+    "git stash pop && git commit -am x",
+    "git checkout kit/other -- src/a.ts && git commit -am x",
+    "git restore --source kit/other src/a.ts && git commit -am x",
+    "git cherry-pick kit/other && git push origin kit/promptpay-qr",
+    "git pull && git push",
+    "pnpm build && git add -A && git commit -m build",
+    "mv ../x.txt notes.txt && git commit -am x",
+    "tee notes.txt < .env && git commit -am x",
+    "git commit -F .env",
+    "git commit --allow-empty -F .env",
+    "git commit --file=.env",
+    "git commit -F- < .env",
+    "cat .env | git commit -F -",
+    "git commit -t .env",
+    "git commit --template .env",
+    "git commit --allow-empty -F .env && git push origin kit/promptpay-qr",
+    "gh pr create --title fix --body-file .env",
+    "gh pr create -t fix -F .env",
+    "gh pr create -t fix --body-file=.env",
+    "gh pr create -t fix -T .env",
+  ];
+  /** Their plain twins: the save is of what the read before it sees. */
+  const SEEN = [
+    "git add -A && git commit -m x", "git add . && git commit -m x && git push -u origin kit/promptpay-qr", "git commit -am x",
+    "git commit -m x && git push", "git status && git add src/a.ts && git commit -m x", "pnpm test && git commit -am x",
+    "git rm --cached src/a.ts && git commit -m x", "git mv src/a.ts src/b.ts && git commit -m x", "gh pr create -t fix -b body",
+    "git commit -m 'Add -F flag'", "git push origin kit/promptpay-qr",
+  ];
+
+  it("says the read before it cannot see what such a line saves, so a commit or a push in it asks", () => {
+    const wrong: string[] = [];
+    // each is read as unseen, or as a step nobody can read (`--template` already was), which asks at every level
+    for (const line of UNSEEN) if (!readCommand(line, at).unseen && readCommand(line, at).action !== "unknown") wrong.push(`seen: ${line}`);
+    for (const line of SEEN) if (readCommand(line, at).unseen) wrong.push(`unseen: ${line}`);
+    expect(wrong).toEqual([]);
+    counted += UNSEEN.length;
+  });
+
+  it("says which steps send what is saved, so a push reads the commits it sends", () => {
+    for (const line of ["git push", "git push origin kit/promptpay-qr", "git commit -m x && git push", "gh pr create -t x -b y", "git push --force origin kit/x"]) expect([line, readCommand(line, at).sends]).toEqual([line, true]);
+    for (const line of ["git commit -m x", "git add -A", "git status"]) expect([line, readCommand(line, at).sends]).toEqual([line, false]);
+  });
+});
+
 describe("everyday commands", () => {
   /** What a developer and an agent run all day, each as it read before item 112 (only `cdk synth`, now a build, moved).
    *  None of these may start to ask because a hostile line beside it does. */

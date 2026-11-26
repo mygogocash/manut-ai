@@ -137,15 +137,23 @@ const UNREAD = "\u0000unread";
 function keysFor(read: AskRead, chat: string, saved: SavedKeys | null | undefined): string[] {
   const counted = keysIn(chat);
   if (!read.saves) return counted;
-  if (!saved || saved.unread) return [...counted, UNREAD];
-  return [...new Set([...counted, ...saved.files])];
+  // a line that writes files beside the save, or a message or a body from a file, saves what no read made before it sees
+  // (item 120)
+  if (!saved || saved.unread || read.unseen) return [...counted, UNREAD];
+  const found = foundIn(read, saved);
+  // a step that sends weighs the commits it sends too, and asks when they were not read whole (item 120)
+  return read.sends && (!saved.history || saved.history.unread) ? [...counted, ...found, UNREAD] : [...new Set([...counted, ...found])];
 }
+
+/** The names a read of what step `read` saves found a key in: the folder's files and, for a step that sends, the commits'. */
+const foundIn = (read: AskRead, saved: SavedKeys): string[] => [...saved.files, ...(read.sends && saved.history ? saved.history.files : [])];
 
 /** Whether ask `ev` saves or sends the change (a commit, a push) and the dial would let it go alone were nothing found in
  *  what it saves: such an ask waits for `savedKeys` first, and `kitAnswer` is then given what the read found. */
 export function savesAlone(ev: EventOf<"approval.request">, ctx: AskContext, now: number = Date.now()): boolean {
   const read = readIn(ev, ctx, folders.get(ctx.chat) ?? []);
-  if (!read?.saves || !ev.choices.includes("once")) return false;
+  // a save no read could see asks without one (item 120)
+  if (!read?.saves || read.unseen || !ev.choices.includes("once")) return false;
   return decideAsk(read, projectFor(ctx), keysIn(ctx.chat), now).answer === "alone";
 }
 
@@ -199,6 +207,9 @@ export function kitAnswer(
   if (out) {
     answered.set(askKey(ctx.chat, ev.request_id), out.answer);
     appSounds().answered(ctx.chat, ev.request_id);
+  } else if (saved && read.saves) {
+    // what the read found is added to the session's own count, so the card names it
+    noteSaved(ctx.chat, foundIn(read, saved));
   }
   return out;
 }

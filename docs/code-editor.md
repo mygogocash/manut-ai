@@ -126,7 +126,15 @@ The states whose rules are pure functions, with their tests, then the screens th
   each file's diff masked by the shell's twin). A file an added line of which holds a key makes the step ask, whoever wrote it,
   and so does a file it could not read whole (binary, too large, past its budget or its list) or a read that failed or took
   more than five seconds. That read only reaches a folder the app made, so a commit or a push from a session in the
-  developer's own folder always asks. Since item 117 the masker has two forms: `maskSecrets`
+  developer's own folder always asks. Since item 120 three routes that read does not see ask too: a line that writes files
+  beside its commit or push (`cp .env notes.txt && git add notes.txt && git commit …`: the read is made before the line
+  runs; staging what is there, `git rm`, `git mv`, a read or a check beside it are fine, `git add -f` is not), a message or
+  a body read from a file (`git commit -F`, `--file`, `-t`, `--template`, `gh pr create -F`, `--body-file`, `-T`), and a
+  push (or `gh pr create`) whose commits hold a key the folder no longer does. For a push the shell also reads every commit
+  on the lane's branch that no remote-tracking branch holds (`git log` with `--no-ext-diff --no-textconv`, a merge against
+  its first parent, at most 200 commits and 4 MB, within the same budget): a key in an added line, a file's new name or a
+  message makes it ask and is named on the card (a message by its commit's short id); more commits, a binary change, or a
+  read not made in time asks too. A commit is not held up by the history: it sends nothing. Since item 117 the masker has two forms: `maskSecrets`
   for text that never runs, and `maskCommand` for what an ask's card shows, which masks a key and never a substitution, a
   pipe, a second command or a command's own operand (a token-shaped word is a key only as a whole word with a key's
   shape); a private key block keeps its BEGIN and END lines around one masked line only inside a quoted string or a heredoc's

@@ -8,15 +8,16 @@ import { createStore, type ApprovalItem, type BridgeLike } from "../state/store"
 import type { AskTool, BridgeEvent, EventOf } from "../lib/protocol";
 import { askOfItem, kitAnswer, kitAnswered, kitCard, keysIn, resetKitAsks } from "./kitAsks";
 import { addRule, kitProjects, projectOf, resetKitProjects, setLevel, updateKitProjects } from "./project";
+import type { SavedKeys } from "./secrets";
 
 const bridge: BridgeLike = { connect: async () => undefined, onAny: () => () => {}, onStatus: () => () => {}, request: (async () => ({})) as BridgeLike["request"] };
 const ROOT = "/w/baanmali-preorder";
 const FAKE_KEY = "sk-FAKE0000000000000000TEST";
 
 /** What the stand-in shell's read of the session's folder finds in what a commit or a push would save (`SessionHost.laneKeys`). */
-type Saved = () => Promise<{ files: string[]; unread: boolean } | null>;
+type Saved = () => Promise<SavedKeys | null>;
 
-async function session(saved: Saved = async () => ({ files: [], unread: false }), branch: () => string = () => "kit/promptpay-qr") {
+async function session(saved: Saved = async () => ({ files: [], unread: false, history: { files: [], unread: false } }), branch: () => string = () => "kit/promptpay-qr") {
   (globalThis as { localStorage?: unknown }).localStorage = { getItem: () => null, setItem: () => {}, removeItem: () => {} };
   const sinks = new Map<number, (e: ChatEvent) => void>();
   const inputs: ChatInput[] = [];
@@ -348,6 +349,69 @@ describe("Kit's dial on a push of the branch checked out, across one turn (item 
     await endTurn(s);
     expect((await s.ask("u6", RUN, "cd /w/elsewhere && git switch main")).resolved).toBe("deny");
     expect((await s.ask("u7", RUN, "git push")).resolved).toBe("once");
+  });
+});
+
+// Item 120: the read of the lane's diff is made before the line runs and sees only the folder against where it started, so a
+// key written and saved by the same line, one added and taken out again in two commits, or one read into a message or a
+// request's body from a file was never seen.
+describe("Kit's dial on a commit or a push whose key the read of the folder does not see (item 120)", () => {
+  beforeEach(() => {
+    resetKitProjects();
+    resetKitAsks();
+    updateKitProjects((p) => setLevel(p, ROOT, "everything_in_project"));
+  });
+  afterEach(() => {
+    resetKitProjects();
+    resetKitAsks();
+  });
+  const RUN = "Run this command?";
+  const clean = { files: [], unread: false, history: { files: [], unread: false } };
+
+  it("asks before a line that writes files and saves them, and before a message or a body read from a file", async () => {
+    const s = await session(async () => clean);
+    for (const [n, line] of [
+      "cp .env notes.txt && git add notes.txt && git commit -m notes && git push origin kit/promptpay-qr",
+      "cp .env n.txt && git add n.txt && git commit -qm a && git rm -q n.txt && git commit -qm b",
+      "git commit --allow-empty -F .env",
+      "gh pr create --title fix --body-file .env",
+      "gh pr create -t fix -F .env",
+    ].entries())
+      expect([line, (await s.ask(`w${n}`, RUN, line)).resolved]).toEqual([line, undefined]);
+    // the plain twins go
+    for (const [n, line] of ["git add -A && git commit -m x", "git commit -m x && git push origin kit/promptpay-qr", "gh pr create -t fix -b body"].entries())
+      expect([line, (await s.ask(`p${n}`, RUN, line)).resolved]).toEqual([line, "once"]);
+  });
+
+  it("asks before a push whose commits hold a key the folder no longer does, in an added line or a message, and names them", async () => {
+    for (const [name, files] of [
+      ["a line", ["notes.txt"]],
+      ["a message", ["1a2b3c4d5e6f"]],
+    ] as const) {
+      resetKitAsks();
+      const s = await session(async () => ({ files: [], unread: false, history: { files: [...files], unread: false } }));
+      const card = await s.ask(`h-${name}`, RUN, "git push origin kit/promptpay-qr");
+      expect([name, card.resolved]).toEqual([name, undefined]);
+      expect(kitCard(asked(`h-${name}`, RUN, "git push origin kit/promptpay-qr"), { chat: s.key, root: ROOT, home: "/w" })?.keys).toEqual([...files]);
+      // a commit sends nothing: what is already in the history is not its to weigh
+      resetKitAsks();
+      const t = await session(async () => ({ files: [], unread: false, history: { files: [...files], unread: false } }));
+      expect([name, (await t.ask(`c-${name}`, RUN, "git commit -m x")).resolved]).toEqual([name, "once"]);
+    }
+  });
+
+  it("asks before a push when the commits it sends could not be read whole, in time, or at all", async () => {
+    for (const [name, saved] of [
+      ["unread", async () => ({ files: [], unread: false, history: { files: [], unread: true } })],
+      ["no history (an older shell)", async () => ({ files: [], unread: false })],
+    ] as const) {
+      resetKitAsks();
+      const s = await session(saved as Saved);
+      expect([name, (await s.ask(`n-${name}`, RUN, "git push")).resolved]).toEqual([name, undefined]);
+      expect([name, (await s.ask(`g-${name}`, RUN, "gh pr create -t x -b y")).resolved]).toEqual([name, undefined]);
+      // a commit does not wait on the history
+      expect([name, (await s.ask(`m-${name}`, RUN, "git commit -m x")).resolved]).toEqual([name, "once"]);
+    }
   });
 });
 

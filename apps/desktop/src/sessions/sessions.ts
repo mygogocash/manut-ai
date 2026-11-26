@@ -51,7 +51,7 @@ import { askOpen, folderKey, getStore, notifySessionEvent, notifySessionNote, on
 import { blobType, bytesOf, inlinePicture, parseSentFiles, pathsTyped, putSentFiles, SENT_FILES_KEY, shellQuote, wireText, type SavedFile, type SentFilesBook } from "./attach";
 import type { AccountCli, AccountGroup, ApprovalChoice, BridgeEvent, ClarifyAnswers, DiffFile, EventOf, Msg } from "../lib/protocol";
 import { settleApproval } from "../chat/cards/respond";
-import { afterBranchRead, beforeBranchRead, kitAnswer, noteChange, noteSaved, savesAlone } from "../code/kitAsks";
+import { afterBranchRead, beforeBranchRead, kitAnswer, noteChange, savesAlone } from "../code/kitAsks";
 import { readSaved, SAVED_READ_MS } from "../code/secrets";
 import { planLaneBranch, workDir, type LaneBranch } from "../code/laneBranch";
 import { openFolderInEditor } from "../code/editor";
@@ -597,7 +597,6 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
         const [saved, branch] = await Promise.all([readSaved(() => (host.laneKeys ? host.laneKeys(dir) : Promise.resolve(null))), branchNow(dir)]);
         const a = kitAnswer(ask, { ...ctx, branch }, Date.now(), saved);
         if (a) return settleApproval(store(), key, card, a.choice);
-        noteSaved(key, saved?.files ?? []);
         const items = store().getState().chats[key]?.items ?? [];
         const item = items.find((i): i is ApprovalItem => i.kind === "approval" && i.request_id === ask.request_id);
         if (item && askOpen(items, item)) notify?.({ ...ev, bot: key } as unknown as BridgeEvent);

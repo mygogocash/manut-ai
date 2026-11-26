@@ -62,6 +62,12 @@ export interface ReadCommand {
    *  switches, renames or detaches it, may leave the shell in another folder, or cannot be read at all. The session's next
    *  push that names no branch is then read with none, until the branch is read again from disk. */
   movesHead: boolean;
+  /** It saves what a read of the folder made before it runs cannot see (item 120): a step beside the commit or the push
+   *  writes files (`cp .env notes.txt && git add notes.txt && git commit …`), or a message or a body comes from a file. Such
+   *  a step asks, as one whose read could not be made. */
+  unseen: boolean;
+  /** It sends what is saved to the remote (a push, a pull request): the commits it sends are read too (item 120). */
+  sends: boolean;
 }
 
 // ---- paths --------------------------------------------------------------------------------------------------------
@@ -430,6 +436,13 @@ interface Verdict {
   lost?: true;
   /** It may switch, rename or detach the branch checked out, or make another repository to work in (item 120). */
   moves?: true;
+  /** It sends what is saved (item 120). */
+  sends?: true;
+  /** Its message or body is read from a file (item 120). */
+  fromFile?: true;
+  /** It only stages or unstages what the folder already holds, or takes it away (`git add` without force, `git rm`,
+   *  `git mv`): a read of the folder made before it sees what it saves (item 120). */
+  staged?: true;
 }
 
 const say = (key: Key, vars?: Say["vars"]): Say => (vars ? { key, vars } : { key });
@@ -826,10 +839,13 @@ function git(words: string[], where: Where): Verdict {
       return rest[0] === "run" ? unknownProgram("git") : moving(change());
     case "reflog":
       return has(args, "expire", "delete") ? del() : history();
-    case "commit":
+    case "commit": {
       // the file a message or a template is read from (`-F`, `--file`, `-t`) is a path like any other: a key read into a
-      // message would leave with the next push
-      return v("change", say("kit.say.commit"), head, { saves: true, text: textAfter(words, ["-m", "--message", "--author", "--date", "-C", "-c", "--fixup", "--squash"]) });
+      // message would leave with the next push, and no read of the folder sees it (item 120)
+      const text = textAfter(words, ["-m", "--message", "--author", "--date", "-C", "-c", "--fixup", "--squash"]);
+      const fromFile = args.some((w, k) => !text.has(head + k) && ["-F", "-t", "--file", "--template"].some((o) => isOpt(w, o, "mFCct")));
+      return v("change", say("kit.say.commit"), head, { saves: true, text, ...(fromFile ? { fromFile: true as const } : {}) });
+    }
     case "switch":
       if (has(args, "--force", "-f", "--discard-changes")) return moving(del(say("kit.say.discard")));
       return moving({ ...change(), text: textAfter(words, ["-c", "--create", "-C", "--force-create"]) });
@@ -845,7 +861,11 @@ function git(words: string[], where: Where): Verdict {
     case "clone": {
       const r = { ...change(), text: textAfter(words, ["-m", "--message", "-b", "--branch", "-c", "--config", "--origin", "-o"]) };
       // a rebase leaves the branch detached while it stops, and a clone or an init makes another repository to work in
-      return ["rebase", "init", "clone"].includes(sub) ? moving(r) : r;
+      if (["rebase", "init", "clone"].includes(sub)) return moving(r);
+      // staging what the folder holds, or moving a tracked file, saves nothing a read of the folder does not see; with
+      // `--force` git adds a file it ignores, which no read of the folder shows (item 120)
+      if ((sub === "add" && !has(args, "-f", "--force")) || sub === "mv") return { ...r, staged: true };
+      return r;
     }
     case "checkout": {
       if (has(args, "--force", "-f")) return moving(del(say("kit.say.discard")));
@@ -862,7 +882,7 @@ function git(words: string[], where: Where): Verdict {
       if (hasExactly(args, "-n", "--dry-run")) return history();
       return has(args, "-x", "-X") ? unknownProgram("git") : del();
     case "rm":
-      return hasExactly(args, "--cached") ? change() : del();
+      return { ...(hasExactly(args, "--cached") ? change() : del()), staged: true };
     case "gc":
     case "prune":
     case "filter-branch":
@@ -907,7 +927,7 @@ function git(words: string[], where: Where): Verdict {
       return configReads(args, rest) ? history() : unknownProgram("git");
     }
     case "push":
-      return push(words, head, where);
+      return { ...push(words, head, where), sends: true };
     default:
       return unknownProgram("git");
   }
@@ -984,9 +1004,11 @@ function gh(words: string[], where: Where): Verdict {
       if (act === "create") {
         // a request on a repository the words name, or one opened from another folder than the session's, which may be
         // another repository (item 120)
-        if (words.some((w) => w === "-R" || /^-R./.test(w) || isOpt(w, "--repo"))) return { ...sends(), saves: true };
-        if (!samePath(where.cwd || where.root, where.root)) return { ...live(), saves: true };
-        return v("push", say("kit.say.pr"), head, { saves: true, text });
+        if (words.some((w) => w === "-R" || /^-R./.test(w) || isOpt(w, "--repo"))) return { ...sends(), saves: true, sends: true };
+        if (!samePath(where.cwd || where.root, where.root)) return { ...live(), saves: true, sends: true };
+        // a body read from a file, or from a template file, which no read of the folder sees (item 120)
+        const fromFile = words.some((w, i) => !text.has(i) && (["-F", "-T"].some((o) => w === o || (w.startsWith(o) && w.length > 2)) || isOpt(w, "--body-file") || isOpt(w, "--template")));
+        return v("push", say("kit.say.pr"), head, { saves: true, sends: true, text, ...(fromFile ? { fromFile: true as const } : {}) });
       }
       if (act === "merge") return live();
       // it checks out the request's branch (item 120)
@@ -2093,6 +2115,8 @@ export function readCommand(line: string, where: Where): ReadCommand {
     ends: distinct(reads.flatMap((r) => r.ends)),
     ...(resets ? { resets } : {}),
     movesHead: reads.some((r) => r.movesHead),
+    unseen: reads.some((r) => r.unseen),
+    sends: reads.some((r) => r.sends),
   };
 }
 
@@ -2272,7 +2296,10 @@ function readFrom({ cmds, opaque }: Lexed, where: Where, start: string | null): 
   // after it, the branch checked out may not be the one read before (item 120): a step that may move it, one nobody can
   // read, or a shell left in another folder
   const movesHead = lineMoves || RANK[action] >= RANK.unknown || ends.some((e) => e === null || !samePath(e, where.root));
-  return { action, outside, saves, rule, say: s, ends, movesHead };
+  // A save the read of the folder before the line cannot see (item 120): a message or a body from a file, or any step
+  // beside the commit or the push that writes files (one that only reads, checks, stages what is there or saves is none).
+  const unseen = verdicts.some((x) => x.fromFile) || (saves && verdicts.some((x) => !x.saves && !x.staged && RANK[x.action] >= RANK.edit));
+  return { action, outside, saves, rule, say: s, ends, movesHead, unseen, sends: verdicts.some((x) => x.sends) };
 }
 
 /** A package manager's own subcommands: none of them runs a script of the project's by its name. */
