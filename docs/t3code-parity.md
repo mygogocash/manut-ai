@@ -55,10 +55,10 @@ keeps them:
 | Sub-agents across agents and models from one prompt | part: cards show an agent's own subagents; the app starts none | 102 |
 | A worktree for each thread | has (lanes, Settings, Worktrees) | |
 | Agents open, manage and message other threads | part: the fork's thread cards work in Practice only | 102 |
-| Drag a thread into another for its context | no | 97 |
+| Drag a thread into another for its context | has (item 97): a Recent, History or lane row dropped on a box, or Bring context from… in the + menu; the app builds the text with no model and shows it before it goes | 97 |
 | The app as an MCP server that other apps drive | no (an MCP server for computer use only) | 103 |
-| Hand a thread to another agent mid-way | no | 97 |
-| Annotations on a selection, sent with the next message | no | 97 |
+| Hand a thread to another agent mid-way | has (item 97): Continue with… on a coding chat's agent chip, a new chat in the same lane with the old one's context unsent; one agent works in a lane at a time | 97 |
+| Annotations on a selection, sent with the next message | has (item 97): Add a note by a selection in an answer or a lane's pane, sent before the message as a quote | 97 |
 
 ## Other machines
 

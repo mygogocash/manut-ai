@@ -14,6 +14,7 @@
 // box) is the way to take a turn back, and a lane is started from the Code page's + menu, Chat with Kit (item 66, docs/code-editor.md), which New lane opens. A lane that
 // was rewound says Reverted, and offers Bring it back while the shell still keeps the files from before the rewind (until the
 // next turn starts): its panel (BringBack.tsx) opens under the row, filled in by `below`.
+import { dragRef } from "../chat/box/threadContext";
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { elapsed, hhmm } from "../app/time";
 import { t } from "../i18n";
@@ -249,7 +250,8 @@ function LaneItem({ row, now, onOpen, onPull, backOpen, onBack, below, place, ma
   const line = row.status === "failed" ? row.error : row.line ? t(row.line.key, row.line.vars) : "";
   return (
     <div className={`lane${place === "settled" ? " settled" : ""}`} data-testid={`lane-${row.id}`} data-row-key={laneKey(row)} data-status={row.status} data-place={place}>
-      <button type="button" className="rowl" onClick={() => onOpen(row.id)} title={t("lane.open")}>
+      {/* dragged onto an open chat's box, the lane brings its context (item 97) */}
+      <button type="button" className="rowl" onClick={() => onOpen(row.id)} title={t("lane.open")} {...dragRef({ kind: "session", id: row.id })}>
         {place === "pinned" && (
           <span className="lane-pin" role="img" aria-label={t("row.pinned")} title={t("row.pinned")} data-testid="lane-pin">
             ◆

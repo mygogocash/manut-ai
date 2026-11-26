@@ -73,6 +73,12 @@ export interface SavedSession {
   lane?: SavedLane;
   /** A lane a workflow started: the workflow's name (SessionRec `workflow`), so it keeps asking before every change. */
   workflow?: string;
+  /** Continue with… (item 97, continueWith.ts): the link id of the chat this one continues, and of the chat that continues this
+   *  one, each shown as a quiet line linking the other. */
+  continuedFrom?: string;
+  continuedIn?: string;
+  /** A continued chat's model picked in Continue with: set as its agent starts, before the first message goes. */
+  modelWant?: string;
 }
 
 export interface SavedLane {
@@ -149,7 +155,7 @@ function parseSession(v: unknown): SavedSession | null {
   if (typeof v.exitCode === "number" || v.exitCode === null) out.exitCode = v.exitCode;
   const error = str(v.error, MAX_TEXT);
   if (error) out.error = error;
-  for (const k of ["agentSession", "account", "bot", "model", "title", "modelTitle", "agentTitle", "promptTitle", "mode", "effort", "workflow"] as const) {
+  for (const k of ["agentSession", "account", "bot", "model", "title", "modelTitle", "agentTitle", "promptTitle", "mode", "effort", "workflow", "continuedFrom", "continuedIn", "modelWant"] as const) {
     const s = str(v[k], 200);
     if (s) out[k] = s;
   }
