@@ -143,28 +143,40 @@ const SPACE = "[\\t \\u00a0\\u1680\\u2000-\\u200a\\u202f\\u205f\\u3000\\ufeff]";
 const BANG_TICK = new RegExp(`!${SPACE}*\``);
 /** A fence of three or more backticks or tildes whose word starts with `!`: the many-line form of the same. */
 const BANG_FENCE = new RegExp(`(\`{3,}|~{3,})${SPACE}*!`);
-/** One plain setting at the top: a name of letters, digits, `_` and `-`, then a colon and a space or the line's end. */
-const SETTING = /^([A-Za-z][A-Za-z0-9_-]{0,63})[ \t]*:(?:[ \t]|$)/;
+/** One plain setting at the top: a name of letters, digits, `_` and `-`, then a colon and a space or the line's end, and what
+ *  follows on its line. */
+const SETTING = /^([A-Za-z][A-Za-z0-9_-]{0,63})[ \t]*:(?:$|[ \t](.*)$)/;
+/** A setting whose value is the indented lines under it: nothing after the colon (or only a comment), or a block mark (`|`, `>`,
+ *  with its keep, strip or indent signs). Only under one of these may indented lines follow. A one-line value with an indented
+ *  line under it is read differently by a strict YAML reader and a forgiving one, so it is not read at all. */
+const OPENS_BLOCK = /^(?:[|>](?:[+-][1-9]?|[1-9][+-]?)?)?[ \t]*(?:#.*)?$/;
 
 /** The settings of `lines` from `from`, each held to `allowed`, until a line that is exactly `---` (when `fenced`) or the end
  *  (when not). A line this cannot read as a plain setting, a comment, a blank or an indented part of the setting above is
- *  `unreadable`, and so is a fenced top that never closes. */
+ *  `unreadable`, and so are a fenced top that never closes, an indented line under a setting that has its value on its own line,
+ *  and one indented less than the first line of its block. */
 function settingsRefusal(lines: readonly string[], from: number, fenced: boolean, allowed: ReadonlySet<string>): ActsAlone | null {
-  let named = false;
+  // whether the setting above takes indented lines, and how far its first one was indented: a later line indented less would
+  // leave its block, which no setting does by being indented
+  let open = false;
+  let indent: number | null = null;
   for (let i = from; i < lines.length; i++) {
     const line = lines[i] ?? "";
     if (fenced && line === "---") return null;
     if (BLANK.test(line)) continue;
     if (line.startsWith("---") || line.startsWith("...")) return { why: "unreadable" };
     if (line.startsWith(" ")) {
-      if (!named) return { why: "unreadable" };
+      const n = /^ */.exec(line)![0].length;
+      if (!open || line[n] === "\t" || (indent !== null && n < indent)) return { why: "unreadable" };
+      indent ??= n;
       continue;
     }
     if (line.startsWith("#")) continue;
     const m = SETTING.exec(line);
     if (!m) return { why: "unreadable" };
     if (!allowed.has(m[1]!)) return { why: "field", field: m[1]! };
-    named = true;
+    open = OPENS_BLOCK.test((m[2] ?? "").trim());
+    indent = null;
   }
   return fenced ? { why: "unreadable" } : null;
 }

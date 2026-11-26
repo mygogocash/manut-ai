@@ -205,8 +205,9 @@ fn lines(text: &str) -> Vec<&str> {
     out
 }
 
-/// One plain setting's name: a letter, then up to 63 letters, digits, `_` or `-`, then a colon and a space or the line's end.
-fn setting_name(line: &str) -> Option<&str> {
+/// One plain setting's name and what follows on its line: a letter, then up to 63 letters, digits, `_` or `-`, then a colon and
+/// a space or the line's end.
+fn setting_name(line: &str) -> Option<(&str, &str)> {
     let b = line.as_bytes();
     if !b.first()?.is_ascii_alphabetic() {
         return None;
@@ -217,12 +218,45 @@ fn setting_name(line: &str) -> Option<&str> {
     }
     let rest = line[n..].trim_start_matches([' ', '\t']);
     let after = rest.strip_prefix(':')?;
-    (after.is_empty() || after.starts_with([' ', '\t'])).then_some(&line[..n])
+    (after.is_empty() || after.starts_with([' ', '\t'])).then_some((&line[..n], after))
+}
+
+/// Whether a setting with `value` on its line takes the indented lines under it (skillBundle.ts OPENS_BLOCK): nothing after the
+/// colon, or only a comment, or a block mark (`|`, `>`, with its keep, strip or indent signs). Only under one of these may
+/// indented lines follow: a one-line value with an indented line under it is read differently by a strict YAML reader and a
+/// forgiving one, so it is not read at all.
+fn opens_block(value: &str) -> bool {
+    let v = value.trim_matches(is_blank);
+    let mut c = v.chars().peekable();
+    if matches!(c.peek(), Some('|' | '>')) {
+        c.next();
+        match c.peek().copied() {
+            Some('+' | '-') => {
+                c.next();
+                if c.peek().is_some_and(|d| ('1'..='9').contains(d)) {
+                    c.next();
+                }
+            }
+            Some(d) if ('1'..='9').contains(&d) => {
+                c.next();
+                if matches!(c.peek(), Some('+' | '-')) {
+                    c.next();
+                }
+            }
+            _ => {}
+        }
+    }
+    let rest: String = c.collect();
+    let rest = rest.trim_start_matches([' ', '\t']);
+    rest.is_empty() || rest.starts_with('#')
 }
 
 /// The settings of `lines` from `from`, each held to `allowed`, until a line that is exactly `---` (when `fenced`) or the end.
 fn settings_refusal(lines: &[&str], from: usize, fenced: bool, allowed: &[&str]) -> Option<ActsAlone> {
-    let mut named = false;
+    // whether the setting above takes indented lines, and how far its first one was indented: a later line indented less
+    // would leave its block, which no setting does by being indented
+    let mut open = false;
+    let mut indent: Option<usize> = None;
     for line in lines.iter().skip(from) {
         if fenced && *line == "---" {
             return None;
@@ -234,19 +268,22 @@ fn settings_refusal(lines: &[&str], from: usize, fenced: bool, allowed: &[&str])
             return ActsAlone::why("unreadable");
         }
         if line.starts_with(' ') {
-            if !named {
+            let n = line.bytes().take_while(|b| *b == b' ').count();
+            if !open || line[n..].starts_with('\t') || indent.is_some_and(|i| n < i) {
                 return ActsAlone::why("unreadable");
             }
+            indent.get_or_insert(n);
             continue;
         }
         if line.starts_with('#') {
             continue;
         }
-        let Some(name) = setting_name(line) else { return ActsAlone::why("unreadable") };
+        let Some((name, value)) = setting_name(line) else { return ActsAlone::why("unreadable") };
         if !allowed.contains(&name) {
             return Some(ActsAlone { why: "field", field: name.to_string() });
         }
-        named = true;
+        open = opens_block(value);
+        indent = None;
     }
     if fenced { ActsAlone::why("unreadable") } else { None }
 }

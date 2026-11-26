@@ -79,6 +79,15 @@
     ["SKILL.md", "- !``date``\n", "command", ""],
     ["SKILL.md", "---\ndescription: !`whoami`\n---\n", "command", ""],
     ["references/more.md", "Then !`env`\n", "command", ""],
-    ["SKILL.MDX", "!`ls`", "command", ""]
+    ["SKILL.MDX", "!`ls`", "command", ""],
+    ["SKILL.md", "---\nname: x\ndescription: Make a QR\n hooks: bar\n---\nbody\n", "unreadable", ""],
+    ["SKILL.md", "---\nname: x\ndescription: Make a QR\n  allowed-tools: Bash\n---\nbody\n", "unreadable", ""],
+    ["SKILL.md", "---\nname: x\ndescription: |\n    Two lines\n    of text\n hooks: x\n---\nbody\n", "unreadable", ""],
+    ["SKILL.md", "---\nname: x\nmetadata:\n    author: Mali\n  hooks: x\n---\nbody\n", "unreadable", ""],
+    ["SKILL.md", "---\nname: x\ndescription: \"Make a QR\n  for an order\"\n---\nbody\n", "unreadable", ""],
+    ["SKILL.md", "---\nname: x\ndescription: >-\n  Folded\n  text\nmetadata: # who made it\n  author: Mali\n    nested: deeper\n\n  also: this\n---\nbody\n", "", ""],
+    ["SKILL.md", "---\nname: x\ndescription: |+\n  kept\n# a note at the margin\nlicense: MIT\n---\nbody\n", "", ""],
+    ["agents/openai.yaml", "interface: Shown\n dependencies: tools\n", "unreadable", ""],
+    ["agents/openai.yaml", "interface:\n  display_name: Promptpay\n    more: deeper\n", "", ""]
   ]
 }
