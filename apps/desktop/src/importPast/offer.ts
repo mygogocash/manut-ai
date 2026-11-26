@@ -182,14 +182,16 @@ export function shouldLook(rec: ImportRecord, o: { can: boolean; firstRun: boole
   return o.can && !o.firstRun && !rec.offered;
 }
 
-/** Bring `picked` over: each becomes an added folder on the Code page's list (`addFolder`, which adds a folder listed already
- *  only once, so a second run adds nothing twice), the newest at the top as the offer listed them, and the record keeps them for
- *  History. `listed`: the Code page's folders now. The offer counts as made. */
+/** Bring `picked` over: each becomes an added folder on the Code page's list (`addFolder`, which adds a folder that is added
+ *  already only once, so a second run adds nothing twice), the newest at the top as the offer listed them, and the record keeps
+ *  them for History. `listed`: the Code page's folders now, which keep their places under the new ones. A pick that a session
+ *  lists meanwhile (sessions come back after a launch's look) is still added, so History lists it as it lists the rest. The
+ *  offer counts as made. */
 export function bringOver(rec: ImportRecord, prefs: FolderPrefs, picked: readonly string[], listed: readonly string[]): { rec: ImportRecord; prefs: FolderPrefs } {
   const cwds = [...new Set(picked.map(pathKey))].filter((c) => c !== "");
   let next = prefs;
   // addFolder puts each new folder on top: the oldest first, so the newest ends on top
-  for (const cwd of [...cwds].reverse()) next = addFolder(next, cwd, [...listed, ...addedFolders(next)]);
+  for (const cwd of [...cwds].reverse()) next = addFolder(next, cwd, [...listed.filter((l) => pathKey(l) !== cwd), ...addedFolders(next)]);
   const folders = [...new Set([...cwds, ...rec.folders])].slice(0, FOLDERS_MAX);
   return { rec: { offered: true, folders }, prefs: next };
 }

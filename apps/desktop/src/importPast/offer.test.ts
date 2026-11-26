@@ -144,6 +144,13 @@ describe("bringing over", () => {
     expect(JSON.stringify(twice.prefs)).toBe(JSON.stringify(once.prefs));
   });
 
+  it("adds a pick that a session lists meanwhile, so History lists it too, and keeps the listed folders' places under it", () => {
+    const { rec, prefs } = bringOver({ offered: false, folders: [] }, NONE, [WEB], [WEB, "/running"]);
+    expect(addedFolders(prefs)).toEqual([WEB]);
+    expect(prefs.order).toEqual([WEB, "/running"]);
+    expect(historyFolders(rec, prefs)).toEqual([WEB]);
+  });
+
   it("lists in History only the folders brought over that are still on the Code page's list", () => {
     const { rec, prefs } = bringOver({ offered: false, folders: [] }, NONE, [API, WEB], []);
     expect(historyFolders(rec, prefs)).toEqual([API, WEB]);
