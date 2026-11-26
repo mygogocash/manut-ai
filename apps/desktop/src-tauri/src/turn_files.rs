@@ -886,6 +886,125 @@ fn apply(store: &Store, home: &Path, root: &Path, acts: &[Act], keep_dirs: &BTre
 }
 
 // ---------------------------------------------------------------------------------------------
+// Some files of a repository's work tree, for a landing
+// ---------------------------------------------------------------------------------------------
+
+/// One file of a work tree as a helper lane's landing found it (item 102g, `lane_land.rs`): git's mode for it (`100644`,
+/// `100755` or `120000`), its read, write and run bits, and the blob id of its bytes exactly as they are on disk (no filter, no
+/// line-ending conversion), as a snapshot keeps a file. A landing keeps the files it writes this way before and after, so Take
+/// back puts back every byte, and can tell that nothing changed since.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub(crate) struct OnDisk {
+    pub(crate) m: u32,
+    pub(crate) p: u32,
+    pub(crate) o: String,
+}
+
+/// The files `paths` of the work tree `root` (whose own git folder is `git_dir`) as they are on disk: None for a path where
+/// nothing is. With `write` their bytes are stored in the repository's objects, as a snapshot stores them. Err, before anything
+/// is read, for a path that is not a plain relative path ([`safe_rel`]), one reached through a link (never written through), or
+/// one that is a folder or anything but a file or a link: a landing that would have to write there does not.
+pub(crate) fn read_files(home: &Path, root: &Path, git_dir: &Path, paths: &[String], write: bool) -> Result<BTreeMap<String, Option<OnDisk>>, String> {
+    let store = Store::Git { git: git_program().ok_or("git_missing")?, dir: git_dir.to_path_buf() };
+    let mut out: BTreeMap<String, Option<OnDisk>> = BTreeMap::new();
+    let mut todo: Vec<(String, bool)> = Vec::new();
+    let mut bits: Vec<(u32, u32)> = Vec::new();
+    for p in paths {
+        let at = inside(root, p)?;
+        match fs::symlink_metadata(&at) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                out.insert(p.clone(), None);
+            }
+            Err(e) => return Err(format!("{p}: {e}")),
+            Ok(md) => {
+                let ft = md.file_type();
+                let (mode, link) = if ft.is_symlink() && cfg!(unix) {
+                    (LINK, true)
+                } else if ft.is_file() {
+                    (if executable(&md) { 0o100755 } else { 0o100644 }, false)
+                } else {
+                    return Err(format!("{p} is not a file"));
+                };
+                todo.push((p.clone(), link));
+                bits.push((mode, stat_entry(&md, mode).p));
+            }
+        }
+    }
+    let ids = hash_files(&store, home, root, &todo, write)?;
+    for (((p, _), (m, bits)), o) in todo.into_iter().zip(bits).zip(ids) {
+        out.insert(p, Some(OnDisk { m, p: bits, o }));
+    }
+    Ok(out)
+}
+
+/// Puts the files `files` of the work tree `root` back as each holds: written byte for byte with its bits (beside it, then
+/// moved over it), or removed where it holds None. Removals come first, so a file can take the place of a folder that went;
+/// then each folder of `made` (the folders a landing made, deepest first) goes when it is empty. Nothing is written or removed
+/// through a link ([`inside`]). Stops at the first file that cannot be done; the caller puts back what it kept before.
+pub(crate) fn write_files(home: &Path, root: &Path, git_dir: &Path, files: &BTreeMap<String, Option<OnDisk>>, made: &[String]) -> Result<(), String> {
+    let store = Store::Git { git: git_program().ok_or("git_missing")?, dir: git_dir.to_path_buf() };
+    for (rel, f) in files {
+        if f.is_none() {
+            match fs::remove_file(inside(root, rel)?) {
+                Ok(()) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(format!("{rel}: {e}")),
+            }
+        }
+    }
+    let mut reader: Option<Reader> = None;
+    for (rel, f) in files {
+        let Some(f) = f else { continue };
+        let path = inside(root, rel)?;
+        if reader.is_none() {
+            reader = Some(Reader::open(&store, home)?);
+        }
+        let bytes = reader.as_mut().map(|r| r.read(&f.o)).transpose()?.unwrap_or_default();
+        let e = Entry { m: f.m, s: 0, t: 0, c: 0, i: 0, p: f.p, o: f.o.clone() };
+        // a folder in the way of a file that comes back (the landing deleted the file, and a folder of that name was made since)
+        // is never removed: the caller has checked that nothing changed since the landing
+        write_file(&path, &e, &bytes).map_err(|x| format!("{rel}: {x}"))?;
+    }
+    let mut made: Vec<&String> = made.iter().filter(|d| safe_rel(d)).collect();
+    made.sort_by_key(|d| std::cmp::Reverse(d.matches('/').count()));
+    for d in made {
+        if let Ok(at) = inside(root, d) {
+            // remove_dir takes only an empty folder
+            let _ = fs::remove_dir(at);
+        }
+    }
+    Ok(())
+}
+
+/// A tree holding `files`, each under its own name in the tree, written in an index file of this module's own beside `tmp`
+/// (a folder only this account reads): a ref of the app's own that names it keeps their bytes from `git gc`, as a snapshot's
+/// ref does.
+pub(crate) fn tree_of(home: &Path, git_dir: &Path, tmp: &Path, files: &[(String, &OnDisk)]) -> Result<String, String> {
+    let git = git_program().ok_or("git_missing")?;
+    let index = tmp.join(format!("tree-{}-{}", std::process::id(), nonce()));
+    let mut input = Vec::new();
+    for (p, f) in files {
+        if !safe_rel(p) || !hex_id(&f.o) {
+            return Err(format!("not a file to keep: {p}"));
+        }
+        input.extend(format!("{:o} {}\t", f.m, f.o).as_bytes());
+        input.extend(p.as_bytes());
+        input.push(0);
+    }
+    let env = [("GIT_DIR", git_dir.as_os_str()), ("GIT_INDEX_FILE", index.as_os_str())];
+    let built = run_git(&git, home, git_dir, &["update-index", "-z", "--index-info"], &env, Some(input))
+        .and_then(|_| run_git(&git, home, git_dir, &["write-tree"], &env, None))
+        .and_then(git_line);
+    let _ = fs::remove_file(&index);
+    let _ = fs::remove_file(PathBuf::from(format!("{}.lock", index.display())));
+    let tree = built?;
+    if !hex_id(&tree) {
+        return Err("git printed no tree".into());
+    }
+    Ok(tree)
+}
+
+// ---------------------------------------------------------------------------------------------
 // A session's book of snapshots
 // ---------------------------------------------------------------------------------------------
 
