@@ -289,7 +289,7 @@ start, so a file changed by hand never starts what the page would refuse.
 
   | Agent | Refused as skipping the asks or the sandbox |
   | --- | --- |
-  | Claude Code | `--dangerously-skip-permissions`, `--allow-dangerously-skip-permissions`, `--permission-mode`, `--allowedTools`, `--allowed-tools`, `--settings`, `--agents`, `--add-dir` |
+  | Claude Code | `--dangerously-skip-permissions`, `--allow-dangerously-skip-permissions`, `--permission-mode`, `--allowedTools`, `--allowed-tools`, `--settings`, `--setting-sources`, `--agents`, `--add-dir` |
   | Codex | `--dangerously-bypass-approvals-and-sandbox` and its hidden `--yolo`, `--full-auto` (before 0.147), `--dangerously-bypass-hook-trust`, `-a`/`--ask-for-approval`, `-s`/`--sandbox`, `--approve-for-me` and its hidden `--not-so-yolo`, `--add-dir`, `--search`, `-p`/`--profile`, `--enable`, `--disable`, `--trust`, and `-c`/`--config` whose key starts with `approval`, `sandbox`, `profile`, `default_permissions`, `permissions`, `projects`, `mcp_servers`, `features` or `shell_environment_policy` |
   | OpenCode | `--auto`, `--yolo`, `--dangerously-skip-permissions` |
   | Gemini CLI | `-y`/`--yolo`, `--approval-mode`, `--allowed-tools`, `--policy`, `--admin-policy`, `--skip-trust`, `-s`/`--sandbox`, `--include-directories` |
@@ -517,8 +517,9 @@ thing it starts is the lane's preview, when the person presses Start.
   - **What the shell reads** (`lane_diff`): only a folder the app made (the check the removal paths use, `own_lane`, plus git
     listing it as a worktree of the recorded repository; a lane started in a subfolder is read at its subfolder too). It only
     reads, through the lane's own `Git` runner (no hook, no file monitor, no prompt, no optional lock) with `--no-ext-diff
-    --no-textconv`, so no program the repository names runs to draw a diff; a clean filter can still run, as for the
-    developer's own `git status`. A file git ignores never shows, so a `.env` and the agent settings copied in (item 72) do not.
+    --no-textconv`, so no program the repository names runs to draw a diff; a repository whose own config, or a submodule's,
+    names a clean filter is not read at all (see "Git the app runs by itself"), and a submodule is never one of the files nor
+    read inside (item 90). A file git ignores never shows, so a `.env` and the agent settings copied in (item 72) do not.
   - **Bounded, and said.** At most 100 files ("and 12 more files"); a file whose diff is over 256 KiB or that is over 2 MiB on
     disk says "Too large to show."; a binary file says it is binary; the diffs together stop at 1 MiB, and the files after that
     are listed with "Not shown: this list is already long."; the whole read stops at 15 seconds the same way. A page draws at
@@ -720,10 +721,15 @@ another's files or the developer's folder.
   in the lane, keeps the folder, and the kept list names the first of those files; Remove's panel names them as going too.
   The branch stays, and no force flag is ever passed: the removal is `git worktree remove <folder>`, which git itself refuses
   for a locked worktree or one holding files it will not take. A folder kept for commits on no remote says so in the kept
-  list. With the switch off, every folder of a deleted chat is kept and listed. A folder with changes is kept and listed under the lanes
+  list. A folder with submodules (a gitlink in its index, checked out or not, or a modules folder of its own) is always kept
+  (item 90): the app reads nothing inside a submodule by itself (see "Git the app runs by itself"), so its uncommitted work
+  and its commits are not counted, and an empty submodule folder can hold files git lists nowhere. With the switch off, every folder of a deleted chat is kept and listed. A folder with changes is kept and listed under the lanes
   as one of Kit's folders kept, for its project, which stays on the Code page for it even when no session is left there.
   Remove opens a panel that says how many changed files go with the folder; ticking Delete the branch too says how many
-  commits on the branch are not on its base, or that it could not tell. The press is the yes to exactly those numbers: when
+  commits on the branch are not on its base, or that it could not tell. A changed submodule is not one of those files (item
+  90), and the kept list says when a folder has submodules; Remove never forces such a folder, so git's own refusal ("working
+  trees containing submodules cannot be moved or removed", or its refusal of a folder with changes) stands and is shown, and the
+  person removes it by hand. The press is the yes to exactly those numbers: when
   what is there differs, nothing is done and the panel shows the numbers there are now. A folder removed by hand takes only
   git's note of it and the record with it.
 - **Settings › Worktrees** (item 73; `src/settings/WorktreesPage.tsx`, saved on this computer by `src/lib/worktrees.ts` and
@@ -802,9 +808,10 @@ its choices kept on this computer by `src/lib/sourceControl.ts`). The page has t
   date only when the folder is not a lane's; the repository's own config names no program for git to run and no other address to
   fetch from (see "Git the app runs by itself" below); git is not partway through a rebase, merge, cherry-pick, revert or bisect and holds
   no index lock; the checkout is on a branch that tracks a remote branch and both are, by name, the remote's default branch (where
-  `<remote>/HEAD` points, else `main`, else `master`, as the merged clean-up reads it); `git status --porcelain=v1
-  --untracked-files=all --ignore-submodules=none` lists nothing (ignored files do not count); and `git rev-list --count HEAD --not
-  --remotes` is 0. Then it fetches that one branch exactly as Start from the remote does (`lane::fetch_branch`, ten seconds, no
+  `<remote>/HEAD` points, else `main`, else `master`, as the merged clean-up reads it); the checkout has no submodules (item 90:
+  what one holds is never read by itself, so the pull cannot tell whether it would move past work in one; a checkout with any
+  says so and is pulled in a terminal); `git status --porcelain=v1 --untracked-files=all --ignore-submodules=all` lists nothing
+  (ignored files do not count); and `git rev-list --count HEAD --not --remotes` is 0. Then it fetches that one branch exactly as Start from the remote does (`lane::fetch_branch`, ten seconds, no
   password) and moves the checkout only when its commit is an ancestor of the fetched one, with `git merge --ff-only
   --no-overwrite-ignore --no-autostash --no-verify-signatures --no-stat <commit>`: a fast-forward git refuses otherwise, never a merge commit, a rebase,
   a stash or a force; no hook runs. An ignored file does not count as a change, but it is never written over: git's default
@@ -812,8 +819,8 @@ its choices kept on this computer by `src/lib/sourceControl.ts`). The page has t
   the same path, so the pull passes `--no-overwrite-ignore` and git's refusal is said as the folder having changes (item 86).
   A lane started from the remote cannot do this: its fetch moves only the remote-tracking branch, and its checkout is a new
   folder. The cleanliness is read again just before that one write. Kit's panel for the project says in one line what happened:
-  how many commits came, or why nothing was done (changes, commits on no remote, busy, another branch, no upstream, could not
-  fetch, both moved).
+  how many commits came, or why nothing was done (changes, submodules, commits on no remote, busy, another branch, no upstream,
+  could not fetch, both moved).
 - **Default merge method** (default "The last one I chose", which starts as a merge commit) and **Remove agent credits when
   merging** (default off), for the asks below. The recognised credit lines are listed on the page as the code holds them.
 
@@ -837,6 +844,39 @@ terminal (`GIT_PAGER=cat` too on the Diff). Work the person asked for by pressin
 and a pull request after a Yes, Remove) runs git with their settings and the repository's, as the same git in a terminal would,
 hooks and the file monitor aside: they chose to act on that project, and a refusal there would break a repository-local LFS or
 deploy-key ssh setup the person relies on.
+
+**Submodules** (item 90). A git that goes into a submodule reads that submodule's own config (`.git/modules/<name>/config`,
+nested ones too) and attributes, which none of the above reached, so a folder someone sent with a submodule whose config names a
+clean filter ran it within a minute of being opened. Two guards now:
+
+- The app's own runs never go into a submodule. `git status` and every diff pass `--ignore-submodules=all` (a diff against the
+  work tree, and a status, otherwise run `status` inside each submodule), the diffs also `--submodule=short` (never
+  `diff.submodule`'s `log` or `diff` forms, which read or diff inside one), the fetch `--no-recurse-submodules`, and every
+  automatic run `-c submodule.recurse=false -c diff.ignoreSubmodules=all` for anything that does not say it itself (`git help
+  status`, `git help diff`, `git help config`; `git merge --ff-only` does not recurse on its own, checked with git 2.54).
+  `ls-files`, `rev-parse`, `rev-list`, `merge-base`, `log` and `worktree list` never go into one.
+- Before any automatic work, every submodule's own config is read too (`lane::config_risk_by`): each git folder under the work
+  tree's modules folder (`git rev-parse --git-path modules`; a lane has its own), nested ones and names with `/`, walked without
+  following a link, and the git folder of each submodule checked out in the work tree that is not under it (`<path>/.git`, a
+  folder, or a file whose `gitdir:` points anywhere), each read as git reads it there (`git --git-dir=<folder> config --list
+  --show-scope --includes -z`, so `includeIf` is matched against the submodule). The same settings stop it as above, and a diff
+  driver's program too (`diff.external`, `diff.<driver>.command` and `.textconv`), since `--no-ext-diff --no-textconv` does not
+  reach a diff git runs inside a submodule. It is named `modules/<name>:<setting>`. A link, a config git cannot read (the
+  repository's own too), more than 100 such folders or deeper than 8 is read as `?` and stops the work the same way. Attributes
+  are not read: a filter or diff driver named in `.gitattributes`, `info/attributes` or `core.attributesFile` runs nothing
+  unless a config defines its program, and every config git reads for the repository and its submodules is read here (the
+  person's own global and system settings aside, as above).
+
+What a person sees changes a little: a changed submodule is no longer counted as a change in a lane's counts, its Diff or the
+main-moved note. Nothing is removed or pulled past because of that: a folder with submodules is kept by every clean-up
+(`submodules`), Remove never forces it, the automatic pull stops at a checkout with any, and the kept list says so. Elsewhere in
+the same class: a `.git` file that points at another folder, and a bare repository committed inside a project, are read exactly
+as git reads them from the same folder, so the same settings stop the work; `include.path` and `includeIf` are read with
+`--includes`; hooks and the file monitor are switched off by `-c`, which git passes on to every git it starts, a submodule's
+included; the variables that would send git to another repository's files or objects (`GIT_DIR`, `GIT_WORK_TREE`,
+`GIT_INDEX_FILE`, `GIT_OBJECT_DIRECTORY`, `GIT_ALTERNATE_OBJECT_DIRECTORIES`, `GIT_COMMON_DIR`, `GIT_NAMESPACE`) are taken out
+of what git inherits; an alternates file names only where objects are read and runs nothing; and git's own `safe.directory`
+and `safe.bareRepository` are left as the person set them (the app never widens them).
 
 **Put up for review** (`code/Review.tsx`, under a lane's row and at the top of its pane, for a lane with a folder and a branch of
 its own and no open pull request yet). The link opens a draft: a title (the one commit's subject, else the lane's title) and a
@@ -915,7 +955,9 @@ still goes through the asks (How an ask is read, Kit's dial, Buddy's card).
   back at once. So a copy (an `.mcp.json` can hold a token) is never committed by `git add -A`, never kept in a turn's snapshot
   (which leaves out what git ignores), never keeps a clean-up from removing the folder, and goes with the folder. Links, files
   over 1 MiB and more than 200 files stay behind too. The lane's first line says how many came along and how many stayed and
-  why; a file that came along is not counted among the changed files that did not. Copies are made for this account only
+  why; a file that came along is not counted among the changed files that did not. Since item 89 a chat's Claude Code reads
+  none of the project's or the lane's own copies (see [What a project's own files cannot do](#what-a-projects-own-files-cannot-do)):
+  they are there for a terminal opened in the lane, which asks Claude Code's own trust question, and for Codex. Copies are made for this account only
   (0600), and a change to a copy stays in the lane. Claude Code itself also reads some of the developer's own from a worktree
   (local settings at the main checkout's root, untracked skills, agents and commands when the worktree has none, the folder's
   local-scope MCP servers; checked on this Mac with Claude Code 2.1.332, `claude mcp list` in a `git worktree add` folder and
@@ -953,7 +995,13 @@ still goes through the asks (How an ask is read, Kit's dial, Buddy's card).
   root being the developer's folder for a lane), the server approved by `enabledMcpjsonServers` or
   `enableAllProjectMcpServers` in the person's user settings, the root's `.claude/settings.local.json` while git does not
   track it, or the folder's entry, and not in `disabledMcpjsonServers`. A repository's committed settings never approve its
-  own servers, as in Claude Code. This one source because `.mcp.json` lives in the folder the agent already works in, so its
+  own servers, as in Claude Code. In a lane (item 89) the approval is of the entry, not the name: a server is handed on only
+  when its whole entry in the lane, as canonical JSON (keys sorted, `${VAR}`s as written), has the same SHA-256 digest as the
+  entry of that name in the developer's folder at the same place (`acp_mcp::entry_digest`), the one the person approved. A
+  lane's `.mcp.json` is the lane's own file, which its agent can change, so another command, argument, variable, address,
+  header or kind under an approved name, or a name the developer's folder does not have, starts nothing, and the chat says
+  "Not started in this lane: <names>" with why (`session.note` `mcp_differs`, names only). A session in the developer's own
+  folder is held to the entries there, as Claude Code is. This one source because `.mcp.json` lives in the folder the agent already works in, so its
   literal values are ones the agent can read anyway, and its `${VAR}` and `${VAR:-default}` are filled in from the environment
   the agent already runs with (a server with a variable that is not set is left out). The servers the person added to Claude
   Code or Codex themselves are not handed on: their secrets were given to those agents. Shapes from the protocol's Session
@@ -972,6 +1020,67 @@ still goes through the asks (How an ask is read, Kit's dial, Buddy's card).
   until the app closes); Codex's is not known. Plugin skills are one row per plugin. The page changes nothing and names the
   commands that do (`claude mcp add`, `codex mcp remove`, the skills folders), says where else the settings reach, and in a
   browser says there is nothing to read.
+
+### What a project's own files cannot do
+
+Item 89 (security review, 26 Nov 2026). A chat starts its agent headless, and `claude -p` skips Claude Code's "Do you trust this
+folder?" question (`claude --help`: "The workspace trust dialog is skipped when Claude is run in non-interactive mode"). So
+before this item a repository's own files acted in every chat the app started: a committed `.claude/settings.json` hook ran on
+the Mac, an untracked `.claude/settings.local.json` (one a lane copied in, or one a build step wrote) could allow all of Bash so
+that Kit's dial never saw those asks, a `defaultMode` could start the chat in Accept edits, and `.mcp.json` servers connected
+without asking (Claude Code's permissions page, "What runs before you trust a folder", `claude -p` column). Now no file inside a
+project folder or a lane's folder, committed or copied in, can run a hook, allow a tool, set a permission mode, or name a key
+helper or a status line program in a chat the app starts, where the agent has a switch for it:
+
+- **Claude Code** (every chat, a lane's or not, and Buddy's): `--setting-sources user` (`sessions::CLAUDE_CHAT_ARGS`). The
+  permissions page names this flag for `claude -p` in a repository you did not write ("reads neither the project's settings
+  files nor its `.mcp.json`"), and the Agent SDK page says what each source loads: `project` is `.claude/settings.json` and
+  its hooks, CLAUDE.md and `.claude/rules` in the folder and every folder above it, and the folder's skills, commands and
+  subagents; `local` is `.claude/settings.local.json` and `CLAUDE.local.md`. Every chat also starts with
+  `--permission-mode` named on its command line (`agent_chat::start_mode`): the mode the person picked (a Restart, a restart of
+  the app), else Ask (`default`), so a `defaultMode` in any file, the person's own included, never chooses it. The page passes
+  the mode with `chat_start` and no longer sets it after the start; a mode the agent does not offer refuses the start.
+- **Codex**: its thread starts (`thread/start`, `thread/resume`) with the approval policy and sandbox of the chat's mode, Ask
+  (`untrusted`, `workspace-write`) unless the person picked another, and every turn carries them, as before.
+- **OpenCode**: `OPENCODE_DISABLE_PROJECT_CONFIG=1` (OpenCode's CLI documentation: "Disable project configuration and project
+  instruction files"). Checked on this Mac with OpenCode 2.3.0: `opencode debug config --standalone` in a folder with an
+  `opencode.json` and a `.opencode` folder lists both as sources without it and neither with it, while the person's own
+  configuration and an inline `OPENCODE_CONFIG_CONTENT` stay. A person's variable of that name is refused on Settings ›
+  Providers, as the app's own, and the app's value goes last.
+
+**What a developer loses inside an app chat.** Claude Code: the project's `.claude/settings.json` and
+`.claude/settings.local.json` no longer apply, so their hooks, their allow, ask and deny rules (a team's deny rules
+included), `env`, `defaultMode`, plugins (`enabledPlugins`) and model; the project's `.mcp.json` servers do not connect, even
+approved ones; the project's CLAUDE.md, `.claude/CLAUDE.md`, `.claude/rules`, CLAUDE.md files in the folders above it and
+`CLAUDE.local.md` are not read; the project's skills, commands and subagents are not offered; a "don't ask again" Claude Code
+writes to the local file is not read back. Buddy's chat, in its own empty folder, no longer reads a CLAUDE.md in the folders
+above it (`~/CLAUDE.md`). OpenCode: the project's `opencode.json` and `.opencode` folder, and its instruction files. What stays,
+as a terminal would have it: the person's own settings, CLAUDE.md, rules, skills, commands, subagents and the plugins their
+own settings turn on, the MCP servers in `~/.claude.json` and their claude.ai connectors (read whatever the sources, Agent SDK
+page), managed settings, and auto memory. Kit's dial and the cards are unchanged. A developer who wants a project's own setup
+can open the folder in a terminal session, where Claude Code asks its own trust question, or move what they need into their
+user settings. Not confirmed by running Claude Code: whether a folder's local-scope MCP servers in `~/.claude.json` still
+connect (the SDK page says the file is always read), and whether output styles or Claude Code workflows in the project are
+held by the source list (neither can run a program or allow a tool on its own).
+
+**The other agents, by agent.** Each one's project files read from its own help and documentation (no agent was run):
+
+| Agent | Project files that can allow a tool or run a program | Switch | Here |
+| --- | --- | --- | --- |
+| Codex | `.codex/config.toml` (approval, sandbox, MCP servers, hooks), loaded only for a project the person trusted in Codex | none that leaves out the project layer; `-c` sets single keys | the thread's mode is named (above). Open: a project the person trusted in Codex still starts its MCP servers and hooks |
+| OpenCode | `opencode.json(c)`, `.opencode/` (permissions, MCP servers, plugins, formatters, agents) | `OPENCODE_DISABLE_PROJECT_CONFIG` | on (above) |
+| Gemini CLI | `.gemini/settings.json` (`tools.allowed`, `general.defaultApprovalMode`, MCP servers, hooks), `.gemini/.env`, `.env` | folder trust (`security.folderTrust.enabled`), which the documentation calls both off and on by default; nothing found that leaves out project settings and keeps the person's | open: whether trust holds under `--acp` is not documented |
+| Qwen Code | `.qwen/settings.json` (`permissions.allow`, `tools.approvalMode`, MCP servers, hooks) | folder trust, off by default | open (not installed here) |
+| Kimi Code | none found: its hooks are user-level only ("there is no project-level hook file") | none needed for hooks | open for MCP and permission files (not installed here) |
+| Copilot CLI | `.github/copilot/settings.json`, part of `.claude/settings.json`, `.github/hooks/*.json` (after workspace admission), `.mcp.json` and `.github/mcp.json` | none found | open (not installed here) |
+| Cline | `.cline/hooks/`, `.clinerules` | none found (`--hooks-dir` only adds) | open |
+| Cursor | `.cursor/cli.json` (`permissions.allow`), `.cursor/hooks.json` (needs workspace trust), `.cursor/mcp.json` (needs approval) | none found; `--trust` is the opposite and is refused | open |
+| Antigravity | not read: its hooks, MCP and project pages were not reached | `--include-default-customizations=false` is untested | open |
+| pi | `.pi/extensions` (code), `.pi/settings.json` (`packages`, `extensions`), loaded after project trust (`defaultProjectTrust`, agent-folder settings only) | none for the rpc mode found | open (not installed here) |
+| oh-my-pi | `.omp/` hooks and extensions, `.omp/mcp.json` | `--no-extensions` also drops the person's own; `--approval-mode` unconfirmed against project settings | open |
+| OmO, DeepSeek Harness, a person's own agent | not read (not installed here, or the person's) | | open |
+
+Grok runs only as its own terminal, where its own prompts apply. `docs/decisions.md` has the call (item 89).
 
 ### How the main branch moving is read
 
@@ -1245,7 +1354,8 @@ person's next message would, until the last.
   Otherwise the run is Failed with that reason and nothing starts.
 - **The most careful setting.** Nobody may be watching, so the lane reads its asks at Kit's lowest level, Asks every time, with no
   kept rule, whatever the project's dial says (`careful` on `code/kitAsks.ts`' context), and starts in the agent's Ask mode
-  (Claude Code `default`, Codex `ask`). Reading files and running the tests still go alone, and a step outside the project is still
+  (Claude Code `default`, Codex `ask`), named when the agent starts, as every chat's mode is since item 89 (see
+  [What a project's own files cannot do](#what-a-projects-own-files-cannot-do)). Reading files and running the tests still go alone, and a step outside the project is still
   stopped. The mark (`SessionRec.workflow`) is saved with the session, so a lane that comes back after a restart stays careful. The
   lane's box shows that level and says why instead of the dial; the chat says it as the lane starts; the page says it under the
   switch.

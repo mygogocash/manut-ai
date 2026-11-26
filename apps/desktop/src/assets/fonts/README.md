@@ -22,3 +22,4 @@ subsets the app needs are kept.
 | `geist-latin-wght-normal.woff2`, `geist-latin-ext-wght-normal.woff2` | `@fontsource-variable/geist` 5.3.0 (sha256 of the tarball `533dd66117795ac12316fb05fce27736c4bc63c31613b302d0a5285ca3a291d7`) | SIL OFL 1.1, `Geist-OFL.txt` |
 | `geist-mono-latin-wght-normal.woff2`, `geist-mono-latin-ext-wght-normal.woff2` | `@fontsource-variable/geist-mono` 5.3.0 (sha256 `af7a9f156602b859efa95cd1acb824a5322c51a1eca53afb38ed033885736a70`) | SIL OFL 1.1, `GeistMono-OFL.txt` |
 | `ibm-plex-sans-thai-thai-{400,500,600}-normal.woff2` | `@fontsource/ibm-plex-sans-thai` 5.3.0 (sha256 `5ca89cc99ea11b8ee264f9b9dc5deae8a448693cbc2a467a3719146230f3ffd4`) | SIL OFL 1.1, `IBMPlexSansThai-OFL.txt` |
+| `source-serif-4-{latin,latin-ext}-wght-{normal,italic}.woff2` | `@fontsource-variable/source-serif-4` 5.3.1 (sha256 `8c452853c74be1e43e9fbfe76321c26f4678a2d431e93209ff1d9faec03fd96f`) | SIL OFL 1.1, `SourceSerif4-OFL.txt` (the package's own `LICENSE`) |

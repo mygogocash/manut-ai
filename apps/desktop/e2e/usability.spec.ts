@@ -190,14 +190,14 @@ test("Automations and Plugins are pages now, not Soon", async ({ page }) => {
 test("the bot's face sits beside its bubbles, once per run of bot messages", async ({ page }) => {
   await page.goto("/");
   const bot = page.getByTestId("bubble-bot").first();
-  await expect(bot.locator("img.msg-face")).toBeVisible();
+  await expect(bot.locator(".ui-av.msg-face")).toBeVisible();
   // a reply right after another bot bubble keeps the indent but hides the face
-  const faces = page.locator('[data-testid="bubble-bot"] img.msg-face:not(.blank)');
+  const faces = page.locator('[data-testid="bubble-bot"] .ui-av.msg-face:not(.blank)');
   expect(await faces.count()).toBeGreaterThan(0);
-  // the thread is wider than before (920px cap) so a 1440px window is not a narrow centred column
+  // the thread is the Chat board's column (item 85f): 696px in a wide window, so no line of an answer is wider
   await page.setViewportSize({ width: 1440, height: 900 });
   const w = await page.locator(".thread > *").first().evaluate((e) => e.getBoundingClientRect().width);
-  expect(w).toBeGreaterThan(760);
+  expect(w).toBe(696);
 });
 
 
@@ -208,18 +208,20 @@ test("the activity line and the approval card start at the bot bubbles' text col
   await expect(page.getByTestId("card-approval")).toBeVisible();
   const left = (sel: string) => page.locator(sel).last().evaluate((e) => Math.round(e.getBoundingClientRect().left));
   const text = await left('[data-testid="bubble-bot"] .b');
-  const face = await left('[data-testid="bubble-bot"] img.msg-face');
+  const face = await left('[data-testid="bubble-bot"] .ui-av.msg-face');
   expect(text - face).toBe(38); // face 28px + gap 10px
   expect(await left('[data-testid="card-approval"]')).toBe(text);
   expect(await left('[data-testid="activity"]')).toBe(text);
 });
 
-test("at 900px the header fits: the name ellipsizes, the model gives way, the panel overlays the chat", async ({ page }) => {
+test("at 900px the header fits: the name ellipsizes, the model is in the box, the panel overlays the chat", async ({ page }) => {
   // a long model id and a long name, set before the page opens the chat
   await mock("chat.set_model", { bot: "kami", model: "anthropic/claude-opus-5-5-extended-thinking-preview" });
   await page.setViewportSize({ width: 900, height: 700 });
   await open(page);
-  await mock("bots.rename", { bot: "kami", name: "Kami the very long bot name that never ends" });
+  // long enough to need an ellipsis now that no model shares the header (item 85f): the mock's 64 characters, Hangul
+  // for width
+  await mock("bots.rename", { bot: "kami", name: "Kami the very long bot name 그리고 끝없이 이어지는 아주 아주 긴 이름을 가진 우리 가게의 봇" });
   await expect(page.getByTestId("who")).toContainText("very long bot name");
   const timelineBefore = await page.getByTestId("timeline").evaluate((e) => e.getBoundingClientRect().width);
   await page.getByTestId("who").click();

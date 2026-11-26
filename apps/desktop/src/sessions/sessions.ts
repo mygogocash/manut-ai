@@ -676,6 +676,12 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
           const key = keys.get(id);
           if (key) store().dispatch({ type: "system.note", bot: key, text: tr("ss.newConversation"), now: Date.now() });
         }
+        // a lane's MCP server whose entry is not the one the person approved was not started (acp_mcp.rs, item 89): its names
+        if (ev.kind === "mcp_differs" && Array.isArray(ev.names)) {
+          const key = keys.get(id);
+          const names = ev.names.filter((n): n is string => typeof n === "string").join(", ");
+          if (key && names) store().dispatch({ type: "system.note", bot: key, text: tr("ss.mcpDiffers", { names }), now: Date.now() });
+        }
         return;
       case "exit": {
         if (procs.get(id) === proc) procs.delete(id);
@@ -764,8 +770,10 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     // and so no turn kept before it can be rewound: their snapshots go
     turns.forget(id);
     try {
-      // a lane's agent works in the lane's own folder
-      proc.hostId = await host.chatStart(r.agent, workDir(r), onAgentEvent(id, proc), resume, accountOf(r), id, suggestOn() && suggestWorks(r.agent));
+      // a lane's agent works in the lane's own folder, and starts in the mode the person picked (a restart, a Restart, a
+      // workflow's Ask): named at the start (item 89), so it holds from the first turn; none, and the shell picks the careful one
+      const mode = r.mode && modesOf(r.agent).includes(r.mode) ? r.mode : undefined;
+      proc.hostId = await host.chatStart(r.agent, workDir(r), onAgentEvent(id, proc), resume, accountOf(r), id, suggestOn() && suggestWorks(r.agent), mode);
       // it said it is not signed in before manut knew its id: it is ended already, so only the process goes
       if (proc.signedOut) {
         void host.chatClose(proc.hostId).catch(() => undefined);
@@ -777,9 +785,8 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
         return;
       }
       patchRec(id, { status: "running" });
-      // the mode and effort the person picked before (a restart, a Restart) are set again
+      // the effort the person picked before (a restart, a Restart) is set again; the mode went with the start
       const again = rec(id);
-      if (again?.mode && modesOf(again.agent).includes(again.mode)) await host.chatInput(proc.hostId, { kind: "mode", mode: again.mode }).catch(() => undefined);
       if (again?.effort) await host.chatInput(proc.hostId, { kind: "effort", effort: again.effort }).catch(() => undefined);
       void readBranch(id);
     } catch (e) {

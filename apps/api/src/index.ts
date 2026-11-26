@@ -28,7 +28,7 @@ import { modelAdminRoute } from "./model-gateway";
 import { peopleRoute, queryNamesSession } from "./people";
 import { pilotRoute } from "./pilot";
 import { routinesRoute } from "./routines";
-import { relayPath, relayRoute, relaySourceGroup } from "./relay";
+import { relayEnabled, relayPath, relayRoute, relaySourceGroup } from "./relay";
 import { RelayObject } from "./relay-object";
 import { ScheduleObject } from "./schedule-object";
 import { signUpsOpen } from "./self-serve";
@@ -121,6 +121,9 @@ export interface Env {
   /// which must be a host of its own, never the app's. No environment sets either, so publishing answers feature_disabled
   /// and no page is served anywhere. ARTIFACT_READ_LIMITER counts every request on the artifact host, per source address.
   ARTIFACT_LINKS?: string;
+  /// Skill links (item 84): the default of `skillLinks`, which no environment sets either. A bundle of skills is published and
+  /// read only while both switches are on.
+  SKILL_LINKS?: string;
   ARTIFACT_ORIGIN?: string;
   ARTIFACT_READ_LIMITER?: RateLimit;
   /// Making a shop of one's own (self-serve.ts; docs/pilot-api.md, "Making a shop of your own"). Built and off: the route
@@ -409,10 +412,13 @@ export type FeatureFlags = {
   /// Artifact links (artifacts.ts, docs/pilot-api.md "Artifact links"): `POST /v1/artifacts` answers 403
   /// `feature_disabled` and every link answers 404 until it is on.
   artifactLinks: boolean;
+  /// Skill links (artifacts.ts, docs/pilot-api.md "Skill links"): a bundle of skills is refused 403 `feature_disabled` and its
+  /// link answers 404 until this is on as well as `artifactLinks`, so pages can be allowed and skills not.
+  skillLinks: boolean;
 };
 
 const FLAG_KEYS = ["officeCloud", "officeRoutines", "officeExternalWrites", "officeInbound", "officeSharing", "shopFeed",
-  "artifactLinks"] as const;
+  "artifactLinks", "skillLinks"] as const;
 
 async function featureFlags(env: Env): Promise<FeatureFlags> {
   const defaults: FeatureFlags = {
@@ -423,6 +429,7 @@ async function featureFlags(env: Env): Promise<FeatureFlags> {
     officeSharing: env.OFFICE_SHARING === "1",
     shopFeed: env.SHOP_FEED === "1",
     artifactLinks: env.ARTIFACT_LINKS === "1",
+    skillLinks: env.SKILL_LINKS === "1",
   };
   try {
     const response = await authCall(env, "/flags");
@@ -442,6 +449,7 @@ async function featureFlags(env: Env): Promise<FeatureFlags> {
         typeof dynamic.officeSharing === "boolean" ? dynamic.officeSharing : defaults.officeSharing,
       shopFeed: typeof dynamic.shopFeed === "boolean" ? dynamic.shopFeed : defaults.shopFeed,
       artifactLinks: typeof dynamic.artifactLinks === "boolean" ? dynamic.artifactLinks : defaults.artifactLinks,
+      skillLinks: typeof dynamic.skillLinks === "boolean" ? dynamic.skillLinks : defaults.skillLinks,
     };
   } catch {
     return defaults;
@@ -711,11 +719,14 @@ export default {
     const adminDenial = adminGate(request, url.pathname, env, ctx);
     if (adminDenial) return adminDenial;
 
-    // Health carries no task data and stays public.
+    // Health carries no task data and stays public. It also says whether the relay is switched on, which anyone can
+    // already learn from a relay route's 503: the desktop's page cannot read that answer from a socket, and asks here
+    // before dialling again (apps/desktop/src/remote/link.ts).
     if (request.method === "GET" && url.pathname === "/v1/health") {
       return json({
         ok: true,
         service: "manut-api",
+        relay: relayEnabled(env) ? "on" : "off",
         families: [
           "tasks",
           "work",

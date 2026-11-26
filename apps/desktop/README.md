@@ -85,6 +85,18 @@ the names omher's screens use, each pointed at a design token. `src/theme/tokens
 layer drifts from `tokens.json`. Geist, Geist Mono and IBM Plex Sans Thai are bundled (`src/theme/fonts.css`,
 `src/assets/fonts/`), because the app allows no remote font.
 
+## Settings
+
+Settings (`src/settings`) is drawn as the canvas's Settings board: a quiet list of its pages beside one reading
+column, text 696 wide at most, groups under grey bands in sentence case, rows 44px, buttons 34px, fields 40px, and type
+on the kit's scale, nothing under 12px (`settings.css`, held there by `settingsColumn.test.tsx`). The list leads with
+the everyday pages (General, Voice), then the team and the shop's People. The developer pages (Terminal, Providers,
+Computer, Worktrees, Source control, Artifacts, MCP and Skills, Workflows, Developer, `HOOD_PAGES` in `pages.ts`) sit
+under one entry, "Under the hood", which is closed until someone opens it and is remembered open on this computer
+(`manut.settings.hood`). A link to one of its pages (the palette, a page's own button) opens it by itself, so a name
+like "Settings › Terminal" still lands where it says. Under a 756px main column the list stacks above the page as rows
+that wrap. Its segmented switches are Home's 28px pill, one part for both (`src/ui/Modes.tsx`, `.ui-modes`).
+
 ## The command palette
 
 Command-K (Ctrl+K off macOS) and the side menu's Search open one box over whatever is showing (`src/palette`): a

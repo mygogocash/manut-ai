@@ -26,14 +26,16 @@ export async function respond(store: { getState(): Pick<AppState, "chats" | "las
 }
 
 /** Settles approval `item` of chat `bot` with `choice` through the store's respondApproval, exactly as each of the
- *  card's buttons does. Null once the runtime took it, otherwise why not. */
+ *  card's buttons does. `by` names who decided when it was not the person at this Mac: a paired phone's device id, once
+ *  its passkey answer checked out (src/remote/serve.ts). Null once the runtime took it, otherwise why not. */
 export function settleApproval(
   store: Pick<Store, "getState" | "actions">,
   bot: string,
   item: Pick<ApprovalItem, "id" | "request_id">,
   choice: ApprovalChoice,
+  by?: string,
 ): Promise<string | null> {
-  return respond(store, bot, item.id, () => store.actions.respondApproval(item.request_id, choice, bot));
+  return respond(store, bot, item.id, () => (by ? store.actions.respondApproval(item.request_id, choice, bot, by) : store.actions.respondApproval(item.request_id, choice, bot)));
 }
 
 /** Passes approval `item` of chat `bot` on to its shop's owner with `note`, through the store's passOnApproval (a helper's

@@ -29,7 +29,10 @@ The fixes are items 85e to 85i in `docs/plan.md`; the motion is items 85a to 85c
    silhouettes on team-colour grounds (the Colour board's team colours, `KitFaces`). `src/ui/Avatar.tsx`. Seen.
 2. **The chat.** Replies are 13px sans in grey bubbles on both sides. The Chat board sets Buddy's answer in 17px serif
    with no bubble, and only the person's message has one. The serif is not bundled (`theme/fonts.css`), `--font-read`
-   is used only in `pages/mission.css`, and `--fs-msg` starts at 13px. Seen, and code.
+   is used only in `pages/mission.css`, and `--fs-msg` starts at 13px. Seen, and code. *Item 85f (26 Nov):* the answer
+   is on the page in `--font-read` at 17px / 1.65 in a 696px column, the person's message alone in a bubble at 15px,
+   and Settings › Appearance's text size moves both a step along the scale. The serif, Source Serif 4, is bundled
+   for Latin text; Thai and the CJK languages read in the stack's next serif until theirs are bundled.
 3. **Languages.** Settings and the palette offer English, Korean, Japanese and Chinese, and no Thai. The Type board
    treats Thai as a first language. Not changed: the owner said on 25 Nov that the first release speaks those four and
    Thai waits.
@@ -41,13 +44,16 @@ The fixes are items 85e to 85i in `docs/plan.md`; the motion is items 85a to 85c
 6. **The foot of the side menu** shows three small squares for each coding tool's use, and "You". The board has the
    budget pill and the person's name with their shop. Seen.
 7. **The chat's header** shows a maker's logo with a model and effort, and "3 other places" with two other companies'
-   logos. The board has Answer, Used and Steps, and a cost line. Seen.
+   logos. The board has Answer, Used and Steps, and a cost line. Seen. *Item 85f (26 Nov):* the header holds the
+   member's name, the places in words and the panel button; the model and its effort are in the chat box. The Answer,
+   Used and Steps tabs and the cost line wait for runtimes that say what an answer used and what a chat cost.
 
 ### The same thing drawn two ways
 
 8. **An approval's card in the chat** has three 24px tinted buttons (red, blue, amber) and a red bar down its left.
    By the Colour board blue is never a button, amber means Needs you, red means failed, each view has one black main
-   button, and a button is 34px. `chat/cards/cards.css`. Seen in both themes.
+   button, and a button is 34px. `chat/cards/cards.css`. Seen in both themes. Rebuilt in item 85g (26 Nov): the kit's
+   card, Allow once the one black button, no tints and no rail (`e2e/ask-cards.spec.ts` pictures every kind).
 9. **Two icon sets.** The side menu's is the brand's (16px, a 1.4 line). Pages use `ui/icons.tsx` (9 to 15px, a 1.8 to
    2.6 line): 257 of the icons measured are 14px with a 2px line. Measured.
 10. **Two segmented switches.** Home's is a 28px pill; Settings' (`.mseg`) are 22px rectangles with 11.5px text. Seen.
@@ -65,7 +71,9 @@ The fixes are items 85e to 85i in `docs/plan.md`; the motion is items 85a to 85c
 15. **The command palette's** rows are 32px with no icons, and its groups are in capitals. The board's menu rows are
     34px with an icon and its word. Seen.
 16. **Needs you** has thin rows, a grey "Approve" tag that looks like a button, and two times. The board has one card a
-    decision, a 17px line saying what follows, and Approve on the card. Seen.
+    decision, a 17px line saying what follows, and Approve on the card. Seen. Rebuilt in item 85g (26 Nov): one card a
+    decision, the 17px line, one time and the kind as an amber mark; Approve stays on Home and the chat's card, by the
+    decision of 24 Nov that an owner reads the card before approving.
 
 ### Empty, loading and error states
 
