@@ -271,6 +271,11 @@ fn gl_pull(v: &Value) -> Pull {
     Pull { item, review: review.into(), conflict, base: tasks::one_line(tasks::text(v, "target_branch"), 250) }
 }
 
+/// Seconds since 1970 now, as a board's `at` says it.
+pub(crate) fn now() -> i64 {
+    now_secs()
+}
+
 fn now_secs() -> i64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
 }

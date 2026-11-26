@@ -4016,4 +4016,5 @@ export const zh: Record<Key, string> = {
   "proj.why.bad_repo_name": "GitHub 上的名称由字母、数字、点、连字符和下划线组成，也可以在前面加上 owner/。",
   "proj.why.has_origin": "此文件夹已有 origin，已在某个托管上。未发出任何询问。",
   "proj.why.not_a_repository": "此文件夹本身未启动 git，因此不会从这里在 GitHub 上创建。",
+  "prs.otherTip": "审查和合并在 {host} 上进行：应用只列出它。",
 };

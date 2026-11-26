@@ -4016,4 +4016,5 @@ export const ko: Record<Key, string> = {
   "proj.why.bad_repo_name": "GitHub 이름은 영문자, 숫자, 점, 하이픈, 밑줄로 이루어지며 앞에 owner/를 붙일 수도 있습니다.",
   "proj.why.has_origin": "이 폴더에는 이미 origin이 있어 호스트에 있습니다. 아무것도 묻지 않았습니다.",
   "proj.why.not_a_repository": "이 폴더 자체에서 git이 시작되지 않아 여기서 GitHub에 만들지 않습니다.",
+  "prs.otherTip": "리뷰와 병합은 {host}에서 합니다. 앱은 목록에만 보여 줍니다.",
 };

@@ -4054,4 +4054,5 @@ export const en = {
   "proj.why.bad_repo_name": "A name on GitHub is letters, digits, dots, dashes and underscores, with an owner/ before it if you like.",
   "proj.why.has_origin": "This folder has an origin already, so it is on a host. Nothing was asked.",
   "proj.why.not_a_repository": "Git has not started in this folder itself, so it is not made on GitHub from here.",
+  "prs.otherTip": "Reviews and merges happen on {host}: the app only lists it.",
 };

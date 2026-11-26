@@ -1377,6 +1377,28 @@ GitLab's merge methods page offers a rebase for. Anything else is not read and a
 not on this Mac (26 Nov 2026), so the flags are from GitLab's pages for `glab api` and `glab mr merge`, and the answer is read as
 the Projects API's object. A lane's own Merge step is unchanged and still offers all three, as for GitHub.
 
+**Other hosts, read only** (item 100b, `src-tauri/src/pulls_other.rs`, `tasks/board.ts`). A project whose remote is on neither
+GitHub nor GitLab is asked of the other hosts' reader, which reads the folder's remote from its git config and answers only when
+that host's CLI is installed; the page sends only the folder. Its open requests join the same bands, each row naming its host and
+offering only Open on <host> (no detail, no Merge, nothing written):
+
+- Azure DevOps (`https://dev.azure.com/<org>/<project>/_git/<repo>`, its `ssh.dev.azure.com:v3/...` form, and the older
+  `<org>.visualstudio.com`) through `az repos pr list --organization ... --project ... --repository ... --status active --top 51
+  --output json --detect false`, with `AZURE_EXTENSION_USE_DYNAMIC_INSTALL=no` so the CLI installs no extension by itself. The
+  review is read from the reviewers' votes, a conflict from `mergeStatus`; the list carries no checks, so none are shown, and a
+  request's address is made from the organisation, project, repository and id.
+- Gitea and Forgejo through Gitea's own CLI, `gt` (it replaced the archived `tea`): `gt auth status --json=host --no-input` names
+  the servers it is signed in to, at most once a minute, and a remote on one of them (https with the server's base path, or ssh
+  to its host) is listed with `gt pr list --host <server> --repo <owner>/<name> --state open --limit 51 --json=<fields>
+  --no-input`. Whether `gt` serves a Forgejo server is not confirmed; one it is signed in to is listed when its answer reads.
+- Bitbucket is not offered: Atlassian's own CLIs are `acli`, which has no Bitbucket commands, and `twg` (Teamwork Graph), whose
+  documented pages name a pull request query but no output a reader here could rely on; the other Bitbucket CLIs are not
+  Atlassian's.
+
+`az` and `gt` were not on this Mac on 26 Nov 2026: the flags are from Azure CLI's reference and configuration pages and `gt`'s
+manual pages, and the tests read made-up answers in the documented shapes (`tasks_fixtures/az-pr-list.json`, `gt-pr-list.json`).
+A host whose CLI is not here shows nothing and runs nothing; GitHub's and GitLab's projects are never asked of these CLIs.
+
 **Watching costs little.** The page reads the lists once when shown, then at most once a minute while shown and in front, never
 while hidden. The shell gives a list read within 55 seconds again, and before reading a GitHub list again asks `gh api --method
 GET --include -H 'If-None-Match: <ETag>' repos/<r>/pulls?state=open&per_page=51`: a 304 gives the last list again and costs no

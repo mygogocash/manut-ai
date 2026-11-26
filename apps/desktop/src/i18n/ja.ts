@@ -4016,4 +4016,5 @@ export const ja: Record<Key, string> = {
   "proj.why.bad_repo_name": "GitHub での名前は英字、数字、ドット、ハイフン、アンダースコアです。前に owner/ を付けることもできます。",
   "proj.why.has_origin": "このフォルダにはすでに origin があり、どこかのホストにあります。何も確認していません。",
   "proj.why.not_a_repository": "このフォルダ自体で git が始まっていないため、ここから GitHub には作りません。",
+  "prs.otherTip": "レビューとマージは {host} で行います。アプリは一覧に出すだけです。",
 };

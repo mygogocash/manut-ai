@@ -36,6 +36,7 @@ mod power;
 mod review;
 mod preview;
 mod pulls;
+mod pulls_other;
 mod providers;
 mod remote_keys;
 #[cfg(all(test, unix))]
@@ -920,6 +921,22 @@ async fn pulls_methods(boards: State<'_, Arc<pulls::Boards>>, source: String, re
     tauri::async_runtime::spawn_blocking(move || b.methods(src, &repo)).await.map_err(|e| e.to_string())?
 }
 
+/// Pull requests on other hosts (item 100b, pulls_other.rs): the Azure DevOps, Gitea or Forgejo repository the project at `cwd` is
+/// in, read from its git config, when that host's CLI is installed (and, for Gitea, signed in to the server); null otherwise.
+#[tauri::command]
+async fn pulls_other_remote(others: State<'_, Arc<pulls_other::Others>>, cwd: String) -> Result<Option<pulls_other::OtherRemote>, String> {
+    let o = Arc::clone(&others);
+    tauri::async_runtime::spawn_blocking(move || o.found(&cwd).map(|f| f.remote())).await.map_err(|e| e.to_string())
+}
+
+/// Pull requests on other hosts: the project at `cwd`'s open requests there, through that host's own CLI; null when it is on none
+/// of them or the CLI is not here. Only reads: no merge, no write.
+#[tauri::command]
+async fn pulls_other_board(others: State<'_, Arc<pulls_other::Others>>, cwd: String) -> Result<Option<pulls_other::OtherBoard>, String> {
+    let o = Arc::clone(&others);
+    tauri::async_runtime::spawn_blocking(move || o.board(&cwd)).await.map_err(|e| e.to_string())?
+}
+
 /// A project's own icon (item 100b, project_icon.rs): the picture its folder keeps in one of a few known places, as a `data:`
 /// address of an image's type, or null. Only reads; never through a link, never outside the folder, at most 64 KiB.
 #[tauri::command]
@@ -1682,6 +1699,8 @@ pub fn run() {
             // the asks that push a lane and open or merge its pull request, each settled once (review.rs)
             app.manage(Arc::new(review::Ledger::default()));
             app.manage(Arc::new(pulls::Boards::default()));
+            // pull requests on Azure DevOps, Gitea and Forgejo, read only (pulls_other.rs)
+            app.manage(Arc::new(pulls_other::Others::default()));
             // the projects' own icons, kept by size and modified time (project_icon.rs)
             app.manage(Arc::new(project_icon::Icons::default()));
             app.manage(Arc::new(skill_links::Installs::default()));
@@ -1886,6 +1905,8 @@ fn commands(invoke: tauri::ipc::Invoke) -> bool {
         pulls_board,
         pulls_view,
         pulls_methods,
+        pulls_other_remote,
+        pulls_other_board,
         project_icon,
         gh_accounts,
         source_tools,
