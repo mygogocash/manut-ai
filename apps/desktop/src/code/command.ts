@@ -791,7 +791,7 @@ function push(words: string[], head: number, where: Where): Verdict {
   const ops = operands(words, head, new Set(["-o", "--push-option", "--repo", "--receive-pack", "--exec"]));
   // where it sends: the remote it names, or one given by `--repo`; an address the agent wrote is no remote of the project's
   const repo = [words[ops[0]] ?? "", ...args.filter((w) => isOpt(w, "--repo") && w.includes("=")).map((w) => w.slice(w.indexOf("=") + 1)), ...args.flatMap((w, i) => (w === "--repo" ? [args[i + 1] ?? ""] : []))];
-  if (repo.some(gitAddress)) return sends();
+  if (repo.some(gitAddress)) return { ...sends(), saves: true };
   const refs = ops.slice(1).map((i) => words[i]);
   const target = (ref: string) => {
     const r = ref.replace(/^\+/, "");
