@@ -185,11 +185,12 @@ pub(crate) fn web_link(url: &str) -> bool {
     !host.is_empty() && !host.contains('@') && !host.contains('\\')
 }
 
+/// The person's home folder. In the Mac App Store edition it is the password database's, never the sandbox's container
+/// (app_store.rs, which also points `HOME` there for every other reader and every child before the app starts).
 fn user_home() -> Result<PathBuf, String> {
-    std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
-        .filter(|v| !v.is_empty())
-        .map(PathBuf::from)
-        .ok_or_else(|| "no home folder".to_string())
+    let env = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" });
+    let passwd = if app_store::APP_STORE { app_store::passwd_home() } else { None };
+    app_store::resolve_home(app_store::APP_STORE, env.as_deref(), passwd).ok_or_else(|| "no home folder".to_string())
 }
 
 /// The env a new session of `cli` starts with to use manut account `id` (`default` = the CLI's own home).
@@ -1593,6 +1594,11 @@ pub fn computer_relay(args: &[std::ffi::OsString]) -> Option<i32> {
         return None;
     }
     Some(computer::mcp::relay_main())
+}
+
+/// The Mac App Store edition's real home, set before anything else runs (app_store.rs); nothing in the GitHub build.
+pub fn adopt_real_home() {
+    app_store::adopt_real_home();
 }
 
 pub fn statusline_relay(args: &[std::ffi::OsString]) -> Option<i32> {
