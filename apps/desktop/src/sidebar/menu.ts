@@ -105,6 +105,9 @@ export interface RecentParts {
   pinned: RecentThread[];
   recent: RecentThread[];
   settled: RecentThread[];
+  /** With the Working group on (item 94, sidebar/inbox.ts): the chats whose turn runs, newest first, out of `recent`. A chat that
+   *  needs the person, a pinned one and a settled or snoozed one are never here. Empty with it off. */
+  working: RecentThread[];
 }
 
 export function recentParts(
@@ -114,12 +117,19 @@ export function recentParts(
   needs: (bot: string, row: ThreadRow) => boolean,
   now: number,
   n = 3,
-  /** `working`: the thread's turn runs (a snooze until it finishes waits for that, item 94). */
-  opts: { working?: (bot: string, row: ThreadRow) => boolean } = {},
+  /** `working`: the thread's turn runs (a snooze until it finishes waits for that, item 94). `group`: the Working group is on. */
+  opts: { working?: (bot: string, row: ThreadRow) => boolean; group?: boolean } = {},
 ): RecentParts {
   const working = opts.working ?? (() => false);
   const all = threadsNewestFirst(threads, members).map((e) => ({ key: threadRowKey(e.bot, e.row.thread), needs: needs(e.bot, e.row), working: working(e.bot, e.row), e }));
   const places = arrange(all, marks, now);
   const of = (x: (typeof all)[number]): RecentThread => ({ bot: x.e.bot, thread: x.e.row.thread, title: x.e.row.title, ts: x.e.ts, working: x.working });
-  return { pinned: places.pinned.map(of), recent: places.normal.slice(0, n).map(of), settled: places.settled.slice(0, n).map(of) };
+  // a chat that needs the person stays in Recent whatever else it is doing
+  const away = (x: (typeof all)[number]) => !!opts.group && x.working && !x.needs;
+  return {
+    pinned: places.pinned.map(of),
+    recent: places.normal.filter((x) => !away(x)).slice(0, n).map(of),
+    settled: places.settled.slice(0, n).map(of),
+    working: places.normal.filter(away).map(of),
+  };
 }

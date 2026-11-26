@@ -35,6 +35,7 @@ import { SourceControlPage } from "./SourceControlPage";
 import { ArtifactLinksPage } from "./ArtifactLinksPage";
 import { RemotePage } from "./RemotePage";
 import { setSuggestOn, useSuggestOn } from "../lib/suggest";
+import { setInbox, useInbox } from "../sidebar/inbox";
 import { VoicePage } from "./VoicePage";
 import { ComputerPage } from "./ComputerPage";
 import { McpSkillsPage } from "./mcp/McpSkillsPage";
@@ -666,6 +667,12 @@ function SuggestToggle() {
   return <Toggle on={on} label={t("suggest.title")} onChange={setSuggestOn} testId="set-suggest" />;
 }
 
+/** Settings › General › Recent chats › Working group (item 94, sidebar/inbox.ts): off until the person turns it on. */
+function WorkingToggle() {
+  const inbox = useInbox();
+  return <Toggle on={inbox.working} label={t("inbox.working")} onChange={(working) => setInbox({ working })} testId="set-working" />;
+}
+
 function GeneralPage() {
   const s = useStore();
   const h = s.hello;
@@ -712,7 +719,12 @@ function GeneralPage() {
           <Value>{t("suggest.agentsValue")}</Value>
         </Row>
       </div>
-      <div className="st-grp">
+      {/* the side menu's own choices (item 94), with the menu's other one, the tasks bar */}
+      <div className="st-gh">{t("inbox.group")}</div>
+      <div className="st-grp" data-testid="set-inbox">
+        <Row title={t("inbox.working")} hint={t("inbox.workingHint")}>
+          <WorkingToggle />
+        </Row>
         <Row title={t("tasks.barSetting")} hint={t("tasks.barSettingHint")}>
           <TasksBarToggle />
         </Row>

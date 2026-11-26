@@ -28,6 +28,7 @@ import { rowStatus } from "../threads/ThreadTree";
 import { MoreButton, useRowMenu } from "./RowMenu";
 import { threadRowKey, useRowMarks } from "./rows";
 import { RowsWatcher } from "./RowsWatcher";
+import { useInbox } from "./inbox";
 import { togglePalette } from "../palette/state";
 import { BrandMark, MenuIcon, SearchGlyph } from "./menuIcons";
 import { DiskChip } from "./DiskChip";
@@ -91,6 +92,7 @@ export function SideMenu({
   current,
   needs,
   recent,
+  working = [],
   settings,
   account = accountLabel(EMPTY_SHOP),
   helping = false,
@@ -106,6 +108,8 @@ export function SideMenu({
   /** how many asks wait on the person; no count shows at 0 */
   needs: number;
   recent: RecentItem[];
+  /** The Working group (item 94): chats whose turn runs, when the person turned the group on; nothing is drawn while it is empty. */
+  working?: RecentItem[];
   /** Settings is open: the account row is current, as on the canvas's Settings board */
   settings: boolean;
   /** who the account row names and the initial in its avatar (onboarding/shop.ts `accountLabel`); "You" by default */
@@ -163,6 +167,18 @@ export function SideMenu({
           </ul>
         </>
       )}
+      {working.length > 0 && (
+        <>
+          <div className="sb-h" id="menu-working-h">
+            {t("menu.working")}
+          </div>
+          <ul className="sb-recent sb-working" aria-labelledby="menu-working-h" data-testid="menu-working">
+            {working.map((r) => (
+              <RecentRow key={r.key} item={r} />
+            ))}
+          </ul>
+        </>
+      )}
       <div className="sb-foot">
         {foot}
         {/* Who uses the app, and their settings. The canvas names the owner and the shop here ("Fon, Baan Mali"): the
@@ -209,7 +225,8 @@ export function Sidebar() {
   const members = selectSidebarBots(s).map((b) => b.name);
   const untitled = t("thread.untitled");
   const marks = useRowMarks();
-  const parts = recentParts(s.threads, members, marks, (bot, row) => rowStatus(s, bot, row) === "needs_you", Date.now(), 3, { working: (bot, row) => rowStatus(s, bot, row) === "running" });
+  const inbox = useInbox();
+  const parts = recentParts(s.threads, members, marks, (bot, row) => rowStatus(s, bot, row) === "needs_you", Date.now(), 3, { working: (bot, row) => rowStatus(s, bot, row) === "running", group: inbox.working });
   const item = (place: RecentItem["place"]) => (r: { bot: string; thread: string; title: string; working?: boolean }): RecentItem => ({
     key: `${r.bot}:${r.thread}`,
     title: r.title || untitled,
@@ -228,6 +245,7 @@ export function Sidebar() {
       current={currentRow(s.ui, s.selectedBot)}
       needs={selectAsks(s).length}
       recent={recent}
+      working={parts.working.map(item(undefined))}
       settings={s.ui.view === "settings"}
       account={accountLabel({ person: s.ui.shop.person, shop: viewedShopName(s) })}
       helping={!!helpedShop(s.shops)}

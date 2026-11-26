@@ -44,6 +44,19 @@ async function begin(page: Page, theme: "light" | "dark") {
   await expect(page.getByTestId("menu-recent")).toHaveCount(3);
 }
 
+/** Kami's thread `title` starts or ends a turn, as the store hears it from the runtime (a turn's end is its newest activity). */
+async function turn(page: Page, title: string, running: boolean) {
+  await page.evaluate(
+    async ([title, running]) => {
+      const m = (await import(/* @vite-ignore */ "/src/state/store.ts" as string)) as { getStore(): { getState(): { threads: Record<string, { title: string }[]> }; dispatch(a: unknown): void } };
+      const st = m.getStore();
+      const row = st.getState().threads.kami!.find((r) => r.title === title)!;
+      st.dispatch({ type: "thread.upsert", bot: "kami", row: { ...row, running, last: Date.now() / 1000 } });
+    },
+    [title, running] as const,
+  );
+}
+
 const recent = (page: Page, title: string) => page.locator(".sb-recent .rec-li").filter({ hasText: title });
 const isMac = (page: Page) => page.evaluate(() => /Mac|iPhone|iPad/.test(navigator.platform));
 
@@ -99,6 +112,28 @@ for (const theme of ["light", "dark"] as const) {
       await expect(page.getByTestId("row-undo-toast")).toContainText("Snoozed: Check the books");
       await page.getByTestId("row-undo").click();
       await expect(row).toHaveCount(1);
+    });
+
+    test("the Working group is off by default; on, a working chat waits there and is back on top when it finishes", async ({ page }) => {
+      await begin(page, theme);
+      // off by default: Settings says so, and a working chat stays in Recent
+      await page.getByTestId("nav-settings").click();
+      await expect(page.getByTestId("set-inbox")).toBeVisible();
+      await expect(page.getByTestId("set-working")).toHaveAttribute("aria-checked", "false");
+      await turn(page, "The 12.12 teaser", true);
+      await expect(page.getByTestId("menu-working")).toHaveCount(0);
+      await expect(recent(page, "The 12.12 teaser")).toHaveCount(1);
+      await page.getByTestId("set-working").click();
+      await expect(page.getByTestId("set-working")).toHaveAttribute("aria-checked", "true");
+      await shot(page, `working-setting-${theme}`);
+      const group = page.getByTestId("menu-working");
+      await expect(group).toContainText("The 12.12 teaser");
+      await expect(page.locator(".sb-recent:not(.sb-working) .rec-li").filter({ hasText: "The 12.12 teaser" })).toHaveCount(0);
+      await shot(page, `working-group-${theme}`);
+      // its turn ends: back in Recent, on top
+      await turn(page, "The 12.12 teaser", false);
+      await expect(group).toHaveCount(0);
+      await expect(page.getByTestId("menu-recent").first()).toHaveText("The 12.12 teaser");
     });
 
     test("⌘Z in the chat box leaves a row's mark alone", async ({ page }) => {
