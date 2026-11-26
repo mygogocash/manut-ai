@@ -1,0 +1,56 @@
+[
+  {
+    "pullRequestId": 31,
+    "codeReviewId": 31,
+    "status": "active",
+    "createdBy": { "displayName": "Noi Saetang", "uniqueName": "noi@baanmali.example", "id": "6f2b4a0e-1111-4c1e-9d2f-000000000001" },
+    "creationDate": "2026-11-24T08:15:02.1234567Z",
+    "title": "PromptPay QR at checkout",
+    "description": "Adds a QR.",
+    "sourceRefName": "refs/heads/kit/promptpay-qr",
+    "targetRefName": "refs/heads/main",
+    "mergeStatus": "succeeded",
+    "isDraft": false,
+    "reviewers": [{ "displayName": "Fon", "vote": 10 }, { "displayName": "Build team", "vote": 0 }],
+    "repository": { "id": "8c1d", "name": "site", "url": "https://dev.azure.com/baanmali/8a2c/_apis/git/repositories/8c1d", "project": { "id": "8a2c", "name": "Shop Site", "state": "wellFormed" } },
+    "url": "https://dev.azure.com/baanmali/8a2c/_apis/git/repositories/8c1d/pullRequests/31",
+    "supportsIterations": true
+  },
+  {
+    "pullRequestId": 32,
+    "status": "active",
+    "createdBy": { "displayName": "Fon", "uniqueName": "fon@baanmali.example" },
+    "creationDate": "2026-11-23T02:00:00Z",
+    "title": "Read the order total ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789",
+    "sourceRefName": "refs/heads/fix/total",
+    "targetRefName": "refs/heads/main",
+    "mergeStatus": "succeeded",
+    "isDraft": false,
+    "reviewers": [{ "displayName": "Noi Saetang", "vote": 10 }, { "displayName": "Fon", "vote": -5 }]
+  },
+  {
+    "pullRequestId": 33,
+    "status": "active",
+    "createdBy": { "displayName": "Noi Saetang" },
+    "creationDate": "2026-11-22T02:00:00Z",
+    "title": "Delivery zones",
+    "sourceRefName": "refs/heads/feat/zones",
+    "targetRefName": "refs/heads/main",
+    "mergeStatus": "conflicts",
+    "isDraft": false,
+    "reviewers": [{ "displayName": "Fon", "vote": 0 }]
+  },
+  {
+    "pullRequestId": 34,
+    "status": "active",
+    "createdBy": { "displayName": "A visitor" },
+    "creationDate": "2026-11-21T02:00:00Z",
+    "title": "Try a darker header",
+    "sourceRefName": "refs/heads/try/header",
+    "targetRefName": "refs/heads/main",
+    "mergeStatus": "notSet",
+    "isDraft": true,
+    "reviewers": [],
+    "forkSource": { "name": "refs/heads/try/header", "repository": { "name": "site-fork" } }
+  }
+]

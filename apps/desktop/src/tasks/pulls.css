@@ -288,3 +288,11 @@
     border-left: 0;
   }
 }
+
+/* A request on another host (item 100b): the same row, read only, its Open on <host> at its end instead of opening in the app. */
+.prs .prs-other {
+  flex-wrap: nowrap;
+}
+.prs .prs-other .lk {
+  flex: none;
+}

@@ -212,6 +212,46 @@ test("a request that cannot merge says why and asks nothing; a fork's request of
   expect((await calls(page, "__manutSessionCalls")).filter((c) => c.op === "review.settle")).toEqual([]);
 });
 
+test("another host's requests are listed read only, with Open on the host and nothing to merge (item 100b)", async ({ page }) => {
+  const AZ = "/home/you/code/baanmali-az";
+  // after setup's own script (init scripts run in the order they were added, again on the reload): a third project, on Azure DevOps
+  await setup(page);
+  await page.addInitScript((az) => {
+    const w = window as unknown as Record<string, any>;
+    w.__manutTasks.others = {
+      [az]: {
+        host: "azure",
+        name: "Azure DevOps",
+        repo: "Shop Site/site",
+        items: [
+          { number: 31, title: "PromptPay QR at checkout", state: "open", url: "https://dev.azure.com/baanmali/Shop%20Site/_git/site/pullrequest/31", labels: [], author: "Noi Saetang", created: Math.floor(Date.now() / 1000) - 7200, updated: Math.floor(Date.now() / 1000) - 7200, checks: { passed: 0, failed: 0, pending: 0, total: 0 }, head: "kit/promptpay-qr", same: true, from: "", review: "approved", conflict: false, base: "main" },
+        ],
+      },
+    };
+    w.__manutLanes.push({ worktree: `${az}-lanes/qr`, dir: `${az}-lanes/qr`, branch: "kit/qr", base: "main", project: az, made: 1 });
+  }, AZ);
+  await page.reload();
+  await openCode(page);
+  await page.getByTestId("tasks-open").click();
+  await page.getByTestId("tasks-scope-pulls").click();
+  const other = page.getByTestId("prs-other-row");
+  await expect(other).toHaveCount(1);
+  await expect(other).toHaveAttribute("data-readiness", "ready");
+  await expect(other.getByTestId("prs-other-host")).toHaveText("Azure DevOps");
+  await other.getByTestId("prs-other-open").click();
+  expect(await page.evaluate(() => (window as unknown as { __opened: string[] }).__opened)).toEqual(["https://dev.azure.com/baanmali/Shop%20Site/_git/site/pullrequest/31"]);
+  // it opens nothing in the app: no detail, no Merge, and nothing was asked to write
+  await expect(page.getByTestId("prs-detail")).toHaveCount(0);
+  expect((await calls(page, "__manutSessionCalls")).filter((c) => String(c.op).startsWith("review."))).toEqual([]);
+  // the other hosts' reader was asked only for the folder on no GitHub or GitLab remote
+  const asked = (await calls(page, "__manutTaskCalls")).filter((c) => c.op === "otherRemote").map((c) => c.cwd);
+  expect(asked).toEqual([AZ]);
+  if (SHOTS) {
+    await page.mouse.move(2, 2);
+    await shot(page, "prs-other-light-1280");
+  }
+});
+
 test.describe("shots", () => {
   test.skip(!SHOTS, "MANUT_SHOTS unset");
   for (const theme of ["light", "dark"] as const)
