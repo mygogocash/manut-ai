@@ -56,6 +56,8 @@ export interface AskRead {
   sends?: boolean;
   /** For a command: the tags it makes (item 120). */
   tags?: string[];
+  /** For a command: it defines what a later command of the same shell runs (item 120). */
+  defines?: boolean;
 }
 
 const RUN = "Run this command?";
@@ -107,13 +109,14 @@ function listed(paths: string[], where: Where): string {
 }
 
 /** Where a command leaves its shell, for the session's next command. */
-const folders = (c: ReadCommand): Pick<AskRead, "ends" | "resets" | "movesHead" | "unseen" | "sends" | "tags"> => ({
+const folders = (c: ReadCommand): Pick<AskRead, "ends" | "resets" | "movesHead" | "unseen" | "sends" | "tags" | "defines"> => ({
   ends: c.ends,
   ...(c.resets ? { resets: c.resets } : {}),
   movesHead: c.movesHead,
   unseen: c.unseen,
   sends: c.sends,
   tags: c.tags,
+  defines: c.defines,
 });
 
 /** `v` when it is text that is not blank. */

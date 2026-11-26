@@ -72,6 +72,9 @@ export interface ReadCommand {
   sends: boolean;
   /** The tags it makes (item 120), for the session's later pushes. */
   tags: string[];
+  /** It defines what a later command of the same shell runs (a function, an alias, a trap, or text read into the shell:
+   *  `eval`, `source`, `.`), so no later `cd` to the project's folder says where the shell is (item 120). */
+  defines: boolean;
 }
 
 // ---- paths --------------------------------------------------------------------------------------------------------
@@ -229,12 +232,15 @@ interface Lexed {
   cmds: Simple[];
   /** Something in it cannot be read in advance: a substitution, a variable, a here-document, a subshell. */
   opaque: boolean;
+  /** It defines a function (`name()`, unquoted), which a later command of the shell may call (item 120). */
+  defines: boolean;
 }
 
 /** The command line split into simple commands, as a POSIX shell would, without expanding anything. */
 function lex(line: string): Lexed {
   const cmds: Simple[] = [];
   let opaque = false;
+  let defines = false;
   let cur: Simple = { words: [], redirects: [], writes: [], piped: false, sep: "start", after: "end" };
   let word = "";
   let inWord = false;
@@ -396,6 +402,8 @@ function lex(line: string): Lexed {
       continue;
     }
     if (c === "(" || c === ")" || ((c === "{" || c === "}") && !inWord && (next === undefined || next === " " || next === "\n"))) {
+      // `name()` or `name ()`, unquoted, defines a function (item 120); `$()` and `<()` do not
+      if (c === "(" && /^[ \t]*\)/.test(line.slice(i + 1)) && (inWord ? !/[$<>=]$/.test(word) : cur.words.length > 0)) defines = true;
       opaque = true;
       continue;
     }
@@ -416,7 +424,7 @@ function lex(line: string): Lexed {
   }
   if (quote) opaque = true;
   endCmd("end");
-  return { cmds, opaque };
+  return { cmds, opaque, defines };
 }
 
 // ---- what a program does ------------------------------------------------------------------------------------------
@@ -2150,6 +2158,15 @@ function reachesOut(words: string[], verdict: Verdict): boolean {
 const NO_FILE = new Set(["pwd", "echo", "printf", "date", "whoami", "uname", "true", "false", "sleep", "id", "sw_vers", "uptime", "which", "type", "wait", "exit"]);
 /** Words that, as a command, may move the shell to another folder. */
 const MOVES = new Set(["cd", "chdir", "pushd", "popd", "source", ".", "eval"]);
+/** The same, and `trap`, as words anywhere in a simple command (item 120): behind a word that is no wrapper the reading
+ *  follows (`! cd`, `command -p cd`, `noglob cd`, `repeat 1 cd`, `then cd`, `do cd`, a function's body) the shell still
+ *  moves. `.` is left to where a program stands, since as a word it is mostly the folder it names (`git add .`). */
+const MOVE_NAMES = new Set(["cd", "chdir", "pushd", "popd", "source", "eval", "trap"]);
+/** Words the shell reads before the program of a simple command: `!`, the reserved words that open or go on with a
+ *  compound command, and the wrappers and zsh's precommand modifiers (`repeat` takes a count). */
+const SHELL_PREFIX = new Set(["!", "if", "then", "else", "elif", "while", "until", "do", "{", "time", "noglob", "nocorrect", "command", "builtin", "exec", "coproc", "repeat", "nohup", "nice", "stdbuf", "caffeinate", "timeout", "-"]);
+/** Programs that define what a later command of the same shell runs (item 120). */
+const DEFINES = new Set(["alias", "function", "trap", "eval", "source", "."]);
 /** Words before a program that only change how it runs (`builtin cd x` is a `cd`). */
 const WRAPS = new Set(["time", "nohup", "command", "builtin", "exec", "stdbuf", "caffeinate", "nice", "timeout"]);
 /** The most folders a session's shell is followed through. Past it, where it is cannot be known. */
@@ -2157,6 +2174,8 @@ const MAX_FOLDERS = 32;
 
 /** The program a simple command runs, assignments and wrappers taken off, as written. */
 const programOf = (words: readonly string[]) => words.find((w) => !ASSIGNMENT.test(w) && !WRAPS.has(w) && !w.startsWith("-") && !/^[0-9]+$/.test(w)) ?? "";
+/** The same, past every word the shell reads before a program too (item 120). */
+const programAt = (words: readonly string[]) => words.find((w) => !ASSIGNMENT.test(w) && !SHELL_PREFIX.has(w) && !w.startsWith("-") && !/^[0-9]+$/.test(w)) ?? "";
 
 /** One way through a line: the folder the shell is in (null when it cannot be known), as written, and whether the last
  *  step that decides a `&&` or a `||` succeeded (`ok`: a `cd` that went; `fail`: one that did not; `any`: not known). */
@@ -2200,6 +2219,7 @@ export function readCommand(line: string, where: Where): ReadCommand {
     unseen: reads.some((r) => r.unseen),
     sends: reads.some((r) => r.sends),
     tags: [...new Set(reads.flatMap((r) => r.tags))],
+    defines: reads.some((r) => r.defines),
   };
 }
 
@@ -2215,7 +2235,7 @@ export function foldersAfter(before: readonly (string | null)[], read: Pick<Read
 /** `line` read as it runs from the folder `start` (null: a folder that cannot be known), followed through each way the
  *  shell can take: a `cd` may fail, `&&` runs the next command only after one that went, `||` only after one that did
  *  not, and `;` runs it either way. */
-function readFrom({ cmds, opaque }: Lexed, where: Where, start: string | null): Omit<ReadCommand, "resets"> {
+function readFrom({ cmds, opaque, defines: lexDefines }: Lexed, where: Where, start: string | null): Omit<ReadCommand, "resets"> {
   const allowed = where.allowed ?? [];
   const session = where.cwd || where.root;
   const outside: string[] = [];
@@ -2311,6 +2331,9 @@ function readFrom({ cmds, opaque }: Lexed, where: Where, start: string | null): 
       gitOwn = true;
     if (!reads && (guardedPath(cwd, here) || words.some((w, i) => i > 0 && !verdict.text?.has(i) && (IN_GIT_DIR.test(w) || named(w).some((x) => x !== "" && guardedPath(x, here)))))) gitOwn = true;
 
+    // a `cd` the reading did not take as one, behind a word it does not follow or in a compound command (item 120): once it
+    // has run, where the shell is cannot be said
+    if (verdict.cd === undefined && !verdict.lost && (words.some((w, i) => !verdict.text?.has(i) && MOVE_NAMES.has(w)) || programAt(words) === ".")) return { lost: true };
     if (verdict.cd !== undefined) {
       // from a folder that cannot be known, a relative `cd` goes nowhere that can be said: it asks, and is not outside
       const known = !unknownHere || absCd;
@@ -2357,7 +2380,9 @@ function readFrom({ cmds, opaque }: Lexed, where: Where, start: string | null): 
   }
   // a line that cannot be read in advance and holds a command that may move the shell (a `cd` in a subshell or a brace
   // group, a `source`) leaves it where nobody can say
-  const ends = opaque && cmds.some((c) => MOVES.has(programOf(c.words))) ? [null] : distinct(flows.map((f) => f.dir));
+  // a function, an alias or a trap it defines, or text read into the shell, may move it whenever a later command runs (item 120)
+  const defines = lexDefines || cmds.some((c) => DEFINES.has(programAt(c.words)));
+  const ends = defines || (opaque && cmds.some((c) => MOVES.has(programOf(c.words)))) ? [null] : distinct(flows.map((f) => f.dir));
 
   const whole = verdicts.length ? strictest(verdicts) : v("unknown", say("kit.say.opaque"));
   let action: KitAction = whole.action;
@@ -2386,7 +2411,7 @@ function readFrom({ cmds, opaque }: Lexed, where: Where, start: string | null): 
   // A save the read of the folder before the line cannot see (item 120): a message or a body from a file, or any step
   // beside the commit or the push that writes files (one that only reads, checks, stages what is there or saves is none).
   const unseen = verdicts.some((x) => x.fromFile) || (saves && verdicts.some((x) => !x.saves && !x.staged && RANK[x.action] >= RANK.edit));
-  return { action, outside, saves, rule, say: s, ends, movesHead, unseen, sends: verdicts.some((x) => x.sends), tags: lineTags };
+  return { action, outside, saves, rule, say: s, ends, movesHead, unseen, sends: verdicts.some((x) => x.sends), tags: lineTags, defines };
 }
 
 /** A package manager's own subcommands: none of them runs a script of the project's by its name. */

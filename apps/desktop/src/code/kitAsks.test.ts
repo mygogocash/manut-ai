@@ -415,6 +415,48 @@ describe("Kit's dial on a commit or a push whose key the read of the folder does
   });
 });
 
+// Item 120: a `cd` the reading does not take as one (`! cd`, inside an `if`, in a function then called) left the session's
+// folder where it was, once the person allowed the line; an agent whose shell keeps its folder then wrote in `.git/hooks`.
+describe("Kit's dial after a `cd` it cannot follow (item 120)", () => {
+  beforeEach(() => {
+    resetKitProjects();
+    resetKitAsks();
+    updateKitProjects((p) => setLevel(p, ROOT, "edits_and_safe_commands"));
+  });
+  afterEach(() => {
+    resetKitProjects();
+    resetKitAsks();
+  });
+  const RUN = "Run this command?";
+  const bash = (line: string): AskTool => ({ kind: "command", name: "Bash", line, cwd: ROOT });
+  const write = "printf '#!/bin/sh' > pre-commit";
+
+  it("asks for the next write once a hidden `cd` may have run", async () => {
+    for (const [n, hidden] of ["! cd .git/hooks", "if true; then cd .git/hooks; fi", "command -p cd .git/hooks", "repeat 1 cd .git/hooks"].entries()) {
+      resetKitAsks();
+      const s = await session();
+      expect((await s.ask(`h${n}`, RUN, hidden, bash(hidden))).resolved).toBeUndefined();
+      expect([hidden, (await s.ask(`w${n}`, RUN, write, bash(write))).resolved]).toEqual([hidden, undefined]);
+    }
+  });
+
+  it("keeps the folder unknown after a function, an alias or a trap, even past a `cd` to the project's folder", async () => {
+    for (const [n, defined] of ["f() { cd .git/hooks; }", "alias c='cd .git/hooks'", "trap 'cd .git/hooks' DEBUG"].entries()) {
+      resetKitAsks();
+      const s = await session();
+      expect((await s.ask(`d${n}`, RUN, defined, bash(defined))).resolved).toBeUndefined();
+      expect((await s.ask(`r${n}`, RUN, `cd ${ROOT}`, bash(`cd ${ROOT}`))).resolved).toBe("once");
+      expect([defined, (await s.ask(`w${n}`, RUN, write, bash(write))).resolved]).toEqual([defined, undefined]);
+    }
+    // the plain twin: a `cd` to the project's folder sets it back after an ordinary `cd`
+    resetKitAsks();
+    const s = await session();
+    expect((await s.ask("p1", RUN, "cd src", bash("cd src"))).resolved).toBe("once");
+    expect((await s.ask("p2", RUN, `cd ${ROOT}`, bash(`cd ${ROOT}`))).resolved).toBe("once");
+    expect((await s.ask("p3", RUN, "printf x > notes.md", bash("printf x > notes.md"))).resolved).toBe("once");
+  });
+});
+
 describe("Kit's dial on a tag the session made, pushed in a later ask (item 120)", () => {
   beforeEach(() => {
     resetKitProjects();

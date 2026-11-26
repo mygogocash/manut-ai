@@ -412,6 +412,12 @@ below), but the dial does not rely on any agent:
   brace group that holds a `cd`, or a shell command the dial could not read at all), every later command of the session
   asks, except one that names no file (`pwd`, `echo`, `date` and the like) and a `cd` to a folder written in full, until
   a command that is only `cd` to the project's folder.
+- **A `cd` the reading does not follow (item 120).** A simple command that holds `cd`, `chdir`, `pushd`, `popd`,
+  `source`, `eval` or `trap` anywhere but as text (`! cd x`, `command -p cd x`, `noglob cd x`, `repeat 1 cd x`, `then
+  cd x`, `do cd x`, a function's body), or runs `.` past such words, leaves the folder unknown. A line that defines a
+  function (`f()`, `function f`), an alias or a trap, or reads text into the shell (`eval`, `source`, `.`), and any shell
+  command the dial cannot read, may move the shell whenever a later command runs: the folder then stays unknown for the
+  rest of the chat, a `cd` to the project's folder included.
 - **Not seen.** A command an agent runs without asking (its own allow rules) is never read, so a `cd` in it is not
   carried; a shell function or alias from the person's own shell setup that moves the folder, zsh's `AUTO_CD`, and a
   `CDPATH` that sends `cd name` elsewhere are not followed either. With Claude Code these no longer carry past one command.

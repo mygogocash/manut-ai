@@ -1211,6 +1211,46 @@ describe("D4: a read that prints secrets, a tag pushed, a branch moved back (ite
   });
 });
 
+describe("D5: a `cd` in a form the reader does not follow as one (item 120)", () => {
+  /** Lines that may move the shell where the reading cannot follow it: a `cd` behind a word that is not a wrapper it knows,
+   *  inside a compound command, or in a function, an alias or a trap. */
+  const HIDDEN = [
+    "! cd .git/hooks", "command -p cd .git/hooks", "noglob cd .git/hooks", "nocorrect cd .git/hooks", "repeat 1 cd .git/hooks",
+    "if true; then cd .git/hooks; fi", "if false; then :; else cd .git/hooks; fi", "if false; then :; elif true; then cd .git/hooks; fi",
+    "while true; do cd .git/hooks; break; done", "until false; do cd .git/hooks; break; done", "for d in x; do cd .git/hooks; done",
+    "coproc cd .git/hooks", "! pushd .git/hooks", "if true; then pushd .git/hooks; fi", "command -p chdir .git/hooks",
+    "! . ./x.sh", "if true; then . ./x.sh; fi", "noglob source ./x.sh", "! eval cd x",
+    "f() { cd .git/hooks; }; f", "f () { cd .git/hooks; }", "function f { cd .git/hooks; }", "alias c='cd .git/hooks'",
+    "trap 'cd .git/hooks' DEBUG", "! trap 'cd .git/hooks' EXIT",
+  ];
+  /** Their plain twins: a `cd` the reading follows, and words that only name a folder or say `cd` as text. */
+  const PLAIN: [line: string, ends: string[]][] = [
+    ["cd src", [`${root}/src`, root]],
+    ["builtin cd src", [`${root}/src`, root]],
+    ["echo cd", [root]],
+    ["git commit -m cd", [root]],
+    ["grep -rn 'cd ' scripts", [root]],
+    ["git add .", [root]],
+    ["prettier --check .", [root]],
+    ["git commit -m 'make foo() pure'", [root]],
+    ["echo 'f() { cd x; }'", [root]],
+  ];
+
+  it("leaves the folder unknown after each, so the session's next command is read from nowhere that can be said", () => {
+    const wrong: string[] = [];
+    for (const line of HIDDEN) if (!readCommand(line, at).ends.includes(null)) wrong.push(`followed: ${line} -> ${JSON.stringify(readCommand(line, at).ends)}`);
+    for (const [line, ends] of PLAIN) if (JSON.stringify(readCommand(line, at).ends.sort()) !== JSON.stringify([...ends].sort())) wrong.push(`plain: ${line} -> ${JSON.stringify(readCommand(line, at).ends)}`);
+    expect(wrong).toEqual([]);
+    counted += HIDDEN.length;
+  });
+
+  it("says which lines define a function, an alias or a trap, which no later `cd` to the project's folder undoes", () => {
+    for (const line of ["f() { cd .git/hooks; }; f", "f () { :; }", "function f { :; }", "alias c='cd .git/hooks'", "trap 'cd .git/hooks' DEBUG", "eval 'g() { cd x; }'", "source ./x.sh", ". ./x.sh"])
+      expect([line, readCommand(line, at).defines]).toEqual([line, true]);
+    for (const line of ["cd src", "pnpm test", "git commit -m 'make foo() pure'", "echo 'f() { :; }'", "git add ."]) expect([line, readCommand(line, at).defines]).toEqual([line, false]);
+  });
+});
+
 describe("everyday commands", () => {
   /** What a developer and an agent run all day, each as it read before item 112 (only `cdk synth`, now a build, moved).
    *  None of these may start to ask because a hostile line beside it does. */

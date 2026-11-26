@@ -87,6 +87,9 @@ export const askOfItem = (chat: string, item: ApprovalItem): EventOf<"approval.r
 
 /** Per chat: the folders its shell may be in besides the session's (null: one that cannot be known). */
 const folders = new Map<string, (string | null)[]>();
+/** Per chat: a command defined a function, an alias or a trap, or the dial could not read one that may have (item 120): its
+ *  shell may move whenever a later command runs, so no `cd` to the project's folder sets the folder back. */
+const defined = new Set<string>();
 /** Per ask: the folders and the branch it was read with as it arrived, so its card reads it as the dial did. */
 const readWith = new Map<string, { from: (string | null)[]; branch: string | undefined }>();
 
@@ -190,14 +193,19 @@ export function kitAnswer(
   if (!read) {
     // a command the dial cannot read, which the person may allow, leaves the shell where nobody can say; and any ask it
     // cannot read (a command, a tool of an MCP server's) may move the branch checked out
-    if (!ev.outdated && isCommand(ev)) folders.set(ctx.chat, [null]);
+    if (!ev.outdated && isCommand(ev)) {
+      folders.set(ctx.chat, [null]);
+      defined.add(ctx.chat);
+    }
     if (!ev.outdated) noteMoved(ctx.chat);
     return null;
   }
   const project = projectFor(ctx);
   const weighed = keysFor(read, ctx.chat, saved);
   const d = decideAsk(read, project, weighed, now);
-  if (read.what === "command" && read.ends && d.answer !== "blocked") folders.set(ctx.chat, foldersAfter(from, { ends: read.ends, ...(read.resets ? { resets: read.resets } : {}) }));
+  if (read.what === "command" && read.defines && d.answer !== "blocked") defined.add(ctx.chat);
+  if (read.what === "command" && read.ends && d.answer !== "blocked")
+    folders.set(ctx.chat, defined.has(ctx.chat) ? [null] : foldersAfter(from, { ends: read.ends, ...(read.resets ? { resets: read.resets } : {}) }));
   if (d.answer !== "blocked" && (read.movesHead || read.action === "unknown" || read.action === "live")) noteMoved(ctx.chat);
   if (d.answer !== "blocked" && read.tags?.length) tagsMade.set(ctx.chat, [...new Set([...(tagsMade.get(ctx.chat) ?? []), ...read.tags])]);
   let out: { choice: ApprovalChoice; answer: KitAnswer } | null = null;
@@ -299,6 +307,7 @@ export function resetKitAsks(): void {
   moved.clear();
   stale.clear();
   tagsMade.clear();
+  defined.clear();
   resetPreview();
   version++;
 }
