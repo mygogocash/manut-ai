@@ -67,11 +67,15 @@ describe("a GitLab merge request a chat opened (item 100b)", () => {
   it("links the chat once one view says the request is the project's own, and not for a fork or another project", async () => {
     const remote = { source: "gitlab" as const, repo: "baanmali/shop/app" };
     const mr = item({ number: 12, title: "Pre-order page", url: "https://gitlab.com/baanmali/shop/app/-/merge_requests/12", head: "kit/preorder", from: "" });
+    // the chat works on the branch the request is made from (item 120's rule holds for GitLab too)
+    const GL_WHERE = { ...WHERE, branch: "kit/preorder" };
     const h = host(mr, remote);
-    expect(await noteChatPull(h, "agent:g1", glEnd(), WHERE)).toEqual({ linked: { source: "gitlab", repo: "baanmali/shop/app", number: 12, url: mr.url, title: "Pre-order page", state: "open", head: "kit/preorder" } });
+    expect(await noteChatPull(h, "agent:g1", glEnd(), GL_WHERE)).toEqual({ linked: { source: "gitlab", repo: "baanmali/shop/app", number: 12, url: mr.url, title: "Pre-order page", state: "open", head: "kit/preorder" } });
     expect(h.view).toHaveBeenCalledWith("gitlab", "baanmali/shop/app", "prs", 12);
     expect(chatOfPull("gitlab", "baanmali/shop/app", 12)).toBe("agent:g1");
-    expect(await noteChatPull(host(item({ ...mr, same: false }), remote), "agent:g2", glEnd(), WHERE)).toEqual({ why: "fork" });
+    expect(await noteChatPull(host(item({ ...mr, same: false }), remote), "agent:g2", glEnd(), GL_WHERE)).toEqual({ why: "fork" });
+    // a request from another branch of the same project is not the one this chat opened
+    expect(await noteChatPull(host(mr, remote), "agent:g5", glEnd(), WHERE)).toEqual({ why: "other_branch" });
     // each in a folder of its own: a folder's remote is read once
     const other = host(mr, { source: "gitlab", repo: "baanmali/other" });
     expect(await noteChatPull(other, "agent:g3", glEnd(), { ...WHERE, cwd: "/code/other", root: "/code/other" })).toEqual({ why: "other_repo" });
