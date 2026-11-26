@@ -158,7 +158,10 @@ describe("resume snapshot", () => {
     // OmO continues with --session (a real omo answered from its earlier turn after a restart)
     expect(continuesItself({ agent: "omo", view: "chat", agentSession: "01a1ca42-38d5-7b6b-b3e9-d76953dcecd0" })).toBe(true);
     expect(continuesItself({ agent: "claude", view: "chat" })).toBe(false);
-    for (const agent of ["pi", "omp", "grok", "omh"] as const) expect(continuesItself({ agent, view: "chat", agentSession: "x" })).toBe(false);
+    for (const agent of ["pi", "omp", "omh"] as const) expect(continuesItself({ agent, view: "chat", agentSession: "x" })).toBe(false);
+    // item 101b: Grok's chat continues over its ACP server, as OpenCode's does
+    expect(continuesItself({ agent: "grok", view: "chat", agentSession: "01a218bc-0000-7000-8000-000000000003" })).toBe(true);
+    expect(continuesItself({ agent: "grok", view: "chat" })).toBe(false);
   });
 });
 

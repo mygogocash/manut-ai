@@ -77,6 +77,13 @@ Highwire and Kzurb Sonar credit Dr. MAD), which GoSpark had converted to AIFF an
 (`apps/desktop/src/assets/sounds/`; their hashes are in `AndroidSoundSources.json` and the licence is in
 `apps/desktop/THIRD_PARTY_NOTICES.md`).
 
+GoSpark again (at `a7537c80`, the same checkout, 27 Nov 2026) for Grok as a chat (item 101b, `apps/desktop/src-tauri/src/acp_chat.rs`
+and `sessions.rs`): no code, the facts its adapters hold. From `ACPSession.swift`, that Grok's ACP server is `grok agent
+stdio` and is started supervised as `grok --permission-mode default agent stdio`; from `ACPToolMapping.swift`, that Grok
+names a call's tool in `_meta["x.ai/tool"]` (`kind`, else `name`: `bash`, `search_replace`, `write_file`, `edit_file`,
+`read_file`) rather than in `kind`; and from its migration plan (`docs/plans/migrate-from-grok-muse-2026-09-25.md`), what
+Muse Code is and where it keeps its settings and sessions.
+
 The Agent Client Protocol's agent registry (Apache-2.0, `agentclientprotocol/registry`, release `v2026.11.26-3667256` at
 commit `36672565f76e7fb9796eb15182e0e14fb9e77c33`) for Settings › Providers › From the ACP registry (item 101c): its
 published `registry.json` is pinned byte for byte in `apps/desktop/src-tauri/acp-registry/` with its `quarantine.json`

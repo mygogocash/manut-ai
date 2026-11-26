@@ -480,7 +480,7 @@ pub fn adapter_row(c: &CustomAgent) -> &'static AcpAgent {
         return r;
     }
     let leak = |s: &str| -> &'static str { Box::leak(s.to_string().into_boxed_str()) };
-    let row: &'static AcpAgent = Box::leak(Box::new(AcpAgent { id: leak(&c.id), label: leak(&c.label), login: leak(&c.program), skill_tool: None, rules: None, asks_in: &[], settings: None }));
+    let row: &'static AcpAgent = Box::leak(Box::new(AcpAgent { id: leak(&c.id), label: leak(&c.label), login: leak(&c.program), skill_tool: None, rules: None, asks_in: &[], settings: &[], ask_switches: &[] }));
     rows.push(row);
     row
 }
