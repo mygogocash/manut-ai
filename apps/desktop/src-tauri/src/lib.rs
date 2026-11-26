@@ -26,6 +26,7 @@ mod lane_clean;
 mod lane_config;
 mod lane_diff;
 mod past_chats;
+mod project_notes;
 mod platform;
 mod outpost;
 mod power;
