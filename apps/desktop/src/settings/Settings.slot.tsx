@@ -35,6 +35,7 @@ import { SourceControlPage } from "./SourceControlPage";
 import { ArtifactLinksPage } from "./ArtifactLinksPage";
 import { RemotePage } from "./RemotePage";
 import { setSuggestOn, useSuggestOn } from "../lib/suggest";
+import { modLabel, setAfterSend, useAfterSend, type AfterSend } from "../chat/box/keys";
 import { VoicePage } from "./VoicePage";
 import { ComputerPage } from "./ComputerPage";
 import { McpSkillsPage } from "./mcp/McpSkillsPage";
@@ -666,6 +667,23 @@ function SuggestToggle() {
   return <Toggle on={on} label={t("suggest.title")} onChange={setSuggestOn} testId="set-suggest" />;
 }
 
+/** Settings › General › Chat box › After sending from Home (item 95): what Enter does there; Cmd+Enter does the other. */
+function AfterSendSeg() {
+  const v = useAfterSend();
+  return (
+    <Modes
+      label={t("box.after")}
+      value={v}
+      options={[
+        { value: "open", label: t("box.afterOpen") },
+        { value: "stay", label: t("box.afterStay") },
+      ]}
+      onChange={(x) => setAfterSend(x as AfterSend)}
+      testId="set-after-send"
+    />
+  );
+}
+
 function GeneralPage() {
   const s = useStore();
   const h = s.hello;
@@ -703,6 +721,13 @@ function GeneralPage() {
         </Row>
       </div>
       <OutsideNotes />
+      {/* The chat box's keys (item 95), beside its other choices: each has the default nobody needs to change. */}
+      <div className="st-gh">{t("box.group")}</div>
+      <div className="st-grp" data-testid="set-box">
+        <Row title={t("box.after")} hint={t("box.afterHint", { mod: modLabel() })}>
+          <AfterSendSeg />
+        </Row>
+      </div>
       <div className="st-gh">{t("suggest.group")}</div>
       <div className="st-grp">
         <Row title={t("suggest.title")} hint={t("suggest.hintCost")}>

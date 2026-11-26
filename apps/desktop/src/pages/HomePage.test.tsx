@@ -101,6 +101,20 @@ describe("Home's ask box", () => {
     expect(count(code, 'data-testid="home-chip"')).toBe(4);
   });
 
+  it("after a send that stayed on Home, one quiet line under the box says where it went, with Open (item 95)", () => {
+    const open = vi.fn();
+    const html = draw({ started: { name: "Buddy", words: "Translate a message", open } });
+    expect(html).toMatch(/<\/form><p class="started mo-rise" role="status" data-testid="home-started">/);
+    expect(words(html)).toContain("Sent to Buddy: Translate a message Open");
+    expect(html).toMatch(/<button type="button" class="lk" data-testid="home-started-open">Open<\/button>/);
+    expect(draw()).not.toContain('data-testid="home-started"');
+  });
+
+  it("Send's tooltip says what it does here, and what Cmd+Enter does instead", () => {
+    expect(draw()).toMatch(/title="Send and open the chat \((⌘|Ctrl\+)Enter sends and stays here\)"/);
+    expect(draw({ stays: true })).toMatch(/title="Send and stay here \((⌘|Ctrl\+)Enter sends and opens the chat\)"/);
+  });
+
   it("says why an ask did not go, under the box that still holds its words", () => {
     const html = draw({ text: "Translate a message", sendError: "Kit is not connected" });
     expect(html).toContain('value="Translate a message"');

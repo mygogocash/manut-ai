@@ -89,7 +89,7 @@ keeps them:
 | Archive; pin | has | |
 | A Working section | no | 94 |
 | Threads that wait on you rise to the top | has (Needs you) | |
-| Cmd+Enter sends in the background | no | 95 |
+| Cmd+Enter sends in the background | has (item 95): from Home, with a line that opens it; Settings swaps Enter and Cmd+Enter | 95 |
 | A thread on a schedule | off (workflows, item 77b; routines for the shop's team) | 94 |
 | Steer or queue, a key to swap, a default | part: both, as buttons on a held message; no key, no default | 95 |
 | Select several rows; bulk snooze, settle, new titles | no | 94, 96 |
