@@ -3999,7 +3999,7 @@ export const ja: Record<Key, string> = {
   "proj.ask.folder": "元のフォルダ",
   "proj.ask.remote": "フォルダのリモート",
   "proj.ask.runs": "そのまま次を実行します:",
-  "proj.ask.never": "何もプッシュしません。プロジェクトのファイルは、あなたがプッシュするまでこのコンピュータに残ります。プッシュは別に確認します。",
+  "proj.ask.never": "何もプッシュしません。プロジェクトのファイルは、あなたがプッシュするまでこのコンピュータに残ります。",
   "proj.ask.yes": "GitHub に作る",
   "proj.created": "GitHub に {repo} を作りました。何もプッシュしていません。",
   "proj.failed": "GitHub で作れませんでした: {error}",
@@ -4014,7 +4014,7 @@ export const ja: Record<Key, string> = {
   "proj.why.init_failed": "フォルダはできましたが、git を始められませんでした: {error}",
   "proj.why.make_failed": "フォルダを作れませんでした: {error}",
   "proj.why.bad_repo_name": "GitHub での名前は英字、数字、ドット、ハイフン、アンダースコアです。前に owner/ を付けることもできます。",
-  "proj.why.has_origin": "このフォルダにはすでに origin があり、どこかのホストにあります。何も確認していません。",
+  "proj.why.has_origin": "このフォルダにはすでに origin という名前のリモートがあるため、ここから GitHub には作りません。何も確認していません。",
   "proj.why.not_a_repository": "このフォルダ自体で git が始まっていないため、ここから GitHub には作りません。",
   "prs.otherTip": "レビューとマージは {host} で行います。アプリは一覧に出すだけです。",
 };

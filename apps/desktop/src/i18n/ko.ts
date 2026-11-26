@@ -3999,7 +3999,7 @@ export const ko: Record<Key, string> = {
   "proj.ask.folder": "원본 폴더",
   "proj.ask.remote": "폴더의 리모트",
   "proj.ask.runs": "다음을 그대로 실행합니다:",
-  "proj.ask.never": "아무것도 푸시하지 않습니다. 프로젝트 파일은 직접 푸시할 때까지 이 컴퓨터에 남으며, 푸시는 따로 확인합니다.",
+  "proj.ask.never": "아무것도 푸시하지 않습니다. 프로젝트 파일은 직접 푸시할 때까지 이 컴퓨터에 남습니다.",
   "proj.ask.yes": "GitHub에 만들기",
   "proj.created": "GitHub에 {repo}을(를) 만들었습니다. 아무것도 푸시하지 않았습니다.",
   "proj.failed": "GitHub에서 만들지 못했습니다: {error}",
@@ -4014,7 +4014,7 @@ export const ko: Record<Key, string> = {
   "proj.why.init_failed": "폴더는 있지만 그 안에서 git을 시작하지 못했습니다: {error}",
   "proj.why.make_failed": "폴더를 만들지 못했습니다: {error}",
   "proj.why.bad_repo_name": "GitHub 이름은 영문자, 숫자, 점, 하이픈, 밑줄로 이루어지며 앞에 owner/를 붙일 수도 있습니다.",
-  "proj.why.has_origin": "이 폴더에는 이미 origin이 있어 호스트에 있습니다. 아무것도 묻지 않았습니다.",
+  "proj.why.has_origin": "이 폴더에는 이미 origin이라는 리모트가 있어 여기서 GitHub에 만들지 않습니다. 아무것도 묻지 않았습니다.",
   "proj.why.not_a_repository": "이 폴더 자체에서 git이 시작되지 않아 여기서 GitHub에 만들지 않습니다.",
   "prs.otherTip": "리뷰와 병합은 {host}에서 합니다. 앱은 목록에만 보여 줍니다.",
 };

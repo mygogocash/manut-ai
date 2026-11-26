@@ -4037,7 +4037,7 @@ export const en = {
   "proj.ask.folder": "From the folder",
   "proj.ask.remote": "Remote in the folder",
   "proj.ask.runs": "This runs, exactly:",
-  "proj.ask.never": "Nothing is pushed: the project's files stay on this computer until you push them, which asks on its own.",
+  "proj.ask.never": "Nothing is pushed: the project's files stay on this computer until you push them.",
   "proj.ask.yes": "Make it on GitHub",
   "proj.created": "Made {repo} on GitHub. Nothing was pushed.",
   "proj.failed": "GitHub did not make it: {error}",
@@ -4052,7 +4052,7 @@ export const en = {
   "proj.why.init_failed": "The folder is there, but git could not start in it: {error}",
   "proj.why.make_failed": "The folder could not be made: {error}",
   "proj.why.bad_repo_name": "A name on GitHub is letters, digits, dots, dashes and underscores, with an owner/ before it if you like.",
-  "proj.why.has_origin": "This folder has an origin already, so it is on a host. Nothing was asked.",
+  "proj.why.has_origin": "This folder has a remote named origin already, so it is not made on GitHub from here. Nothing was asked.",
   "proj.why.not_a_repository": "Git has not started in this folder itself, so it is not made on GitHub from here.",
   "prs.otherTip": "Reviews and merges happen on {host}: the app only lists it.",
 };

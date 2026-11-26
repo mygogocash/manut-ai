@@ -3999,7 +3999,7 @@ export const zh: Record<Key, string> = {
   "proj.ask.folder": "来自文件夹",
   "proj.ask.remote": "文件夹中的远程",
   "proj.ask.runs": "将完全按此运行：",
-  "proj.ask.never": "不会推送任何内容：项目文件会留在这台电脑上，直到你推送它们，推送会单独询问。",
+  "proj.ask.never": "不会推送任何内容：项目文件会留在这台电脑上，直到你推送它们。",
   "proj.ask.yes": "在 GitHub 上创建",
   "proj.created": "已在 GitHub 上创建 {repo}。未推送任何内容。",
   "proj.failed": "GitHub 未能创建：{error}",
@@ -4014,7 +4014,7 @@ export const zh: Record<Key, string> = {
   "proj.why.init_failed": "文件夹已存在，但无法在其中启动 git：{error}",
   "proj.why.make_failed": "无法创建文件夹：{error}",
   "proj.why.bad_repo_name": "GitHub 上的名称由字母、数字、点、连字符和下划线组成，也可以在前面加上 owner/。",
-  "proj.why.has_origin": "此文件夹已有 origin，已在某个托管上。未发出任何询问。",
+  "proj.why.has_origin": "此文件夹已有名为 origin 的远程，因此不会从这里在 GitHub 上创建。未发出任何询问。",
   "proj.why.not_a_repository": "此文件夹本身未启动 git，因此不会从这里在 GitHub 上创建。",
   "prs.otherTip": "审查和合并在 {host} 上进行：应用只列出它。",
 };
