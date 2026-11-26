@@ -732,6 +732,8 @@ function git(words: string[], where: Where): Verdict {
     case "var":
       return history();
     case "grep":
+      // with `-f` the patterns come from a file, which is checked as any path is, and only the words after `-e` are patterns
+      if (hasIn(GIT_GREP_VALUES, args, "-f")) return { ...history(), text: textAfter(words, ["-e"]) };
       return { ...history(), text: new Set(ops.slice(1, 2)) };
     case "fetch":
       return fetch(words, head);
@@ -742,7 +744,9 @@ function git(words: string[], where: Where): Verdict {
     case "reflog":
       return has(args, "expire", "delete") ? del() : history();
     case "commit":
-      return v("change", say("kit.say.commit"), head, { saves: true, text: textAfter(words, ["-m", "--message", "-F", "--file", "--author", "--date", "-C", "-c", "--fixup", "--squash", "--template", "-t"]) });
+      // the file a message or a template is read from (`-F`, `--file`, `-t`) is a path like any other: a key read into a
+      // message would leave with the next push
+      return v("change", say("kit.say.commit"), head, { saves: true, text: textAfter(words, ["-m", "--message", "--author", "--date", "-C", "-c", "--fixup", "--squash"]) });
     case "switch":
       if (has(args, "--force", "-f", "--discard-changes")) return del(say("kit.say.discard"));
       return { ...change(), text: textAfter(words, ["-c", "--create", "-C", "--force-create"]) };
@@ -1332,6 +1336,14 @@ function classify(words: string[], where: Where): Verdict {
   if (["grep", "egrep", "fgrep"].includes(name)) return (search(words, "grep"));
   if (["rg", "ag"].includes(name)) return (search(words, "rg"));
   if (name === "find") return find(words, where);
+  // A list of files read from a file (`--files0-from`, `--files-from`, tar's `-T`, zip's `-@`): the files it reads, or
+  // packs into the project, are named nowhere in the command, so whether they are outside it is not known.
+  if (
+    words.slice(1).some((w) => ["files0-from", "files-from"].includes(optName(w))) ||
+    (name === "tar" && (hasIn("fCbTXKNLHV", words.slice(1), "-T") || /^[A-Za-z]*T/.test(words[1] ?? ""))) ||
+    (name === "zip" && words.slice(1).some((w) => /^-[^-]*@/.test(w)))
+  )
+    return unknownProgram(name);
   if (RUNS_PROGRAM[name] && hasIn(RUNS_PROGRAM[name].values, words.slice(1), ...RUNS_PROGRAM[name].opts)) return unknownProgram(name);
   if ((name === "less" || name === "more") && words.some((w) => w.startsWith("+") && /[!|]/.test(w))) return unknownProgram(name);
   if (name === "sed") {
@@ -1411,7 +1423,12 @@ function classify(words: string[], where: Where): Verdict {
   if (name === "jq" || name === "yq") {
     // yq's `--split-exp` writes each result into a file its expression names
     if (hasIn("poIs", words.slice(1), "-i", "--inplace") || (name === "yq" && hasIn("poI", words.slice(1), "-s", "--split-exp"))) return (v("change", say("kit.say.change"), 1));
-    const ops = operands(words, 1, new Set(["--arg", "--argjson", "-f", "--from-file", "--indent"]));
+    // With `-f` the filter comes from a file: jq takes the first file it is given as the filter wherever `-f` stands, and
+    // every word is a file it reads, so none is text and each is checked as any path is.
+    if (hasIn("L", words.slice(1), "-f", "--from-file")) return v("read", say("kit.say.read"));
+    const ops = operands(words, 1, new Set(["--arg", "--argjson", "--indent", "-L", "--library-path"]));
+    // a module a filter imports or includes is read from a folder of jq's own, `~/.jq` among them, or one `-L` names
+    if (name === "jq" && ops.length && /\b(import|include)\b/.test(words[ops[0]])) return unknownProgram(name);
     return (v("read", say("kit.say.read"), undefined, { text: new Set(ops.slice(0, 1)) }));
   }
   if (name === "sort") return (hasIn("ktST", words.slice(1), "-o", "--output") ? v("change", say("kit.say.change"), 1) : v("read", say("kit.say.read")));
@@ -1593,6 +1610,9 @@ function valuesIn(w: string): string[] {
       }
     }
   }
+  // `@file` is a file read for its words (a response file, curl's and gh's `@` for a field's value): one from a root, the
+  // home folder or a folder above is the path it names. `@~1` and `@{u}` are git's names for a commit.
+  for (const x of [...out]) if (x.startsWith("@") && /^(\/|~(\/|$)|\.\.([\\/]|$)|[A-Za-z]:[\\/]|\\\\)/.test(x.slice(1))) out.push(x.slice(1));
   return out;
 }
 

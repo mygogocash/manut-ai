@@ -443,6 +443,46 @@ describe("B4: a reading program's output file", () => {
   });
 });
 
+describe("B5: a file read from outside the project that the words did not show as one", () => {
+  it("checks a file an option reads, and asks for a list of files read from a file", () => {
+    counted += holds([
+      ["jq -R -f /dev/stdin /Users/fon/.ssh/id_rsa", "jq -R . notes.txt", "read"],
+      ["jq -Rf /dev/stdin /Users/fon/.ssh/id_rsa", "jq -r .name package.json", "read"],
+      ["jq --from-file=/dev/stdin ~/.ssh/id_rsa", "jq --from-file=filter.jq data.json", "read"],
+      ["jq -L /Users/fon/.secrets -n 'import \"k\" as $k; $k'", "jq -n '1 + 1'", "read"],
+      ["jq -n 'import \"k\" as $k; $k'", "jq -n '[1, 2] | length'", "read"],
+      ["jq -n 'include \"k\"; .'", "jq '.a' data.json", "read"],
+      ["git grep -f /Users/fon/.ssh/id_rsa src", "git grep -f patterns.txt src", "read"],
+      ["git grep -nf /Users/fon/.ssh/id_rsa", "git grep -e foo src", "read"],
+      ["wc --files0-from=list.txt", "wc -l src/a.ts", "read"],
+      ["du --files0-from list.txt", "du -sh src", "read"],
+      ["sort --files0-from=list.txt", "sort src/a.txt", "read"],
+      ["strings @/Users/fon/.ssh/id_rsa", "strings a.bin", "read"],
+      ["cat @~/.ssh/id_rsa", "cat a.txt", "read"],
+    ]);
+    // `@~1` is git's name for a commit, not a file
+    expect(read("git diff @~1")).toMatchObject({ action: "read", outside: [] });
+  });
+
+  it("checks the file a commit takes its message from, so a kept git commit rule cannot carry one out", () => {
+    for (const [line, path] of [
+      ["git commit -F ~/.ssh/id_rsa", "~/.ssh/id_rsa"],
+      ["git commit --file /Users/fon/.ssh/id_rsa", "/Users/fon/.ssh/id_rsa"],
+      ["git commit --file=/Users/fon/.ssh/id_rsa", "/Users/fon/.ssh/id_rsa"],
+      ["git commit -t ../other/secret.txt", "../other/secret.txt"],
+      ["git commit -a -F /etc/passwd", "/etc/passwd"],
+    ])
+      expect([line, read(line).outside, read(line).rule]).toEqual([line, [path], null]);
+    for (const line of ["git commit -F msg.txt", "git commit -m 'Add ~/.zshrc to the docs'", "git commit --fixup HEAD~1"]) expect([line, read(line).outside]).toEqual([line, []]);
+  });
+
+  it("asks for a change that reads its list of files from a file", () => {
+    for (const line of ["tar -czf a.tgz -T list.txt", "tar --files-from=list.txt -cf a.tar", "rsync -a --files-from=list.txt . backup/", "zip -@ a.zip < list.txt", "zip -r@ a.zip < list.txt"])
+      expect([line, read(line).action]).toEqual([line, "unknown"]);
+    for (const line of ["tar -czf a.tgz src", "rsync -a src/ backup/", "zip -r a.zip src"]) expect([line, read(line).action]).toEqual([line, "change"]);
+  });
+});
+
 describe("the table", () => {
   it("holds at least 120 hostile lines, each beside the plain line it imitates", () => {
     expect(counted).toBeGreaterThanOrEqual(120);

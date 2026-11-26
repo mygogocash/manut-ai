@@ -250,6 +250,12 @@ program or reaches the network. What it does not understand is `unknown`, and as
   app and write `cdk.out`, so they are a build, not a read. Each program the reader calls a read was checked against its
   own manual for an option or a file it writes; diff, cmp, comm, cut, tr, nl, od, hexdump, strings, column, fold, rev, wc,
   stat, du, df, ls, file (but `-C`), head, tail and cat have none.
+- **A file read that the words did not show as one.** With `-f` jq takes the first file as its filter wherever `-f`
+  stands, so no word is a filter then and every file is checked; a jq filter that imports or includes a module asks, and
+  `-L`'s folder is checked. git grep's `-f` file is checked, and so is the file `git commit -F`, `--file` or `-t` takes a
+  message from, which a kept "git commit" rule would otherwise carry out with the next push. A list of files read from a
+  file (`--files0-from`, `--files-from`, tar's `-T`, zip's `-@`) asks, since the files are named nowhere, and `@file`
+  that names a path from a root, the home folder or a folder above is checked as that path.
 
 `command.hostile.test.ts` holds 170 such lines, each beside the plain line it imitates, which reads as it did.
 
