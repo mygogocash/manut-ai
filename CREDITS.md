@@ -114,6 +114,12 @@ GoSpark again (at `a7537c80`, the same checkout, 27 Nov 2026) for the helper blo
 `BuddyStreamingDelegationTests` and the `delegatingReply` cases of `BuddyHeldBackTests`), ported case by case as tables in
 `helperBlocks.test.ts`; and its `fallbackPolicy`, adapted as the lead's note (`apps/desktop/src/jobs/helperPolicy.ts`).
 
+GoSpark again (at `a7537c80`, the same checkout, 27 Nov 2026) for running helper lanes (item 102h,
+`apps/desktop/src/jobs/helperRuns.ts` and `helperBrief.ts`): a helper lane's brief is `delegatedHeadPrompt` with the own-copy
+case of `workplaceRules`, `howToWork` and `howToReport` (`GoGoCode/Models/Buddy.swift`), and the budget's three notes are
+`BuddyBudget.pacingNote`, `wrapUpNote` and `finalNote` (its final note without "your tools are gone", since a helper lane keeps
+its tools for its report), written through the four dictionaries.
+
 The Agent Client Protocol's agent registry (Apache-2.0, `agentclientprotocol/registry`, release `v2026.11.26-3667256` at
 commit `36672565f76e7fb9796eb15182e0e14fb9e77c33`) for Settings › Providers › From the ACP registry (item 101c): its
 published `registry.json` is pinned byte for byte in `apps/desktop/src-tauri/acp-registry/` with its `quarantine.json`

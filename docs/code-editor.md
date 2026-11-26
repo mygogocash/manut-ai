@@ -1185,7 +1185,10 @@ another's files or the developer's folder.
   worktree beside the lead's folder on `<lead's branch>-help-<n>` at that commit, its record naming its job, its lead and the
   ref, and is listed and removed as any lane (Remove takes the ref with the record). Its agent settings come from the
   developer's folder, never from the lead's copy. The page calls `lane_helper_worktree` with the lead lane's folder and the
-  job's id only.
+  job's id only. Item 102h starts the helper lane's agent there (`startHelperLane` in `sessions/sessions.ts`, run by
+  `jobs/helperRuns.ts`), in its agent's Ask mode, as many at once as the shell's memory read allows (`machine_memory`); its row in
+  the Lanes band is indented under its lead's and offers no main-moved merge and no Put up for review, since its work goes back
+  by landing.
 - **When a folder goes.** When its session is closed (the chat is deleted), once its agent stopped, and Settings › Worktrees'
   "Remove the folder when its chat is deleted" is on (it is, by default), `lane_release` removes it only if nothing in it is
   changed or new, git is not partway through a rebase, merge, cherry-pick, revert or bisect there, every commit on its branch

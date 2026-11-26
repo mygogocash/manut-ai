@@ -1,7 +1,7 @@
 # Several agents on one job (item 102)
 
 The design for plan item 102 (`docs/plan.md`; `docs/t3code-parity.md`, "Orchestration", group 3 of its order: "must be
-designed first because it can act for the person"). Status on 27 Nov 2026: design, with slice 102a built (Ask several agents: the + menu row, its panel, one send starting one lane for each row, the job saved with each session and its row in the Lanes band), slice 102d (the helper lanes' rules, pure) and slice 102f (a helper lane made from a snapshot of its lead's folder, in the shell); see "Phases and slices". The rest is not built. It covers three
+designed first because it can act for the person"). Status on 27 Nov 2026: design, with slice 102a built (Ask several agents: the + menu row, its panel, one send starting one lane for each row, the job saved with each session and its row in the Lanes band), slice 102d (the helper lanes' rules, pure), slice 102e (the helper blocks and the Start helpers card), slice 102f (a helper lane made from a snapshot of its lead's folder, in the shell), slice 102h (running helper lanes) and slice 102k (chats that reach other chats); see "Phases and slices". The rest is not built. It covers three
 things:
 
 1. **Ask several agents.** One message from the person starts lanes on different agents and models side by side, and their
@@ -478,6 +478,20 @@ the screens are built on tested ground.
   you's names, the idle process ended. Tests: sessions store tests with the stand-in agent and a stand-in clock, the e2e
   spec. Safety tests: a helper's ask stays pending after its lead's next turn ends whatever that turn says; every helper
   `chat_start` carries the asking mode; an agent whose settings skip asks is refused and the round goes on.
+  **Built 27 Nov 2026** (`src/jobs/helperRuns.ts`, `helperBrief.ts`, `HelperRunCard.tsx`, `startHelperLane` in
+  `sessions/sessions.ts`, `helperGroups` in `code/Lanes.tsx`, the shell's `machine_memory` in `src-tauri/src/machine.rs`, their
+  tests, and `e2e/helper-runs.spec.ts`; `docs/decisions/102h-run-helpers.md`). The sessions store hands every round approved
+  with Start helpers to the runs, which start its helper lanes one after the other as this Mac's memory allows (2, 3 or 4 at
+  once, read once by the shell), each in a folder made by `lane_helper_worktree` and in its agent's Ask mode named on its command
+  line, with its brief (GoSpark's head prompt, fenced as the lead agent's words) as its first message. The budget runs on the
+  helper's events and a clock that stands still while any ask of it waits; the person's Stop and Stop all are on the Helpers
+  card under the settled Start helpers line; each helper that comes back is handed to 102i and 102j through `whenHelperBack`,
+  its landing "pending"; a done round's idle processes end. What changed from the design or was settled on the way: Ask
+  several's own send still does not wait (its lanes count against the cap); no Settings number lowers the cap yet; a helper on
+  a limited account says so and has no Start again press; Answer on a row opens the helper's own chat at its ask rather than
+  answering there; the final note drops GoSpark's "your tools are gone"; under a helper lane's row in the Lanes band there is no
+  main-moved merge and no Put up for review; closing a helper lane counts it back as stopped, and closing the lead stops its
+  helper lanes; after a restart a helper lane comes back paused, its round not restored (102j).
 - **102i. Landings in the chat.** Landing each helper when it reports and the lead is idle, the rows' outcomes, Show patch,
   Take back this landing, keys named. Tests: a store test with the stand-in shell's landing answers, the e2e spec. Safety
   test: no landing starts while the lead's turn runs or its ask waits.
