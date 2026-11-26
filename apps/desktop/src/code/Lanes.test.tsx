@@ -517,6 +517,23 @@ describe("helper lanes under their lead (item 102h)", () => {
     expect(out).toMatch(/data-testid="lane-s2"[^>]*data-status="needs_you"/);
   });
 
+  it("a lead that is a lane of a job (102b's row): the row still opens the side-by-side view, and its helper lanes sit under it once the job's lanes are shown", () => {
+    const inJob = (id: string, startedAt: number) =>
+      laneRowOf(input({ rec: { id, agent: "claude", cwd: "/Users/fon/baanmali-preorder", status: "running", promptTitle: LEAD, startedAt, job: "jk7m2", lane: { name: `kit/${id}`, base: "main" } } }));
+    const rows = [inJob("s1", 1_000), inJob("s9", 1_500), helper("s2", 0, "Claude Code")];
+    const onJobView = vi.fn();
+    const closed = drawn(LanesView({ rows, now: 100_000, onOpen: vi.fn(), onJobView }));
+    (closed.find((e) => e.props["data-testid"] === "lane-job-open")!.props.onClick as () => void)();
+    expect(onJobView).toHaveBeenCalledWith("jk7m2");
+    // the job's lanes hidden: its lead's helper lane is not drawn as a loose row either
+    expect(renderToString(createElement(LanesView, { rows, now: 100_000, onOpen: vi.fn(), onJobView }))).not.toContain('data-testid="lane-s2"');
+    const open = renderToString(createElement(LanesView, { rows, now: 100_000, onOpen: vi.fn(), onJobView, jobOpen: ["jk7m2"] }));
+    const block = open.slice(open.indexOf('data-testid="lane-helpers-s1"'));
+    expect(open.indexOf('data-testid="lane-helpers-s1"')).toBeGreaterThan(-1);
+    expect(block).toContain('data-testid="lane-s2"');
+    expect(open).toContain("Helper 1 of Add the PromptPay QR");
+  });
+
   it("draws a helper lane whose lead is not listed as an ordinary row that still names its lead", () => {
     const out = renderToString(createElement(LanesView, { rows: [helper("s2", 0, "Claude Code")], now: 100_000, onOpen: vi.fn() }));
     expect(out).toContain('data-testid="lane-s2"');

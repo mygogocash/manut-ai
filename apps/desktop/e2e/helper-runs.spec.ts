@@ -10,6 +10,24 @@ import { expect, test, type Page } from "@playwright/test";
 import { openCode } from "./start";
 
 const ROOT = "/home/you/code/baanmali-preorder";
+const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
+
+/** The mock bridge's own reset: an account a spec before this one limited (ask-several's Codex) would keep a helper lane from
+ *  starting here, as it should in the app. */
+async function resetMock(): Promise<void> {
+  const ws = new WebSocket(`ws://127.0.0.1:${MOCK}/?token=e2e`);
+  await new Promise<void>((res, rej) => {
+    ws.onopen = () => res();
+    ws.onerror = () => rej(new Error("mock websocket error"));
+  });
+  await new Promise<void>((res) => {
+    ws.onmessage = (m) => {
+      if (JSON.parse(String(m.data)).id === "hr1") res();
+    };
+    ws.send(JSON.stringify({ id: "hr1", op: "mock.reset" }));
+  });
+  ws.close();
+}
 const SHOTS = process.env.HELPERS_SHOTS || "test-results";
 type Call = { op: string; agent?: string; cwd?: string; mode?: string; session?: string; lead?: string; job?: string; input?: { kind: string; text?: string } };
 const calls = (page: Page) => page.evaluate(() => ((window as unknown as { __manutSessionCalls?: Call[] }).__manutSessionCalls ?? []));
@@ -34,6 +52,7 @@ const theme = (page: Page, th: "light" | "dark") =>
   }, th);
 
 test.beforeEach(async ({ page }) => {
+  await resetMock();
   await page.addInitScript((root) => {
     localStorage.removeItem("manut.kit.projects");
     const w = window as any;
