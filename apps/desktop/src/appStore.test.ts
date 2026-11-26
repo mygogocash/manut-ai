@@ -3,7 +3,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { isAppStore } from "./appStore";
+import { isAppStore, sandboxSaid, TERMINAL_REFUSED } from "./appStore";
 
 const shellText = (name: string) => readFileSync(fileURLToPath(new URL(`../src-tauri/${name}`, import.meta.url)), "utf8");
 
@@ -28,6 +28,14 @@ describe("the Mac App Store edition", () => {
     expect(isAppStore()).toBe(true);
     vi.stubGlobal("__manutAppStore", "yes");
     expect(isAppStore()).toBe(false);
+  });
+
+  it("says a terminal the sandbox refused in plain words, and any other start error as it came", () => {
+    const say = (k: string) => `said:${k}`;
+    expect(sandboxSaid(TERMINAL_REFUSED, say)).toBe("said:ss.sandboxTerminal");
+    expect(sandboxSaid("not a folder: /x", say)).toBe("not a folder: /x");
+    // the shell's code (app_store.rs TERMINAL_REFUSED) and the page's are the same string
+    expect(shellText("src/app_store.rs")).toContain(`pub const TERMINAL_REFUSED: &str = "${TERMINAL_REFUSED}";`);
   });
 
   it("is sandboxed as the listing's app, connects out and listens nowhere", () => {

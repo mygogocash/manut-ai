@@ -70,6 +70,7 @@ import { busyMate, continuedDraft, laneFree, type ContinuePick } from "./continu
 import { parseCommands, type AgentCommand } from "../chat/parts/commands";
 import { noteMcpSeen } from "../settings/mcp/agentConfig";
 import { t as tr, type Key } from "../i18n";
+import { sandboxSaid } from "../appStore";
 import { notesSaid } from "./projectNotes";
 import { windowWatched, type SessionNote } from "../lib/notify";
 import { createCloseGrace, graceMs, restoreSplitIn, type SplitWas } from "./closeGrace";
@@ -292,13 +293,17 @@ export const signedOutSaid = (text: string): string => {
 
 const errText = (e: unknown) =>
   signedOutSaid(
-    typeof e === "string"
-      ? e
-      : e instanceof Error
-        ? e.message
-        : typeof e === "object" && e && "message" in e
-          ? String((e as { message: unknown }).message)
-          : String(e),
+    // (a terminal the App Store edition's sandbox refused is said in plain words, src/appStore.ts)
+    sandboxSaid(
+      typeof e === "string"
+        ? e
+        : e instanceof Error
+          ? e.message
+          : typeof e === "object" && e && "message" in e
+            ? String((e as { message: unknown }).message)
+            : String(e),
+      tr,
+    ),
   );
 
 const readOpens = () => {

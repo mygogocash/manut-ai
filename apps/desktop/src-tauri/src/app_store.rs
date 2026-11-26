@@ -13,9 +13,16 @@
 //! - Claude Code keeps a scratch folder under `/tmp`, which the sandbox (inherited by every child) refuses: GoSpark's
 //!   sandboxed build saw `EPERM: operation not permitted, open '/tmp/claude-501'` before Claude's first turn. So it is
 //!   pointed at `~/.manut/tmp`, inside an exception the app already holds, unless the person chose one.
+//! - Apple's `/usr/bin/git` (and every other developer-tools stand-in there) refuses to run in a sandbox ("xcrun: error:
+//!   cannot be used within an App Sandbox", seen on this Mac, 26 Nov 2026), and an app opened from the Finder or the Dock
+//!   has only `/usr/bin:/bin:/usr/sbin:/sbin` on `PATH`. So [`adopt_real_home`] also puts the folders that hold real
+//!   programs first: Homebrew's, then the active developer tools' own `usr/bin` (whose git does run in the sandbox).
+//! - The sandbox refuses to give a terminal its controlling terminal (`ioctl(TIOCSCTTY)` answers EPERM, also seen on this
+//!   Mac), which no entitlement grants, so no terminal can start. [`spawn_refusal`] turns that into a code the page says
+//!   in plain words; the rest of the app works without terminals (docs/app-store.md).
 
 use std::ffi::{OsStr, OsString};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Whether this shell was built as the Mac App Store edition.
 pub const APP_STORE: bool = cfg!(app_store);
@@ -54,6 +61,44 @@ pub fn home_vars(app_store: bool, env_home: Option<&OsStr>, passwd: Option<PathB
     vars
 }
 
+/// Where the developer tools live when none is chosen (`xcode-select --install` puts them here).
+const COMMAND_LINE_TOOLS: &str = "/Library/Developer/CommandLineTools";
+
+/// The App Store edition's `PATH`: Homebrew's folders and the developer tools' own `usr/bin` (the active ones, named by
+/// `xcode-select`'s link, then the Command Line Tools) before what was there, so `git` is a program the sandbox runs and
+/// not Apple's `/usr/bin` stand-in. Only folders that exist and are not on `PATH` yet are added; None when nothing is.
+pub fn store_path(path: Option<&OsStr>, active_developer_dir: Option<PathBuf>, is_dir: impl Fn(&Path) -> bool) -> Option<OsString> {
+    let had: Vec<PathBuf> = path.map(|p| std::env::split_paths(p).collect()).unwrap_or_default();
+    let mut first: Vec<PathBuf> = Vec::new();
+    let tools = active_developer_dir.into_iter().chain([PathBuf::from(COMMAND_LINE_TOOLS)]).map(|d| d.join("usr").join("bin"));
+    for d in [PathBuf::from("/opt/homebrew/bin"), PathBuf::from("/usr/local/bin")].into_iter().chain(tools) {
+        if is_dir(&d) && !had.contains(&d) && !first.contains(&d) {
+            first.push(d);
+        }
+    }
+    if first.is_empty() {
+        return None;
+    }
+    std::env::join_paths(first.into_iter().chain(had)).ok()
+}
+
+/// What the page is told when a terminal cannot start because the sandbox refused it its controlling terminal; the
+/// page says it in the person's words (src/appStore.ts).
+pub const TERMINAL_REFUSED: &str = "why:sandbox_terminal";
+
+/// A terminal's start error as the page gets it: in the App Store edition, the sandbox's EPERM becomes
+/// [`TERMINAL_REFUSED`]; anything else, and everything in the GitHub build, stays as it was.
+pub fn spawn_refusal(app_store: bool, error: String) -> String {
+    if app_store && error == std::io::Error::from_raw_os_error(EPERM).to_string() {
+        TERMINAL_REFUSED.to_string()
+    } else {
+        error
+    }
+}
+
+/// EPERM, 1 on every system the app is built for (named here so the Windows build, which has no libc crate, compiles too).
+const EPERM: i32 = 1;
+
 /// Called first in `main`, while the process has one thread, so no other thread reads the environment as it changes.
 /// Does nothing in the GitHub build.
 pub fn adopt_real_home() {
@@ -63,6 +108,11 @@ pub fn adopt_real_home() {
     let vars = home_vars(true, std::env::var_os("HOME").as_deref(), passwd_home(), std::env::var_os(CLAUDE_TMPDIR).as_deref());
     for (k, v) in vars {
         std::env::set_var(k, v);
+    }
+    // the developer tools xcode-select chose, read from its link without running anything
+    let active = std::fs::read_link("/var/db/xcode_select_link").ok();
+    if let Some(path) = store_path(std::env::var_os("PATH").as_deref(), active, Path::is_dir) {
+        std::env::set_var("PATH", path);
     }
 }
 
@@ -147,6 +197,31 @@ mod tests {
         assert_eq!(home_vars(true, os(CONTAINER), Some("/Users/k".into()), os("/Users/k/tmp")), vec![("HOME", OsString::from("/Users/k"))]);
         // no home at all: nothing to set
         assert!(home_vars(true, None, None, None).is_empty());
+    }
+
+    #[test]
+    fn the_app_store_edition_puts_real_programs_before_apples_stand_ins() {
+        let all = |_: &Path| true;
+        let xcode = Some(PathBuf::from("/Applications/Xcode.app/Contents/Developer"));
+        let finder = OsStr::new("/usr/bin:/bin:/usr/sbin:/sbin");
+        let path = store_path(Some(finder), xcode.clone(), all).unwrap();
+        assert_eq!(
+            path,
+            OsString::from("/opt/homebrew/bin:/usr/local/bin:/Applications/Xcode.app/Contents/Developer/usr/bin:/Library/Developer/CommandLineTools/usr/bin:/usr/bin:/bin:/usr/sbin:/sbin")
+        );
+        // only folders that exist, never twice, and nothing to do when all are there already
+        let only_brew = |d: &Path| d == Path::new("/opt/homebrew/bin");
+        assert_eq!(store_path(Some(finder), None, only_brew), Some(OsString::from("/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin")));
+        assert_eq!(store_path(Some(OsStr::new("/opt/homebrew/bin:/usr/bin")), None, only_brew), None);
+        assert_eq!(store_path(None, None, |_: &Path| false), None);
+    }
+
+    #[test]
+    fn a_terminal_the_sandbox_refused_is_said_plainly_only_in_the_app_store_edition() {
+        let eperm = std::io::Error::from_raw_os_error(1).to_string();
+        assert_eq!(spawn_refusal(true, eperm.clone()), TERMINAL_REFUSED);
+        assert_eq!(spawn_refusal(false, eperm.clone()), eperm);
+        assert_eq!(spawn_refusal(true, "not a folder: /x".into()), "not a folder: /x");
     }
 
     #[cfg(unix)]

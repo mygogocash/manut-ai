@@ -15,3 +15,11 @@ export function isAppStore(): boolean {
   if (BUILT_FOR_STORE) return true;
   return (globalThis as { __manutAppStore?: unknown }).__manutAppStore === true;
 }
+
+/** What the shell answers when the App Store edition's sandbox refused a terminal (app_store.rs `TERMINAL_REFUSED`). */
+export const TERMINAL_REFUSED = "why:sandbox_terminal";
+
+/** A start error in the person's words: the sandbox's refusal of a terminal is said plainly, anything else as it came. */
+export function sandboxSaid(error: string, say: (key: "ss.sandboxTerminal") => string): string {
+  return error === TERMINAL_REFUSED ? say("ss.sandboxTerminal") : error;
+}
