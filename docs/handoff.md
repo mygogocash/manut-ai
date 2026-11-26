@@ -269,11 +269,12 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    job reads success when a shard failed. They are repaired (one was real: "Effort" left in English in three
    languages). After every push of merged code, read the shard jobs: `gh run view <id> --json jobs`, and
    `gh run view <id> --log-failed` for the errors. Helpers are now told to run every spec their change touches.
+   Item 106 (use outside Manut AI, off by default) merged at 11:06; Codex's compressed sessions wait for a dependency
+   the owner must allow (106b).
    Running on 26 Nov at 10:25, each a subagent of the lead's session in its own worktree:
    - item 98, a drawing in the chat (`feat/chat-drawing`, Opus, `cc-item98-chat-drawing`): an agent's HTML in a closed
      frame, the safety model first; a no with evidence is an accepted result;
    - item 97, context from one thread to another (`feat/thread-context`, Opus, `cc-item97-thread-context`);
-   - item 106, use everywhere (`feat/usage-everywhere`, Sonnet, `cc-item106-usage-everywhere`);
    - the fourth security read (Opus, read-only, in `cc-review4`).
    Next: items 100 and 101; the fourth read's fixes; 78f part 2 (it needs a tailnet and phones to try); and a redeploy
    of dev for the API routes of items 83, 84 and 78b's health answer (all behind flags that are off). The briefs the
