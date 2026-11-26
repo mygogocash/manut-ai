@@ -22,11 +22,7 @@ const PLACEHOLDER_GREY = /var\(--(quiet|aui-placeholder)\b/;
 const ALLOWED = /::?placeholder|:placeholder-shown|:disabled|\[disabled\]|\[aria-disabled(="true")?\]|\.disabled\b/;
 
 /** The argued exceptions: a folder whose rules are left as they are for now, and why. */
-const PENDING: Record<string, string> = {
-  "chat/":
-    "item 85f rewrites the chat's type in these stylesheets on the same night (26 Nov 2026), so they are not touched here; " +
-    "the lead removes this entry after merging 85f, and this test then names each rule left to change",
-};
+const PENDING: Record<string, string> = {};
 
 /** Every rule that colours text with the placeholder's grey, outside a placeholder or a disabled control. */
 function offenders(): string[] {

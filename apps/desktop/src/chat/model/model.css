@@ -92,7 +92,7 @@
   align-items: center;
   gap: 7px;
   padding: 0 8px;
-  color: var(--quiet);
+  color: var(--muted);
   cursor: text;
 }
 /* the search field takes the app's text-field focus (its edge turns --muted, as the sidebar search does) */
