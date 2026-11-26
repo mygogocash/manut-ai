@@ -119,14 +119,24 @@ pub type Lister<'a> = dyn Fn(&[&str], &[(String, String)]) -> Option<String> + '
 /// listed again with the value set; only that same form's `kept` starts the chat. A form whose listing fails or cannot be
 /// read moves on to the next (an older or newer CLI has no such listing), but one whose rules were read and then not kept
 /// refuses at once, so no other way of listing is tried against rules the agent did not take. None: refuse.
-pub fn probe_rules(probe: &RuleProbe, env: &[(String, String)], list: &Lister) -> Option<(String, String)> {
+///
+/// `notes`: the project's instructions file (item 93, `crate::project_notes`). It joins the value as its one `instructions`
+/// entry ([`with_instructions`]) BEFORE the second listing, in whichever form was read, so the value listed again is the
+/// very value the chat starts with: the ask rules, the formatter and language server switches ([`PROJECT_CODE_OFF`], part of
+/// what `build` makes), then the instructions entry. `kept` still compares the rules `build` made, which the entry leaves
+/// byte for byte. A path the value cannot carry refuses at once: it is not a listing another form could read better.
+pub fn probe_rules(probe: &RuleProbe, env: &[(String, String)], list: &Lister, notes: Option<&std::path::Path>) -> Option<(String, String)> {
     for form in probe.forms {
         let Some(first) = list(form.args, env) else { continue };
         let Some(value) = (form.build)(&first) else { continue };
+        let sent = match notes {
+            Some(f) => with_instructions(&value, f)?,
+            None => value.clone(),
+        };
         let mut with = env.to_vec();
-        with.push((probe.var.to_string(), value.clone()));
+        with.push((probe.var.to_string(), sent.clone()));
         return match list(form.args, &with) {
-            Some(again) if (form.kept)(&first, &value, &again) => Some((probe.var.to_string(), value)),
+            Some(again) if (form.kept)(&first, &value, &again) => Some((probe.var.to_string(), sent)),
             _ => None,
         };
     }
@@ -370,6 +380,22 @@ const CONFIG_TOKENS: [&str; 2] = ["{file:", "{env:"];
 /// organisation config, which comes after, could switch them on again. A person loses, in an app chat, the formatting of the
 /// files the agent writes and the language servers' diagnostics the agent reads; a terminal keeps both.
 const PROJECT_CODE_OFF: &str = ",\"formatter\":false,\"lsp\":false";
+
+/// OpenCode's config `value` (a JSON object, as [`opencode_ask`] builds it) with the project's instructions file `file`
+/// added as its one `instructions` entry (item 93, `crate::project_notes`). OpenCode's rules page: an absolute path there
+/// is "used as written", and OpenCode 2.3.0's own code reads it while `OPENCODE_DISABLE_PROJECT_CONFIG` keeps the
+/// project's files out. The rules text is kept byte for byte. `None` when the path holds a config token, a `*`, `?`, `[`
+/// or `{` (the file's name may be read as a pattern), or is not absolute, or `value` is not an object.
+pub fn with_instructions(value: &str, file: &std::path::Path) -> Option<String> {
+    let path = file.to_str()?;
+    let name = file.file_name()?.to_str()?;
+    if !file.is_absolute() || CONFIG_TOKENS.iter().any(|t| path.contains(t)) || name.contains(['*', '?', '[', '{']) {
+        return None;
+    }
+    let body = value.strip_prefix('{')?.strip_suffix('}')?;
+    let entry = format!("\"instructions\":[{}]", Value::String(path.into()));
+    Some(if body.trim().is_empty() { format!("{{{entry}}}") } else { format!("{{{body},{entry}}}") })
+}
 
 /// The two listings (`first` without `rules`, `listing` with them set) as far as manut's own rules cannot explain a
 /// difference: `rules` is what `first` gives, both name the same agents in the same order, each with the same mode,
@@ -1078,6 +1104,26 @@ impl Adapter for Acp {
 mod tests {
     use super::*;
     use std::path::Path;
+
+    /// Item 93: the instructions file joins OpenCode's config value as its one `instructions` entry, the rules text kept
+    /// byte for byte, and only a path OpenCode reads as exactly that file.
+    #[test]
+    fn the_instructions_file_joins_the_config_value_as_written() {
+        let rules = r#"{"agent":{"build":{"permission":{"bash":{"*":"ask"}}}}}"#;
+        let f = Path::new("/Users/me/.manut/project-notes/18c-2f-0.md");
+        assert_eq!(
+            with_instructions(rules, f).as_deref(),
+            Some(r#"{"agent":{"build":{"permission":{"bash":{"*":"ask"}}}},"instructions":["/Users/me/.manut/project-notes/18c-2f-0.md"]}"#)
+        );
+        assert_eq!(with_instructions("{}", f).as_deref(), Some(r#"{"instructions":["/Users/me/.manut/project-notes/18c-2f-0.md"]}"#));
+        // a quote or a backslash in the folder is escaped as JSON, never closing the string
+        assert_eq!(with_instructions("{}", Path::new(r#"/U/a"b\c/1.md"#)).as_deref(), Some(r#"{"instructions":["/U/a\"b\\c/1.md"]}"#));
+        // OpenCode would read these as something else: a token it substitutes, a name it takes as a pattern, a relative path
+        for bad in ["/U/{env:HOME}/1.md", "/U/{file:/etc/passwd}/1.md", "/U/x/*.md", "/U/x/[a].md", "/U/x/a?.md", "/U/x/{a,b}.md", "notes/1.md"] {
+            assert_eq!(with_instructions("{}", Path::new(bad)), None, "{bad}");
+        }
+        assert_eq!(with_instructions("[]", f), None);
+    }
 
 /// What OpenCode decides for `tool` on `input` under `rules` (the last rule whose permission and pattern match,
 /// else ask), matching as it does on Windows (`fold`) or elsewhere.

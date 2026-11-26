@@ -717,7 +717,8 @@ const USAGE = {
 // Accounts (accounts.*), shaped like the real bridge: every coding CLI, the CLI's own login first ("default").
 // Claude: signed in on this computer (owner@example.com), plus a local CLIProxyAPI holding 5 logins, listed from
 // its file names: owner@example.com is one of them (that row says so), the other 4 are read-only `cpa:<n>` rows. Codex: this computer + "Work", this computer in use. pi: on this computer, signed in. oh-my-pi, Grok,
-// Gemini: not installed. mock.accounts {limit: id, cli?} marks an account limited (as its usage record would).
+// Gemini: not installed. mock.accounts {limit: id, cli?} marks an account limited (as its usage record would); {lift: id}
+// ends that limit.
 const ACCT_CLIS = ["claude", "codex", "pi", "omp", "grok", "gemini"];
 const CPA_EMAILS = ["ana@example.com", "ben@example.com", "cho@example.com", "team@example.org"];
 const ACCT_INSTALLED = { claude: true, codex: true, pi: true, omp: false, grok: false, gemini: false };
@@ -1779,6 +1780,8 @@ const OPS = {
   "mock.accounts": (p) => {
     const cli = typeof p.cli === "string" ? p.cli : "codex";
     if (typeof p.limit === "string") acctLimited[`${cli}:${p.limit}`] = now() + 2 * 3600;
+    // lift: the limit is over (item 95's send at the reset reads the account as usable again)
+    if (typeof p.lift === "string") delete acctLimited[`${cli}:${p.lift}`];
     // usage {id, windows: [{label, used_percent?, resets_in_min?}]}: that account's own usage record
     if (p.usage && typeof p.usage === "object") {
       const windows = (p.usage.windows ?? []).map((w) => ({

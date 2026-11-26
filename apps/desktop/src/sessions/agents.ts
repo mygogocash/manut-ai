@@ -354,6 +354,8 @@ export interface SessionRec {
   title?: string;
   /** The title the agent gave its conversation (Claude Code's own title, a Codex thread name). */
   agentTitle?: string;
+  /** A title the person's chosen model wrote (Settings › Titles and words, item 96); never above a name the person gave. */
+  modelTitle?: string;
   /** Work the agent says still runs in the background after its turn (commands; subagents have their own rows). */
   background?: number;
   /** A short summary of the person's first real message, made here (no model is asked). */
@@ -533,7 +535,7 @@ export function termFallbackName(rec: Pick<SessionRec, "agent" | "fgAgent">, age
 /** A pane's name in the split's small drawings (Plans minimap, the row glyph's label): its title, but its folder's name
  *  when nothing named it, so three bare shells read `web-app`, `api-server`, `docs` and not "Shell" three times (the
  *  row already sits under its folder group). */
-export function splitPaneName(rec: Pick<SessionRec, "agent" | "fgAgent" | "cwd" | "title" | "agentTitle" | "promptTitle">, agents: AgentInfo[] | null | undefined): string {
+export function splitPaneName(rec: Pick<SessionRec, "agent" | "fgAgent" | "cwd" | "title" | "modelTitle" | "agentTitle" | "promptTitle">, agents: AgentInfo[] | null | undefined): string {
   const got = pickTitle(rec, termFallbackName(rec, agents));
   return got.source === "folder" ? folderName(rec.cwd) || got.title : got.title;
 }

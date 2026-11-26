@@ -9,7 +9,7 @@ The fixes are items 85e to 85i in `docs/plan.md`; the motion is items 85a to 85c
 ## What "quiet luxury" means here, as rules
 
 - **Colour:** one black main button a view, and colour only for its four meanings (working, needs you, checked,
-  failed). No accent for the person to pick.
+  failed). No accent for the person to pick (the colour picker left Settings in item 85i).
 - **Type:** sizes only from the scale, nothing under 12px. Weight 600 is the only emphasis: no capitals, no
   letter-spacing. Anything read at length is serif.
 - **Rhythm:** rows 44px, buttons 34px, fields 40px, 16 to 24px between groups, text never wider than 696px. Space is
@@ -40,9 +40,12 @@ The fixes are items 85e to 85i in `docs/plan.md`; the motion is items 85a to 85c
    Worktrees, Source control, MCP and Skills, Developer) beside the everyday ones. The Settings board is one quiet
    column. Smallest change: the developer pages under one "Under the hood" entry, as the Voice board names it. Seen.
 5. **Code** opens on the old TERMINALS section with other companies' logos on an otherwise empty page. The Code board
-   shows lanes, the conversation and a diff: at least a grey Lanes band and `StatesCode`'s empty state. Seen.
+   shows lanes, the conversation and a diff: at least a grey Lanes band and `StatesCode`'s empty state. Seen. Fixed in
+   item 85i (26 Nov): it opens on the grey Lanes band with New lane over an empty state, then Terminals under a grey band
+   in sentence case; the task sources and the coding tools' plans are named in words, with no company's mark.
 6. **The foot of the side menu** shows three small squares for each coding tool's use, and "You". The board has the
-   budget pill and the person's name with their shop. Seen.
+   budget pill and the person's name with their shop. Seen. Fixed in item 85i (26 Nov): the foot is the pill (shown only with
+   the runtime's numbers, none yet) and the person with their shop; the coding tools' use is on the Code page.
 7. **The chat's header** shows a maker's logo with a model and effort, and "3 other places" with two other companies'
    logos. The board has Answer, Used and Steps, and a cost line. Seen. *Item 85f (26 Nov):* the header holds the
    member's name, the places in words and the panel button; the model and its effort are in the chat box. The Answer,
@@ -55,21 +58,33 @@ The fixes are items 85e to 85i in `docs/plan.md`; the motion is items 85a to 85c
    button, and a button is 34px. `chat/cards/cards.css`. Seen in both themes. Rebuilt in item 85g (26 Nov): the kit's
    card, Allow once the one black button, no tints and no rail (`e2e/ask-cards.spec.ts` pictures every kind).
 9. **Two icon sets.** The side menu's is the brand's (16px, a 1.4 line). Pages use `ui/icons.tsx` (9 to 15px, a 1.8 to
-   2.6 line): 257 of the icons measured are 14px with a 2px line. Measured.
+   2.6 line): 257 of the icons measured are 14px with a 2px line. Measured. Fixed in item 85i (26 Nov): every icon is a
+   drawing of `src/ui/icons.tsx`, 16px with a 1.4 line; the board's 65 word for word, and 29 the board does not have,
+   drawn on its grid with its line, ends and corners for the board to take in or redraw: arrow-left, panel-right,
+   terminal, grid, gear, expand, shrink, pin, bolt, wrench, database, globe, chip, cube, folder, chevrons-up-down,
+   chevrons-down-up, git-branch, diff, camera, hard-drive, columns-2, message-plus, list, paperclip, audio-lines, reply,
+   home, nodes. `src/ui/icons.test.tsx` fails on a line icon drawn anywhere else (marks, faces, meters, state glyphs
+   and the run graph are listed with why), and `e2e/quiet-sweep.spec.ts` measures every icon on the menu's pages and in
+   Settings.
 10. **Two segmented switches.** Home's is a 28px pill; Settings' (`.mseg`) are 22px rectangles with 11.5px text. Seen.
 11. **Two greys for second-line text.** `--quiet` (the placeholder's colour) is text in 219 rules beside `--muted`. On
     grey bands, the side menu and hovered rows it measures 4.0 to 4.3 to 1, under the 4.5 the Contrast board asks.
-    Measured.
-12. **Team's Pause everyone** is a red outlined button. Pausing can be undone, so red is wrong. Seen.
+    Measured. Fixed in item 85i (26 Nov): 108 rules now use `--muted` (4.57 to 1 at its lowest, on a hovered row in
+    light); `--quiet` is left on placeholders and disabled controls, and `src/theme/quietRule.test.ts` keeps it there.
+    The chat's stylesheets (47 rules) wait for item 85f, which rewrites them; the test names them once the lead drops
+    its one exception.
+12. **Team's Pause everyone** is a red outlined button. Pausing can be undone, so red is wrong. Seen. Fixed in item 85i
+    (26 Nov): the Team board's quiet button; the question's own Pause everyone stays as PauseAll draws it.
 
 ### Density and rhythm
 
 13. **Text below the scale.** The commonest sizes on the pages are 11.5, 11, 12.5 and 10.5px; the board's smallest is
     12px for tags and 14px for body. Settings is worst (`settings/settings.css`: `.st-k b`, `.st-k span`, `.st-note`,
     and the uppercase 10.5px `.st-sh` and `.st-gh` labels, which should be grey bands in sentence case). Measured.
-14. **The side menu is 248px wide** where the board says 196 (`--side-w`). Seen.
+14. **The side menu is 248px wide** where the board says 196 (`--side-w`). Seen. Fixed in item 85i (26 Nov).
 15. **The command palette's** rows are 32px with no icons, and its groups are in capitals. The board's menu rows are
-    34px with an icon and its word. Seen.
+    34px with an icon and its word. Seen. Fixed in item 85i (26 Nov): 34px rows, each an icon of the set and its word, the
+    groups (Go to, Actions, Chats) on grey bands in sentence case, the field with the magnifier and Esc, as `Search`.
 16. **Needs you** has thin rows, a grey "Approve" tag that looks like a button, and two times. The board has one card a
     decision, a 17px line saying what follows, and Approve on the card. Seen. Rebuilt in item 85g (26 Nov): one card a
     decision, the 17px line, one time and the kind as an amber mark; Approve stays on Home and the chat's card, by the
@@ -78,7 +93,10 @@ The fixes are items 85e to 85i in `docs/plan.md`; the motion is items 85a to 85c
 ### Empty, loading and error states
 
 17. **Customize and the activity log** print a raw error as body text when a read fails. The system-states board says
-    "This page did not load. Nothing was changed. Try again." Seen; a real failure would read the same.
+    "This page did not load. Nothing was changed. Try again." Seen; a real failure would read the same. Fixed in item 85i
+    (26 Nov): a failure the app does not word for people shows the board's banner with Try again, and the raw error only
+    under a shut Details (`LoadFailed`, `saysWhy` in `pages/load.ts`); a worded refusal (Not yet, owner only, offline)
+    still says why in its own sentence.
 18. The empty states of Needs you, Artifacts and History are good and alike: the pattern for the others.
 
 ### Dark, and narrow
@@ -86,13 +104,21 @@ The fixes are items 85e to 85i in `docs/plan.md`; the motion is items 85a to 85c
 19. **Dark, Settings, General:** in the Appearance preview a chip is white text on a near-white ground
     (`settings/settings.css`, a hand-typed `#fff`). Seen.
 20. **At 900 wide,** Team's and Customize's right panel drops under a half-height list and leaves a blank strip, and
-    Settings shows three columns with 485px left for the page. Seen.
+    Settings shows three columns with 485px left for the page. Seen. Fixed in item 85i (26 Nov) for Team and Customize
+    (Settings in 85h): under the width where the two cannot stand side by side (936 for Team, 976 for Customize, with the
+    196px menu), the list keeps its own height and the panel follows it with its edge on top, as BrandLayout says.
 
 ### Words
 
 21. Technical words where the Voice board is plain (`i18n/en.ts`): "Bots", "Automations" beside "Routines", "Plugins",
     "Idle", "New session", "Deny", "Allow for session", "Waiting for approval", "Profile ID", "Reasoning", "Providers",
-    "Worktrees". The board says team member, Routines, Needs you, Under the hood. Seen.
+    "Worktrees". The board says team member, Routines, Needs you, Under the hood. Seen. Fixed in item 85i (26 Nov) on the
+    everyday pages: team members for bots in Settings, Routines for Automations (Customize's entry is "All routines",
+    beside its Routines), Skills and tools for Plugins, New chat or terminal for New session, Needs you for Waiting for
+    approval, Internal name for Profile ID, Thinking for Reasoning, and the Needs you tag a noun (Approval). Kept: "Idle",
+    which StatesTeam and BrandThai use for a member with nothing to do; "Deny" and "Allow for session", because the
+    Voice board gives no replacement for an ask's choices; an untitled session's name and the developer pages'
+    words (Providers, Worktrees, the terminals' menus).
 
 ## The order of work
 

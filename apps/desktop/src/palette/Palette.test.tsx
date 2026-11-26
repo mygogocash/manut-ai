@@ -8,9 +8,9 @@ import type { Group } from "./groups";
 const noop = () => {};
 const row = (id: string, label: string, hint?: string) => ({ id, label, hint, run: noop });
 const groups: Group[] = [
-  { key: "go", heading: "pal.go", rows: [row("go:a", "Team"), row("go:b", "History")] },
-  { key: "do", heading: "pal.do", rows: [row("do:a", "New session")] },
-  { key: "chats", heading: "pal.chats", rows: [row("chat:a", "Refund for Khun Mali", "Nam")] },
+  { key: "go", heading: "pal.go", rows: [{ ...row("go:a", "Team"), icon: "users" }, row("go:b", "History")], icon: "chevron-right" },
+  { key: "do", heading: "pal.do", rows: [row("do:a", "New session")], icon: "chevron-right" },
+  { key: "chats", heading: "pal.chats", rows: [row("chat:a", "Refund for Khun Mali", "Nam")], icon: "clock" },
 ];
 
 function draw(over: Partial<PaletteViewProps> = {}) {
@@ -30,9 +30,9 @@ describe("the palette's overlay", () => {
     expect(count(html, 'role="option"')).toBe(4);
   });
 
-  it("heads the groups Go to, Do and Chats, in that order", () => {
+  it("heads the groups Go to, Actions and Chats, in that order, in sentence case as the Search board writes them", () => {
     const html = draw();
-    const at = ["Go to", "Do", "Chats"].map((h) => html.indexOf(`>${h}<`));
+    const at = ["Go to", "Actions", "Chats"].map((h) => html.indexOf(`>${h}<`));
     expect(at.every((i) => i > 0)).toBe(true);
     expect([...at].sort((a, b) => a - b)).toEqual(at);
   });
@@ -52,9 +52,20 @@ describe("the palette's overlay", () => {
     expect(none).not.toContain("aria-activedescendant");
   });
 
+  it("draws every row as the canvas's Search board does: an icon of the set before its word (item 85i)", () => {
+    const html = draw();
+    expect(count(html, 'class="pal-row')).toBe(4);
+    for (const m of html.matchAll(/<li[^>]*class="pal-row[^"]*"[^>]*>(.*?)<\/li>/g)) expect(m[1]).toMatch(/^<svg class="ic"[^>]*viewBox="0 0 16 16"/);
+    // a row's own icon, else its group's: Team is the menu's users, a chat the clock of Recent
+    expect(html).toMatch(/data-row="go:a"><svg[^>]*><circle cx="6" cy="6" r="2.2"/);
+    expect(html).toMatch(/data-row="chat:a"><svg[^>]*><circle cx="8" cy="8" r="5.5"/);
+    // the field has the magnifier and says Esc closes it
+    expect(html).toMatch(/<div class="pal-s"><svg class="ic"[^>]*>.*<input[^>]*data-testid="palette-input"[^>]*\/><span class="pal-kbd" aria-hidden="true">Esc<\/span>/);
+  });
+
   it("speaks the app's language", () => {
     setLang("ja");
-    const html = draw({ groups: [{ key: "go", heading: "pal.go", rows: [row("go:a", "x")] }] });
+    const html = draw({ groups: [{ key: "go", heading: "pal.go", rows: [row("go:a", "x")], icon: "chevron-right" }] });
     expect(html).toContain("移動");
     expect(html).toContain("コマンドパレット");
   });

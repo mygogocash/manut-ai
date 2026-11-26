@@ -35,6 +35,10 @@ interface Known {
   byBranch: Map<string, LanePull>;
 }
 const known = new Map<string, Known>();
+/** The branches of each repository whose pull request the host said merged (item 94): a list the app read showed it merged, or the
+ *  app's own Merge finished. Only this repository's own branches: a fork's request on a branch of the same name never counts. Never
+ *  guessed from a request that is simply no longer listed as open, which may have been closed. Of this run, as the cache is. */
+const merged = new Map<string, Set<string>>();
 /** When each repository was last asked for, by this module, whether it answered or not. */
 const asked = new Map<string, number>();
 const listeners = new Set<() => void>();
@@ -54,6 +58,7 @@ export function notePulls(source: CliSource, repo: string, items: readonly TaskI
   const prev = known.get(keyOf(source, repo));
   const byBranch = whole || !prev ? new Map<string, LanePull>() : new Map(prev.byBranch);
   for (const i of items) {
+    if (i.head && i.state === "merged" && i.same === true) noteMerged(source, repo, i.head);
     if (!i.head || (i.state !== "open" && i.state !== "draft")) continue;
     // two open requests from one branch of one repository: the newer (higher number) is the one the person means
     const key = branchKey(repo, i, i.head);
@@ -69,9 +74,24 @@ export function notePulls(source: CliSource, repo: string, items: readonly TaskI
 export function dropPull(source: CliSource, repo: string, number: number): void {
   const k = known.get(keyOf(source, repo));
   if (!k) return;
-  for (const [branch, p] of k.byBranch) if (p.number === number) k.byBranch.delete(branch);
+  for (const [branch, p] of k.byBranch)
+    if (p.number === number) {
+      k.byBranch.delete(branch);
+      // the app merged it, and the host said so: a branch of this repository's own is merged (item 94)
+      if (branch.startsWith(`${repo}\n`)) noteMerged(source, repo, branch.slice(repo.length + 1));
+    }
   bump();
 }
+
+function noteMerged(source: CliSource, repo: string, branch: string): void {
+  const k = keyOf(source, repo);
+  const set = merged.get(k) ?? new Set<string>();
+  set.add(branch);
+  merged.set(k, set);
+}
+
+/** Whether the host said a pull request from `branch` of `repo` itself merged (item 94). */
+export const mergedFor = (source: CliSource, repo: string, branch: string): boolean => merged.get(keyOf(source, repo))?.has(branch) ?? false;
 
 /** The open pull request made from `branch` of `repo` itself (never a fork's branch of the same name), or null. */
 export function pullFor(source: CliSource, repo: string, branch: string): LanePull | null {
@@ -119,6 +139,11 @@ const subscribe = (l: () => void) => {
 /** The pull request for each of `branches` of the project at `root`, by branch name. It reads the repository once when its cache is
  *  stale (see the top of this file) and follows the cache as the Tasks page fills it. */
 export function usePullRequests(root: string, branches: readonly string[]): ReadonlyMap<string, LanePull> {
+  return useLanePulls(root, branches).open;
+}
+
+/** `usePullRequests`, and which of `branches` the host said merged (item 94: a lane settles when its pull request merged). */
+export function useLanePulls(root: string, branches: readonly string[]): { open: ReadonlyMap<string, LanePull>; merged: ReadonlySet<string> } {
   useSyncExternalStore(subscribe, () => version, () => version);
   const [remote, setRemote] = useState<TaskRemote | null>(null);
   const wanted = branches.length > 0;
@@ -136,16 +161,20 @@ export function usePullRequests(root: string, branches: readonly string[]): Read
     };
   }, [root, wanted]);
   const out = new Map<string, LanePull>();
-  if (remote) for (const b of branches) {
-    const p = pullFor(remote.source, remote.repo, b);
-    if (p) out.set(b, p);
-  }
-  return out;
+  const done = new Set<string>();
+  if (remote)
+    for (const b of branches) {
+      const p = pullFor(remote.source, remote.repo, b);
+      if (p) out.set(b, p);
+      if (mergedFor(remote.source, remote.repo, b)) done.add(b);
+    }
+  return { open: out, merged: done };
 }
 
 /** Tests: start from nothing. */
 export function resetPulls(): void {
   known.clear();
+  merged.clear();
   asked.clear();
   remotes.clear();
   bump();

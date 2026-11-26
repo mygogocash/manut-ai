@@ -97,6 +97,20 @@ export interface BuddyHost {
   buddySaveFile(name: string, data: Uint8Array): Promise<string>;
 }
 
+/** What a title run is asked (title_run.rs `Request`): `material` is already masked by the page. */
+export interface TitleRequest {
+  agent: string;
+  model: string;
+  effort: string;
+  purpose: "title" | "pull";
+  key: string;
+  material: string;
+}
+export interface TitleWords {
+  title: string;
+  body: string;
+}
+
 export interface SessionHost extends HistoryHost {
   readonly kind: "tauri" | "mock";
   /** Stop anything an earlier page load left running (a webview reload keeps the shell alive). */
@@ -185,6 +199,12 @@ export interface SessionHost extends HistoryHost {
    *  only when nothing in it is changed, new, unpushed or in progress and only by a fast-forward (src-tauri/src/git_pull.rs).
    *  Never a lane's folder. Null for an answer that is not one. */
   sourcePull?(cwd: string): Promise<Pulled | null>;
+  /** One short run of the person's own Claude Code that writes a chat's title or a pull request's words (src-tauri/src/title_run.rs,
+   *  item 96). Only asked when Settings › Titles and words is on. Returns the cleaned words; writes nothing. Rejects with a code
+   *  (`off`, `busy`, `too_many`, `timeout`, `cancelled`, `empty`, `unsupported`, ...) or the program's own line. */
+  titleRun?(req: TitleRequest): Promise<TitleWords>;
+  /** Stops the title run made for `key` (a chat's id), when it is the one running. */
+  titleCancel?(key: string): Promise<void>;
   /** A lane put up for review (src-tauri/src/review.rs): what it would go up with. Only reads. */
   reviewDraft?(worktree: string): Promise<ReviewDraft | null>;
   /** The ask to push the lane at `worktree` and open its pull request with `title` and `body`: the exact repository, branch,
@@ -446,6 +466,16 @@ export class TauriHost implements SessionHost, BuddyHost {
     const { invoke } = await this.core();
     return readPulled(await invoke<unknown>("source_pull", { cwd }));
   }
+  async titleRun(req: TitleRequest): Promise<TitleWords> {
+    const { invoke } = await this.core();
+    const v = await invoke<unknown>("title_run", { request: req });
+    const o = v && typeof v === "object" ? (v as Record<string, unknown>) : {};
+    return { title: typeof o.title === "string" ? o.title : "", body: typeof o.body === "string" ? o.body : "" };
+  }
+  async titleCancel(key: string) {
+    const { invoke } = await this.core();
+    await invoke<unknown>("title_cancel", { key });
+  }
   async reviewDraft(worktree: string) {
     const { invoke } = await this.core();
     return readDraft(await invoke<unknown>("review_draft", { worktree }));
@@ -665,6 +695,8 @@ export interface MockCall {
     | "source.tools"
     | "source.pull"
     | "review.ask"
+    | "title.run"
+    | "title.cancel"
     | "review.settle"
     | "buddy.start"
     | "buddy.input"
@@ -710,6 +742,10 @@ export interface MockCall {
   show?: string[];
   /** history: the terminal's key (a session id or `panel-<n>`) */
   key?: string;
+  /** title.run: what was asked for, and with which model and effort ("" for the agent's own) */
+  purpose?: "title" | "pull";
+  titleModel?: string;
+  titleEffort?: string;
   /** source.tools: the CLIs were asked again */
   fresh?: boolean;
   /** review.settle: the person's answer, and on a Yes the title and body the mock would have sent */
@@ -806,6 +842,7 @@ export type MockGlobals = MockTurnGlobals & {
   __manutSourceTools?: unknown;
   /** e2e: what a pull of each project's default branch answers, by folder (the shell's `source_pull` answer) */
   __manutPulled?: Record<string, unknown>;
+  __manutTitleRun?: Partial<TitleWords> | { error: string };
   /** e2e: what each lane would go up for review with, by worktree: its repository, its commits' subjects, a code its ask is
    *  refused with, or the step its Yes fails at */
   __manutReview?: Record<string, { source?: "github" | "gitlab"; repo?: string; commits?: string[]; refuse?: string; fail?: { step: string; error: string }; cannot?: string; title?: string }>;
@@ -1468,6 +1505,17 @@ export class MockHost implements SessionHost, BuddyHost {
     if (!lane) return { source: "github", repo: "", commits: [], refuse: "not_a_lane" };
     const name = lane.project.split("/").filter(Boolean).pop() ?? "project";
     return { source: "github", repo: `you/${name}`, commits: ["Work in this lane"], ...(this.g.__manutReview?.[worktree] ?? {}) };
+  }
+  /** What e2e says a title run answers (`__manutTitleRun`: words, or `{ error }`); none: a fixed title and body. */
+  async titleRun(req: TitleRequest): Promise<TitleWords> {
+    this.log({ op: "title.run", purpose: req.purpose, key: req.key, titleModel: req.model, titleEffort: req.effort });
+    const a = this.g.__manutTitleRun;
+    if (a && typeof a === "object" && "error" in a) throw new Error(String((a as { error: unknown }).error));
+    const w = (a ?? {}) as Partial<TitleWords>;
+    return { title: w.title ?? "A written title", body: req.purpose === "pull" ? (w.body ?? "A written description") : "" };
+  }
+  async titleCancel(key: string) {
+    this.log({ op: "title.cancel", key });
   }
   async reviewDraft(worktree: string): Promise<ReviewDraft | null> {
     const lane = (this.g.__manutLanes ?? []).find((l) => l.worktree === worktree);

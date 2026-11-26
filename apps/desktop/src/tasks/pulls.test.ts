@@ -2,7 +2,7 @@
 // read at most once while its cache is fresh (never one call per lane, never on a timer), and a failed read shows nothing.
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { TaskHost } from "./host";
-import { dropPull, notePulls, PULLS_MAX_AGE, pullFor, readPulls, remoteOf, resetPulls, shouldRead } from "./pulls";
+import { dropPull, mergedFor, notePulls, PULLS_MAX_AGE, pullFor, readPulls, remoteOf, resetPulls, shouldRead } from "./pulls";
 import { clearOpen, getTasks, resetTasks, showPull } from "./state";
 import type { TaskItem } from "./types";
 
@@ -135,5 +135,31 @@ describe("opening it where Tasks already goes", () => {
   it("changes nothing for a bad repository name", () => {
     expect(showPull("github", "not a repo", 1)).toBe(false);
     expect(getTasks().open).toBeNull();
+  });
+});
+
+describe("a merged pull request, as the host said it (item 94)", () => {
+  beforeEach(() => resetPulls());
+
+  it("is noted from a list that shows it merged, for this repository's own branch only", () => {
+    notePulls("github", "o/r", [pr(7, "kit/promptpay-qr", "merged"), pr(8, "kit/thai-date", "merged", false)], NOW);
+    expect(mergedFor("github", "o/r", "kit/promptpay-qr")).toBe(true);
+    // a fork's request on a branch named like a lane's never counts
+    expect(mergedFor("github", "o/r", "kit/thai-date")).toBe(false);
+  });
+
+  it("is noted when the app's own Merge finished, and never guessed from a request no longer listed as open", () => {
+    notePulls("github", "o/r", [pr(3, "kit/a"), pr(4, "kit/b")], NOW, true);
+    dropPull("github", "o/r", 3);
+    expect(mergedFor("github", "o/r", "kit/a")).toBe(true);
+    // b left the open list: closed or merged, the app cannot tell, so it is neither
+    notePulls("github", "o/r", [], NOW + 1, true);
+    expect(mergedFor("github", "o/r", "kit/b")).toBe(false);
+  });
+
+  it("is not noted for an open or closed request", () => {
+    notePulls("gitlab", "g/p", [pr(1, "kit/x", "open"), pr(2, "kit/y", "closed")], NOW);
+    expect(mergedFor("gitlab", "g/p", "kit/x")).toBe(false);
+    expect(mergedFor("gitlab", "g/p", "kit/y")).toBe(false);
   });
 });

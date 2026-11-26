@@ -267,7 +267,7 @@ describe("sending from the ask box, on the demo runtime", () => {
   it("Chat opens a new thread with Buddy and sends the words there", async () => {
     vi.useFakeTimers();
     const store = await demoStore();
-    expect(await sendAsk(store.actions, { to: "thread", bot: "buddy" }, "Translate a message")).toBe(true);
+    expect(await sendAsk(store.actions, { to: "thread", bot: "buddy" }, "Translate a message")).toMatchObject({ to: "thread", bot: "buddy" });
     const s = store.getState();
     expect(s.selectedBot).toBe("buddy");
     expect(s.ui.view).toBe("chat");
@@ -282,7 +282,7 @@ describe("sending from the ask box, on the demo runtime", () => {
     vi.useFakeTimers();
     const store = await demoStore();
     store.actions.openPage("history");
-    expect(await sendAsk(store.actions, { to: "main", bot: "buddy" }, "Reply to waiting customers")).toBe(true);
+    expect(await sendAsk(store.actions, { to: "main", bot: "buddy" }, "Reply to waiting customers")).toEqual({ to: "main", bot: "buddy" });
     const s = store.getState();
     expect(s.ui).toMatchObject({ view: "chat", thread: null });
     expect(s.selectedBot).toBe("buddy");
@@ -292,17 +292,43 @@ describe("sending from the ask box, on the demo runtime", () => {
   it("Code opens a new thread with Kit and sends the words there", async () => {
     vi.useFakeTimers();
     const store = await demoStore();
-    expect(await sendAsk(store.actions, { to: "thread", bot: "kit" }, "Build a pre-order page")).toBe(true);
+    expect(await sendAsk(store.actions, { to: "thread", bot: "kit" }, "Build a pre-order page")).toMatchObject({ to: "thread", bot: "kit" });
     const s = store.getState();
     expect(s.selectedBot).toBe("kit");
     expect(s.ui.thread).not.toBeNull();
     expect(s.chats[threadKey("kit", s.ui.thread!)].items.filter((i) => i.kind === "user").map((i) => (i as { text: string }).text)).toEqual(["Build a pre-order page"]);
   });
 
+  it("Cmd+Enter (stay): Chat makes the thread and sends there without opening it; Home stays open", async () => {
+    vi.useFakeTimers();
+    const store = await demoStore();
+    store.actions.openPage("home");
+    const sent = await sendAsk(store.actions, { to: "thread", bot: "buddy" }, "Translate a message", true);
+    expect(sent).toMatchObject({ to: "thread", bot: "buddy", thread: expect.any(String) });
+    const s = store.getState();
+    expect(s.ui.view).toBe("home");
+    expect(s.ui.thread).toBeNull();
+    const thread = (sent as { thread: string }).thread;
+    expect(s.threads.buddy.some((r) => r.thread === thread)).toBe(true);
+    expect(s.chats[threadKey("buddy", thread)].items.filter((i) => i.kind === "user").map((i) => (i as { text: string }).text)).toEqual(["Translate a message"]);
+  });
+
+  it("Cmd+Enter (stay): Team sends to Buddy's main chat once, and Home stays open", async () => {
+    vi.useFakeTimers();
+    const store = await demoStore();
+    store.actions.openPage("home");
+    const before = store.getState().selectedBot;
+    expect(await sendAsk(store.actions, { to: "main", bot: "buddy" }, "Reply to waiting customers", true)).toEqual({ to: "main", bot: "buddy" });
+    const s = store.getState();
+    expect(s.ui.view).toBe("home");
+    expect(s.selectedBot).toBe(before);
+    expect(s.chats.buddy.items.filter((i) => i.kind === "user" && i.text === "Reply to waiting customers")).toHaveLength(1);
+  });
+
   it("says when a thread could not be made, so the words stay in the box", async () => {
     vi.useFakeTimers();
     const store = await demoStore();
-    expect(await sendAsk(store.actions, { to: "thread", bot: "nobody" }, "Hello")).toBe(false);
+    expect(await sendAsk(store.actions, { to: "thread", bot: "nobody" }, "Hello")).toBeNull();
     expect(selectAsks(store.getState())).toEqual([]);
   });
 });

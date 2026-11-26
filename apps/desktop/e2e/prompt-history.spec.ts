@@ -28,7 +28,9 @@ async function mock(op: string, params: Record<string, unknown> = {}): Promise<a
 const sent = async () => ((await mock("mock.calls")).calls as { op: string; params: any }[]).filter((c) => c.op === "chat.send").map((c) => c.params.text as string);
 const steered = async () => ((await mock("mock.calls")).calls as { op: string; params: any }[]).filter((c) => c.op === "chat.steer").map((c) => c.params.text as string);
 
-test.beforeEach(async () => {
+test.beforeEach(async ({ page }) => {
+  // a prompt typed mid-answer is steered in, as Settings' Add it now does (item 95), so it is history at once
+  await page.addInitScript(() => localStorage.setItem("manut.box.followUp", "steer"));
   await mock("mock.reset");
 });
 

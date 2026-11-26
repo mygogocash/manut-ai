@@ -18,6 +18,8 @@
 import "./review.css";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { t, type Key } from "../i18n";
+import { titleModel, titlesFor, useTitleModel } from "../lib/titleModel";
+import { pullMaterial, whyKey } from "../sessions/titleWords";
 import { getHost } from "../sessions/host";
 import { maskSecrets } from "../lib/secrets";
 import { openExternal } from "../lib/openExternal";
@@ -29,7 +31,7 @@ import { MERGE_METHODS, type MergeMethod, type ReviewAsk, type ReviewDone, type 
 /** Where the panel is. `why` is a code (the shell's, or approval-core's) said in words by `whyWords`. */
 export type ReviewStep =
   | { at: "closed"; done?: ReviewDone | null; kind?: "open" | "merge" }
-  | { at: "draft"; title: string; body: string; busy: boolean; why: string | null }
+  | { at: "draft"; title: string; body: string; busy: boolean; why: string | null; writing?: boolean }
   | { at: "method"; method: MergeMethod; busy: boolean; why: string | null }
   | { at: "ask"; ask: ReviewAsk; busy: boolean; why: string | null };
 
@@ -105,6 +107,8 @@ export interface ReviewViewProps {
   onTitle: (title: string) => void;
   onBody: (body: string) => void;
   onAsk: () => void;
+  /** Suggest (item 96): offered only when the person turned on Settings › Titles and words and the host can. */
+  onSuggest?: () => void;
   onMergeStart?: () => void;
   onMethod?: (method: MergeMethod) => void;
   onMergeAsk?: () => void;
@@ -278,6 +282,11 @@ export function ReviewView(p: ReviewViewProps) {
             <button type="button" className="btn dark" disabled={s.busy || s.title.trim() === ""} onClick={p.onAsk} data-testid="review-ask-button">
               {t("review.ask")}
             </button>
+            {p.onSuggest && (
+              <button type="button" className="btn" disabled={s.busy || !!s.writing} onClick={p.onSuggest} data-testid="review-suggest">
+                {s.writing ? t("titles.suggesting") : t("titles.suggest")}
+              </button>
+            )}
             <button type="button" className="btn" onClick={p.onClose} data-testid="review-cancel">
               {t("review.cancel")}
             </button>
@@ -329,6 +338,7 @@ export function Review({ worktree, title, pull = null }: ReviewProps) {
   const [step, setStep] = useState<ReviewStep>({ at: "closed" });
   const asked = useRef<string | null>(null);
   const host = getHost();
+  const words = useTitleModel();
 
   // an ask left waiting when the lane or the panel goes is taken back
   const drop = useCallback(() => {
@@ -391,6 +401,22 @@ export function Review({ worktree, title, pull = null }: ReviewProps) {
     drop();
     setStep({ at: "closed" });
   };
+  /** Suggest: the person's chosen model writes a title and a description from the lane's commits and changed files, and they go into
+   *  the two fields to be read and changed. Nothing is asked of the host's pull request path: Ask is still the person's. */
+  const suggest = async () => {
+    if (step.at !== "draft" || step.writing || !host.titleRun) return;
+    setStep({ ...step, writing: true, why: null });
+    const settings = titleModel();
+    try {
+      const draft = await host.reviewDraft?.(worktree).catch(() => null);
+      const folder = await host.laneDiff(worktree).catch(() => null);
+      const got = await host.titleRun({ agent: "claude", model: settings.model, effort: settings.effort, purpose: "pull", key: worktree, material: pullMaterial(draft?.commits ?? [], folder?.files ?? []) });
+      if (!got.title) throw new Error("empty");
+      setStep((s) => (s.at === "draft" ? { ...s, title: got.title, body: got.body, writing: false, why: null } : s));
+    } catch (e) {
+      setStep((s) => (s.at === "draft" ? { ...s, writing: false, why: t(`titles.why.${whyKey(e)}` as Key) } : s));
+    }
+  };
   const edit = (patch: { title?: string; body?: string }) => setStep((s) => (s.at === "draft" ? { ...s, ...patch, why: null } : s));
   const change = () => {
     if (step.at !== "ask") return;
@@ -407,6 +433,7 @@ export function Review({ worktree, title, pull = null }: ReviewProps) {
       onTitle={(v) => edit({ title: v })}
       onBody={(v) => edit({ body: v })}
       onAsk={() => void ask()}
+      {...(host.titleRun && titlesFor("claude", words) ? { onSuggest: () => void suggest() } : {})}
       {...(host.reviewMerge ? { onMergeStart: () => setStep({ at: "method", method: startMethod(sourceSettings()), busy: false, why: null }) } : {})}
       onMethod={(method) => setStep((s) => (s.at === "method" ? { ...s, method, why: null } : s))}
       onMergeAsk={() => void mergeAsk()}

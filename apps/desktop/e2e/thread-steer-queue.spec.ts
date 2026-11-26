@@ -1,8 +1,14 @@
 // Steer queue in a thread: a message typed in a thread while its turn runs is held like the main chat's (a bubble
 // with the ↵ mark, never "Not sent · a turn is running"), goes out after that turn with `chat.send {session, queued}`,
 // and Steer hands it to that thread's running turn (`chat.steer {session}`). Main-chat cases: steer-queue.spec.ts.
+// These run with Settings' "While an answer is running" on Add it now (item 95), as every chat did before it; the
+// default, Wait for it, and Cmd+Enter are e2e/chat-keys.spec.ts's.
 import { expect, test, type Page } from "@playwright/test";
 import { chatOpen, openChat, openThread } from "./start";
+
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem("manut.box.followUp", "steer"));
+});
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 

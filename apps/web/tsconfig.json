@@ -18,6 +18,7 @@
       "@manut/format": ["../../packages/format/src/index.ts"],
       "@manut/people-rules": ["../../packages/people-rules/src/index.ts"],
       "@manut/promptpay": ["../../packages/promptpay/src/index.ts"],
+      "@manut/remote-channel": ["../../packages/remote-channel/src/index.ts"],
       "@manut/routine-rules": ["../../packages/routine-rules/src/index.ts"]
     }
   },
