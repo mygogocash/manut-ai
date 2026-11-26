@@ -3701,6 +3701,7 @@ export const en = {
   "wf.why.unchecked": "Its project folder could not be checked.",
   "wf.why.moved": "Its project folder is not the one you allowed. Look at it again.",
   "wf.why.no_lane": "A lane of its own could not be made in its project, so nothing ran.",
+  "wf.why.config": "Did not run: this project's own git settings name a program for git to run, or another address to fetch from. The app does not run those by itself while nobody is there; press Run now if you trust them.",
   // Settings, Sharing and access: reaching this Mac from a paired phone (item 78b, src/settings/RemotePage.tsx).
   // rm.consent.operator is a marked placeholder the owner writes: who runs the relay, and where.
   "rm.intro": "Watch your chats and answer their asks from your phone, wherever you are. Every Allow needs Face ID or the phone's passcode.",

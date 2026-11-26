@@ -47,8 +47,10 @@ const text = (over: Record<string, unknown> = {}) => JSON.stringify({ ...nightly
 type Projects = Record<string, { real: string } | { why: string } | "throws">;
 
 async function setup(
-  o: { files?: ShellFile[]; agents?: { id: string; path?: string; off?: boolean }[]; on?: boolean; now?: number; lanes?: boolean | "throws"; allowed?: boolean; projects?: Projects } = {},
+  o: { files?: ShellFile[]; agents?: { id: string; path?: string; off?: boolean }[]; on?: boolean; now?: number; lanes?: boolean | "throws"; allowed?: boolean; projects?: Projects; risky?: string } = {},
 ) {
+  /** What each lane's start asked of the shell (`lane_worktree`'s `start`). */
+  const starts: unknown[] = [];
   const storage = memory();
   if (o.on !== false) storage.set("manut.workflows", JSON.stringify({ on: true, skippedKept: 50 }));
   const sinks = new Map<string, (e: ChatEvent) => void>();
@@ -78,8 +80,11 @@ async function setup(
     ...(o.lanes === false
       ? {}
       : {
-          laneWorktree: async (_cwd: string, names: string[]) => {
+          laneWorktree: async (_cwd: string, names: string[], start?: { unattended?: boolean }) => {
+            starts.push(start);
             if (o.lanes === "throws") throw new Error("no_commit");
+            // as lane.rs answers a lane made with nobody there in a repository whose own config names a program
+            if (o.risky && start?.unattended) throw new Error(`config:${o.risky}`);
             return { branch: names[0], base: "main", dir: LANE, worktree: LANE, left: 0, from: "", local: "", config: 0, stayed: 0 } satisfies LaneMade;
           },
         }),
@@ -125,7 +130,7 @@ async function setup(
     await emit(sid, { event: "turn.start" });
     await emit(sid, { event: "turn.end", outcome, ...(error ? { error } : {}) });
   };
-  return { ss, store, wf, sent, inputs, started, modes, live, runs, emit, turn, settle, storage, files, allow, projects, checked, at: (t: number) => (clock = t) };
+  return { ss, store, wf, sent, inputs, started, modes, live, runs, emit, turn, settle, storage, files, allow, projects, checked, starts, at: (t: number) => (clock = t) };
 }
 
 beforeEach(() => {
@@ -483,6 +488,29 @@ describe("a run starts only in a repository's own lane, never in a folder too br
       expect(t.runs()[0]).toMatchObject({ by: "schedule", state: "skipped", why: "no_lane" });
     });
   }
+
+  // Item 114: a run by the clock makes its lane with nobody there, so the shell first reads the repository's own config as the
+  // automatic pull does; a setting that names a program or another address stops it, and the run is kept as skipped with the
+  // setting's name. Run now is the person's own press, as a lane started from the chat box is (item 86).
+  it("a run by the clock asks for its lane as one made with nobody there, and is skipped with the setting when the config names a program", async () => {
+    const t = await setup({ risky: "filter.lfs.smudge" });
+    t.at(DUE + 10_000);
+    await t.wf.tick();
+    await t.settle();
+    nothingRan(t);
+    expect(t.starts).toEqual([expect.objectContaining({ unattended: true })]);
+    expect(t.runs()[0]).toMatchObject({ by: "schedule", state: "skipped", why: "config", detail: "filter.lfs.smudge", reached: 0 });
+    expect(t.wf.getState().refused["nightly.json"]).toBe("config");
+  });
+
+  it("Run now is the person's own start: its lane is asked for as theirs, and the same config does not stop it", async () => {
+    const t = await setup({ risky: "filter.lfs.smudge" });
+    expect(await t.wf.runNow("nightly.json")).toBeNull();
+    await t.settle();
+    expect(t.starts).toHaveLength(1);
+    expect(t.starts[0]).not.toMatchObject({ unattended: true });
+    expect(t.runs()[0]).toMatchObject({ by: "person", state: "running" });
+  });
 });
 
 describe("the switch", () => {

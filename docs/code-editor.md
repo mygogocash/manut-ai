@@ -892,7 +892,8 @@ and system settings are theirs and stay as they are. What the app's runs switch 
 (`core.hooksPath` pointed at a folder never made), `core.fsmonitor=false`, `--no-ext-diff --no-textconv` on every diff
 (`diff.external`, `diff.<driver>.command` and `.textconv`), `--no-verify-signatures` on the pull's write (`merge.verifySignatures`
 would run `gpg.program`), `protocol.ext.allow=never` on every automatic run, and a pager or an editor, which git starts only for a
-terminal (`GIT_PAGER=cat` too on the Diff). Work the person asked for by pressing something (a lane started, its fetch, a push
+terminal (`GIT_PAGER=cat` too on the Diff). A workflow's lane made by the clock is the app's own work too (item 114, see
+Workflows). Work the person asked for by pressing something (a lane started, Run now, its fetch, a push
 and a pull request after a Yes, Remove) runs git with their settings and the repository's, as the same git in a terminal would,
 hooks and the file monitor aside: they chose to act on that project, and a refusal there would break a repository-local LFS or
 deploy-key ssh setup the person relies on.
@@ -1433,6 +1434,19 @@ refusing, an agent that is not a chat) starts no agent at all: `start` closes th
 person's drafts and never in place of one, is not opened in front of them, changes neither how they last opened the agent nor
 their last folder, and is named after the workflow. When a step's turn ends `done`, the next step goes through `send`, as the
 person's next message would, until the last.
+
+**A run nobody started by a press (item 114).** A run by the clock makes its lane with nobody there, so the lane is the app's
+own doing, as the automatic pull is: the page asks the shell for it with `unattended` (`LaneStart`), and `lane::make_with` then
+runs git as automatic work runs it (`Git::automatic`: no `ext::` remote, never into a submodule) and first reads the repository's
+own config and every submodule's (`Git::config_risk`, the same read as "Git the app runs by itself" above). While that names a
+program git would run or another address to fetch from, nothing is made, checked out, counted or fetched: `git worktree add`
+would run a smudge filter as it checks the files out, the count of the developer's files that did not come along a clean
+filter, and Start from the remote an `ext::` address or a proxy. The shell answers `config:<setting>`, no agent starts, and the
+run is kept as skipped (`config`) with the setting as its detail; the card says "Did not run: this project's own git settings
+name a program for git to run, or another address to fetch from. The app does not run those by itself while nobody is there;
+press Run now if you trust them." Only a press counts as someone there (`by === "person"`), so any way a run starts later (a
+webhook) is read as nobody there. Run now, and a lane the person starts from the chat box, stay as item 86 decided: the person
+is there and chose to act on that project, so git runs with their settings and the repository's, as in a terminal.
 
 - **An ask waits.** The run never answers one. An ask in any step is on its card and in Needs you as always, and the run waits
   there, since the turn has not ended; the page says "Waiting for you at step 2 of 3".

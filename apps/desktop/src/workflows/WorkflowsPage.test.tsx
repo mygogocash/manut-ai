@@ -175,6 +175,10 @@ describe("Settings › Workflows", () => {
       expect(said("unchecked")).toContain("Its project folder could not be checked.");
       expect(words(card(draw({ settings: on, allowed, refused: { "nightly.json": "no_lane" } })))).toContain("A lane of its own could not be made in its project, so nothing ran.");
       expect(words(card(draw({ settings: on, allowed, refused: { "nightly.json": "moved" } })))).toContain("Its project folder is not the one you allowed. Look at it again.");
+      // item 114: a run by the clock whose project's own git config names a program, said as the automatic pull says it
+      expect(words(card(draw({ settings: on, allowed, refused: { "nightly.json": "config" } })))).toContain(
+        "Did not run: this project's own git settings name a program for git to run, or another address to fetch from. The app does not run those by itself while nobody is there; press Run now if you trust them.",
+      );
     });
 
     it("never draws a step it could not show as it is: a file with a hidden character is listed with why, with no Allow", () => {

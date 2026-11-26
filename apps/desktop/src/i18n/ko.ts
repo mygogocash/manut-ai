@@ -3665,6 +3665,7 @@ export const ko: Record<Key, string> = {
   "wf.why.unchecked": "프로젝트 폴더를 확인할 수 없었습니다.",
   "wf.why.moved": "프로젝트 폴더가 허용한 폴더와 다릅니다. 다시 확인하세요.",
   "wf.why.no_lane": "프로젝트에 전용 레인을 만들 수 없어 아무것도 실행하지 않았습니다.",
+  "wf.why.config": "실행하지 않았습니다: 이 프로젝트 자체의 git 설정이 git이 실행할 프로그램이나 다른 가져올 주소를 지정합니다. 아무도 없는 동안 앱은 그것을 스스로 실행하지 않아요. 믿을 수 있다면 지금 실행을 누르세요.",
   // Settings, Sharing and access: reaching this Mac from a paired phone (item 78b, src/settings/RemotePage.tsx).
   // rm.consent.operator is a marked placeholder the owner writes: who runs the relay, and where.
   "rm.intro": "어디에 있든 휴대폰으로 채팅을 보고 요청에 답하세요. 허용할 때마다 Face ID나 휴대폰 암호가 필요합니다.",

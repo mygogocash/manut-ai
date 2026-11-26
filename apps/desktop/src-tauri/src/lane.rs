@@ -110,6 +110,12 @@ pub struct Start {
     pub root: String,
     #[serde(default)]
     pub remote: bool,
+    /// The lane is made with nobody there (a workflow by the clock, item 114): it is then the app's own doing, so it reads
+    /// the repository's own config first and runs git as the automatic pull does ([`Git::automatic`], [`Git::config_risk`]).
+    /// A lane the person starts themselves (the chat box, Run now) leaves it false, and is made with their settings and the
+    /// repository's, as item 86 decided.
+    #[serde(default)]
+    pub unattended: bool,
 }
 
 /// The app's record of one worktree it made, `<lanes>/<project>/<words>.json`, beside the folder it names.
@@ -965,6 +971,12 @@ pub fn make(home: &Path, cwd: &Path, names: &[String]) -> Result<Made, String> {
 /// The folder is under `start.root` when the person chose one (checked again here: a code from [`check_lanes_root`] when it is
 /// no longer usable, and the lane is then not made anywhere else), else under [`lanes_dir`]; the record is under [`lanes_dir`]
 /// either way.
+///
+/// With `start.unattended` (item 114) the lane is the app's own doing: git runs as for the automatic pull, and nothing is
+/// made, checked out, counted or fetched while the repository's own config, or a submodule's, names a program git would run
+/// or another address to fetch from. `git worktree add` runs a smudge filter as it checks the files out, the count of what
+/// did not come along a clean filter, and a start from the remote an `ext::` address or a proxy. The answer is then
+/// `config:<setting>`, the setting named as the automatic pull names it.
 pub fn make_with(home: &Path, cwd: &Path, names: &[String], start: &Start) -> Result<Made, String> {
     if names.is_empty() || names.len() > NAMES_MAX || !names.iter().all(|n| valid_name(n)) {
         return Err("bad_name".into());
@@ -981,7 +993,13 @@ pub fn make_with(home: &Path, cwd: &Path, names: &[String], start: &Start) -> Re
     if in_progress(&git_dir) {
         return Err("busy".into());
     }
-    let git = Git::new(home)?;
+    let git = if start.unattended { Git::automatic(home)? } else { Git::new(home)? };
+    // with nobody there, the repository's own config is read before git does anything that could run a program it names
+    if start.unattended {
+        if let Some(setting) = git.config_risk(cwd) {
+            return Err(format!("config:{setting}"));
+        }
+    }
     // no commit yet: there is nothing to make a branch from
     let Some(at) = git.line(cwd, &["rev-parse", "--verify", "--quiet", "HEAD^{commit}"]).filter(|l| l.len() >= 40 && l.bytes().all(|b| b.is_ascii_hexdigit())) else {
         return Err("no_commit".into());
@@ -1991,6 +2009,51 @@ pub(crate) mod tests {
         let _ = fs::remove_dir_all(home);
     }
 
+    /// Item 114: a lane made with nobody there (a workflow by the clock; `unattended`, as the page sends it) first reads the
+    /// repository's own config, as the automatic pull does, and makes nothing while it names a program or another address:
+    /// `git worktree add` runs a smudge filter while it checks the files out, `git status` a clean filter, and a start from
+    /// the remote an `ext::` address. A lane the person starts themselves is made as before (item 86).
+    #[test]
+    fn a_lane_made_with_nobody_there_is_not_made_where_the_repository_s_config_names_a_program() {
+        let Some((home, d)) = repo("unattended") else { return };
+        let unattended = |remote: bool| -> Start { serde_json::from_value(serde_json::json!({"root": "", "remote": remote, "unattended": true})).unwrap() };
+        let (script, marker) = spy(&home, "smudge", false);
+        let attrs = d.join(".git/info/attributes");
+        fs::create_dir_all(attrs.parent().unwrap()).unwrap();
+        fs::write(&attrs, "*.txt filter=spy\n").unwrap();
+        let ran = || fs::read_to_string(&marker).unwrap_or_default();
+        type Plant<'a> = (&'a str, Vec<(&'a str, String)>, bool, &'a str);
+        let cases: Vec<Plant> = vec![
+            ("a smudge filter, run by the checkout", vec![("filter.spy.smudge", script.clone())], false, "filter.spy.smudge"),
+            ("a clean filter, run by the count of what did not come along", vec![("filter.spy.clean", script.clone())], false, "filter.spy.clean"),
+            ("a remote that is a shell command, run by a start from the remote", vec![("remote.origin.url", format!("ext::{script} %S")), ("protocol.ext.allow", "always".into())], true, "remote.origin.url"),
+            ("a proxy for the start from the remote", vec![("remote.origin.url", "http://manut-test.invalid/o/r.git".into()), ("http.proxy", "http://127.0.0.1:9".into())], true, "http.proxy"),
+        ];
+        sh(&d, &["remote", "add", "origin", "https://example.invalid/o/r.git"]);
+        for (what, plant, remote, named) in &cases {
+            for (k, v) in plant {
+                sh(&d, &["config", k, v]);
+            }
+            let got = make_with(&home, &d, &names(&["kit/nightly"]), &unattended(*remote));
+            assert_eq!(got, Err(format!("config:{named}")), "{what}");
+            assert!(!marker.exists(), "{what}: a program ran: {}", ran());
+            assert_eq!(sh(&d, &["branch", "--list", "kit/*"]), "", "{what}: a branch was made");
+            assert!(!home.join(".manut/lanes/web-app/nightly").exists(), "{what}: a folder was made");
+            for (k, _) in plant {
+                let _ = std::process::Command::new("git").args(["-C", d.to_str().unwrap(), "config", "--unset", k]).output();
+            }
+            sh(&d, &["remote", "set-url", "origin", "https://example.invalid/o/r.git"]);
+        }
+        // with nothing of that kind it is made, as a person's own lane is
+        let made = make_with(&home, &d, &names(&["kit/nightly"]), &unattended(false)).unwrap();
+        assert_eq!(made.branch, "kit/nightly");
+        // the person's own start, from the chat box, keeps item 86's rule: their repository's settings apply, as in a terminal
+        sh(&d, &["config", "filter.spy.smudge", &script]);
+        let mine = make(&home, &d, &names(&["kit/mine"])).unwrap();
+        assert_eq!(mine.branch, "kit/mine");
+        let _ = fs::remove_dir_all(home);
+    }
+
     #[test]
     fn a_clean_up_never_removes_a_folder_with_submodules_whose_work_it_does_not_count() {
         let Some((home, d)) = repo("sub-release") else { return };
@@ -2303,7 +2366,7 @@ pub(crate) mod tests {
         let Some((home, d)) = repo("chosen") else { return };
         let old = make(&home, &d, &names(&["kit/old"])).unwrap();
         let root = home.join("work/lanes");
-        let start = Start { root: root.to_string_lossy().into(), remote: false };
+        let start = Start { root: root.to_string_lossy().into(), ..Start::default() };
         let made = make_with(&home, &d, &names(&["kit/new"]), &start).unwrap();
         let wt = root.canonicalize().unwrap().join("web-app/new");
         assert_eq!(made.worktree, wt.to_string_lossy());
