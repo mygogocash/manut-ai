@@ -101,7 +101,7 @@
 .thread > .day {
   margin: 10px auto 2px;
   text-align: center;
-  color: var(--quiet);
+  color: var(--muted);
   font-size: 11px;
   letter-spacing: 0.01em;
 }
@@ -342,7 +342,7 @@
 .msg-wait {
   margin-top: 3px;
   font-size: 11px;
-  color: var(--quiet);
+  color: var(--muted);
 }
 /* a steer's reply: the bot's first words after it read it, one line under its bubble; long ones end in an
    ellipsis inside the bubble's width instead of wrapping */
@@ -386,7 +386,7 @@
 .msg-read {
   font-size: 11px;
   line-height: 1;
-  color: var(--quiet);
+  color: var(--muted);
   white-space: nowrap;
   margin-bottom: 2px;
 }
@@ -421,11 +421,11 @@
 }
 /* an action that is off (an agent with no steer; a message the agent has already) says why in its tooltip */
 .sq-mark.off {
-  color: var(--quiet);
+  color: var(--muted);
   cursor: not-allowed;
 }
 .sq-mark.off:hover {
-  color: var(--quiet);
+  color: var(--muted);
   background: var(--raise);
 }
 /* × drops the message: only while the pointer is on its row or a button there has focus */
@@ -803,7 +803,7 @@
 .line-ic {
   width: 12px;
   text-align: center;
-  color: var(--quiet);
+  color: var(--muted);
   font-size: 11px;
   flex: none;
 }
@@ -820,7 +820,7 @@
 .line.sys {
   justify-content: center;
   font-size: 11.5px;
-  color: var(--quiet);
+  color: var(--muted);
 }
 .line.sys::before,
 .line.sys::after {
@@ -833,7 +833,7 @@
   flex: none;
 }
 .line-tm {
-  color: var(--quiet);
+  color: var(--muted);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
   flex: none;
@@ -842,7 +842,7 @@
 .src-ic {
   flex: none;
   display: inline-block;
-  color: var(--quiet);
+  color: var(--muted);
 }
 .src-sq {
   width: 7px;
@@ -922,7 +922,7 @@
 }
 .composer:not(.has) .send:not(.stop) {
   background: var(--raise2);
-  color: var(--quiet);
+  color: var(--muted);
 }
 .send:not(:disabled):hover {
   filter: brightness(1.08);
@@ -1018,12 +1018,12 @@
   gap: 5px;
   margin: 0 0 1px 4px;
   font-size: 11px;
-  color: var(--quiet);
+  color: var(--muted);
 }
 .msg-quote-n {
   margin-left: 4px;
   font-size: 11px;
-  color: var(--quiet);
+  color: var(--muted);
 }
 /* the person's message, faded: their bubble colour at low strength, one line, smaller; it recedes behind the answer */
 .msg-quote {
@@ -1072,7 +1072,7 @@
   gap: 5px;
   margin-top: 3px;
   font-size: 11px;
-  color: var(--quiet);
+  color: var(--muted);
 }
 
 /* the right panel's button, right of the model control: borderless, gray while the panel is open, no accent; the

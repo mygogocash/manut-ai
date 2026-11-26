@@ -59,15 +59,17 @@ export function promptTitle(raw: string, max = TITLE_MAX): string {
 }
 
 /** Where a session's name came from. */
-export type TitleSource = "person" | "agent" | "prompt" | "folder";
+export type TitleSource = "person" | "model" | "agent" | "prompt" | "folder";
 
 /** The name a session shows, by the order above, and where it came from. */
 export function pickTitle(
-  s: { title?: string; agentTitle?: string; promptTitle?: string },
+  s: { title?: string; modelTitle?: string; agentTitle?: string; promptTitle?: string },
   folder: string,
 ): { title: string; source: TitleSource } {
   const clean = (v?: string) => (v ?? "").replace(/\s+/g, " ").trim();
   if (clean(s.title)) return { title: clean(s.title), source: "person" };
+  // a title the person's chosen model wrote (Settings › Titles and words) is a proposal: it stands in for the agent's and the summary, never for a name the person gave
+  if (clean(s.modelTitle)) return { title: clean(s.modelTitle), source: "model" };
   if (clean(s.agentTitle)) return { title: clean(s.agentTitle), source: "agent" };
   if (clean(s.promptTitle)) return { title: clean(s.promptTitle), source: "prompt" };
   return { title: folder, source: "folder" };

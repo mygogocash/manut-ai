@@ -1,17 +1,19 @@
-// The side menu, as the design canvas draws it (`<nav class="sb">` in Approvals.dc.html): the brand mark and Search,
-// then New, Needs you (with the count of open asks), Team, Code, Artifacts, Customize and History, a Recent list of the
-// three newest threads, and the account row that opens Settings. New and the brand mark open Home. A person in two or
-// more shops also has the shop switcher at the end of the account row (ShopSwitcher.tsx), and is told above the row when
-// their place in a shop ended (docs/several-shops.md). It replaces the
-// sidebar the fork took from Oh My Hermes (a search box, a tasks bar, a needs strip, the BOTS and TERMINALS lists and a
-// foot of icon buttons), and each of those now lives on one of the menu's pages (src/pages). The canvas's budget pill
-// waits until the runtime has a budget to show, and hiding the menu is not built yet.
+// The side menu, as the design canvas draws it (`<nav class="sb">` in Main.dc.html and KitNavigation.dc.html, 196px
+// wide): the brand mark and Search, then New, Needs you (with the count of open asks), Team, Code, Artifacts, Customize and
+// History, a Recent list of the three newest threads, and at the foot the budget pill and the account row, which names
+// the person with their shop and opens Settings. New and the brand mark open Home. A person in two or more shops also has
+// the shop switcher at the end of the account row (ShopSwitcher.tsx), and is told above the row when their place in a
+// shop ended (docs/several-shops.md). It replaces the sidebar the fork took from Oh My Hermes (a search box, a tasks bar, a
+// needs strip, the BOTS and TERMINALS lists and a foot of icon buttons), and each of those now lives on one of the menu's
+// pages (src/pages). The coding tools' use, which sat in the foot as three small marks, is on the Code page, one click
+// away (item 85i). The budget pill shows only what the runtime gives it, and no runtime gives a budget yet; hiding the
+// menu is not built yet.
 //
 // menu.ts decides which row is current. `SideMenu` draws whatever it is given, so tests can draw any state, and
 // `Sidebar` feeds it from the app's store.
 import type { ReactNode } from "react";
-// sidebar.css still styles what the menu's foot carries (the disk chip, the usage meters, the update control) and
-// .vh, and sessions.css styles the terminal view and the Code page's list.
+// sidebar.css still styles what the menu's foot carries (the disk chip, the update control), the usage meters the Code
+// page shows, and .vh, and sessions.css styles the terminal view and the Code page's list.
 import "./sidebar.css";
 import "../sessions/sessions.css";
 import "./menu.css";
@@ -34,11 +36,12 @@ import { useRowSelect, useSelectionEscape } from "./useRowSelect";
 type RowSelect = ReturnType<typeof useRowSelect>;
 import { togglePalette } from "../palette/state";
 import { BrandMark, MenuIcon, SearchGlyph } from "./menuIcons";
+import { Icon } from "../ui/icons";
 import { DiskChip } from "./DiskChip";
 import { ModeLine } from "./ModeLine";
 import { ShopSwitcher } from "./ShopSwitcher";
 import { UpdateButton } from "./UpdateButton";
-import { Usage } from "./Usage";
+import { satangText } from "../pages/job";
 
 const LABEL: Record<MenuRow, Key> = {
   new: "menu.new",
@@ -95,12 +98,9 @@ function RecentRow({ item, select }: { item: RecentItem; select: RowSelect }) {
   );
 }
 
+/** A pinned chat's mark: the set's pin (src/ui/icons.tsx). */
 function PinGlyph() {
-  return (
-    <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-      <path d="M14.5 2.5l7 7-3 1-3.5 3.5.5 4.5-2 2-4-4-5.5 5.5-1-1L7 14.5l-4-4 2-2 4.5.5L13 5.5z" />
-    </svg>
-  );
+  return <Icon name="pin" />;
 }
 
 export function SideMenu({
@@ -117,6 +117,7 @@ export function SideMenu({
   onSearch,
   onAccount,
   foot,
+  budget = null,
 }: {
   /** the row marked current, or none (a thread, Settings) */
   current: MenuRow | null;
@@ -138,8 +139,10 @@ export function SideMenu({
   onRow: (row: MenuRow) => void;
   onSearch: () => void;
   onAccount: () => void;
-  /** what the runtime and this computer add above the account row: the disk chip, usage meters, an update */
+  /** what the runtime and this computer add above the account row: the disk chip, an update, which data this is */
   foot?: ReactNode;
+  /** the shop's AI spend this month against its cap, in integer satang, when the runtime gives them; none draws no pill */
+  budget?: Budget | null;
 }) {
   // Recent and the Working group are one list to select in, in the order they are drawn
   const order = [...recent, ...working].flatMap((r) => (r.rowKey ? [r.rowKey] : []));
@@ -211,6 +214,9 @@ export function SideMenu({
             </button>
           </div>
         )}
+        {/* The canvas's plan pill: the AI budget this month, read and never guessed, so it shows only with the runtime's
+            numbers. */}
+        {budget && <BudgetPill budget={budget} />}
         <div className="acct-row">
           <button type="button" className="acct" aria-current={settings ? "page" : undefined} title={t("nav.settings")} onClick={onAccount} data-testid="nav-settings">
             <span className="av" aria-hidden="true">
@@ -230,6 +236,25 @@ export function SideMenu({
         </div>
       </div>
     </nav>
+  );
+}
+
+/** The shop's AI spend this month and its cap, both integer satang (money is never a float). */
+export interface Budget {
+  spentSatang: number;
+  capSatang: number;
+}
+
+/** "฿186 of ฿300", the canvas's `.planp` in the menu's foot. Anything that is not two whole, non-negative amounts draws
+ *  nothing rather than a guess. */
+export function BudgetPill({ budget }: { budget: Budget }) {
+  const ok = (n: number) => Number.isSafeInteger(n) && n >= 0;
+  if (!ok(budget.spentSatang) || !ok(budget.capSatang)) return null;
+  const words = { spent: satangText(budget.spentSatang), cap: satangText(budget.capSatang) };
+  return (
+    <span className="planp" role="img" aria-label={t("menu.budgetAria", words)} data-testid="menu-budget">
+      {t("menu.budget", words)}
+    </span>
   );
 }
 
@@ -278,8 +303,6 @@ export function Sidebar() {
         <>
           {/* A chip when the home folder's volume is low on space (src/lib/disk.ts), and nothing while it is fine. */}
           <DiskChip />
-          {/* The coding CLIs' subscription usage, which only a runtime that reads their logins has. */}
-          {can("accounts") && <Usage />}
           {/* the desktop app's shell keeps the accounts in every mode (item 74); a runtime may keep them too */}
           {(can("accounts") || isDesktop()) && <AccountsWatcher />}
           {/* A newer signed release, which shows nothing until in-app updates are turned on (updater.ts). */}

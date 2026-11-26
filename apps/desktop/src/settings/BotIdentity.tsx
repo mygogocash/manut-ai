@@ -7,6 +7,7 @@ import { Avatar, SourceIcon, Spinner } from "../ui";
 import { shortTime } from "../app/time";
 import { lang, t, tx } from "../i18n";
 import { composing } from "../lib/ime";
+import { Icon } from "../ui/icons";
 
 const SIDE = 256;
 const KINDS = ["image/png", "image/jpeg", "image/webp"];
@@ -296,17 +297,12 @@ function Stat({ n, text, label }: { n?: number; text?: string; label: string }) 
 
 function CameraIcon() {
   return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true">
-      <path d="M2.5 5.2h2.2l1.1-1.7h4.4l1.1 1.7h2.2v7.3h-11z" strokeLinejoin="round" />
-      <circle cx="8" cy="8.7" r="2.3" />
-    </svg>
+    <Icon name="camera" />
   );
 }
 
 function PenIcon() {
   return (
-    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.3" aria-hidden="true">
-      <path d="M8.2 1.8l2 2-6.4 6.4-2.5.5.5-2.5z" strokeLinejoin="round" />
-    </svg>
+    <Icon name="pencil" />
   );
 }

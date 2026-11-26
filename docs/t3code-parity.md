@@ -46,7 +46,7 @@ keeps them:
 | The ACP registry, and any ACP agent by hand | part: any ACP agent by hand (Settings, Providers); seven fixed rows, no registry | 101 |
 | Reuses installed agents and their sign-ins | has | |
 | Several accounts of one provider | part: Claude Code and Codex; not Grok or pi; off on Windows | 101 |
-| Pick the model that writes titles, commit messages and PR words | no | 96 |
+| Pick the model that writes titles, commit messages and PR words | part: chat titles and PR words by Claude Code only, off by default; no commit messages | 96 |
 
 ## Orchestration
 

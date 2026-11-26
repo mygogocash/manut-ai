@@ -12,6 +12,7 @@ import type { SessionRec } from "./agents";
 import type { TurnPreview } from "./turnFiles";
 import { REWINDS, rewindable, RewindError, wentLive, whyNotText, whyText, type RewindTurn, type WhyNot } from "./rewind";
 import "./rewind.css";
+import { Icon } from "../ui/icons";
 
 export interface RewindPanelProps {
   /** the turns that can be rewound, newest first */
@@ -114,12 +115,7 @@ export function RewindPanelView(p: RewindPanelProps) {
   );
 }
 
-const RewindIcon = () => (
-  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-    <path d="M4 5v5h5" />
-    <path d="M4.6 10A8 8 0 1 1 6 16.4" />
-  </svg>
-);
+const RewindIcon = () => <Icon name="rotate-ccw" />;
 
 /** The Rewind chip and its panel, for a running coding session whose agent can take its chat back. Shows only once a
  *  turn can be rewound, or the folder's files could not be kept (the panel then says why). */

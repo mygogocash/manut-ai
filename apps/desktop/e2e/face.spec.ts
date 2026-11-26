@@ -52,7 +52,10 @@ async function watchFaces(page: Page) {
       });
       // measured from the person's last bubble: the dots row under the live line makes the thread taller, and the
       // pinned-to-bottom scroll moves every row up by it; what must not move is the face against the conversation
-      const base = rows[lastUser]?.getBoundingClientRect().bottom ?? 0;
+      // (less the bubble's own Rise: it arrives by moving 8px, and the face under it is not a thing that moved)
+      const you = rows[lastUser];
+      const rise = you ? new DOMMatrixReadOnly(getComputedStyle(you).transform).m42 : 0;
+      const base = (you?.getBoundingClientRect().bottom ?? 0) - rise;
       const faces: Face[] = [];
       for (const r of rows.slice(lastUser + 1))
         for (const f of r.querySelectorAll<HTMLElement>(".ui-av.msg-face, [data-testid=session-face]")) {
@@ -71,8 +74,9 @@ async function watchFaces(page: Page) {
             ? "status"
             : "other";
       const act = tl.querySelector("[data-testid=activity][data-state=live]");
-      const you = rows[lastUser]?.getBoundingClientRect().bottom;
-      const line = act && you !== undefined ? Math.round((act.getBoundingClientRect().top - you) * 2) / 2 : null;
+      // the line's row arrives with its own Rise, which is not a move of the line either
+      const actRise = act ? new DOMMatrixReadOnly(getComputedStyle(act.closest(".row") ?? act).transform).m42 : 0;
+      const line = act && you ? Math.round((act.getBoundingClientRect().top - actRise - base) * 2) / 2 : null;
       w.__faces.push({ phase, faces, line });
     };
     sample();

@@ -132,7 +132,7 @@
 .tm-none {
   padding: 14px 12px;
   font-size: 12px;
-  color: var(--quiet);
+  color: var(--muted);
 }
 /* the rows' fields: a font name, and a number with a step either side (the look of the segmented control) */
 .tm-font {
@@ -244,7 +244,7 @@
 }
 .tm-imp-h span {
   font-size: 12.5px;
-  color: var(--quiet);
+  color: var(--muted);
 }
 .tm-imp-list {
   display: grid;
@@ -255,7 +255,7 @@
   scrollbar-width: thin;
 }
 .tm-row.off {
-  color: var(--quiet);
+  color: var(--muted);
   cursor: default;
 }
 .tm-row.off:hover {
@@ -271,7 +271,7 @@
 .tm-imp-tag {
   flex: none;
   font-size: 12px;
-  color: var(--quiet);
+  color: var(--muted);
 }
 .tm-imp-foot {
   display: flex;

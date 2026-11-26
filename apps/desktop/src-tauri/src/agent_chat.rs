@@ -3697,6 +3697,8 @@ pub struct ChatSessions {
     next: AtomicU32,
     /// tests: a shorter [`START_DEADLINE`]
     start_deadline: Option<Duration>,
+    /// tests: the home whose `~/.manut/project-notes` holds a chat's instructions file ([`ChatSessions::notes_home`])
+    notes_home: Option<PathBuf>,
 }
 
 /// Queue `lines` for the chat's writer thread. Never blocks (a pipe takes only so much before a write
@@ -3750,7 +3752,7 @@ fn deliver(sink: &ChatSink, events: Vec<Event>) {
 /// The command a chat runs: `argv` in `cwd` on pipes, with the child `PATH` and the chosen account's home
 /// variable (`account_env`, empty for the CLI's own login), the same env a terminal session gets. Nothing
 /// else is added.
-fn command_for(argv: &[OsString], cwd: &Path, path_env: Option<OsString>, account_env: &[(String, String)]) -> Result<Command, String> {
+pub(crate) fn command_for(argv: &[OsString], cwd: &Path, path_env: Option<OsString>, account_env: &[(String, String)]) -> Result<Command, String> {
     let (prog, rest) = argv.split_first().ok_or("empty argv")?;
     let mut cmd = Command::new(prog);
     cmd.args(rest).current_dir(cwd).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
@@ -3799,7 +3801,11 @@ const RULES_DEADLINE: Duration = Duration::from_secs(30);
 /// the value, and a second listing with the value set must satisfy `probe.kept`. Any doubt (the variable already set
 /// in manut's own environment, a failed or slow listing, output it cannot read, rules that did not hold) is
 /// [`no_rules`] (with the agent's name, `label`), and the chat does not start.
-fn agent_rules(probe: &RuleProbe, label: &str, argv: &[OsString], cwd: &Path, path_env: &OsString, account_env: &[(String, String)]) -> Result<(String, String), String> {
+///
+/// `notes`: the project's instructions file for OpenCode (item 93, [`crate::project_notes`]). It joins the value as an
+/// `instructions` entry before the second listing, so the rules are checked as OpenCode will get them, with that entry.
+#[allow(clippy::too_many_arguments)]
+fn agent_rules(probe: &RuleProbe, label: &str, argv: &[OsString], cwd: &Path, path_env: &OsString, account_env: &[(String, String)], notes: Option<&Path>) -> Result<(String, String), String> {
     if !cwd.is_absolute() || !cwd.is_dir() {
         return Err(format!("not a folder: {}", cwd.display()));
     }
@@ -3830,10 +3836,14 @@ fn agent_rules(probe: &RuleProbe, label: &str, argv: &[OsString], cwd: &Path, pa
     };
     let first = list(account_env).ok_or_else(|| no_rules(label))?;
     let value = (probe.build)(&first).ok_or_else(|| no_rules(label))?;
+    let sent = match notes {
+        Some(f) => crate::acp_chat::with_instructions(&value, f).ok_or_else(|| no_rules(label))?,
+        None => value.clone(),
+    };
     let mut env = account_env.to_vec();
-    env.push((probe.var.to_string(), value.clone()));
+    env.push((probe.var.to_string(), sent.clone()));
     match list(&env) {
-        Some(again) if (probe.kept)(&first, &value, &again) => Ok((probe.var.to_string(), value)),
+        Some(again) if (probe.kept)(&first, &value, &again) => Ok((probe.var.to_string(), sent)),
         _ => Err(no_rules(label)),
     }
 }
@@ -4016,6 +4026,25 @@ impl ChatSessions {
         }
         // the person's own arguments (Settings › Providers): checked here, and added last of all below
         let extra = crate::providers::extra_args(agent_id, mine, through_cmd)?;
+        // The project's own instructions (item 93, crate::project_notes): the switches that keep a project's files from
+        // acting also keep Claude Code and OpenCode from reading them, so the app reads them as plain text and hands them
+        // over as text appended to the system prompt, in a file of its own that goes when the chat ends (or now, when the
+        // start is refused below). A path the start cannot carry is not handed over, and the chat's note says so.
+        let mut notes = match crate::project_notes::Agent::of(agent_id) {
+            Some(a) => crate::project_notes::prepare(a, cwd, self.notes_home().as_deref()),
+            None => crate::project_notes::Prepared::default(),
+        };
+        if let Some(f) = notes.file().filter(|_| agent_id == "claude") {
+            // one file, and the only appended prompt a coding chat has: a person's own is refused on Settings › Providers
+            let arg = if through_cmd { cmd_path_arg(&f.to_string_lossy()).ok().map(OsString::from) } else { Some(f.as_os_str().to_owned()) };
+            match arg {
+                Some(a) => argv.extend(["--append-system-prompt-file".into(), a]),
+                None => notes.unsend(),
+            }
+        }
+        if agent_id == "opencode" && notes.file().is_some_and(|f| crate::acp_chat::with_instructions("{}", f).is_none()) {
+            notes.unsend();
+        }
         // the person's variables and the home they set, then the account's home, then what keeps the project's own
         // configuration out, so a variable of the person's with the same name never wins
         let mut env = crate::providers::session_env(agent_id, mine, account_env, true);
@@ -4023,11 +4052,22 @@ impl ChatSessions {
         // an agent whose own default runs tools unasked (OpenCode) gets ask rules built from its own
         // resolved rules, so nothing the person allows runs unasked and nothing they deny becomes askable; or it does
         // not start. Its rules are read with the variables it will run with, so one of the person's that changes them is
-        // read too, and the rule variable goes last, so it is the one the agent gets.
+        // read too, and the rule variable goes last, so it is the one the agent gets. OpenCode's instructions file rides in
+        // the same value (`instructions`), the one way it takes them with its project configuration off.
         if let Some((probe, label)) = acp.and_then(|a| a.rules.as_ref().map(|r| (r, a.label))) {
-            let rules = agent_rules(probe, label, &program, cwd, &path_env, &env)?;
+            let rules = agent_rules(probe, label, &program, cwd, &path_env, &env, notes.file().filter(|_| agent_id == "opencode"))?;
             env.push(rules);
         }
+        // nothing below refuses the start: the file now goes when the chat ends
+        let note = notes.note();
+        let mut gone = notes.keep();
+        let mut inner = sink;
+        let sink = move |out: ChatOut| {
+            if matches!(out, ChatOut::Exit(..)) {
+                gone.now();
+            }
+            inner(out)
+        };
         // Claude Code's chat is handed computer use when the Mac allows it (computer/hub.rs): its asks come here as cards.
         // It is attached only now, when nothing above can still refuse the start and leave its room behind.
         let (mut argv, adapter, sink, computer) = with_computer(agent_id == "claude", argv, adapter, sink);
@@ -4036,7 +4076,28 @@ impl ChatSessions {
         argv.extend(extra);
         let started = self.spawn(argv, cwd, Some(path_env), &env, adapter, sink);
         self.bind_computer(computer.as_deref(), &started);
+        // the chat says once what its agent was told: the files read, and those left out and why
+        if let (Ok(id), Some(n)) = (&started, note) {
+            let sink = self.live.lock().unwrap().get(id).map(|c| c.sink.clone());
+            if let Some(s) = sink {
+                deliver(&s, vec![ev("session.note", n)]);
+            }
+        }
         started
+    }
+
+    /// The home whose `~/.manut/project-notes` holds a chat's instructions file: the person's own, and in tests a
+    /// temporary one unless a test names its own, so no test ever writes there.
+    fn notes_home(&self) -> Option<PathBuf> {
+        if let Some(h) = &self.notes_home {
+            return Some(h.clone());
+        }
+        if cfg!(test) {
+            let h = std::env::temp_dir().join(format!("manut-notes-home-{}", std::process::id()));
+            let _ = std::fs::create_dir_all(&h);
+            return Some(h);
+        }
+        std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).filter(|h| !h.is_empty()).map(PathBuf::from)
     }
 
     /// Computer use serves only a server under the process started for its chat (`computer/hub.rs`): name that process
@@ -4416,7 +4477,7 @@ mod tests {
         let probe = RuleProbe { args: &[], var: "MANUT_TEST_RULES_VAR", build, kept };
         let tmp = std::env::temp_dir().canonicalize().unwrap();
         let argv: Vec<OsString> = vec!["/bin/sh".into(), "-c".into(), script.into()];
-        agent_rules(&probe, "OpenCode", &argv, &tmp, &std::env::var_os("PATH").unwrap(), &[])
+        agent_rules(&probe, "OpenCode", &argv, &tmp, &std::env::var_os("PATH").unwrap(), &[], None)
     }
 
     #[test]
@@ -4433,6 +4494,31 @@ mod tests {
         ] {
             assert_eq!(rules_with(bad), Err(crate::acp_chat::NO_RULES.to_string()), "{bad}");
         }
+    }
+
+    /// Item 93: OpenCode's instructions file joins the rule value as its `instructions` entry before the second listing, so
+    /// the rules are checked with the very value OpenCode gets, and `kept` still compares the rules alone.
+    #[test]
+    #[cfg(unix)]
+    fn opencodes_instructions_file_rides_in_the_rule_value_it_was_checked_with() {
+        const FILE: &str = "/home/me/.manut/project-notes/1-2-3.md";
+        fn build(l: &str) -> Option<String> {
+            l.strip_prefix("rules:").map(|r| r.trim().to_string())
+        }
+        fn kept(_first: &str, rules: &str, again: &str) -> bool {
+            rules == r#"{"agent":{}}"# && again.trim() == format!("kept {}", crate::acp_chat::with_instructions(rules, Path::new(FILE)).unwrap())
+        }
+        let probe = RuleProbe { args: &[], var: "MANUT_TEST_RULES_VAR", build, kept };
+        let tmp = std::env::temp_dir().canonicalize().unwrap();
+        let script = r#"if [ -n "$MANUT_TEST_RULES_VAR" ]; then echo "kept $MANUT_TEST_RULES_VAR"; else echo 'rules: {"agent":{}}'; fi"#;
+        let argv: Vec<OsString> = vec!["/bin/sh".into(), "-c".into(), script.into()];
+        let path = std::env::var_os("PATH").unwrap();
+        assert_eq!(
+            agent_rules(&probe, "OpenCode", &argv, &tmp, &path, &[], Some(Path::new(FILE))),
+            Ok(("MANUT_TEST_RULES_VAR".to_string(), r#"{"agent":{},"instructions":["/home/me/.manut/project-notes/1-2-3.md"]}"#.to_string()))
+        );
+        // a path the value cannot carry refuses the start rather than leaving the entry out unchecked
+        assert_eq!(agent_rules(&probe, "OpenCode", &argv, &tmp, &path, &[], Some(Path::new("/x/{env:HOME}/1.md"))), Err(no_rules("OpenCode")));
     }
 
     /// A listed pattern or agent name is not trusted config text: no second listing with a file/env token that
@@ -4455,7 +4541,7 @@ mod tests {
                 let marker = dir.join("listed-again");
                 let script = format!("if [ -n \"${}\" ]; then printf again > '{}'; exit 1; fi; printf '%s' '{}'", probe.var, marker.display(), first);
                 let argv = ["/bin/sh".into(), "-c".into(), script.into()];
-                assert_eq!(agent_rules(probe, row.label, &argv, &dir, &std::env::var_os("PATH").unwrap(), &[]), Err(no_rules(row.label)));
+                assert_eq!(agent_rules(probe, row.label, &argv, &dir, &std::env::var_os("PATH").unwrap(), &[], None), Err(no_rules(row.label)));
                 assert!(!marker.exists(), "{id}: second listing ran for {token}");
                 assert!(!absent.exists());
             }
@@ -4990,6 +5076,95 @@ mod tests {
         let argv = seen_lines(&seen);
         assert_eq!(the_one(&argv, "--setting-sources").as_deref(), Some("user"), "{argv:?}");
         assert_eq!(the_one(&argv, "--permission-mode").as_deref(), Some("default"), "{argv:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Item 93. `--setting-sources user` keeps a project's CLAUDE.md and rules from Claude Code too, so the app reads them
+    /// as plain text and hands them over with `--append-system-prompt-file`: one file, the app's own, outside the project,
+    /// with the fixed lines first, removed when the chat ends; the chat says once what was read. A project with no
+    /// instruction file passes nothing and says nothing, and the item 89 switches stay on the command line.
+    #[cfg(unix)]
+    #[test]
+    fn a_claude_chat_is_handed_the_projects_own_instructions_as_text() {
+        use crate::providers::Stored;
+        use std::os::unix::fs::PermissionsExt;
+        let base = std::env::temp_dir().join(format!("manut-notes-chat-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+        let dir = base.canonicalize().unwrap();
+        // a stand-in Claude Code: it writes its arguments and a copy of the instructions file it was named, then waits
+        let prog = dir.join("fake-claude");
+        let seen = dir.join("seen");
+        let copy = dir.join("prompt.copy");
+        let body = format!(
+            "#!/bin/sh\nprev=\nfor a in \"$@\"; do printf '%s\\n' \"$a\"; if [ \"$prev\" = --append-system-prompt-file ]; then cat \"$a\" > '{c}'; fi; prev=$a; done > '{s}.tmp'\nmv '{s}.tmp' '{s}'\nread l\n",
+            s = seen.display(),
+            c = copy.display()
+        );
+        std::fs::write(&prog, body).unwrap();
+        std::fs::set_permissions(&prog, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let project = dir.join("project");
+        hostile_project(&project);
+        std::fs::create_dir_all(project.join(".git")).unwrap();
+        std::fs::write(project.join("CLAUDE.md"), "Use tabs.\n@/etc/passwd\n").unwrap();
+        let home = dir.join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        let mut c = ChatSessions::default();
+        c.notes_home = Some(home.clone());
+        let mine = Stored { path: prog.to_string_lossy().into_owned(), ..Stored::default() };
+        let events: Arc<Mutex<Vec<Value>>> = Arc::default();
+        let got = events.clone();
+        let id = c
+            .start_agent_mine("claude", &project, None, &[], None, false, &mine, move |out| {
+                if let ChatOut::Event(e) = out {
+                    got.lock().unwrap().push(e);
+                }
+            })
+            .unwrap();
+        let argv = seen_lines(&seen);
+        assert_eq!(the_one(&argv, "--setting-sources").as_deref(), Some("user"), "{argv:?}");
+        assert_eq!(the_one(&argv, "--permission-mode").as_deref(), Some("default"), "{argv:?}");
+        let file = PathBuf::from(the_one(&argv, "--append-system-prompt-file").expect("one instructions file"));
+        assert!(file.starts_with(crate::project_notes::notes_dir(&home)), "{file:?}");
+        assert!(!file.starts_with(&project), "{file:?}");
+        assert!(file.exists(), "kept while the chat runs");
+        assert_eq!(std::fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o600);
+        let text = std::fs::read_to_string(&copy).unwrap();
+        assert!(text.starts_with(crate::project_notes::HEAD), "{text}");
+        assert!(text.contains("\nContents of CLAUDE.md:\nUse tabs.\n@/etc/passwd\n"), "{text}");
+        assert!(!text.contains("root:"), "an import is never followed");
+        let note = json!({"event": "session.note", "kind": "instructions", "read": ["CLAUDE.md"], "left": []});
+        assert!(wait_for(|| events.lock().unwrap().contains(&note), 10), "{:?}", events.lock().unwrap());
+        // the chat ends: its file goes with it
+        c.close(id);
+        assert!(wait_for(|| !file.exists(), 10), "{file:?} outlived its chat");
+        assert_eq!(events.lock().unwrap().iter().filter(|e| e["kind"] == "instructions").count(), 1, "said once");
+
+        // no instruction file: nothing passed, nothing said
+        std::fs::remove_file(project.join("CLAUDE.md")).unwrap();
+        std::fs::remove_file(&seen).unwrap();
+        events.lock().unwrap().clear();
+        let got = events.clone();
+        let id = c
+            .start_agent_mine("claude", &project, None, &[], None, false, &mine, move |out| {
+                if let ChatOut::Event(e) = out {
+                    got.lock().unwrap().push(e);
+                }
+            })
+            .unwrap();
+        let argv = seen_lines(&seen);
+        assert!(!argv.iter().any(|a| a == "--append-system-prompt-file"), "{argv:?}");
+        assert_eq!(the_one(&argv, "--setting-sources").as_deref(), Some("user"), "{argv:?}");
+        thread::sleep(Duration::from_millis(300));
+        assert!(!events.lock().unwrap().iter().any(|e| e["event"] == "session.note"));
+        c.close(id);
+        assert_eq!(std::fs::read_dir(crate::project_notes::notes_dir(&home)).unwrap().count(), 0);
+
+        // a refused start leaves no file behind
+        std::fs::write(project.join("CLAUDE.md"), "Use tabs.\n").unwrap();
+        let bad = Stored { args: vec!["--dangerously-skip-permissions".into()], ..mine.clone() };
+        assert!(c.start_agent_mine("claude", &project, None, &[], None, false, &bad, |_| {}).is_err());
+        assert_eq!(std::fs::read_dir(crate::project_notes::notes_dir(&home)).unwrap().count(), 0);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

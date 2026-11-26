@@ -86,11 +86,12 @@
   width: 20px;
   height: 20px;
   border-radius: var(--r-sm);
-  color: var(--quiet);
+  color: var(--muted);
 }
+/* The set's x at its small size (src/ui/icons.tsx: 12px, a simple shape beside 12px text). */
 .termpanel-tab-x svg {
-  width: 9px;
-  height: 9px;
+  width: 12px;
+  height: 12px;
 }
 .termpanel-tab-x:hover,
 .termpanel-ib:hover {
@@ -174,7 +175,7 @@
 .termpanel-tab-n {
   margin-left: 4px;
   font-size: 10px;
-  color: var(--quiet);
+  color: var(--muted);
 }
 /* a shell in the tab rang while the tab was not in front (TERMINALS' bell colour) */
 .termpanel-ring {

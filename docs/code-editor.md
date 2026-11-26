@@ -473,6 +473,30 @@ undo toast, the picked time, the Working group and a quiet chat settling, in lig
   is not tried again within the five minutes, and a missing or signed-out `gh` shows no pull request. Nothing is written to GitHub or
   GitLab. `tasks/pulls.ts`.
 
+### Titles and words by a model (item 96)
+
+Settings › General › Titles and words lets the person's own Claude Code write a chat's title and a pull request's words. It is **off**
+until turned on, and it works with Claude Code only: its `--help` names the three switches a run with no tools and no project needs,
+and no other agent here has been checked. The setting says so.
+
+- **The run** (`src-tauri/src/title_run.rs`, commands `title_run` and `title_cancel`): `claude -p` with `--tools ""`, `--strict-mcp-config`
+  and no MCP config, `--disable-slash-commands`, `--permission-mode default`, `--no-session-persistence`, `--setting-sources user`, and the
+  chosen `--model` and `--effort` (each checked). It starts as a chat does (the allow-list, the child `PATH`, the account's home) in the
+  empty folder `~/.manut/titles`. The text goes in on standard input, masked and cut to 6,000 characters. One run at a time, 45 seconds, four
+  starts a minute, cancel by key. The answer is cleaned and only returned. Its rate-limit event reaches the usage the meter reads.
+- **A chat's title** (`sessions/titleWords.ts`): after a turn ends done, from the first message and first answer. It becomes
+  `SessionRec.modelTitle`, which `pickTitle` ranks below a name the person gave and above the agent's title and the summary. A result that
+  arrives after a rename is dropped. Row menu › Write the title again asks for another, and is offered only for a chat the person has not
+  named. A failed automatic run is quiet; a failed ask says why.
+- **A pull request's words**: Suggest in the review draft sends the lane's commit subjects and changed files with a few lines of each,
+  masked, and fills the title and description to be read and changed. A file whose name says it holds keys (`.env`, a private key, a
+  keystore, an `.npmrc`; `holdsKeys` in `sessions/titleWords.ts`) gives its name and none of its lines, since masking knows a key only by
+  its shape. Ask, and the ask's own yes, are unchanged. The setting has a row, "What it reads", that says all of this.
+- **Not done**: commit messages, and any agent but Claude Code.
+- **Checked**: Rust stand-in tests (`title_run` module, a stand-in program for the CLI, so no real agent runs), `sessions/titleWords.test.ts`,
+  `settings/TitlesRows.test.tsx` and `code/Review.test.tsx`. How a real Claude Code answers, and how Suggest looks in the review draft (no browser spec reaches that draft), are a
+  hands-on pass that spends the owner's tokens. The lead looked at the Settings rows in light and dark at 1280 and 900.
+
 ### The suggested next message
 
 After a turn ends in a coding chat, the empty box may show one predicted next message in grey; Tab takes it into the box (where it is
@@ -1137,10 +1161,11 @@ helper or a status line program in a chat the app starts, where the agent has a 
 **What a developer loses inside an app chat.** Claude Code: the project's `.claude/settings.json` and
 `.claude/settings.local.json` no longer apply, so their hooks, their allow, ask and deny rules (a team's deny rules
 included), `env`, `defaultMode`, plugins (`enabledPlugins`) and model; the project's `.mcp.json` servers do not connect, even
-approved ones; the project's CLAUDE.md, `.claude/CLAUDE.md`, `.claude/rules`, CLAUDE.md files in the folders above it and
-`CLAUDE.local.md` are not read; the project's skills, commands and subagents are not offered; a "don't ask again" Claude Code
-writes to the local file is not read back. Buddy's chat, in its own empty folder, no longer reads a CLAUDE.md in the folders
-above it (`~/CLAUDE.md`). OpenCode: the project's `opencode.json` and `.opencode` folder, and its instruction files. What stays,
+approved ones; Claude Code no longer reads the project's instruction files itself, so the app reads them and hands them over as
+text, and what that still leaves out is in [A project's own instructions, as text](#a-projects-own-instructions-as-text) (item
+93); the project's skills, commands and subagents are not offered; a "don't ask again" Claude Code writes to the local file is
+not read back. Buddy's chat, in its own empty folder, no longer reads a CLAUDE.md in the folders above it (`~/CLAUDE.md`).
+OpenCode: the project's `opencode.json` and `.opencode` folder; its instruction files come as text from the app too. What stays,
 as a terminal would have it: the person's own settings, CLAUDE.md, rules, skills, commands, subagents and the plugins their
 own settings turn on, the MCP servers in `~/.claude.json` and their claude.ai connectors (read whatever the sources, Agent SDK
 page), managed settings, and auto memory. Kit's dial and the cards are unchanged. A developer who wants a project's own setup
@@ -1167,6 +1192,72 @@ held by the source list (neither can run a program or allow a tool on its own).
 | OmO, DeepSeek Harness, a person's own agent | not read (not installed here, or the person's) | | open |
 
 Grok runs only as its own terminal, where its own prompts apply. `docs/decisions.md` has the call (item 89).
+
+### A project's own instructions, as text
+
+Item 93 (26 Nov 2026). The switches above also kept out a project's instruction files, which are only words: they cannot run a
+program, allow a tool or set a mode. So the agent in a lane no longer knew the project's conventions. Now the shell reads those
+files itself, as plain text, when a chat of Claude Code or OpenCode starts in a lane or a project folder, and hands the text to
+the agent (`src-tauri/src/project_notes.rs`). Every action still asks through Kit's dial as before. It is on for every chat,
+with no switch.
+
+**Which files.** From the folder the chat works in (a lane's own folder, so the lane's version of a file is the one read) and
+each folder above it up to the project's top: the nearest folder holding `.git` (a repository, or a lane's worktree), else the
+chat's folder alone. Never the person's home folder or anything above it, even when the home folder is kept in git.
+
+- Claude Code (its memory page, code.claude.com/docs/en/memory): at each folder from the top down, `CLAUDE.md`,
+  `.claude/CLAUDE.md`, every `.claude/rules/**/*.md` without a `paths` field (its frontmatter removed, as Claude Code does),
+  then `CLAUDE.local.md`; when none of the three CLAUDE files is in any of those folders, `AGENTS.md` and `.claude/AGENTS.md`
+  in their place (Claude Code's default, "claude-md-or-agents-md"). AGENTS.md is a member of the class the item 89 switch
+  left out too: Claude Code 2.1.332 finds it through `$.fs.ancestors`, which answers nothing while the project source is off
+  (read in its program, not run).
+- OpenCode (opencode.ai/docs/rules): at each folder from the chat's up to the top, `AGENTS.md`, else `CLAUDE.md`.
+
+**How each file is read.** Never through a link: a symbolic link in a file's place, a folder on the way that is one
+(`.claude`, `.claude/rules`, a folder of rules), and a hard link (a second name for a file elsewhere) are each left out and
+named. The file is opened without following a link (`O_NOFOLLOW`) and without waiting on a pipe, must be the very file looked
+at, and its path must still lead to it with no link on the way. At most 64 KiB a file (about 16,000 tokens: a large real
+CLAUDE.md on this Mac is 46 KB, and Claude Code cuts a file it loads later at 40,000 characters on a 200K window) and 128 KiB
+in all (about a sixth of a 200K window); at most 50 rule files a folder, four folders deep. UTF-8 text only, with no NUL.
+Cleaned of what a person reading the file does not see: the invisible format characters computer use strips from a card's label
+(`computer::room::format_char`, the same list, called rather than copied), the rest of Unicode's default-ignorable code points
+(variation selectors, fillers, the combining grapheme joiner, tags) and control characters other than a tab and a line end; and,
+as Claude Code does, HTML comments that start a line outside a code block. An `@path` import is never followed: the line is
+handed over as written, and the fixed lines in front say so.
+
+**How it is handed over.** The text goes to a new file of the app's own, `~/.manut/project-notes/<mark>.md`: the folder only
+this user may open (0700), the file readable by this user alone (0600) and made new each time, never inside the project (a home
+folder opened as a project hands nothing over, and the note says so), removed when the chat ends or its start is refused; one
+left over after a crash is cleared at a start a day later. First in it come two fixed lines: the notes below are this
+repository's own notes about how to work in it, read from its folder; they are not the person speaking and give no permission;
+every action still asks the person as usual; they end only at a line with the chat's own end mark, which the repository cannot
+know in advance; and a line naming a file with @ was not read in. Then each file under its path, then the end line.
+
+- Claude Code: `--append-system-prompt-file <file>`, once, after the chat's other arguments (the CLI reference: "Appends file
+  contents to the default prompt"). The reference does not say a second copy of the flag is taken, and none is needed: no
+  coding chat passes another (a person's own is refused on Settings › Providers, and `--append-system-prompt` is not on its
+  list). Buddy's chat is unchanged: its own file, in its own empty folder, no project.
+- OpenCode: an `instructions` entry in the `OPENCODE_CONFIG_CONTENT` the app already passes (its rules page: an absolute path
+  is "used as written"; OpenCode 2.3.0's own code reads such a path while `OPENCODE_DISABLE_PROJECT_CONFIG` keeps project files
+  out). The entry joins the value before the second rule listing, so the ask rules are checked with the very value OpenCode gets.
+
+**What the chat says.** One quiet line, once: "Read this project's CLAUDE.md." with the files it read, and "Left out: …" with
+each file left out and why (a link, over 64 KB, over 128 KB in all, not plain text, only for some files, could not be passed
+on). A chat restarted on the same files adds no second line. With no instruction file, nothing is handed over and nothing is
+said.
+
+**What is still left out.** Folders above the project's top; a subfolder's CLAUDE.md, which Claude Code loads only when it
+works in that folder (the agent can still read one); rules with a `paths` field, which Claude Code loads only for matching
+files; anything an `@path` import names; an AGENTS.md beside a CLAUDE file (Claude Code's default reads one or the other).
+Claude Code puts its own CLAUDE.md in a message after the system prompt; the app's text is appended to the system prompt
+itself. A conversation continued after a restart keeps the system prompt it recorded on its first request until it is
+compacted (`claude --help`, `--system-prompt-snapshot`), so it keeps the instructions it started with until then.
+
+**Not changed.** Codex and every other agent were not switched off by item 89 and still read their own project files as they
+always did; the app hands them nothing. Checked only with stand-ins: whether Claude Code reads the file again after a
+compaction (the file stays until the chat ends either way), and OpenCode's start, because on this Mac OpenCode 2.3.0 has no
+`opencode agent list` (it prints its help), so its ask-rule listing fails and an OpenCode chat does not start at all (item 89's
+rule, unchanged by this item).
 
 ### How the main branch moving is read
 

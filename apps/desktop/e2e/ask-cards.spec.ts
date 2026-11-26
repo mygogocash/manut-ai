@@ -294,9 +294,10 @@ for (const theme of THEMES) {
     // one time: since when it waits, and no "how long ago" beside it
     await expect(friren.locator(".need-who")).toHaveText(/^Friren · .*Waiting since \d{2}:\d{2}$/);
     await expect(friren.locator(".when")).toHaveCount(0);
-    // the kind is the amber of waiting for a person, a mark and not a button
+    // the kind is the amber of waiting for a person, a mark and not a button, named with a noun as the Approvals board tags a
+    // card (item 85i): a verb on a tag reads as a button
     const tag = friren.locator(".tag");
-    await expect(tag).toHaveText("Approve");
+    await expect(tag).toHaveText("Approval");
     expect(await tag.evaluate((el) => el.closest("button")?.getAttribute("data-testid"))).toBe("needs-open");
     const warn = await page.evaluate(() => {
       const d = document.createElement("span");

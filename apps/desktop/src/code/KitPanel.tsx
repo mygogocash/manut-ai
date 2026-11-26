@@ -28,6 +28,8 @@ import { AutoPull } from "./AutoPull";
 import { LaneReview } from "./Review";
 import { PreviewSample } from "./PreviewSample";
 import { allowFolder, dropRule, mayAllow, removeFolder, setLevel, updateKitProjects, useKitProject, type KitProject } from "./project";
+import { Empty } from "../pages/MenuPage";
+import { MenuIcon } from "../sidebar/menuIcons";
 
 /** A session of this project whose changes hold a key. */
 export interface KeyNote {
@@ -209,6 +211,21 @@ function LaneBelow({ root, row, backOpen, onCloseBack }: { root: string; row: La
   );
 }
 
+/** The Lanes band with nothing under it yet: what a lane is, and New lane, which opens the + menu on its Chat with Kit. */
+export function LanesEmpty({ onNew }: { onNew: () => void }) {
+  return (
+    <section className="lanes-empty" aria-labelledby="lanes-empty-h" data-testid="lanes-empty">
+      <div className="band" data-testid="lanes-band">
+        <span id="lanes-empty-h">{t("lane.title")}</span>
+        <button type="button" className="lk" onClick={onNew} title={t("lane.newTip")} data-testid="lane-new">
+          {t("lane.new")}
+        </button>
+      </div>
+      <Empty icon={<MenuIcon row="code" />} title={t("lane.emptyTitle")} text={t("lane.emptyText")} testId="lanes-empty-state" />
+    </section>
+  );
+}
+
 export function KitPanel() {
   const ss = useSessions();
   const prefs = useFolderPrefs();
@@ -236,7 +253,9 @@ export function KitPanel() {
   const [awayOpen, setAwayOpen] = useState(false);
   // the time a turn has run moves while one does
   const now = useNow(lanes.some((l) => l.status === "working"), 1_000);
-  if (!root) return null;
+  // No project yet: the canvas's Lanes band with its New lane, over the empty state that says what a lane is, so the page
+  // opens on Kit's work and never on an empty list of terminals (item 85i, finding 5).
+  if (!root) return <LanesEmpty onNew={() => openNewSessionMenu({ chat: true })} />;
   const keys: KeyNote[] = sessionsWithKeys()
     .map((k) => ({ session: k.chat.slice("agent:".length), files: k.files }))
     .filter((k) => pathKey(ss.list.find((r) => r.id === k.session)?.cwd ?? "") === root);

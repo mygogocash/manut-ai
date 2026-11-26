@@ -18,6 +18,7 @@ import { sendAsk } from "./home";
 import { initialOf, recipientTag, resultWord, satangText, timeline, tokensText, tookText, traceRows, traceText, traceTotal } from "./job";
 import { LOADING, load, type Load } from "./load";
 import { Loading } from "./Loading";
+import { Icon } from "../ui/icons";
 
 /** The actions that do nothing yet. They say so when pressed instead of pretending. */
 export type Unwired = "wrong" | "again" | "replay";
@@ -50,16 +51,12 @@ export const jobQuestion = (title: string, question: string): string => t("job.a
 
 function Chevron() {
   return (
-    <svg className="ic" viewBox="0 0 16 16" aria-hidden="true">
-      <path d="M6.5 4.5L10 8l-3.5 3.5" />
-    </svg>
+    <Icon name="chevron-right" />
   );
 }
 function SendGlyph() {
   return (
-    <svg className="ic" viewBox="0 0 16 16" aria-hidden="true">
-      <path d="M8 13V3M4 7l4-4 4 4" />
-    </svg>
+    <Icon name="arrow-up" />
   );
 }
 

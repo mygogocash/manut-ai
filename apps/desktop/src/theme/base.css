@@ -82,3 +82,7 @@ a {
 }
 
 /* Every move (its keyframes, its times and reduced motion) is in motion.css. */
+/* The brand's icons (src/ui/icons.tsx): a 16px box drawn on a 16-unit grid, which never shrinks in a row. */
+.ic {
+  flex: none;
+}

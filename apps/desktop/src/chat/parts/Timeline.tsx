@@ -287,7 +287,7 @@ export function Timeline({
             {label && <div className="day">{label}</div>}
             {aboveLine && it.id === liveId && typingRow}
             <div
-              className={`row row-${it.kind}${liveLine ? " live-line" : ""}${fresh.has(it.id) ? (it.kind === "approval" || it.kind === "clarify" ? " arrived-ask" : " mo-rise") : ""}`} data-kind={it.kind} {...(it.kind === "user" ? { "data-item": it.id } : {})}>
+              className={`row row-${it.kind}${liveLine ? " live-line" : ""}${fresh.has(it.id) && !liveLine ? (it.kind === "approval" || it.kind === "clarify" ? " arrived-ask" : " mo-rise") : ""}`} data-kind={it.kind} {...(it.kind === "user" ? { "data-item": it.id } : {})}>
               {liveFace && <LiveFace bot={bot.name} face={face} />}
               {render(it, label ? undefined : items[i - 1], i)}
             </div>

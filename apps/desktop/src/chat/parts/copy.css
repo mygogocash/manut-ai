@@ -6,7 +6,7 @@
   width: 24px;
   height: 22px;
   border-radius: var(--r-sm);
-  color: var(--quiet);
+  color: var(--muted);
   opacity: 0;
   transition: var(--tr-control);
 }
@@ -89,7 +89,7 @@
   height: 18px;
   border-radius: var(--r-sm);
   font-size: 12px;
-  color: var(--quiet);
+  color: var(--muted);
   opacity: 0;
   transition: var(--tr-control);
 }
@@ -97,7 +97,7 @@
 .msg-edit-note {
   padding: 0 4px;
   font-size: 12px;
-  color: var(--quiet);
+  color: var(--muted);
   opacity: 0;
   transition: opacity var(--tr-hover);
 }

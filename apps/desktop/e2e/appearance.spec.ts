@@ -80,38 +80,28 @@ test("a look saved before the board's: its old defaults read as today's, a real 
   });
   await open(page);
   const html = page.locator("html");
-  await expect(html).toHaveAttribute("data-palette", "forest");
+  // the colour set it had saved is read as the brand's (item 85i); its old default bubbles and text read as today's
+  await expect(html).toHaveAttribute("data-palette", "manut");
   await expect(html).toHaveAttribute("data-bubbles", "open");
   await expect(html).toHaveAttribute("data-text", "medium");
 });
 
-test("colour set: picking one repaints your bubble, links and accent, and the logo stays", async ({ page }) => {
-  await open(page);
-  // the logo is the side menu's brand mark now; its paint must not follow the colour set
-  const logo = () => page.locator(".sb-mark").evaluate((svg) => [...svg.querySelectorAll("rect, path")].map((e) => `${getComputedStyle(e).fill} ${getComputedStyle(e).stroke}`).join("|"));
-  const logoBefore = await logo();
-  const meBefore = await css(page, "bubble-user", "background-color");
-  await appearance(page);
-  await expect(page.getByTestId("palette-manut")).toHaveAttribute("aria-checked", "true");
-  await page.getByTestId("palette-ocean").click();
-  await expect(page.locator("html")).toHaveAttribute("data-palette", "ocean");
-  await expect(page.getByTestId("palette-ocean")).toHaveAttribute("aria-checked", "true");
-  // the selected swatch is gray-framed, never filled with the accent
-  expect(await page.getByTestId("palette-ocean").evaluate((e) => getComputedStyle(e).backgroundImage)).toBe("none");
-  // preview follows
-  const send = await page.locator(".ap-pv-send").evaluate((e) => getComputedStyle(e).backgroundImage);
-  expect(send).toContain("rgb(47, 111, 228)"); // #2f6fe4
-  await page.getByRole("button", { name: "Close settings" }).click();
-  expect(await css(page, "bubble-user", "background-color")).not.toBe(meBefore);
-  expect(await css(page, "bubble-user", "background-color")).toBe("rgb(31, 49, 80)"); // #1f3150
-  expect(await logo()).toBe(logoBefore);
-  // light theme has its own tint for the same set
-  await page.evaluate(async () => {
-    const m = await import(/* @vite-ignore */ "/src/state/store.ts");
-    m.getStore().actions.setTheme("light");
+test("no colour to pick: the brand's colours are everyone's, and a set the picker once saved reads as the brand's (item 85i)", async ({ page }) => {
+  await page.addInitScript(() => {
+    if (!sessionStorage.getItem("kept")) localStorage.setItem("manut.look", JSON.stringify({ palette: "ocean", bubbles: "solid", text: "large" }));
   });
-  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
-  expect(await css(page, "bubble-user", "background-color")).toBe("rgb(216, 231, 250)"); // #d8e7fa
+  await open(page);
+  // the saved set is read and put aside without a word; the rest of the look is kept
+  await expect(page.locator("html")).toHaveAttribute("data-palette", "manut");
+  await expect(page.locator("html")).toHaveAttribute("data-bubbles", "solid");
+  await expect(page.locator("html")).toHaveAttribute("data-text", "large");
+  expect(await css(page, "bubble-user", "background-image")).toContain("linear-gradient");
+  // Settings, General has no colour picker: the audit's first rule, "no accent for the person to pick"
+  await appearance(page);
+  await expect(page.getByTestId("appearance")).toBeVisible();
+  await expect(page.getByTestId("appearance").getByRole("radiogroup", { name: "Colour" })).toHaveCount(0);
+  await expect(page.locator("[data-testid^=palette-manut], [data-testid^=palette-ocean], .ap-sw")).toHaveCount(0);
+  await expect(page.getByTestId("appearance")).not.toContainText("Graphite");
 });
 
 test("bubble styles: soft puts the answer in a bubble too; solid puts yours in the accent; open is the board's", async ({ page }) => {
@@ -150,21 +140,20 @@ test("text size moves answers, messages and the composer a step along the board'
   expect(await css(page, "bubble-user", "font-size")).toBe("14px");
   await appearance(page);
   await page.getByTestId("text-seg").getByRole("radio", { name: "Large" }).click();
-  await page.getByTestId("palette-forest").click();
   await page.getByTestId("bubbles-seg").getByRole("radio", { name: "Soft" }).click();
   await page.getByRole("button", { name: "Close settings" }).click();
   expect(await css(page, "bubble-bot", "font-size")).toBe("20px");
   expect(await css(page, "bubble-user", "font-size")).toBe("17px");
   expect(await page.getByTestId("composer").evaluate((e) => getComputedStyle(e).fontSize)).toBe("17px");
   expect(JSON.parse((await page.evaluate(() => localStorage.getItem("manut.look"))) ?? "{}")).toEqual({
-    palette: "forest",
+    palette: "manut",
     bubbles: "soft",
     text: "large",
     v: 2,
   });
   await page.evaluate(() => sessionStorage.setItem("kept", "1"));
   await page.reload();
-  await expect(page.locator("html")).toHaveAttribute("data-palette", "forest");
+  await expect(page.locator("html")).toHaveAttribute("data-palette", "manut");
   // chosen since the board's look: kept
   await expect(page.locator("html")).toHaveAttribute("data-bubbles", "soft");
   await expect(page.locator("html")).toHaveAttribute("data-text", "large");
@@ -197,11 +186,11 @@ test("screenshots: the chat in several looks, and the Appearance page", async ({
     );
   const looks: [string, Record<string, string>, string][] = [
     ["look-manut-soft-dark", { palette: "manut", bubbles: "soft", text: "small" }, "dark"],
-    ["look-ocean-solid-dark", { palette: "ocean", bubbles: "solid", text: "small" }, "dark"],
-    ["look-graphite-open-dark", { palette: "graphite", bubbles: "open", text: "medium" }, "dark"],
-    ["look-sunset-soft-light", { palette: "sunset", bubbles: "soft", text: "small" }, "light"],
-    ["look-forest-solid-light", { palette: "forest", bubbles: "solid", text: "small" }, "light"],
-    ["look-rose-open-light", { palette: "rose", bubbles: "open", text: "medium" }, "light"],
+    ["look-manut-solid-dark", { palette: "manut", bubbles: "solid", text: "small" }, "dark"],
+    ["look-manut-open-dark", { palette: "manut", bubbles: "open", text: "medium" }, "dark"],
+    ["look-manut-soft-light", { palette: "manut", bubbles: "soft", text: "small" }, "light"],
+    ["look-manut-solid-light", { palette: "manut", bubbles: "solid", text: "small" }, "light"],
+    ["look-manut-open-light", { palette: "manut", bubbles: "open", text: "medium" }, "light"],
   ];
   for (const [name, look, theme] of looks) {
     await set(look, theme);

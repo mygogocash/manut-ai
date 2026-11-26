@@ -11,6 +11,7 @@ import { attachKind, badgeFor, limitReason, previewKind } from "./attachFiles";
 import { fileSize } from "./mediaLines";
 import { FileRow, gridOf, ImageTile } from "./Media";
 import { t } from "../../i18n";
+import { Icon } from "../../ui/icons";
 
 export interface Chip extends OutFile {
   id: string;
@@ -169,7 +170,7 @@ export function AttachButton({
         onClick={() => (menu ? setOpen((o) => !o) : input.current?.click())}
         data-testid="attach"
       >
-        <PlusIcon size={14} />
+        <PlusIcon />
       </button>
       <input ref={input} type="file" multiple hidden onChange={picked} data-testid="attach-file-input" />
       {open && (
@@ -229,7 +230,7 @@ export function AttachButton({
                 data-testid="attach-plugins"
               >
                 <span className="att-ic">
-                  <PlugIcon size={15} />
+                  <PlugIcon />
                 </span>
                 <span className="att-n">{t("att.plugins")}</span>
                 <span className="att-chev" aria-hidden="true">
@@ -298,9 +299,7 @@ export function AttachButton({
 }
 
 const FolderGlyph = () => (
-  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" aria-hidden="true">
-    <path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4.4l2 2h8.6A1.5 1.5 0 0 1 21 9.5v8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z" />
-  </svg>
+  <Icon name="folder" />
 );
 
 /** A plugin's name for people: the catalog title, else its folder name with the dashes spaced and a capital. */
@@ -328,16 +327,11 @@ function PluginTile({ p }: { p: PluginRow }) {
 }
 
 const GearIcon = () => (
-  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-    <circle cx="12" cy="12" r="3" />
-    <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" />
-  </svg>
+  <Icon name="gear" />
 );
 
 const ClipIcon = () => (
-  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-    <path d="M20 11.5 12.4 19a5 5 0 0 1-7.1-7.1l7.6-7.6a3.3 3.3 0 0 1 4.7 4.7l-7.6 7.6a1.7 1.7 0 0 1-2.4-2.4l7-7" />
-  </svg>
+  <Icon name="paperclip" />
 );
 
 /** The attachments above the input, as Codex shows them: a picture or video the person can see is a large square

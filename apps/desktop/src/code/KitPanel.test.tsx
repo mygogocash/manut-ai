@@ -4,7 +4,7 @@ import { createElement, isValidElement, type ReactElement, type ReactNode } from
 import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { setLang } from "../i18n";
-import { KitPanelView, codeProjects, onlyInOwnFolders, type KitPanelProps } from "./KitPanel";
+import { KitPanelView, LanesEmpty, codeProjects, onlyInOwnFolders, type KitPanelProps } from "./KitPanel";
 import { laneRowOf } from "./Lanes";
 import { emptyLane, noteLane } from "./lane";
 import { emptyProject } from "./project";
@@ -207,5 +207,19 @@ describe("the main-moved note under the dial", () => {
     // no session yet, or only a draft, or only another project's: as before
     expect(onlyInOwnFolders([], root)).toBe(false);
     expect(onlyInOwnFolders([{ cwd: root, status: "draft" }, { cwd: "/elsewhere", status: "running", lane: lane("/l/y") }], root)).toBe(false);
+  });
+});
+
+describe("the Code page with no project yet (item 85i)", () => {
+  it("opens on the canvas's grey Lanes band with New lane, over an empty state that says what a lane is", () => {
+    setLang("en");
+    const html = renderToString(<LanesEmpty onNew={() => {}} />);
+    expect(html).toMatch(/<div class="band" data-testid="lanes-band"><span id="lanes-empty-h">Lanes<\/span><button[^>]*data-testid="lane-new"[^>]*>New lane<\/button><\/div>/);
+    expect(html).toContain('data-testid="lanes-empty-state"');
+    expect(html).toContain("No lanes yet");
+    expect(html).toContain("nothing goes live until you approve");
+    // the empty state's drawing is the menu's Code icon, from the set: no maker's mark
+    expect(html).toMatch(/<span class="ico" aria-hidden="true"><svg class="ic"[^>]*><path d="M5.5 4.5L2 8l3.5 3.5M10.5 4.5L14 8l-3.5 3.5"/);
+    expect(html).not.toMatch(/<img|data-agent|data-brand/);
   });
 });
