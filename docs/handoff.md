@@ -302,9 +302,10 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    merged, then 131 (GoSpark's sounds, asked for by the owner that night; the owner should listen to them on a real
    Mac), then 101b (Grok as a chat; Muse Code needs the owner). Then 132 (GoSpark's effort card, asked for by the owner
    that night) 101d (Grok and pi accounts), 101c (the ACP registry) and 104 (a snapshot of any app; the owner's steps to try it
-   are 11 to 18 in `docs/computer-use.md`). Running: 102a
-   and 102d (from the design `docs/several-agents.md`, whose eight open questions the lead answered provisionally with
-   its own recommendations, logged in `docs/decisions/102-several-agents.md`), and 133 (motion-lists steady). Needs the owner from 101b: Grok signed in and `permission_mode = "ask"`
+   are 11 to 18 in `docs/computer-use.md`). Then the design of 102
+   (`docs/several-agents.md`; its eight open questions answered provisionally by the lead with the design's own
+   recommendations, in `docs/decisions/102-several-agents.md`, for the owner) and 102d (its pure rules). Running: 102a
+   (ask several agents) and 133 (the flaky browser specs, and whether four workers a shard is too many). Needs the owner from 101b: Grok signed in and `permission_mode = "ask"`
    under `[ui]` in `~/.grok/config.toml` (it says always-approve, so Grok chats are refused), and Muse Code's CLI. From 101e: all 325 Codex sessions on the owner's Mac are compressed, so
    only Claude Code's conversations are offered until 106b. Needs the owner from 101a: Cursor's Approval mode set to Allowlist (it is Run Everything, so Cursor
    chats are refused), and a Cursor plan with messages left to record a real tool call. GitHub reported 7 Dependabot alerts on `main` (2 critical) at that push, for the owner to look at.
