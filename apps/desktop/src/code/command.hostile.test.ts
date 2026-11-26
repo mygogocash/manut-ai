@@ -377,6 +377,30 @@ describe("B2: a runner's own options before the tool, and what loads a program i
   });
 });
 
+describe("B3: what zsh expands that bash does not", () => {
+  it("never reads a word zsh splits, matches or evaluates from a variable", () => {
+    counted += holds([
+      ["LANG='-exec rm {} ;'; find . -maxdepth 0 $=LANG", "find . -maxdepth 0", "read"],
+      ["X=-delete; find . -name x $=X", "LANG=C; find . -name x", "read"],
+      ["export LANG='-o out.txt'; sort $=LANG src/a.txt", "export LANG=C; sort src/a.txt", "read"],
+      ["find . $~X", "find . -type f", "read"],
+      ["find . $^X", "find . -type d", "read"],
+      ["find . -maxdepth $+X", "find . -maxdepth 1", "read"],
+      ["find . ${=X}", "find . -empty", "read"],
+      ["find . ${(z)X}", "find . -print", "read"],
+      ["echo ${(e)X}", "echo done", "read"],
+      ["git log $=X", "git log --oneline", "read"],
+      ["rg foo $=X", "rg foo src", "read"],
+      ["cat =(cat /Users/fon/.ssh/id_rsa)", "cat a.txt", "read"],
+      ["cat <(cat src/a.ts) $~X", "cat src/a.ts", "read"],
+      ["ls $:X $/X", "ls src", "read"],
+    ]);
+    // a `$` with nothing after it is only itself
+    expect(read("echo $ done").action).toBe("read");
+    expect(read("grep -n 'a$' src/a.ts").action).toBe("read");
+  });
+});
+
 describe("the table", () => {
   it("holds at least 120 hostile lines, each beside the plain line it imitates", () => {
     expect(counted).toBeGreaterThanOrEqual(120);

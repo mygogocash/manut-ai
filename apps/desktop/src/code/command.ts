@@ -346,7 +346,11 @@ function lex(line: string): Lexed {
       continue;
     }
     // `$'…'` decodes escapes (`$'\x2dexec'` is `-exec`) and `$"…"` translates its text: neither is what it looks like.
-    if (c === "`" || (c === "$" && next !== undefined && /[A-Za-z_({0-9?@*#!$'"-]/.test(next))) {
+    // zsh, the shell Codex and Claude Code run commands in on a Mac, expands more after a `$` than bash does: `$=X` and
+    // `${=X}` split a variable into words (options among them), `$~X` reads it as a pattern, `$^X`, `$+X`, `${(z)X}` and
+    // `${(e)X}` do more again. So a `$` followed by anything but a blank or the line's end is never read as itself, and
+    // since no expansion is read, a variable set earlier in the line cannot reach a later word unseen.
+    if (c === "`" || (c === "$" && next !== undefined && !/[\s]/.test(next))) {
       opaque = true;
       word += c;
       inWord = true;

@@ -237,6 +237,10 @@ program or reaches the network. What it does not understand is `unknown`, and as
   `NODE_OPTIONS` and npm's `npm_config_*` in front of a command already asked; a test runner told to hand node options to
   its workers (mocha's `-n`, ava's `--node-arguments`, vitest's `execArgv`) or to load a module (vitest's `--pool`,
   `--diff`, `--workspace`, a custom coverage provider; jest's `--runner`) as a file is no check.
+- **zsh's expansions.** Codex (`zsh -lc`) and Claude Code run commands in zsh on a Mac, and zsh expands more after a `$`
+  than bash: `$=X` splits a variable into words, `$~X` reads it as a pattern, and `$^X`, `$+X`, `${(z)X}` and `${(e)X}`
+  do more. An unquoted `$` followed by anything but a blank or the line's end is not read in advance, so a variable set
+  earlier in the line never reaches a later word unseen. `=(…)` and `<(…)` already asked.
 
 `command.hostile.test.ts` holds 170 such lines, each beside the plain line it imitates, which reads as it did.
 
