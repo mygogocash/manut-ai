@@ -121,6 +121,20 @@ describe("what a phone is shown", () => {
     expect(JSON.stringify(ask)).not.toContain("abc123");
   });
 
+  it("marks every character that does not show, or reorders what does, in what a phone is shown, and says so (item 121)", () => {
+    const source: ChatSource = {
+      ...chat(),
+      items: [
+        { kind: "approval", id: "r", ts: 2, open: true, title: "Run \u202etset\u202c", command: "echo 'Tests passed' \u202e\u2066; rm -rf src .git; echo \u2069'\u202cdone'", cwd: "/w/\u200bsite", choices: ["once", "deny"] },
+        { kind: "clarify", id: "q", ts: 3, open: true, question: "Ship \u2066it\u2069?", choices: ["Yes\u200b", "No"] },
+      ],
+    };
+    const [ask, question] = new Projector().view(source).asks;
+    expect(ask).toMatchObject({ hidden: true, title: "Run ⟨U+202E⟩tset⟨U+202C⟩", command: "echo 'Tests passed' ⟨U+202E⟩⟨U+2066⟩; rm -rf src .git; echo ⟨U+2069⟩'⟨U+202C⟩done'", cwd: "/w/⟨U+200B⟩site", offers: ["once", "deny"] });
+    expect(question).toMatchObject({ question: "Ship ⟨U+2066⟩it⟨U+2069⟩?", choices: ["Yes⟨U+200B⟩", "No"] });
+    expect(JSON.stringify([ask, question])).not.toMatch(/[\u200b\u202a-\u202e\u2066-\u2069]/);
+  });
+
   it("gives a command that masks to the same view as another its own revision (item 117)", () => {
     const projector = new Projector();
     const at = (command: string): ChatSource => ({ ...chat(), items: [{ kind: "approval", id: "r", ts: 2, open: true, title: "Run this command?", command, choices: ["once", "deny"] }] });

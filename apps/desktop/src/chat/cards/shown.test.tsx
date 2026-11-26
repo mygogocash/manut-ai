@@ -63,4 +63,27 @@ describe("an approval card's command", () => {
     expect(closed).not.toContain("abc123");
     expect(closed).not.toContain("xyz789");
   });
+
+  it("shows every word that runs, and says so when it must show a command as it is because it may hold a key (item 121)", () => {
+    setLang("en");
+    const cookie = commandOf(renderToString(<Cards bot="agent:proj" item={ask("git push -o cookie:x=1 --force origin main")} />));
+    expect(cookie).toBe("git push -o cookie:•••• --force origin main");
+    const html = renderToString(<Cards bot="agent:proj" item={ask("echo •••• && API_KEY=abc123 pnpm test")} />);
+    expect(commandOf(html)).toBe("echo •••• && API_KEY=abc123 pnpm test");
+    expect(html).toContain("This command may hold a key. It is shown in full, so you see exactly what runs.");
+    expect(renderToString(<Cards bot="agent:proj" item={ask("API_KEY=abc123 pnpm test")} />)).not.toContain('data-testid="card-cmd-key"');
+  });
+
+  it("marks every character that does not show, or that reorders what does, and says the command holds them (item 121)", () => {
+    setLang("en");
+    const command = "echo 'Tests passed' ‮⁦; rm -rf src .git; echo ⁩'‬done'";
+    const html = renderToString(<Cards bot="agent:proj" item={ask(command, { title: "Run ‮tset‬", cwd: "/w/​site" })} />);
+    expect(commandOf(html)).toBe("echo 'Tests passed' ⟨U+202E⟩⟨U+2066⟩; rm -rf src .git; echo ⟨U+2069⟩'⟨U+202C⟩done'");
+    expect(html).toContain("This command holds hidden characters. Each is shown here as a mark like ⟨U+202E⟩.");
+    expect(html).toContain("Run ⟨U+202E⟩tset⟨U+202C⟩");
+    expect(html).toContain("/w/⟨U+200B⟩site");
+    expect(html).not.toMatch(/[​-‏‪-‮⁦-⁩]/);
+    // the closed line too
+    expect(renderToString(<Cards bot="agent:proj" item={ask(command, { resolved: "deny" })} />)).not.toMatch(/[‪-‮⁦-⁩]/);
+  });
 });

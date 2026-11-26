@@ -5,7 +5,7 @@ import { t, type Key } from "../i18n";
 import type { Bot } from "../lib/protocol";
 import { askText, type Actions, type ApprovalItem, type Ask, type Chat, type ClarifyItem } from "../state/store";
 import { riskOf } from "../chat/cards/risk";
-import { maskCommand, showCommand } from "../lib/secrets";
+import { maskCommand, revealHidden, showCommand } from "../lib/secrets";
 import { asksOf, memberStatus } from "./team";
 
 export type HomeMode = "chat" | "team" | "code";
@@ -102,7 +102,8 @@ export async function sendAsk(actions: Pick<Actions, "sendTo" | "sendAway" | "ne
 /** Whether Home may offer Approve on an ask, beside Look first. Only for an approval whose chat card would show no more
  *  than Home does: one that offers Allow once (the choice Approve sends) and names its exact action (the command), with
  *  no plan to read, no folder it runs in, no risk warning, no subagent asking, and a command its card shows with no note
- *  (item 121: not one shown as it is because it may hold a key). Every other ask is settled on its card, after Look first.
+ *  (item 121: not one shown as it is because it may hold a key, nor one that holds hidden characters). Every other ask is
+ *  settled on its card, after Look first.
  *  Either way it goes through the one approval path the card uses (chat/cards/respond.ts). */
 export function canApproveHere(item: ApprovalItem | ClarifyItem): item is ApprovalItem {
   return (
@@ -113,8 +114,16 @@ export function canApproveHere(item: ApprovalItem | ClarifyItem): item is Approv
     !item.cwd &&
     !item.subagent &&
     riskOf(item.command).length === 0 &&
-    (!!item.whole || !showCommand(item.command).unmasked)
+    plainCommand(item)
   );
+}
+
+/** Whether an approval's card shows its command with no note: not one shown as it is because it may hold a key, nor one
+ *  that holds characters that do not show (item 121). */
+function plainCommand(item: ApprovalItem): boolean {
+  if (item.whole) return revealHidden(item.command) === item.command;
+  const shown = showCommand(item.command);
+  return !shown.unmasked && !shown.hidden;
 }
 
 /** An ask in the words of its chat card: an approval's title (or the card's own words for an untitled one, or for one
@@ -124,10 +133,10 @@ export function canApproveHere(item: ApprovalItem | ClarifyItem): item is Approv
 export function askLines(item: ApprovalItem | ClarifyItem): { title: string; action: string | null; whole: boolean } {
   if (item.kind === "clarify") return { title: askText(item), action: null, whole: false };
   // as its card shows it: a browser write's sentence exactly as typed, any other command whole with only its keys masked
-  // (maskCommand, item 117)
-  const action = item.command.trim() ? (item.whole ? item.command : maskCommand(item.command)) : null;
+  // (maskCommand, item 117), each with every character that does not show as a visible mark (item 121)
+  const action = item.command.trim() ? (item.whole ? revealHidden(item.command) : maskCommand(item.command)) : null;
   return {
-    title: item.plan ? t("card.startPlan") : item.title || t("card.approvalNeeded"),
+    title: item.plan ? t("card.startPlan") : revealHidden(item.title) || t("card.approvalNeeded"),
     action,
     whole: action !== null && !!item.whole,
   };

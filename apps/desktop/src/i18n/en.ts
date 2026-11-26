@@ -852,6 +852,7 @@ export const en = {
   "card.inCwd": "in {cwd}",
   "card.command": "The whole command",
   "card.cmdMayHoldKey": "This command may hold a key. It is shown in full, so you see exactly what runs.",
+  "card.cmdHidden": "This command holds hidden characters. Each is shown here as a mark like ⟨U+202E⟩.",
   "card.startPlan": "Start working on this plan?",
   "card.notSent": "Not sent · {error}",
   "card.answerOpt": "Your answer (optional)",

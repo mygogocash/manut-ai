@@ -128,6 +128,11 @@ describe("Approve on Home", () => {
     expect(canApproveHere(approval({ command: "API_KEY=abc123 pnpm test" }))).toBe(true);
   });
 
+  it("is not offered for a command that holds hidden characters, which only its card explains (item 121)", () => {
+    expect(canApproveHere(approval({ command: "echo 'Tests passed' \u202e\u2066; rm -rf src .git; echo \u2069'\u202cdone'" }))).toBe(false);
+    expect(canApproveHere(approval({ command: "git status\u200b" }))).toBe(false);
+  });
+
   it("is not offered without Allow once, the choice it sends, or without an exact action", () => {
     expect(canApproveHere(approval({ choices: ["session", "deny"] }))).toBe(false);
     expect(canApproveHere(approval({ command: "" }))).toBe(false);
@@ -143,6 +148,11 @@ describe("an ask in its card's words", () => {
     // a browser write's sentence is shown whole, as its card shows it
     expect(askLines(approval({ whole: true })).whole).toBe(true);
     expect(askLines(approval({ whole: true, command: " " }))).toMatchObject({ action: null, whole: false });
+  });
+
+  it("marks every character that does not show, or reorders what does, in the title and the action (item 121)", () => {
+    expect(askLines(approval({ title: "Run \u202etset\u202c", command: "echo 'Tests passed' \u202e\u2066; rm -rf src .git; echo \u2069'\u202cdone'" }))).toEqual({ title: "Run ⟨U+202E⟩tset⟨U+202C⟩", action: "echo 'Tests passed' ⟨U+202E⟩⟨U+2066⟩; rm -rf src .git; echo ⟨U+2069⟩'⟨U+202C⟩done'", whole: false });
+    expect(askLines(approval({ whole: true, command: "Send on LINE: \u201cHi\u200b\u201d" })).action).toBe("Send on LINE: \u201cHi⟨U+200B⟩\u201d");
   });
 
   it("uses the card's own words for an approval with no title, or one that starts on a plan", () => {

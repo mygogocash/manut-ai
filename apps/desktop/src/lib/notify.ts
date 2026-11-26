@@ -13,7 +13,7 @@ import type { BridgeEvent } from "./protocol";
 import { t } from "../i18n";
 import { outsideSettings, presentOutside, routeAction, type Outside, type PresentContext, type Shown, type ShownAction } from "./outside";
 import { isMacPlatform } from "./power";
-import { showCommand } from "./secrets";
+import { revealHidden, showCommand } from "./secrets";
 
 export interface Note {
   title: string;
@@ -105,7 +105,7 @@ const say = (text: string) => spoken(text) || clip(shortenRefs(text));
  *  shows it, or, for one its card shows as it is because it may hold a key, the plain words that it may (item 121). */
 function noteCommand(ev: { command?: string; whole?: boolean }): string {
   if (!ev.command) return "";
-  if (ev.whole) return ev.command;
+  if (ev.whole) return revealHidden(ev.command);
   const shown = showCommand(ev.command);
   return shown.unmasked ? t("note.mayHoldKey") : shown.text;
 }
@@ -131,7 +131,7 @@ export function noteFor(
         // A command's keys are masked as on its card (showCommand): Notification Centre keeps what it was shown, and a body
         // a masker changed is no longer the exact action below, so it never offers Approve (item 117). A command its card
         // shows as it is, since it may hold a key, is not put here at all: the body says so (item 121).
-        body: clip(shortenRefs(ev.brief || noteCommand(ev) || ev.title || t("ask.allowThis"))),
+        body: clip(shortenRefs(revealHidden(ev.brief || noteCommand(ev) || ev.title || t("ask.allowThis")))),
         bot,
         tag: `${bot}:approval`,
         // only the connected runtime's asks carry an approval-core kind; any other has none and is owner-only
@@ -148,7 +148,8 @@ export function noteFor(
     case "clarify.request":
       return {
         title: t("note.question", { bot: who }),
-        body: ev.question.trim() ? say(ev.question) : t("note.waiting"),
+        // a character that does not show, or that reorders what does, is a visible mark, as on the card (item 121)
+        body: ev.question.trim() ? say(revealHidden(ev.question)) : t("note.waiting"),
         bot,
         tag: `${bot}:clarify`,
         ask: { id: ev.request_id, approval: "", member: who, canApprove: false, waiting: ctx.waiting?.() ?? 1 },

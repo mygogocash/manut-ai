@@ -26,7 +26,7 @@ import { riskOf } from "./risk";
 import { t, type Key } from "../../i18n";
 import { Markdown } from "../parts/Markdown";
 import { composing, holdImeEnter } from "../../lib/ime";
-import { maskCommand, maskSecrets, showCommand } from "../../lib/secrets";
+import { maskCommand, maskSecrets, revealHidden, showCommand } from "../../lib/secrets";
 import { KitSays, kitButtons, kitDoneText, useKitCard } from "../../code/KitCardParts";
 import { addRule, updateKitProjects } from "../../code/project";
 import { computerAsk } from "../../computer/computer";
@@ -85,15 +85,30 @@ function CommandBlock({ text }: { text: string }) {
 }
 
 /** A command as an approval shows it (showCommand): its keys masked, or, when masking it could change what it seems to do,
- *  whole with a plain note that it may hold a key (item 121). */
+ *  whole with a plain note that it may hold a key; and every character that does not show, or that reorders what does, as
+ *  a visible mark, with a note that it holds hidden characters (item 121). */
 function ShownCommandBlock({ command }: { command: string }) {
   const shown = showCommand(command);
   return (
     <>
       <CommandBlock text={shown.text} />
-      {shown.unmasked && (
+      <CommandNotes unmasked={shown.unmasked} hidden={shown.hidden} />
+    </>
+  );
+}
+
+/** The plain notes under a command: it may hold a key, it holds hidden characters (item 121). */
+function CommandNotes({ unmasked, hidden }: { unmasked: boolean; hidden: boolean }) {
+  return (
+    <>
+      {unmasked && (
         <div className="card-note" data-testid="card-cmd-key" role="note">
           {t("card.cmdMayHoldKey")}
+        </div>
+      )}
+      {hidden && (
+        <div className="card-note" data-testid="card-cmd-hidden" role="note">
+          {t("card.cmdHidden")}
         </div>
       )}
     </>
@@ -158,7 +173,8 @@ function Approval({ bot, item }: { bot: string; item: ApprovalItem }) {
   // a computer use card (item 82) is drawn in the person's language from what the shell named (computerCard.ts)
   const comp = computerAsk(item.tool?.computer);
   const said = comp ? computerWords(comp) : null;
-  const detail = [shop, said ? said.title : item.command ? maskCommand(item.command) : maskSecrets(item.title)].filter(Boolean).join(" · ");
+  // every character that does not show, or reorders what does, is a visible mark there too (item 121)
+  const detail = [shop, said ? said.title : item.command ? maskCommand(item.command) : revealHidden(maskSecrets(item.title))].filter(Boolean).join(" · ");
   // a coding session's ask, read as one of Kit's steps (src/code/): its words, and Always allow in this project
   const kit = useKitCard(bot, item);
 
@@ -211,7 +227,7 @@ function Approval({ bot, item }: { bot: string; item: ApprovalItem }) {
   // a computer use card's lines are an app's words, not a command: no command risk is read in them
   const risks = said ? [] : riskOf(item.command || "");
   // plan mode's end asks one thing in plain words: start on the plan below
-  const title = item.plan ? t("card.startPlan") : said ? said.title : item.title || t("card.approvalNeeded");
+  const title = item.plan ? t("card.startPlan") : said ? said.title : revealHidden(item.title) || t("card.approvalNeeded");
   return (
     <div
       ref={ref}
@@ -252,7 +268,10 @@ function Approval({ bot, item }: { bot: string; item: ApprovalItem }) {
       ) : (
         item.command &&
         (item.whole ? (
-          <pre className="card-cmd whole">{item.command}</pre>
+          <>
+            <pre className="card-cmd whole">{revealHidden(item.command)}</pre>
+            <CommandNotes unmasked={false} hidden={revealHidden(item.command) !== item.command} />
+          </>
         ) : (
           <ShownCommandBlock command={item.command} />
         ))
@@ -261,12 +280,12 @@ function Approval({ bot, item }: { bot: string; item: ApprovalItem }) {
       {/* plan mode's plan: the agent's markdown as an answer reads, whole, scrolling inside the card */}
       {item.plan && (
         <div className="card-plan md" data-testid="card-plan">
-          <Markdown text={item.plan} />
+          <Markdown text={revealHidden(item.plan)} />
         </div>
       )}
       {item.cwd && (
-        <div className="card-cwd" title={item.cwd} data-testid="card-cwd">
-          {t("card.inCwd", { cwd: item.cwd })}
+        <div className="card-cwd" title={revealHidden(item.cwd)} data-testid="card-cwd">
+          {t("card.inCwd", { cwd: revealHidden(item.cwd) })}
         </div>
       )}
       {passed && (
@@ -414,7 +433,7 @@ function QuestionInput({
   }
   const showOther = otherOpen || !!pick.other;
   return (
-    <div className={`iv-chips${flat ? " flat" : ""}`} role={multi || onPickOne ? "group" : "radiogroup"} aria-label={q.question} onKeyDown={flat ? undefined : onKey}>
+    <div className={`iv-chips${flat ? " flat" : ""}`} role={multi || onPickOne ? "group" : "radiogroup"} aria-label={revealHidden(q.question)} onKeyDown={flat ? undefined : onKey}>
       {/* the Other row stays in the list (pressed while its field is open); the field takes the next line */}
       {choices.map((c, i) => {
         const on = pick.chosen.includes(c);
@@ -437,11 +456,11 @@ function QuestionInput({
             {multi && <span className="iv-box" aria-hidden="true">{on ? "✓" : ""}</span>}
             <span className="iv-body">
               <span className="iv-title">
-                {title}
+                {revealHidden(title)}
                 {recommended && " "}
                 {recommended && <span className="iv-badge">{t("card.recommended")}</span>}
               </span>
-              {desc && <span className="iv-desc">{desc}</span>}
+              {desc && <span className="iv-desc">{revealHidden(desc)}</span>}
             </span>
           </button>
         );
@@ -535,7 +554,7 @@ function Interview({ bot, item, cardRef }: { bot: string; item: ClarifyItem; car
           <li key={q.qid} className="iv-q" data-testid="iv-question">
             <div className="iv-text">
               <span className="iv-n">{i + 1}</span>
-              {q.question}
+              {revealHidden(q.question)}
               {q.choices?.length ? <span className="iv-hint"> · {q.multi_select ? t("card.pickAny") : t("card.pickOne")}</span> : null}
             </div>
             <QuestionInput
@@ -566,8 +585,8 @@ function Interview({ bot, item, cardRef }: { bot: string; item: ClarifyItem; car
 function AskedBy({ who }: { who?: AskSubagent }) {
   if (!who) return null;
   return (
-    <div className="card-who" data-testid="card-subagent" title={who.name}>
-      {t("card.subagentAsks", { name: who.name || t("sub.untitled", { n: 1 }) })}
+    <div className="card-who" data-testid="card-subagent" title={revealHidden(who.name)}>
+      {t("card.subagentAsks", { name: revealHidden(who.name) || t("sub.untitled", { n: 1 }) })}
     </div>
   );
 }
@@ -585,7 +604,7 @@ function Clarify({ bot, item }: { bot: string; item: ClarifyItem }) {
   const interview = (item.questions?.length ?? 0) > 1;
   useFocusRequest(bot, item.id, interview ? formRef : ref, open);
 
-  const detail = interview ? t("card.questions", { n: item.questions!.length }) : item.question;
+  const detail = interview ? t("card.questions", { n: item.questions!.length }) : revealHidden(item.question);
   const landed = useLanded(item.answer !== undefined);
   if (item.answer !== undefined) return <Line icon="✓" text={t("card.answeredWith", { answer: item.answer })} detail={detail} testid="card-line" landed={landed} ok />;
   if (item.expired && !busy) return <Line icon="–" text={t(EXPIRED_LABEL[item.expired])} detail={detail} testid="card-line" />;
@@ -616,7 +635,7 @@ function Clarify({ bot, item }: { bot: string; item: ClarifyItem }) {
       onKeyDown={choices.length ? (e) => keys.current?.key(e) : undefined}
     >
       <AskedBy who={item.subagent} />
-      <div className="card-title">{item.question}</div>
+      <div className="card-title">{revealHidden(item.question)}</div>
       {choices.length > 0 && (
         <QuestionInput
           q={q}

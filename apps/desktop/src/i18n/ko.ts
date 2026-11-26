@@ -849,6 +849,7 @@ export const ko: Record<Key, string> = {
   "card.inCwd": "{cwd}에서",
   "card.command": "명령 전체",
   "card.cmdMayHoldKey": "이 명령에 키가 들어 있을 수 있어요. 실제로 실행되는 내용을 그대로 볼 수 있도록 전체를 보여 드려요.",
+  "card.cmdHidden": "이 명령에 보이지 않는 문자가 들어 있어요. 여기서는 각각 ⟨U+202E⟩ 같은 표시로 보여 드려요.",
   "card.startPlan": "이 계획대로 작업을 시작할까요?",
   "card.notSent": "보내지 못함 · {error}",
   "card.answerOpt": "답변 (선택)",

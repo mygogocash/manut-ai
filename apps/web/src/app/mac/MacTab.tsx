@@ -606,6 +606,11 @@ function ApprovalCard({ m, ask, state, live, remote }: { m: MacStrings; ask: App
           {m.keyedHere}
         </p>
       )}
+      {ask.hidden && (
+        <p className="hint" style={{ margin: 0 }} data-testid="mac-command-hidden">
+          {m.hiddenHere}
+        </p>
+      )}
       {ask.plan && <p style={SOFT}>{ask.plan}</p>}
       {ask.cwd && (
         <p className="hint" style={{ margin: 0, overflowWrap: "anywhere" }}>

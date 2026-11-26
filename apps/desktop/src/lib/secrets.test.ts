@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { maskCommand, maskSecrets, sameShape, shellWords, showCommand } from "./secrets";
+import { maskCommand, maskSecrets, revealHidden, sameShape, shellWords, showCommand } from "./secrets";
 import table from "./secrets.cases.json";
 
 const X = (n: number) => "X".repeat(n);
@@ -28,8 +28,10 @@ describe("maskSecrets (the one masker; patterns in secrets.json)", () => {
     for (const [text, want, notes = ""] of table.command) {
       const shown = showCommand(text);
       expect(shown.text, text).toBe(want);
-      // a row's third field names the notes the card adds: `unmasked` when the line is shown as it is (item 121)
+      // a row's third field names the notes the card adds: `unmasked` when the line is shown as it is, `hidden` when it
+      // holds characters that do not show, each replaced by a mark (item 121)
       expect(shown.unmasked, text).toBe(notes.split(" ").includes("unmasked"));
+      expect(shown.hidden, text).toBe(notes.split(" ").includes("hidden"));
       expect(maskCommand(text), text).toBe(want);
     }
   });
@@ -40,6 +42,11 @@ describe("maskSecrets (the one masker; patterns in secrets.json)", () => {
     for (const [text] of [...table.command, ...table.cases]) {
       expect(shellWords(maskCommand(text)).length, text).toBe(shellWords(text).length);
     }
+  });
+
+  it("shows every direction and format character in an ask's text as a visible mark (item 121, secrets.cases.json `reveal`)", () => {
+    expect(table.reveal.length).toBeGreaterThan(3);
+    for (const [text, want] of table.reveal) expect(revealHidden(text), JSON.stringify(text)).toBe(want);
   });
 
   it("accepts a masked line only when its words are the command's, each with only a key's part replaced (item 121)", () => {

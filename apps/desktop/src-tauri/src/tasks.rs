@@ -363,6 +363,9 @@ struct Secrets {
     plain: Regex,
     /// commands that only write their input out: a key block is masked only in the data of one of these
     sinks: Vec<String>,
+    /// a character that does not show, or that reorders what does, and the mark that shows it instead (`{hex}`)
+    hidden: Regex,
+    hidden_mark: String,
 }
 
 /// A pattern of secrets.json as the page's JavaScript reads it: `{names}` and `{prefixes}` filled in, its flags (`i`, `m`),
@@ -413,6 +416,12 @@ fn secrets() -> &'static Secrets {
             reference: one("ref"),
             plain: pattern(&get("plain"), "i", &names, &prefixes),
             sinks: entries("sinks").iter().map(|e| e.as_str().expect("secrets.json sink").to_string()).collect(),
+            hidden: Regex::new(&format!(
+                "[{}]",
+                entries("hidden").iter().map(|r| format!(r"\x{{{}}}-\x{{{}}}", r[0].as_str().expect("hidden from"), r[1].as_str().expect("hidden to"))).collect::<String>()
+            ))
+            .expect("secrets.json hidden"),
+            hidden_mark: get("hiddenMark"),
         }
     })
 }
@@ -440,9 +449,27 @@ fn a_key(s: &Secrets, v: &str) -> bool {
     !s.reference.is_match(v) && !s.plain.is_match(v)
 }
 
-/// How much of a value may be masked in a command: up to the first character the shell acts on.
+/// Whether `c` is one a masked value in a command stops at (src/lib/secrets.ts `stops`): a `shell` character, or one that does
+/// not show.
+fn stops(s: &Secrets, c: char) -> bool {
+    let b = &mut [0; 4];
+    let c = c.encode_utf8(b);
+    s.shell.is_match(c) || s.hidden.is_match(c)
+}
+
+/// How much of a value may be masked in a command: up to the first character it stops at.
 fn up_to(s: &Secrets, v: &str) -> usize {
-    s.shell.find(v).map_or(v.len(), |m| m.start())
+    v.char_indices().find(|&(_, c)| stops(s, c)).map_or(v.len(), |(i, _)| i)
+}
+
+/// `t` with every character that does not show, or that reorders what does, replaced by a visible mark (`⟨U+202E⟩`)
+/// (src/lib/secrets.ts `revealHidden`, item 121).
+pub fn reveal_hidden(t: &str) -> String {
+    let s = secrets();
+    s.hidden.replace_all(t, |c: &regex::Captures| {
+        let cp = c[0].chars().next().map_or(0, u32::from);
+        s.hidden_mark.replace("{hex}", &format!("{cp:04X}"))
+    }).into_owned()
 }
 
 /// `t`'s `whole` matches masked; in a command (`command`), not a key block, which [`mask_blocks`] masked first.
@@ -717,7 +744,7 @@ fn shaped(before: &str, after: &str, free: &dyn Fn(&Reading, usize) -> bool) -> 
 /// shell words, each the same or with only a key's part masked, a run that holds no character the command form stops at.
 fn same_shape(before: &str, after: &str) -> bool {
     let s = secrets();
-    shaped(before, after, &|_, k| before[k..].chars().next().is_some_and(|c| !s.shell.is_match(c.encode_utf8(&mut [0; 4]))))
+    shaped(before, after, &|_, k| before[k..].chars().next().is_some_and(|c| !stops(s, c)))
 }
 
 /// A command's private key blocks whose body holds only key lines, where the whole block is data a writer only writes out
@@ -817,6 +844,8 @@ pub struct Shown {
     /// shown as it is: the masked line would not split into the command's own shell words, or the command already holds
     /// the mask's character, and the person is told it may hold a key
     pub unmasked: bool,
+    /// it holds characters that do not show or that reorder what does, each replaced in `text` by a visible mark
+    pub hidden: bool,
 }
 
 /// A command, or anything else an approval shows, with its keys masked and nothing else (src/lib/secrets.ts `showCommand`,
@@ -827,12 +856,11 @@ pub fn show_command(t: &str) -> Shown {
     let s = secrets();
     let blocks = mask_blocks(s, t.to_string());
     let masked = blocks.split('\n').map(|l| command_line(s, l)).collect::<Vec<_>>().join("\n");
-    if masked == t {
-        return Shown { text: masked, unmasked: false };
-    }
     let dot = s.mask.chars().next().unwrap_or('•');
-    let sure = !t.contains(dot) && shaped(t, &blocks, &|r, k| r.data[k]) && same_shape(&blocks, &masked);
-    if sure { Shown { text: masked, unmasked: false } } else { Shown { text: t.to_string(), unmasked: true } }
+    let sure = masked == t || (!t.contains(dot) && shaped(t, &blocks, &|r, k| r.data[k]) && same_shape(&blocks, &masked));
+    let plain = if sure { masked } else { t.to_string() };
+    let text = reveal_hidden(&plain);
+    Shown { hidden: text != plain, text, unmasked: !sure }
 }
 
 /// [`show_command`]'s text: what an approval shows of a command.
@@ -1801,6 +1829,11 @@ mod tests {
             // a row's third field names the notes the card adds: `unmasked` when the line is shown as it is (item 121)
             let notes = c.get(2).and_then(Value::as_str).unwrap_or("");
             assert_eq!(shown.unmasked, notes.split(' ').any(|n| n == "unmasked"), "{c}");
+            assert_eq!(shown.hidden, notes.split(' ').any(|n| n == "hidden"), "{c}");
+        }
+        // every direction and format character in an ask's text becomes a visible mark (item 121)
+        for c in v["reveal"].as_array().unwrap() {
+            assert_eq!(reveal_hidden(c[0].as_str().unwrap()), c[1].as_str().unwrap(), "{c}");
         }
         // a mask stands for part of one word, so the line a person reads splits where the line that runs does (item 121)
         for c in command.iter().chain(cases) {

@@ -215,7 +215,7 @@ function shaped(before: string, after: string, free: (reading: Reading) => (at: 
 /** The structural check of what an approval shows (item 121): `after` splits into exactly `before`'s shell words, each the
  *  same or with only a key's part masked, a run that holds no character the command form stops at (secrets.json `shell`). */
 export function sameShape(before: string, after: string): boolean {
-  return shaped(before, after, () => (k) => !SHELL.test(before.charAt(k)));
+  return shaped(before, after, () => (k) => !stops(before, k));
 }
 
 /** Whether the block that ends its base64 lines at `from` in `text` has no END of its own: none before the next BEGIN. */
@@ -237,6 +237,21 @@ const NAMED = new RegExp(spec.named);
 const RUN = new RegExp(spec.run, "g");
 const PREFIX = new RegExp(`^${spec.prefixes}`);
 const SHELL = new RegExp(spec.shell);
+/** The characters that do not show, or that reorder what does (secrets.json `hidden`, item 121). */
+const HIDDEN_CLASS = `[${spec.hidden.map(([a, b]) => `\\u{${a}}-\\u{${b}}`).join("")}]`;
+const HIDDEN = new RegExp(HIDDEN_CLASS, "u");
+const HIDDEN_ALL = new RegExp(HIDDEN_CLASS, "gu");
+
+/** `text` with every character that does not show, or that reorders what does, replaced by a visible mark (`⟨U+202E⟩`),
+ *  so a direction override or a zero-width character can neither hide nor reorder what an ask shows (item 121). Every
+ *  surface that shows an ask's command or text runs it: the card, the phone, Home, Needs you, a notification. */
+export function revealHidden(text: string): string {
+  return text.replace(HIDDEN_ALL, (c) => spec.hiddenMark.replace("{hex}", c.codePointAt(0)!.toString(16).toUpperCase().padStart(4, "0")));
+}
+
+/** Whether the character at `k` of `text` (a UTF-16 index) is one a masked value in a command stops at: the command form's
+ *  `shell` characters, or one that does not show. */
+const stops = (text: string, k: number): boolean => SHELL.test(text.charAt(k)) || HIDDEN.test(String.fromCodePoint(text.codePointAt(k) ?? 0));
 const REF = new RegExp(spec.ref);
 const PLAIN = new RegExp(spec.plain, "i");
 
@@ -261,10 +276,11 @@ function keyShaped(m: string): boolean {
   return NEEDS.test(m.replace(PREFIX, ""));
 }
 
-/** How much of a value may be masked in a command: up to the first character the shell acts on (0 when it starts with one). */
+/** How much of a value may be masked in a command: up to the first character it stops at (`stops`), 0 when it starts with
+ *  one. */
 const upTo = (value: string): number => {
-  const i = value.search(SHELL);
-  return i < 0 ? value.length : i;
+  for (let i = 0; i < value.length; i++) if (stops(value, i)) return i;
+  return value.length;
 };
 
 /** `text`'s `whole` matches masked; in a command (`command`), not a key block, which `BLOCKS` masked first. */
@@ -337,6 +353,9 @@ export interface ShownCommand {
   /** The masked line would not split into the command's own shell words, or the command already holds the mask's
    *  character, so a mask could not be told from it: it is shown as it is, and the person is told it may hold a key. */
   unmasked: boolean;
+  /** It holds characters that do not show or that reorder what does, each replaced in `text` by a visible mark
+   *  (`revealHidden`): the person is told it holds hidden characters. */
+  hidden: boolean;
 }
 
 /** A command, or anything else an approval shows, with its keys masked and nothing else: a private key block whose body holds
@@ -350,12 +369,12 @@ export interface ShownCommand {
 export function showCommand(command: string): ShownCommand {
   const blocks = maskBlocks(command);
   const masked = blocks.split("\n").map(commandLine).join("\n");
-  if (masked === command) return { text: command, unmasked: false };
   const sure =
-    !command.includes(spec.mask.charAt(0)) &&
-    shaped(command, blocks, (r) => (k) => r.data[k]) &&
-    sameShape(blocks, masked);
-  return sure ? { text: masked, unmasked: false } : { text: command, unmasked: true };
+    masked === command ||
+    (!command.includes(spec.mask.charAt(0)) && shaped(command, blocks, (r) => (k) => r.data[k]) && sameShape(blocks, masked));
+  const plain = sure ? masked : command;
+  const text = revealHidden(plain);
+  return { text, unmasked: !sure, hidden: text !== plain };
 }
 
 /** `showCommand`'s text: what an approval shows of a command. */

@@ -81,6 +81,9 @@ describe("selectAsks", () => {
     expect(a.item.kind === "clarify" && a.item.questions?.map((q) => q.qid)).toEqual(["q1", "q2", "q3"]);
     expect(askText(a.item)).toBe("3 questions: Who is it for?");
     expect(askText(run(initialState(), [approval("kami", "x")]).chats.kami.items[0] as never)).toBe("Allow `rm -rf build/`?");
+    // a character that does not show, or that reorders what does, is a visible mark in the one line too (item 121)
+    expect(askText({ kind: "approval", id: "h", request_id: "h", title: "", command: "rm -rf build\u202e/", choices: [] } as never)).toBe("Allow `rm -rf build⟨U+202E⟩/`?");
+    expect(askText({ kind: "clarify", id: "c", request_id: "c", question: "Ship \u2066it\u2069?" } as never)).toBe("Ship ⟨U+2066⟩it⟨U+2069⟩?");
   });
 
   it("an interview answered in one go keeps the per-question answers", () => {

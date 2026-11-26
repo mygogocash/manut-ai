@@ -133,7 +133,9 @@ The states whose rules are pure functions, with their tests, then the screens th
   body that a writer (`cat`, `tee`, `echo`, `printf`) leading the command only writes out, and its body holds only base64
   and PEM header lines; anywhere else it is shown whole. Since item 121 a masked value also stops at a blank, a quote, `#`
   and a glob character, and the masked command must split into the command's own shell words or it is shown as it is with
-  a note that it may hold a key (docs/remote-access.md, "An approval shows what runs"). The card shows a command whole, its line breaks kept, scrolling in its block.
+  a note that it may hold a key, and every character that does not show, or that reorders what does, is a visible mark
+  such as `⟨U+202E⟩`, with a note that the command holds hidden characters (docs/remote-access.md, "An approval shows
+  what runs"). The card shows a command whole, its line breaks kept, scrolling in its block.
 - `apps/desktop/src/code/kitAsks.ts`: the dial at work on a session's asks, through the asks' own cards.
 - `apps/desktop/src/code/KitCardParts.tsx`, `KitPanel.tsx`, `kit.css`: Kit's words on an ask's card, and Kit on the
   Code page.

@@ -849,6 +849,7 @@ export const ja: Record<Key, string> = {
   "card.inCwd": "{cwd} で",
   "card.command": "コマンド全体",
   "card.cmdMayHoldKey": "このコマンドにはキーが含まれている可能性があります。実行される内容をそのまま確認できるよう、全体を表示しています。",
+  "card.cmdHidden": "このコマンドには見えない文字が含まれています。ここではそれぞれ ⟨U+202E⟩ のような印で表示しています。",
   "card.startPlan": "この計画で作業を始めますか？",
   "card.notSent": "未送信 · {error}",
   "card.answerOpt": "回答（任意）",

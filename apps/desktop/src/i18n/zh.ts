@@ -849,6 +849,7 @@ export const zh: Record<Key, string> = {
   "card.inCwd": "位于 {cwd}",
   "card.command": "完整的命令",
   "card.cmdMayHoldKey": "这条命令可能含有密钥。为让你看清实际运行的内容，这里完整显示。",
+  "card.cmdHidden": "这条命令含有不可见的字符，这里每个都显示为 ⟨U+202E⟩ 这样的标记。",
   "card.startPlan": "按这个计划开始工作吗？",
   "card.notSent": "未发送 · {error}",
   "card.answerOpt": "你的回答（可选）",

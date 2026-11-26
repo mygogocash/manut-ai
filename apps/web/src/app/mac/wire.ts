@@ -38,6 +38,8 @@ export interface ApprovalAsk {
   /// The Mac's card shows the command as it is, since it may hold a key: it is not sent (`command` is empty), and it is
   /// allowed only on the Mac (project.ts `keyed`, item 121).
   readonly keyed?: true;
+  /// The command holds characters that do not show, each a visible mark in `command` (`⟨U+202E⟩`, item 121).
+  readonly hidden?: true;
   readonly cwd?: string;
   readonly plan?: string;
   readonly from?: string;
@@ -156,6 +158,7 @@ export function readAsk(value: unknown): AskView | null {
       command,
       ...(long ? { long: true as const } : {}),
       ...(keyed ? { keyed: true as const } : {}),
+      ...(o.hidden === true ? { hidden: true as const } : {}),
       ...optional("cwd", str(o.cwd)),
       ...optional("plan", str(o.plan)),
       ...optional("from", from),

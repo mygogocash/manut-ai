@@ -192,7 +192,13 @@ needs a QR reader, which the repository does not have: the browser's own is used
   with only a key's part masked), and a command that already holds the mask's `•` cannot be told from a masked one; when
   either fails the command is shown as it is, and the card says it may hold a key. Such a command never leaves the Mac:
   the phone gets it marked `keyed`, with no command and no folder, offers only No, and says only the Mac can allow it; a
-  notification says only that a command may hold a key; Home offers no Approve beside it. A token-shaped word is
+  notification says only that a command may hold a key; Home offers no Approve beside it. Characters that do not show,
+  or that reorder what does (direction embeddings, overrides and isolates, zero-width spaces and joiners, the byte order
+  mark, the soft hyphen, tag characters, control characters but a tab and a line break: secrets.json `hidden`), are each
+  replaced by a visible mark such as `⟨U+202E⟩` in the command form and its twin, and in every text of an ask (its title,
+  folder, plan, question and choices) on the card, the phone, Home, Needs you and a notification (`revealHidden`), so a
+  command reads in the order it runs (item 121). The card and the phone (`hidden`) say the command holds hidden
+  characters, a masked value stops at one, and Home offers no Approve beside such a command. A token-shaped word is
   masked only when it is a whole word with a key's shape, so a command's own operand (`rm -rf sk-releases-backup`) is
   shown. The shell sends the card the whole command with its line breaks (it used to fold it to one line and cut it at
   160 characters), and the phone gets it unclipped up to 20,000 characters; past that the phone gets the start, marked

@@ -7,13 +7,15 @@
 // what a person allows is what runs (item 117). A command longer than a phone is sent (`PHONE_COMMAND_CHARS`) arrives as
 // its start, marked `long`, and cannot be allowed from the phone at all: No stays. A command the card shows as it is,
 // because masking it could change what it seems to do and so it may hold a key, is not sent at all, nor its folder: it is
-// marked `keyed`, and the phone offers only No (item 121).
+// marked `keyed`, and the phone offers only No (item 121). In every text of an ask, each character that does not show, or
+// that reorders what does, arrives as a visible mark (`⟨U+202E⟩`), and an approval whose command holds one is marked
+// `hidden`, so the phone says so as the card does (item 121).
 //
 // From a phone an approval offers at most Allow once and No: Always allow and Allow for the session stay on the Mac, and
 // an ask the card marks as needing an app update offers nothing. Each ask carries a revision, which goes up whenever what
 // it shows changes or anything it was built from changes, a key the masker hides included, so an Allow the phone sends
 // counts only for the very command the person saw (approval-core's `seenRevision`).
-import { maskSecrets, showCommand } from "../lib/secrets";
+import { maskSecrets, revealHidden, showCommand } from "../lib/secrets";
 
 export type ChatState = "working" | "needs_you" | "done";
 
@@ -103,6 +105,8 @@ export type AskView =
       readonly long?: true;
       /** The card shows the command as it is, since it may hold a key: `command` is empty, and it is allowed only on the Mac. */
       readonly keyed?: true;
+      /** The command holds characters that do not show, each a visible mark in `command`. */
+      readonly hidden?: true;
       readonly cwd?: string;
       readonly plan?: string;
       readonly from?: string;
@@ -163,14 +167,16 @@ export function chatRow(source: ChatSource): ChatRow {
   return { chat: source.key, title: maskSecrets(source.title), state: chatState(source), updatedAt: source.updatedAt };
 }
 
-const mask = (text: string | undefined): string | undefined => (text === undefined ? undefined : maskSecrets(text));
+/** An ask's text as a phone is shown it: its keys masked, and every character that does not show a visible mark. */
+const shown = (text: string): string => revealHidden(maskSecrets(text));
+const mask = (text: string | undefined): string | undefined => (text === undefined ? undefined : shown(text));
 
 function approvalView(item: SourceApproval): Omit<Extract<AskView, { kind: "approval" }>, "revision"> {
-  const shown = showCommand(item.command);
+  const cmd = showCommand(item.command);
   const folder = item.cwd === undefined ? undefined : showCommand(item.cwd);
   // a key the card could not mask safely never leaves the Mac: the command and its folder stay there
-  const keyed = shown.unmasked || !!folder?.unmasked;
-  const whole = keyed ? "" : shown.text;
+  const keyed = cmd.unmasked || !!folder?.unmasked;
+  const whole = keyed ? "" : cmd.text;
   const long = whole.length > PHONE_COMMAND_CHARS;
   const offers: PhoneOption[] = item.outdated ? [] : (["once", "deny"] as const).filter((o) => item.choices.includes(o) && !((long || keyed) && o === "once"));
   const outcome = item.resolved ? (item.resolved === "deny" ? "declined" : "allowed") : item.expired ? "expired" : undefined;
@@ -182,10 +188,11 @@ function approvalView(item: SourceApproval): Omit<Extract<AskView, { kind: "appr
     id: item.id,
     open: item.open,
     ts: item.ts,
-    title: maskSecrets(item.title),
+    title: shown(item.title),
     command: long ? start(whole, PHONE_COMMAND_CHARS) : whole,
     ...(long ? { long: true as const } : {}),
     ...(keyed ? { keyed: true as const } : {}),
+    ...(cmd.hidden && !keyed ? { hidden: true as const } : {}),
     ...(cwd ? { cwd } : {}),
     ...(plan ? { plan } : {}),
     ...(from ? { from } : {}),
@@ -203,15 +210,15 @@ function questionView(item: SourceQuestion): Omit<Extract<AskView, { kind: "ques
     id: item.id,
     open: item.open,
     ts: item.ts,
-    question: maskSecrets(item.question),
-    ...(item.choices?.length ? { choices: item.choices.map(maskSecrets) } : {}),
+    question: shown(item.question),
+    ...(item.choices?.length ? { choices: item.choices.map(shown) } : {}),
     ...(item.multi ? { multi: true as const } : {}),
     ...(item.questions?.length
       ? {
           questions: item.questions.map((q) => ({
             id: q.id,
-            question: maskSecrets(q.question),
-            ...(q.choices?.length ? { choices: q.choices.map(maskSecrets) } : {}),
+            question: shown(q.question),
+            ...(q.choices?.length ? { choices: q.choices.map(shown) } : {}),
             ...(q.multi ? { multi: true as const } : {}),
           })),
         }
