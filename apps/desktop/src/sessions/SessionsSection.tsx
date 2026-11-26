@@ -33,11 +33,13 @@ import { countRender, useAnyFlowing, useTermFace } from "./termActivity";
 import { addFolder, addedFolders, allCollapsed, collapseOthers, folderGroups, pathKey, folderSummary, isCollapsed, isTildePath, getFolderPrefs, moveFolder, orderFolders, removeFolder, setAllFolders, setFolderGone, setFolderPrefs, toggleFolder, useFolderPrefs, useGoneFolders, withAdded } from "./folders";
 import { ChevronDown, ChevronRight } from "../ui/icons";
 import { rowChoices } from "../sidebar/RowMenu";
-import { arrange, markRow, sessionRowKey, useRowMarks, type RowMark as PlaceMark } from "../sidebar/rows";
+import { actOnRows, arrange, sessionRowKey, useRowMarks, type RowMark as PlaceMark } from "../sidebar/rows";
 import { CUE_PX, useEdgeFade } from "../sidebar/edgeFade";
 import { getHost, type PastChat } from "./host";
 import { getSessions, useSessions } from "./sessions";
 import { pickTitle } from "./titles";
+import { useTitleModel } from "../lib/titleModel";
+import { wantsTitle } from "./titleWords";
 import { onOpenNewSessionMenu, useShells, type NewMenuStart } from "./newMenu";
 import { onTermSettings, readTermSettings } from "./term/settings";
 import { TermLinkGone } from "./termLinkOpen";
@@ -856,7 +858,7 @@ export function SessionList({ needle = "", query = "" }: { needle?: string; quer
   if (terms.length === 0 && added.length === 0) return <SessionStart />;
   // pinned rows first in their folder, in the order pinned, then the rest, then the rows set aside as done for now (item 76); a
   // terminal that rang is never set aside (rows.ts `placeOf`)
-  const placed = arrange(terms.filter((r) => sessionMatches(r, needle)).map((r) => ({ key: sessionRowKey(r.id), needs: ss.unseen[r.id] === "bell", r })), marks, Date.now());
+  const placed = arrange(terms.filter((r) => sessionMatches(r, needle)).map((r) => ({ key: sessionRowKey(r), needs: ss.unseen[r.id] === "bell", r })), marks, Date.now());
   const shown = [...placed.pinned, ...placed.normal, ...placed.settled].map((x) => x.r);
   // an added folder with no session is a group too; a search keeps it only when its path matches
   const groups = orderFolders(withAdded(folderGroups(shown), needle ? added.filter((c) => c.toLowerCase().includes(needle)) : added), folders.order);
@@ -1185,12 +1187,12 @@ export function rowMenuItems(rec: Pick<SessionRec, "cwd" | "agentSession">): Row
 }
 /** A TERMINALS row's menu: Rename, Reveal, Open in the system terminal, Copy link (its `manut://terminal/…`),
  *  New terminal here, Close. */
-export function termMenuItems(rec: Pick<SessionRec, "cwd" | "linkId">, mark?: PlaceMark | null): RowAction[] {
+export function termMenuItems(rec: Pick<SessionRec, "cwd" | "linkId">, mark?: PlaceMark | null, again = false): RowAction[] {
   // Pin and Done for now come after Rename when the row's marks are given (item 76; a terminal has no Snooze or Archive)
   const marks: RowAction[] = mark === undefined ? [] : (rowChoices("terminal", mark ?? undefined) as RowAction[]);
-  return ["rename", ...marks, ...(rec.cwd ? (["reveal", "terminal"] as const) : []), ...(rec.linkId ? (["link"] as const) : []), "here", "close"];
+  return ["rename", ...(again ? (["retitle"] as const) : []), ...marks, ...(rec.cwd ? (["reveal", "terminal"] as const) : []), ...(rec.linkId ? (["link"] as const) : []), "here", "close"];
 }
-export type RowAction = "rename" | "reveal" | "terminal" | "copy" | "link" | "here" | "close" | "pin" | "unpin" | "settle" | "wake";
+export type RowAction = "rename" | "retitle" | "reveal" | "terminal" | "copy" | "link" | "here" | "close" | "pin" | "unpin" | "settle" | "wake";
 
 /** \"Show in Finder\" on macOS, \"Show in Explorer\" on Windows, \"Show in file manager\" elsewhere. */
 const revealWord = () => {
@@ -1200,6 +1202,7 @@ const revealWord = () => {
 
 const ROW_ACTION_LABEL: Record<RowAction, () => string> = {
   rename: () => t("ss.rename"),
+  retitle: () => t("titles.again"),
   reveal: revealWord,
   terminal: () => t("ss.menu.terminal"),
   copy: () => t("ss.menu.copyId"),
@@ -1213,6 +1216,7 @@ const ROW_ACTION_LABEL: Record<RowAction, () => string> = {
 };
 const ROW_ACTION_ID: Record<RowAction, string> = {
   rename: "session-rename",
+  retitle: "session-retitle",
   reveal: "session-reveal",
   terminal: "session-system-terminal",
   copy: "session-copy-id",
@@ -1392,12 +1396,14 @@ const TermRow = memo(function TermRow({ rec, agents, unseen, active, ticking, on
   const activity = termActivity({ agent: rec.agent, fgAgent: rec.fgAgent, lastLine: act.lastLine, oscTitle: act.oscTitle });
   // a CLI runs in it: the card's thin amber lane on its left edge (the folder summary's "running" counts the same)
   const running = live && markAgent !== null;
-  const rowMark = useRowMarks()[sessionRowKey(rec.id)];
-  const actions = termMenuItems(rec, rowMark ?? null);
+  const rowMark = useRowMarks()[sessionRowKey(rec)];
+  const titleSettings = useTitleModel();
+  const actions = termMenuItems(rec, rowMark ?? null, rec.status !== "draft" && wantsTitle(rec, titleSettings, true));
   const pick = (a: RowAction) => {
     const sx = getSessions();
-    if (a === "pin" || a === "unpin" || a === "settle" || a === "wake") markRow(sessionRowKey(rec.id), { do: a });
+    if (a === "pin" || a === "unpin" || a === "settle" || a === "wake") actOnRows([sessionRowKey(rec)], { do: a }, title.title);
     else if (a === "rename") setEditing(true);
+    else if (a === "retitle") void sx.rewriteTitle(rec.id);
     else if (a === "reveal") void sx.revealFolder(rec.id);
     else if (a === "terminal") void sx.openTerminal(rec.id);
     else if (a === "link") void sx.copyLink(rec.id);
@@ -1476,6 +1482,7 @@ const TermRow = memo(function TermRow({ rec, agents, unseen, active, ticking, on
       className={`ss-row tr${active ? " active" : ""}${running ? " run" : ""}${menu ? " menu-open" : ""}${rowMark?.pinned !== undefined ? " pinned" : ""}${rowMark?.settled ? " settled" : ""}${split ? (active ? " split-focus" : away ? " split split-away" : " split") : ""}`}
       data-split={split ? (active ? "focused" : away ? "away" : "in") : undefined}
       data-testid={`session-${rec.id}`}
+      data-row-key={sessionRowKey(rec)}
       data-status={rec.status}
       data-term-status={status ?? "idle"}
       data-fg={rec.fgAgent ?? undefined}

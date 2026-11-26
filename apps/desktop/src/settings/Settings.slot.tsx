@@ -35,6 +35,9 @@ import { SourceControlPage } from "./SourceControlPage";
 import { ArtifactLinksPage } from "./ArtifactLinksPage";
 import { RemotePage } from "./RemotePage";
 import { setSuggestOn, useSuggestOn } from "../lib/suggest";
+import { modLabel, setAfterSend, setFollowUp, useAfterSend, usePickedFollowUp, type AfterSend, type FollowUp } from "../chat/box/keys";
+import { QUIET_DAYS, setInbox, useInbox } from "../sidebar/inbox";
+import { TITLE_EFFORTS, TITLE_MODELS, setTitleModel, useTitleModel } from "../lib/titleModel";
 import { VoicePage } from "./VoicePage";
 import { ComputerPage } from "./ComputerPage";
 import { McpSkillsPage } from "./mcp/McpSkillsPage";
@@ -663,6 +666,106 @@ function SuggestToggle() {
   return <Toggle on={on} label={t("suggest.title")} onChange={setSuggestOn} testId="set-suggest" />;
 }
 
+/** Settings › General › Recent chats › Working group (item 94, sidebar/inbox.ts): off until the person turns it on. */
+function WorkingToggle() {
+  const inbox = useInbox();
+  return <Toggle on={inbox.working} label={t("inbox.working")} onChange={(working) => setInbox({ working })} testId="set-working" />;
+}
+
+/** Settings › General › Side menu › Done after quiet days (item 94): 3 days by default, Off turns it off. */
+function QuietDaysSeg() {
+  const inbox = useInbox();
+  return (
+    <Modes
+      label={t("inbox.quiet")}
+      value={String(inbox.quietDays)}
+      options={QUIET_DAYS.map((n) => ({ value: String(n), label: n === 0 ? t("set.off") : n === 1 ? t("inbox.day1") : t("inbox.days", { n }) }))}
+      onChange={(v) => setInbox({ quietDays: Number(v) })}
+      testId="set-quiet-days"
+    />
+  );
+}
+
+/** Settings › General › Side menu › Done when its pull request merges (item 94): on by default. */
+function MergedToggle() {
+  const inbox = useInbox();
+  return <Toggle on={inbox.merged} label={t("inbox.merged")} onChange={(merged) => setInbox({ merged })} testId="set-settle-merged" />;
+}
+
+/** Settings › General › Titles and words (lib/titleModel.ts, item 96): off until the person turns it on, since each title is an extra
+ *  request on their own plan; the model and the effort that write them. */
+export function TitlesRows() {
+  const m = useTitleModel();
+  return (
+    <>
+      <div className="st-gh">{t("titles.group")}</div>
+      <div className="st-grp" data-testid="set-titles">
+        <Row title={t("titles.on.title")} hint={t("titles.on.hint")}>
+          <Toggle on={m.on} label={t("titles.on.title")} onChange={(on) => setTitleModel({ on })} testId="set-titles-on" />
+        </Row>
+        <Row title={t("titles.reads")} hint={t("titles.reads.hint")} />
+        <Row title={t("titles.model")} hint={t("titles.model.hint")}>
+          <select className="dev-in" value={m.model} aria-label={t("titles.model")} onChange={(e) => setTitleModel({ model: e.currentTarget.value as (typeof TITLE_MODELS)[number] })} data-testid="set-titles-model">
+            {TITLE_MODELS.map((v) => (
+              <option key={v} value={v}>
+                {t(`titles.model.${v || "default"}` as Key)}
+              </option>
+            ))}
+          </select>
+        </Row>
+        <Row title={t("titles.effort")}>
+          <select className="dev-in" value={m.effort} aria-label={t("titles.effort")} onChange={(e) => setTitleModel({ effort: e.currentTarget.value as (typeof TITLE_EFFORTS)[number] })} data-testid="set-titles-effort">
+            {TITLE_EFFORTS.map((v) => (
+              <option key={v} value={v}>
+                {t(`titles.effort.${v || "default"}` as Key)}
+              </option>
+            ))}
+          </select>
+        </Row>
+        <Row title={t("suggest.agents")} hint={t("titles.agentsHint")}>
+          <Value>{t("suggest.agentsValue")}</Value>
+        </Row>
+      </div>
+    </>
+  );
+}
+
+/** Settings › General › Chat box › After sending from Home (item 95): what Enter does there; Cmd+Enter does the other. */
+function AfterSendSeg() {
+  const v = useAfterSend();
+  return (
+    <Modes
+      label={t("box.after")}
+      value={v}
+      options={[
+        { value: "open", label: t("box.afterOpen") },
+        { value: "stay", label: t("box.afterStay") },
+      ]}
+      onChange={(x) => setAfterSend(x as AfterSend)}
+      testId="set-after-send"
+    />
+  );
+}
+
+/** Settings › General › Chat box › While an answer is running (item 95): what Enter does with a message typed then. "Usual" is
+ *  where it starts and changes nothing: a team member takes it in now and a coding chat waits, as each did before the choice. */
+function FollowUpSeg() {
+  const v = usePickedFollowUp();
+  return (
+    <Modes
+      label={t("box.follow")}
+      value={v ?? "usual"}
+      options={[
+        { value: "usual", label: t("box.followUsual") },
+        { value: "queue", label: t("box.followQueue") },
+        { value: "steer", label: t("box.followSteer") },
+      ]}
+      onChange={(x) => setFollowUp(x === "usual" ? null : (x as FollowUp))}
+      testId="set-follow-up"
+    />
+  );
+}
+
 function GeneralPage() {
   const s = useStore();
   const h = s.hello;
@@ -700,6 +803,16 @@ function GeneralPage() {
         </Row>
       </div>
       <OutsideNotes />
+      {/* The chat box's keys (item 95), beside its other choices: each has the default nobody needs to change. */}
+      <div className="st-gh">{t("box.group")}</div>
+      <div className="st-grp" data-testid="set-box">
+        <Row title={t("box.after")} hint={t("box.afterHint", { mod: modLabel() })}>
+          <AfterSendSeg />
+        </Row>
+        <Row title={t("box.follow")} hint={t("box.followHint", { mod: modLabel() })}>
+          <FollowUpSeg />
+        </Row>
+      </div>
       <div className="st-gh">{t("suggest.group")}</div>
       <div className="st-grp">
         <Row title={t("suggest.title")} hint={t("suggest.hintCost")}>
@@ -709,11 +822,23 @@ function GeneralPage() {
           <Value>{t("suggest.agentsValue")}</Value>
         </Row>
       </div>
-      <div className="st-grp">
+      {/* the side menu's own choices (item 94), with the menu's other one, the tasks bar */}
+      <div className="st-gh">{t("inbox.group")}</div>
+      <div className="st-grp" data-testid="set-inbox">
+        <Row title={t("inbox.working")} hint={t("inbox.workingHint")}>
+          <WorkingToggle />
+        </Row>
+        <Row title={t("inbox.quiet")} hint={t("inbox.quietHint")}>
+          <QuietDaysSeg />
+        </Row>
+        <Row title={t("inbox.merged")} hint={t("inbox.mergedHint")}>
+          <MergedToggle />
+        </Row>
         <Row title={t("tasks.barSetting")} hint={t("tasks.barSettingHint")}>
           <TasksBarToggle />
         </Row>
       </div>
+      <TitlesRows />
       <div className="st-gh">{t("set.system")}</div>
       <div className="st-grp" data-testid="set-system">
         <Row title={t("win.close")} hint={t(isMacPlatform() ? "win.closeHint" : "win.closeHintOther")}>

@@ -56,8 +56,10 @@ export function Chat() {
           // the + menu lists a bot's plugins only when the runtime has any (and a Plugins page to manage them on)
           plugins={can("plugins")}
           history={promptsOf(chat?.items)}
-          onSend={(text) => void s.send(text)}
-          onSendFiles={(text, files) => s.sendWithFiles(text, files)}
+          onSend={(text, how) => void s.send(text, how)}
+          onSendFiles={(text, files, how) => s.sendWithFiles(text, files, how)}
+          // Buddy's own coding agent takes no message mid-answer (buddy_chat.rs refuses a steer); a member's chat does
+          steers={!box}
           onStop={() => void s.interrupt()}
           reply={s.replyTo[bot.name] ?? null}
           onClearReply={() => s.setReplyTo(null, bot.name)}

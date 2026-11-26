@@ -82,15 +82,20 @@ export function askRoute(mode: HomeMode, home: string | null, kit: string | null
   return mode === "chat" ? { to: "thread", bot: home } : { to: "main", bot: home };
 }
 
+/** Where a send from Home went: the member's main chat, or the thread it started. */
+export type Sent = { to: "main"; bot: string } | { to: "thread"; bot: string; thread: string };
+
 /** Sends `text` where `route` says, through the store's own actions: `sendTo` opens a member's main chat and sends
- *  there, `newThreadWith` opens a new thread and sends its first message. False when the thread could not be made,
- *  so the ask box keeps the words. */
-export async function sendAsk(actions: Pick<Actions, "sendTo" | "newThreadWith">, route: AskRoute, text: string): Promise<boolean> {
+ *  there, `newThreadWith` opens a new thread and sends its first message. With `stay` (Cmd+Enter, item 95) nothing is
+ *  opened: `sendAway` sends to the main chat where it is, and the new thread is made without opening it. Null when the
+ *  thread could not be made, so the ask box keeps the words. */
+export async function sendAsk(actions: Pick<Actions, "sendTo" | "sendAway" | "newThreadWith">, route: AskRoute, text: string, stay = false): Promise<Sent | null> {
   if (route.to === "main") {
-    await actions.sendTo(route.bot, text);
-    return true;
+    await (stay ? actions.sendAway(route.bot, text) : actions.sendTo(route.bot, text));
+    return { to: "main", bot: route.bot };
   }
-  return (await actions.newThreadWith(route.bot, text)) !== null;
+  const thread = await actions.newThreadWith(route.bot, text, stay);
+  return thread === null ? null : { to: "thread", bot: route.bot, thread };
 }
 
 /** Whether Home may offer Approve on an ask, beside Look first. Only for an approval whose chat card would show no more

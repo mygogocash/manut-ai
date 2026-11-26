@@ -6,6 +6,7 @@ import { renderToString } from "react-dom/server";
 import { LANGS, setLang, t } from "../i18n";
 import { doneWords, draftOf, ReviewView, whyWords, type ReviewStep, type ReviewViewProps } from "./Review";
 import type { ReviewAsk } from "./source";
+import { pullMaterial } from "../sessions/titleWords";
 
 const words = (html: string) => html.replace(/<[^>]*>/g, " ").replace(/&#x27;/g, "'").replace(/&quot;/g, '"').replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
 const noop = () => {};
@@ -131,5 +132,28 @@ describe("Put up for review", () => {
     expect(draftOf({ branch: "kit/qr", base: "main", commits: ["Draw the QR"], count: 1 }, "PromptPay QR")).toEqual({ title: "Draw the QR", body: "" });
     expect(draftOf({ branch: "kit/qr", base: "main", commits: ["Read the amount", "Draw the QR"], count: 2 }, "PromptPay QR")).toEqual({ title: "PromptPay QR", body: "- Draw the QR\n- Read the amount" });
     expect(draftOf(null, "PromptPay QR")).toEqual({ title: "PromptPay QR", body: "" });
+  });
+
+  it("offers Suggest in the draft only when it is given, and it never asks by itself", () => {
+    const step: ReviewStep = { at: "draft", title: "t", body: "b", busy: false, why: null };
+    expect(draw(step)).not.toContain("review-suggest");
+    const html = draw(step, { onSuggest: noop });
+    expect(words(html)).toContain(t("titles.suggest"));
+    expect(html).toContain("review-suggest");
+    // while it writes, the button says so and waits
+    const writing = draw({ ...step, writing: true }, { onSuggest: noop });
+    expect(words(writing)).toContain(t("titles.suggesting"));
+    expect(writing).toMatch(/disabled[^>]*data-testid="review-suggest"|data-testid="review-suggest"[^>]*disabled/);
+    for (const l of LANGS) {
+      setLang(l);
+      expect(t("titles.suggest")).not.toBe("");
+    }
+  });
+
+  it("gives a pull request run the commits, the files and a few lines of each, masked", () => {
+    const m = pullMaterial(["Add the QR"], [{ path: "src/qr.ts", kind: "add", added: 2, removed: 0, lines: ["+const k = 'ghp_abcdefghijklmnopqrstuvwxyz0123456789';", "+x"] }]);
+    expect(m).toContain("- Add the QR");
+    expect(m).toContain("add src/qr.ts (+2 -0)");
+    expect(m).not.toContain("ghp_abcdefghijklmnopqrstuvwxyz0123456789");
   });
 });

@@ -41,6 +41,8 @@ import { isLinkId, LINK_COPIED_EVENT, newLinkId, termLinkUrl } from "./termLink"
 import { acpRow, agentDef, agentLabel, continues, draftAgent, draftFolder, draftOpen, hermesOnly, idInUse, installLine, isBuiltin, isGone, isShell, isTerminalRec, LAST_LINE_MAX, refusedResume, SHELL, termEnd, termMarkAgent, lastPrintedLine, OPEN_KEY, setsUpScreen, UI_BYTES, opensAs, parseOpens, parseRecent, pushRecent, RECENT_KEY, registerAcp, sessionMode, termGroups, type AgentId, type AgentInfo, type OpenAs, type Unseen, type Opens, type Recent, type SessionRec } from "./agents";
 import { clearSuggestion, noteSuggestion } from "../chat/suggestion";
 import { suggestOn, suggestWorks } from "../lib/suggest";
+import { acceptTitle, chatMaterial, titleRequest, wantsTitle, whyKey } from "./titleWords";
+import { titleModel } from "../lib/titleModel";
 import { NAME_MAX, parseTitles, promptTitle, putTitle, TITLES_KEY } from "./titles";
 import { getDraft, setDraft as setUnsent } from "../app/drafts";
 import { getHost, type ChatEvent, type ChatInput, type ConvState, type PastChat, type SessionHost } from "./host";
@@ -57,6 +59,8 @@ import { forgetPreview } from "../code/previewStore";
 import { continuesItself, type SavedSession } from "../app/resume";
 import { accountGroups } from "../settings/accounts/useAccounts";
 import { ASK_MODE, modesOf, steersOf } from "./controls";
+import { followUp as savedFollowUp, type FollowUp } from "../chat/box/keys";
+import { draftFolders } from "../app/stash";
 import { parseCommands, type AgentCommand } from "../chat/parts/commands";
 import { noteMcpSeen } from "../settings/mcp/agentConfig";
 import { t as tr, type Key } from "../i18n";
@@ -69,7 +73,7 @@ import { folderGroups, getFolderPrefs, orderFolders, pathKey, ranElsewhere, reve
 import { broughtBackNote, REWINDS, rewoundNote, TurnBook, turnTitle } from "./rewind";
 
 /** The Accounts CLI a session of `agent` signs in as (mirrors `session_cli` in src-tauri/src/accounts.rs). */
-const ACCOUNT_CLI: Partial<Record<AgentId, AccountCli>> = { claude: "claude", codex: "codex", grok: "grok" };
+export const ACCOUNT_CLI: Partial<Record<AgentId, AccountCli>> = { claude: "claude", codex: "codex", grok: "grok" };
 
 /** The account a new session of `agent` runs as, from the Accounts list when it is loaded (none = unknown or the
  *  agent has no accounts; the shell then uses the one picked for new sessions). */
@@ -753,6 +757,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
           if (ev.outcome === "done") flag(id, "end");
           void readAgentTitle(id);
           void readBranch(id);
+          if (ev.outcome === "done") void writeTitle(id);
         }
     }
   };
@@ -1050,8 +1055,10 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
   };
 
   /** Send chat text: the bubble shows at once; a refusal marks it "Not sent". True when it went to the agent or waits for the
-   *  running turn, false when nothing was sent. */
-  const send = async (id: string, text: string): Promise<boolean> => {
+   *  running turn, false when nothing was sent. While a turn runs it waits (the steer queue); with `how` "steer" (the chat
+   *  box's Cmd+Enter or Settings' choice, chat/box/keys.ts) it is handed to the running turn at once, as its ↵ does, when
+   *  the agent takes a steer and nothing waits ahead of it. */
+  const send = async (id: string, text: string, how?: FollowUp): Promise<boolean> => {
     const t = text.trim();
     const key = keys.get(id);
     if (!t || !key) return false;
@@ -1059,6 +1066,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     const lid = `local-s${++localSeq}`;
     if (mustHoldHere(id, key)) {
       hold(id, key, lid, { kind: "send", text: t, id: lid }, () => st.dispatch({ type: "local.user", bot: key, id: lid, text: t, now: Date.now(), held: true }));
+      if ((how ?? savedFollowUp("code")) === "steer" && chatOf(key)?.turn && chatOf(key)?.queue?.[0] === lid) await queuePick(id, lid, "steer");
       return true;
     }
     st.dispatch({ type: "local.user", bot: key, id: lid, text: t, now: Date.now() });
@@ -1140,9 +1148,9 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
    * Send a message with files from a running chat. The files are saved first; if one cannot be, nothing is sent
    * and the error goes back to the composer (its chips stay).
    */
-  const sendFiles = async (id: string, text: string, files: OutFile[]): Promise<void> => {
+  const sendFiles = async (id: string, text: string, files: OutFile[], how?: FollowUp): Promise<void> => {
     if (!files.length) {
-      await send(id, text);
+      await send(id, text, how);
       return;
     }
     const key = keys.get(id);
@@ -2291,7 +2299,8 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     if (restored || state.list.length > 0) return;
     restored = true;
     if (!saved.length) {
-      void ready().then(() => host.pruneFiles([]).catch(() => undefined));
+      // the drafts kept on Home keep their files' folders (app/stash.ts)
+      void ready().then(() => host.pruneFiles(draftFolders()).catch(() => undefined));
       void ready().then(() => turns.prune([]));
       void ready().then(() => pruneHistory(host, savedPanelKeys()));
       saveSentFiles({});
@@ -2319,7 +2328,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
       if (isGone(s.agent)) {
         // an agent manut no longer offers (Kilo Code): ended, with its chat as it was, one plain line and no Restart
         // (SessionView's Ended); nothing is started, now or on Resume
-        list.push({ id: s.id, agent: s.agent, cwd: s.cwd, startedAt: s.startedAt, view: "chat", status: "exited", exitCode: null, ...(s.title ? { title: s.title } : {}), ...(s.agentTitle ? { agentTitle: s.agentTitle } : {}), ...(s.promptTitle ? { promptTitle: s.promptTitle } : {}) });
+        list.push({ id: s.id, agent: s.agent, cwd: s.cwd, startedAt: s.startedAt, view: "chat", status: "exited", exitCode: null, ...(s.title ? { title: s.title } : {}), ...(s.modelTitle ? { modelTitle: s.modelTitle } : {}), ...(s.agentTitle ? { agentTitle: s.agentTitle } : {}), ...(s.promptTitle ? { promptTitle: s.promptTitle } : {}) });
         seq = Math.max(seq, Number(s.id.slice(1)) || 0);
         keys.set(s.id, `agent:${s.id}`);
         openChat(s.id, s.model ?? "", (s.messages ?? []).map((m) => ({ id: `r-${m.id}`, role: m.role, text: m.text, ts: m.ts })));
@@ -2371,7 +2380,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
         ...(s.model ? { model: s.model } : {}),
         // its name comes back with it
         ...(s.title ? { title: s.title } : {}),
-        ...(s.agentTitle ? { agentTitle: s.agentTitle } : {}),
+        ...(s.modelTitle ? { modelTitle: s.modelTitle } : {}), ...(s.agentTitle ? { agentTitle: s.agentTitle } : {}),
         ...(s.promptTitle ? { promptTitle: s.promptTitle } : {}),
         ...(s.mode ? { mode: s.mode } : {}),
         ...(s.effort ? { effort: s.effort } : {}),
@@ -2409,7 +2418,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     for (const r of list) if (keys.has(r.id)) registerRoute(r.id);
     // the saved copies of sessions that are gone go; the ones kept show again in their bubbles
     const ids = list.map((r) => r.id);
-    void ready().then(() => host.pruneFiles(ids).catch(() => undefined));
+    void ready().then(() => host.pruneFiles([...ids, ...draftFolders()]).catch(() => undefined));
     // and the kept turns of sessions that are gone
     void ready().then(() => turns.prune(ids));
     // the kept history of terminals that are gone goes (the bottom panel's tabs keep theirs)
@@ -2577,6 +2586,8 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     forgetSentFiles(id);
     const key = keys.get(id);
     if (key) {
+      // a title being written for it stops with it (item 96): nobody is left to read it, and it is the person's own use
+      if (writingTitle.has(id)) void host.titleCancel?.(key).catch(() => undefined);
       setChatRoute(key, null);
       store().dispatch({ type: "chat.forget", bot: key }); // its asks leave the Needs-you strip with it
       forgetLane(key);
@@ -2646,6 +2657,34 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     const k = titleKey(r);
     if (k) saveTitles(putTitle(titles, k, t || null));
   };
+
+  /** Chats whose title a model is writing now: one run at a time for a chat. */
+  const writingTitle = new Set<string>();
+  /** The title the person's chosen model writes for chat session `id` (item 96): off unless Settings › Titles and words is on. It is
+   *  asked after a first answer, from the first message and that answer. The words go in as `modelTitle`, which ranks below a name
+   *  the person gave; a name given while it ran is kept and the words dropped. `again` is "Write the title again". Quietly nothing
+   *  when the host cannot, and `note`s why when the person asked and it failed. */
+  const writeTitle = async (id: string, again = false) => {
+    const r = rec(id);
+    const settings = titleModel();
+    const key = keys.get(id);
+    if (!r || !key || !host.titleRun || writingTitle.has(id) || !wantsTitle(r, settings, again)) return;
+    const material = chatMaterial(chatOf(key)?.messages ?? []);
+    if (!material) return;
+    writingTitle.add(id);
+    try {
+      const words = await host.titleRun(titleRequest(r.agent, settings, key, material));
+      const patch = acceptTitle(rec(id), words);
+      if (patch) patchRec(id, patch);
+    } catch (e) {
+      // an automatic run fails quietly (the title stays what it was); the person's own ask says why
+      if (again) note(id, tr(`titles.why.${whyKey(e)}` as Key));
+    } finally {
+      writingTitle.delete(id);
+    }
+  };
+  /** "Write the title again": for a chat the person has not named. */
+  const rewriteTitle = (id: string) => writeTitle(id, true);
 
   /** Change a chat session's model (Claude Code `set_model`, Codex per turn, pi `set_model`, Hermes). */
   const setModel = async (id: string, option: ModelOption) => {
@@ -2770,6 +2809,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     setMode,
     setEffort,
     rename,
+    rewriteTitle,
     moveRow,
     restart,
     startFresh,

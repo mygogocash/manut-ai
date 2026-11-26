@@ -254,6 +254,26 @@
 .home .ask .err {
   padding: 0 8px 2px;
 }
+/* The desktop's own (item 95): after a send that left the person on Home, one quiet line under the box says where it
+   went, with Open beside it. It sits in the box's column and takes no more room than a line. */
+.home .started {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  width: 100%;
+  max-width: 696px;
+  margin: -8px 0 0;
+  padding: 0 18px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.home .started .grow {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .home .tag.ok .ic {
   width: 16px;
   height: 16px;
@@ -281,7 +301,7 @@
   font-size: 13.5px;
 }
 .home .think .when {
-  color: var(--aui-muted);
+  color: var(--muted);
   font-size: 12.5px;
   font-variant-numeric: tabular-nums;
 }
@@ -297,4 +317,70 @@
   background: var(--aui-blue);
   /* The desktop's own: the dot pulses as the canvas's working tag does, so the row reads as live. */
   animation: var(--anim-pulse);
+}
+
+/* Drafts (item 95): the drafts kept for later, a band over their rows at the top of Home, in the box's column. A row puts
+   its draft back where it was written; Move to and × sit at its end. */
+.home .drafts {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+.home .drow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-right: 6px;
+  border-radius: var(--rad);
+}
+.home .drow > .rowl {
+  flex: 1;
+  min-width: 0;
+}
+.home .drow .l1,
+.home .drow .l2 {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.home .dmenu {
+  position: relative;
+  flex: none;
+}
+.home .dmenu-list {
+  display: flex;
+  flex-direction: column;
+}
+.home .dmenu-row {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 34px;
+  padding: 0 10px;
+  border-radius: var(--rad);
+  color: var(--ink);
+  font-size: 13px;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.home .dmenu-row:hover,
+.home .dmenu-row:focus-visible {
+  background: var(--hov);
+}
+/* The line under the list when a sixth draft let the oldest go: what went, and Undo. */
+.home .dnote {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin: 0;
+  padding: 4px 10px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.home .dnote .grow {
+  flex: 1;
+  min-width: 0;
 }

@@ -61,6 +61,7 @@ function snapshot(): ResumeSnap {
         ...(r.model ? { model: r.model } : {}),
         ...(r.title ? { title: r.title } : {}),
         ...(r.agentTitle ? { agentTitle: r.agentTitle } : {}),
+        ...(r.modelTitle ? { modelTitle: r.modelTitle } : {}),
         ...(r.promptTitle ? { promptTitle: r.promptTitle } : {}),
         ...(r.mode ? { mode: r.mode } : {}),
         ...(r.effort ? { effort: r.effort } : {}),
