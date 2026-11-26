@@ -10,6 +10,8 @@ import { agentDef, chatAgents, draftAgent, menuOrder, offeredAgents, registerAcp
 import { answering, noneSaid } from "../../runtime/mock/buddy";
 import { LANGS, setLang, t } from "../../i18n";
 import { ProviderDetail } from "./ProvidersPage";
+import { signinAgent, statusLine } from "./model";
+import { planName } from "../accounts/rules";
 
 const ids = (l: { id: string }[]) => l.map((a) => a.id);
 const SECRET = "sk-live-7f3a9c2e1b";
@@ -147,5 +149,28 @@ describe("the look-up's settings reach the menus only through the shell's answer
     expect(ids(offeredAgents(agents))).toEqual(["codex"]);
     expect(answering(agents)).toBeNull();
     expect(draftAgent([], agents)).toBe("codex");
+  });
+});
+
+describe("Cursor's and Antigravity's sign-in (item 101a)", () => {
+  it("is read from their own status commands through the shell, and only for those two", async () => {
+    const g: Record<string, unknown> = {
+      __manutMockAgents: ["claude", "codex", "gemini", "cursor-agent", "agy"],
+      __manutMockSignins: { "cursor-agent": { logged_in: true, email: "me@example.com" }, agy: { logged_in: false } },
+    };
+    const host = new MockHost(g);
+    const views = await host.providers();
+    const by = (id: string) => views.find((v) => v.id === id)!;
+    expect(["claude", "codex", "gemini", "cursor-agent", "agy"].map((id) => by(id).signin)).toEqual([true, true, false, true, true]);
+    expect(signinAgent("cursor-agent") && signinAgent("agy") && !signinAgent("claude") && !signinAgent("gemini")).toBe(true);
+    const cursor = await host.providerSignin("cursor-agent");
+    expect(statusLine(by("cursor-agent"), cursor, planName).text).toBe(t("prov.signedInAs", { who: "me@example.com" }));
+    expect(statusLine(by("agy"), await host.providerSignin("agy"), planName).text).toBe(t("prov.signedOut"));
+    // an agent whose sign-in is not read this way, or one not installed, gets nothing
+    expect(await host.providerSignin("gemini")).toBeNull();
+    expect(await new MockHost({ __manutMockAgents: ["claude"] }).providerSignin("cursor-agent")).toBeNull();
+    // a status command that said nothing: installed, nothing invented
+    const quiet = new MockHost({ __manutMockAgents: ["agy"], __manutMockSignins: { agy: null } });
+    expect(statusLine(by("agy"), await quiet.providerSignin("agy"), planName).text).toBe(t("ag.installed"));
   });
 });

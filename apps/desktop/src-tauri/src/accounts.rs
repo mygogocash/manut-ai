@@ -694,6 +694,18 @@ pub fn run_version(argv: &[OsString], path_env: &OsString) -> Result<Option<Stri
     Ok(Some(if out.trim().is_empty() { err } else { out }))
 }
 
+/// An agent's own fixed status command for Settings › Providers (`providers::signin_here`): `argv` is the program a
+/// session would start and the fixed arguments, run as [`run_version`] runs, to the end or `STATUS_TIMEOUT`. The caller
+/// keeps only what its parser reads of `(exit code, stdout, stderr)`.
+pub fn run_fixed(argv: &[OsString], path_env: &OsString) -> Result<(Option<i32>, String, String), String> {
+    let (program, rest) = argv.split_first().ok_or("nothing to run")?;
+    let mut cmd = Command::new(program);
+    cmd.args(rest).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).env("PATH", path_env);
+    crate::platform::no_console_window(&mut cmd);
+    crate::appimage::host_env(&mut cmd);
+    run_cmd(cmd, Path::new(program))
+}
+
 fn run_cmd(mut cmd: Command, program: &Path) -> Result<(Option<i32>, String, String), String> {
     let mut child = cmd.spawn().map_err(|e| format!("could not start {}: {e}", program.display()))?;
     let read = |s: Option<Box<dyn Read + Send>>| {

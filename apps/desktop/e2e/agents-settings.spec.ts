@@ -36,18 +36,19 @@ type Call = { op: string; agent?: string };
 const calls = (page: Page) => page.evaluate(() => ((window as unknown as { __manutSessionCalls?: Call[] }).__manutSessionCalls ?? []));
 const file = (page: Page) => page.evaluate(() => (window as unknown as { __manutCustomFile?: unknown[] }).__manutCustomFile ?? null);
 
-async function open(page: Page, opts: { theme?: string; lang?: string; file?: unknown[] } = {}) {
+async function open(page: Page, opts: { theme?: string; lang?: string; file?: unknown[]; agents?: string[]; signins?: Record<string, unknown> } = {}) {
   await page.addInitScript(
-    ([t, l, f]) => {
+    ([t, l, f, a, s]) => {
       localStorage.setItem("manut.theme", t as string);
       if (l) localStorage.setItem("manut.lang", l as string);
       localStorage.removeItem("manut.sessions.recent");
-      const w = window as unknown as { __manutPickFolder: string; __manutMockAgents: string[]; __manutCustomFile?: unknown[] };
+      const w = window as unknown as { __manutPickFolder: string; __manutMockAgents: string[]; __manutCustomFile?: unknown[]; __manutMockSignins?: unknown };
       w.__manutPickFolder = "/home/you/code/web-app";
-      w.__manutMockAgents = ["claude", "codex", "omh", "opencode", "gemini"];
+      w.__manutMockAgents = (a as string[] | null) ?? ["claude", "codex", "omh", "opencode", "gemini"];
       if (f) w.__manutCustomFile = f as unknown[];
+      if (s) w.__manutMockSignins = s;
     },
-    [opts.theme ?? "dark", opts.lang ?? "", opts.file ?? null] as const,
+    [opts.theme ?? "dark", opts.lang ?? "", opts.file ?? null, opts.agents ?? null, opts.signins ?? null] as const,
   );
   await page.goto("/");
   await chatOpen(page);
@@ -96,6 +97,16 @@ test("the page lists every agent with a switch and its status, between Terminal 
   expect(names).not.toContain("Accounts");
   expect(names).not.toContain("Agents");
   await expect(page.getByTestId("accounts-page")).toBeAttached();
+});
+
+test("Cursor and Antigravity say whether they are signed in, from their own status commands (item 101a)", async ({ page }) => {
+  await open(page, { agents: ["claude", "codex", "gemini", "cursor-agent", "agy"], signins: { "cursor-agent": { logged_in: true, email: "me@example.com" }, agy: { logged_in: false } } });
+  await agentsPage(page);
+  await expect(page.getByTestId("provider-status-cursor-agent")).toHaveText("Signed in as me@example.com");
+  await expect(page.getByTestId("provider-status-agy")).toHaveText("Not signed in");
+  await expect(page.getByTestId("provider-version-agy")).toHaveText("1.0.0");
+  // an agent whose sign-in is not read here still says only that it is installed
+  await expect(page.getByTestId("provider-status-gemini")).toHaveText("Installed");
 });
 
 test("an agent turned off leaves both parts of the + menu at once, and comes back when turned on", async ({ page }) => {
