@@ -35,7 +35,7 @@ import { SourceControlPage } from "./SourceControlPage";
 import { ArtifactLinksPage } from "./ArtifactLinksPage";
 import { RemotePage } from "./RemotePage";
 import { setSuggestOn, useSuggestOn } from "../lib/suggest";
-import { modLabel, setAfterSend, useAfterSend, type AfterSend } from "../chat/box/keys";
+import { modLabel, setAfterSend, setFollowUp, useAfterSend, useFollowUp, type AfterSend, type FollowUp } from "../chat/box/keys";
 import { VoicePage } from "./VoicePage";
 import { ComputerPage } from "./ComputerPage";
 import { McpSkillsPage } from "./mcp/McpSkillsPage";
@@ -457,6 +457,7 @@ const SHORTCUTS: [string, Key][] = [
   [`${MOD},`, "key.settings"],
   [`${MOD}J`, "key.nextAsk"],
   [MOD === "⌘" ? `${MOD}N · ${MOD}T` : `${MOD}N`, "key.newSession"],
+  [`${MOD}Enter`, "key.sendOther"],
   [MOD === "⌘" ? "⌘D · ⌘⇧D" : "Ctrl+Shift+D · Alt+Shift+D", "key.splitPane"],
   [MOD === "⌘" ? "⌘W" : "Ctrl+Shift+W", "key.closePane"],
   [MOD === "⌘" ? "⌘⌥ ←↑↓→" : "Ctrl+Alt+ ←↑↓→", "key.focusPane"],
@@ -684,6 +685,23 @@ function AfterSendSeg() {
   );
 }
 
+/** Settings › General › Chat box › While an answer is running (item 95): what Enter does with a message typed then. */
+function FollowUpSeg() {
+  const v = useFollowUp();
+  return (
+    <Modes
+      label={t("box.follow")}
+      value={v}
+      options={[
+        { value: "queue", label: t("box.followQueue") },
+        { value: "steer", label: t("box.followSteer") },
+      ]}
+      onChange={(x) => setFollowUp(x as FollowUp)}
+      testId="set-follow-up"
+    />
+  );
+}
+
 function GeneralPage() {
   const s = useStore();
   const h = s.hello;
@@ -726,6 +744,9 @@ function GeneralPage() {
       <div className="st-grp" data-testid="set-box">
         <Row title={t("box.after")} hint={t("box.afterHint", { mod: modLabel() })}>
           <AfterSendSeg />
+        </Row>
+        <Row title={t("box.follow")} hint={t("box.followHint", { mod: modLabel() })}>
+          <FollowUpSeg />
         </Row>
       </div>
       <div className="st-gh">{t("suggest.group")}</div>

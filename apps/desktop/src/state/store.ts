@@ -15,7 +15,7 @@ import { promptText } from "../chat/parts/attachFiles";
 import { findTokens, toWire } from "../chat/parts/skillTokens";
 import { forBots, parseResume, RESUME_KEY, type ResumeSnap } from "../app/resume";
 import { getDraft } from "../app/drafts";
-import type { FollowUp } from "../chat/box/keys";
+import { followUp as savedFollowUp, type FollowUp } from "../chat/box/keys";
 import { moveInSidebar } from "./order";
 import { LANG_KEY, readLang, setLang, t as tr, type Key, type Lang } from "../i18n";
 import { firstRunEntry, flowReduce, ONBOARDED_KEY, startFlow, type FlowEvent, type FlowState } from "../onboarding/flow";
@@ -2524,7 +2524,7 @@ export function createStore(bridge: BridgeLike, opts: StoreOptions = {}): Store 
    *  turn ends. Where it cannot be steered (files, a Reply there target, a `/` command Hermes runs itself, no turn yet,
    *  the bridge coming back, a refused steer ahead of it) it is held whatever `how` says. False when nothing runs
    *  there: send it now. */
-  const followUpOf = opts.followUp ?? ((): FollowUp => "steer");
+  const followUpOf = opts.followUp ?? savedFollowUp;
   const holdIfBusy = (key: string, id: string, p: { text: string; wire: string; reply_to?: string; files?: OutFile[] }, row: Extract<Action, { type: "local.user" }>, how?: FollowUp) => {
     if (!mustHold(state, key)) return false;
     held.set(id, { bot: key, ...p });

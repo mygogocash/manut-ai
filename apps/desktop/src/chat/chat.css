@@ -1151,3 +1151,11 @@
   font-size: 11.5px;
   color: var(--muted);
 }
+/* Item 95: while an answer runs and the box holds a message, what Enter does with it and what Cmd+Enter does instead.
+   One quiet line on the scale's smallest size, appearing and staying still. */
+.cmp-keys {
+  padding: 6px 8px 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--muted);
+}

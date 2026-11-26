@@ -24,7 +24,9 @@ async function mock(op: string, params: Record<string, unknown> = {}): Promise<a
   return reply.result;
 }
 
-test.beforeEach(async () => {
+test.beforeEach(async ({ page }) => {
+  // these prompts are typed mid-answer and steered in, as Settings' Add it now does (item 95)
+  await page.addInitScript(() => localStorage.setItem("manut.box.followUp", "steer"));
   await mock("mock.reset");
 });
 

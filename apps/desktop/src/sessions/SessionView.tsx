@@ -15,7 +15,7 @@ import { CheckIcon } from "../chat/model/CheckIcon";
 import "../chat/model/model.css";
 import { ArrowUp, ChatIcon, ChevronDown, Popover, TerminalIcon } from "../ui";
 import { composing } from "../lib/ime";
-import { modesOf, queueOff, usageText } from "./controls";
+import { modesOf, queueOff, steersOf, usageText } from "./controls";
 import { ModelMenu } from "../chat/box/ModelMenu";
 import { ApprovalMenu, DialRows } from "../chat/box/ApprovalMenu";
 import { DEFAULT_KIT_LEVEL, KIT_LEVELS } from "@manut/member-grants";
@@ -200,11 +200,13 @@ function ChatPane({ rec, chatKey }: { rec: SessionRec; chatKey: string }) {
         offlineText={offlineText}
         suggestion={suggestion}
         onSuggestionTaken={() => clearSuggestion(chatKey)}
-        onSend={(t) => {
+        onSend={(t, how) => {
           clearSuggestion(chatKey);
-          void getSessions().send(rec.id, t);
+          void getSessions().send(rec.id, t, how);
         }}
-        onSendFiles={takesFiles ? (t, files) => (clearSuggestion(chatKey), getSessions().sendFiles(rec.id, t, files)) : undefined}
+        onSendFiles={takesFiles ? (t, files, how) => (clearSuggestion(chatKey), getSessions().sendFiles(rec.id, t, files, how)) : undefined}
+        // only the agents with a mid-turn input of their own take a message into a running answer (controls.ts STEERS)
+        steers={steersOf(rec.agent)}
         onStop={() => void getSessions().interrupt(rec.id)}
         commands={commands}
         // Add context: a folder is named by its path (the dial reads one outside the project as blocked, with Allow this

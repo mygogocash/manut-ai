@@ -18,6 +18,7 @@ import { addAt, matchMembers, mentionAt, putMention, withAction, withFolders, ty
 import { FolderChips, MentionPicker } from "../box/BoxParts";
 import { useBoxVoice } from "../box/Voice";
 import { voiceOffered } from "../../voice/engine";
+import { keysCaption, sendKey, useFollowUp, whileRunning, type FollowUp } from "../box/keys";
 
 const MAX_H = 200;
 
@@ -34,7 +35,10 @@ const MAX_H = 200;
  * The + is Add context (item 80): files, a folder (named on its own line by its path when the message goes,
  * chat/box/context.ts), a teammate with `@` (`mentions`: typing `@` at a word's start opens the same menu) and the
  * agent's actions (`actions`: the `/` menu, which the + opens over text already typed, the action then going first).
- * With `voice` (item 81, the Mac app), the microphone and voice mode sit before Send (chat/box/Voice.tsx). */
+ * With `voice` (item 81, the Mac app), the microphone and voice mode sit before Send (chat/box/Voice.tsx).
+ * While an answer runs (item 95), Enter does Settings' "While an answer is running" (wait for it, or add it now) and
+ * Cmd+Enter the other, for that one message (chat/box/keys.ts); a quiet line under the box says which. With no answer
+ * running both keys send. */
 export function Composer({
   bot,
   running,
@@ -62,15 +66,17 @@ export function Composer({
   suggestion,
   onSuggestionTaken,
   voice = false,
+  steers = true,
 }: {
   bot: Bot;
   running: boolean;
   /** An approval or question card of this bot is waiting above: the placeholder points at it. */
   asking?: boolean;
   offline: boolean;
-  onSend: (text: string) => void;
+  /** `how`: while an answer runs, whether the message waits for it or goes into it now (absent: Settings' choice). */
+  onSend: (text: string, how?: FollowUp) => void;
   /** Files with the text (a bot's main chat, a SESSIONS chat agent). Without it there is no +, drop or file paste. */
-  onSendFiles?: (text: string, files: OutFile[]) => Promise<void>;
+  onSendFiles?: (text: string, files: OutFile[], how?: FollowUp) => Promise<void>;
   onStop: () => void;
   reply?: ReplyChip | null;
   onClearReply?: () => void;
@@ -112,6 +118,9 @@ export function Composer({
   /** The microphone, which puts the words heard into the text, and voice mode, which talks with the agent of this chat
    *  (item 81): a chat whose box carries the agent's controls, in the Mac app. */
   voice?: boolean;
+  /** This chat's agent can take a message mid-answer (a steer). Without one, a message typed during an answer always
+   *  waits, with Enter or Cmd+Enter, and the line under the box says so. */
+  steers?: boolean;
 }) {
   // unsent text survives switching chats and restarts (drafts.ts; the composer is keyed by its chat)
   const [text, setText] = useState(() => getDraft(bot.name));
@@ -415,9 +424,12 @@ export function Composer({
   useEffect(() => () => latest.current.forEach((c) => c.url && URL.revokeObjectURL(c.url)), []);
 
   const overlay = useDropZone(wrap, !offline && !!onSendFiles, add);
+  const follow = useFollowUp();
 
-  const send = async () => {
+  /** Send with Enter or Cmd+Enter (`key`): while an answer runs they choose between waiting for it and adding it now. */
+  const send = async (key: "enter" | "cmd" = "enter") => {
     if (!has || offline || sending) return;
+    const how = running ? whileRunning(key, steers, follow) : undefined;
     vc.sending();
     if (threadCmd && onNewThread) {
       if (good.length) return setErr(t("thread.cmdFiles"));
@@ -428,7 +440,7 @@ export function Composer({
     // the folders named go on their own lines under the text (none: the text as typed)
     const body = folders.length ? withFolders(text, folders) : text;
     if (!good.length || !onSendFiles) {
-      onSend(body);
+      onSend(body, how);
       edit("");
       setFolders([]);
       return;
@@ -436,7 +448,7 @@ export function Composer({
     setSending(true);
     setErr(null);
     try {
-      await onSendFiles(body, good);
+      await onSendFiles(body, good, how);
       edit("");
       setFolders([]);
       setChips((cur) => cur.filter((c) => c.reason)); // red chips stay: they were never sent
@@ -623,7 +635,8 @@ export function Composer({
           }
           if (e.key === "Enter" && !e.shiftKey && !composing) {
             e.preventDefault();
-            void send();
+            // Cmd+Enter does the other of wait and add now while an answer runs; any other Enter is a plain send
+            void send(sendKey(e) ?? "enter");
           } else if (e.key === "Backspace" && !text && reply) {
             e.preventDefault();
             onClearReply?.();
@@ -733,6 +746,12 @@ export function Composer({
       {heldNote && has && (
         <div className="cmp-held" role="note" data-testid="composer-held">
           {heldNote}
+        </div>
+      )}
+      {/* While an answer runs, what Enter does with what is typed, and what Cmd+Enter does instead (item 95). */}
+      {running && has && !action && !offline && (
+        <div className="cmp-keys" role="note" data-testid="composer-keys" data-steers={steers ? "true" : "false"}>
+          {keysCaption(steers, bot.display_name, follow)}
         </div>
       )}
       {foot}

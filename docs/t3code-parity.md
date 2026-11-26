@@ -91,7 +91,7 @@ keeps them:
 | Threads that wait on you rise to the top | has (Needs you) | |
 | Cmd+Enter sends in the background | has (item 95): from Home, with a line that opens it; Settings swaps Enter and Cmd+Enter | 95 |
 | A thread on a schedule | off (workflows, item 77b; routines for the shop's team) | 94 |
-| Steer or queue, a key to swap, a default | part: both, as buttons on a held message; no key, no default | 95 |
+| Steer or queue, a key to swap, a default | has (item 95): Settings › General › Chat box, Wait for it by default; Cmd+Enter does the other for one message; the held message keeps its buttons | 95 |
 | Select several rows; bulk snooze, settle, new titles | no | 94, 96 |
 | Auto-settle after some days | no | 94 |
 | Several drafts; stash one | part: one draft a chat, no pictures | 95 |

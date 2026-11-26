@@ -57,6 +57,7 @@ import { forgetPreview } from "../code/previewStore";
 import { continuesItself, type SavedSession } from "../app/resume";
 import { accountGroups } from "../settings/accounts/useAccounts";
 import { ASK_MODE, modesOf, steersOf } from "./controls";
+import { followUp as savedFollowUp, type FollowUp } from "../chat/box/keys";
 import { parseCommands, type AgentCommand } from "../chat/parts/commands";
 import { noteMcpSeen } from "../settings/mcp/agentConfig";
 import { t as tr, type Key } from "../i18n";
@@ -1041,8 +1042,10 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
   };
 
   /** Send chat text: the bubble shows at once; a refusal marks it "Not sent". True when it went to the agent or waits for the
-   *  running turn, false when nothing was sent. */
-  const send = async (id: string, text: string): Promise<boolean> => {
+   *  running turn, false when nothing was sent. While a turn runs it waits (the steer queue); with `how` "steer" (the chat
+   *  box's Cmd+Enter or Settings' choice, chat/box/keys.ts) it is handed to the running turn at once, as its ↵ does, when
+   *  the agent takes a steer and nothing waits ahead of it. */
+  const send = async (id: string, text: string, how?: FollowUp): Promise<boolean> => {
     const t = text.trim();
     const key = keys.get(id);
     if (!t || !key) return false;
@@ -1050,6 +1053,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     const lid = `local-s${++localSeq}`;
     if (mustHoldHere(id, key)) {
       hold(id, key, lid, { kind: "send", text: t, id: lid }, () => st.dispatch({ type: "local.user", bot: key, id: lid, text: t, now: Date.now(), held: true }));
+      if ((how ?? savedFollowUp()) === "steer" && chatOf(key)?.turn && chatOf(key)?.queue?.[0] === lid) await queuePick(id, lid, "steer");
       return true;
     }
     st.dispatch({ type: "local.user", bot: key, id: lid, text: t, now: Date.now() });
@@ -1131,9 +1135,9 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
    * Send a message with files from a running chat. The files are saved first; if one cannot be, nothing is sent
    * and the error goes back to the composer (its chips stay).
    */
-  const sendFiles = async (id: string, text: string, files: OutFile[]): Promise<void> => {
+  const sendFiles = async (id: string, text: string, files: OutFile[], how?: FollowUp): Promise<void> => {
     if (!files.length) {
-      await send(id, text);
+      await send(id, text, how);
       return;
     }
     const key = keys.get(id);
