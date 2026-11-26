@@ -85,9 +85,27 @@
   background: var(--warnbg);
 }
 
+/* The project's name or picker, with its own icon before it when its folder keeps one (item 100b). */
+.kit-proj {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+/* the picker keeps the half of the band it had */
+.kit-proj:has(select) {
+  max-width: 50%;
+}
+.kit-proj .proj-ic {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+  border-radius: 3px;
+}
 /* The desktop's own: the project picker beside the dial's band, as quiet as the band's words. */
 .kitp .band select {
-  max-width: 50%;
+  max-width: 100%;
   padding: 2px 4px;
   border: 1px solid var(--line);
   border-radius: var(--rad);

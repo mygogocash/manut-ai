@@ -19,103 +19,203 @@ const BLOCKS = spec.blocks.map((e) => [compile(e[0] as string, (e[3] as string |
 const BLOCK_BEGIN = new RegExp(spec.blockBegin);
 const BLOCK_END = new RegExp(spec.blockEnd);
 
-/** A heredoc still to come or being read: its terminator word, and whether tabs before it are allowed (`<<-`). */
-interface Heredoc {
-  word: string;
-  dash: boolean;
+/** A word of a command as the shell splits it, and where it is in the command (`from` up to `to`). */
+interface Word {
+  text: string;
+  from: number;
+  to: number;
 }
 
-/** How the shell reads `text` up to the start of its line `line` (an offset): the quote still open there, the heredoc whose
- *  body that line is in, or null when the reading cannot be followed (a `$(`, a backtick, `${`, a heredoc word it cannot read,
- *  a heredoc begun inside a quote). */
-function readTo(text: string, line: number): { quote: string | null; heredoc: Heredoc | null } | null {
+/** A command read as the shell reads it (item 121): its words, and for each character whether a key block there is data
+ *  that is only written out, so it may be masked. */
+interface Reading {
+  words: Word[];
+  data: boolean[];
+}
+
+/** The terminator a heredoc's word names, and whether it was quoted (then nothing in the body runs): a plain word, a word
+ *  in one pair of single or double quotes, or a word after one backslash. Any other form is not read (null). */
+function heredocWord(w: string): { word: string; quoted: boolean } | null {
+  if (/^[A-Za-z0-9_.-]+$/.test(w)) return { word: w, quoted: false };
+  const m = /^(?:'([^']*)'|"([^"\\$`]*)"|\\([A-Za-z0-9_.-]+))$/.exec(w);
+  return m ? { word: m[1] ?? m[2] ?? m[3], quoted: true } : null;
+}
+
+/** A command read as the shell reads it (item 121). Words part at a blank; `;`, `&`, `|`, `(`, `)`, `<`, `>` and a line break
+ *  are words of their own; a quote (`'…'`, `"…"`, `$'…'`) or a backslash keeps what it covers in its word; a `#` that starts
+ *  a word starts a comment, one word to its line's end; `<<` (not a here-string's `<<<`) takes the next word as a heredoc's
+ *  terminator, and after its line the body is one word up to the terminator line, which is another.
+ *
+ *  `data` marks what a key block may be masked in: the inside of a quoted string or a heredoc's body that belongs to the
+ *  command's first simple command, when that command's first word is one that only writes its input out (secrets.json
+ *  `sinks`) and nothing in the command could run what it writes (no `|`, `(` or `)` anywhere). Nothing is data from the first
+ *  thing this reading cannot follow on: a substitution (`` ` ``, `$(`, `${`), arithmetic (`$[`, `((`), a heredoc word it
+ *  cannot read; nor in an unquoted heredoc's body from its first `$(`, `${`, backtick or backslash, which the shell acts on. */
+function lex(text: string): Reading {
+  const n = text.length;
+  const words: Word[] = [];
+  const commands: (string | null)[] = [null];
+  const regions: { from: number; to: number; command: number }[] = [];
+  let until = n;
+  let piped = false;
+  let start = -1;
   let quote: string | null = null;
-  let queue: Heredoc[] = [];
-  let body: Heredoc | null = null;
-  let at = 0;
-  while (at < line) {
-    const nl = text.indexOf("\n", at);
-    const end = nl < 0 ? text.length : nl;
-    const l = text.slice(at, end).replace(/\r$/, "");
-    if (body) {
-      if ((body.dash ? l.replace(/^\t+/, "") : l) === body.word) body = queue.shift() ?? null;
-    } else {
-      const got = scanLine(l, quote);
-      if (!got) return null;
-      quote = got.quote;
-      if (got.heredocs.length) {
-        if (quote) return null;
-        queue = [...queue, ...got.heredocs];
-        body = queue.shift() ?? null;
+  let opened = 0;
+  let plain = -1;
+  let wanted: boolean | null = null;
+  let heredocs: { word: string; quoted: boolean; dash: boolean; command: number }[] = [];
+  const command = () => commands.length - 1;
+  const stop = (at: number) => {
+    until = Math.min(until, at);
+  };
+  const push = (from: number, to: number) => words.push({ text: text.slice(from, to), from, to });
+  const end = (to: number) => {
+    if (start < 0) return;
+    const w = text.slice(start, to);
+    push(start, to);
+    if (wanted !== null) {
+      const h = heredocWord(w);
+      if (h) heredocs.push({ ...h, dash: wanted, command: command() });
+      else stop(start);
+      wanted = null;
+    } else if (commands[command()] === null) commands[command()] = w;
+    start = -1;
+  };
+  const close = (at: number) => {
+    regions.push({ from: opened, to: at, command: command() });
+    quote = null;
+  };
+  // the heredocs begun on the line that ended at `from`, in order: each body one word, its terminator line another
+  const bodies = (from: number): number => {
+    let at = from;
+    for (const h of heredocs) {
+      const body = at;
+      let term = -1;
+      let termEnd = n;
+      while (at < n) {
+        const nl = text.indexOf("\n", at);
+        const lineEnd = nl < 0 ? n : nl;
+        const line = text.slice(at, lineEnd);
+        if ((h.dash ? line.replace(/^\t+/, "") : line) === h.word) {
+          term = at;
+          termEnd = lineEnd;
+          break;
+        }
+        at = lineEnd + 1;
       }
+      const bodyEnd = term < 0 ? n : term;
+      push(body, bodyEnd);
+      const acts = h.quoted ? -1 : text.slice(body, bodyEnd).search(/[`\\]|\$[({[]/);
+      regions.push({ from: body, to: acts < 0 ? bodyEnd : body + acts, command: h.command });
+      if (term < 0) return n;
+      push(term, termEnd);
+      at = termEnd + 1;
     }
-    at = end + 1;
-  }
-  return { quote, heredoc: body };
-}
-
-/** One line read as the shell reads it, from quote state `quote`: the quote open at its end and the heredocs it begins, or
- *  null when it holds what this reading cannot follow. `stop` ends the reading early (at a key block's BEGIN marker). */
-function scanLine(l: string, quote: string | null, stop = l.length): { quote: string | null; heredocs: Heredoc[] } | null {
-  const heredocs: Heredoc[] = [];
-  for (let i = 0; i < stop; i++) {
-    const c = l[i];
+    return Math.min(at, n);
+  };
+  for (let i = 0; i < n; i++) {
+    const c = text[i];
     if (quote === "'") {
-      if (c === "'") quote = null;
+      if (c === "'") close(i);
       continue;
     }
-    if (c === "`" || (c === "$" && (l[i + 1] === "(" || l[i + 1] === "{"))) return null;
+    if (quote) {
+      if (c === "\\") i++;
+      else if (quote === "$'" ? c === "'" : c === '"') close(i);
+      else if (quote === '"' && (c === "`" || (c === "$" && (text[i + 1] === "(" || text[i + 1] === "{")))) stop(i);
+      continue;
+    }
     if (c === "\\") {
+      if (start < 0) start = i;
       i++;
       continue;
     }
-    if (quote === '"') {
-      if (c === '"') quote = null;
+    if (c === "'" || c === '"') {
+      if (start < 0) start = i;
+      quote = c === "'" && plain === i - 1 && text[i - 1] === "$" ? "$'" : c;
+      opened = i + 1;
       continue;
     }
-    if (c === "'" || c === '"') quote = c;
-    else if (c === "#" && (i === 0 || /\s/.test(l[i - 1]))) break;
-    else if (c === "<" && l[i + 1] === "<" && l[i + 2] !== "<") {
-      const m = /^<<(-?)[ \t]*(?:'([^']+)'|"([^"]+)"|\\?([A-Za-z0-9_]+))/.exec(l.slice(i));
-      if (!m) return null;
-      heredocs.push({ word: m[2] ?? m[3] ?? m[4], dash: m[1] === "-" });
-      i += m[0].length - 1;
+    if (c === "`" || (c === "$" && "({[".includes(text[i + 1] ?? "x")) || (c === "(" && text[i + 1] === "(")) stop(i);
+    if (c === " " || c === "\t") {
+      end(i);
+    } else if (c === "#" && start < 0) {
+      const nl = text.indexOf("\n", i);
+      push(i, nl < 0 ? n : nl);
+      i = (nl < 0 ? n : nl) - 1;
+    } else if (c === "<" || c === ">") {
+      end(i);
+      if (wanted !== null) stop(i);
+      if (c === "<" && text[i + 1] === "<" && text[i - 1] !== "<" && text[i + 2] !== "<") {
+        const dash = text[i + 2] === "-";
+        push(i, i + (dash ? 3 : 2));
+        wanted = dash;
+        i += dash ? 2 : 1;
+      } else push(i, i + 1);
+    } else if (";&|()\n".includes(c)) {
+      end(i);
+      if (wanted !== null) stop(i);
+      wanted = null;
+      push(i, i + 1);
+      if (c === "|" || c === "(" || c === ")") piped = true;
+      commands.push(null);
+      if (c === "\n" && heredocs.length) {
+        i = bodies(i + 1) - 1;
+        heredocs = [];
+      }
+    } else {
+      if (start < 0) start = i;
+      plain = i;
     }
   }
-  return { quote, heredocs };
+  end(n);
+  const data: boolean[] = new Array<boolean>(n).fill(false);
+  const first = commands.findIndex((w) => w !== null);
+  if (!piped && first >= 0 && spec.sinks.includes(commands[first]!)) {
+    for (const r of regions) if (r.command === first) for (let k = r.from; k < Math.min(r.to, until); k++) data[k] = true;
+  }
+  return { words, data };
 }
 
-/** Whether the shell reads the key block from `from` to `to` in `text` as data, never as commands (item 117): inside a quoted
- *  string opened on its BEGIN line before the marker that is still open at its end and closes after it, or inside a heredoc's
- *  body whose terminator line does not come before its end. Anything else, and anything unsure, is no. */
-function shellData(text: string, from: number, to: number): boolean {
-  const line = text.lastIndexOf("\n", from - 1) + 1;
-  const before = readTo(text, line);
-  if (!before) return false;
-  if (before.heredoc) {
-    const { word, dash } = before.heredoc;
-    const last = text.indexOf("\n", to);
-    const lines = text.slice(line, last < 0 ? text.length : last).split("\n");
-    return !lines.some((l) => (dash ? l.replace(/\r$/, "").replace(/^\t+/, "") : l.replace(/\r$/, "")) === word);
-  }
-  if (before.quote) return false;
-  const end = text.indexOf("\n", line);
-  const own = text.slice(line, end < 0 ? text.length : end);
-  const at = scanLine(own, null, from - line);
-  if (!at?.quote || at.heredocs.length) return false;
-  // the same string closes after the block: the next quote of its kind, nothing it cannot read before it
-  const q = at.quote;
-  for (let i = to; i < text.length; i++) {
-    const c = text[i];
-    if (q === "'") {
-      if (c === "'") return true;
-      continue;
+/** The words of a command as the shell splits it (`lex`). */
+export function shellWords(text: string): string[] {
+  return lex(text).words.map((w) => w.text);
+}
+
+/** Whether `after` is the word `before` (which starts at `from` in its command) with each mask standing for a run of one or
+ *  more of its characters, every one of which `free` allows, and everything else equal. */
+function aligned(before: string, from: number, after: string, free: (at: number) => boolean): boolean {
+  if (before === after) return true;
+  const pieces = after.split(spec.mask);
+  if (pieces.length === 1 || pieces.length > 64 || !before.startsWith(pieces[0])) return false;
+  const failed = new Set<number>();
+  const rest = (i: number, at: number): boolean => {
+    const key = i * (before.length + 1) + at;
+    if (failed.has(key)) return false;
+    const next = pieces[i];
+    const last = i === pieces.length - 1;
+    for (let end = at + 1; end <= before.length && free(from + end - 1); end++) {
+      if (before.startsWith(next, end) && (last ? end + next.length === before.length : rest(i + 1, end + next.length))) return true;
     }
-    if (c === "`" || c === "$") return false;
-    if (c === "\\") i++;
-    else if (c === '"') return true;
-  }
-  return false;
+    failed.add(key);
+    return false;
+  };
+  return rest(1, pieces[0].length);
+}
+
+/** Whether `after` splits into the same shell words as `before`, as many and each the same, or with masks standing for
+ *  characters `free` allows in `before` (given `before`'s reading). */
+function shaped(before: string, after: string, free: (reading: Reading) => (at: number) => boolean): boolean {
+  const a = lex(before);
+  const b = lex(after);
+  const ok = free(a);
+  return a.words.length === b.words.length && a.words.every((w, i) => aligned(w.text, w.from, b.words[i].text, ok));
+}
+
+/** The structural check of what an approval shows (item 121): `after` splits into exactly `before`'s shell words, each the
+ *  same or with only a key's part masked, a run that holds no character the command form stops at (secrets.json `shell`). */
+export function sameShape(before: string, after: string): boolean {
+  return shaped(before, after, () => (k) => !stops(before, k));
 }
 
 /** Whether the block that ends its base64 lines at `from` in `text` has no END of its own: none before the next BEGIN. */
@@ -137,6 +237,21 @@ const NAMED = new RegExp(spec.named);
 const RUN = new RegExp(spec.run, "g");
 const PREFIX = new RegExp(`^${spec.prefixes}`);
 const SHELL = new RegExp(spec.shell);
+/** The characters that do not show, or that reorder what does (secrets.json `hidden`, item 121). */
+const HIDDEN_CLASS = `[${spec.hidden.map(([a, b]) => `\\u{${a}}-\\u{${b}}`).join("")}]`;
+const HIDDEN = new RegExp(HIDDEN_CLASS, "u");
+const HIDDEN_ALL = new RegExp(HIDDEN_CLASS, "gu");
+
+/** `text` with every character that does not show, or that reorders what does, replaced by a visible mark (`⟨U+202E⟩`),
+ *  so a direction override or a zero-width character can neither hide nor reorder what an ask shows (item 121). Every
+ *  surface that shows an ask's command or text runs it: the card, the phone, Home, Needs you, a notification. */
+export function revealHidden(text: string): string {
+  return text.replace(HIDDEN_ALL, (c) => spec.hiddenMark.replace("{hex}", c.codePointAt(0)!.toString(16).toUpperCase().padStart(4, "0")));
+}
+
+/** Whether the character at `k` of `text` (a UTF-16 index) is one a masked value in a command stops at: the command form's
+ *  `shell` characters, or one that does not show. */
+const stops = (text: string, k: number): boolean => SHELL.test(text.charAt(k)) || HIDDEN.test(String.fromCodePoint(text.codePointAt(k) ?? 0));
 const REF = new RegExp(spec.ref);
 const PLAIN = new RegExp(spec.plain, "i");
 
@@ -161,17 +276,23 @@ function keyShaped(m: string): boolean {
   return NEEDS.test(m.replace(PREFIX, ""));
 }
 
-/** How much of a value may be masked in a command: up to the first character the shell acts on (0 when it starts with one). */
+/** How much of a value may be masked in a command: up to the first character it stops at (`stops`), 0 when it starts with
+ *  one. */
 const upTo = (value: string): number => {
-  const i = value.search(SHELL);
-  return i < 0 ? value.length : i;
+  for (let i = 0; i < value.length; i++) if (stops(value, i)) return i;
+  return value.length;
 };
 
-/** `text`'s `whole` matches masked; in a command (`command`), not a key block, which `BLOCKS` masked first. */
+/** Whether `m`, found at `offset` in `text`, is part of a path: it holds a `/` or touches one. In a command such a word
+ *  names a program or a file (`./whsec_…/deploy.sh`, `rm -rf ./npm_…`), so it is shown (item 121). */
+const inPath = (m: string, [offset, text]: At): boolean => m.includes("/") || text.charAt(offset - 1) === "/" || text.charAt(offset + m.length) === "/";
+
+/** `text`'s `whole` matches masked; in a command (`command`), not a key block, which `BLOCKS` masked first, nor a word that
+ *  is part of a path. */
 function maskWhole(text: string, command = false): string {
   for (const [rx, kind] of WHOLE) {
     if (command && kind === "block") continue;
-    text = text.replace(rx, (m: string, ...args: unknown[]) => (kind === "word" && !alone(m, at(args)) ? m : spec.mask));
+    text = text.replace(rx, (m: string, ...args: unknown[]) => (kind === "word" && (!alone(m, at(args)) || (command && inPath(m, at(args)))) ? m : spec.mask));
   }
   return text;
 }
@@ -202,7 +323,7 @@ export function maskSecrets(text: string): string {
 /** One line of a command, masked as `maskCommand` says. A value that already holds the mask (a key block's) is left as it is. */
 function commandLine(line: string): string {
   line = maskWhole(line, true);
-  line = line.replace(WORD, (m: string, ...args: unknown[]) => (alone(m, at(args)) && keyShaped(m) ? spec.mask : m));
+  line = line.replace(WORD, (m: string, ...args: unknown[]) => (alone(m, at(args)) && !inPath(m, at(args)) && keyShaped(m) ? spec.mask : m));
   for (const rx of KEPT) {
     line = line.replace(rx, (m: string, before: string, secret: string, after: string) => {
       const n = aKey(secret) && !secret.includes(spec.mask) ? upTo(secret) : 0;
@@ -216,19 +337,52 @@ function commandLine(line: string): string {
   });
 }
 
-/** A command, or anything else an approval shows, with its keys masked and nothing else: a private key block whose body holds
- *  only key characters keeps its BEGIN and END lines and shows its body as one mask line, and one whose body holds anything
- *  else is shown whole; then read line by line, so no other masked value spans a line; never joined across a blank, so a
- *  command's next word stays; and a masked value stops at the first character the shell acts on, which is shown with what
- *  follows it. What a person approves is then what runs, less the
- *  keys in it (item 117; the table's `command` rows, which the shell's twin runs too). */
-export function maskCommand(text: string): string {
-  // a private key block whose body holds nothing the shell acts on, where the shell reads it as data (`shellData`): its BEGIN
-  // and END lines stay, its body is one mask line
+/** `text`'s private key blocks whose body holds only key lines (base64, or a PEM header such as `Proc-Type: 4,ENCRYPTED`),
+ *  where the whole block is data a writer only writes out (`lex`): its BEGIN and END lines stay, its body is one mask line. */
+function maskBlocks(text: string): string {
+  if (!text.includes("PRIVATE KEY")) return text;
   for (const [rx, sep, open] of BLOCKS) {
-    text = text.replace(rx, (m: string, begin: string, _body: string, end: string, offset: number, whole: string) =>
-      (open && !unended(whole, offset + m.length)) || !shellData(whole, offset, offset + m.length) ? m : `${begin}${sep}${spec.mask}${end}`,
-    );
+    const { data } = lex(text);
+    text = text.replace(rx, (m: string, begin: string, _body: string, end: string, offset: number, whole: string) => {
+      const inData = data.slice(offset, offset + m.length).every(Boolean);
+      return (open && !unended(whole, offset + m.length)) || !inData ? m : `${begin}${sep}${spec.mask}${end}`;
+    });
   }
-  return text.split("\n").map(commandLine).join("\n");
+  return text;
+}
+
+/** What an approval shows of a command (item 121). */
+export interface ShownCommand {
+  /** The command with its keys masked; or the command as it is, when masking it could change what it seems to do. */
+  text: string;
+  /** The masked line would not split into the command's own shell words, or the command already holds the mask's
+   *  character, so a mask could not be told from it: it is shown as it is, and the person is told it may hold a key. */
+  unmasked: boolean;
+  /** It holds characters that do not show or that reorder what does, each replaced in `text` by a visible mark
+   *  (`revealHidden`): the person is told it holds hidden characters. */
+  hidden: boolean;
+}
+
+/** A command, or anything else an approval shows, with its keys masked and nothing else: a private key block whose body holds
+ *  only key lines keeps its BEGIN and END lines and shows its body as one mask line, only where it is data a writer only
+ *  writes out; then read line by line, so no other masked value spans a line; never joined across a blank, so a command's
+ *  next word stays; and a masked value stops at the first blank, quote, `#`, glob character or character the shell acts on,
+ *  which is shown with what follows it (item 117, item 121). Then the structural check: the masked command must split into
+ *  exactly the command's shell words, each the same or with only a key's part masked, or the command is shown as it is
+ *  (`unmasked`). What a person approves is then what runs, less the keys in it (the table's `command` rows, which the shell's
+ *  twin runs too). */
+export function showCommand(command: string): ShownCommand {
+  const blocks = maskBlocks(command);
+  const masked = blocks.split("\n").map(commandLine).join("\n");
+  const sure =
+    masked === command ||
+    (!command.includes(spec.mask.charAt(0)) && shaped(command, blocks, (r) => (k) => r.data[k]) && sameShape(blocks, masked));
+  const plain = sure ? masked : command;
+  const text = revealHidden(plain);
+  return { text, unmasked: !sure, hidden: text !== plain };
+}
+
+/** `showCommand`'s text: what an approval shows of a command. */
+export function maskCommand(text: string): string {
+  return showCommand(text).text;
 }

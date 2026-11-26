@@ -27,7 +27,7 @@ describe("what a phone is shown", () => {
       step: `Running gh auth with ${TOKEN}`,
       items: [
         { kind: "message", id: "m", role: "assistant", text: `Your token is ${TOKEN}`, ts: 1 },
-        { kind: "approval", id: "r", ts: 2, open: true, title: `Use ${TOKEN}`, command: `curl -H "token=${TOKEN}" https://x`, cwd: `/tmp/${TOKEN}`, plan: `Plan with ${TOKEN}`, choices: ["once", "deny"], from: `sub ${TOKEN}` },
+        { kind: "approval", id: "r", ts: 2, open: true, title: `Use ${TOKEN}`, command: `curl -H "token=${TOKEN}" https://x`, cwd: `/tmp/token=${TOKEN}`, plan: `Plan with ${TOKEN}`, choices: ["once", "deny"], from: `sub ${TOKEN}` },
         { kind: "clarify", id: "q", ts: 3, open: true, question: `Keep ${TOKEN}?`, choices: [`yes ${TOKEN}`], questions: [{ id: "a", question: `A ${TOKEN}`, choices: [`b ${TOKEN}`] }] },
       ],
     };
@@ -35,6 +35,11 @@ describe("what a phone is shown", () => {
     const text = JSON.stringify([view, chatRow(source)]);
     expect(text).not.toContain(TOKEN);
     expect(text).toContain("••••");
+  });
+
+  it("shows a key-shaped part of a path, which names what the command runs or where, as the Mac's card does (item 121)", () => {
+    const source: ChatSource = { ...chat(), items: [{ kind: "approval", id: "r", ts: 2, open: true, title: "t", command: `rm -rf ./${TOKEN}/build`, cwd: `/tmp/${TOKEN}`, choices: ["once", "deny"] }] };
+    expect(new Projector().view(source).asks[0]).toMatchObject({ command: `rm -rf ./${TOKEN}/build`, cwd: `/tmp/${TOKEN}` });
   });
 
   it("masks the common forms a key takes in what an agent writes, not only tokens (item 113)", () => {
@@ -110,6 +115,29 @@ describe("what a phone is shown", () => {
     const fits: ChatSource = { ...source, items: [{ ...source.items[0]!, command: command.slice(0, PHONE_COMMAND_CHARS) } as ChatSource["items"][number]] };
     expect(new Projector().view(fits).asks[0]).toMatchObject({ offers: ["once", "deny"] });
     expect(new Projector().view(fits).asks[0]).not.toHaveProperty("long");
+  });
+
+  it("never sends a phone a command its card shows as it is because it may hold a key, nor its folder: only No (item 121)", () => {
+    const command = "echo •••• && API_KEY=abc123 pnpm deploy";
+    const source: ChatSource = { ...chat(), items: [{ kind: "approval", id: "r", ts: 2, open: true, title: "Run this command?", command, cwd: "/w/token=abc123", choices: ["once", "deny"] }] };
+    const ask = new Projector().view(source).asks[0]!;
+    expect(ask).toMatchObject({ kind: "approval", keyed: true, command: "", offers: ["deny"] });
+    expect(ask).not.toHaveProperty("cwd");
+    expect(JSON.stringify(ask)).not.toContain("abc123");
+  });
+
+  it("marks every character that does not show, or reorders what does, in what a phone is shown, and says so (item 121)", () => {
+    const source: ChatSource = {
+      ...chat(),
+      items: [
+        { kind: "approval", id: "r", ts: 2, open: true, title: "Run \u202etset\u202c", command: "echo 'Tests passed' \u202e\u2066; rm -rf src .git; echo \u2069'\u202cdone'", cwd: "/w/\u200bsite", choices: ["once", "deny"] },
+        { kind: "clarify", id: "q", ts: 3, open: true, question: "Ship \u2066it\u2069?", choices: ["Yes\u200b", "No"] },
+      ],
+    };
+    const [ask, question] = new Projector().view(source).asks;
+    expect(ask).toMatchObject({ hidden: true, title: "Run ⟨U+202E⟩tset⟨U+202C⟩", command: "echo 'Tests passed' ⟨U+202E⟩⟨U+2066⟩; rm -rf src .git; echo ⟨U+2069⟩'⟨U+202C⟩done'", cwd: "/w/⟨U+200B⟩site", offers: ["once", "deny"] });
+    expect(question).toMatchObject({ question: "Ship ⟨U+2066⟩it⟨U+2069⟩?", choices: ["Yes⟨U+200B⟩", "No"] });
+    expect(JSON.stringify([ask, question])).not.toMatch(/[\u200b\u202a-\u202e\u2066-\u2069]/);
   });
 
   it("gives a command that masks to the same view as another its own revision (item 117)", () => {

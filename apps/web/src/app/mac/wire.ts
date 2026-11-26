@@ -35,6 +35,11 @@ export interface ApprovalAsk {
   readonly command: string;
   /// The command is longer than the Mac sends a phone: `command` is its start, and it is allowed only on the Mac.
   readonly long?: true;
+  /// The Mac's card shows the command as it is, since it may hold a key: it is not sent (`command` is empty), and it is
+  /// allowed only on the Mac (project.ts `keyed`, item 121).
+  readonly keyed?: true;
+  /// The command holds characters that do not show, each a visible mark in `command` (`⟨U+202E⟩`, item 121).
+  readonly hidden?: true;
   readonly cwd?: string;
   readonly plan?: string;
   readonly from?: string;
@@ -136,9 +141,11 @@ export function readAsk(value: unknown): AskView | null {
   if (o.kind === "approval") {
     const title = str(o.title);
     const command = str(o.command);
-    // A command the Mac could not send whole is never allowed from here, whatever the offers say.
+    // A command the Mac could not send whole, or kept because it may hold a key, is never allowed from here, whatever the
+    // offers say.
     const long = o.long === true;
-    const offers = strs(o.offers)?.filter((x): x is PhoneOption => x === "deny" || (x === "once" && !long));
+    const keyed = o.keyed === true;
+    const offers = strs(o.offers)?.filter((x): x is PhoneOption => x === "deny" || (x === "once" && !long && !keyed));
     if (title === null || command === null || !offers) return null;
     const outcome: ApprovalAsk["outcome"] | null = o.outcome === "allowed" || o.outcome === "declined" || o.outcome === "expired" ? o.outcome : null;
     return {
@@ -150,6 +157,8 @@ export function readAsk(value: unknown): AskView | null {
       title,
       command,
       ...(long ? { long: true as const } : {}),
+      ...(keyed ? { keyed: true as const } : {}),
+      ...(o.hidden === true ? { hidden: true as const } : {}),
       ...optional("cwd", str(o.cwd)),
       ...optional("plan", str(o.plan)),
       ...optional("from", from),

@@ -12,9 +12,12 @@
 // the minute without asking the host, and (item 100's part 3) asks GitHub whether a list changed before reading it again.
 //
 // Whatever is read is also noted for the lanes' rows (pulls.ts `notePulls`), so a lane's pull request shows from the same read.
+//
+// A project on Azure DevOps, or on a Gitea or Forgejo server (item 100b), is listed too, read only, when its host's CLI is here: the
+// shell reads the folder's remote and the list (src-tauri/src/pulls_other.rs); a host whose CLI is not here gives nothing.
 import type { TaskHost } from "./host";
 import { notePulls, remoteOf } from "./pulls";
-import type { CliSource, PullRow } from "./types";
+import type { CliSource, OtherHost, OtherRemote, PullRow } from "./types";
 
 export type Readiness = "ready" | "checks" | "review" | "changes" | "failing" | "conflict" | "draft";
 /** The order the list shows them in. */
@@ -39,9 +42,15 @@ export interface BoardRow {
   pull: PullRow;
 }
 
+/** A request on another host's list (item 100b): read only, with the host as the row names it and the project folder it is of. */
+export interface OtherRow extends OtherRemote {
+  folder: string;
+  pull: PullRow;
+}
+
 /** `rows` readiest first, then the most recently changed, then by repository and number so the order never jumps. */
-export function sortRows<T extends BoardRow>(rows: readonly T[]): T[] {
-  const rank = (r: BoardRow) => READINESS.indexOf(readiness(r.pull));
+export function sortRows<T extends Pick<BoardRow, "repo" | "pull">>(rows: readonly T[]): T[] {
+  const rank = (r: Pick<BoardRow, "pull">) => READINESS.indexOf(readiness(r.pull));
   return [...rows].sort((a, b) => rank(a) - rank(b) || (b.pull.updated || b.pull.created) - (a.pull.updated || a.pull.created) || a.repo.localeCompare(b.repo) || a.pull.number - b.pull.number);
 }
 
@@ -53,10 +62,14 @@ export const due = (last: number | null, now: number, visible: boolean): boolean
 
 export interface BoardState {
   rows: BoardRow[];
+  /** Other hosts' requests (item 100b), read only, in the same order. */
+  others: OtherRow[];
   /** The repositories whose list failed, with the shell's line. */
-  errors: { source: CliSource; repo: string; error: string }[];
+  errors: { source: CliSource | OtherHost; repo: string; error: string }[];
   /** The projects' repositories, once read (null: not yet). */
   repos: { source: CliSource; repo: string; folder: string }[] | null;
+  /** The projects' repositories on other hosts whose CLI is here (none until read). */
+  otherRepos: (OtherRemote & { folder: string })[];
   /** Each project folder's repository, `<source>:<repo>` (lower case), for telling a lane's request by its folder. */
   folders: Record<string, string>;
   loading: boolean;
@@ -64,7 +77,7 @@ export interface BoardState {
   at: number | null;
 }
 
-const EMPTY: BoardState = { rows: [], errors: [], repos: null, folders: {}, loading: false, at: null };
+const EMPTY: BoardState = { rows: [], others: [], errors: [], repos: null, otherRepos: [], folders: {}, loading: false, at: null };
 
 /** A repository as `BoardState.folders` names it. */
 export const repoKey = (source: CliSource, repo: string): string => `${source}:${repo.toLowerCase()}`;
@@ -101,12 +114,27 @@ export class BoardWatch {
     if (next.join("\n") === this.projects.join("\n") && this.state.repos !== null) return;
     this.projects = next;
     const gen = ++this.gen;
-    const found = await Promise.all(next.map(async (folder) => ({ folder, remote: await remoteOf(this.host, folder) })));
+    // a folder whose remote is not on GitHub or GitLab is asked of the other hosts' reader, which answers only when that host's CLI
+    // is here
+    const otherOf = this.host.otherRemote?.bind(this.host);
+    const found = await Promise.all(
+      next.map(async (folder) => {
+        const remote = await remoteOf(this.host, folder);
+        const other = remote || !otherOf ? null : await otherOf(folder).catch(() => null);
+        return { folder, remote, other };
+      }),
+    );
     if (gen !== this.gen) return;
     const seen = new Set<string>();
     const repos: BoardState["repos"] = [];
+    const otherRepos: BoardState["otherRepos"] = [];
     const folders: Record<string, string> = {};
-    for (const { folder, remote } of found) {
+    for (const { folder, remote, other } of found) {
+      if (other) {
+        const key = `${other.host}:${other.name}:${other.repo}`.toLowerCase();
+        if (!seen.has(key)) otherRepos.push({ ...other, folder });
+        seen.add(key);
+      }
       if (!remote) continue;
       const key = repoKey(remote.source, remote.repo);
       folders[folder] = key;
@@ -114,7 +142,7 @@ export class BoardWatch {
       seen.add(key);
       repos.push({ source: remote.source, repo: remote.repo, folder });
     }
-    this.set({ repos, folders });
+    this.set({ repos, otherRepos, folders });
     await this.read();
   }
 
@@ -129,13 +157,15 @@ export class BoardWatch {
     const repos = this.state.repos ?? [];
     const board = this.host.board?.bind(this.host);
     if (!board) return Promise.resolve();
+    const otherBoard = this.host.otherBoard?.bind(this.host);
     this.set({ loading: true });
     this.reading = (async () => {
       const at = this.now();
       const rows: BoardRow[] = [];
+      const others: OtherRow[] = [];
       const errors: BoardState["errors"] = [];
-      await Promise.all(
-        repos.map(async (r) => {
+      await Promise.all([
+        ...repos.map(async (r) => {
           try {
             const b = await board(r.source, r.repo);
             for (const pull of b.items) rows.push({ ...r, pull });
@@ -144,8 +174,17 @@ export class BoardWatch {
             errors.push({ source: r.source, repo: r.repo, error: e instanceof Error ? e.message : String(e) });
           }
         }),
-      );
-      this.set({ rows: sortRows(rows), errors, loading: false, at });
+        ...(otherBoard ? this.state.otherRepos : []).map(async (r) => {
+          try {
+            const b = await otherBoard!(r.folder);
+            // the shell reads the folder again: a list of another repository than the one found is not shown
+            if (b && b.host === r.host && b.repo === r.repo) for (const pull of b.items) others.push({ host: r.host, name: r.name, repo: r.repo, folder: r.folder, pull });
+          } catch (e) {
+            errors.push({ source: r.host, repo: r.repo, error: e instanceof Error ? e.message : String(e) });
+          }
+        }),
+      ]);
+      this.set({ rows: sortRows(rows), others: sortRows(others), errors, loading: false, at });
     })().finally(() => {
       this.reading = null;
     });

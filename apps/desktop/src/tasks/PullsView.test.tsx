@@ -144,3 +144,28 @@ describe("a request opened in the app", () => {
     expect(methodsOf(null)).toEqual(["merge", "squash", "rebase"]);
   });
 });
+
+describe("another host's requests (item 100b)", () => {
+  const other = { host: "azure" as const, name: "Azure DevOps", repo: "Shop Site/site", folder: "/code/az", pull: pull(31, { review: "approved", title: "PromptPay QR at checkout", url: "https://dev.azure.com/baanmali/Shop%20Site/_git/site/pullrequest/31" }) };
+
+  it("are listed read only in the same bands, with their host and Open on <host>, and open nothing in the app", () => {
+    const opened: string[] = [];
+    const html = renderToString(
+      <PullsListView state={{ rows: [], others: [other], otherRepos: [{ host: "azure", name: "Azure DevOps", repo: "Shop Site/site", folder: "/code/az" }], errors: [], repos: [], at: 1 }} noProjects={false} selected={null} isLane={() => false} onOpen={noop} onOpenUrl={(u) => opened.push(u)} onRetry={noop} now={NOW} />,
+    );
+    expect(html).toContain('data-testid="prs-group-ready"');
+    expect(html).toContain('data-testid="prs-other-row"');
+    expect(words(html)).toContain("PromptPay QR at checkout");
+    expect(words(html)).toContain("Azure DevOps");
+    expect(words(html)).toContain(t("prs.openOn", { host: "Azure DevOps" }));
+    // no row button that opens it in the app, and no Merge
+    expect(html).not.toContain('data-testid="prs-row"');
+    expect(html).not.toMatch(/pr-merge|review-/);
+    expect(html).not.toContain('data-testid="prs-norepos"');
+  });
+
+  it("with no project on any host the list says so as before", () => {
+    const html = renderToString(<PullsListView state={{ rows: [], others: [], otherRepos: [], errors: [], repos: [], at: 1 }} noProjects={false} selected={null} isLane={() => false} onOpen={noop} onRetry={noop} now={NOW} />);
+    expect(html).toContain('data-testid="prs-norepos"');
+  });
+});

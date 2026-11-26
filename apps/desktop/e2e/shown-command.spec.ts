@@ -51,6 +51,10 @@ const COMMANDS = [
     command: `cat > key.pem <<'EOF'\n-----BEGIN RSA PRIVATE KEY-----\nMIIB${"X".repeat(60)}\n${"X".repeat(64)}\n-----END RSA PRIVATE KEY-----\nEOF`,
     shown: "cat > key.pem <<'EOF'\n-----BEGIN RSA PRIVATE KEY-----\n••••\n-----END RSA PRIVATE KEY-----\nEOF",
   },
+  // a value never runs over a word the shell reads on its own: the force push shows (item 121)
+  { name: "cookie", command: "git push -o cookie:x=1 --force origin main", shown: "git push -o cookie:•••• --force origin main" },
+  // a command that already holds the mask cannot be told from a masked one: shown as it is, with a note (item 121)
+  { name: "unmasked", command: "echo •••• && API_KEY=abc123 pnpm test", shown: "echo •••• && API_KEY=abc123 pnpm test", note: true },
 ] as const;
 
 async function open(page: Page, theme: Theme) {
@@ -90,6 +94,9 @@ for (const theme of THEMES) {
       // word for word, line for line: nothing folded, cut or hidden but the keys
       expect(await block.evaluate((el) => el.textContent)).toBe(c.shown);
       expect(await block.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+      // only a command shown as it is says it may hold a key
+      await expect(card.getByTestId("card-cmd-key")).toHaveCount("note" in c ? 1 : 0);
+      if ("note" in c) await expect(card.getByTestId("card-cmd-key")).toHaveText("This command may hold a key. It is shown in full, so you see exactly what runs.");
       await shot(card, theme, c.name);
     }
     // the long one scrolls inside its block, its scrollbar showing, and End reaches its end (not the chat's)

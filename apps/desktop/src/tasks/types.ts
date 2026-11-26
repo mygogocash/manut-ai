@@ -130,6 +130,21 @@ export interface PullDetail {
   changed: number | null;
 }
 
+/** A host listed read only (item 100b, src-tauri/src/pulls_other.rs): Azure DevOps through `az`, a Gitea or Forgejo server through
+ *  `gt`. Nothing is merged or written there from the app. */
+export type OtherHost = "azure" | "gitea";
+
+/** A project's repository on such a host: what the row calls the host ("Azure DevOps", or the server's own name) and the repository
+ *  as a person reads it. */
+export interface OtherRemote {
+  host: OtherHost;
+  name: string;
+  repo: string;
+}
+
+/** Such a repository's open requests, read through the host's own CLI. */
+export interface OtherBoard extends OtherRemote, PullBoard {}
+
 /** The merge methods a repository allows; `read`: the host said (else all three, and the host refuses one it does not allow). */
 export interface MergeMethods {
   merge: boolean;

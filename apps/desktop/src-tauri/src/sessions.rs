@@ -1062,7 +1062,8 @@ impl Sessions {
             return Err(format!("not a folder: {}", cwd.display()));
         }
         let pair = native_pty_system().openpty(clamp_size(cols, rows)).map_err(|e| e.to_string())?;
-        let mut child = pair.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
+        // the App Store edition's sandbox refuses a terminal its controlling terminal: said plainly (app_store.rs)
+        let mut child = pair.slave.spawn_command(cmd).map_err(|e| crate::app_store::spawn_refusal(crate::app_store::APP_STORE, e.to_string()))?;
         drop(pair.slave); // only the child holds the terminal side, so its exit ends our reads
         let reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
         let mut writer = pair.master.take_writer().map_err(|e| e.to_string())?;

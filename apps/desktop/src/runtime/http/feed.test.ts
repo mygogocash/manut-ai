@@ -44,8 +44,12 @@ function world(...answers: Look[]) {
       ping: (shop) => void pings.push(shop),
     },
   });
+  worlds.push(feeds);
   return { feeds, sockets, looks, pings, answer: (...more: Look[]) => queue.splice(0, queue.length, ...more) };
 }
+
+/** Every test's followers, let go after it, so none of them looks or opens on a later test's clock. */
+const worlds: ShopFeeds[] = [];
 
 const ON = (ticket = "c2hvcC1h.ticket-1"): Look => ({ kind: "on", ticket });
 const PING = JSON.stringify({ v: 1, seq: 1795591574420 });
@@ -59,6 +63,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  for (const feeds of worlds.splice(0)) feeds.stop();
   vi.useRealTimers();
 });
 
@@ -127,7 +132,10 @@ describe("following a shop", () => {
     let at = Date.now();
     for (let i = 0; i < 14; i += 1) {
       const before = w.looks.length;
-      while (w.looks.length === before) await vi.advanceTimersByTimeAsync(500);
+      // straight to the next timer, a bounded number of times: stepping half a second through the hour-long waits took
+      // over 22,000 steps, passed five seconds on a loaded Mac, and its loop then ran on under the next tests' clocks
+      for (let k = 0; k < 8 && w.looks.length === before; k += 1) await vi.advanceTimersToNextTimerAsync();
+      expect(w.looks.length, `look ${i + 2}`).toBe(before + 1);
       waits.push(Math.round((Date.now() - at) / 1000));
       at = Date.now();
     }

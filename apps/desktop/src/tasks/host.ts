@@ -6,7 +6,7 @@
 // only an account id (`<login>@<host>`), a section word and a page number; a non-active account's token never
 // reaches the page (the shell reads it for one `gh` call and drops it).
 import { maskSecrets } from "../lib/secrets";
-import type { CliSource, CliStatus, GhAccount, GhAccounts, MeFailKind, MeItem, MePage, MeSection, MergeMethods, PullBoard, PullDetail, PullRow, TaskDetail, TaskFilter, TaskItem, TaskKind, TaskPage, TaskRemote } from "./types";
+import type { CliSource, CliStatus, GhAccount, GhAccounts, MeFailKind, MeItem, MePage, MeSection, MergeMethods, OtherBoard, OtherRemote, PullBoard, PullDetail, PullRow, TaskDetail, TaskFilter, TaskItem, TaskKind, TaskPage, TaskRemote } from "./types";
 import { PAGE } from "./types";
 
 /** A "나" list that failed, with why (`rate`: GitHub's rate limit, `auth`: sign in again, `other`). */
@@ -47,6 +47,12 @@ export interface TaskHost {
   pullView?(source: CliSource, repo: string, number: number): Promise<PullDetail>;
   /** The merge methods `repo` allows. Only reads. */
   methods?(source: CliSource, repo: string): Promise<MergeMethods>;
+  /** The Azure DevOps, Gitea or Forgejo repository the project at `cwd` is in (item 100b), read by the shell from the folder, when
+   *  that host's CLI is installed; null otherwise. Only reads. */
+  otherRemote?(cwd: string): Promise<OtherRemote | null>;
+  /** That repository's open requests, through the host's own CLI; null when there is none or its CLI is not here. Only reads: the
+   *  app merges and writes nothing there. */
+  otherBoard?(cwd: string): Promise<OtherBoard | null>;
 }
 
 class TauriTaskHost implements TaskHost {
@@ -88,6 +94,14 @@ class TauriTaskHost implements TaskHost {
     const { invoke } = await this.core();
     return invoke<MergeMethods>("pulls_methods", { source, repo });
   }
+  async otherRemote(cwd: string) {
+    const { invoke } = await this.core();
+    return invoke<OtherRemote | null>("pulls_other_remote", { cwd });
+  }
+  async otherBoard(cwd: string) {
+    const { invoke } = await this.core();
+    return invoke<OtherBoard | null>("pulls_other_board", { cwd });
+  }
 }
 
 // ---- Mock -----------------------------------------------------------------------------------
@@ -118,6 +132,9 @@ export interface MockTasks {
   pullDetails?: Record<string, Partial<Omit<PullDetail, "pull">>>;
   /** `<source>:<repo>` -> the merge methods it allows (else all three, not read) */
   methods?: Record<string, MergeMethods>;
+  /** Other hosts (item 100b): folder -> its repository there and every open request, as the shell answers when the host's CLI is
+   *  installed (a folder not named: none, or its CLI is not here) */
+  others?: Record<string, OtherRemote & { items: PullRow[]; error?: string }>;
 }
 
 export type MockTaskCall =
@@ -129,7 +146,9 @@ export type MockTaskCall =
   | { op: "me"; account: string; section: MeSection; page: number; fresh: boolean }
   | { op: "board"; source: CliSource; repo: string }
   | { op: "pullView"; source: CliSource; repo: string; number: number }
-  | { op: "methods"; source: CliSource; repo: string };
+  | { op: "methods"; source: CliSource; repo: string }
+  | { op: "otherRemote"; cwd: string }
+  | { op: "otherBoard"; cwd: string };
 
 type G = { __manutTasks?: MockTasks; __manutTaskCalls?: MockTaskCall[] };
 
@@ -209,6 +228,19 @@ class MockTaskHost implements TaskHost {
     this.log({ op: "methods", source, repo });
     return this.data.methods?.[`${source}:${repo}`] ?? { merge: true, squash: true, rebase: true, read: false };
   }
+  async otherRemote(cwd: string): Promise<OtherRemote | null> {
+    this.log({ op: "otherRemote", cwd });
+    const o = this.data.others?.[cwd];
+    return o ? { host: o.host, name: o.name, repo: o.repo } : null;
+  }
+  async otherBoard(cwd: string): Promise<OtherBoard | null> {
+    this.log({ op: "otherBoard", cwd });
+    await new Promise((r) => setTimeout(r, 30));
+    const o = this.data.others?.[cwd];
+    if (!o) return null;
+    if (o.error) throw new Error(o.error);
+    return { host: o.host, name: o.name, repo: o.repo, items: o.items, more: false, at: Math.floor(Date.now() / 1000) };
+  }
 }
 
 // ---- Masking --------------------------------------------------------------------------------
@@ -269,6 +301,16 @@ export class MaskingTaskHost implements TaskHost {
   methods(source: CliSource, repo: string): Promise<MergeMethods> {
     if (!this.inner.methods) return Promise.resolve({ merge: true, squash: true, rebase: true, read: false });
     return this.inner.methods(source, repo).catch((e) => Promise.reject(masked(e)));
+  }
+  async otherRemote(cwd: string): Promise<OtherRemote | null> {
+    if (!this.inner.otherRemote) return null;
+    const r = await this.inner.otherRemote(cwd).catch((e) => Promise.reject(masked(e)));
+    return r ? { ...r, name: maskSecrets(r.name), repo: maskSecrets(r.repo) } : null;
+  }
+  async otherBoard(cwd: string): Promise<OtherBoard | null> {
+    if (!this.inner.otherBoard) return null;
+    const b = await this.inner.otherBoard(cwd).catch((e) => Promise.reject(masked(e)));
+    return b ? { ...b, name: maskSecrets(b.name), repo: maskSecrets(b.repo), items: b.items.map(maskItem) } : null;
   }
 }
 

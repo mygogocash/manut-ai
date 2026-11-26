@@ -3,6 +3,7 @@ import {
   AGENTS,
   folderName,
   INSTALL,
+  installLine,
   isAgentId,
   lastPrintedLine,
   LAST_LINE_MAX,
@@ -130,6 +131,17 @@ describe("session agents", () => {
     // OpenCode's own docs (opencode.ai/v1/docs): the npm package is opencode-ai, its program `opencode`
     expect(missingNote("opencode")).toBe("opencode was not found on this computer · install: npm install -g opencode-ai");
     expect(Object.keys(INSTALL).sort()).toEqual(AGENTS.map((a) => a.id).sort());
+  });
+
+  it("the Mac App Store edition offers no install line, and its tooltip says why (Guideline 2.4.5)", () => {
+    for (const a of AGENTS) {
+      expect(installLine(a.id, true)).toBe("");
+      expect(installLine(a.id, false)).toBe(INSTALL[a.id as keyof typeof INSTALL]);
+      const note = missingNote(a.id, true);
+      expect(note).toContain("The App Store edition does not install programs");
+      expect(note).not.toMatch(/npm|curl|install:/);
+    }
+    expect(missingNote("dsh", true)).toContain("DeepSeek Harness (dsh)");
   });
 
   it("row model of a chat: live only while a turn runs, needsYou while an approval waits (the line stays the agent)", () => {

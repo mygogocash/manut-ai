@@ -449,7 +449,8 @@ describe("B5: a file read from outside the project that the words did not show a
     counted += holds([
       ["jq -R -f /dev/stdin /Users/fon/.ssh/id_rsa", "jq -R . notes.txt", "read"],
       ["jq -Rf /dev/stdin /Users/fon/.ssh/id_rsa", "jq -r .name package.json", "read"],
-      ["jq --from-file=/dev/stdin ~/.ssh/id_rsa", "jq --from-file=filter.jq data.json", "read"],
+      // item 120: a filter read from a file is not read in advance, so `jq --from-file=filter.jq data.json` asks too
+      ["jq --from-file=/dev/stdin ~/.ssh/id_rsa", "jq -r .name data.json", "read"],
       ["jq -L /Users/fon/.secrets -n 'import \"k\" as $k; $k'", "jq -n '1 + 1'", "read"],
       ["jq -n 'import \"k\" as $k; $k'", "jq -n '[1, 2] | length'", "read"],
       ["jq -n 'include \"k\"; .'", "jq '.a' data.json", "read"],
@@ -505,7 +506,8 @@ describe("B6: a read or a check pointed at another computer", () => {
       ["kubectl get pods -s x.example:443", "kubectl get pods -n web", "read"],
       ["kubectl get pods --kubeconfig=./kc.yaml", "kubectl describe pod web", "read"],
       ["kubectl get pods --kuberc=./rc.yaml", "kubectl logs web", "read"],
-      ["kubectl get -f https://x.example/k.yaml", "kubectl get -f k8s/web.yaml", "read"],
+      // item 120: an object a file names may be a Secret, so `kubectl get -f k8s/web.yaml` asks too
+      ["kubectl get -f https://x.example/k.yaml", "kubectl get -n web pods", "read"],
       ["helm template web https://x.example/k.tgz", "helm template web ./chart", "read"],
       ["helm template web oci://x.example/k", "helm lint ./chart", "read"],
       ["helm template web chart --repo x.example", "helm template web ./chart -f values.yaml", "read"],
@@ -865,6 +867,388 @@ describe("C5: git pointed at another folder, and a program named by a path (item
       ["fixtures/node_modules/.bin/../x/node_modules/.bin/../../../scripts/test", `${root}/node_modules/.bin/vitest run`, "check"],
       ["../node_modules/.bin/vitest run", "./node_modules/.bin/tsc --noEmit", "check"],
     ]);
+  });
+});
+
+describe("D1: a push read with a branch the line has moved away from (item 120)", () => {
+  const level = (line: string, where: Where = at) => {
+    const c = readCommand(line, where);
+    return kitDecide({ action: c.action, outside: c.outside.length > 0 }, "everything_in_project", ON_THIS_MAC, 0).answer;
+  };
+  /** Steps that may leave the folder on another branch, or the rest of the line in another repository. */
+  const MOVERS = [
+    "git switch main", "git switch -c kit/y", "git switch -C kit/y", "git switch --detach", "git switch -", "git checkout main",
+    "git checkout -b kit/y", "git checkout -B kit/y", "git checkout -", "git checkout --detach", "git branch -m main",
+    "git branch -M kit/x main", "git branch --move main", "git bisect start", "git rebase main", "git rebase -i main",
+    "git -C . switch main", "git --no-pager checkout main", "gh pr checkout 12", "git symbolic-ref HEAD refs/heads/main",
+    "git update-ref --no-deref HEAD main", "git worktree move a b", "git stash branch main", "git clone https://example.com/x.git",
+    "sh -c 'git switch main'", "command git switch main", "time git checkout main", "find . -maxdepth 0 -exec git switch main \\;",
+  ];
+  /** Steps that move the shell into a folder that may be another repository: a push after them runs there. */
+  const INTO = ["cd vendor/lib", "cd apps/web", "cd ./vendor/lib/", `cd ${root}/vendor/lib`];
+  /** Pushes that name no branch, or name the branch checked out (HEAD, `@`, and `head`, which macOS's disk finds as HEAD). */
+  const PUSHES = ["git push", "git push -u origin", "git push origin", "git push origin HEAD", "git push --set-upstream origin HEAD", "git push origin @", "git push origin head", "git push origin Head"];
+
+  it("never reads a push of the branch checked out as the session's branch once a step before or beside it may have moved it", () => {
+    const wrong: string[] = [];
+    for (const m of MOVERS)
+      for (const p of PUSHES)
+        for (const line of [`${m} && ${p}`, `${m}; ${p}`, `${m}\n${p}`, `${m} || ${p}`, `${m} | ${p}`, `${p} | ${m}`, `${p} & ${m}`, `${m} & ${p}`])
+          if (level(line) === "alone") wrong.push(line);
+    for (const m of INTO) for (const p of [...PUSHES, "git push origin kit/promptpay-qr", "gh pr create -t x -b y"]) for (const line of [`${m} && ${p}`, `${m}; ${p}`, `${m}\n${p}`]) if (level(line) === "alone") wrong.push(line);
+    expect(wrong).toEqual([]);
+    // a `cd` that cannot have run first leaves the push in the session's folder: `||` runs it only after a `cd` that failed
+    expect(level("cd vendor/lib || git push")).toBe("alone");
+  });
+
+  it("reads a push or a pull request from another folder of the project as one of a repository that is not known", () => {
+    expect(level("git push", { ...at, cwd: `${root}/vendor/lib` })).toBe("ask");
+    expect(level("git push origin HEAD", { ...at, from: [`${root}/vendor/lib`] })).toBe("ask");
+    // a folder inside the project may be another repository, with a remote of its own
+    expect(level("cd vendor/lib && git push origin kit/promptpay-qr")).toBe("ask");
+    expect(level("git push origin kit/promptpay-qr", { ...at, from: [`${root}/vendor/lib`] })).toBe("ask");
+    expect(level("cd vendor/lib && gh pr create -t x -b y")).toBe("ask");
+    // and a pull request opened on a repository the words name
+    expect(level("gh pr create -R someone/else -t x -b y")).toBe("ask");
+    expect(level("gh pr create --repo=someone/else -t x -b y")).toBe("ask");
+    expect(level("gh pr create -t x -b y")).toBe("alone");
+    // the plain twins: a push of the session's branch from its own folder still goes alone
+    for (const p of PUSHES) expect([p, level(p)]).toEqual([p, "alone"]);
+    expect(level("git status && git push")).toBe("alone");
+    expect(level("git add -A && git commit -m x && git push -u origin kit/promptpay-qr")).toBe("alone");
+  });
+
+  it("reads the branch a push sends to from its own words", () => {
+    /** A push, the branch the session is on, and what it reads as. */
+    const ROWS: [line: string, branch: string, as: KitAction][] = [
+      ["git push origin @", "main", "live"],
+      ["git push origin head", "main", "live"],
+      ["git push origin HEAD", "main", "live"],
+      ["git push origin @", "kit/promptpay-qr", "push"],
+      // `:` and `+:` push every branch both sides have, main among them
+      ["git push origin :", "kit/promptpay-qr", "live"],
+      ["git push origin +:", "kit/promptpay-qr", "live"],
+      // a pattern pushes every branch it matches
+      ["git push origin 'refs/heads/*:refs/heads/*'", "kit/promptpay-qr", "live"],
+      ["git push origin 'kit/*'", "kit/promptpay-qr", "live"],
+      // git finds `heads/main` on the remote as refs/heads/main
+      ["git push origin HEAD:heads/main", "kit/promptpay-qr", "live"],
+      ["git push origin kit/x:refs/heads/main", "kit/promptpay-qr", "live"],
+      ["git push origin refs/heads/main", "kit/promptpay-qr", "live"],
+      ["git push origin HEAD:refs/remotes/origin/main", "kit/promptpay-qr", "live"],
+      ["git push origin :main", "kit/promptpay-qr", "live"],
+      // every branch, an option the server reads (GitLab merges with one), remote branches removed, submodules pushed
+      ["git push --branches origin", "kit/promptpay-qr", "live"],
+      ["git push --branch origin", "kit/promptpay-qr", "live"],
+      ["git push -o merge_request.merge_when_pipeline_succeeds origin kit/promptpay-qr", "kit/promptpay-qr", "live"],
+      ["git push --push-option=ci.skip origin kit/promptpay-qr", "kit/promptpay-qr", "live"],
+      ["git push --prune origin kit/promptpay-qr", "kit/promptpay-qr", "live"],
+      ["git push --recurse-submodules=on-demand origin kit/promptpay-qr", "kit/promptpay-qr", "live"],
+      // the plain twins
+      ["git push origin kit/promptpay-qr", "kit/promptpay-qr", "push"],
+      ["git push origin HEAD:kit/promptpay-qr", "main", "push"],
+      ["git push --recurse-submodules=check origin kit/promptpay-qr", "kit/promptpay-qr", "push"],
+      ["git push -u origin HEAD", "kit/promptpay-qr", "push"],
+    ];
+    const wrong = ROWS.filter(([line, branch, as]) => readCommand(line, { ...at, branch }).action !== as).map(([line, branch, as]) => `${line} on ${branch}: ${readCommand(line, { ...at, branch }).action}, not ${as}`);
+    expect(wrong).toEqual([]);
+  });
+
+  it("asks before a branch is given an upstream, which decides where a later push that names no branch sends", () => {
+    counted += holds([
+      ["git branch -u origin/main", "git branch kit/y", "change"],
+      ["git branch --set-upstream-to=origin/main", "git branch -m kit/z", "change"],
+      ["git branch --track kit/y origin/main", "git branch kit/y main", "change"],
+      ["git switch -c kit/y --track origin/main", "git switch -c kit/y", "change"],
+      ["git switch -t origin/main", "git switch kit/y", "change"],
+      ["git checkout -b kit/y -t origin/main", "git checkout -b kit/y", "change"],
+      ["git checkout --track origin/main", "git checkout kit/y", "change"],
+    ]);
+    for (const line of ["git branch -u origin/main", "git switch -c kit/y --track origin/main"]) expect([line, level(line)]).toEqual([line, "ask"]);
+  });
+
+  it("says which lines may move the branch checked out, for the session's next push", () => {
+    const wrong: string[] = [];
+    for (const m of [...MOVERS, ...INTO]) if (!readCommand(m, at).movesHead) wrong.push(`not said: ${m}`);
+    for (const plain of ["git status", "git add -A", "git commit -m x", "git push origin kit/promptpay-qr", "pnpm test", "ls", "git log --oneline", "git diff HEAD~1", "git fetch", "git stash", "git stash pop", "git merge main", "git pull"])
+      if (readCommand(plain, at).movesHead) wrong.push(`said: ${plain}`);
+    expect(wrong).toEqual([]);
+  });
+});
+
+describe("D2: an option that takes a value, read as taking the option after it (item 120)", () => {
+  /** A program read from a list of its options, the options of it that take a value, and an option no list holds, written
+   *  the way the program reads its options. Each value option is followed by the unknown option: a program whose value is
+   *  optional (vitest's `--changed`, make's `-j`, cargo's `--test`) leaves the next option to itself, and one whose value
+   *  is required takes it as the value or refuses to start, so reading it as an option only ever asks more. */
+  const PROGRAMS: [prefix: string, values: string, unknown: string][] = [
+    ["vitest run", "-r --root -c --config -t --testNamePattern --dir --reporter --mode --workspace --pool --maxWorkers --minWorkers --environment --shard --changed --testTimeout --hookTimeout --bail --retry --exclude --project --slowTestThreshold --teardownTimeout --maxConcurrency", "--zzz-unread"],
+    ["npx vitest list", "--changed --project -t", "--zzz-unread"],
+    ["tsc --noEmit", "-p --project --target --module --moduleResolution --lib --jsx --types --moduleDetection --locale", "--zzz-unread"],
+    ["npx playwright test", "-c --config --browser -g --grep -G --grep-invert --global-timeout -j --workers --max-failures --project --repeat-each --reporter --retries --shard --timeout", "--zzz-unread"],
+    ["pytest", "-k -m --maxfail --durations --durations-min --verbosity -r --tb --show-capture --color --code-highlight -W --ignore --ignore-glob --deselect --doctest-glob --import-mode --capture --assert --log-level --log-cli-level --log-format --log-date-format", "--zzz-unread"],
+    ["mypy", "-O --follow-imports --python-version --platform --always-true --always-false --untyped-calls-exclude --deprecated-calls-exclude --disable-error-code --enable-error-code --exclude -m -p", "--zzz-unread"],
+    ["ruff check", "--output-format --target-version --extension --select --ignore --extend-select --per-file-ignores --extend-per-file-ignores --fixable --unfixable --extend-fixable --exclude --extend-exclude --color", "--zzz-unread"],
+    ["ruff format --check", "--extension --target-version --output-format --exclude --line-length --range --color", "--zzz-unread"],
+    ["npx jest", "-b --bail --changedSince --collectCoverageFrom --coverageProvider --maxConcurrency -w --maxWorkers --seed --selectProjects --shard --testMatch -t --testNamePattern --testPathIgnorePatterns --testPathPatterns --testTimeout", "--zzz-unread"],
+    ["npx mocha", "--global --globals -j --jobs --retries -s --slow -t --timeout --timeouts -u --ui --extension --ignore --exclude -f --fgrep -g --grep", "--zzz-unread"],
+    ["npx eslint", "--ext --global --rule --ignore-pattern --max-warnings -f --format --report-unused-disable-directives-severity --cache-strategy --fix-type --concurrency", "--zzz-unread"],
+    ["npx prettier --check", "--ignore-path --config-precedence --log-level --find-config-path", "--zzz-unread"],
+    ["pylint", "--disable -d --enable -j --ignore --msg-template --recursive --source-roots", "--zzz-unread"],
+    ["shellcheck", "-i --include -e --exclude --extended-analysis -f --format -o --enable -s --shell -S --severity -W --wiki-link-count", "--zzz-unread"],
+    ["actionlint", "-ignore -format", "-zzzunread"],
+    ["go test", "-bench -benchtime -count -covermode -coverpkg -cpu -list -parallel -run -shuffle -skip -timeout -vet", "-zzzunread"],
+    ["cargo test", "--message-format --color -p --package --exclude --bin --example --test --bench -F --features -j --jobs --profile --target", "--zzz-unread"],
+    ["cargo clippy", "-p --package --bin --test --target", "--zzz-unread"],
+    ["pip list", "--format --exclude", "--zzz-unread"],
+    ["uv pip list", "--exclude --format", "--zzz-unread"],
+    ["pnpm test --", "-t --testNamePattern --reporter --pool --project --shard --testTimeout --maxWorkers --environment --config --mode", "--zzz-unread"],
+    ["turbo run test", "--filter -F", "--zzz-unread"],
+    ["make", "-C --directory -j --jobs -l --load-average", "--file=other.mk"],
+    ["just", "--color", "--justfile=other"],
+    ["task", "--concurrency", "--taskfile=other.yml"],
+    ["pnpm", "--filter -F -C --dir --prefix --workspace --cwd --reporter --loglevel --workspace-dir --depth --workspace-concurrency --resume-from --test-pattern --omit --include --tag", "--config.script-shell=./x.sh"],
+    ["git fetch", "--depth --deepen --shallow-since --shallow-exclude --jobs -j --filter --negotiation-tip", "--upload-pack=./x.sh"],
+    ["git branch", "--sort --format", "--set-upstream-to=origin/main"],
+    ["git config", "--type --default", "--global"],
+  ];
+  /** What each program is given after the options: a target, a task or a script for those that need one. */
+  const after = (prefix: string) => (["make", "just", "task"].includes(prefix) ? " test" : prefix === "pnpm" ? " test" : prefix === "git config" ? " user.name" : "");
+
+  it("reads the option after it as the option it is: a value option never takes a word that starts with `-`", () => {
+    const wrong: string[] = [];
+    let n = 0;
+    for (const [prefix, values, unknown] of PROGRAMS) {
+      for (const opt of values.split(" ")) {
+        n++;
+        const line = `${prefix} ${opt} ${unknown}${after(prefix)}`;
+        if (alone(line)) wrong.push(line);
+      }
+      // the plain twin: the program alone still goes
+      if (!alone(`${prefix}${after(prefix)}`) && !["git config"].includes(prefix)) wrong.push(`plain asks: ${prefix}${after(prefix)}`);
+    }
+    expect(wrong).toEqual([]);
+    expect(n).toBeGreaterThan(200);
+    counted += n;
+  });
+
+  it("asks for the review's lines, in every form a runner is started", () => {
+    counted += holds([
+      ["vitest run --changed --inspect=0.0.0.0:9229", "vitest run --changed", "check"],
+      ["vitest run --changed --inspect-brk=0.0.0.0:9229", "vitest run --changed HEAD~1", "check"],
+      ["vitest --changed --inspect=0.0.0.0:9229 --changed --no-file-parallelism", "vitest --changed --no-file-parallelism", "check"],
+      ["npx vitest run --changed --inspect=0.0.0.0:9229", "npx vitest run --changed=main", "check"],
+      ["pnpm exec vitest run --changed --inspect=0.0.0.0:9229", "pnpm exec vitest run --changed", "check"],
+      ["node_modules/.bin/vitest run --changed --inspect=0.0.0.0:9229", "node_modules/.bin/vitest run --changed", "check"],
+      ["vitest run --changed --browser.api.host=0.0.0.0", "vitest run --changed --coverage", "check"],
+      ["pnpm vitest run --changed --inspect-brk=0.0.0.0:9229 --no-file-parallelism", "pnpm vitest run --no-file-parallelism", "check"],
+      ["npx vitest list --changed --inspect=0.0.0.0:9229", "npx vitest list --changed", "check"],
+      ["make -j --file=other.mk test", "make -j test", "check"],
+      ["make --jobs --file=other.mk test", "make --jobs 4 test", "check"],
+      ["make --load-average --file=other.mk test", "make --load-average 2.5 test", "check"],
+      ["make -l --file=other.mk test", "make -j4 test", "check"],
+      ["cargo test --test --manifest-path fixtures/x/Cargo.toml", "cargo test --test api", "check"],
+      ["npx jest --bail --watchman=false --runInBand", "npx jest --bail --runInBand", "check"],
+      // a debugger asks in every runner, whatever reads its options: the words a script is handed, mocha's and node's names
+      ["pnpm test -- --inspect-port=0.0.0.0:9229", "pnpm test -- --coverage", "check"],
+      ["npx mocha --debug-port=9229", "npx mocha --exit", "check"],
+      ["npx jest --inspect-brk", "npx jest --ci", "check"],
+    ]);
+  });
+});
+
+describe("D3: a key saved by a route the read of the folder's diff does not see (item 120)", () => {
+  /** Lines whose commit or push saves what a read of the folder made before they run cannot see: a step that writes files
+   *  beside the save, or a message or body read from a file. */
+  const UNSEEN = [
+    "cp .env notes.txt && git add notes.txt && git commit -m notes && git push origin kit/promptpay-qr",
+    "cp .env n.txt && git add n.txt && git commit -qm a && git rm -q n.txt && git commit -qm b",
+    "cat .env >> notes.md && git commit -am notes",
+    "printf x > a.txt; git commit -am x",
+    "sed -i '' 's/a/b/' src/a.ts && git commit -am x",
+    "git add -f .env && git commit -m x",
+    "git add --force .env && git commit -m x",
+    "git stash pop && git commit -am x",
+    "git checkout kit/other -- src/a.ts && git commit -am x",
+    "git restore --source kit/other src/a.ts && git commit -am x",
+    "git cherry-pick kit/other && git push origin kit/promptpay-qr",
+    "git pull && git push",
+    "pnpm build && git add -A && git commit -m build",
+    "mv ../x.txt notes.txt && git commit -am x",
+    "tee notes.txt < .env && git commit -am x",
+    "git commit -F .env",
+    "git commit --allow-empty -F .env",
+    "git commit --file=.env",
+    "git commit -F- < .env",
+    "cat .env | git commit -F -",
+    "git commit -t .env",
+    "git commit --template .env",
+    "git commit --allow-empty -F .env && git push origin kit/promptpay-qr",
+    "gh pr create --title fix --body-file .env",
+    "gh pr create -t fix -F .env",
+    "gh pr create -t fix --body-file=.env",
+    "gh pr create -t fix -T .env",
+  ];
+  /** Their plain twins: the save is of what the read before it sees. */
+  const SEEN = [
+    "git add -A && git commit -m x", "git add . && git commit -m x && git push -u origin kit/promptpay-qr", "git commit -am x",
+    "git commit -m x && git push", "git status && git add src/a.ts && git commit -m x", "pnpm test && git commit -am x",
+    "git rm --cached src/a.ts && git commit -m x", "git mv src/a.ts src/b.ts && git commit -m x", "gh pr create -t fix -b body",
+    "git commit -m 'Add -F flag'", "git push origin kit/promptpay-qr",
+  ];
+
+  it("says the read before it cannot see what such a line saves, so a commit or a push in it asks", () => {
+    const wrong: string[] = [];
+    // each is read as unseen, or as a step nobody can read (`--template` already was), which asks at every level
+    for (const line of UNSEEN) if (!readCommand(line, at).unseen && readCommand(line, at).action !== "unknown") wrong.push(`seen: ${line}`);
+    for (const line of SEEN) if (readCommand(line, at).unseen) wrong.push(`unseen: ${line}`);
+    expect(wrong).toEqual([]);
+    counted += UNSEEN.length;
+  });
+
+  it("says which steps send what is saved, so a push reads the commits it sends", () => {
+    for (const line of ["git push", "git push origin kit/promptpay-qr", "git commit -m x && git push", "gh pr create -t x -b y", "git push --force origin kit/x"]) expect([line, readCommand(line, at).sends]).toEqual([line, true]);
+    for (const line of ["git commit -m x", "git add -A", "git status"]) expect([line, readCommand(line, at).sends]).toEqual([line, false]);
+  });
+});
+
+describe("D4: a read that prints secrets, a tag pushed, a branch moved back (item 120)", () => {
+  it("reads git config's new `get` listing, kubectl's file and raw reads, yq's load anywhere, helm's and terraform's JSON as printing secrets", () => {
+    counted += holds([
+      ["git config get --all --regexp .", "git config get user.email", "read"],
+      ["git config get --regexp 'http\\..*'", "git config get --all remote.origin.fetch", "read"],
+      ["git config get --reg .", "git config get --show-origin user.name", "read"],
+      ["git config get --url=https://github.com http.extraheader", "git config get --default=main init.defaultBranch", "read"],
+      ["git config get --url https://github.com http.extraHeader", "git config get -t bool core.bare", "read"],
+      ["git config get --show-names --regexp .", "git config get --local --regexp remote", "read"],
+      ["printf 'apiVersion: v1\\nkind: Secret\\nmetadata:\\n  name: db\\n' | kubectl get -f - -o yaml", "kubectl get pods -o yaml", "read"],
+      ["kubectl get -f k8s/db-secret.yaml -o yaml", "kubectl get deploy web -o yaml", "read"],
+      ["kubectl get --filename=k8s/db.yaml -o json", "kubectl get svc -o wide", "read"],
+      ["kubectl get -k overlays/prod -o yaml", "kubectl get ns", "read"],
+      ["kubectl get --raw /api/v1/namespaces/default/secrets", "kubectl get pods -n web -o name", "read"],
+      ["kubectl describe -f k8s/db-secret.yaml", "kubectl describe deploy web", "read"],
+      ["kubectl get -Rf k8s/ -o yaml", "kubectl get pods -A", "read"],
+      ["yq -n --expression='load_str(\"/Users/fon/.aws/credentials\")'", "yq -n --expression='.a'", "read"],
+      ["yq -n 'eval(\"lo\" + \"ad_str(\\\"/Users/fon/.aws/credentials\\\")\")'", "yq -n '.a + 1'", "read"],
+      ["yq -n 'eval(\"e\" + \"nv(AWS_SECRET_ACCESS_KEY)\")'", "yq '.a' a.yaml", "read"],
+      ["yq -o json 'load_str(\"/Users/fon/.aws/credentials\")' a.yaml", "yq -o json '.a' a.yaml", "read"],
+      ["yq -I 4 -n 'env(HOME)'", "yq -I 4 '.a' a.yaml", "read"],
+      ["yq --from-file expr.yq a.yaml", "yq e '.a' a.yaml", "read"],
+      ["jq -f filter.jq package.json", "jq .name package.json", "read"],
+      ["jq --from-file filter.jq package.json", "jq -r .version package.json", "read"],
+      ["jq -n --arg x 1 '$ENV'", "jq -n --arg x 1 '$x'", "read"],
+      ["helm status web -o json", "helm status web", "read"],
+      ["helm status web --output=yaml", "helm list -o json", "read"],
+      ["terraform show -json", "terraform show", "read"],
+      ["tofu show -json plan.out", "tofu show plan.out", "read"],
+      ["pulumi preview --show-secrets", "pulumi preview", "read"],
+    ]);
+  });
+
+  it("reads a push of a tag as one that goes live", () => {
+    const ROWS: [line: string, as: KitAction][] = [
+      ["git push origin v2.0.0", "live"],
+      ["git push origin refs/tags/v2.0.0", "live"],
+      ["git push origin tags/v2.0.0", "live"],
+      ["git push origin desktop-v0.1.1", "live"],
+      ["git push origin HEAD:refs/tags/x", "live"],
+      ["git push --tags", "live"],
+      ["git push --follow-tags origin kit/promptpay-qr", "live"],
+      ["git tag release-1 && git push origin release-1", "live"],
+      ["git tag -a nightly -m x; git push origin nightly", "live"],
+      // the plain twins
+      ["git push origin kit/promptpay-qr", "push"],
+      ["git push origin kit/v2-checkout", "push"],
+    ];
+    const wrong = ROWS.filter(([line, as]) => read(line).action !== as).map(([line, as]) => `${line}: ${read(line).action}, not ${as}`);
+    expect(wrong).toEqual([]);
+    // a tag the session made earlier, pushed by its bare name
+    expect(readCommand("git push origin release-1", { ...at, tags: ["release-1"] }).action).toBe("live");
+    expect(readCommand("git tag release-1", at).tags).toEqual(["release-1"]);
+    expect(readCommand("git tag -a nightly -m 'the nightly'", at).tags).toEqual(["nightly"]);
+    expect(readCommand("git tag -l", at).tags).toEqual([]);
+  });
+
+  it("reads a branch moved back as a discard, which a kept rule for a new branch never covers", () => {
+    for (const line of ["git branch -f main 1a2b3c4", "git branch --force main 1a2b3c4", "git branch -M kit/x main", "git branch -C kit/x main", "git checkout -B main 1a2b3c4", "git switch -C main 1a2b3c4", "git switch --force-create main 1a2b3c4", "git update-ref refs/heads/main 1a2b3c4", "git update-ref HEAD 1a2b3c4", "git worktree add -B main wt/x"])
+      expect([line, read(line).action]).toEqual([line, "delete"]);
+    for (const line of ["git branch kit/new", "git branch -m kit/z", "git checkout -b kit/y", "git switch -c kit/y"]) expect([line, read(line).action]).toEqual([line, "change"]);
+    const decide = (line: string, rule: Rule) => {
+      const c = readCommand(line, at);
+      return decideAsk({ what: "command", action: c.action, outside: c.outside, folder: null, saves: c.saves, rule: c.rule, line, say: c.say }, { ...emptyProject(), level: "edits_and_safe_commands", rules: [rule] }, [], 0).answer;
+    };
+    for (const [kept, harsher] of [
+      ["git branch kit/new", "git branch -M kit/x main"],
+      ["git branch kit/new", "git branch -C kit/x main"],
+      ["git checkout kit/a", "git checkout -B main 1a2b3c4"],
+      ["git switch kit/a", "git switch -C main 1a2b3c4"],
+      ["git switch kit/a", "git switch --force-create main 1a2b3c4"],
+    ])
+      expect([kept, harsher, decide(harsher, readCommand(kept, at).rule!)]).toEqual([kept, harsher, "ask"]);
+  });
+
+  it("does not read a commit named from another (`HEAD~5`, `main^`) as a Windows short file name", () => {
+    const EVERYDAY_GIT: [line: string, as: KitAction][] = [
+      ["git rebase -i HEAD~3", "change"],
+      ["git rebase --onto main HEAD~3", "change"],
+      ["git reset HEAD~1", "change"],
+      ["git reset --soft HEAD~1", "change"],
+      ["git revert HEAD~1", "change"],
+      ["git revert --no-edit HEAD^", "change"],
+      ["git cherry-pick main~2", "change"],
+      ["git commit --fixup HEAD~2", "change"],
+      ["git branch kit/y HEAD~2", "change"],
+      ["git switch -c kit/y HEAD~1", "change"],
+      ["git tag v1 HEAD^", "change"],
+      ["git checkout HEAD~1", "change"],
+      ["git stash push -m wip && git rebase -i @~2", "change"],
+      ["git merge kit/x~1", "change"],
+    ];
+    const wrong = EVERYDAY_GIT.filter(([line, as]) => read(line).action !== as).map(([line, as]) => `${line}: ${read(line).action}, not ${as}`);
+    expect(wrong).toEqual([]);
+    // a word that is a path still counts, short name and all
+    for (const line of ["git add PACKAG~1.JSO", "cp a.json PACKAG~1.JSO", "printf x > GITHUB~1/workflows/ci.yml", "git checkout HEAD~1 -- PACKAG~1.JSO"]) expect([line, read(line).action]).toEqual([line, "unknown"]);
+  });
+});
+
+describe("D5: a `cd` in a form the reader does not follow as one (item 120)", () => {
+  /** Lines that may move the shell where the reading cannot follow it: a `cd` behind a word that is not a wrapper it knows,
+   *  inside a compound command, or in a function, an alias or a trap. */
+  const HIDDEN = [
+    "! cd .git/hooks", "command -p cd .git/hooks", "noglob cd .git/hooks", "nocorrect cd .git/hooks", "repeat 1 cd .git/hooks",
+    "if true; then cd .git/hooks; fi", "if false; then :; else cd .git/hooks; fi", "if false; then :; elif true; then cd .git/hooks; fi",
+    "while true; do cd .git/hooks; break; done", "until false; do cd .git/hooks; break; done", "for d in x; do cd .git/hooks; done",
+    "coproc cd .git/hooks", "! pushd .git/hooks", "if true; then pushd .git/hooks; fi", "command -p chdir .git/hooks",
+    "! . ./x.sh", "if true; then . ./x.sh; fi", "noglob source ./x.sh", "! eval cd x",
+    "f() { cd .git/hooks; }; f", "f () { cd .git/hooks; }", "function f { cd .git/hooks; }", "alias c='cd .git/hooks'",
+    "trap 'cd .git/hooks' DEBUG", "! trap 'cd .git/hooks' EXIT",
+  ];
+  /** Their plain twins: a `cd` the reading follows, and words that only name a folder or say `cd` as text. */
+  const PLAIN: [line: string, ends: string[]][] = [
+    ["cd src", [`${root}/src`, root]],
+    ["builtin cd src", [`${root}/src`, root]],
+    ["echo cd", [root]],
+    ["git commit -m cd", [root]],
+    ["grep -rn 'cd ' scripts", [root]],
+    ["git add .", [root]],
+    ["prettier --check .", [root]],
+    ["git commit -m 'make foo() pure'", [root]],
+    ["echo 'f() { cd x; }'", [root]],
+  ];
+
+  it("leaves the folder unknown after each, so the session's next command is read from nowhere that can be said", () => {
+    const wrong: string[] = [];
+    for (const line of HIDDEN) if (!readCommand(line, at).ends.includes(null)) wrong.push(`followed: ${line} -> ${JSON.stringify(readCommand(line, at).ends)}`);
+    for (const [line, ends] of PLAIN) if (JSON.stringify(readCommand(line, at).ends.sort()) !== JSON.stringify([...ends].sort())) wrong.push(`plain: ${line} -> ${JSON.stringify(readCommand(line, at).ends)}`);
+    expect(wrong).toEqual([]);
+    counted += HIDDEN.length;
+  });
+
+  it("says which lines define a function, an alias or a trap, which no later `cd` to the project's folder undoes", () => {
+    // zsh's AUTO_CD and bash's autocd make a folder's bare name a `cd`
+    for (const line of ["f() { cd .git/hooks; }; f", "f () { :; }", "function f { :; }", "alias c='cd .git/hooks'", "trap 'cd .git/hooks' DEBUG", "eval 'g() { cd x; }'", "source ./x.sh", ". ./x.sh", "setopt AUTO_CD", "shopt -s autocd"])
+      expect([line, readCommand(line, at).defines]).toEqual([line, true]);
+    for (const line of ["cd src", "pnpm test", "git commit -m 'make foo() pure'", "echo 'f() { :; }'", "git add ."]) expect([line, readCommand(line, at).defines]).toEqual([line, false]);
   });
 });
 
