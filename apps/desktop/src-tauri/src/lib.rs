@@ -1717,6 +1717,19 @@ pub fn run() {
     // refused there (Guideline 2.4.5(vii), app_store.rs). Its page asks nothing either (src/sidebar/updater.ts).
     #[cfg(not(app_store))]
     let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    // A snapshot of any app (computer/snap.rs, item 104): the plugin is there, and registers nothing until the person
+    // turns the key on in Settings › Computer. Its one handler reads the app in front when the key goes down. The page is
+    // given none of its commands (capabilities/default.json), so only the shell registers a key.
+    #[cfg(target_os = "macos")]
+    let builder = builder.plugin(
+        tauri_plugin_global_shortcut::Builder::new()
+            .with_handler(|app, _keys, event| {
+                if event.state == tauri_plugin_global_shortcut::ShortcutState::Pressed {
+                    computer::snap::pressed(app);
+                }
+            })
+            .build(),
+    );
     let app = builder
         // The process plugin does the restart that follows an update.
         .plugin(tauri_plugin_process::init())
@@ -1789,6 +1802,15 @@ pub fn run() {
                     eprintln!("Manut AI: no computer use: {e}");
                 }
             }
+            // the snapshot's key (computer/snap.rs): off until the person turns it on, and registered only then. On the
+            // Mac app alone: elsewhere, and in the App Store edition, whose sandbox refuses accessibility, Settings says
+            // it is not here and nothing is ever registered.
+            #[cfg(target_os = "macos")]
+            let keys: Box<dyn computer::snap::Hotkeys> =
+                if app_store::APP_STORE { Box::new(computer::snap::Nowhere) } else { Box::new(computer::snap::Plugin(app.handle().clone())) };
+            #[cfg(not(target_os = "macos"))]
+            let keys: Box<dyn computer::snap::Hotkeys> = Box::new(computer::snap::Nowhere);
+            app.manage(computer::snap::Snap::start(user_home().ok(), keys, cfg!(target_os = "macos") && !app_store::APP_STORE));
             app.manage(Shell {
                 logins: accounts::Logins::new(),
                 sessions: Sessions::new(),
@@ -2007,6 +2029,8 @@ fn commands(invoke: tauri::ipc::Invoke) -> bool {
         voice::voice_stop,
         computer::computer_status,
         computer::computer_open,
+        computer::snap::snapshot_settings,
+        computer::snap::snapshot_set,
         tailscale::tailscale_state
     ];
     answer(invoke)
