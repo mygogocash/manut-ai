@@ -1891,6 +1891,8 @@ export const ko: Record<Key, string> = {
   "lane.open": "이 레인 열기",
   "lane.new": "새 레인",
   "lane.newTip": "레인을 시작해요. 에이전트와 폴더를 고르세요. 첫 메시지를 보내면 시작돼요.",
+  "lane.emptyTitle": "아직 레인이 없습니다",
+  "lane.emptyText": "Kit에게 무엇을 만들거나 고쳐 달라고 요청하세요. 작업마다 레인이 하나씩 생기고, 승인하기 전에는 아무것도 공개되지 않습니다.",
   "lane.madeFrom": "{base}에서 만들었어요. Kit은 여기서 푸시하거나 병합하지 않아요.",
   "lane.moved": "Kit이 이 레인을 위해 {branch}을(를) 만들었지만, 폴더는 지금 {now}에 있어요.",
   "lane.noBranch": "이 레인에는 자기만의 브랜치가 없어서, 폴더가 있는 브랜치에서 작업해요.",

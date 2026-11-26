@@ -58,7 +58,7 @@ export function CodePage() {
             <div className="band" id="code-plans-h">
               {t("menu.plans")}
             </div>
-            <Usage />
+            <Usage named />
           </section>
         )}
       </div>

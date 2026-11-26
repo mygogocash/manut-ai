@@ -42,10 +42,11 @@ test("one mark per provider above the user row; rings only where the source gave
   await open(page);
   const usage = page.getByTestId("usage");
   await expect(usage.locator(".usage-m")).toHaveCount(3);
-  // each provider has one mark (the fork has no agent logos, so each is a letter mark, marked data-agent="letter")
-  await expect(page.getByTestId("usage-codex").locator("[data-agent]")).toHaveCount(1);
-  await expect(page.getByTestId("usage-claude").locator("[data-agent]")).toHaveCount(1);
-  await expect(page.getByTestId("usage-grok").locator("[data-agent]")).toHaveCount(1);
+  // each provider is named in words, with no maker's mark, as the Code page names a coding agent (item 85i)
+  await expect(page.getByTestId("usage-codex").locator(".usage-name")).toHaveText("Codex");
+  await expect(page.getByTestId("usage-claude").locator(".usage-name")).toHaveText("Claude Code");
+  await expect(page.getByTestId("usage-grok").locator(".usage-name")).toHaveText("Grok");
+  await expect(usage.locator("[data-agent]")).toHaveCount(0);
   // the marks are on the Code page under their band, and no longer in the side menu's foot (item 85i)
   await expect(page.getByTestId("code-plans").locator(".band")).toHaveText("Your coding plans");
   await expect(page.getByTestId("sidebar").getByTestId("usage")).toHaveCount(0);

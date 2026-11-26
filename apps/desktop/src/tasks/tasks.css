@@ -43,14 +43,15 @@
   gap: 2px;
   padding-right: 4px;
 }
+/* A task source, named in words (item 85i): a quiet link-sized word, not its company's mark. */
 .tk-bar-ic {
-  width: 20px;
-  height: 20px;
-  display: grid;
-  place-items: center;
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 8px;
   border-radius: var(--r-sm);
   color: var(--muted);
-  opacity: 0.75;
+  font-size: 13px;
 }
 .tk-bar-ic:hover,
 .tk-bar-ic:focus-visible {

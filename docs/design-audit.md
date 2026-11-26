@@ -37,7 +37,9 @@ The fixes are items 85e to 85i in `docs/plan.md`; the motion is items 85a to 85c
    Worktrees, Source control, MCP and Skills, Developer) beside the everyday ones. The Settings board is one quiet
    column. Smallest change: the developer pages under one "Under the hood" entry, as the Voice board names it. Seen.
 5. **Code** opens on the old TERMINALS section with other companies' logos on an otherwise empty page. The Code board
-   shows lanes, the conversation and a diff: at least a grey Lanes band and `StatesCode`'s empty state. Seen.
+   shows lanes, the conversation and a diff: at least a grey Lanes band and `StatesCode`'s empty state. Seen. Fixed in
+   item 85i (26 Nov): it opens on the grey Lanes band with New lane over an empty state, then Terminals under a grey band
+   in sentence case; the task sources and the coding tools' plans are named in words, with no company's mark.
 6. **The foot of the side menu** shows three small squares for each coding tool's use, and "You". The board has the
    budget pill and the person's name with their shop. Seen. Fixed in item 85i (26 Nov): the foot is the pill (shown only with
    the runtime's numbers, none yet) and the person with their shop; the coding tools' use is on the Code page.

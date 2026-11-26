@@ -1891,6 +1891,8 @@ export const zh: Record<Key, string> = {
   "lane.open": "打开此泳道",
   "lane.new": "新建泳道",
   "lane.newTip": "开始一条泳道：选择代理和文件夹。发出第一条消息后才会开始。",
+  "lane.emptyTitle": "还没有泳道",
+  "lane.emptyText": "请 Kit 做点东西或修点东西。每项工作都有自己的泳道，在你批准之前不会上线。",
   "lane.madeFrom": "从 {base} 创建。Kit 不会从这里推送或合并。",
   "lane.moved": "Kit 为这个泳道创建了 {branch}，但文件夹现在在 {now} 上。",
   "lane.noBranch": "这个泳道没有自己的分支，所以在文件夹当前所在的分支上工作。",

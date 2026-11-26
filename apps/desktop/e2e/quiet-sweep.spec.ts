@@ -130,6 +130,28 @@ test("Team's Pause everyone is the quiet button, and Customize says it did not l
   }
 });
 
+test("Code opens on the grey Lanes band and its empty state, names each coding tool and task source in words, and shows no company's logo", async ({ page }) => {
+  await start(page);
+  await page.getByTestId("menu-code").click();
+  const code = page.getByTestId("page-code");
+  await expect(code.getByTestId("lanes-band")).toHaveText("LanesNew lane");
+  await expect(code.getByTestId("lanes-empty-state")).toContainText("No lanes yet");
+  // the lanes come first; the terminals' list is under them, under a grey band in sentence case
+  const [lanes, terms] = await Promise.all([code.getByTestId("lanes-band").boundingBox(), code.getByTestId("side-sessions").boundingBox()]);
+  expect(lanes!.y).toBeLessThan(terms!.y);
+  const head = code.locator(".terms .side-sh");
+  expect(await head.evaluate((e) => [getComputedStyle(e).textTransform, getComputedStyle(e).fontSize])).toEqual(["none", "13px"]);
+  // no company's mark anywhere on the page: the task sources and the coding tools are words
+  await expect(code.locator(".tk-mark, [data-brand], [data-agent], img")).toHaveCount(0);
+  await expect(code.getByTestId("tasks-bar-github")).toHaveText("GitHub");
+  await expect(code.getByTestId("usage-codex")).toContainText("Codex");
+  if (SHOTS) for (const theme of ["light", "dark"] as const) {
+    await page.evaluate((th) => document.documentElement.setAttribute("data-theme", th), theme);
+    await page.waitForTimeout(300);
+    await page.screenshot({ path: join(SHOTS, `code-${theme}.png`), animations: "disabled" });
+  }
+});
+
 test("pictures of every menu page and Settings, at 1280 and 900, light and dark", async ({ page }) => {
   test.skip(!SHOTS, "QUIET_SHOTS=<dir> keeps the pictures");
   test.setTimeout(240_000);

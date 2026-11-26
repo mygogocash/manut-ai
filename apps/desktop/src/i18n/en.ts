@@ -1903,6 +1903,8 @@ export const en = {
   "lane.open": "Open this lane",
   "lane.new": "New lane",
   "lane.newTip": "Start a lane: choose an agent and a folder. It starts with your first message.",
+  "lane.emptyTitle": "No lanes yet",
+  "lane.emptyText": "Ask Kit to build or fix something. Each piece of work gets a lane of its own, and nothing goes live until you approve.",
   "lane.madeFrom": "Made from {base}. Kit never pushes or merges from here.",
   "lane.moved": "Kit made {branch} for this lane, but the folder is on {now} now.",
   "lane.noBranch": "This lane has no branch of its own, so it works on the branch the folder is on.",
