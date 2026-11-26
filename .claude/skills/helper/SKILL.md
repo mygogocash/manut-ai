@@ -38,10 +38,11 @@ agent in a mode that skips its asks, never force a removal or a push.
 - Before you push, unless your brief asks for the whole gate: every test file you touched, the type check
   (`pnpm --config.verify-deps-before-run=false typecheck`, or the desktop's alone when you changed only the desktop),
   the whole Rust suite if you changed Rust, and the Playwright specs you changed or that assert what you changed. Say
-  in your report exactly what you ran, with counts. The lead runs the whole gate once, after merging your branch
-  (`.claude/skills/lead-merge/scripts/gate.sh`): with several helpers at work, a whole gate from each kept the one
-  gate lock busy for most of an hour (26 Nov 2026). A test that fails only under load and passes alone is in
-  `docs/handoff.md`, "Known flaky tests"; anything else is yours.
+  in your report exactly what you ran, with counts. CI then runs the whole check on GitHub when you push (every
+  package's tests, the type check, Rust and every browser spec), and the lead merges on its green run (item 126, 26
+  Nov 2026): a whole gate from each helper on this Mac kept its one lock busy for most of an hour.
+  `.claude/skills/lead-merge/scripts/gate.sh` is for when CI is down. A test that fails only under load and passes
+  alone is in `docs/handoff.md`, "Known flaky tests"; anything else is yours.
 - Look at what you built. A page or a move that only tests have seen is not checked: take the screenshots your brief
   names, open them, and say in your report what you saw and what you changed because of it.
 - This Mac has 8 GB and several helpers are running. Run only the files you touch while you work, and nothing heavy
@@ -77,7 +78,14 @@ list names only.
   `mktemp -d` and use `git commit -F <file>`.
 - End each message with `Co-Authored-By:` and the model you are, for example
   `Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>`.
-- When those checks are green, push your branch once: `git push -u origin <your branch>`.
+- When those checks are green, merge the lead's branch in (`git merge --no-edit feat/continue-pilot-week-1`, unless
+  your brief names another), so CI checks the very commit the lead will merge, and run your tests again if the merge
+  brought anything in. Then push your branch: `git push -u origin <your branch>`. CI runs on every push of a `feat/`,
+  `fix/`, `refactor/`, `test/`, `docs/`, `ci/` or `chore/` branch, measured from the newest green `pilot/week-1` commit
+  your branch holds.
+- Wait for that run: `.claude/skills/lead-merge/scripts/ci-wait.sh <your branch>` prints each job and exits 0 only when
+  green. A red job is yours: read it (`gh run view <id> --log-failed`), fix it, push, and wait again. Say in your report
+  the run's id and that it is green.
 - Never push to `main` or `pilot/week-1`, never merge, deploy, tag, publish a release or change a GitHub setting.
 
 ## If it does not fit

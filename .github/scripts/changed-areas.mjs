@@ -56,6 +56,9 @@ function areasOfPath(path) {
   // The other scripts and workflows are read by tests in the API's job (the deploy check) and the desktop's (the
   // release workflow's rules, the Playwright summary, the spec timings).
   if (path.startsWith(".github/scripts/") || path.startsWith(".github/workflows/")) return only("desktop", "api");
+  // The lead's merge reads CI through these scripts, and their tests (.github/scripts/lead-merge.test.mjs) run in the
+  // desktop's job.
+  if (path.startsWith(".claude/skills/lead-merge/scripts/")) return only("desktop");
   if (path.startsWith(".github/") || path.startsWith(".claude/") || path.startsWith(".vscode/") ||
       [".gitignore", ".gitattributes", ".editorconfig", "LICENSE", "NOTICE"].includes(path)) return flags(false);
   // A shared package reaches every app that imports it.

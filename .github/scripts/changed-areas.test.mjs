@@ -81,6 +81,12 @@ describe("what a changed file needs", () => {
     assert.deepEqual(on(areasOf([".gitignore", ".claude/settings.json", ".github/dependabot.yml", "LICENSE"])), []);
   });
 
+  it("runs the desktop's job, where their tests are, for the lead's merge scripts", () => {
+    assert.deepEqual(on(areasOf([".claude/skills/lead-merge/scripts/ci-wait.sh"])), ["desktop"]);
+    assert.deepEqual(on(areasOf([".claude/skills/lead-merge/SKILL.md"])), ["api", "desktop"]);
+    assert.deepEqual(on(areasOf([".claude/skills/helper/scripts/x.sh"])), []);
+  });
+
   it("adds up what several files need", () => {
     assert.deepEqual(on(areasOf(["docs/plan.md", "apps/desktop/src-tauri/Cargo.toml"])), ["api", "desktop", "rust"]);
     assert.deepEqual(on(areasOf([])), []);
