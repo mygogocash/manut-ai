@@ -34,7 +34,7 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 use serde_json::{json, Value};
 
-use super::keys::{self, Chord};
+use super::keys::{self, Chord, Keyboard};
 
 /// A control on the Mac, as the desk holds it (an accessibility element there, a number in a test).
 pub type Handle = Arc<dyn Any + Send + Sync>;
@@ -182,7 +182,10 @@ pub trait Desk: Send + Sync {
     fn focus(&self, pid: i32) -> Option<Focus>;
     fn press(&self, handle: &Handle) -> Result<(), String>;
     fn set_value(&self, handle: &Handle, text: &str) -> Result<(), String>;
-    fn key(&self, pid: i32, chord: &Chord) -> Result<(), String>;
+    /// The keyboard layout in use and the others the person has turned on, read fresh (`keys.rs`).
+    fn keyboard(&self) -> Result<Keyboard, String>;
+    /// Presses `chord` as the key with virtual key code `code`, found on the layout in use ([`Chord::code`]).
+    fn key(&self, pid: i32, chord: &Chord, code: u16) -> Result<(), String>;
     fn menu(&self, pid: i32, path: &[String]) -> Result<(), String>;
 }
 
@@ -430,8 +433,8 @@ enum Target {
     /// A click, or with `value` the text put into a field and `held` exactly what the field held at the ask (empty for
     /// typing, else all that the text replaces); `place` is where the control was at the ask.
     Node { pid: i32, role: String, label: String, handle: Handle, value: Option<String>, held: Option<String>, place: Place },
-    /// A key press, and where it was aimed at the ask.
-    Key { pid: i32, aim: Aim, chord: Chord },
+    /// A key press, where it was aimed at the ask, and the key that sends it on the layout then in use.
+    Key { pid: i32, aim: Aim, chord: Chord, code: u16 },
     Menu { pid: i32, path: Vec<String> },
 }
 
@@ -755,6 +758,9 @@ impl Room {
                 if let Some(effect) = chord.blocked() {
                     return Err(format!("{} would {effect}, so computer use never sends it. Reach the goal another way, such as the window's own button or menu item.", chord.shown()));
                 }
+                // the key that types the chord's character on the layout in use, never read as a blocked shortcut on
+                // any layout turned on
+                let code = chord.code(&self.desk.keyboard()?)?;
                 // the key goes to the window that has the keyboard and the control focused there: the card names both,
                 // and the yes is bound to them, not to a title another window can share
                 let focus = self.focus(app.pid).ok_or(NO_FOCUS)?;
@@ -765,7 +771,7 @@ impl Room {
                     return Err("The keyboard is in a password field, and computer use never types into one.".into());
                 }
                 let s = Shown { window: Some(focus.window.title.clone()), control: focus.control.as_ref().map(|(n, _)| control_name(n)), keys: Some(chord.shown()), ..shown("key") };
-                Ok(Decision::Card(Ask { shown: s, target: Target::Key { pid: app.pid, aim: Aim::of(&focus), chord } }))
+                Ok(Decision::Card(Ask { shown: s, target: Target::Key { pid: app.pid, aim: Aim::of(&focus), chord, code } }))
             }
             MENU => {
                 let path: Vec<String> = args
@@ -954,10 +960,15 @@ impl Room {
                     }
                 }
             }
-            Target::Key { pid, aim, chord } => {
+            Target::Key { pid, aim, chord, code } => {
                 let app = self.still_app(pid)?;
                 if chord.blocked().is_some() {
                     return Err("Computer use never sends that shortcut.".into());
+                }
+                // the layout read again: the same key must still type what the card named, and no layout turned on
+                // since may read it as a shortcut that is never sent
+                if chord.code(&self.desk.keyboard()?)? != code {
+                    return Err("The keyboard layout changed since the person said yes, so the key was not pressed. Look again and ask again.".into());
                 }
                 let now = self.focus(pid).ok_or(NO_FOCUS)?;
                 if own_window(&now.window.title, &now.window.addresses) {
@@ -969,7 +980,7 @@ impl Room {
                 if Aim::of(&now) != aim {
                     return Err(format!("A different window or control of {} has the keyboard now, so the key was not pressed. Look again and ask again.", app.name));
                 }
-                self.desk.key(pid, &chord)?;
+                self.desk.key(pid, &chord, code)?;
                 Ok(Reply::ok(format!("Pressed {} in {}. Call `get_app_state` to see what changed.", chord.shown(), app.name)))
             }
             Target::Menu { pid, path } => {
@@ -1021,7 +1032,7 @@ pub fn tools() -> Value {
         {"name": SET, "title": "Type into a field", "description": "Puts text into one text field from the latest get_app_state. An empty field is typed into; a field that holds anything has all of it replaced by the text, and the person's card says so and how many characters it holds. Asks the person first, every time. Never a password field.",
          "inputSchema": {"type": "object", "properties": {"app": app, "element_index": element, "value": {"type": "string", "maxLength": TEXT_CHARS}}, "required": ["app", "element_index", "value"]},
          "annotations": {"readOnlyHint": false, "destructiveHint": true}, "_meta": write_meta},
-        {"name": KEY, "title": "Press a key", "description": "Presses one key, with modifiers if any (\"Return\", \"Escape\", \"Cmd+S\"), in the app's focused window. Asks the person first, every time. Shortcuts that quit, log out, lock the screen, force quit or empty the Trash are never sent.",
+        {"name": KEY, "title": "Press a key", "description": "Presses one key, with modifiers if any (\"Return\", \"Escape\", \"Cmd+S\"), in the control that has the keyboard in the app's focused window. A letter, digit or punctuation mark is the character the key types on the Mac's keyboard layout. Asks the person first, every time. Shortcuts that quit, log out, lock the screen, force quit or empty the Trash are never sent, on any layout.",
          "inputSchema": {"type": "object", "properties": {"app": app, "key": {"type": "string"}}, "required": ["app", "key"]},
          "annotations": {"readOnlyHint": false, "destructiveHint": true}, "_meta": write_meta},
         {"name": MENU, "title": "Choose a menu item", "description": "Chooses one item from the app's menu bar by its path of titles, such as [\"File\", \"Save…\"]. Asks the person first, every time. Never the Apple menu.",
@@ -1297,7 +1308,7 @@ mod tests {
         assert_eq!(a.shown.lines(), "App: TextEdit\nWindow: Untitled\nKeys: Cmd+S");
         r.answered(KEY, &args, &a);
         assert!(!r.run(KEY, &args).error);
-        assert_eq!(s.acts(), [format!("key {TEXTEDIT} Cmd+S")]);
+        assert_eq!(s.acts(), [format!("key {TEXTEDIT} Cmd+S 0x01")]);
         // the app's front window changed after the yes: the key is not pressed
         let a = card(&r, KEY, &args);
         r.answered(KEY, &args, &a);
@@ -1603,7 +1614,7 @@ mod tests {
         let a = card(&r, KEY, &args);
         r.answered(KEY, &args, &a);
         assert!(!r.run(KEY, &args).error);
-        assert_eq!(s.acts(), [format!("key {TEXTEDIT} Return")]);
+        assert_eq!(s.acts(), [format!("key {TEXTEDIT} Return 0x24")]);
     }
 
     /// Manut AI's own asks are answered in its own windows and on its web pages (approve a reply, delete the shop's
@@ -1724,6 +1735,42 @@ mod tests {
             assert!(own_window(t, &[]), "{t}");
         }
         assert!(!own_window("Shopee Seller Centre", &[]));
+    }
+
+    /// A key press is sent by the key that types its character on the layout in use, and the layout is read again just
+    /// before it is sent: on a French Mac Cmd+A is the key in the US "Q" place, a layout changed since the yes sends
+    /// nothing, and a key some layout turned on reads as Cmd+Q is never sent.
+    #[test]
+    fn a_key_is_sent_by_the_key_that_types_it_on_the_layout_in_use() {
+        use crate::computer::stand::{layout, FRENCH, US};
+        let (s, r) = room();
+        let (french, us) = (layout("French", &FRENCH), layout("U.S.", &US));
+        let only = |l: &crate::computer::keys::Layout| Some(Keyboard { current: l.clone(), others: Vec::new() });
+        s.set_keyboard(only(&french));
+        let args = json!({"app": "TextEdit", "key": "Cmd+A"});
+        let a = card(&r, KEY, &args);
+        assert_eq!(a.shown.title(), "Press Cmd+A in TextEdit?");
+        r.answered(KEY, &args, &a);
+        assert!(!r.run(KEY, &args).error);
+        assert_eq!(s.acts(), [format!("key {TEXTEDIT} Cmd+A 0x0C")]);
+        // the layout changed between the yes and the run: nothing is pressed
+        let a = card(&r, KEY, &args);
+        r.answered(KEY, &args, &a);
+        s.set_keyboard(only(&us));
+        assert!(r.run(KEY, &args).text.contains("keyboard layout changed"));
+        // another layout turned on reads French's A key as Q: refused before any card, and a yes given before is not used
+        s.set_keyboard(only(&french));
+        let a = card(&r, KEY, &args);
+        r.answered(KEY, &args, &a);
+        s.set_keyboard(Some(Keyboard { current: french.clone(), others: vec![us.clone()] }));
+        assert!(r.run(KEY, &args).text.contains("Cmd+Q would quit the app"));
+        assert!(refused(&r, KEY, &args).contains("Cmd+Q would quit the app"));
+        // a character no key types there, and a layout that cannot be read: no card
+        s.set_keyboard(only(&french));
+        assert!(refused(&r, KEY, &json!({"app": "TextEdit", "key": "Cmd+1"})).contains("no key types “1”"));
+        s.set_keyboard(None);
+        assert!(refused(&r, KEY, &args).contains("keyboard layout"));
+        assert_eq!(s.acts().len(), 1);
     }
 
     #[test]

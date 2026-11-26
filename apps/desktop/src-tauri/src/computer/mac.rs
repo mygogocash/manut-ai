@@ -28,7 +28,7 @@ use core_foundation::number::CFNumber;
 use core_foundation::string::{CFString, CFStringRef};
 use core_foundation::url::CFURL;
 
-use super::keys::Chord;
+use super::keys::{char_codes, Chord, Keyboard, Layout};
 use super::room::{clean, App, Desk, Focus, Handle, Node, Place, Win, MAX_DEPTH, MAX_NODES, SECURE};
 
 type AXUIElementRef = *const c_void;
@@ -90,6 +90,121 @@ extern "C" {
     static kCGWindowOwnerName: CFStringRef;
     static kCGWindowBounds: CFStringRef;
     static kCGWindowAlpha: CFStringRef;
+}
+
+// The keyboard layout (`HIToolbox/TextInputSources.h`, `HIToolbox/Events.h`, `CarbonCore/UnicodeUtilities.h`). The
+// header says: "TextInputSources API is not thread safe. If you are a UI application, you must call TextInputSources API
+// on the main thread", so [`keyboard`] reads it there.
+#[link(name = "Carbon", kind = "framework")]
+extern "C" {
+    fn TISCopyCurrentKeyboardLayoutInputSource() -> CFTypeRef;
+    fn TISCreateInputSourceList(properties: CFDictionaryRef, include_all_installed: u8) -> CFArrayRef;
+    fn TISGetInputSourceProperty(source: CFTypeRef, key: CFStringRef) -> CFTypeRef;
+    fn LMGetKbdType() -> u8;
+    static kTISPropertyUnicodeKeyLayoutData: CFStringRef;
+    static kTISPropertyLocalizedName: CFStringRef;
+    static kTISPropertyInputSourceType: CFStringRef;
+    static kTISTypeKeyboardLayout: CFStringRef;
+}
+
+#[link(name = "CoreServices", kind = "framework")]
+extern "C" {
+    #[allow(clippy::too_many_arguments)]
+    fn UCKeyTranslate(
+        layout: *const c_void,
+        virtual_key_code: u16,
+        key_action: u16,
+        modifier_key_state: u32,
+        keyboard_type: u32,
+        key_translate_options: u32,
+        dead_key_state: *mut u32,
+        max_string_length: usize,
+        actual_string_length: *mut usize,
+        unicode_string: *mut u16,
+    ) -> i32;
+}
+
+/// `kUCKeyActionDown` and `kUCKeyTranslateNoDeadKeysMask` (`UnicodeUtilities.h`), and the Command key's bit in
+/// `UCKeyTranslate`'s modifier state: `cmdKey` (1 << `cmdKeyBit` 8, `Events.h`) shifted down 8, as the header says
+/// ("modifierKeyState = ((EventRecord.modifiers) >> 8) & 0xFF").
+const KEY_DOWN: u16 = 0;
+const NO_DEAD_KEYS: u32 = 1;
+const COMMAND_STATE: u32 = ((1 << 8) >> 8) & 0xFF;
+
+/// libdispatch's main queue (`dispatch/queue.h`: `dispatch_get_main_queue()` is `&_dispatch_main_q`).
+#[repr(C)]
+struct DispatchQueue {
+    _opaque: [u8; 0],
+}
+
+extern "C" {
+    static _dispatch_main_q: DispatchQueue;
+    fn dispatch_async_f(queue: *const DispatchQueue, context: *mut c_void, work: extern "C" fn(*mut c_void));
+}
+
+/// `work` run on the main thread, its answer waited for at most two seconds: a main thread that is busy, or not running
+/// its loop (a test), gives None rather than holding the tool or deadlocking against a lock the caller holds.
+fn on_main<T: Send + 'static>(work: fn() -> T) -> Option<T> {
+    if unsafe { libc::pthread_main_np() } == 1 {
+        return Some(work());
+    }
+    struct Job<T> {
+        work: fn() -> T,
+        tx: std::sync::mpsc::Sender<T>,
+    }
+    extern "C" fn run<T>(ctx: *mut c_void) {
+        // SAFETY: `ctx` is the box made below, handed to this function once.
+        let job = unsafe { Box::from_raw(ctx as *mut Job<T>) };
+        let _ = job.tx.send((job.work)());
+    }
+    let (tx, rx) = std::sync::mpsc::channel();
+    let ctx = Box::into_raw(Box::new(Job { work, tx })) as *mut c_void;
+    // SAFETY: the main queue lives as long as the process; `run::<T>` takes back the box.
+    unsafe { dispatch_async_f(&_dispatch_main_q, ctx, run::<T>) };
+    rx.recv_timeout(std::time::Duration::from_secs(2)).ok()
+}
+
+/// What each key in [`char_codes`] types on input source `source`, alone and with Command held, read from its
+/// `uchr` data; None for a source that is not a keyboard layout with one.
+fn layout_of(source: CFTypeRef) -> Option<Layout> {
+    // SAFETY: TISGetInputSourceProperty follows the get rule; the data and name are retained while used.
+    let data = unsafe { TISGetInputSourceProperty(source, kTISPropertyUnicodeKeyLayoutData) };
+    if data.is_null() {
+        return None;
+    }
+    let data: CFData = unsafe { CFData::wrap_under_get_rule(data as _) };
+    let name = unsafe { TISGetInputSourceProperty(source, kTISPropertyLocalizedName) };
+    let name = if name.is_null() { String::new() } else { unsafe { CFString::wrap_under_get_rule(name as CFStringRef) }.to_string() };
+    let uchr = data.bytes().as_ptr() as *const c_void;
+    let kind = unsafe { LMGetKbdType() } as u32;
+    let typed = |code: u16, state: u32| -> Option<char> {
+        let (mut dead, mut n, mut out) = (0u32, 0usize, [0u16; 4]);
+        let err = unsafe { UCKeyTranslate(uchr, code, KEY_DOWN, state, kind, NO_DEAD_KEYS, &mut dead, out.len(), &mut n, out.as_mut_ptr()) };
+        if err != 0 || n != 1 {
+            return None;
+        }
+        char::from_u32(u32::from(out[0])).filter(|c| !c.is_control())
+    };
+    Some(Layout { name, keys: char_codes().map(|c| (c, typed(c, 0), typed(c, COMMAND_STATE))).collect() })
+}
+
+/// The layout in use and the other keyboard layouts the person has turned on. Called on the main thread.
+fn read_keyboard() -> Option<Keyboard> {
+    let current = unsafe { TISCopyCurrentKeyboardLayoutInputSource() };
+    if current.is_null() {
+        return None;
+    }
+    let current = unsafe { CFType::wrap_under_create_rule(current) };
+    let current = layout_of(current.as_CFTypeRef())?;
+    let filter = CFDictionary::from_CFType_pairs(&[(unsafe { CFString::wrap_under_get_rule(kTISPropertyInputSourceType) }, unsafe { CFString::wrap_under_get_rule(kTISTypeKeyboardLayout) }.as_CFType())]);
+    let list = unsafe { TISCreateInputSourceList(filter.as_concrete_TypeRef(), 0) };
+    let others = if list.is_null() {
+        Vec::new()
+    } else {
+        let list: CFArray = unsafe { CFArray::wrap_under_create_rule(list) };
+        list.iter().filter(|p| !p.is_null()).filter_map(|p| layout_of(*p)).filter(|l| *l != current).collect()
+    };
+    Some(Keyboard { current, others })
 }
 
 #[link(name = "ImageIO", kind = "framework")]
@@ -333,6 +448,36 @@ mod tests {
                 assert_eq!(bundle_in(path), id);
             }
         }
+    }
+
+    /// The stand-in layouts are this Mac's own: each is read again here through the calls the desk uses, from the
+    /// layouts macOS ships (read only: nothing is typed, posted or switched), and the layout in use reads whole. A test
+    /// is not a UI application, so the header lets it call these off the main thread, one thread at a time.
+    #[test]
+    fn the_stand_in_layouts_are_the_ones_this_mac_reads() {
+        use crate::computer::stand::{DVORAK, DVORAK_QWERTY_CMD, FRENCH, THAI, US};
+        extern "C" {
+            static kTISPropertyInputSourceID: CFStringRef;
+        }
+        let tables: [(&str, &[(u16, Option<char>, Option<char>)]); 5] = [
+            ("com.apple.keylayout.US", &US),
+            ("com.apple.keylayout.French", &FRENCH),
+            ("com.apple.keylayout.Dvorak", &DVORAK),
+            ("com.apple.keylayout.DVORAK-QWERTYCMD", &DVORAK_QWERTY_CMD),
+            ("com.apple.keylayout.Thai", &THAI),
+        ];
+        for (id, table) in tables {
+            let key = unsafe { CFString::wrap_under_get_rule(kTISPropertyInputSourceID) };
+            let filter = CFDictionary::from_CFType_pairs(&[(key, CFString::new(id).as_CFType())]);
+            let list = unsafe { TISCreateInputSourceList(filter.as_concrete_TypeRef(), 1) };
+            assert!(!list.is_null(), "{id}");
+            let list: CFArray = unsafe { CFArray::wrap_under_create_rule(list) };
+            let source = *list.iter().next().unwrap_or_else(|| panic!("{id} is not installed"));
+            assert_eq!(layout_of(source).unwrap().keys, table, "{id}");
+        }
+        let kb = read_keyboard().expect("the layout in use");
+        assert_eq!(kb.current.keys.len(), char_codes().count());
+        assert!(!kb.current.name.is_empty());
     }
 }
 
@@ -587,9 +732,13 @@ impl Desk for Mac {
         if err == 0 { Ok(()) } else { Err(ax_error(err, "the typing")) }
     }
 
-    fn key(&self, pid: i32, chord: &Chord) -> Result<(), String> {
+    fn keyboard(&self) -> Result<Keyboard, String> {
+        on_main(read_keyboard).flatten().ok_or_else(|| "macOS did not say which keyboard layout is in use, so no key is pressed.".into())
+    }
+
+    fn key(&self, pid: i32, chord: &Chord, code: u16) -> Result<(), String> {
         for down in [true, false] {
-            let e = unsafe { CGEventCreateKeyboardEvent(std::ptr::null(), chord.code, down) };
+            let e = unsafe { CGEventCreateKeyboardEvent(std::ptr::null(), code, down) };
             if e.is_null() {
                 return Err("macOS could not make the key press".into());
             }

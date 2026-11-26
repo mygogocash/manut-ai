@@ -47,6 +47,7 @@ headers and the Mac's own files. Nothing was read from another app's window, no 
 | Sensitive apps | Bundle identifiers read from this Mac's own `Info.plist` files: System Settings `com.apple.systempreferences`, Keychain Access `com.apple.keychainaccess`, Passwords `com.apple.Passwords`, the login window, SecurityAgent, Touch ID's prompt, TCC's prompt service, the Accessibility prompt and the others in `room.rs` `REFUSED` | `/System/...` |
 | A program's bundle identifier | `NSRunningApplication`'s `runningApplicationWithProcessIdentifier:` and `bundleIdentifier` ("the `CFBundleIdentifier` of the application, or nil if the application does not have an `Info.plist`"); it tracks "only user applications", so the `Info.plist` of the bundle a program runs from (`<name>.<kind>/Contents/MacOS/`) is read when it has none. SecurityAgent runs from `SecurityAgent.bundle` (`com.apple.SecurityAgent`) and the Touch ID and password prompt from `coreautha.bundle` (`com.apple.LocalAuthentication.UIAgent`) | AppKit's `NSRunningApplication.h`, the two bundles' `Info.plist` on this Mac |
 | Who a program runs as | `proc_pidinfo` with `PROC_PIDTBSDINFO`: `pbi_uid` and `pbi_ruid` | `sys/proc_info.h`, `libproc.h` |
+| Keyboard layouts | `TISCopyCurrentKeyboardLayoutInputSource`, `TISCreateInputSourceList`, `kTISPropertyUnicodeKeyLayoutData` ("refers to the 'uchr' keyboard layout data"), "you must call TextInputSources API on the main thread"; `UCKeyTranslate` with `LMGetKbdType`, `kUCKeyActionDown`, `kUCKeyTranslateNoDeadKeysMask`, modifier state "((EventRecord.modifiers) >> 8) & 0xFF" (`cmdKey` = 1 << 8) | `HIToolbox/TextInputSources.h`, `HIToolbox/Events.h`, `CarbonCore/UnicodeUtilities.h` |
 | Where keys go, what a page is | `AXFocusedUIElement` and `AXFocusedWindow`; `AXURL` ("A CFURLRef ... Required for elements that represent a disk or network item") and `AXDocument` | `HIServices/AXAttributeConstants.h` |
 
 ## What was lifted from Orca
@@ -190,6 +191,28 @@ Writes:
   - With Screen capture, the card shows a picture of just that part of the window (`CGWindowListCreateImage` with the
     control's frame), for a control up to 640 by 320 points and 256 KB; a larger one, such as a document's text area,
     has none (`a_card_shows_a_small_picture_of_the_control_with_screen_capture`, `computer.test.tsx`).
+- A key is the character it types, on any keyboard (second security review, 26 Nov 2026). Keys were sent by their
+  place on a US keyboard (`kVK_ANSI_*`), so on a French (AZERTY) Mac a card that said Cmd+A sent the key that types Q
+  there and quit the app, past the blocked shortcuts, and Cmd+X on Dvorak did the same. Now (`keys.rs`, `Chord::code`):
+  - Return, Tab, Space, the two deletes, Escape, the arrows, Home, End, Page Up and Page Down keep their codes
+    (`Events.h`: "keycodes for keys that are independent of keyboard layout").
+  - A letter, digit or punctuation mark is sent by the key that types it on the layout in use
+    (`TISCopyCurrentKeyboardLayoutInputSource`, its `kTISPropertyUnicodeKeyLayoutData`, `UCKeyTranslate`), read with
+    Command held for a chord with Command: Thai and Russian type QWERTY letters then, which their shortcuts go by.
+  - That key is checked against every keyboard layout the person has turned on (`TISCreateInputSourceList`), alone and
+    with Command. If any reads it as a shortcut that is never sent, it is refused, naming the layout and what it would
+    do: French with ABC turned on reads Cmd+A's key as Cmd+Q, and "Dvorak - QWERTY Command" types Q alone where it
+    types X with Command.
+  - A character no key types on the layout in use (Cmd+1 on French, a letter alone on Thai) is refused in plain words.
+  - The layout is read again just before the key is sent; a layout changed since the yes sends nothing.
+  - TextInputSources must be called on the main thread of an app (its header), so the desk reads it there and waits at
+    most two seconds; no answer refuses.
+  - The tests' layouts (U.S., French, Dvorak, Dvorak - QWERTY Command, Thai) are this Mac's own, read again through the
+    same calls (`mac.rs` `the_stand_in_layouts_are_the_ones_this_mac_reads`), and every chord on each of them, with each
+    other turned on beside it, is checked (`no_layout_turns_a_chord_into_a_blocked_shortcut`,
+    `a_key_is_sent_by_the_key_that_types_it_on_the_layout_in_use`).
+  - What remains: macOS can keep a layout per document, and an app typing with another layout turned on than the one
+    in use could get another letter than the card's; none of those layouts can turn it into a blocked shortcut.
 - A key press is bound to where the keys go (second security review, 26 Nov 2026). It was bound only to the focused
   window's title, and not at all when that title was empty, so a key allowed for one "Untitled" document could land in
   another. Now the ask reads where the app's keys go (`AXFocusedWindow`, `AXFocusedUIElement`): the window's number
@@ -251,6 +274,8 @@ On the Mac app built from this branch:
    card shows a small picture of that button. Move the window after the card shows and before Allow once: the click is
    refused as moved, and the agent asks again.
 6. Ask for Cmd+S in TextEdit: a card says "Press Cmd+S in TextEdit?"; Allow once saves. Ask for Cmd+Q: refused, no card.
+   Turn on the French layout in System Settings › Keyboard › Text Input, select it, and ask for Cmd+A in a TextEdit
+   document: Allow once selects all and TextEdit stays open. Ask for Cmd+1: refused, naming the layout.
 7. Ask it to look at System Settings, Keychain Access, or Manut AI itself: refused, no card. Open an approval link from
    the pilot in Safari and in Chrome, allow the agent to look at each browser, and ask it to look at that tab or press
    Approve: refused, no card, in both. Ask it to read a LINE or Mail message that holds such a link: the link reads

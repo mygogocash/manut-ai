@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use super::keys::Chord;
+use super::keys::{char_codes, Chord, Keyboard, Layout};
 use super::room::{App, Desk, Focus, Handle, Node, Place, Win};
 
 #[derive(Clone)]
@@ -36,6 +36,12 @@ pub const TEXTEDIT: i32 = 100;
 pub const SETTINGS: i32 = 200;
 pub const KEYCHAIN: i32 = 300;
 pub const NOTES: i32 = 400;
+/// A stand-in layout from one of the tables below.
+pub fn layout(name: &str, keys: &[(u16, Option<char>, Option<char>)]) -> Layout {
+    assert!(keys.iter().map(|k| k.0).eq(char_codes()), "a table names every key that types a character, in order");
+    Layout { name: name.into(), keys: keys.to_vec() }
+}
+
 /// A browser the tests add with `add_app`, and where macOS keeps it.
 pub const SAFARI: i32 = 600;
 pub const SAFARI_PATH: &str = "/System/Cryptexes/App/System/Applications/Safari.app/Contents/MacOS/Safari";
@@ -128,6 +134,8 @@ pub struct Stand {
     focused: Mutex<HashMap<i32, Option<usize>>>,
     /// The control that has the keyboard in each window, by its index; a window not here has the focus itself.
     focused_control: Mutex<HashMap<(i32, usize), usize>>,
+    /// The layout in use and the others turned on; None when it cannot be read.
+    keyboard: Mutex<Option<Keyboard>>,
     calls: Mutex<Vec<String>>,
 }
 
@@ -184,6 +192,7 @@ impl Stand {
             nodes: Mutex::new(nodes),
             focused: Mutex::new(HashMap::new()),
             focused_control: Mutex::new(HashMap::new()),
+            keyboard: Mutex::new(Some(Keyboard { current: layout("U.S.", &US), others: Vec::new() })),
             calls: Mutex::new(Vec::new()),
         }
     }
@@ -229,6 +238,11 @@ impl Stand {
     /// Window `w` of the app gets the keyboard, or with None no window the Mac can tell.
     pub fn focus_window(&self, pid: i32, w: Option<usize>) {
         self.focused.lock().unwrap().insert(pid, w);
+    }
+
+    /// The keyboard layouts the Mac says are in use and turned on, or None for none it can read.
+    pub fn set_keyboard(&self, k: Option<Keyboard>) {
+        *self.keyboard.lock().unwrap() = k;
     }
 
     /// Control `i` of window `w` of app `pid` has the keyboard there, or with None the window itself.
@@ -366,8 +380,11 @@ impl Desk for Stand {
         self.change(pid, w, i, |x| x.value = Some(text.into()));
         Ok(())
     }
-    fn key(&self, pid: i32, chord: &Chord) -> Result<(), String> {
-        self.note(format!("key {pid} {}", chord.shown()));
+    fn keyboard(&self) -> Result<Keyboard, String> {
+        self.keyboard.lock().unwrap().clone().ok_or_else(|| "macOS did not say which keyboard layout is in use, so no key is pressed.".into())
+    }
+    fn key(&self, pid: i32, chord: &Chord, code: u16) -> Result<(), String> {
+        self.note(format!("key {pid} {} 0x{code:02X}", chord.shown()));
         Ok(())
     }
     fn menu(&self, pid: i32, path: &[String]) -> Result<(), String> {

@@ -67,7 +67,9 @@ choose_menu_item {"app": "TextEdit", "menu": ["File", "Save…"]}
 - `press_key` sends one key with its modifiers to the control that has the keyboard in the app's focused window, which
   the person's card names: Return, Tab, Escape, the arrows, Home, End, Page Up, Page Down, Delete, letters, digits and
   punctuation. If the keyboard moves to another window or control before the yes is used, nothing is sent; look again
-  and ask again. Never into a password field. Shortcuts that quit the app (Cmd+Q), log out, lock the
+  and ask again. Never into a password field. A letter, digit or punctuation mark is sent by the key that types it on
+  the Mac's keyboard layout; when no key types it there, or a layout the person uses would read that key as a refused
+  shortcut, it is refused with the reason: reach the goal another way. Shortcuts that quit the app (Cmd+Q), log out, lock the
   screen, open Force Quit or empty the Trash are never sent: reach the goal another way, such as the window's own
   button or menu item.
 - `choose_menu_item` takes the path of titles from the menu bar down, exactly as the menus show them. Never the Apple
