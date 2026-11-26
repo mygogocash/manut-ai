@@ -47,6 +47,8 @@ describe("Settings › Artifacts", () => {
     expect(text).toContain("Share HTML and Markdown files with your team and manage their public links.");
     expect(text).toContain("Publish HTML and Markdown files as links anyone with the URL can open. Each one is asked first.");
     for (const step of ["1. Choose a file to share", "2. Copy the public link", "3. Manage it"]) expect(text).toContain(step);
+    // the second switch, for skills, is off by default too
+    expect(html).toMatch(/role="switch"[^>]*aria-checked="false"[^>]*aria-label="Allow sharing skills by link"/);
   });
 
   it("saves the switch on this computer, and reads anything but a saved yes as off", () => {
@@ -60,12 +62,27 @@ describe("Settings › Artifacts", () => {
     }
   });
 
+  it("keeps skills apart: pages on leaves skills off, and only a saved yes turns skills on", () => {
+    vi.stubGlobal("localStorage", fakeStorage());
+    setArtifactSettings({ publish: true });
+    expect(artifactSettings()).toEqual({ publish: true, skills: false });
+    setArtifactSettings({ skills: true });
+    expect(artifactSettings()).toEqual({ publish: true, skills: true });
+    for (const saved of ['{"skills":"yes"}', '{"skills":1}', '{"publish":true}']) {
+      expect(parseArtifactSettings(saved).skills, saved).toBe(false);
+    }
+  });
+
   it("tells its owner the new value when pressed", () => {
     const changes: boolean[] = [];
-    const view = ArtifactLinksView({ publish: false, onPublish: (on) => changes.push(on), onOpen: () => {} });
+    const skills: boolean[] = [];
+    const view = ArtifactLinksView({ publish: false, skills: false, onPublish: (on) => changes.push(on), onSkills: (on) => skills.push(on), onOpen: () => {} });
     const toggle = find(view, (el) => el.type === Toggle);
     expect(toggle?.props.testId).toBe("art-set-publish");
     (toggle!.props as { onChange: (on: boolean) => void }).onChange(true);
     expect(changes).toEqual([true]);
+    const second = find(view, (el) => el.type === Toggle && el.props.testId === "art-set-skills");
+    (second!.props as { onChange: (on: boolean) => void }).onChange(true);
+    expect(skills).toEqual([true]);
   });
 });

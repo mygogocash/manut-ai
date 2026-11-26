@@ -793,6 +793,9 @@ button.upd:hover {
   overflow: hidden;
 }
 .uc-bar > i {
+  /* a meter fills once, from its left edge (the Motion board's Fill) */
+  transform-origin: left center;
+  animation: var(--anim-fill);
   display: block;
   height: 100%;
   border-radius: 2px;

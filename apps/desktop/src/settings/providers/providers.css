@@ -2,17 +2,17 @@
    switch at the right), the chosen agent's settings as a form group under it, then Your agents and Accounts as the
    groups they were on their own pages. */
 .prov-lead {
-  margin: 0 0 12px;
-  color: var(--body);
-  font-size: 12.5px;
+  margin: 0 10px 12px;
+  color: var(--aui-muted);
+  font-size: 13px;
   line-height: 1.5;
-  max-width: 640px;
 }
 .prov-row {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 0 12px 0 0;
+  padding: 0 10px 0 0;
+  border-radius: var(--rad);
 }
 .prov-row.open {
   background: var(--raise);
@@ -23,12 +23,13 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 9px 12px;
+  padding: 8px 10px;
   text-align: left;
   background: none;
   border: 0;
   color: var(--ink);
   cursor: pointer;
+  min-height: 44px;
 }
 .prov-who {
   display: flex;
@@ -41,33 +42,33 @@
   align-items: baseline;
   gap: 8px;
   min-width: 0;
-  font-size: 13px;
+  font-size: 14px;
 }
 .prov-n b {
-  font-weight: 600;
+  font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .prov-own,
 .prov-ver {
-  color: var(--quiet);
-  font-size: 11.5px;
+  color: var(--aui-muted);
+  font-size: 12.5px;
   white-space: nowrap;
 }
 .prov-ver {
   font-family: var(--mono);
 }
 .prov-s {
-  font-size: 11.5px;
-  color: var(--body);
+  font-size: 13px;
+  color: var(--aui-muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .prov-s.quiet,
 .prov-s.off {
-  color: var(--quiet);
+  color: var(--aui-muted);
 }
 .prov-s.warn {
   color: var(--warn, var(--ink));
@@ -79,6 +80,7 @@
 .prov-detail {
   background: var(--raise);
   padding-left: 26px;
+  border-radius: var(--rad);
 }
 .prov-detail > * + * {
   border-top: 1px solid var(--line);
@@ -93,11 +95,11 @@
 .prov-mono,
 .prov-runs code {
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: 12px;
   overflow-wrap: anywhere;
 }
 .prov-quiet {
-  color: var(--quiet);
+  color: var(--aui-muted);
 }
 .prov-field .st-k {
   max-width: 360px;

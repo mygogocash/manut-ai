@@ -32,13 +32,6 @@
   gap: 8px 10px;
   margin: 10px 0 8px;
 }
-.tm-slot .mseg.sm {
-  width: auto;
-}
-.tm-slot .mseg button {
-  flex: none;
-  padding: 0 10px;
-}
 .tm-slot {
   flex: none;
 }
@@ -55,15 +48,9 @@
   min-width: 140px;
   max-width: 220px;
 }
-/* the page's two text fields are a quiet fill with no outline; with the keyboard the fill deepens (as a
-   stepper's number does) */
-.tm-q,
-.tm-q:focus {
-  border-color: transparent;
-}
-.tm-q:focus,
+/* the page's text fields are Settings' 40px fields (the kit's .input, item 85h); with the keyboard the edge turns ink */
 .tm-font:focus {
-  background: var(--raise2);
+  border-color: var(--ink);
 }
 .tm-list {
   border-top: 1px solid var(--line);
@@ -75,11 +62,10 @@
   scrollbar-color: var(--scrollbar) transparent;
 }
 .tm-gh {
-  font-size: 10.5px;
-  color: var(--quiet);
-  text-transform: uppercase;
-  letter-spacing: 0.07em;
-  padding: 8px 12px 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--aui-muted);
+  padding: 8px 10px 4px;
 }
 .tm-grid {
   display: grid;
@@ -93,9 +79,9 @@
   min-width: 0;
   height: 28px;
   /* a row's swatch starts where a group's words do (.st-row) */
-  padding: 0 12px;
-  border-radius: var(--r-sm);
-  font-size: 12.5px;
+  padding: 0 10px;
+  border-radius: var(--rad);
+  font-size: 13px;
   color: var(--body);
   text-align: left;
 }
@@ -126,7 +112,7 @@
   content: "Aa";
   margin-right: 3px;
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1;
 }
 .tm-sw i {
@@ -150,15 +136,15 @@
 }
 /* the rows' fields: a font name, and a number with a step either side (the look of the segmented control) */
 .tm-font {
-  height: 28px;
   width: 200px;
   min-width: 0;
-  padding: 0 9px;
-  border-radius: var(--r-sm);
-  border: 0;
-  background: var(--raise);
+  padding: 0 12px;
+  border-radius: var(--rad);
+  border: 1px solid var(--aui-border-strong);
+  background: var(--aui-surface);
   color: var(--ink);
-  font-size: 12px;
+  font-size: 14px;
+  min-height: 40px;
 }
 .tm-font:focus {
   outline: none;
@@ -215,15 +201,6 @@
   max-width: 100%;
   margin-left: auto;
 }
-/* as wide as the segmented controls on General, wider when the words need it */
-.tm .st-v .mseg.sm {
-  width: auto;
-  min-width: 200px;
-}
-.tm .st-v .mseg button {
-  flex: 1 0 auto;
-  padding: 0 10px;
-}
 
 /* kshell: Settings › Terminal › Default shell */
 .tm-font.tm-shell {
@@ -239,7 +216,6 @@
   flex: none;
 }
 .tm-imp-btn {
-  height: 28px;
   border: 1px solid var(--line);
   white-space: nowrap;
 }
@@ -248,8 +224,8 @@
 }
 .tm-imp-none {
   padding: 4px 8px 8px;
-  font-size: 12px;
-  color: var(--quiet);
+  font-size: 13px;
+  color: var(--aui-muted);
 }
 .tm-imp {
   margin: 0 0 10px;
@@ -267,7 +243,7 @@
   color: var(--ink);
 }
 .tm-imp-h span {
-  font-size: 11.5px;
+  font-size: 12.5px;
   color: var(--quiet);
 }
 .tm-imp-list {
@@ -294,7 +270,7 @@
 }
 .tm-imp-tag {
   flex: none;
-  font-size: 10.5px;
+  font-size: 12px;
   color: var(--quiet);
 }
 .tm-imp-foot {
@@ -306,7 +282,7 @@
 .tm-imp-font {
   flex: 1;
   min-width: 0;
-  font-size: 11.5px;
+  font-size: 12.5px;
   color: var(--muted);
 }
 .tm-imp-use:not(:disabled) {

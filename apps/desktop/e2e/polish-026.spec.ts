@@ -184,7 +184,7 @@ async function settledHeader(page: Page) {
     .toBe(true);
 }
 
-test("5. a bot's header keeps the model name whole from 900px up, panel open and closed, in every language", async ({ page }) => {
+test("5. a bot's header keeps its parts apart, and the box the model name whole, from 900px up, panel open and closed, in every language", async ({ page }) => {
   test.setTimeout(240_000);
   for (const lang of ["en", "ko", "ja", "zh"]) {
     await setup(page, "dark", {}, lang);
@@ -202,9 +202,10 @@ test("5. a bot's header keeps the model name whole from 900px up, panel open and
         const where = `${lang} ${width}px panel ${open ? "open" : "closed"}`;
         const m = await page.evaluate(() => {
           const q = (id: string) => document.querySelector(`[data-testid="${id}"]`) as HTMLElement | null;
+          // the model is in the chat box since item 85f; the header holds the name, the places chip and the panel button
           const label = q("model-label")!;
           const places = q("places");
-          const ids = ["who", "places", "model-pill", "panel-button"];
+          const ids = ["who", "places", "panel-button"];
           const rects = ids.map((id) => q(id)?.getBoundingClientRect().toJSON() ?? null);
           return { cw: label.clientWidth, sw: label.scrollWidth, placesLabel: !!places && getComputedStyle(places.querySelector('[data-testid="places-label"]')!).display !== "none", rects };
         });
@@ -220,7 +221,7 @@ test("5. a bot's header keeps the model name whole from 900px up, panel open and
 });
 
 for (const theme of ["dark", "light"] as const) {
-  test(`5. the header at 1100px with Plans open keeps "Opus 5.5" whole, the chip down to its marks (${theme})`, async ({ page }) => {
+  test(`5. at 1100px with Plans open the box keeps "Opus 5.5" whole and the header the chip's words (${theme})`, async ({ page }) => {
     await setup(page, theme);
     await page.setViewportSize({ width: 1100, height: 800 });
     await expect(page.getByTestId("places")).toBeVisible();
@@ -231,7 +232,8 @@ for (const theme of ["dark", "light"] as const) {
     await shot(page, "5-header", theme);
     const m = await page.getByTestId("model-label").evaluate((e) => [e.scrollWidth, e.clientWidth]);
     expect(m[0], `model label ${m[1]} of ${m[0]}`).toBeLessThanOrEqual(m[1]);
-    await expect(page.getByTestId("places-label")).toBeHidden();
+    // with no model in the header (item 85f) the chip has room for its words; it has no app marks to give way to
+    await expect(page.getByTestId("places-label")).toBeVisible();
   });
 }
 

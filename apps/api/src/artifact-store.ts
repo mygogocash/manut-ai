@@ -39,8 +39,28 @@ export const MAX_ARTIFACT_BYTES = 128 * 1024;
 export const MAX_ARTIFACTS = 50;
 /// The longest title, in characters as JavaScript counts them.
 export const MAX_TITLE = 120;
-export const ARTIFACT_KINDS = ["html", "markdown"] as const;
+/// A page (`html`, `markdown`) or a bundle of skills (`skills`, item 84): one or more skill folders, each a name and its text
+/// files, for a coding agent. A bundle's stored text is its manifest as JSON (`skillsText`), and the size cap above counts
+/// that whole manifest, so a bundle is never larger than a page.
+export const ARTIFACT_KINDS = ["html", "markdown", "skills"] as const;
 export type ArtifactKind = (typeof ARTIFACT_KINDS)[number];
+/// The kinds a publish carries as `text`.
+export const PAGE_KINDS = ["html", "markdown"] as const;
+
+/// A bundle's limits (item 84). The size is `MAX_ARTIFACT_BYTES` for the whole manifest; these keep a bundle a person can
+/// read file by file before publishing it, and a folder the desktop can write without surprises.
+export const MAX_SKILLS = 20;
+/// The most files in one bundle, all its skills together.
+export const MAX_SKILL_FILES = 200;
+/// The longest relative path of a file inside its skill, in characters.
+export const MAX_SKILL_PATH = 200;
+/// The file that makes a folder a skill for Claude Code and Codex; every skill in a bundle has one at its top.
+export const SKILL_FILE = "SKILL.md";
+
+export type SkillFile = { path: string; text: string };
+export type SkillEntry = { name: string; files: SkillFile[] };
+/// Why a bundle cannot be published, with the skill and the file it is about when there is one.
+export type SkillsRefusal = { reason: string; skill?: string; path?: string };
 
 /// What the Worker forwards: the text at its cap, escaped as JSON at worst six characters for one, and the rest.
 const MAX_BODY_BYTES = 6 * MAX_ARTIFACT_BYTES + 16 * 1024;
@@ -80,6 +100,96 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 export function isArtifactKind(value: unknown): value is ArtifactKind {
   return typeof value === "string" && (ARTIFACT_KINDS as readonly string[]).includes(value);
+}
+
+export function isPageKind(value: unknown): value is (typeof PAGE_KINDS)[number] {
+  return typeof value === "string" && (PAGE_KINDS as readonly string[]).includes(value);
+}
+
+/// A skill's name, which is the folder it is installed as: one plain name of 1 to 64 letters, digits, `-`, `_` or `.`, not
+/// starting with a dot and never `..`, so it can only ever name one folder inside an agent's skills folder.
+export function isSkillName(value: unknown): value is string {
+  return typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(value) && !value.includes("..");
+}
+
+/// Why `path` is not a plain relative path inside a skill, or null when it is: `dot_file` for a file or folder whose name starts
+/// with a dot (a dot-file is the kind that holds keys, and is never shared), `bad_path` for anything else that is not
+/// `name/name/...`: empty, absolute, a `..` or `.` step, a backslash, a colon, a control character, or longer than
+/// `MAX_SKILL_PATH`. The desktop applies the same rule (src/runtime/skillBundle.ts, src-tauri/src/skill_links.rs).
+export function skillPathRefusal(path: unknown): "bad_path" | "dot_file" | null {
+  if (typeof path !== "string" || path.length === 0 || path.length > MAX_SKILL_PATH) return "bad_path";
+  if (/[\\:\u0000-\u001f\u007f-\u009f\u2028\u2029]/.test(path) || path.startsWith("/")) return "bad_path";
+  const steps = path.split("/");
+  if (steps.some((step) => step === "" || step === "." || step === "..")) return "bad_path";
+  if (steps.some((step) => step.startsWith("."))) return "dot_file";
+  return null;
+}
+
+/// A NUL or a lone surrogate: what a binary file read as text has, and what no UTF-8 text file does.
+const BINARY = /\u0000|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+
+/// Why `skills` cannot be a bundle, or null when it can: 1 to `MAX_SKILLS` skills, each with a name `isSkillName` takes and that
+/// no other skill of the bundle has (in any letter case, as a Mac's disk compares them), a `SKILL.md` at its top, and files
+/// whose paths `skillPathRefusal` takes, none twice and none inside another (in any letter case), whose text is text; at most
+/// `MAX_SKILL_FILES` files in all. The size is checked on the manifest as a whole (`skillsText`).
+export function skillsRefusal(skills: unknown): SkillsRefusal | null {
+  if (!Array.isArray(skills) || skills.length === 0) return { reason: "no_skills" };
+  if (skills.length > MAX_SKILLS) return { reason: "too_many_skills" };
+  const names = new Set<string>();
+  let count = 0;
+  for (const skill of skills) {
+    if (!isRecord(skill) || !hasOnly(skill, ["name", "files"]) || !Array.isArray(skill.files)) return { reason: "invalid_skills" };
+    if (!isSkillName(skill.name)) return { reason: "bad_name" };
+    const name = skill.name;
+    if (names.has(name.toLowerCase())) return { reason: "duplicate_name", skill: name };
+    names.add(name.toLowerCase());
+    count += skill.files.length;
+    if (count > MAX_SKILL_FILES) return { reason: "too_many_files" };
+    const paths = new Set<string>();
+    for (const file of skill.files) {
+      if (!isRecord(file) || !hasOnly(file, ["path", "text"]) || typeof file.text !== "string") return { reason: "invalid_skills", skill: name };
+      const bad = skillPathRefusal(file.path);
+      if (bad) return { reason: bad, skill: name, ...(typeof file.path === "string" ? { path: file.path.slice(0, MAX_SKILL_PATH) } : {}) };
+      const path = file.path as string;
+      if (paths.has(path.toLowerCase())) return { reason: "duplicate_path", skill: name, path };
+      paths.add(path.toLowerCase());
+      if (BINARY.test(file.text)) return { reason: "binary_file", skill: name, path };
+    }
+    // A file and a folder of one name cannot both be written: `a` and `a/b` clash on disk.
+    for (const path of paths) {
+      const steps = path.split("/");
+      for (let i = 1; i < steps.length; i++) {
+        if (paths.has(steps.slice(0, i).join("/"))) return { reason: "duplicate_path", skill: name, path: steps.slice(0, i).join("/") };
+      }
+    }
+    if (!paths.has(SKILL_FILE.toLowerCase()) || !skill.files.some((file: SkillFile) => file.path === SKILL_FILE)) {
+      return { reason: "no_skill_md", skill: name };
+    }
+  }
+  return null;
+}
+
+/// A bundle's manifest as it is stored, served as JSON and counted against the cap: `{ "skills": [{ name, files: [{ path,
+/// text }] }] }`, in the order given and with no other field. Only for skills `skillsRefusal` took.
+export function skillsText(skills: readonly SkillEntry[]): string {
+  return JSON.stringify({ skills: skills.map((skill) => ({ name: skill.name,
+    files: skill.files.map((file) => ({ path: file.path, text: file.text })) })) });
+}
+
+/// The skills of a stored manifest, or null when it is not one.
+export function readSkillsText(text: string): SkillEntry[] | null {
+  try {
+    const parsed: unknown = JSON.parse(text);
+    if (!isRecord(parsed) || skillsRefusal(parsed.skills) !== null) return null;
+    return parsed.skills as SkillEntry[];
+  } catch {
+    return null;
+  }
+}
+
+/// Whether `value` has no field but `keys` (any of them may be missing; the checks above say which must be there).
+function hasOnly(value: Record<string, unknown>, keys: readonly string[]): boolean {
+  return Object.keys(value).every((key) => keys.includes(key));
 }
 
 /// A title the list can show on one line: 1 to `MAX_TITLE` characters once trimmed, with no control character, so nothing
@@ -141,10 +251,16 @@ export async function artifactTenantRoute(storage: DurableObjectStorage, request
 /// A new link for `title`, `kind` and `text`. Refused `too_many` once the shop holds `MAX_ARTIFACTS`.
 async function publish(storage: DurableObjectStorage, tenant: string, body: Record<string, unknown>,
   actor: AuditActor | undefined, selfId: string): Promise<Response> {
-  const { title, kind, text } = body;
-  if (!isArtifactTitle(title) || !isArtifactKind(kind) || typeof text !== "string" || text.length === 0) {
-    return json({ error: "invalid_request" }, 400);
+  const { title, kind } = body;
+  if (!isArtifactTitle(title) || !isArtifactKind(kind)) return json({ error: "invalid_request" }, 400);
+  // A bundle is checked again here, and stored as its manifest; a page as its text.
+  let text = body.text;
+  if (kind === "skills") {
+    const refused = skillsRefusal(body.skills);
+    if (refused) return json({ error: "invalid_skills", ...refused }, 400);
+    text = skillsText(body.skills as SkillEntry[]);
   }
+  if (typeof text !== "string" || text.length === 0) return json({ error: "invalid_request" }, 400);
   const bytes = artifactBytes(text);
   if (bytes > MAX_ARTIFACT_BYTES) return json({ error: "too_large", max: MAX_ARTIFACT_BYTES }, 413);
   if (!/^[0-9a-f]{64}$/.test(selfId)) return json({ error: "artifacts_unavailable" }, 500);
@@ -186,7 +302,7 @@ function remove(storage: DurableObjectStorage, tenant: string, id: unknown, acto
   return json(answer.body, answer.status);
 }
 
-/// The public read's lookup, by the link's secret: the page's kind and text, or 404 for a secret that names no link, which
+/// The public read's lookup, by the link's secret: the page's kind, title and text, or 404 for a secret that names no link, which
 /// is what a removed link's secret names. Nothing is written.
 async function open(kv: SyncKvStorage, secret: string): Promise<Response> {
   if (!SECRET.test(secret)) return json({ error: "not_found" }, 404);
@@ -194,7 +310,7 @@ async function open(kv: SyncKvStorage, secret: string): Promise<Response> {
   const record = link ? kv.get<StoredArtifact>(keys.record(link.tenant, link.id)) : undefined;
   const text = link ? kv.get<string>(keys.text(link.tenant, link.id)) : undefined;
   if (!link || !record || text === undefined) return json({ error: "not_found" }, 404);
-  return json({ kind: record.kind, text });
+  return json({ kind: record.kind, title: record.title, text });
 }
 
 /// Part of the TenantObject's tenant wipe: every record, every page's text and every link's way in, so no link of the shop

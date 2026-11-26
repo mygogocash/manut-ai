@@ -6,6 +6,7 @@
 // through the same start a restart takes: no click, no page in between, and the same bridge calls the specs were
 // written against. A spec that removes `manut.resume` before the page loads starts on Home, as a first run does.
 import { expect, type Page } from "@playwright/test";
+import { HOOD_PAGES } from "../src/settings/pages";
 
 /** The mock bridge's members and the names their chat headers show (BOT_SEED in e2e/mock-bridge.mjs). */
 export const MEMBERS: Readonly<Record<string, string>> = { kami: "Kami", friren: "Friren", default: "Hermes", "omh-tui": "OMH TUI" };
@@ -59,10 +60,23 @@ export async function openCustomize(page: Page, entry: "automations" | "plugins"
   await page.getByTestId(`nav-${entry}`).click();
 }
 
+/** Settings' developer pages, which live under its "Under the hood" entry. */
+export const HOOD_IDS: readonly string[] = HOOD_PAGES.map((p) => p.id);
+
+/** Settings is open: its "Under the hood" entry is opened when it is closed, so the developer pages are in its list. A
+ *  spec that starts without `manut.settings.hood` (the config seeds it) reaches a developer page this way. */
+export async function openHood(page: Page): Promise<void> {
+  const hood = page.getByTestId("settings-hood");
+  if ((await hood.getAttribute("aria-expanded")) !== "true") await hood.click();
+  await expect(page.getByTestId("settings-hood-list")).toBeVisible();
+}
+
 /** Open a page of Settings (`accounts`, `terminal`, `bot-kami`...): the menu's account row opens Settings, and
- *  Settings' own list picks the page. The old sidebar's "You" row opened Accounts in one press. */
+ *  Settings' own list picks the page, under "Under the hood" for a developer page. The old sidebar's "You" row opened
+ *  Accounts in one press. */
 export async function openSettings(page: Page, id: string): Promise<void> {
   await page.getByTestId("nav-settings").click();
+  if (HOOD_IDS.includes(id)) await openHood(page);
   await page.getByTestId(`settings-nav-${id}`).click();
   await expect(page.getByTestId(`settings-page-${id}`)).toBeVisible();
 }

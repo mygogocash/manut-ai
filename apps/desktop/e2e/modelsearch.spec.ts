@@ -143,9 +143,10 @@ test("Esc closes the picker and gives focus back to the model button", async ({ 
   await expect(page.getByTestId("model-search")).toBeFocused();
 });
 
-// The header at the Tauri minimum window (900x700) with Details open: the model button stays inside the
-// header and off the panel, whatever the id length; a long id ellipsizes and keeps the full id in its title.
-test("long model id ellipsizes and stays inside the header at 900x700 with the panel open", async ({ page }) => {
+// The chat box at the Tauri minimum window (900x700) with Details open: the model button (in the box since item 85f,
+// no longer in the header) stays inside the box and off the panel, whatever the id length; a long id ellipsizes and
+// keeps the full id in its title.
+test("long model id ellipsizes and stays inside the chat box at 900x700 with the panel open", async ({ page }) => {
   await page.setViewportSize({ width: 900, height: 700 });
   const openPanel = async () => {
     if (!/\bpanel-open\b/.test((await page.getByTestId("window").getAttribute("class")) ?? "")) await page.getByTestId("who").click();
@@ -166,10 +167,11 @@ test("long model id ellipsizes and stays inside the header at 900x700 with the p
         return Math.abs(a - b) < 0.5;
       })
       .toBe(true);
-    const head = (await page.getByTestId("header").boundingBox())!;
-    const pill = (await page.getByTestId("model-pill").boundingBox())!;
+    const box = (await page.locator(".composer").boundingBox())!;
+    const pill = (await page.locator(".cw").getByTestId("model-pill").boundingBox())!;
     const panel = (await page.getByTestId("details").boundingBox())!;
-    expect(pill.x + pill.width).toBeLessThanOrEqual(head.x + head.width + 0.5);
+    expect(pill.x + pill.width).toBeLessThanOrEqual(box.x + box.width + 0.5);
+    expect(pill.y).toBeGreaterThanOrEqual(box.y - 0.5);
     // Below 1100px the panel is an overlay that slides over the chat, header included (by design),
     // so the button may sit under it; what matters is that the panel, not the button, is on top there.
     const overlay = await page.getByTestId("details").evaluate((el) => getComputedStyle(el).position === "absolute");

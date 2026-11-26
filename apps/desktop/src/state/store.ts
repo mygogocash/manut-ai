@@ -391,8 +391,8 @@ export interface Peek {
 export type Theme = "system" | "dark" | "light";
 /** Colour set for bubbles, links and the accent points (send, badges, live dots). The logo never changes. */
 export type Palette = "manut" | "graphite" | "ocean" | "forest" | "sunset" | "rose";
-/** soft = both sides in tinted bubbles (default); solid = your bubble in the accent colour; open = the bot
- *  writes on the page and only your messages are bubbles. */
+/** soft = both sides in tinted bubbles; solid = your bubble in the accent colour; open = the bot writes on the page
+ *  and only your messages are bubbles (the default since item 85f: the Chat board's look). */
 export type BubbleStyle = "soft" | "solid" | "open";
 export const BUBBLE_STYLES: BubbleStyle[] = ["soft", "solid", "open"];
 export type TextSize = "small" | "medium" | "large";
@@ -600,17 +600,37 @@ const emptyChat = (): Chat => ({
   turnSeq: 0,
 });
 
-const DEFAULT_LOOK: Look = { palette: "manut", bubbles: "soft", text: "small" };
+/** The Chat board's look (item 85f): an answer on the page with only the person's message in a bubble ("open"), at
+ *  the board's sizes ("medium": a 17px answer, a 15px message). */
+export const DEFAULT_LOOK: Look = { palette: "manut", bubbles: "open", text: "medium" };
+/** Saved looks carry this from item 85f on. A look saved before it held the old defaults (soft bubbles, small text)
+ *  whenever the person changed anything else, since the whole look is saved at once: those two values meant "as the
+ *  app draws it" and read as today's defaults. A choice made since is kept as it is. */
+export const LOOK_VERSION = 2;
+
+/** A saved look (`manut.look`), read tolerantly: an unknown value falls back to the default. */
+export function parseLook(raw: string | null): Look {
+  try {
+    const v = raw ? (JSON.parse(raw) as Partial<Look> & { v?: unknown }) : {};
+    const before = v.v !== LOOK_VERSION;
+    const bubbles = BUBBLE_STYLES.includes(v.bubbles as BubbleStyle) && !(before && v.bubbles === "soft") ? (v.bubbles as BubbleStyle) : DEFAULT_LOOK.bubbles;
+    const text = v.text === "small" || v.text === "medium" || v.text === "large" ? (before && v.text === "small" ? DEFAULT_LOOK.text : v.text) : DEFAULT_LOOK.text;
+    return {
+      palette: PALETTES.includes(v.palette as Palette) ? (v.palette as Palette) : DEFAULT_LOOK.palette,
+      bubbles,
+      text,
+    };
+  } catch {
+    return { ...DEFAULT_LOOK };
+  }
+}
+
+/** What `manut.look` holds: the look and the version it was saved under. */
+export const savedLook = (look: Look): string => JSON.stringify({ ...look, v: LOOK_VERSION });
 
 function readLook(): Look {
   try {
-    const raw = typeof localStorage !== "undefined" ? localStorage.getItem("manut.look") : null;
-    const v = raw ? (JSON.parse(raw) as Partial<Look>) : {};
-    return {
-      palette: PALETTES.includes(v.palette as Palette) ? (v.palette as Palette) : DEFAULT_LOOK.palette,
-      bubbles: BUBBLE_STYLES.includes(v.bubbles as BubbleStyle) ? (v.bubbles as BubbleStyle) : "soft",
-      text: v.text === "medium" || v.text === "large" ? v.text : "small",
-    };
+    return parseLook(typeof localStorage !== "undefined" ? localStorage.getItem("manut.look") : null);
   } catch {
     return { ...DEFAULT_LOOK };
   }
@@ -2156,6 +2176,8 @@ export interface Actions {
    *  settled with a yes (src/runtime/artifactAsks.ts). Nothing else can publish or remove a link. */
   artifactsList(): Promise<OpMap["artifacts.list"]["result"]>;
   artifactsPublish(ask: string): Promise<OpMap["artifacts.publish"]["result"]>;
+  /** A bundle of skills (item 84), by the id of the ask the person settled with a yes after looking at every file. */
+  artifactsPublishSkills(ask: string): Promise<OpMap["artifacts.publishSkills"]["result"]>;
   artifactsRemove(ask: string): Promise<OpMap["artifacts.remove"]["result"]>;
   /** Tasks › Linear: whether `bot`'s config names a Linear MCP server (bridge `tasks.linear`, config only). */
   tasksLinear(bot: string): Promise<{ configured: boolean; server: string }>;
@@ -3137,6 +3159,7 @@ export function createStore(bridge: BridgeLike, opts: StoreOptions = {}): Store 
     routineRemove: (shop, routine) => bridge.request("routine.remove", { shop, routine }),
     artifactsList: () => bridge.request("artifacts.list", {}),
     artifactsPublish: (ask) => bridge.request("artifacts.publish", { ask }),
+    artifactsPublishSkills: (ask) => bridge.request("artifacts.publishSkills", { ask }),
     artifactsRemove: (ask) => bridge.request("artifacts.remove", { ask }),
     tasksLinear: (bot) => (bridge.request as unknown as (op: string, p: unknown) => Promise<{ configured: boolean; server: string }>)("tasks.linear", { bot }),
     async startTaskThread(bot, title, text) {
@@ -3254,7 +3277,7 @@ export function createStore(bridge: BridgeLike, opts: StoreOptions = {}): Store 
     setLook(look) {
       dispatch({ type: "ui.look", look });
       try {
-        if (typeof localStorage !== "undefined") localStorage.setItem("manut.look", JSON.stringify(state.ui.look));
+        if (typeof localStorage !== "undefined") localStorage.setItem("manut.look", savedLook(state.ui.look));
       } catch {
         /* no storage */
       }

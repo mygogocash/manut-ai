@@ -1,4 +1,5 @@
 import { createRoot } from "react-dom/client";
+import { startMotionDriver } from "./lib/firstPaint";
 import { App } from "./app/App";
 import { getSessions } from "./sessions/sessions";
 import { bootResume } from "./app/resumeBoot";
@@ -25,6 +26,8 @@ startTermShare();
 // "Reach this Mac from your phone" comes back on only for a person who turned it on after its consent sheet; for everyone
 // else this reads one saved choice and does nothing (src/remote/state.ts).
 void import("./remote/state").then((m) => m.resumeRemote());
+// pages that name their moves (rows arriving once, rows sliding to a new place) are looked after in one place
+startMotionDriver();
 // No gate in front of the app: Oh My Hermes waited here for its bridge process (and offered to install Hermes).
 // Manut AI's runtime is reached through `src/runtime`, and the default one lives in this page, so there is nothing
 // to wait for. A runtime that can be away says so through the store's `conn` state, which the chat already shows.

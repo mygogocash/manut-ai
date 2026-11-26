@@ -2,10 +2,19 @@
 // list them without loading every Settings page.
 import type { Key } from "../i18n";
 
-export const APP_PAGES: { id: string; label: Key }[] = [
+type Page = { id: string; label: Key };
+
+/** The everyday pages, which a person sees first in Settings' list (item 85h). */
+export const EVERYDAY_PAGES: Page[] = [
   { id: "general", label: "set.general" },
   // the chat box's microphone and voice mode: the language spoken, this Mac or Apple, the voice (VoicePage.tsx)
   { id: "voice", label: "set.voice" },
+];
+
+/** The developer pages, which live under one entry of Settings' list, "Under the hood" (the Voice board's words for
+ *  logs, debug and trace), so an owner who is not technical never meets them unasked. Each keeps its id: a link to one
+ *  (the palette, a page's own button) opens it and shows it inside its open entry. */
+export const HOOD_PAGES: Page[] = [
   { id: "terminal", label: "set.terminal" },
   // every coding agent: on or off, its program, home, arguments and variables; your own agents; the accounts (item 74)
   { id: "providers", label: "set.providers" },
@@ -30,3 +39,9 @@ export const APP_PAGES: { id: string; label: Key }[] = [
   // Practice or Connected, and signing in to the API (DeveloperPage.tsx)
   { id: "developer", label: "set.developer" },
 ];
+
+/** Every App page, the everyday ones first: the order the palette lists them in. */
+export const APP_PAGES: Page[] = [...EVERYDAY_PAGES, ...HOOD_PAGES];
+
+/** Whether page `id` lives under "Under the hood". */
+export const inHood = (id: string): boolean => HOOD_PAGES.some((p) => p.id === id);

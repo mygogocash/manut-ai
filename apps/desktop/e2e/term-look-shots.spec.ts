@@ -120,13 +120,17 @@ async function fits(page: Page, at: string) {
     // the preview: inside the page, its terminal inside it
     const pv = document.querySelector<HTMLElement>("[data-testid=term-preview]")!;
     within(pv, "the preview");
-    // the page adds no outline Settings > General does not have: the theme list is not a box, and the text
-    // fields and steppers (controls General has none of) carry none
+    // the page adds no outline Settings > General does not have: the theme list is not a box, and the steppers (a
+    // control General has none of) carry none. Its text fields are Settings' one field since item 85h, the kit's 40px
+    // field with its edge, as General's quiet hours are
     const edge = (el: HTMLElement, side: "Top" | "Left" | "Right") => parseFloat(getComputedStyle(el)[`border${side}Width`]) || 0;
     if (edge(list, "Left") || edge(list, "Right")) out.push("the theme list is a box");
-    for (const el of document.querySelectorAll<HTMLElement>("[data-testid=term-search], [data-testid=term-font], [data-testid=term-settings] .tm-step")) {
+    for (const el of document.querySelectorAll<HTMLElement>("[data-testid=term-settings] .tm-step")) {
       const c = getComputedStyle(el);
-      if (parseFloat(c.borderTopWidth) > 0 && c.borderTopColor !== "rgba(0, 0, 0, 0)") out.push(`${el.dataset.testid ?? "a field"} is outlined`);
+      if (parseFloat(c.borderTopWidth) > 0 && c.borderTopColor !== "rgba(0, 0, 0, 0)") out.push("a stepper is outlined");
+    }
+    for (const el of document.querySelectorAll<HTMLElement>("[data-testid=term-search], [data-testid=term-font]")) {
+      if (Math.round(el.getBoundingClientRect().height) !== 40) out.push(`${el.dataset.testid} is not Settings' 40px field`);
     }
     const screen = pv.querySelector<HTMLElement>(".xterm-screen")!.getBoundingClientRect();
     const pb = pv.getBoundingClientRect();

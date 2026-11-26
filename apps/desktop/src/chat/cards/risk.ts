@@ -1,5 +1,6 @@
-// Commands that deserve a warning line on the approval card. This only adds a label; the buttons keep
-// the same weight and order (Deny first), and Hermes' own approval rules decide what is asked at all.
+// Commands that deserve a warning on the approval card. This only adds a label (the kit's red tag: red is what cannot
+// be undone); the buttons stay exactly as on any other card, in the same order (Deny first), and Hermes' own approval
+// rules decide what is asked at all.
 import { t, type Key } from "../../i18n";
 
 const RULES: [RegExp, Key][] = [

@@ -131,16 +131,18 @@
   color: var(--aui-muted);
 }
 
-/* A coding session's ask: what the step does in words, under the command, and a key in the change. */
+/* A coding session's ask: what the step does in words, under the command, in the card's reading size (the canvas's
+   StatesCodeDev card sets it under the command), and a key in the change, in the red of what cannot be undone, on the
+   scale of the card's other lines (chat/cards/cards.css). */
 .card-kit-say {
   margin: 0;
-  font-size: 12.5px;
-  color: var(--body);
+  font-size: 14px;
+  color: var(--ink);
 }
 .card-kit-key {
   margin: 0;
-  font-size: 11.5px;
-  font-weight: 600;
+  font-size: 13px;
+  font-weight: 500;
   color: var(--danger);
 }
 
