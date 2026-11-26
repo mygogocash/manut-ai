@@ -1,7 +1,8 @@
 // What a paired phone is shown of a chat (docs/remote-access.md, "What a person does", step 5): the chats as Working,
 // Needs you or Done, and for one chat its messages, its current step and its asks. Everything here is plain data built
 // from the store (fromStore.ts reads it) and every text in it goes through the one masker every surface of the app uses
-// (lib/secrets.ts), so a token in a chat, a command or a step never reaches the phone. An ask is shown whole, with every
+// (lib/secrets.ts), so a token in a chat, a command or a step never reaches the phone; in a command or its folder, a
+// key-shaped part of a path is shown, as on the Mac's card, since it names what runs or where (item 121). An ask is shown whole, with every
 // field its card shows (the title, the whole command with its line breaks, the folder, the plan, who asks), never cut
 // short. The command and the folder go through `showCommand`, which masks a key and never anything the shell acts on, so
 // what a person allows is what runs (item 117). A command longer than a phone is sent (`PHONE_COMMAND_CHARS`) arrives as

@@ -27,7 +27,7 @@ describe("what a phone is shown", () => {
       step: `Running gh auth with ${TOKEN}`,
       items: [
         { kind: "message", id: "m", role: "assistant", text: `Your token is ${TOKEN}`, ts: 1 },
-        { kind: "approval", id: "r", ts: 2, open: true, title: `Use ${TOKEN}`, command: `curl -H "token=${TOKEN}" https://x`, cwd: `/tmp/${TOKEN}`, plan: `Plan with ${TOKEN}`, choices: ["once", "deny"], from: `sub ${TOKEN}` },
+        { kind: "approval", id: "r", ts: 2, open: true, title: `Use ${TOKEN}`, command: `curl -H "token=${TOKEN}" https://x`, cwd: `/tmp/token=${TOKEN}`, plan: `Plan with ${TOKEN}`, choices: ["once", "deny"], from: `sub ${TOKEN}` },
         { kind: "clarify", id: "q", ts: 3, open: true, question: `Keep ${TOKEN}?`, choices: [`yes ${TOKEN}`], questions: [{ id: "a", question: `A ${TOKEN}`, choices: [`b ${TOKEN}`] }] },
       ],
     };
@@ -35,6 +35,11 @@ describe("what a phone is shown", () => {
     const text = JSON.stringify([view, chatRow(source)]);
     expect(text).not.toContain(TOKEN);
     expect(text).toContain("••••");
+  });
+
+  it("shows a key-shaped part of a path, which names what the command runs or where, as the Mac's card does (item 121)", () => {
+    const source: ChatSource = { ...chat(), items: [{ kind: "approval", id: "r", ts: 2, open: true, title: "t", command: `rm -rf ./${TOKEN}/build`, cwd: `/tmp/${TOKEN}`, choices: ["once", "deny"] }] };
+    expect(new Projector().view(source).asks[0]).toMatchObject({ command: `rm -rf ./${TOKEN}/build`, cwd: `/tmp/${TOKEN}` });
   });
 
   it("masks the common forms a key takes in what an agent writes, not only tokens (item 113)", () => {
