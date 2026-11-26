@@ -8,7 +8,7 @@ description: The lead's routine for one plan item in Manut AI - start a helper's
 One item is one branch in one worktree, built by a helper, merged by the lead. `docs/handoff.md` says what runs now and
 `docs/plan.md` has the items. The owner merges to `main`; the lead never does.
 
-Scripts are in `scripts/` beside this file. Run them from anywhere; they know the paths on the owner's Mac.
+Scripts are in `scripts/` beside this file. Section 4 says when the lead need not review an item at all. Run them from anywhere; they know the paths on the owner's Mac.
 
 ## 1. Start an item
 
@@ -106,6 +106,49 @@ life the item changed (`apps/desktop`, `pnpm exec playwright test e2e/<spec>`). 
    push: one runs, the newest waits, and a run already waiting is replaced by a newer one, so quick merges are all
    covered by the runs that finish (each measures from the last green commit).
 4. Start the next item.
+
+## 4. Low-risk work merges itself (item 130)
+
+The owner agreed on 26 Nov 2026 that documentation, a refactor that changes nothing visible and minor and patch
+dependency bumps merge on a green CI run, and that the lead keeps reviewing features and security work. GitHub's own
+auto-merge and branch protection need repository settings the owner has not given, so this runs from the lead's Mac, by
+hand, with two scripts and one classifier.
+
+**The classifier** is `.github/scripts/merge-risk.mjs <base> <head> [--message <file>]`. It prints `low` or `review` and
+one line a file saying why. `low` only when every changed file is documentation (`docs/**`, `*.md`, pictures under
+`docs/assets/`); a dependency bump whose every version in `package.json`, `pnpm-lock.yaml`, `Cargo.toml` and
+`Cargo.lock` is a minor or patch step (a 0.x minor counts as major, and a package added or removed, a version that went
+down or a lockfile entry that changed without a new version is `review`); or source changed by a refactor the merge
+message declares with a `Risk: refactor` trailer (last paragraph), touching no dictionary, stylesheet, e2e spec,
+tauri capability, entitlement, Info plist or tauri config, deleting no test file and lowering no test count. Anything
+else, any file it cannot read, and anything under `.github/` or `.claude/`, `CLAUDE.md`, a security document or the
+classifier itself is `review`. The merge message's trailer is the lead's word: only a message file counts, never a
+commit message on the branch.
+
+**A `low` answer never skips CI.** It says the change is of a kind CI can judge alone; both scripts still need a green
+run of the exact head, read by `ci-wait.sh`.
+
+Which to use:
+
+| When | Run |
+| --- | --- |
+| A helper reports a docs item, or a refactor the lead has read and means to merge on CI alone (write `Risk: refactor` as the last paragraph of the merge message) | `auto-merge.sh [--dry-run] [--no-push] <item worktree> <message file>` instead of `finish-item.sh --ci` |
+| Dependabot's pull requests into `pilot/week-1` are waiting | `auto-merge-dependabot.sh` (a dry run: lists what it would merge and what is left for the lead), then `auto-merge-dependabot.sh --yes` |
+| A feature, anything that touches security, a Settings page, words, a permission, CI or these rules | `finish-item.sh --ci` after the lead's own review, as in section 3 |
+
+`auto-merge.sh` refuses, and prints why, unless both worktrees are clean, the lead's branch is in the item's, the message
+has a `Co-Authored-By` line, the LEAD's copy of the classifier (never the branch's) answers `low`, and `ci-wait.sh`
+reports a green run of the exact head. It then runs `finish-item.sh --ci` and pushes the lead's branch to `pilot/week-1`
+(a fast-forward; `--no-push` leaves the push for when the lead has marked the plan and handoff). `--dry-run` prints the
+classifier's decision and stops, with no wait for CI and no merge.
+
+`auto-merge-dependabot.sh` lists Dependabot's open pull requests into `pilot/week-1`, fetches each head, and merges
+only those the classifier calls `low` with a green pull request run on that head, using `gh pr merge --merge
+--match-head-commit <sha>`. Dependabot's branches are not ones CI runs on a push of, so it reads the pull request's own
+run (`CI_WAIT_EVENTS` in `ci-wait.sh`). A run still going is listed as waiting: run it again, or pass `--wait`. If
+GitHub refuses the merge it tries the REST merge endpoint with the same head, and lists the pull request if that fails
+too. It never closes, comments on or touches a pull request that is not Dependabot's. Dependabot's major bumps, new
+packages and 0.x minors come back as `review`: read them like any other item.
 
 ## When the Mac or the account stops
 
