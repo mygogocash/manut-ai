@@ -12,6 +12,7 @@
 //  - Every other agent: none is known to offer one. A side question sent to the agent would land in the chat's own history, which is
 //    not acceptable, so none is made.
 import { useSyncExternalStore } from "react";
+import { changes } from "./changes";
 
 export const SUGGEST_KEY = "manut.suggest";
 
@@ -30,7 +31,7 @@ function read(): boolean {
 }
 
 let on = read();
-const listeners = new Set<() => void>();
+const listeners = changes();
 
 /** Whether the person turned suggestions on. Off by default and for anything but the exact saved word. */
 export const suggestOn = (): boolean => on;
@@ -44,17 +45,16 @@ export function setSuggestOn(next: boolean): void {
   } catch {
     /* no storage: it holds for this run */
   }
-  for (const l of listeners) l();
+  listeners.emit();
 }
 
 /** Tests: read the setting again from storage. */
 export function reloadSuggest(): void {
   on = read();
-  for (const l of listeners) l();
+  listeners.emit();
 }
 
 const subscribe = (l: () => void) => {
-  listeners.add(l);
-  return () => void listeners.delete(l);
+  return listeners.subscribe(l);
 };
 export const useSuggestOn = (): boolean => useSyncExternalStore(subscribe, suggestOn, suggestOn);

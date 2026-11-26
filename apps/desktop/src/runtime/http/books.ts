@@ -16,6 +16,7 @@
 import { t } from "../../i18n";
 import { dayText } from "../../app/time";
 import { monthLabel, MONTH, rowsText } from "../google";
+import { isObj } from "../../lib/guards";
 
 /** The operation of Ton's append (`SHEETS_APPEND` in apps/api/src/books-detail.ts). */
 export const SHEETS_APPEND = "google.sheets.append";
@@ -66,7 +67,6 @@ export interface HelperBooks {
 export type BooksDetail = OwnerBooks | HelperBooks;
 
 type Obj = Record<string, unknown>;
-const isObj = (v: unknown): v is Obj => !!v && typeof v === "object" && !Array.isArray(v);
 const CONTROL = /[\u0000-\u001f\u007f]/;
 const ISO_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/;
 

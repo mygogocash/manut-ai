@@ -2,11 +2,11 @@
 // the Leave move, marked as leaving, so it can fade where it stands, and is then gone. The Dock does the same by hand
 // (Dock.tsx, DOCK_FADE_MS). Only the popover and the palette use this: an overlay its parent removes goes at once.
 import { useEffect, useState } from "react";
+import { prefersReducedMotion } from "../lib/reducedMotion";
 
 /** The Leave move's time, motion.css's `--move-leave` (motion.test.ts holds the two together). */
 export const LEAVE_MS = 150;
 
-const reduced = () => typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 export interface Leaving {
   /** Draw the overlay: it is open, or it is leaving. */
@@ -29,7 +29,7 @@ export function useLeaving(open: boolean): Leaving {
     if (open) {
       setKept(true);
       setOpened((n) => n + 1);
-    } else if (reduced()) setKept(false);
+    } else if (prefersReducedMotion()) setKept(false);
   }
   useEffect(() => {
     if (open || !kept) return;

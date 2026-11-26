@@ -22,6 +22,7 @@ import { readAgentConfig, type AgentConfig } from "../settings/mcp/agentConfig";
 import { readInstallAsk, readInstallDone, readLinkRead, readSkillReads, type InstallAsk, type InstallDone, type LinkRead, type ReadSkill } from "../runtime/skillBundle";
 import { readAsk, readDone, readDraft, readMadeProject, readPulled, readRepoAsk, readTools, type MergeMethod, type NewProjectMade, type Pulled, type RepoAsk, type ReviewAsk, type ReviewDone, type ReviewDraft, type SourceTools } from "../code/source";
 import { checkArgs, checkVars, homeVarOf, rulesOf, versionAgent, type ProviderPatch, type ProviderView } from "../settings/providers/model";
+import { inTauri } from "../lib/tauri";
 
 /** What the person did in a chat. Mirrors `Input` in src-tauri/src/agent_chat.rs. `images`: saved copies
  *  (`saveFile`) of attached pictures, for the agent's own image input. */
@@ -2670,7 +2671,6 @@ const MOCK_IMPORT: Partial<Record<ImportApp, ImportProfile[]>> = {
   ],
 };
 
-const inTauri = () => typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
 let host: (SessionHost & BuddyHost) | null = null;
 export function getHost(): SessionHost & BuddyHost {

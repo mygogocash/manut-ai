@@ -21,6 +21,7 @@ import { noteReads, resetPreview } from "./preview";
 import { kitProjects, noteBlocked, projectOf, updateKitProjects, type KitProject } from "./project";
 import { keyFiles, keysAfter, type SavedKeys } from "./secrets";
 import { DEFAULT_KIT_LEVEL, type KitLevel } from "@manut/member-grants";
+import { changes } from "../lib/changes";
 
 /** Where a session's ask is asked: its chat, the folder the dial reads as inside (`root`: where the session works, a lane's own
  *  folder), the project whose level, kept rules and allowed folders the dial uses (`project`: the folder the session started
@@ -173,7 +174,7 @@ export function noteSaved(chat: string, files: readonly string[]): void {
   if (JSON.stringify(after) === JSON.stringify(before)) return;
   keys.set(chat, after);
   version++;
-  listeners.forEach((l) => l());
+  listeners.emit();
 }
 
 /** The answer Kit's dial gives ask `ev` by itself, or null when it waits on the person. A step outside the project is
@@ -267,7 +268,7 @@ export function kitCard(ev: EventOf<"approval.request">, ctx: AskContext, packag
 // ---- keys in each session's changes -------------------------------------------------------------------------------
 
 const keys = new Map<string, Record<string, number>>();
-const listeners = new Set<() => void>();
+const listeners = changes();
 let version = 0;
 
 /** A session's change arrived (`tool.diff`): its keys are counted again, and so are the secrets its code reads (preview.ts). */
@@ -278,7 +279,7 @@ export function noteChange(chat: string, files: readonly DiffFile[]): void {
   if (JSON.stringify(after) === JSON.stringify(before)) return;
   keys.set(chat, after);
   version++;
-  listeners.forEach((l) => l());
+  listeners.emit();
 }
 
 /** The files in session `chat`'s changes that hold a key, in name order. */
@@ -289,8 +290,7 @@ export const sessionsWithKeys = (): { chat: string; files: string[] }[] =>
   [...keys.entries()].map(([chat, k]) => ({ chat, files: keyFiles(k) })).filter((x) => x.files.length);
 
 const subscribe = (l: () => void) => {
-  listeners.add(l);
-  return () => listeners.delete(l);
+  return listeners.subscribe(l);
 };
 
 /** Re-renders when a session's keys change. */

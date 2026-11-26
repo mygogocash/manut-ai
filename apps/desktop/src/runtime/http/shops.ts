@@ -20,6 +20,7 @@ import { decodeApprovals } from "./approvals";
 import { decodeWork, readTaskList, type ReadFailure, type ShopPart, type ShopWork, type TaskListRead } from "./shop";
 import type { Answer, ApiSession, ShopSessionRecord } from "./session";
 import type { FetchLike } from "./shell";
+import { isObj } from "../../lib/guards";
 
 export type { ShopRole, ShopRow } from "../../lib/protocol";
 
@@ -84,7 +85,6 @@ function workOf(a: ShopAnswers, unreadable: unknown[]): ShopWork | null | ReadFa
 export const SHOP_EARLY_MS = 60_000;
 
 type Obj = Record<string, unknown>;
-const isObj = (v: unknown): v is Obj => !!v && typeof v === "object" && !Array.isArray(v);
 const text = (v: unknown, max: number): v is string => typeof v === "string" && v.length > 0 && v.length <= max;
 const ms = (v: unknown): number | null => {
   const t = typeof v === "string" ? Date.parse(v) : NaN;

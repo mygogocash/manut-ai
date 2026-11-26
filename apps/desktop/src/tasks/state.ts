@@ -6,6 +6,7 @@
 import { useSyncExternalStore } from "react";
 import type { ChosenAccount, CliSource, TaskFilter, TaskKind, TaskSource } from "./types";
 import { FILTERS, KINDS, SOURCES, accountId, accountIdOk, repoOk } from "./types";
+import { changes } from "../lib/changes";
 
 /** The colours an account's dot can take, in the order new accounts get them. */
 export const ACCOUNT_COLORS: readonly string[] = ["#4c8dff", "#f2994a", "#3fb68b", "#b07cff", "#e5534b", "#d4a72c"];
@@ -104,7 +105,7 @@ function read(): TasksState {
 }
 
 let state: TasksState = read();
-const listeners = new Set<() => void>();
+const listeners = changes();
 
 function save() {
   if (typeof localStorage === "undefined") return;
@@ -115,13 +116,12 @@ function save() {
 function set(patch: Partial<TasksState>) {
   state = { ...state, ...patch };
   save();
-  for (const fn of listeners) fn();
+  listeners.emit();
 }
 
 export const getTasks = () => state;
 export function subscribeTasks(fn: () => void) {
-  listeners.add(fn);
-  return () => void listeners.delete(fn);
+  return listeners.subscribe(fn);
 }
 export const useTasks = () => useSyncExternalStore(subscribeTasks, getTasks, getTasks);
 
@@ -220,5 +220,5 @@ export function clearOpen(): void {
 export function resetTasks() {
   state = fresh();
   if (typeof localStorage !== "undefined") localStorage.removeItem(KEY);
-  for (const fn of listeners) fn();
+  listeners.emit();
 }

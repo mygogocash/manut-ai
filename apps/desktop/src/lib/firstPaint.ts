@@ -12,6 +12,7 @@
 //   data-flip-scope="<s>"    a change of scope (a filter, a search) is another list, not a row moving: no slide
 // One driver (`startMotionDriver`, called once from main.tsx) watches the document and does the rest.
 import { moved } from "./flip";
+import { prefersReducedMotion } from "./reducedMotion";
 
 /** How long a page counts as arriving: the last of Rise's four steps (0.5 s and 4 x 50 ms) with a little to spare. */
 export const ARRIVING_MS = 800;
@@ -39,7 +40,6 @@ export function stepsOf<P>(parents: readonly P[]): number[] {
 const done = new WeakSet<Element>();
 const lists = new WeakMap<Element, { keys: string; tops: Map<string, number>; scope: string; width: number }>();
 
-const reduced = () => typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 function arrive(): void {
   for (const el of document.querySelectorAll<HTMLElement>("[data-arrive-body]")) {
@@ -95,7 +95,7 @@ function flip(): void {
     const was = lists.get(el);
     lists.set(el, { keys, tops, scope, width: innerWidth });
     // A new scope is another list; a different window width reflowed everything; reduced motion slides nothing.
-    if (!was || was.keys === keys || was.scope !== scope || was.width !== innerWidth || reduced()) continue;
+    if (!was || was.keys === keys || was.scope !== scope || was.width !== innerWidth || prefersReducedMotion()) continue;
     // The plain ease and the Switch's time, from the stylesheet's own tokens: a layout that overshoots reflows twice.
     const duration = ms(token("--move-switch", "0.25s"));
     const easing = token("--ease-plain", "ease-out");

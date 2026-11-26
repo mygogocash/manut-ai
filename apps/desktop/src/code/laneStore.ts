@@ -3,9 +3,10 @@
 // records back. Nothing is saved: a lane's state is of this run, and a restart starts each lane's record again.
 import { useSyncExternalStore } from "react";
 import { emptyLane, noteLane, type LaneRecord, type LaneWhere } from "./lane";
+import { changes } from "../lib/changes";
 
 const lanes = new Map<string, LaneRecord>();
-const listeners = new Set<() => void>();
+const listeners = changes();
 let version = 0;
 
 const NONE = Object.freeze(emptyLane()) as LaneRecord;
@@ -16,7 +17,7 @@ export const isLaneChat = (key: string | null | undefined): key is string => !!k
 
 const changed = () => {
   version++;
-  listeners.forEach((l) => l());
+  listeners.emit();
 };
 
 /** An event of the coding session whose chat has key `chat`, which works in `where` (its lane's own folder). */
@@ -38,8 +39,7 @@ export function forgetLane(chat: string): void {
 }
 
 const subscribe = (l: () => void) => {
-  listeners.add(l);
-  return () => listeners.delete(l);
+  return listeners.subscribe(l);
 };
 
 /** Re-renders when any lane learns something. */
@@ -52,18 +52,17 @@ export function useLanesVersion(): number {
 // A lane's folder is kept when its session closes with changes in it (sessions.ts `letLaneGo`), and the Code page lists the
 // kept ones (KeptLanes.tsx). Whatever adds or removes one says so here, so the list is read again at once.
 
-const keptListeners = new Set<() => void>();
+const keptListeners = changes();
 let keptVersion = 0;
 
 /** A lane's folder was kept or removed: the Code page reads its list again. */
 export function keptLanesChanged(): void {
   keptVersion++;
-  keptListeners.forEach((l) => l());
+  keptListeners.emit();
 }
 
 const subscribeKept = (l: () => void) => {
-  keptListeners.add(l);
-  return () => keptListeners.delete(l);
+  return keptListeners.subscribe(l);
 };
 
 /** Changes when a lane's folder was kept or removed. */

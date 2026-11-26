@@ -13,6 +13,7 @@ import { getHost } from "../sessions/host";
 import { usePendingRequests } from "../sessions/termShare";
 import { DOCK_MAX, dockCount } from "../lib/outside";
 import { isMacPlatform } from "../lib/power";
+import { inTauri } from "../lib/tauri";
 
 /** The number shown: every request waiting, at most 99 (the Dock cuts longer labels). */
 export const badgeCount = (asks: number) => Math.min(Math.max(0, asks), DOCK_MAX);
@@ -23,7 +24,6 @@ export const dockRequests = (asks: readonly unknown[], terminalRequests: readonl
 /** What the window's badge count is given for `n`: no count at all for 0, which removes the badge. */
 export const dockArg = (n: number): number | undefined => (n > 0 ? n : undefined);
 
-const inTauri = () => typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
 /** Show `n` on the Dock icon; 0 removes it. On macOS in the desktop app that is the window's badge count; anywhere else it
  *  is the shell's own command (Windows' dot, Linux's count), or the page's stand-in in a plain browser. */

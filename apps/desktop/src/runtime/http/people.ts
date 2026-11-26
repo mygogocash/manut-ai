@@ -23,6 +23,7 @@ import { helperNameOf, identityOk, MAX_HELPER_NAME, type PeopleOps, type PersonI
 import { OpError } from "../mock/host";
 import type { OwnerLink } from "./connections";
 import type { ShopAnswer } from "./shops";
+import { isObj } from "../../lib/guards";
 
 export const PEOPLE_PATH = "/v1/people";
 export const INVITE_PATH = "/v1/people/invites";
@@ -32,7 +33,6 @@ export const AWAY_PATH = "/v1/people/away";
 export const CLEAR_AWAY_PATH = "/v1/people/away/clear";
 
 type Obj = Record<string, unknown>;
-const isObj = (v: unknown): v is Obj => !!v && typeof v === "object" && !Array.isArray(v);
 const text = (v: unknown, max: number): v is string => typeof v === "string" && v.length > 0 && v.length <= max;
 /** The API keeps an identity's value to this many characters (`MAX_FIELD` in apps/api/src/people-store.ts). */
 const MAX_FIELD = 256;

@@ -1,3 +1,4 @@
+import { inTauri } from "../lib/tauri";
 // The foreground CLI of a terminal's program, from the shell's `session-fg` event (src-tauri/src/lib.rs
 // `watch_foreground`: `{ id, agent }`, sent for every pty session — TERMINALS rows and the bottom panel's shells —
 // only when it changes, and once with null when a session that showed an agent ends). One listener for the page;
@@ -28,7 +29,6 @@ const early = new Map<number, string | null>();
 const EARLY_MAX = 64;
 let listening = false;
 
-const inTauri = () => typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
 /** Hand one event to the terminal that owns its pty id. */
 export function dispatchSessionFg(p: SessionFg): void {

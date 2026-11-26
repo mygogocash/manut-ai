@@ -15,6 +15,7 @@
 // - Nothing here raises. A storage that refuses is a record that was not kept: the run still says each sign-in once.
 import type { ShopRow } from "../../lib/protocol";
 import type { ShopSessions } from "./shops";
+import { isObj } from "../../lib/guards";
 
 /** What the route is read from, with the shop's own session. */
 export const DEVICES_PATH = "/v1/people/devices";
@@ -37,7 +38,6 @@ const MAX_LISTED = 50;
 const KEEP_IDS = 200;
 
 type Obj = Record<string, unknown>;
-const isObj = (v: unknown): v is Obj => !!v && typeof v === "object" && !Array.isArray(v);
 const isId = (v: unknown): v is string => typeof v === "string" && v.length > 0 && v.length <= 256;
 
 /** The sign-ins of a `GET /v1/people/devices` answer, oldest first, once each; null when the answer is not this route's. */

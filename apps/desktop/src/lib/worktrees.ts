@@ -13,6 +13,7 @@
 // - Remove a merged lane's folder: default OFF. It reads pull requests through `gh` or `glab`, so it is the person's to turn on.
 import { useSyncExternalStore } from "react";
 import { LANE_FOLDER, validPrefix } from "../code/laneBranch";
+import { changes } from "./changes";
 
 export interface WorktreeSettings {
   /** The folder lanes' folders are made under; "" is the default. */
@@ -67,7 +68,7 @@ export function parseWorktrees(text: string | null): WorktreeSettings {
   };
 }
 
-const listeners = new Set<() => void>();
+const listeners = changes();
 let cache: { text: string | null; value: WorktreeSettings } | null = null;
 
 export function worktreeSettings(): WorktreeSettings {
@@ -80,14 +81,13 @@ export function worktreeSettings(): WorktreeSettings {
 export function setWorktreeSettings(patch: Partial<WorktreeSettings>): void {
   const next = { ...worktreeSettings(), ...patch };
   write(KEY, JSON.stringify(parseWorktrees(JSON.stringify(next))));
-  listeners.forEach((l) => l());
+  listeners.emit();
 }
 
 export function useWorktreeSettings(): WorktreeSettings {
   return useSyncExternalStore(
     (l) => {
-      listeners.add(l);
-      return () => listeners.delete(l);
+      return listeners.subscribe(l);
     },
     worktreeSettings,
     worktreeSettings,

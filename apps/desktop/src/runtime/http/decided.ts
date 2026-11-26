@@ -20,13 +20,13 @@ import { t, type Key } from "../../i18n";
 import { decidedWords, expiredWords, supersededWords, whoDecided, type Closing, type Who } from "./answer";
 import { decodeApprovals, type ShopApproval } from "./approvals";
 import type { Answer } from "./session";
+import { isObj } from "../../lib/guards";
 
 /** What an ask that left is looked up in: the newest requests that are no longer waiting (the API holds 50 of them when no limit is
  *  asked for), decided, expired or ended, newest asked first. */
 export const RECENT_PATH = "/v1/approvals?state=recent";
 
 type Obj = Record<string, unknown>;
-const isObj = (v: unknown): v is Obj => !!v && typeof v === "object" && !Array.isArray(v);
 
 /** The records of a `state=recent` answer, or null for anything that is not that list: a refusal, no answer, a body of another
  *  kind (an answer that says `open` is the open list, not this one), or one with no list in it. An entry this build cannot read

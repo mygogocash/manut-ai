@@ -7,8 +7,8 @@ import { getStore } from "../state/store";
 import { t } from "../i18n";
 import { getSessions } from "./sessions";
 import { isLinkId, parseTermLink } from "./termLink";
+import { inTauri } from "../lib/tauri";
 
-const inTauri = () => typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
 type Gone = () => void;
 const goneListeners = new Set<Gone>();

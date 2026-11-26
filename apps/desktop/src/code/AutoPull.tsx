@@ -11,6 +11,7 @@ import { t, type Key } from "../i18n";
 import { getHost } from "../sessions/host";
 import { lastPull, markPull, pullDue, sourceSettings, useSourceSettings } from "../lib/sourceControl";
 import type { Pulled, PullCode } from "./source";
+import { changes } from "../lib/changes";
 
 /** The codes that say nothing on the page: the folder is not a repository, or it is a lane's (whose branch is the lane's). */
 const QUIET: readonly PullCode[] = ["not_a_repository", "lane"];
@@ -36,16 +37,15 @@ export function AutoPullView({ pulled }: { pulled: Pulled | null }) {
 
 /** The last answer for each project while the app runs. */
 const lastByRoot = new Map<string, Pulled>();
-const listeners = new Set<() => void>();
+const listeners = changes();
 let version = 0;
 function keep(root: string, p: Pulled): void {
   lastByRoot.set(root, p);
   version++;
-  listeners.forEach((l) => l());
+  listeners.emit();
 }
 const subscribe = (l: () => void) => {
-  listeners.add(l);
-  return () => void listeners.delete(l);
+  return listeners.subscribe(l);
 };
 
 /** Asks for a pull of `root` when the switch is on and one is due; the answer is kept for the project. */

@@ -13,6 +13,7 @@
 //   proposes for its own merge (shown in the ask as sent), never a commit that exists (src-tauri/src/credits.rs).
 import { useSyncExternalStore } from "react";
 import { MERGE_METHODS, type MergeMethod } from "../code/source";
+import { changes } from "./changes";
 
 export interface SourceSettings {
   autoPull: boolean;
@@ -71,7 +72,7 @@ export function parseSource(text: string | null): SourceSettings {
 /** The method a merge's ask starts with. */
 export const startMethod = (s: SourceSettings): MergeMethod => (s.mergeMethod === "last" ? s.lastMethod : s.mergeMethod);
 
-const listeners = new Set<() => void>();
+const listeners = changes();
 let cache: { text: string | null; value: SourceSettings } | null = null;
 
 export function sourceSettings(): SourceSettings {
@@ -82,14 +83,13 @@ export function sourceSettings(): SourceSettings {
 
 export function setSourceSettings(patch: Partial<SourceSettings>): void {
   write(KEY, JSON.stringify(parseSource(JSON.stringify({ ...sourceSettings(), ...patch }))));
-  listeners.forEach((l) => l());
+  listeners.emit();
 }
 
 export function useSourceSettings(): SourceSettings {
   return useSyncExternalStore(
     (l) => {
-      listeners.add(l);
-      return () => listeners.delete(l);
+      return listeners.subscribe(l);
     },
     sourceSettings,
     sourceSettings,

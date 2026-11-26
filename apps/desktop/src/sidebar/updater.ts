@@ -11,6 +11,7 @@
 // General › System says so instead.
 import { isAppStore } from "../appStore";
 import { t } from "../i18n";
+import { inTauri } from "../lib/tauri";
 
 /** Download progress: bytes so far and the total when the server sent one. */
 export type UpdateProgress = { done: number; total: number | null };
@@ -43,7 +44,6 @@ export const CHECK_TIMEOUT_MS = 30 * 1000;
 /** Whether the desktop app looks for updates at all. */
 export const UPDATER_ENABLED = true;
 
-const inTauri = () => typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
 /** The shell's updater plugin as an `UpdateHost`. Exported so its request shape stays tested. */
 export function tauriHost(): UpdateHost {

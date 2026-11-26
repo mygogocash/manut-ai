@@ -24,6 +24,7 @@
 import type { ShopRow } from "../../lib/protocol";
 import { decodeApprovals, type ShopApproval } from "./approvals";
 import type { ApiSession, Answer } from "./session";
+import { isObj } from "../../lib/guards";
 
 /** One member's run of a task (an attempt, apps/api task-object.ts), as the task's export keeps it. */
 export interface ShopAttempt {
@@ -226,7 +227,6 @@ export type ReadFailure = "signed_out" | "offline" | "unavailable";
 export type ShopRead = { ok: true; snapshot: ShopSnapshot } | { ok: false; failure: ReadFailure };
 
 type Obj = Record<string, unknown>;
-const isObj = (v: unknown): v is Obj => !!v && typeof v === "object" && !Array.isArray(v);
 const str = (v: unknown): string => (typeof v === "string" ? v : "");
 const id = (v: unknown): string | null => (typeof v === "string" && v.length > 0 ? v : null);
 const list = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);

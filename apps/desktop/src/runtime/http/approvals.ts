@@ -27,6 +27,7 @@ import {
 } from "@manut/approval-core";
 import type { ApprovalChoice } from "../../lib/protocol";
 import { decodeBooksDetail, type BooksDetail } from "./books";
+import { isObj } from "../../lib/guards";
 
 /** What a request shows that this app puts into words. A LINE reply names all five (`replyRequest` in the API's
  *  task-object.ts); a worker's request names its operation and where it goes, and the words are in its action. */
@@ -67,7 +68,6 @@ export interface ShopApproval {
 }
 
 type Obj = Record<string, unknown>;
-const isObj = (v: unknown): v is Obj => !!v && typeof v === "object" && !Array.isArray(v);
 const str = (v: unknown): string => (typeof v === "string" ? v : "");
 const ms = (v: unknown): number | null => {
   if (typeof v === "number") return Number.isFinite(v) ? v : null;

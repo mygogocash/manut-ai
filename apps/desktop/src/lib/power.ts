@@ -6,6 +6,7 @@
 //   Only edges go to the shell (busy at once, idle after a quiet spell), never one call per output.
 import { t } from "../i18n";
 import { createWakeWatch, WAKE_TICK_MS } from "./wake";
+import { inTauri } from "./tauri";
 
 const CLOSE_KEY = "manut.window.close";
 const AWAKE_KEY = "manut.awake";
@@ -26,7 +27,6 @@ function write(key: string, v: string): void {
   }
 }
 
-const inTauri = () => typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
 /** The window's close hides manut to the tray (on unless the person chose Quit). */
 export const closeHides = (): boolean => read(CLOSE_KEY) !== "quit";

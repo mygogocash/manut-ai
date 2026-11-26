@@ -8,6 +8,7 @@
 import { isMacPlatform } from "../lib/power";
 import type { Key } from "../i18n";
 import type { ComputerAsk } from "../lib/protocol";
+import { inTauri } from "../lib/tauri";
 
 export type { ComputerAsk };
 
@@ -29,7 +30,6 @@ export interface ComputerShell {
   open(pane: Pane): Promise<void>;
 }
 
-const inTauri = () => typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 type MockGlobals = { __manutComputerMock?: boolean; __manutComputer?: ComputerMock };
 const mockOn = () => typeof window !== "undefined" && !!(window as unknown as MockGlobals).__manutComputerMock;
 

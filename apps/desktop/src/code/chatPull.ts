@@ -24,6 +24,7 @@ import { mergedFor, pullFor, remoteOf, type LanePull } from "../tasks/pulls";
 import type { CliSource, TaskItem } from "../tasks/types";
 import { readCommand, type Where } from "./command";
 import { stripAnsi } from "./testRun";
+import { changes } from "../lib/changes";
 
 /** A request a chat opened, as the app read it. */
 export interface ChatPull {
@@ -71,11 +72,11 @@ export function opensPull(command: string, where: Where): boolean {
 
 const byChat = new Map<string, ChatPull>();
 const byPull = new Map<string, string>();
-const listeners = new Set<() => void>();
+const listeners = changes();
 let version = 0;
 const bump = () => {
   version++;
-  listeners.forEach((l) => l());
+  listeners.emit();
 };
 const pullKey = (source: CliSource, repo: string, number: number) => `${source}:${repo.toLowerCase()}:${number}`;
 
@@ -139,8 +140,7 @@ export async function noteChatPull(host: Pick<TaskHost, "remote" | "view">, chat
 }
 
 const subscribe = (l: () => void) => {
-  listeners.add(l);
-  return () => void listeners.delete(l);
+  return listeners.subscribe(l);
 };
 
 /** Re-renders when a chat is linked to a request. */
