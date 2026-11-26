@@ -1,10 +1,12 @@
 # Weekly dependency updates for the three ecosystems in this repository. Minor and patch updates arrive grouped,
 # one pull request per ecosystem; a major update arrives on its own, because it can need code changes.
 #
-# Pull requests target main, the default branch, on purpose. Dependabot reads this file from main only; the active
-# pilot/* branch changes name every week, so a fixed target-branch would soon point at a finished branch; and
-# security updates always target main whatever this file says. Merging main into the next pilot branch carries
-# the updates into daily work.
+# Version updates target pilot/week-1, where the work happens (item 127, 26 Nov 2026), through `target-branch` on each
+# entry: Dependabot then reads the manifests on that branch and opens its pull requests against it. GitHub's
+# Dependabot options reference: with target-branch set, the entry's options (schedule, cooldown, groups) apply to
+# version updates only, and security updates always use the default branch, main. This file takes effect from main,
+# the default branch, so the change starts once it is merged there. When the working branch takes a new name, these
+# three lines change with it, or Dependabot keeps updating a finished branch.
 #
 # A version is only offered once it is seven days old, so a hijacked release has time to be noticed and pulled
 # before it reaches a pull request here. Security updates are never delayed by this. Seven days also clears pnpm's
@@ -15,6 +17,7 @@ updates:
   # The pnpm workspace: the root package.json, every apps/* and packages/* manifest, and pnpm-lock.yaml.
   - package-ecosystem: npm
     directory: /
+    target-branch: "pilot/week-1"
     schedule:
       interval: weekly
       day: monday
@@ -29,6 +32,7 @@ updates:
   # The desktop app's Rust crates.
   - package-ecosystem: cargo
     directory: /apps/desktop/src-tauri
+    target-branch: "pilot/week-1"
     schedule:
       interval: weekly
       day: monday
@@ -46,6 +50,7 @@ updates:
     directories:
       - /
       - /.github/actions/*
+    target-branch: "pilot/week-1"
     schedule:
       interval: weekly
       day: monday

@@ -5,7 +5,9 @@
 // in every language: brand, product and command names, key names, sample code.
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
-import ts from "typescript";
+// The parser comes from TypeScript 6.0's API: TypeScript 7.0, the compiler this package type-checks with, ships no
+// API, and its release notes point code that parses or transpiles to @typescript/typescript6 instead.
+import ts from "@typescript/typescript6";
 import { describe, expect, it } from "vitest";
 
 const SRC = join(__dirname, "..");

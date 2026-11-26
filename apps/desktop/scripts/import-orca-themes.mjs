@@ -12,7 +12,9 @@ import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import ts from "typescript";
+// transpileModule is TypeScript 6.0's API: TypeScript 7.0, the desktop's compiler, ships none, and its release notes
+// point code that transpiles to @typescript/typescript6.
+import ts from "@typescript/typescript6";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const OUT = join(HERE, "..", "src", "sessions", "term", "themes-orca.ts");
