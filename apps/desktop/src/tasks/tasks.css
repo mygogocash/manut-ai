@@ -175,6 +175,10 @@
   box-shadow: inset 0 0 0 1px var(--line-soft);
 }
 .tk-seg button {
+  display: inline-flex;
+  align-items: center;
+  /* a switch's icon and its word, the canvas's button gap (item 122) */
+  gap: 6px;
   height: 22px;
   padding: 0 8px;
   border-radius: var(--r-sm);

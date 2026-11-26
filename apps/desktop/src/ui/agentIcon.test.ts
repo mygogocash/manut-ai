@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { createElement } from "react";
 import { renderToString } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { AGENT_IDS, AgentIcon, agentIcon, fileMark, monogram } from "./AgentIcon";
+import { AGENT_IDS, AgentIcon, agentIcon, fileMark, monogram, ownIds } from "./AgentIcon";
 import { AGENT_MARKS } from "./agentMarks";
 import { AGENTS } from "../sessions/agents";
 import { EDITOR_IDS } from "../code/editor";
@@ -82,15 +82,26 @@ describe("<AgentIcon>", () => {
     expect(html({ id: "claude" })).not.toContain("fill-rule=\"evenodd\" aria-hidden");
   });
 
-  it("gives each drawing of a mark with gradients ids of its own", () => {
+  it("gives each drawing of a mark with gradients ids of its own once it is on the page", () => {
     const a = html({ id: "gemini" });
     const ids = [...a.matchAll(/\bid="([^"]+)"/g)].map((m) => m[1]);
     expect(ids.length).toBeGreaterThan(0);
     for (const id of ids) {
-      expect(id).toMatch(/^ag[a-zA-Z0-9]+-\d+$/);
+      expect(id).toMatch(/^ag-gemini-\d+$/);
       expect(a).toContain(`url(#${id})`);
     }
     expect(a).not.toContain("%u");
+    // on the page, each copy renumbers its own ids once, and keeps them on a later render
+    const body = AGENT_MARKS.gemini.body;
+    const one = { dataset: {} as DOMStringMap, innerHTML: "" };
+    const two = { dataset: {} as DOMStringMap, innerHTML: "" };
+    ownIds(body)(one);
+    ownIds(body)(two);
+    const first = one.innerHTML;
+    ownIds(body)(one);
+    expect(one.innerHTML).toBe(first);
+    const idsOf = (h: string) => [...h.matchAll(/\bid="([^"]+)"/g)].map((m) => m[1]);
+    expect(idsOf(one.innerHTML).some((id) => idsOf(two.innerHTML).includes(id))).toBe(false);
   });
 
   it("draws a monogram as a tile whose letter is the stylesheet's, so it is never part of a row's words", () => {

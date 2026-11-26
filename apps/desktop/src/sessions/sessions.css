@@ -202,7 +202,8 @@ body.side-resizing * {
 .ss-item {
   display: flex;
   align-items: center;
-  gap: 8px;
+  /* the canvas's menu gap, the same in every menu (item 122) */
+  gap: 10px;
   width: 100%;
   height: 30px;
   padding: 0 6px;
@@ -237,7 +238,7 @@ body.side-resizing * {
   opacity: 1;
 }
 .ss-ic {
-  width: 18px;
+  width: 16px;
   display: grid;
   place-items: center;
   flex: none;
@@ -314,7 +315,6 @@ body.side-resizing * {
   color: var(--ink);
 }
 .ss-more-ic {
-  font-size: 13px;
   line-height: 1;
 }
 /* a missing agent's row: its name with "Not installed" (or "Copied") at the line's end, and under them the install
@@ -369,9 +369,7 @@ body.side-resizing * {
   font-weight: 500;
 }
 .ss-past-back > .ss-ic:first-child {
-  width: 10px;
   color: var(--muted);
-  font-size: 14px;
 }
 /* a past conversation: its title over its folder and age, each one line */
 .ss-past {

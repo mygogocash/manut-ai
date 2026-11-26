@@ -15,6 +15,7 @@
 // because the switcher moved meanwhile. A shop the person only helps at is refused in the runtime's own words, which each half
 // shows in place of its list. The rules and words are memory.ts and routines.ts; this file draws them.
 import { useEffect, useReducer, useRef, useState, type ReactNode } from "react";
+import { MenuIcon as EntryIcon } from "../ui/MenuIcon";
 import "./customize.css";
 import { weekdayName } from "../app/time";
 import { t } from "../i18n";
@@ -497,6 +498,7 @@ function RoutinesPane({ p, automations, plugins }: { p: RoutinesPaneProps } & Cu
           {automations && (
             <li>
               <button type="button" className="rowl" onClick={automations.open} data-testid="nav-automations">
+                <EntryIcon name="circle-arrows" />
                 <span className="grow">
                   <span className="l1">{t("customize.allRoutines")}</span>
                   <span className="l2">{t("customize.automations")}</span>
@@ -509,6 +511,7 @@ function RoutinesPane({ p, automations, plugins }: { p: RoutinesPaneProps } & Cu
           {plugins && (
             <li>
               <button type="button" className="rowl" onClick={plugins.open} data-testid="nav-plugins">
+                <EntryIcon name="plug" />
                 <span className="grow">
                   <span className="l1">{t("nav.plugins")}</span>
                   <span className="l2">{t("customize.plugins")}</span>

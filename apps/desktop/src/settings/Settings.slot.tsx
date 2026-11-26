@@ -15,7 +15,7 @@ import { getStore, notifyEnabled, notifyErrorsEnabled, setNotifyEnabled, setNoti
 import { addToList } from "../addbot/bots";
 import { appSounds, setSoundsEnabled, soundsEnabled } from "../lib/sounds";
 import { LANG_NAMES, LANGS, t, type Key, type Lang } from "../i18n";
-import { Avatar, GridIcon, ModelIcon, SourceIcon } from "../ui";
+import { Avatar, ModelIcon, SourceIcon } from "../ui";
 import { Modes } from "../ui/Modes";
 import { reasoningLabel } from "../chat/model/levels";
 import { Appearance } from "./Appearance";
@@ -42,8 +42,8 @@ import { VoicePage } from "./VoicePage";
 import { ComputerPage } from "./ComputerPage";
 import { McpSkillsPage } from "./mcp/McpSkillsPage";
 import { WorkflowsPage } from "../workflows/WorkflowsPage";
-import { APP_PAGES, EVERYDAY_PAGES, HOOD_PAGES, inHood } from "./pages";
-import { Icon } from "../ui/icons";
+import { APP_PAGES, EVERYDAY_PAGES, HOOD_PAGES, LIST_ICON, inHood } from "./pages";
+import { Icon, type IconName } from "../ui/icons";
 
 export const slot = "settings";
 
@@ -83,6 +83,13 @@ function useHood(current: string): [boolean, () => void] {
   return [open, toggle];
 }
 
+/** A list entry's icon of the set (item 122: every menu led by an icon), in the entry's own colour. */
+const NavIcon = ({ name }: { name: IconName }) => (
+  <span className="st-nav-i" aria-hidden="true">
+    <Icon name={name} />
+  </span>
+);
+
 /** The disclosure's chevron, in the canvas's icon style (16px, a 1.4 line). */
 const HoodChevron = () => <Icon name="chevron-down" className="st-ic st-hood-ic" />;
 
@@ -107,14 +114,13 @@ export default function Settings({ page }: SlotProps["settings"]) {
       <nav className="st-nav" aria-label={t("set.sections")}>
         {EVERYDAY_PAGES.map((p) => (
           <NavItem key={p.id} id={p.id} current={current} onPick={s.openSettings}>
-            {t(p.label)}
+            <NavIcon name={p.icon} />
+            <span className="st-nav-n">{t(p.label)}</span>
           </NavItem>
         ))}
         <div className="st-sh">{t("set.bots")}</div>
         <NavItem id="bots" current={current} onPick={s.openSettings}>
-          <span className="st-nav-i" aria-hidden="true">
-            <GridIcon />
-          </span>
+          <NavIcon name={LIST_ICON.bots} />
           <span className="st-nav-n">{t("set.allBots")}</span>
           <span className="st-count">{s.bots.length}</span>
         </NavItem>
@@ -129,7 +135,8 @@ export default function Settings({ page }: SlotProps["settings"]) {
           <>
             <div className="st-sh">{t("set.shop")}</div>
             <NavItem id="people" current={current} onPick={s.openSettings}>
-              {t("set.people")}
+              <NavIcon name={LIST_ICON.people} />
+              <span className="st-nav-n">{t("set.people")}</span>
             </NavItem>
           </>
         )}
@@ -141,6 +148,7 @@ export default function Settings({ page }: SlotProps["settings"]) {
           onClick={toggleHood}
           data-testid="settings-hood"
         >
+          <NavIcon name={LIST_ICON.hood} />
           <span className="st-nav-n">{t("set.hood")}</span>
           <HoodChevron />
         </button>
@@ -148,7 +156,8 @@ export default function Settings({ page }: SlotProps["settings"]) {
           <div className="st-hood-list" id="st-hood-list" role="group" aria-label={t("set.hood")} data-testid="settings-hood-list">
             {HOOD_PAGES.map((p) => (
               <NavItem key={p.id} id={p.id} current={current} onPick={s.openSettings}>
-                {t(p.label)}
+                <NavIcon name={p.icon} />
+                <span className="st-nav-n">{t(p.label)}</span>
               </NavItem>
             ))}
           </div>

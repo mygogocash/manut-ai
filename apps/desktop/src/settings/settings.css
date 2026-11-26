@@ -69,8 +69,10 @@
 /* "Under the hood": one entry for the developer pages. Its chevron turns with the Switch move, as the kit's accordion's
    does; the list it opens sits under it, a step in. */
 .st-nav .st-hood {
-  justify-content: space-between;
   margin-top: 16px;
+}
+.st-nav .st-hood .st-hood-ic {
+  margin-left: auto;
 }
 .st-nav .st-hood[aria-expanded="true"] {
   color: var(--ink);
@@ -103,9 +105,8 @@
   flex-direction: column;
   gap: 2px;
 }
-.st-nav .st-hood-list button {
-  padding-left: 22px;
-}
+/* the hood's pages stand on the list's one column of icons and words (item 122); the open entry above and the space
+   after it say they are its own */
 
 /* the page: one reading column, 736 wide with 20px at its sides, so its text runs 696 at most (BrandLayout) */
 .st-body {
@@ -263,13 +264,15 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* an entry's icon (item 122): 16px in the entry's own colour, 10px before its words, as the side menu's rows; a member's
+   face keeps its 18px */
 .st-nav-i {
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   display: grid;
   place-items: center;
   flex: none;
-  color: var(--aui-muted);
+  color: inherit;
 }
 .st-nav-i svg {
   /* The brand set's size (src/ui/icons.tsx). */
@@ -313,13 +316,9 @@
   }
   .st-nav .st-hood {
     margin-top: 0;
-    gap: 6px;
   }
   .st-hood-list {
     display: contents;
-  }
-  .st-nav .st-hood-list button {
-    padding-left: 10px;
   }
   .st-body {
     padding: 24px 16px 32px;

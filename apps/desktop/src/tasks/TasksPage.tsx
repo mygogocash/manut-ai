@@ -12,6 +12,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "../state/store";
 import { t, type Key } from "../i18n";
 import { CloseIcon, IconButton, Popover, PrIcon, SearchIcon, Spinner } from "../ui";
+import { Icon, type IconName } from "../ui/icons";
+
+/** Each scope's icon of the set (item 122: every switch led by an icon). */
+const SCOPE_ICON: Record<"repo" | "me" | "pulls", IconName> = { repo: "folder", me: "user", pulls: "git-pull-request" };
 import { BotChip } from "../pages/kit";
 import { Markdown } from "../chat/parts/Markdown";
 import { CopyButton } from "../chat/parts/Copy";
@@ -251,6 +255,7 @@ export function TasksPage() {
         <div className="tk-seg tk-scope" role="group" aria-label={t("tasks.scope")}>
           {(["repo", "me", "pulls"] as const).map((sc) => (
             <button key={sc} type="button" className={tk.scope === sc ? "on" : undefined} aria-pressed={tk.scope === sc} onClick={() => setScope(sc)} data-testid={`tasks-scope-${sc}`}>
+              <Icon name={SCOPE_ICON[sc]} className="tk-seg-ic" />
               {sc === "repo" ? t("tasks.scope.repo") : sc === "me" ? t("tasks.scope.me") : t("tasks.scope.pulls")}
             </button>
           ))}

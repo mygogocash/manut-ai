@@ -215,7 +215,7 @@ describe("Settings › Developer on the app's store", () => {
     const { default: Settings } = await import("./Settings.slot");
     await getStore().actions.init();
     const html = renderToString(<Settings page="developer" onClose={noop} />);
-    expect(html).toMatch(/data-testid="settings-nav-developer"[^>]*>Developer</);
+    expect(html).toMatch(/data-testid="settings-nav-developer"[^>]*>.*?<span class="st-nav-n">Developer</);
     expect(html).toContain('data-testid="settings-page-developer"');
     expect(html).toContain('data-testid="dev-runtime"');
     // in Practice, which is the default, the page offers the pretend sign-in by email to try the screens

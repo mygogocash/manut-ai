@@ -9,6 +9,8 @@
 // placed at a point inside the window and is the same `row-menu` the sessions' own menu uses.
 import { useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { t, type Key } from "../i18n";
+import { MenuIcon } from "../ui/MenuIcon";
+import type { IconName } from "../ui/icons";
 import { clearSelection } from "./selection";
 import { actOnRows, dayField, pickedTime, SNOOZES, snoozeUntil, timeField, type RowAction, type RowMark } from "./rows";
 
@@ -33,6 +35,27 @@ const LABEL: Record<RowChoice, Key> = {
   restore: "row.restore",
 };
 
+/** Each choice's icon of the set (item 122: every menu led by an icon). */
+export const CHOICE_ICON: Record<RowChoice, IconName> = {
+  pin: "pin",
+  unpin: "pin-off",
+  snooze: "clock",
+  settle: "check",
+  wake: "rotate-ccw",
+  archive: "archive",
+  restore: "rotate-ccw",
+};
+
+/** The snooze step's icons: back, the three fixed times, until it finishes and a picked time. */
+export const SNOOZE_ICON: Record<"back" | "hour" | "tomorrow" | "week" | "done" | "pick", IconName> = {
+  back: "chevron-left",
+  hour: "clock",
+  tomorrow: "calendar",
+  week: "calendar",
+  done: "check",
+  pick: "pencil",
+};
+
 const ACTION: Partial<Record<RowChoice, RowAction>> = {
   pin: { do: "pin" },
   unpin: { do: "unpin" },
@@ -42,9 +65,10 @@ const ACTION: Partial<Record<RowChoice, RowAction>> = {
   restore: { do: "restore" },
 };
 
-/** The menu's size, to keep it inside the window: 168 wide, or the widest word (an editor's name) up to about 208, 26 per row plus its padding. */
-const W = 208;
-const height = (rows: number) => rows * 26 + 14;
+/** The menu's size, to keep it inside the window: 168 wide, or the widest word (an editor's name) up to about 260, 34 per row
+ *  (the canvas's menu row, item 122) plus its padding. */
+const W = 260;
+const height = (rows: number) => rows * 34 + 10;
 
 /** Where a menu of `rows` rows opens for a pointer or a button at (`x`, `y`): inside the window. */
 export function menuAt(x: number, y: number, rows = 5): { x: number; y: number } {
@@ -145,29 +169,35 @@ export function RowMenu({ rowKey, kind, mark, name, at, onDismiss, extra, workin
             </span>
           )}
           <button type="submit" role="menuitem" className="row-mi" data-testid="row-pick-go">
+            <MenuIcon name={CHOICE_ICON.snooze} />
             {t("row.snooze")}
           </button>
           <button type="button" role="menuitem" className="row-mi" onClick={() => setStep("snooze")} data-testid="row-pick-back">
+            <MenuIcon name={SNOOZE_ICON.back} />
             {t("row.snooze.back")}
           </button>
         </form>
       ) : step === "snooze" ? (
         <>
           <button type="button" role="menuitem" className="row-mi" onClick={() => setStep("main")} data-testid="row-snooze-back">
+            <MenuIcon name={SNOOZE_ICON.back} />
             {t("row.snooze.back")}
           </button>
           {SNOOZES.map((id) => (
             <button key={id} type="button" role="menuitem" className="row-mi" onClick={() => done({ do: "snooze", until: snoozeUntil(id, Date.now()) })} data-testid={`row-snooze-${id}`}>
+              <MenuIcon name={SNOOZE_ICON[id]} />
               {t(`row.snooze.${id}` as Key)}
             </button>
           ))}
           {snoozeChoices(working && !many).map((c) =>
             c === "done" ? (
               <button key={c} type="button" role="menuitem" className="row-mi" title={t("row.snooze.doneTip")} onClick={() => done({ do: "snoozeTurn" })} data-testid="row-snooze-done">
+                <MenuIcon name={SNOOZE_ICON.done} />
                 {t("row.snooze.done")}
               </button>
             ) : (
               <button key={c} type="button" role="menuitem" className="row-mi" onClick={() => setStep("pick")} data-testid="row-snooze-pick">
+                <MenuIcon name={SNOOZE_ICON.pick} />
                 {t("row.snooze.pick")}
               </button>
             ),
@@ -177,6 +207,7 @@ export function RowMenu({ rowKey, kind, mark, name, at, onDismiss, extra, workin
         <>
           {choices.map((c) => (
             <button key={c} type="button" role="menuitem" className="row-mi" onClick={() => (c === "snooze" ? setStep("snooze") : done(ACTION[c]!))} data-testid={`row-${c}`}>
+              <MenuIcon name={CHOICE_ICON[c]} />
               {t(LABEL[c])}
             </button>
           ))}

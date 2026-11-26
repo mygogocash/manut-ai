@@ -53,14 +53,26 @@ describe("Settings' list", () => {
   it("starts with the hood closed: the everyday pages and the team first, then one entry for the developer pages", () => {
     vi.stubGlobal("localStorage", fakeStorage());
     const list = nav(renderToString(<Settings page="general" onClose={noop} />));
-    expect(list).toMatch(/aria-expanded="false"[^>]*data-testid="settings-hood"[^>]*><span class="st-nav-n">Under the hood</);
+    expect(list).toMatch(/aria-expanded="false"[^>]*data-testid="settings-hood"[^>]*><span class="st-nav-i" aria-hidden="true"><svg[^]*?<\/svg><\/span><span class="st-nav-n">Under the hood</);
     for (const p of HOOD_PAGES) expect(list).not.toContain(`settings-nav-${p.id}"`);
     expect(at(list, "settings-nav-general")).toBeLessThan(at(list, "settings-nav-voice"));
     expect(at(list, "settings-nav-voice")).toBeLessThan(at(list, "settings-nav-bots"));
     expect(at(list, "settings-nav-bots")).toBeLessThan(at(list, "settings-hood"));
-    expect(list).toMatch(/data-testid="settings-nav-general"[^>]*>General</);
+    expect(list).toMatch(/data-testid="settings-nav-general"[^>]*>.*?<span class="st-nav-n">General</);
     // the group names are words in sentence case; the stylesheet draws them as bands
     expect(list).toContain('<div class="st-sh">Team members</div>');
+  });
+
+  it("leads every entry of the list with an icon of the set, hidden from a screen reader, before its words (item 122)", () => {
+    vi.stubGlobal("localStorage", fakeStorage({ "manut.settings.hood": "1" }));
+    const list = nav(renderToString(<Settings page="general" onClose={noop} />));
+    const entries = [...list.matchAll(/<button[^>]*data-testid="(settings-nav-[a-z]+|settings-hood)"[^>]*>([^]*?)<\/button>/g)];
+    const ids = entries.map((m) => m[1]);
+    expect(ids).toEqual(["settings-nav-general", "settings-nav-voice", "settings-nav-remote", "settings-nav-bots", "settings-nav-people", "settings-hood", ...HOOD_PAGES.map((p) => `settings-nav-${p.id}`)]);
+    for (const [, id, inner] of entries) expect(inner, id).toMatch(/^<span class="st-nav-i" aria-hidden="true"><svg class="ic" width="16" height="16"/);
+    // every page's icon is its own
+    const icons = [...EVERYDAY_PAGES, ...HOOD_PAGES].map((p) => p.icon);
+    expect(new Set(icons).size).toBe(icons.length);
   });
 
   it("opens the hood by itself when a link names one of its pages, with that page chosen", () => {

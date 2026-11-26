@@ -6,7 +6,7 @@
 // removes or pays: an ask stays an ask on its own card (registry.test.ts holds the registry to that).
 import { LANG_NAMES, LANGS, t, type Key, type Lang } from "../i18n";
 import type { MenuPage } from "../state/store";
-import { APP_PAGES } from "../settings/pages";
+import { APP_PAGES, LIST_ICON } from "../settings/pages";
 import { MENU_ROWS, rowPage, type MenuRow } from "../sidebar/menu";
 import type { Places } from "./places";
 import type { IconName } from "../ui/icons";
@@ -77,15 +77,16 @@ const MENU_WORDS: Record<MenuRow, Key> = {
 export function goRows(c: PaletteCtx): Row[] {
   const pages: Row[] = MENU_ROWS.map((row) => ({ id: `go:${row}`, label: t(MENU_WORDS[row]), icon: MENU_ICON[row], run: () => c.openPage(rowPage(row)) }));
   const settings = t("set.title");
-  const own = (id: string, name: string): Row => ({ id: `go:settings:${id}`, label: `${settings} › ${name}`, icon: "gear", run: () => c.openSettings(id) });
+  // each Settings page by the icon its entry in Settings' list leads with (item 122); a member's page by Settings' own
+  const own = (id: string, name: string, icon: IconName = "gear"): Row => ({ id: `go:settings:${id}`, label: `${settings} › ${name}`, icon, run: () => c.openSettings(id) });
   return [
     ...pages,
     own("general", t("set.general")),
-    own("bots", t("set.allBots")),
+    own("bots", t("set.allBots"), LIST_ICON.bots),
     ...c.bots.map((b) => own(`bot:${b.name}`, b.displayName)),
-    ...(c.people ? [own("people", t("set.people"))] : []),
+    ...(c.people ? [own("people", t("set.people"), LIST_ICON.people)] : []),
     // General is listed first above, so the App list skips it
-    ...APP_PAGES.filter((p) => p.id !== "general").map((p) => own(p.id, t(p.label))),
+    ...APP_PAGES.filter((p) => p.id !== "general").map((p) => own(p.id, t(p.label), p.icon)),
   ];
 }
 

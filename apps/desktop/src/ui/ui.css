@@ -295,3 +295,17 @@ button.ui-pill:hover {
 .agent-mono::before {
   content: attr(data-letter);
 }
+
+/* A menu entry's lead (MenuIcon.tsx): a 16px slot in the entry's own text colour, 10px before its words, as the canvas's
+   menus (KitMore's .mi) draw it. Every menu that leads with an icon uses this one slot and this one gap. */
+.mi-ic {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  color: inherit;
+}
+.mi-ic > * {
+  display: block;
+}

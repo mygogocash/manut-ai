@@ -49,7 +49,8 @@ import { SESSION_CLI } from "./sessionCli";
 import { agentSignedOut, signedOutTip, signedOutWord } from "./signedOut";
 import { useAccounts } from "../settings/accounts/useAccounts";
 import { accountForNewSessions } from "../settings/accounts/rules";
-import { Icon } from "../ui/icons";
+import { Icon, type IconName } from "../ui/icons";
+import { MenuIcon } from "../ui/MenuIcon";
 
 
 /** `work@example.com` -> `work@…`. */
@@ -464,13 +465,17 @@ function NewSessionMenu({ onClose, trigger, start }: { onClose: () => void; trig
                 }}
                 data-testid="session-folder-pick"
               >
-                <span className="ss-ic" />
+                <span className="ss-ic" aria-hidden="true">
+                  <Icon name="folder" />
+                </span>
                 <span className="ss-n">{folderName(cwd)}</span>
                 <span className="ss-path">{parentPath(tildePath(cwd, ss.home))}</span>
               </button>
             ))}
             <button type="button" role="menuitem" className="ss-item" onClick={() => void choose()} data-testid="session-choose">
-              <span className="ss-ic" />
+              <span className="ss-ic" aria-hidden="true">
+                <Icon name="search" />
+              </span>
               <span className="ss-n">{t("sessions.choose")}</span>
             </button>
           </div>
@@ -522,7 +527,9 @@ function NewSessionMenu({ onClose, trigger, start }: { onClose: () => void; trig
               const isDefault = defaultShell ? s.id === defaultShell : s.default;
               return (
                 <button key={s.id} type="button" role="menuitem" className="ss-item" title={s.path} onClick={() => pickShell(s.id)} data-testid="session-shell-pick" data-shell={s.id}>
-                  <span className="ss-ic" />
+                  <span className="ss-ic" aria-hidden="true">
+                    <Icon name="terminal" />
+                  </span>
                   <span className="ss-n">{s.label}</span>
                   {isDefault && <span className="ss-missing">{t("term.shellDefault")}</span>}
                 </button>
@@ -541,7 +548,7 @@ function NewSessionMenu({ onClose, trigger, start }: { onClose: () => void; trig
             data-testid="session-more"
           >
             <span className="ss-ic ss-more-ic" aria-hidden="true">
-              {unfold ? "⌄" : "›"}
+              <Icon name={unfold ? "chevron-down" : "chevron-right"} />
             </span>
             <span className="ss-n">{t("ss.moreAgents")}</span>
             <span className="ss-missing">{parts.more.length}</span>
@@ -685,7 +692,7 @@ function PastList({ agent, onBack, onPick }: { agent: PastAgent; onBack: () => v
     >
       <button type="button" role="menuitem" className="ss-item ss-past-back" onClick={onBack} data-testid="session-past-back" aria-label={t("ss.past.back")}>
         <span className="ss-ic" aria-hidden="true">
-          ‹
+          <Icon name="chevron-left" />
         </span>
         <span className="ss-ic">
           <AgentMark agent={agent} />
@@ -714,6 +721,9 @@ function PastList({ agent, onBack, onPick }: { agent: PastAgent; onBack: () => v
               }}
               data-testid={`session-past-row-${c.id}`}
             >
+              <span className="ss-ic" aria-hidden="true">
+                <Icon name="message" />
+              </span>
               <span className="ss-n ss-n-as">
                 <span className="ss-l">{c.title}</span>
                 <span className="ss-as">
@@ -1102,12 +1112,12 @@ function FolderMenu({ at, cwd, all, added, onDismiss }: { at: { x: number; y: nu
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
   }, [onDismiss]);
-  const items: [string, string, () => void][] = [
-    ["term-folder-new", t("term.here"), () => void getSessions().startTerminal(SHELL, cwd)],
-    ["term-folder-others", t("term.collapseOthers"), () => setFolderPrefs(collapseOthers(getFolderPrefs(), all, cwd))],
-    ["term-folder-reveal", revealWord(), () => void getHost().reveal(cwd).catch(() => undefined)],
-    ["term-folder-add", t("term.newFolder"), () => void addTermFolder()],
-    ...(added ? ([["term-folder-remove", t("term.folderRemove"), () => (setFolderGone(cwd, false), setFolderPrefs(removeFolder(getFolderPrefs(), cwd)))]] as [string, string, () => void][]) : []),
+  const items: [string, string, () => void, IconName][] = [
+    ["term-folder-new", t("term.here"), () => void getSessions().startTerminal(SHELL, cwd), "square-plus"],
+    ["term-folder-others", t("term.collapseOthers"), () => setFolderPrefs(collapseOthers(getFolderPrefs(), all, cwd)), "chevrons-down-up"],
+    ["term-folder-reveal", revealWord(), () => void getHost().reveal(cwd).catch(() => undefined), "folder"],
+    ["term-folder-add", t("term.newFolder"), () => void addTermFolder(), "folder-plus"],
+    ...(added ? ([["term-folder-remove", t("term.folderRemove"), () => (setFolderGone(cwd, false), setFolderPrefs(removeFolder(getFolderPrefs(), cwd))), "minus"]] as [string, string, () => void, IconName][]) : []),
   ];
   return (
     <div
@@ -1132,7 +1142,7 @@ function FolderMenu({ at, cwd, all, added, onDismiss }: { at: { x: number; y: nu
         btns[to % btns.length]?.focus();
       }}
     >
-      {items.map(([id, label, run]) => (
+      {items.map(([id, label, run, icon]) => (
         <button
           key={id}
           type="button"
@@ -1144,6 +1154,7 @@ function FolderMenu({ at, cwd, all, added, onDismiss }: { at: { x: number; y: nu
             run();
           }}
         >
+          <MenuIcon name={icon} />
           {label}
         </button>
       ))}
@@ -1217,6 +1228,22 @@ const ROW_ACTION_LABEL: Record<RowAction, () => string> = {
   settle: () => t("row.settle"),
   wake: () => t("row.wake"),
 };
+/** Each entry's icon of the set (item 122: every menu led by an icon); Open in <editor> draws the editor's own logo. */
+export const ROW_ACTION_ICON: Record<RowAction, IconName> = {
+  rename: "pencil",
+  retitle: "sparkle",
+  reveal: "folder",
+  terminal: "terminal",
+  editor: "code",
+  copy: "copy",
+  link: "link",
+  here: "square-plus",
+  close: "x",
+  pin: "pin",
+  unpin: "pin-off",
+  settle: "check",
+  wake: "rotate-ccw",
+};
 const ROW_ACTION_ID: Record<RowAction, string> = {
   rename: "session-rename",
   retitle: "session-retitle",
@@ -1235,7 +1262,7 @@ const ROW_ACTION_ID: Record<RowAction, string> = {
 
 /** Right-click menu of a session row (rowMenuItems). Placed at the pointer, inside the window. Arrow keys move,
  *  Home / End jump, Enter picks, Esc closes. */
-function SessionMenu({ at, name, actions, onPick, onDismiss, editor }: { at: { x: number; y: number }; name: string; actions: RowAction[]; onPick: (a: RowAction) => void; onDismiss: () => void; editor?: string }) {
+function SessionMenu({ at, name, actions, onPick, onDismiss, editor }: { at: { x: number; y: number }; name: string; actions: RowAction[]; onPick: (a: RowAction) => void; onDismiss: () => void; editor?: { id: string; label: string } }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     ref.current?.querySelector<HTMLButtonElement>("button")?.focus();
@@ -1280,16 +1307,18 @@ function SessionMenu({ at, name, actions, onPick, onDismiss, editor }: { at: { x
             onPick(a);
           }}
         >
-          {a === "editor" && editor ? t("editor.open", { name: editor }) : ROW_ACTION_LABEL[a]()}
+          <MenuIcon name={ROW_ACTION_ICON[a]} mark={a === "editor" && editor ? { id: editor.id, title: editor.label } : null} />
+          {a === "editor" && editor ? t("editor.open", { name: editor.label }) : ROW_ACTION_LABEL[a]()}
         </button>
       ))}
     </div>
   );
 }
 
-/** The row menu's size, to keep it inside the window: 168 wide, 26 per row plus its padding and separator. */
-const MENU_W_PX = 208;
-const menuHeight = (rows: number) => rows * 26 + 14;
+/** The row menu's size, to keep it inside the window: up to 300 wide, 34 per row and the 2 between (the canvas's menu row,
+ *  item 122) plus its padding and separator. */
+const MENU_W_PX = 300;
+const menuHeight = (rows: number) => rows * 36 + 18;
 
 /** The name field of a row being renamed: Enter or leaving it saves, Esc cancels, an empty name goes back to the
  *  automatic one. */
@@ -1545,7 +1574,7 @@ const TermRow = memo(function TermRow({ rec, agents, unseen, active, ticking, on
           <CloseIcon />
         </button>
       )}
-      {menu && <SessionMenu at={menu} name={title.title} actions={actions} onPick={pick} onDismiss={() => setMenu(null)} editor={editor?.label} />}
+      {menu && <SessionMenu at={menu} name={title.title} actions={actions} onPick={pick} onDismiss={() => setMenu(null)} editor={editor ?? undefined} />}
     </div>
   );
 });

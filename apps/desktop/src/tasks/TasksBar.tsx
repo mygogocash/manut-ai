@@ -4,6 +4,7 @@
 // GitHub accounts chosen, a badge counts the reviews asked of me (summed over the accounts the "나" chip shows); the
 // row keeps their lists read while manut runs (me.ts startMePolling).
 import { useEffect, useRef, useState } from "react";
+import { MenuIcon } from "../ui/MenuIcon";
 import { useStore } from "../state/store";
 import { t } from "../i18n";
 import { setBar, setScope, setSource, useTasks } from "./state";
@@ -96,6 +97,7 @@ export function TasksBar() {
             }}
             data-testid="tasks-bar-hide"
           >
+            <MenuIcon name="eye-off" />
             {t("tasks.hide")}
           </button>
         </div>

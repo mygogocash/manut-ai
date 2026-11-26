@@ -5,7 +5,7 @@
 // its first letter in the app's own type on a quiet tile, so a row of agents always reads as a row of marks. A mark
 // drawn in `currentColor` follows the text colour on both themes; one with colours of its own keeps them. A logo names
 // its own product only: the app's own places keep the app's own icon set (src/ui/icons.tsx).
-import { useId, type CSSProperties } from "react";
+import type { CSSProperties } from "react";
 import { t } from "../i18n";
 import { AGENT_MARKS } from "./agentMarks";
 import { MODEL_MARKS } from "./modelMarks";
@@ -112,6 +112,17 @@ export function fileMark(file: string, title: string): AgentMark {
   return (FILES[stem] ? svgMark(FILES[stem]) : null) ?? letter(title);
 }
 
+let drawn = 0;
+
+/** A drawing's ids made its own once it is on the page: a mark with a gradient or a mask is first written with ids named
+ *  after the mark (`ag-gemini-0`), and each copy of it then takes a number of its own, so a copy hidden in a closed menu
+ *  never takes another copy's gradient with it. A ref, not a hook, so the mark draws anywhere a function is called. */
+export const ownIds = (body: string) => (el: { dataset: DOMStringMap; innerHTML: string } | null) => {
+  if (!el || el.dataset.u) return;
+  el.dataset.u = String(++drawn);
+  el.innerHTML = body.replace(/%u/g, `ag${drawn}`);
+};
+
 /** The size of a monogram's letter in a tile of `size`: about two thirds of it, as a capital stands in the set's box. */
 export const monoFont = (size: number) => Math.round(size * 0.625);
 
@@ -132,8 +143,6 @@ export function AgentIcon({
   style?: CSSProperties;
   className?: string;
 }) {
-  // ids of this drawing's own, so two copies of a mark with a gradient or a mask never share one
-  const uid = `ag${useId().replace(/[^a-zA-Z0-9]/g, "")}`;
   const mark = file ? fileMark(file, title ?? id ?? "") : agentIcon(id, title);
   const cls = `agent-ic${className ? ` ${className}` : ""}`;
   if (mark.kind === "letter") {
@@ -160,8 +169,9 @@ export function AgentIcon({
       className={cls}
       data-agent={mark.id}
       style={style}
+      ref={mark.body.includes("%u") ? ownIds(mark.body) : undefined}
       // static, generated markup from agentMarks.ts and modelMarks.ts (no user input)
-      dangerouslySetInnerHTML={{ __html: mark.body.replace(/%u/g, uid) }}
+      dangerouslySetInnerHTML={{ __html: mark.body.replace(/%u/g, `ag-${mark.id}`) }}
     />
   );
 }
