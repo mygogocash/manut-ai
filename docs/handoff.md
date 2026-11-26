@@ -290,6 +290,12 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    word the app is also going to the Mac App Store in GoSpark's listing (item 119), and the GitHub 0.1.2 waits for the
    Apple Developer ID secrets, to go out as a pre-release (owner, 26 Nov).
    Running at 14:15: items 100b, 119, 120 and 121, each a subagent in its own `cc-item…` worktree.
+   By 15:35 on 26 Nov items 100b, 119 (the App Store edition), 120 (the fifth read's dial fixes) and 123 (the App
+   Privacy draft) are merged. Item 121 (what an ask shows) is reviewed and in its gate; 122 (icon-led menus and
+   provider logos) and 124 (deleting an account inside the app, Guideline 5.1.1(v)) are running. The App Store
+   upload waits for the owner's privacy and support links, the owner's answers to the App Privacy draft's open
+   questions, and item 124's API in production (the owner's deploy). Joining 120 with 100b, the lead held 100b's
+   GitLab test to 120's own-branch rule.
    Next, needing no owner: a fifth security read over items 116 to 118 and the new surfaces of 97, 98 and 100; item
    100b (other hosts, a new project with an ask, project icons); item 101 (more agents, first-launch import); items
    102 to 105. Needing the owner: 106b (a zstd dependency to read Codex's compressed sessions), 99 and 111 (themes,
@@ -681,8 +687,12 @@ Every switch that turns a built part on, and what each needs from the owner, is 
   `src/lib/notify.device.test.ts`, `src/lib/notify.ask.test.ts`; `apps/web` `test/macRemote.test.ts`,
   `test/MakeRoutineForm.test.tsx`, `test/JoinPage.test.tsx` ("counts down to a new code"). Each is a 5 second limit
   reached at a load of 30, not yet read further.
-- `apps/desktop` `src/runtime/http/feed.test.ts`: failed in two loaded gates on 26 Nov (seven tests at once) and
-  passed alone each time. `apps/desktop/src-tauri`
+- `apps/desktop` `src/i18n/literals.test.ts`: its scan of every `.tsx` file timed out at five seconds in item 122's
+  loaded gate on 26 Nov and passed alone. Once more and it gets a longer timeout of its own.
+- `apps/desktop` `src/runtime/http/feed.test.ts`: failed in three loaded gates on 26 Nov (seven tests at once) and
+  passed alone each time. Fixed at 15:50: its backoff test stepped half a second at a time through hours of fake
+  waits, passed five seconds under load, and its loop ran on under the next tests' clock. It now jumps to each next
+  timer, and every test's followers are let go after it. `apps/desktop/src-tauri`
   `agent_chat::tests::a_claude_chat_is_handed_the_projects_own_instructions_as_text` (item 93) raced and is fixed: its
   stand-in ended at the app's first line of input, and now waits for its input to close.
 - `apps/desktop/src-tauri` `shop_cache_key::tests::keychain::*` and

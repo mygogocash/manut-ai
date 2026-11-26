@@ -130,7 +130,7 @@ test("Team's Pause everyone is the quiet button, and Customize says it did not l
   }
 });
 
-test("Code opens on the grey Lanes band and its empty state, names each coding tool and task source in words, and shows no company's logo", async ({ page }) => {
+test("Code opens on the grey Lanes band and its empty state; each coding tool is its own mark and its name, the task sources words", async ({ page }) => {
   await start(page);
   await page.getByTestId("menu-code").click();
   const code = page.getByTestId("page-code");
@@ -141,10 +141,13 @@ test("Code opens on the grey Lanes band and its empty state, names each coding t
   expect(lanes!.y).toBeLessThan(terms!.y);
   const head = code.locator(".terms .side-sh");
   expect(await head.evaluate((e) => [getComputedStyle(e).textTransform, getComputedStyle(e).fontSize])).toEqual(["none", "13px"]);
-  // no company's mark anywhere on the page: the task sources and the coding tools are words
-  await expect(code.locator(".tk-mark, [data-brand], [data-agent], img")).toHaveCount(0);
+  // the owner's request of 26 Nov 2026 (docs/decisions.md): each coding tool by its own logo beside its name; the task
+  // sources stay words, and no other company's mark or picture is on the page
+  await expect(code.locator(".tk-mark, [data-brand], img")).toHaveCount(0);
   await expect(code.getByTestId("tasks-bar-github")).toHaveText("GitHub");
   await expect(code.getByTestId("usage-codex")).toContainText("Codex");
+  await expect(code.getByTestId("usage-codex").locator('svg.agent-ic[data-agent="codex"]')).toHaveCount(1);
+  await expect(code.locator("[data-agent]:not(.agent-ic):not([data-testid=term-row-mark])")).toHaveCount(0);
   if (SHOTS) for (const theme of ["light", "dark"] as const) {
     await page.evaluate((th) => document.documentElement.setAttribute("data-theme", th), theme);
     await page.waitForTimeout(300);

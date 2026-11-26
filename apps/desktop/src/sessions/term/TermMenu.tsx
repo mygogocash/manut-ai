@@ -4,6 +4,8 @@
 // Paste goes through the page's paste guard (the multi-line confirm); Reset puts the terminal's own state back (modes,
 // colours, the screen) and sends nothing to the program; Split starts a new Shell as ⌘D does.
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
+import { MenuIcon } from "../../ui/MenuIcon";
+import type { IconName } from "../../ui/icons";
 import "./term-menu.css";
 import { t, type Key } from "../../i18n";
 import { isMac } from "../../app/shortcuts";
@@ -14,6 +16,18 @@ import { MAX_PANES, panesOf } from "../../terminal/layout";
 import { TERM_MENU_EVENT, type TermMenuRequest } from "./menu-event";
 
 type ItemKey = "copy" | "paste" | "selectAll" | "find" | "clear" | "reset" | "splitRight" | "splitDown";
+
+/** Each entry's icon of the set (item 122: every menu led by an icon). */
+export const TERM_MENU_ICON: Record<ItemKey, IconName> = {
+  copy: "copy",
+  paste: "clipboard",
+  selectAll: "text-select",
+  find: "search",
+  clear: "eraser",
+  reset: "rotate-ccw",
+  splitRight: "columns-2",
+  splitDown: "rows-2",
+};
 
 /** The key shown beside an item on this platform ("" for none). */
 function termMenuShortcut(k: ItemKey, onMac: boolean): string {
@@ -202,6 +216,7 @@ export function TermMenu() {
             it.run();
           }}
         >
+          <MenuIcon name={TERM_MENU_ICON[it.key]} />
           <span className="term-mi-l">{t(it.label)}</span>
           {termMenuShortcut(it.key, mac) && <kbd className="term-mi-k">{termMenuShortcut(it.key, mac)}</kbd>}
         </button>

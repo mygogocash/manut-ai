@@ -125,6 +125,58 @@ export async function draw(page: Page, source: string, build: Build = "app", o: 
 /** The drawing's own frame (the inner one; the outer when the box is one frame). */
 const inner = (page: Page, build: Build = "app") => (build === "one-frame" ? page.frameLocator("iframe") : page.frameLocator("iframe").frameLocator("iframe"));
 
+// ---- what a drawing would draw (item 121) -------------------------------------------------------------------------------
+
+/** Groups of ten `<use>`s of the group before, `levels` deep, under ids `a0` (one rectangle) to `a<levels>`: drawn once,
+ *  the top one draws 10^levels rectangles. The fifth security read's drawing (26 Nov) was this at seven levels, 1,893
+ *  bytes, and froze the app's page. */
+const chain = (levels: number) => {
+  let defs = `<rect id="a0" width="1" height="1"/>`;
+  for (let i = 1; i <= levels; i++) defs += `<g id="a${i}">${`<use href="#a${i - 1}"/>`.repeat(10)}</g>`;
+  return defs;
+};
+const use = (id: string) => `<use href="#${id}"/>`;
+const svg = (body: string) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">${body}</svg>`;
+/** A path through `n` points, for markers drawn at its vertices. */
+const zigzag = (n: number) => `M0 0 ${Array.from({ length: n }, (_, i) => `L${i} ${i % 2}`).join(" ")}`;
+const b64 = (text: string) => Buffer.from(text, "utf8").toString("base64");
+/** A marker of `inner` drawn at every vertex of a path through `n` points. */
+const marked = (id: string, n: number, inner: string) => `<marker id="${id}" markerWidth="2" markerHeight="2"><path d="${zigzag(n)}" ${inner}/></marker>`;
+
+/** Drawings whose references multiply what they draw past what the box draws: each must be refused before it is drawn. */
+export const MULTIPLIED: Record<string, string> = {
+  "nested use, five levels": svg(`<defs>${chain(5)}</defs>${use("a5")}`),
+  "nested use, seven levels": svg(`<defs>${chain(7)}</defs>${use("a7")}`),
+  "a symbol of nested use": svg(`<defs>${chain(3)}<symbol id="s">${use("a3").repeat(10)}</symbol></defs>${use("s")}`),
+  "a pattern of nested use": svg(`<defs>${chain(4)}<pattern id="p" width="5" height="5" patternUnits="userSpaceOnUse">${use("a4")}</pattern></defs><rect width="10" height="10" fill="url(#p)"/>`),
+  "a pattern that takes its content from another": svg(`<defs>${chain(4)}<pattern id="q" width="5" height="5">${use("a4")}</pattern><pattern id="p" href="#q"/></defs><rect width="10" height="10" fill="url(#p)"/>`),
+  "a mask of nested use": svg(`<defs>${chain(4)}<mask id="m">${use("a4")}</mask></defs><rect width="10" height="10" mask="url(#m)"/>`),
+  "a clip of nested use": svg(`<defs>${chain(4)}<clipPath id="c">${use("a4")}</clipPath></defs><rect width="10" height="10" clip-path="url(#c)"/>`),
+  "markers on markers": svg(`<defs><marker id="m3"><rect width="1" height="1"/></marker>${marked("m2", 60, 'marker-mid="url(#m3)"')}${marked("m1", 60, 'marker-mid="url(#m2)"')}</defs><path d="${zigzag(60)}" marker-mid="url(#m1)"/>`),
+  "markers along an animated path": svg(`<defs>${chain(2)}<marker id="m">${use("a2")}</marker></defs><path d="M0 0 L1 1" marker-mid="url(#m)"><animate attributeName="d" dur="2s" values="${zigzag(200)};M0 0 L1 1"/></path>`),
+  "markers named by a style sheet": `<style>path { marker-mid: url(#m) }</style>` + svg(`<defs>${chain(3)}<marker id="m">${use("a3")}</marker></defs><path d="${zigzag(20)}"/>`),
+  "a mask named by an escaped style sheet": `<style>.x { mask: url(\\23 m) }</style>` + svg(`<defs>${chain(4)}<mask id="m">${use("a4")}</mask></defs><rect class="x" width="5" height="5"/>`),
+  "a mask in a style attribute": svg(`<defs>${chain(4)}<mask id="m">${use("a4")}</mask></defs><rect style="mask: url(#m)" width="5" height="5"/>`),
+  "a mask on a paragraph": `<p style="mask: url(#m)">Hi</p>` + svg(`<defs>${chain(4)}<mask id="m">${use("a4")}</mask></defs>`),
+  "an SVG picture of nested use": `<img alt="" src="data:image/svg+xml;base64,${b64(svg(`<defs>${chain(5)}</defs>${use("a5")}`))}">`,
+  "an SVG image of nested use": svg(`<image width="10" height="10" href="data:image/svg+xml,${encodeURIComponent(svg(`<defs>${chain(5)}</defs>${use("a5")}`))}"/>`),
+  "an SVG picture in a style sheet": `<style>p { background: url("data:image/svg+xml,${encodeURIComponent(svg(`<defs>${chain(5)}</defs>${use("a5")}`))}") }</style><p>Hi</p>`,
+  "an SVG picture in an escaped style sheet": `<style>p { background: url("d\\61 ta:image/svg+xml;base64,${b64(svg(`<defs>${chain(5)}</defs>${use("a5")}`))}") }</style><p>Hi</p>`,
+  "an SVG picture inside an SVG picture": `<img alt="" src="data:image/svg+xml;base64,${b64(svg(`<image width="10" height="10" href="data:image/svg+xml;base64,${b64(svg(`<defs>${chain(5)}</defs>${use("a5")}`))}"/>`))}">`,
+};
+
+/** Drawings that reuse their shapes the ordinary way: each is still drawn. */
+export const ORDINARY: Record<string, string> = {
+  "a chart of three thousand dots": svg(Array.from({ length: 3000 }, (_, i) => `<circle cx="${i % 100}" cy="${Math.floor(i / 100)}" r="0.4"/>`).join("")),
+  "a symbol drawn two hundred times": svg(`<defs><symbol id="s"><rect width="1" height="1"/><circle r="1"/><path d="M0 0 L1 1"/><line x2="1"/><ellipse rx="1" ry="1"/></symbol></defs>${Array.from({ length: 200 }, (_, i) => `<use href="#s" x="${i}"/>`).join("")}`),
+  "arrowheads on fifty lines": svg(`<defs><marker id="a" markerWidth="4" markerHeight="4"><path d="M0 0 L4 2 L0 4 z"/></marker></defs>${Array.from({ length: 50 }, (_, i) => `<line x1="0" y1="${i}" x2="9" y2="${i}" stroke="black" marker-end="url(#a)"/>`).join("")}`),
+  "arrowheads named by a style sheet": `<style>line { marker-end: url(#a) }</style>` + svg(`<defs><marker id="a"><path d="M0 0 L4 2 L0 4 z"/></marker></defs>${Array.from({ length: 50 }, (_, i) => `<line x1="0" y1="${i}" x2="9" y2="${i}" stroke="black"/>`).join("")}`),
+  "gradients that inherit from each other": svg(`<defs><linearGradient id="g0"><stop offset="0" stop-color="red"/><stop offset="1" stop-color="blue"/></linearGradient>${Array.from({ length: 20 }, (_, i) => `<linearGradient id="g${i + 1}" href="#g${i}"/>`).join("")}</defs><rect width="10" height="10" fill="url(#g20)"/>`),
+  "a pattern of dots on ten tiles": svg(`<defs><pattern id="p" width="2" height="2" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="0.5"/><circle r="0.2"/><rect width="0.2" height="0.2"/></pattern></defs>${Array.from({ length: 10 }, (_, i) => `<rect x="${i}" width="1" height="10" fill="url(#p)"/>`).join("")}`),
+  "a small SVG picture": `<img alt="" src="data:image/svg+xml,${encodeURIComponent(svg(`<circle cx="5" cy="5" r="4"/>`))}">`,
+  "a use that names its own group": svg(`<g id="g"><rect width="1" height="1"/>${use("g")}</g>`),
+};
+
 /** Long enough for a refresh, a preconnect or a beacon to have reached the listener and for it to have read a line. */
 const settle = (page: Page) => page.waitForTimeout(1500);
 
@@ -351,6 +403,35 @@ export function chatDrawingCases({ engine }: { engine: "chromium" | "webkit" }):
     });
   });
 
+  test.describe("what a drawing would draw, every reference followed (item 121)", () => {
+    test("one whose references multiply its shapes is refused before it is drawn, and the page answers at once", async ({ page }) => {
+      await boxPage(page);
+      const got = await page.evaluate(async (cases) => {
+        const s = (await import(/* @vite-ignore */ "/src/chat/drawing/sanitize.ts" as string)) as typeof import("../src/chat/drawing/sanitize");
+        return Object.fromEntries(Object.entries(cases).map(([name, src]) => {
+          const p = s.prepareDrawing(src, { reduceMotion: false });
+          return [name, p.ok ? "drawn" : p.why];
+        }));
+      }, MULTIPLIED);
+      expect(got).toEqual(Object.fromEntries(Object.keys(MULTIPLIED).map((name) => [name, "too_many"])));
+      // the read's own drawing, through the box as the app frames one: refused, and the page answers within a moment
+      expect(await draw(page, MULTIPLIED["nested use, seven levels"])).toEqual({ ok: false, why: "too_many" });
+      const asked = Date.now();
+      expect(await page.evaluate(() => 1)).toBe(1);
+      expect(Date.now() - asked).toBeLessThan(1000);
+    });
+
+    test("one that reuses its shapes the ordinary way is still drawn, and the page still answers", async ({ page }) => {
+      await boxPage(page);
+      for (const [name, src] of Object.entries(ORDINARY)) {
+        expect(await draw(page, src), name).toMatchObject({ ok: true });
+        const asked = Date.now();
+        expect(await page.evaluate(() => 1)).toBe(1);
+        expect(Date.now() - asked, name).toBeLessThan(1000);
+      }
+    });
+  });
+
   test.describe("why the box is built so: the simpler boxes let the listener hear them", () => {
     const trap = new Trap();
     test.beforeAll(async () => trap.open());
@@ -559,6 +640,17 @@ export function chatDrawingUiCases({ engine, layout }: { engine: "chromium" | "w
       expect(trap.hits.slice(before)).toEqual([]);
       expect(popups).toBe(0);
       expect(new URL(page.url()).pathname).toBe("/");
+    });
+
+    test("one whose references multiply its shapes: the card says it is too large to draw, and the chat goes on (item 121)", async ({ page }) => {
+      await answer("```svg\n" + MULTIPLIED["nested use, seven levels"] + "\n```");
+      const bubble = lastAnswer(page);
+      await bubble.getByTestId("drawing-show").click();
+      await expect(bubble.getByTestId("drawing-refused")).toHaveText("Too large to draw: it would draw more than 5,000 shapes.");
+      await expect(bubble.getByTestId("drawing-frame")).toHaveCount(0);
+      const asked = Date.now();
+      expect(await page.evaluate(() => 1)).toBe(1);
+      expect(Date.now() - asked).toBeLessThan(1000);
     });
 
     test("at most three live: a fourth puts the oldest back to a still card, and Show there brings it back", async ({ page }) => {

@@ -14,6 +14,7 @@
 // keeps its own engine; a pane whose session came back paused after a restart shows it paused. Bot chats never split:
 // only TERMINALS sessions go in a split, and the keys live in TERMINALS terminals only.
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactNode, type RefObject } from "react";
+import { MenuIcon } from "../ui/MenuIcon";
 import { getStore } from "../state/store";
 import { CloseIcon, ExpandIcon } from "../ui";
 import { t } from "../i18n";
@@ -283,6 +284,7 @@ function PaneMenu({ rec, name, at, onClose }: { rec: SessionRec; name: string; a
     <div ref={ref} className="row-menu ss-pane-menu" role="menu" aria-label={name} data-testid="split-pane-menu" data-session={rec.id} style={{ left: pos.x, top: pos.y }} onKeyDown={keys}>
       {items.map((it) => (
         <button key={it.key} type="button" role="menuitem" className="row-mi ss-pane-mi" data-testid={`split-menu-${it.key}`} onClick={act(it.run)}>
+          <MenuIcon name={it.key === "zoom" ? "expand" : it.key === "equalize" ? "columns" : "x"} />
           <span className="ss-pane-mi-l">{it.label}</span>
           <kbd className="ss-pane-mi-k">{paneShortcut(it.key)}</kbd>
         </button>

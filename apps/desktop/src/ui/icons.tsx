@@ -110,6 +110,18 @@ export const DRAWN = {
   "home": <><path d="M2.5 7L8 2.5 13.5 7v5.5a1 1 0 01-1 1h-3v-4h-3v4h-3a1 1 0 01-1-1z" /></>,
   "pause": <><path d="M6 4v8M10 4v8" /></>,
   "nodes": <><rect x="2" y="6.5" width="3.5" height="3.5" rx="1" /><rect x="10.5" y="2.5" width="3.5" height="3.5" rx="1" /><rect x="10.5" y="10" width="3.5" height="3.5" rx="1" /><path d="M5.5 8.2c3 0 3-4 5-4M5.5 8.2c3 0 3 4 5 4" /></>,
+  // item 122: drawn for menu entries that had words only (an icon shows a thing you can see)
+  "at-sign": <><circle cx="8" cy="8" r="2.2" /><path d="M10.2 5.8v3a1.65 1.65 0 0 0 3.3 0V8a5.5 5.5 0 1 0-2.2 4.4" /></>,
+  "square-slash": <><rect x="2.5" y="2.5" width="11" height="11" rx="2" /><path d="M9.5 5.5l-3 5" /></>,
+  "archive": <><rect x="2.5" y="3" width="11" height="3" rx="1" /><path d="M3.5 6v6a1.5 1.5 0 001.5 1.5h6a1.5 1.5 0 001.5-1.5V6M6.5 8.5h3" /></>,
+  "pin-off": <><path d="M6 2.5h4M7 2.5v3.8L4.5 8.8h7L9 6.3V2.5M8 8.8v4.7M3 3l10 10" /></>,
+  "folder-plus": <><path d="M2.5 5a1.5 1.5 0 011.5-1.5h2.6l1.4 1.5h4a1.5 1.5 0 011.5 1.5v5A1.5 1.5 0 0112 13H4a1.5 1.5 0 01-1.5-1.5z" /><path d="M8 7.3v3.4M6.3 9h3.4" /></>,
+  "clipboard": <><rect x="3.5" y="3" width="9" height="10.5" rx="1.5" /><path d="M6 3V2.5h4V3M6 7h4M6 9.5h4" /></>,
+  "text-select": <><path d="M3 4.5h10M3 8h10M3 11.5h6" /></>,
+  "user": <><circle cx="8" cy="5.8" r="2.4" /><path d="M3.5 13.5c.4-2.6 2.2-4 4.5-4s4.1 1.4 4.5 4" /></>,
+  "git-pull-request": <><circle cx="4.5" cy="3.8" r="1.3" /><circle cx="4.5" cy="12.2" r="1.3" /><circle cx="11.5" cy="12.2" r="1.3" /><path d="M4.5 5.1v5.8M11.5 10.9V6.5A1.5 1.5 0 0010 5H7.5M9 3.5L7.5 5 9 6.5" /></>,
+  "rows-2": <><rect x="2.5" y="3" width="11" height="10" rx="2" /><path d="M2.5 8h11" /></>,
+  "eraser": <><path d="M9.3 3.2l3.5 3.5-6.1 6.1H3.9L2.7 11.6a1.4 1.4 0 010-2zM6.2 6.3l3.5 3.5M7 12.8h6" /></>,
 } satisfies Record<string, ReactNode>;
 
 export const ICONS = { ...BOARD, ...DRAWN };

@@ -12,6 +12,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "../state/store";
 import { t, type Key } from "../i18n";
 import { CloseIcon, IconButton, Popover, PrIcon, SearchIcon, Spinner } from "../ui";
+import { Icon, type IconName } from "../ui/icons";
+
+/** Each scope's icon of the set (item 122: every switch led by an icon). */
+const SCOPE_ICON: Record<"repo" | "me" | "pulls", IconName> = { repo: "folder", me: "user", pulls: "git-pull-request" };
 import { BotChip } from "../pages/kit";
 import { Markdown } from "../chat/parts/Markdown";
 import { CopyButton } from "../chat/parts/Copy";
@@ -98,7 +102,8 @@ function RepoPicker({ source, repo, recent, onPick }: { source: CliSource; repo:
     <span className="pg-chipwrap">
       <button type="button" className="tk-repo" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen((o) => !o)} data-testid="tasks-repo">
         <SourceMark source={source} size={12} />
-        <span>{repo || t("tasks.pickRepo")}</span>
+        {/* a repository's name is set as code; the words asking for one are not */}
+        <span className={repo ? "tk-repo-name" : undefined}>{repo || t("tasks.pickRepo")}</span>
       </button>
       <Popover open={open} onClose={() => setOpen(false)} align="left" width={280} label={t("tasks.pickRepo")}>
         <form
@@ -251,6 +256,7 @@ export function TasksPage() {
         <div className="tk-seg tk-scope" role="group" aria-label={t("tasks.scope")}>
           {(["repo", "me", "pulls"] as const).map((sc) => (
             <button key={sc} type="button" className={tk.scope === sc ? "on" : undefined} aria-pressed={tk.scope === sc} onClick={() => setScope(sc)} data-testid={`tasks-scope-${sc}`}>
+              <Icon name={SCOPE_ICON[sc]} className="tk-seg-ic" />
               {sc === "repo" ? t("tasks.scope.repo") : sc === "me" ? t("tasks.scope.me") : t("tasks.scope.pulls")}
             </button>
           ))}

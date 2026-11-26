@@ -361,6 +361,11 @@ struct Secrets {
     /// a value that is a reference (`${DB_PASSWORD}`), and a word that says there is none (`none`): no key
     reference: Regex,
     plain: Regex,
+    /// commands that only write their input out: a key block is masked only in the data of one of these
+    sinks: Vec<String>,
+    /// a character that does not show, or that reorders what does, and the mark that shows it instead (`{hex}`)
+    hidden: Regex,
+    hidden_mark: String,
 }
 
 /// A pattern of secrets.json as the page's JavaScript reads it: `{names}` and `{prefixes}` filled in, its flags (`i`, `m`),
@@ -410,6 +415,13 @@ fn secrets() -> &'static Secrets {
             shell: one("shell"),
             reference: one("ref"),
             plain: pattern(&get("plain"), "i", &names, &prefixes),
+            sinks: entries("sinks").iter().map(|e| e.as_str().expect("secrets.json sink").to_string()).collect(),
+            hidden: Regex::new(&format!(
+                "[{}]",
+                entries("hidden").iter().map(|r| format!(r"\x{{{}}}-\x{{{}}}", r[0].as_str().expect("hidden from"), r[1].as_str().expect("hidden to"))).collect::<String>()
+            ))
+            .expect("secrets.json hidden"),
+            hidden_mark: get("hiddenMark"),
         }
     })
 }
@@ -437,12 +449,37 @@ fn a_key(s: &Secrets, v: &str) -> bool {
     !s.reference.is_match(v) && !s.plain.is_match(v)
 }
 
-/// How much of a value may be masked in a command: up to the first character the shell acts on.
-fn up_to(s: &Secrets, v: &str) -> usize {
-    s.shell.find(v).map_or(v.len(), |m| m.start())
+/// Whether `c` is one a masked value in a command stops at (src/lib/secrets.ts `stops`): a `shell` character, or one that does
+/// not show.
+fn stops(s: &Secrets, c: char) -> bool {
+    let b = &mut [0; 4];
+    let c = c.encode_utf8(b);
+    s.shell.is_match(c) || s.hidden.is_match(c)
 }
 
-/// `t`'s `whole` matches masked; in a command (`command`), not a key block, which [`mask_blocks`] masked first.
+/// How much of a value may be masked in a command: up to the first character it stops at.
+fn up_to(s: &Secrets, v: &str) -> usize {
+    v.char_indices().find(|&(_, c)| stops(s, c)).map_or(v.len(), |(i, _)| i)
+}
+
+/// `t` with every character that does not show, or that reorders what does, replaced by a visible mark (`⟨U+202E⟩`)
+/// (src/lib/secrets.ts `revealHidden`, item 121).
+pub fn reveal_hidden(t: &str) -> String {
+    let s = secrets();
+    s.hidden.replace_all(t, |c: &regex::Captures| {
+        let cp = c[0].chars().next().map_or(0, u32::from);
+        s.hidden_mark.replace("{hex}", &format!("{cp:04X}"))
+    }).into_owned()
+}
+
+/// Whether the match `m` in `t` is part of a path: it holds a `/` or touches one (src/lib/secrets.ts `inPath`). In a command
+/// such a word names a program or a file, so it is shown (item 121).
+fn in_path(t: &str, m: regex::Match) -> bool {
+    m.as_str().contains('/') || t[..m.start()].ends_with('/') || t[m.end()..].starts_with('/')
+}
+
+/// `t`'s `whole` matches masked; in a command (`command`), not a key block, which [`mask_blocks`] masked first, nor a word
+/// that is part of a path.
 fn mask_whole(s: &Secrets, mut t: String, command: bool) -> String {
     for (rx, kind) in &s.whole {
         if command && kind == "block" {
@@ -450,146 +487,282 @@ fn mask_whole(s: &Secrets, mut t: String, command: bool) -> String {
         }
         t = rx.replace_all(&t, |c: &regex::Captures| {
             let m = c.get(0).expect("match");
-            if kind == "word" && !alone(s, &t, m) { m.as_str().to_string() } else { s.mask.clone() }
+            if kind == "word" && (!alone(s, &t, m) || (command && in_path(&t, m))) { m.as_str().to_string() } else { s.mask.clone() }
         }).into_owned();
     }
     t
 }
 
-/// A heredoc still to come or being read: its terminator word, and whether tabs before it are allowed (`<<-`).
-struct Heredoc {
-    word: String,
-    dash: bool,
+/// A command read as the shell reads it (src/lib/secrets.ts `lex`, step for step): its words as byte ranges, and for each byte
+/// whether a key block there is data that is only written out, so it may be masked.
+struct Reading {
+    words: Vec<(usize, usize)>,
+    data: Vec<bool>,
 }
 
-/// One line read as the shell reads it, from quote state `quote` (src/lib/secrets.ts `scanLine`): the quote open at its end and
-/// the heredocs it begins, or None when it holds what this reading cannot follow. `stop` (a byte offset) ends it early.
-fn scan_line(l: &str, mut quote: Option<char>, stop: usize) -> Option<(Option<char>, Vec<Heredoc>)> {
-    static WORD: OnceLock<Regex> = OnceLock::new();
-    let word = WORD.get_or_init(|| Regex::new(r#"^<<(-?)[ \t]*(?:'([^']+)'|"([^"]+)"|\\?([A-Za-z0-9_]+))"#).expect("heredoc"));
-    let mut heredocs = Vec::new();
-    let b: Vec<(usize, char)> = l.char_indices().take_while(|(i, _)| *i < stop).collect();
-    let mut k = 0;
-    while k < b.len() {
-        let (i, c) = b[k];
-        let next = b.get(k + 1).map(|x| x.1);
-        if quote == Some('\'') {
-            if c == '\'' {
-                quote = None;
+/// The terminator a heredoc's word names, and whether it was quoted (src/lib/secrets.ts `heredocWord`): a plain word, a word in
+/// one pair of single or double quotes, or a word after one backslash. Any other form is not read.
+fn heredoc_word(w: &str) -> Option<(String, bool)> {
+    static PLAIN: OnceLock<Regex> = OnceLock::new();
+    static QUOTED: OnceLock<Regex> = OnceLock::new();
+    if PLAIN.get_or_init(|| Regex::new(r"^[A-Za-z0-9_.-]+$").expect("plain heredoc word")).is_match(w) {
+        return Some((w.to_string(), false));
+    }
+    let m = QUOTED.get_or_init(|| Regex::new(r#"^(?:'([^']*)'|"([^"\\$`]*)"|\\([A-Za-z0-9_.-]+))$"#).expect("quoted heredoc word")).captures(w)?;
+    Some((m.get(1).or_else(|| m.get(2)).or_else(|| m.get(3)).map_or("", |x| x.as_str()).to_string(), true))
+}
+
+/// A quote being read: `'…'`, `"…"` or `$'…'`.
+#[derive(Clone, Copy, PartialEq)]
+enum Quote {
+    Single,
+    Double,
+    Dollar,
+}
+
+/// The reader's state (src/lib/secrets.ts `lex`): byte offsets throughout.
+struct Lexer<'a> {
+    text: &'a str,
+    words: Vec<(usize, usize)>,
+    /// each simple command's first word, once it has one
+    commands: Vec<Option<String>>,
+    /// quoted strings and heredoc bodies: from, to, and the simple command each belongs to
+    regions: Vec<(usize, usize, usize)>,
+    /// nothing from here on can be followed
+    until: usize,
+    start: Option<usize>,
+    /// a `<<` waits for its word (whether it was `<<-`)
+    wanted: Option<bool>,
+    /// heredocs begun on this line: terminator, quoted, `<<-`, simple command
+    heredocs: Vec<(String, bool, bool, usize)>,
+}
+
+impl Lexer<'_> {
+    fn stop(&mut self, at: usize) {
+        self.until = self.until.min(at);
+    }
+
+    fn end(&mut self, to: usize) {
+        let Some(from) = self.start.take() else { return };
+        let w = &self.text[from..to];
+        self.words.push((from, to));
+        let command = self.commands.len() - 1;
+        if let Some(dash) = self.wanted.take() {
+            match heredoc_word(w) {
+                Some((word, quoted)) => self.heredocs.push((word, quoted, dash, command)),
+                None => self.stop(from),
             }
-            k += 1;
-            continue;
+        } else if self.commands[command].is_none() {
+            self.commands[command] = Some(w.to_string());
         }
-        if c == '`' || (c == '$' && matches!(next, Some('(') | Some('{'))) {
-            return None;
+    }
+
+    /// The heredocs begun on the line that ended at byte `from`, in order: each body one word, its terminator line another.
+    fn bodies(&mut self, from: usize) -> usize {
+        static ACTS: OnceLock<Regex> = OnceLock::new();
+        let acts = ACTS.get_or_init(|| Regex::new(r"[`\\]|\$[({\[]").expect("heredoc acts"));
+        let n = self.text.len();
+        let mut at = from;
+        for (word, quoted, dash, command) in std::mem::take(&mut self.heredocs) {
+            let body = at;
+            let mut term = None;
+            while at < n {
+                let line_end = self.text[at..].find('\n').map_or(n, |k| at + k);
+                let line = &self.text[at..line_end];
+                if (if dash { line.trim_start_matches('\t') } else { line }) == word {
+                    term = Some((at, line_end));
+                    break;
+                }
+                at = line_end + 1;
+            }
+            let body_end = term.map_or(n, |t| t.0);
+            self.words.push((body, body_end));
+            let readable = if quoted { body_end } else { acts.find(&self.text[body..body_end]).map_or(body_end, |m| body + m.start()) };
+            self.regions.push((body, readable, command));
+            let Some((t, t_end)) = term else { return n };
+            self.words.push((t, t_end));
+            at = t_end + 1;
+        }
+        at.min(n)
+    }
+}
+
+/// A command read as the shell reads it (src/lib/secrets.ts `lex`, which says how).
+fn lex(text: &str) -> Reading {
+    let s = secrets();
+    let b: Vec<(usize, char)> = text.char_indices().collect();
+    let n = text.len();
+    let index = |byte: usize| b.partition_point(|x| x.0 < byte);
+    let mut lx = Lexer { text, words: Vec::new(), commands: vec![None], regions: Vec::new(), until: n, start: None, wanted: None, heredocs: Vec::new() };
+    let mut piped = false;
+    let mut quote: Option<Quote> = None;
+    let mut opened = 0;
+    let mut plain: Option<usize> = None;
+    let mut i = 0;
+    while i < b.len() {
+        let (here, c) = b[i];
+        let next = b.get(i + 1).map(|x| x.1);
+        let after = |k: usize| b.get(k).map_or(n, |x| x.0);
+        if let Some(q) = quote {
+            if q != Quote::Single && c == '\\' {
+                i += 2;
+                continue;
+            }
+            if (q == Quote::Single && c == '\'') || (q == Quote::Dollar && c == '\'') || (q == Quote::Double && c == '"') {
+                lx.regions.push((opened, here, lx.commands.len() - 1));
+                quote = None;
+            } else if q == Quote::Double && (c == '`' || (c == '$' && matches!(next, Some('(' | '{')))) {
+                lx.stop(here);
+            }
+            i += 1;
+            continue;
         }
         if c == '\\' {
-            k += 2;
-            continue;
-        }
-        if quote == Some('"') {
-            if c == '"' {
-                quote = None;
-            }
-            k += 1;
+            lx.start.get_or_insert(here);
+            i += 2;
             continue;
         }
         if c == '\'' || c == '"' {
-            quote = Some(c);
-        } else if c == '#' && (k == 0 || b[k - 1].1.is_whitespace()) {
-            break;
-        } else if c == '<' && next == Some('<') && b.get(k + 2).map(|x| x.1) != Some('<') {
-            let m = word.captures(&l[i..])?;
-            let w = m.get(2).or_else(|| m.get(3)).or_else(|| m.get(4)).map(|x| x.as_str().to_string()).unwrap_or_default();
-            heredocs.push(Heredoc { word: w, dash: &m[1] == "-" });
-            let past = i + m[0].len();
-            while k < b.len() && b[k].0 < past {
-                k += 1;
-            }
+            lx.start.get_or_insert(here);
+            quote = Some(if c == '"' {
+                Quote::Double
+            } else if i > 0 && plain == Some(i - 1) && b[i - 1].1 == '$' {
+                Quote::Dollar
+            } else {
+                Quote::Single
+            });
+            opened = after(i + 1);
+            i += 1;
             continue;
         }
-        k += 1;
-    }
-    Some((quote, heredocs))
-}
-
-/// How the shell reads `text` up to the start of its line at byte `line` (src/lib/secrets.ts `readTo`): the quote still open
-/// there and the heredoc whose body that line is in, or None when the reading cannot be followed.
-fn read_to(text: &str, line: usize) -> Option<(Option<char>, Option<Heredoc>)> {
-    let mut quote = None;
-    let mut queue: std::collections::VecDeque<Heredoc> = std::collections::VecDeque::new();
-    let mut body: Option<Heredoc> = None;
-    let mut at = 0;
-    while at < line {
-        let end = text[at..].find('\n').map_or(text.len(), |i| at + i);
-        let l = text[at..end].strip_suffix('\r').unwrap_or(&text[at..end]);
-        if let Some(h) = &body {
-            let shown = if h.dash { l.trim_start_matches('\t') } else { l };
-            if shown == h.word {
-                body = queue.pop_front();
+        if c == '`' || (c == '$' && matches!(next, Some('(' | '{' | '['))) || (c == '(' && next == Some('(')) {
+            lx.stop(here);
+        }
+        if c == ' ' || c == '\t' {
+            lx.end(here);
+        } else if c == '#' && lx.start.is_none() {
+            let nl = text[here..].find('\n').map_or(n, |k| here + k);
+            lx.words.push((here, nl));
+            i = index(nl);
+            continue;
+        } else if c == '<' || c == '>' {
+            lx.end(here);
+            if lx.wanted.is_some() {
+                lx.stop(here);
+            }
+            let prev = if i > 0 { Some(b[i - 1].1) } else { None };
+            let third = b.get(i + 2).map(|x| x.1);
+            if c == '<' && next == Some('<') && prev != Some('<') && third != Some('<') {
+                let dash = third == Some('-');
+                let len = if dash { 3 } else { 2 };
+                lx.words.push((here, here + len));
+                lx.wanted = Some(dash);
+                i += len;
+                continue;
+            }
+            lx.words.push((here, here + 1));
+        } else if ";&|()\n".contains(c) {
+            lx.end(here);
+            if lx.wanted.take().is_some() {
+                lx.stop(here);
+            }
+            lx.words.push((here, here + 1));
+            if matches!(c, '|' | '(' | ')') {
+                piped = true;
+            }
+            lx.commands.push(None);
+            if c == '\n' && !lx.heredocs.is_empty() {
+                let to = lx.bodies(here + 1);
+                i = index(to);
+                continue;
             }
         } else {
-            let (q, found) = scan_line(l, quote, l.len())?;
-            quote = q;
-            if !found.is_empty() {
-                if quote.is_some() {
-                    return None;
+            lx.start.get_or_insert(here);
+            plain = Some(i);
+        }
+        i += 1;
+    }
+    lx.end(n);
+    let mut data = vec![false; n];
+    let first = lx.commands.iter().position(Option::is_some);
+    if let Some(f) = first.filter(|&f| !piped && lx.commands[f].as_ref().is_some_and(|w| s.sinks.iter().any(|k| k == w))) {
+        for &(from, to, command) in &lx.regions {
+            if command == f {
+                for d in &mut data[from..to.min(lx.until).max(from)] {
+                    *d = true;
                 }
-                queue.extend(found);
-                body = queue.pop_front();
             }
         }
-        at = end + 1;
     }
-    Some((quote, body))
+    Reading { words: lx.words, data }
 }
 
-/// Whether the shell reads the key block from byte `from` to `to` of `text` as data, never as commands (src/lib/secrets.ts
-/// `shellData`): in a quoted string opened on its BEGIN line, still open at its end and closing after it, or in a heredoc's body
-/// whose terminator line does not come before its end. Anything else, and anything unsure, is no.
-fn shell_data(text: &str, from: usize, to: usize) -> bool {
-    let line = text[..from].rfind('\n').map_or(0, |i| i + 1);
-    let Some((quote, heredoc)) = read_to(text, line) else { return false };
-    if let Some(h) = heredoc {
-        let last = text[to..].find('\n').map_or(text.len(), |i| to + i);
-        return !text[line..last].split('\n').any(|l| {
-            let l = l.strip_suffix('\r').unwrap_or(l);
-            (if h.dash { l.trim_start_matches('\t') } else { l }) == h.word
-        });
-    }
-    if quote.is_some() {
+/// The words of a command as the shell splits it ([`lex`]).
+#[cfg(test)]
+fn shell_words(t: &str) -> Vec<String> {
+    lex(t).words.iter().map(|&(a, z)| t[a..z].to_string()).collect()
+}
+
+/// Whether pieces `i..` of a masked word follow at byte `at` of `before`, the mask before piece `i` standing for a run of one or
+/// more characters `free` allows (src/lib/secrets.ts `aligned`).
+fn rest(before: &str, from: usize, pieces: &[&str], i: usize, at: usize, free: &dyn Fn(usize) -> bool, failed: &mut std::collections::HashSet<(usize, usize)>) -> bool {
+    if failed.contains(&(i, at)) {
         return false;
     }
-    let end = text[line..].find('\n').map_or(text.len(), |i| line + i);
-    let Some((Some(q), found)) = scan_line(&text[line..end], None, from - line) else { return false };
-    if !found.is_empty() {
-        return false;
-    }
-    let mut rest = text[to..].chars();
-    while let Some(c) = rest.next() {
-        if q == '\'' {
-            if c == '\'' {
-                return true;
-            }
-            continue;
+    let next = pieces[i];
+    let last = i == pieces.len() - 1;
+    for (k, ch) in before[at..].char_indices() {
+        let pos = at + k;
+        if !free(from + pos) {
+            break;
         }
-        if c == '`' || c == '$' {
-            return false;
-        }
-        if c == '\\' {
-            rest.next();
-        } else if c == '"' {
+        let end = pos + ch.len_utf8();
+        if before[end..].starts_with(next) && (if last { end + next.len() == before.len() } else { rest(before, from, pieces, i + 1, end + next.len(), free, failed) }) {
             return true;
         }
     }
+    failed.insert((i, at));
     false
 }
 
-/// A command's private key blocks whose body holds only key characters, where the shell reads them as data ([`shell_data`]):
-/// the BEGIN and END lines stay, the body is one mask line (src/lib/secrets.ts `maskCommand`). A block with no END of its own is
-/// masked only when none comes before the next BEGIN.
+/// Whether `after` is the word `before` (which starts at byte `from` in its command) with each mask standing for a run of one or
+/// more of its characters, every one of which `free` allows, and everything else equal.
+fn aligned(before: &str, from: usize, after: &str, mask: &str, free: &dyn Fn(usize) -> bool) -> bool {
+    if before == after {
+        return true;
+    }
+    let pieces: Vec<&str> = after.split(mask).collect();
+    if pieces.len() == 1 || pieces.len() > 64 || !before.starts_with(pieces[0]) {
+        return false;
+    }
+    rest(before, from, &pieces, 1, pieces[0].len(), free, &mut std::collections::HashSet::new())
+}
+
+/// Whether `after` splits into the same shell words as `before`, each the same or with masks standing for characters `free`
+/// allows (given `before`'s reading and a byte offset).
+fn shaped(before: &str, after: &str, free: &dyn Fn(&Reading, usize) -> bool) -> bool {
+    let s = secrets();
+    let a = lex(before);
+    let b = lex(after);
+    a.words.len() == b.words.len() && a.words.iter().zip(&b.words).all(|(&(f, t), &(g, u))| aligned(&before[f..t], f, &after[g..u], &s.mask, &|k| free(&a, k)))
+}
+
+/// The structural check of what an approval shows (src/lib/secrets.ts `sameShape`): `after` splits into exactly `before`'s
+/// shell words, each the same or with only a key's part masked, a run that holds no character the command form stops at.
+fn same_shape(before: &str, after: &str) -> bool {
+    let s = secrets();
+    shaped(before, after, &|_, k| before[k..].chars().next().is_some_and(|c| !stops(s, c)))
+}
+
+/// A command's private key blocks whose body holds only key lines, where the whole block is data a writer only writes out
+/// ([`lex`]): the BEGIN and END lines stay, the body is one mask line (src/lib/secrets.ts `maskBlocks`). A block with no END
+/// of its own is masked only when none comes before the next BEGIN.
 fn mask_blocks(s: &Secrets, mut t: String) -> String {
+    if !t.contains("PRIVATE KEY") {
+        return t;
+    }
     for (rx, sep, open) in &s.blocks {
+        let data = lex(&t).data;
         t = rx.replace_all(&t, |c: &regex::Captures| {
             let m = c.get(0).expect("match");
             if *open {
@@ -599,7 +772,7 @@ fn mask_blocks(s: &Secrets, mut t: String) -> String {
                     return m.as_str().to_string();
                 }
             }
-            if !shell_data(&t, m.start(), m.end()) {
+            if !data[m.start()..m.end()].iter().all(|&d| d) {
                 return m.as_str().to_string();
             }
             format!("{}{}{}{}", &c[1], sep, s.mask, &c[3])
@@ -608,11 +781,12 @@ fn mask_blocks(s: &Secrets, mut t: String) -> String {
     t
 }
 
-/// `t`'s token matches of `rx` masked, when they stand alone and have a key's shape.
-fn mask_tokens(s: &Secrets, rx: &Regex, t: String) -> String {
+/// `t`'s token matches of `rx` masked, when they stand alone and have a key's shape; in a command (`command`), not one that
+/// is part of a path.
+fn mask_tokens(s: &Secrets, rx: &Regex, t: String, command: bool) -> String {
     rx.replace_all(&t, |c: &regex::Captures| {
         let m = c.get(0).expect("match");
-        if alone(s, &t, m) && key_shaped(s, m.as_str()) { s.mask.clone() } else { m.as_str().to_string() }
+        if alone(s, &t, m) && !(command && in_path(&t, m)) && key_shaped(s, m.as_str()) { s.mask.clone() } else { m.as_str().to_string() }
     }).into_owned()
 }
 
@@ -643,7 +817,7 @@ pub fn mask_secrets(t: &str) -> String {
     for (rx, n) in &s.split {
         t = rx.replace_all(&t, |c: &regex::Captures| split_token(c, *n, &s.mask)).into_owned();
     }
-    t = mask_tokens(s, &s.tokens, t);
+    t = mask_tokens(s, &s.tokens, t, false);
     for rx in &s.kept {
         t = rx.replace_all(&t, |c: &regex::Captures| if a_key(s, &c[2]) { format!("{}{}{}", &c[1], s.mask, &c[3]) } else { c[0].to_string() }).into_owned();
     }
@@ -652,7 +826,7 @@ pub fn mask_secrets(t: &str) -> String {
 
 /// One line of a command, masked as [`mask_command`] says. A value that already holds the mask (a key block's) is left as it is.
 fn command_line(s: &Secrets, line: &str) -> String {
-    let mut t = mask_tokens(s, &s.word, mask_whole(s, line.to_string(), true));
+    let mut t = mask_tokens(s, &s.word, mask_whole(s, line.to_string(), true), true);
     for rx in &s.kept {
         t = rx.replace_all(&t, |c: &regex::Captures| {
             let v = &c[2];
@@ -671,12 +845,35 @@ fn command_line(s: &Secrets, line: &str) -> String {
     }).into_owned()
 }
 
-/// A command, or anything else an approval shows, with its keys masked and nothing else (src/lib/secrets.ts `maskCommand`,
-/// step for step): line by line, never joined across a blank, and a masked value stops at the first character the shell
-/// acts on, which is shown with what follows it.
-pub fn mask_command(t: &str) -> String {
+/// What an approval shows of a command (src/lib/secrets.ts `ShownCommand`).
+pub struct Shown {
+    /// the command with its keys masked; or as it is, when masking it could change what it seems to do
+    pub text: String,
+    /// shown as it is: the masked line would not split into the command's own shell words, or the command already holds
+    /// the mask's character, and the person is told it may hold a key
+    pub unmasked: bool,
+    /// it holds characters that do not show or that reorder what does, each replaced in `text` by a visible mark
+    pub hidden: bool,
+}
+
+/// A command, or anything else an approval shows, with its keys masked and nothing else (src/lib/secrets.ts `showCommand`,
+/// step for step): line by line, never joined across a blank, and a masked value stops at the first blank, quote, `#`, glob
+/// character or character the shell acts on, which is shown with what follows it; then the structural check, or the command
+/// is shown as it is.
+pub fn show_command(t: &str) -> Shown {
     let s = secrets();
-    mask_blocks(s, t.to_string()).split('\n').map(|l| command_line(s, l)).collect::<Vec<_>>().join("\n")
+    let blocks = mask_blocks(s, t.to_string());
+    let masked = blocks.split('\n').map(|l| command_line(s, l)).collect::<Vec<_>>().join("\n");
+    let dot = s.mask.chars().next().unwrap_or('•');
+    let sure = masked == t || (!t.contains(dot) && shaped(t, &blocks, &|r, k| r.data[k]) && same_shape(&blocks, &masked));
+    let plain = if sure { masked } else { t.to_string() };
+    let text = reveal_hidden(&plain);
+    Shown { hidden: text != plain, text, unmasked: !sure }
+}
+
+/// [`show_command`]'s text: what an approval shows of a command.
+pub fn mask_command(t: &str) -> String {
+    show_command(t).text
 }
 
 /// A text field of a CLI answer: control characters out, token-like strings masked.
@@ -1641,7 +1838,27 @@ mod tests {
         let block = Regex::new(r"-{4,5} ?BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY").unwrap();
         for c in command {
             let (text, want) = (c[0].as_str().unwrap(), c[1].as_str().unwrap());
-            assert_eq!(mask_command(text), want, "{c}");
+            let shown = show_command(text);
+            assert_eq!(shown.text, want, "{c}");
+            // a row's third field names the notes the card adds: `unmasked` when the line is shown as it is (item 121)
+            let notes = c.get(2).and_then(Value::as_str).unwrap_or("");
+            assert_eq!(shown.unmasked, notes.split(' ').any(|n| n == "unmasked"), "{c}");
+            assert_eq!(shown.hidden, notes.split(' ').any(|n| n == "hidden"), "{c}");
+        }
+        // every direction and format character in an ask's text becomes a visible mark (item 121)
+        for c in v["reveal"].as_array().unwrap() {
+            assert_eq!(reveal_hidden(c[0].as_str().unwrap()), c[1].as_str().unwrap(), "{c}");
+        }
+        // a mask stands for part of one word, so the line a person reads splits where the line that runs does (item 121)
+        for c in command.iter().chain(cases) {
+            let text = c[0].as_str().unwrap();
+            assert_eq!(shell_words(&mask_command(text)).len(), shell_words(text).len(), "{c}");
+        }
+        // the structural check itself, on lines a masker must never be let show
+        let shape = v["shape"].as_array().unwrap();
+        assert!(shape.len() > 8);
+        for c in shape {
+            assert_eq!(same_shape(c[0].as_str().unwrap(), c[1].as_str().unwrap()), c[2].as_bool().unwrap(), "{c}");
         }
         for c in command.iter().chain(cases) {
             let text = c[0].as_str().unwrap();

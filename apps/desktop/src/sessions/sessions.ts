@@ -51,8 +51,8 @@ import { askOpen, folderKey, getStore, notifySessionEvent, notifySessionNote, on
 import { blobType, bytesOf, inlinePicture, parseSentFiles, pathsTyped, putSentFiles, SENT_FILES_KEY, shellQuote, wireText, type SavedFile, type SentFilesBook } from "./attach";
 import type { AccountCli, AccountGroup, ApprovalChoice, BridgeEvent, ClarifyAnswers, DiffFile, EventOf, Msg } from "../lib/protocol";
 import { settleApproval } from "../chat/cards/respond";
-import { kitAnswer, noteChange, noteSaved, savesAlone } from "../code/kitAsks";
-import { readSaved } from "../code/secrets";
+import { afterBranchRead, beforeBranchRead, kitAnswer, noteChange, savesAlone } from "../code/kitAsks";
+import { readSaved, SAVED_READ_MS } from "../code/secrets";
 import { planLaneBranch, workDir, type LaneBranch } from "../code/laneBranch";
 import { openFolderInEditor } from "../code/editor";
 import { startOf, worktreeSettings } from "../lib/worktrees";
@@ -423,15 +423,31 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     }
   };
   const patchLive = (id: string, p: Partial<AgentLive>) => set({ live: { ...state.live, [id]: { ...state.live[id], ...p } } });
-  /** The branch of the folder the agent works in (a lane's own), read again when a turn ends (the agent may have switched it). */
+  /** The branch of the folder the agent works in (a lane's own), read again when a turn ends (the agent may have switched it).
+   *  Kit's dial reads a push that names no branch with none while a step that may have moved it has run since (item 120). */
   const readBranch = async (id: string) => {
     const r = rec(id);
     if (!r?.cwd) return;
+    const key = keys.get(id) ?? "";
+    const token = beforeBranchRead(key);
     try {
       const b = await host.branch(workDir(r));
       if (rec(id) && state.live[id]?.branch !== b) patchLive(id, { branch: b });
+      afterBranchRead(key, token);
     } catch {
       /* an older shell */
+    }
+  };
+  /** The branch checked out in `dir` as the disk says now, or undefined when it cannot be read in time (item 120). */
+  const branchNow = async (dir: string): Promise<string | undefined> => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<undefined>((done) => (timer = setTimeout(() => done(undefined), SAVED_READ_MS)));
+    try {
+      return await Promise.race([host.branch(dir).catch(() => undefined), late]);
+    } catch {
+      return undefined;
+    } finally {
+      clearTimeout(timer);
     }
   };
   /** A lane's own working folder (src/code/laneBranch.ts). As a chat session starts, Kit makes a branch of its own for it from
@@ -581,10 +597,11 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
       // made whole and in time, leaves it to the person, who is then told of it as of any ask
       const dir = ctx.root;
       return async () => {
-        const saved = await readSaved(() => (host.laneKeys ? host.laneKeys(dir) : Promise.resolve(null)));
-        const a = kitAnswer(ask, ctx, Date.now(), saved);
+        // the branch is read again from disk as the step arrives (item 120): one a job left running or a project's own
+        // code switched since the last read is the one a push that names no branch sends
+        const [saved, branch] = await Promise.all([readSaved(() => (host.laneKeys ? host.laneKeys(dir) : Promise.resolve(null))), branchNow(dir)]);
+        const a = kitAnswer(ask, { ...ctx, branch }, Date.now(), saved);
         if (a) return settleApproval(store(), key, card, a.choice);
-        noteSaved(key, saved?.files ?? []);
         const items = store().getState().chats[key]?.items ?? [];
         const item = items.find((i): i is ApprovalItem => i.kind === "approval" && i.request_id === ask.request_id);
         if (item && askOpen(items, item)) notify?.({ ...ev, bot: key } as unknown as BridgeEvent);
@@ -779,7 +796,9 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
         if (ev.event === "tool.end" && typeof ev.command === "string") {
           const tasks = pulls();
           const w = laneWhere(id);
-          if (tasks && w) void noteChatPull(tasks, keys.get(id) ?? "", ev, { cwd: w.root, root: w.root, ...(w.home ? { home: w.home } : {}) }).catch(() => undefined);
+          // the chat's own branch: a lane's own, else the one its folder had when it was read (item 120)
+          const own = rec(id)?.lane?.name ?? state.live[id]?.branch;
+          if (tasks && w) void noteChatPull(tasks, keys.get(id) ?? "", ev, { cwd: w.root, root: w.root, ...(w.home ? { home: w.home } : {}), ...(own ? { branch: own } : {}) }).catch(() => undefined);
         }
         if (ev.event === "turn.end") afterTurn(id, ev.outcome === "interrupted");
         // the files as the turn left them: what changes before the next turn reads as changed by hand (rewind.ts)

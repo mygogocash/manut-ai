@@ -1230,9 +1230,11 @@ async fn session_main_moved(cwd: String, base: Option<String>, show: Option<Vec<
 /// What really changed in the lane's own folder since it started, from git, for the Diff beside the lane (lane_diff.rs). Only a
 /// folder the app made is read; the answer is a short code otherwise.
 #[tauri::command]
-async fn lane_diff(worktree: String) -> Result<lane_diff::LaneDiff, String> {
+async fn lane_diff(worktree: String, history: Option<bool>) -> Result<lane_diff::LaneDiff, String> {
     let home = user_home()?;
-    tauri::async_runtime::spawn_blocking(move || lane_diff::read(&home, &worktree)).await.map_err(|e| e.to_string())?
+    // a push about to go asks for the commits it would send too (item 120)
+    let with_history = history.unwrap_or(false);
+    tauri::async_runtime::spawn_blocking(move || lane_diff::read_with(&home, &worktree, with_history)).await.map_err(|e| e.to_string())?
 }
 
 /// Remove session `session`'s saved files (it was closed).

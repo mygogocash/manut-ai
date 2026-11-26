@@ -173,7 +173,8 @@
 .mp-opt {
   display: flex;
   align-items: center;
-  gap: 8px;
+  /* the canvas's menu gap, the same in every menu (item 122) */
+  gap: 10px;
   width: 100%;
   padding: 5px 6px;
   border-radius: var(--r-sm);

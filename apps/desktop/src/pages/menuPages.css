@@ -520,7 +520,8 @@
   right: auto;
   width: 320px;
 }
-/* Each tool named in words beside its ring, a quiet pill, as an everyday page names a coding agent. */
+/* Each tool by its own mark inside its ring, then its name, a quiet pill (the owner's request of 26 Nov 2026: each provider
+   by its own logo). With no ring the mark stands alone in the ring's place, so every name starts on the same line. */
 .mpage .code-plans .usage-m.named {
   display: inline-flex;
   align-items: center;
@@ -533,8 +534,15 @@
 .mpage .code-plans .usage-m.named > * {
   grid-area: auto;
 }
-.mpage .code-plans .usage-m.named:not(:has(.usage-ring)) {
-  padding-left: 10px;
+.mpage .code-plans .usage-disc {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  flex: none;
+}
+.mpage .code-plans .usage-disc > * {
+  grid-area: 1 / 1;
 }
 .mpage .code-plans .usage-name {
   font-size: 13px;

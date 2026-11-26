@@ -12,7 +12,7 @@ import { bringToFront, createNoteGate, noteFor, sessionNote, sessionRings, showN
 import { noteAsk } from "../chat/cards/askNote";
 import { settleApproval } from "../chat/cards/respond";
 import { appSounds, soundFor, type SoundBoard } from "../lib/sounds";
-import { maskCommand } from "../lib/secrets";
+import { maskCommand, revealHidden } from "../lib/secrets";
 import { promptText } from "../chat/parts/attachFiles";
 import { findTokens, toWire } from "../chat/parts/skillTokens";
 import { forBots, parseResume, RESUME_KEY, type ResumeSnap } from "../app/resume";
@@ -2069,11 +2069,12 @@ export function askFrom(state: AppState, key: string): string {
 }
 
 /** One plain line for an ask: "Allow `rm -rf build/`?" or the (first) question. A command's keys are masked as on its
- *  card (maskCommand), never anything else in it; a browser write's sentence is as typed. */
+ *  card (maskCommand), never anything else in it; a browser write's sentence is as typed. Every character that does not
+ *  show, or that reorders what does, is a visible mark, as on the card (item 121). */
 export function askText(it: ApprovalItem | ClarifyItem): string {
-  if (it.kind === "approval") return it.command ? tr("ask.allowCmd", { cmd: `\`${it.whole ? it.command : maskCommand(it.command)}\`` }) : it.title || tr("ask.allowThis");
+  if (it.kind === "approval") return it.command ? tr("ask.allowCmd", { cmd: `\`${it.whole ? revealHidden(it.command) : maskCommand(it.command)}\`` }) : revealHidden(it.title) || tr("ask.allowThis");
   const n = it.questions?.length ?? 0;
-  return n > 1 ? tr("ask.questions", { n, first: it.questions![0].question }) : it.question;
+  return revealHidden(n > 1 ? tr("ask.questions", { n, first: it.questions![0].question }) : it.question);
 }
 
 let sideCache: { bots: Bot[]; pinned: string[]; roster: string[] | null; out: Bot[] } | null = null;

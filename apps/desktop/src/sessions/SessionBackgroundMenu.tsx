@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { MenuIcon } from "../ui/MenuIcon";
 import { t } from "../i18n";
 import { openNewSessionMenu } from "./newMenu";
 import { addTermFolder } from "./SessionsSection";
@@ -63,6 +64,7 @@ export function SessionBackgroundMenu({ at, onClose }: { at: { x: number; y: num
           openNewSessionMenu();
         }}
       >
+        <MenuIcon name="square-plus" />
         {t("sessions.new")}
       </button>
       <button
@@ -75,6 +77,7 @@ export function SessionBackgroundMenu({ at, onClose }: { at: { x: number; y: num
           void addTermFolder();
         }}
       >
+        <MenuIcon name="folder-plus" />
         {t("term.newFolder")}
       </button>
     </div>

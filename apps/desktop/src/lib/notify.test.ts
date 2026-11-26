@@ -55,6 +55,21 @@ describe("noteFor: only what needs the person", () => {
     // notify-rules offers Approve only when the body is the action word for word, which a masked body is not
     expect(n?.body).not.toBe(n?.ask?.action);
   });
+  it("a command its card shows as it is, since it may hold a key, says so and never reaches Notification Centre (item 121)", () => {
+    const command = "echo •••• && API_KEY=abc123 pnpm deploy";
+    const n = noteFor(ev({ event: "approval.request", request_id: "a", title: "Run", command, choices: ["once", "deny"], kind: "reply" }), ctx());
+    expect(n?.body).toBe("A command that may hold a key. Open Manut AI to read it.");
+    expect(JSON.stringify(n?.body)).not.toContain("abc123");
+    expect(n?.body).not.toBe(n?.ask?.action);
+  });
+  it("marks the characters a command hides, so a notification never reorders it, and offers no Approve (item 121)", () => {
+    const n = noteFor(ev({ event: "approval.request", request_id: "a", title: "Run", command: "echo 'Tests passed' \u202e\u2066; rm -rf src .git; echo \u2069'\u202cdone'", choices: ["once", "deny"], kind: "reply" }), ctx());
+    expect(n?.body).toContain("⟨U+202E⟩");
+    expect(n?.body).not.toMatch(/[\u202a-\u202e\u2066-\u2069]/);
+    expect(n?.body).not.toBe(n?.ask?.action);
+    const q = noteFor(ev({ event: "clarify.request", request_id: "q", question: "Ship \u202etset\u202c?" }), ctx());
+    expect(q?.body).toContain("⟨U+202E⟩");
+  });
   it("an approval from one of several shops says whose it is, and offers no Approve where the person's role may not decide", () => {
     const shop = { id: "pilot:b", name: "Ran Pa Noi", owner: "Noi", role: "helper" as const };
     const reply = noteFor(ev({ event: "approval.request", request_id: "pilot%3Ab/r@1", title: "", command: "Send on LINE: “Hi”", choices: ["once", "deny"], kind: "reply", shop }), ctx());

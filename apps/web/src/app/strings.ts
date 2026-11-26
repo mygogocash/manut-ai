@@ -201,6 +201,10 @@ export type MacStrings = {
   onlyOnMac: string;
   /// A command longer than a phone is sent: its start is shown, and only the Mac can allow it.
   tooLongHere: string;
+  /// A command the Mac shows as it is because it may hold a key: it stays on the Mac, and only the Mac can allow it.
+  keyedHere: string;
+  /// A command that holds characters that do not show: each is a visible mark, as on the Mac's card.
+  hiddenHere: string;
   answerWhenBack: string;
   notes: Record<
     | "allowed"
@@ -513,6 +517,8 @@ export const en: AppStrings = {
     skipHint: "Leave one empty to skip it.",
     onlyOnMac: "Answer this one on your Mac.",
     tooLongHere: "This command is too long to show here in full, so only your Mac can allow it.",
+    keyedHere: "This command may hold a key, so it stays on your Mac, and only your Mac can allow it.",
+    hiddenHere: "This command holds hidden characters. Each is shown here as a mark like ⟨U+202E⟩.",
     answerWhenBack: "It can be answered once your Mac is back.",
     notes: {
       allowed: "Allowed once.",

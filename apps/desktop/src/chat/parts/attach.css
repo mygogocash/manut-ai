@@ -75,12 +75,13 @@
   color: var(--ink);
   outline: none;
 }
+/* an entry's icon: 16px in the entry's own text colour, 10px before its words, as every menu's (item 122) */
 .att-ic {
-  width: 20px;
+  width: 16px;
   flex: none;
   display: grid;
   place-items: center;
-  color: var(--muted);
+  color: inherit;
 }
 .att-tile {
   width: 20px;

@@ -33,6 +33,8 @@ import type { Say } from "./command";
 import { useLanePulls, usePullsVersion, type LanePull } from "../tasks/pulls";
 import { asLanePull, chatPullOf, useChatPullsVersion } from "./chatPull";
 import { MoreButton, settledWhy, useRowMenu } from "../sidebar/RowMenu";
+import { MenuIcon } from "../ui/MenuIcon";
+import { AgentMark } from "../sessions/AgentMark";
 import { arrange, sessionRowKey, settleDue, settleRows, untilWord, useRowMarks, type RowMark, type RowMarks, type RowPlace } from "../sidebar/rows";
 import { useInbox } from "../sidebar/inbox";
 
@@ -61,6 +63,8 @@ export interface LaneRow {
   title: string;
   /** The agent's name, as the session's row names it. */
   agent: string;
+  /** The agent's id, which its mark is drawn by (item 122). */
+  agentId?: string;
   branch: LaneBranchTag | null;
   status: LaneStatus;
   line: Say | null;
@@ -129,6 +133,7 @@ export function laneRowOf(i: LaneRowInput, time: (ms: number) => string = (ms) =
     ...(own?.worktree ? { worktree: own.worktree } : {}),
     title: pickTitle(rec, folderName(rec.cwd)).title,
     agent: i.agent,
+    agentId: rec.agent,
     branch,
     status,
     // a lane works on a separate branch only while its folder is on it
@@ -262,7 +267,10 @@ function LaneItem({ row, now, onOpen, onPull, backOpen, onBack, below, place, ma
           </span>
         )}
         <span className="grow l1">{row.title}</span>
-        <span className="mut who">{t("lane.who", { agent: row.agent })}</span>
+        <span className="mut who">
+          {row.agentId && <AgentMark agent={row.agentId} size={16} />}
+          {t("lane.who", { agent: row.agent })}
+        </span>
         {row.branch && (
           <span className="tag mono" title={branchTitle(row.branch)} data-testid="lane-branch" data-kind={row.branch.kind}>
             {row.branch.name}
@@ -353,6 +361,7 @@ export function LaneMore({ row, mark }: { row: LaneRow; mark: RowMark | undefine
               }}
               data-testid="lane-open-editor"
             >
+              <MenuIcon mark={{ id: editor.id, title: editor.label }} />
               {t("editor.open", { name: editor.label })}
             </button>
           )

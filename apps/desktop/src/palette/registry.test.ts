@@ -135,6 +135,16 @@ describe("an action that needs a place that is not open is not listed", () => {
     expect(calls).toEqual(["newLane()", "toggleMic()", "toggleMode()", "pauseAsk()", "setRuntime(connected)"]);
   });
 
+  it("draws Open in <editor> by the editor's own logo, every other row by an icon of the set (item 122)", () => {
+    const rows = doRows(ctx({ editor: { id: "zed", label: "Zed" } }, { ...everyPlace(), editorProject: { open: spy("editorProject") }, editorSession: { open: spy("editorSession") } }));
+    const marked = rows.filter((r) => r.mark);
+    expect(marked.map((r) => [r.id, r.mark])).toEqual([
+      ["do:open-editor:project", { id: "zed", title: "Zed" }],
+      ["do:open-editor:session", { id: "zed", title: "Zed" }],
+    ]);
+    for (const r of rows) expect(r.icon, r.id).toBeTruthy();
+  });
+
   it("names the microphone and voice mode by their state, as their buttons do", () => {
     const on = everyPlace();
     on.box = { ...on.box!, micLive: () => true, modeLive: () => true };

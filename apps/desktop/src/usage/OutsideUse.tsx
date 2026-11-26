@@ -9,6 +9,7 @@ import { getStore } from "../state/store";
 import { clock } from "../sidebar/usageFormat";
 import { PROVIDER_NAME } from "../sidebar/usageFormat";
 import { t } from "../i18n";
+import { AgentIcon } from "../ui/AgentIcon";
 import { OUTSIDE_TOOLS, outsideHost, outsideUseOn, skippedCount, startedIds, tokenText, watchOutsideUse, type OutsideHost, type OutsideReport, type OutsideTool } from "./outside";
 
 const REFRESH_MS = 120_000;
@@ -116,6 +117,7 @@ export function OutsideView({ on, reads, open, onOpen, openSettings, now }: View
           return (
             <div className="out-t" key={r.tool} data-testid={`outside-${r.tool}`}>
               <div className="out-r1">
+                <AgentIcon id={r.tool} title={PROVIDER_NAME[r.tool]} size={16} />
                 <span className="out-name">{t("out.tool", { tool: PROVIDER_NAME[r.tool] ?? r.tool })}</span>
                 <span className="out-n" data-testid={`outside-${r.tool}-n`}>
                   {unread(r) ? t("out.compressed") : `${t("out.today", { n: tokenText(r.today) })} · ${t("out.week", { n: tokenText(r.week) })}`}

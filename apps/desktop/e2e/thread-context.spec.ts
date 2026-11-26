@@ -173,6 +173,10 @@ test("a Recent row dragged onto the box adds one chip that opens to show exactly
   const bubble = page.getByTestId("bubble-user").last();
   await expect(bubble.getByTestId("bubble-context")).toContainText("Receipt QR plan");
   await expect(bubble).toContainText("Go on from here");
+  // the chat keeps the shop that context came from, so a chip made of this chat carries it on (item 121)
+  const through = await page.evaluate(() => JSON.parse(localStorage.getItem("manut.box.through") ?? "{}") as Record<string, string[]>);
+  expect(Object.values(through)).toHaveLength(1);
+  expect(Object.values(through)[0]).toHaveLength(1);
 });
 
 test("Bring context from… in the + menu, by keyboard only", async ({ page }) => {

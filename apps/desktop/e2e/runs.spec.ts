@@ -47,8 +47,8 @@ async function mockError(op: string, params: Record<string, unknown>): Promise<s
   return reply.error?.code;
 }
 
-/** An element's words without its drawings. Since the fork an agent's mark is a drawing of its first letter (README.md:
- *  other companies' logos are replaced by initials), and these checks read the words beside the mark. */
+/** An element's words without its drawings: an agent's mark is a drawing (its own logo, or its monogram, whose letter the
+ *  stylesheet draws), and these checks read the words beside it. */
 const words = (l: Locator) =>
   l.evaluate((e) => {
     const c = e.cloneNode(true) as Element;
@@ -503,7 +503,7 @@ test("a node is its title, one mark with what ran it, and a status icon with a w
   const by: Record<string, { title: string; lines: number; clamp: string; tall: number; cut: boolean; repair: boolean; marks: [string, string][]; facts: string[]; whole: string; status: string; icon: string; children: string[] }> = Object.fromEntries(
     await nodes.evaluateAll((els) =>
       els.map((e) => {
-        // the words only: an agent's mark draws its first letter (words(), above)
+        // the words only, without the agent's mark (words(), above)
         const texts = (sel: string) =>
           [...e.querySelectorAll(sel)].map((l) => {
             const c = l.cloneNode(true) as Element;
@@ -696,9 +696,9 @@ test("a node shows the logo of the model that ran it: Claude, OpenAI, Gemini; th
   // a model is known: its maker's mark, and the CLI the lane went to only as words
   expect(inPanel["t3-doctor"]).toMatchObject({ marks: ["model:claude"], logo: "claude", whole: "Opus 5.5 · low · via Codex" });
   expect(inPanel["t1-hermes"]).toMatchObject({ marks: ["model:claude"], whole: "Opus 5.5 · high · via Codex" });
-  // no model is known: the CLI's own mark, with its name where the model's would be (the mark draws Codex's first
-  // letter since the fork, as other companies' logos are replaced by initials)
-  expect(inPanel["t1-discovery"]).toMatchObject({ marks: ["agent:codex"], logo: "letter", whole: "Codex · high", via: null });
+  // no model is known: the CLI's own mark (Codex's logo, the owner's request of 26 Nov 2026), with its name where the
+  // model's would be
+  expect(inPanel["t1-discovery"]).toMatchObject({ marks: ["agent:codex"], logo: "codex", whole: "Codex · high", via: null });
   // a Hermes helper: its model's mark alone
   expect(inPanel["t5-verify"]).toMatchObject({ marks: ["model:claude"], whole: "Opus 5.5 · review", via: null });
   for (const n of Object.values(inPanel)) expect(n.marks).toHaveLength(1);
@@ -1056,9 +1056,9 @@ test("Dependencies and Node details are plain text under the boxes", async ({ pa
   const card = details.getByTestId("run-detail");
   await expect(card).toHaveCount(1);
   await expect(card).toHaveAttribute("data-node", "t3-doctor");
-  // its lines of words: an agent's mark draws its first letter (words(), above), which is not a line of text
+  // its lines of words: an agent's mark is a drawing (words(), above), not a line of text
   const lines = await card.evaluate((e) => {
-    const marks = [...e.querySelectorAll<SVGElement>("svg[data-agent=letter]")];
+    const marks = [...e.querySelectorAll<HTMLElement | SVGElement>(".agent-ic")];
     for (const m of marks) m.style.display = "none";
     const text = (e as HTMLElement).innerText;
     for (const m of marks) m.style.display = "";
@@ -1069,7 +1069,7 @@ test("Dependencies and Node details are plain text under the boxes", async ({ pa
   await expect(card.locator("svg[data-icon]")).toHaveAttribute("data-icon", "dot");
   expect(await card.getByTestId("node-mark").evaluateAll((els) => els.map((e) => e.getAttribute("data-mark")))).toEqual(["codex"]);
   // all of it in the app's own font: monospace is for code and paths only
-  // (an agent's mark is a drawing of its letter, in the drawing's own font: words(), above)
+  // (an agent's mark is a drawing, not words: words(), above)
   const fonts = await box.locator(".bv-sec, .bv-sec *:not(svg):not(svg *)").evaluateAll((els) => [...new Set(els.map((e) => getComputedStyle(e).fontFamily))]);
   expect(fonts).toEqual([await page.evaluate(() => getComputedStyle(document.body).fontFamily)]);
   expect(await box.locator(".bv-sec").first().innerText()).not.toMatch(GLYPHS);
