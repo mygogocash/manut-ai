@@ -293,13 +293,17 @@ jobs:
     if: needs.changes.outputs.e2e == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # Each shard's Playwright workers, each against a stand-in of its own (apps/desktop/playwright.config.ts). The split
+    # reads the same number, so it plays out the order in which Playwright hands the shard's files to them.
+    env:
+      MANUT_E2E_WORKERS: "4"
     strategy:
       # A shard that fails says nothing about the others, so none of them is cancelled for it. Adding a shard is one
       # more number here and in the all-shards job's --shards below (e2e-shards.test.mjs checks that they agree); the
       # split takes the matrix's own size.
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9]
+        shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -319,7 +323,7 @@ jobs:
       - name: Pick the shard's spec files
         run: |
           code=0
-          node .github/scripts/e2e-shards.mjs --total ${{ strategy.job-total }} --shard ${{ matrix.shard }} > "$RUNNER_TEMP/shard-files" 2> "$RUNNER_TEMP/shard-plan" || code=$?
+          node .github/scripts/e2e-shards.mjs --total ${{ strategy.job-total }} --shard ${{ matrix.shard }} --workers "$MANUT_E2E_WORKERS" > "$RUNNER_TEMP/shard-files" 2> "$RUNNER_TEMP/shard-plan" || code=$?
           tee -a "$GITHUB_STEP_SUMMARY" < "$RUNNER_TEMP/shard-plan"
           exit $code
       # --forbid-only fails a shard where a test.only left in a file would quietly skip the rest of its tests. The
@@ -377,7 +381,7 @@ jobs:
       # --strict fails the job on a failed test, an error outside the tests, an unreadable report, or fewer than nine
       # shards' reports. A flaky test (one that passed on its retry) is counted and named but does not fail it.
       - name: Write the counts of all shards to the job summary
-        run: node .github/scripts/playwright-summary.mjs --title "Desktop Playwright, all shards" --shards 9 --strict "$RUNNER_TEMP/playwright-results"
+        run: node .github/scripts/playwright-summary.mjs --title "Desktop Playwright, all shards" --shards 3 --strict "$RUNNER_TEMP/playwright-results"
       # A shard can fail outside its tests (its install, a step before the suite) and still have left a report, so the
       # shards' own result is checked too.
       - name: Check every shard passed
