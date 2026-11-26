@@ -59,11 +59,13 @@ export function ThreadChat({ bot, thread }: { bot: Bot; thread: string }) {
           history={promptsOf(chat?.items)}
           offline={bot.status === "offline" || away}
           offlineText={away ? t("chat.connecting") : undefined}
-          onSend={(text) => void s.threadSend(bot.name, thread, text)}
+          onSend={(text, how) => void s.threadSend(bot.name, thread, text, how)}
           onStop={() => void s.threadInterrupt(bot.name, thread)}
           // `./thread` here opens a sibling thread under the same bot, as it does in the bot's main chat
           onNewThread={bot.host || bot.status === "offline" ? undefined : (first) => void s.newThreadWith(bot.name, first)}
-          onSendFiles={box ? (text, files) => s.threadSendWithFiles(bot.name, thread, text, files) : undefined}
+          onSendFiles={box ? (text, files, how) => s.threadSendWithFiles(bot.name, thread, text, files, how) : undefined}
+          // a thread answering through the person's own coding agent takes no message mid-answer, as its main chat
+          steers={!box}
           tools={box ? <AgentBoxTools bot={bot.name} thread={thread} box={box} /> : undefined}
           onFolder={box ? pickFolder : undefined}
           mentions={box ? teammates(s.bots, bot.name) : undefined}

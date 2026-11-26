@@ -11,6 +11,7 @@
 //
 // menu.ts decides which row is current. `SideMenu` draws whatever it is given, so tests can draw any state, and
 // `Sidebar` feeds it from the app's store.
+import { LaterWatcher } from "../chat/box/LaterRows";
 import type { ReactNode } from "react";
 // sidebar.css still styles what the menu's foot carries (the disk chip, the update control), the usage meters the Code
 // page shows, and .vh, and sessions.css styles the terminal view and the Code page's list.
@@ -305,6 +306,8 @@ export function Sidebar() {
           <DiskChip />
           {/* the desktop app's shell keeps the accounts in every mode (item 74); a runtime may keep them too */}
           {(can("accounts") || isDesktop()) && <AccountsWatcher />}
+          {/* sends a message kept for when its account's limit resets (item 95) */}
+          <LaterWatcher />
           {/* A newer signed release, which shows nothing until in-app updates are turned on (updater.ts). */}
           <UpdateButton />
           {/* Practice mode, or the API host it is connected to: never a guess about which data this is. */}

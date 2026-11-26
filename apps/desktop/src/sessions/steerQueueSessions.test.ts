@@ -158,3 +158,32 @@ test("a Send now mark is used up by the turn's end: a later Stop still throws aw
   expect(t.row("D")).toMatchObject({ wait: "dropped" });
   expect(sends(t.inputs)).toEqual(["first", "C"]);
 });
+
+// item 95: the chat box's Cmd+Enter (or Settings' Add it now) passes `how: "steer"`; Enter, on the default, waits.
+test("Cmd+Enter (`how: \"steer\"`) hands the message to the running turn at once; Enter waits as before", async () => {
+  const t = await setup();
+  await t.ss.send(t.id, "B", "steer");
+  expect(t.inputs.filter((i) => i.kind === "steer")).toEqual([{ kind: "steer", id: t.row("B")!.id, text: "B" }]);
+  expect(t.row("B")?.held).toBeUndefined();
+  await t.ss.send(t.id, "C");
+  expect(t.row("C")).toMatchObject({ held: true, wait: "queued" });
+  expect(t.inputs.filter((i) => i.kind === "steer")).toHaveLength(1);
+});
+
+test("a message asked in with Cmd+Enter behind one that waits is never put ahead of it", async () => {
+  const t = await setup();
+  await t.ss.send(t.id, "B");
+  await t.ss.send(t.id, "C", "steer");
+  expect(t.inputs.filter((i) => i.kind === "steer")).toEqual([]);
+  expect(t.chat().queue).toEqual([t.row("B")!.id, t.row("C")!.id]);
+});
+
+test("an agent with no steer of its own waits with Cmd+Enter too: nothing goes to it mid-answer", async () => {
+  const t = await setup("dsh");
+  await t.ss.send(t.id, "B", "steer");
+  expect(t.inputs.filter((i) => i.kind === "steer")).toEqual([]);
+  expect(t.row("B")).toMatchObject({ held: true });
+  t.end();
+  await t.tick();
+  expect(sends(t.inputs)).toEqual(["first", "B"]);
+});
