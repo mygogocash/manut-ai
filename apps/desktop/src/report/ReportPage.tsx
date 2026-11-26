@@ -10,13 +10,15 @@
 //
 // `ReportView` draws a given state so a test can draw each one; `ReportPage` reads the computer and acts. What the report holds
 // and never holds is report.ts's; the page says it in its own words under the report.
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { t } from "../i18n";
 import { getStore, useStore } from "../state/store";
 import { getSessions, useSessions } from "../sessions/sessions";
 import { agentLabel, chatAgents, draftAgent, draftFolder, offeredAgents, tildePath, type AgentId } from "../sessions/agents";
 import { setDraft } from "../app/drafts";
 import { openExternal } from "../lib/openExternal";
+import { Popover } from "../ui";
+import { AgentMark } from "../sessions/AgentMark";
 import conf from "../../src-tauri/tauri.conf.json";
 import { Row } from "../settings/DevRow";
 import "./report.css";
@@ -48,13 +50,76 @@ export interface ReportViewProps {
   onIssueCancel: () => void;
 }
 
+/** The agent chip: a 34px button with the agent's logo and name that opens the app's own agent menu (the rows New chat and Continue
+ *  with draw: the logo, the name). */
+function AgentChip({ agents, agent, onAgent }: { agents: { id: AgentId; label: string }[]; agent: AgentId | null; onAgent: (id: AgentId) => void }) {
+  const [open, setOpen] = useState(false);
+  const btn = useRef<HTMLButtonElement>(null);
+  const now = agents.find((a) => a.id === agent);
+  return (
+    <span className="bx-w">
+      <button
+        ref={btn}
+        type="button"
+        className={`st-btn rp-agent${open ? " on" : ""}`}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        aria-label={`${t("rp.agent.which")}: ${now?.label ?? ""}`}
+        onClick={() => setOpen((v) => !v)}
+        data-testid="report-agent"
+      >
+        {agent && <AgentMark agent={agent} size={14} />}
+        <span>{now?.label}</span>
+      </button>
+      <Popover
+        open={open}
+        onClose={(why) => {
+          setOpen(false);
+          if (why === "escape") btn.current?.focus();
+        }}
+        side="bottom"
+        align="left"
+        width={240}
+        label={t("rp.agent.which")}
+        className="mp-pop bx-pop"
+      >
+        <div data-testid="report-agent-menu">
+          {agents.map((a) => (
+            <button
+              key={a.id}
+              type="button"
+              className="mp-opt"
+              autoFocus={a.id === agent}
+              onClick={() => {
+                onAgent(a.id);
+                setOpen(false);
+                btn.current?.focus();
+              }}
+              data-testid="report-agent-pick"
+              data-agent={a.id}
+            >
+              <AgentMark agent={a.id} size={16} />
+              <span className="mp-n">{a.label}</span>
+            </button>
+          ))}
+        </div>
+      </Popover>
+    </span>
+  );
+}
+
 export function ReportView(p: ReportViewProps) {
   const none = p.agents.length === 0;
   return (
     <div className="st-page rp" data-testid="report-page">
       <div className="st-gh st-gh0">{t("set.report")}</div>
       <p className="rp-lead">{t("rp.lead")}</p>
-      <div className="st-gh">{t("rp.what")}</div>
+      <div className="st-gh">
+        <span>{t("rp.what")}</span>
+        <button type="button" className="rp-link" onClick={p.onRefresh} data-testid="report-refresh">
+          {t("rp.refresh")}
+        </button>
+      </div>
       <pre className="rp-text" tabIndex={0} aria-label={t("rp.what")} aria-busy={p.report === null} data-testid="report-text" data-ready={String(p.report !== null)}>
         {p.report ?? t("rp.reading")}
       </pre>
@@ -68,13 +133,7 @@ export function ReportView(p: ReportViewProps) {
         <Row title={t("rp.agent.title")} hint={none ? t("rp.agent.none") : t("rp.agent.hint")}>
           {!none && (
             <span className="rp-pick">
-              <select className="dev-in rp-sel" value={p.agent ?? ""} aria-label={t("rp.agent.which")} onChange={(e) => p.onAgent(e.currentTarget.value as AgentId)} data-testid="report-agent">
-                {p.agents.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.label}
-                  </option>
-                ))}
-              </select>
+              <AgentChip agents={p.agents} agent={p.agent} onAgent={p.onAgent} />
               <button type="button" className="st-btn" onClick={p.onChoose} title={p.folder} aria-label={p.folder ? `${t("rp.folder.choose")}: ${p.folder}` : t("rp.folder.choose")} data-testid="report-folder">
                 {p.folder ? t("rp.folder.in", { path: p.folder }) : t("rp.folder.choose")}
               </button>
@@ -105,11 +164,6 @@ export function ReportView(p: ReportViewProps) {
           </span>
         </div>
       )}
-      <div className="st-note">
-        <button type="button" className="st-btn" onClick={p.onRefresh} data-testid="report-refresh">
-          {t("rp.refresh")}
-        </button>
-      </div>
     </div>
   );
 }

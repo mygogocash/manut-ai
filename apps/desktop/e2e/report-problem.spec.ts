@@ -65,6 +65,12 @@ test("Copy puts the report on the clipboard and says so", async ({ page }) => {
 });
 
 test("the agent action puts the report in a new coding chat's box and sends nothing", async ({ page }) => {
+  // the agent chip opens the app's agent menu; the three controls of the row share one 34px line
+  const heights = await page.evaluate(() => ["report-agent", "report-folder", "report-ask"].map((id) => document.querySelector<HTMLElement>(`[data-testid=${id}]`)!.getBoundingClientRect().height));
+  expect(heights).toEqual([34, 34, 34]);
+  await page.getByTestId("report-agent").click();
+  await expect(page.getByTestId("report-agent-menu").getByTestId("report-agent-pick").first()).toBeVisible();
+  await page.getByTestId("report-agent-pick").first().click();
   await page.getByTestId("report-ask").click();
   await expect(page.getByTestId("composer")).toHaveValue(/Manut AI problem report/);
   await expect(page.getByTestId("composer")).toHaveValue(/the agent would not start/);

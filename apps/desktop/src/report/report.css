@@ -23,8 +23,7 @@
   overflow-wrap: anywhere;
 }
 .rp .rp-text:focus-visible,
-.rp .st-btn:focus-visible,
-.rp .dev-in:focus-visible {
+.rp .st-btn:focus-visible {
   outline: 2px solid var(--aui-border-strong);
   outline-offset: 1px;
 }
@@ -44,9 +43,26 @@
   align-items: center;
   gap: 8px;
 }
-.rp .rp-sel {
-  width: auto;
-  min-width: 140px;
+/* the three controls of the agent row share one 34px line */
+.rp .rp-pick .st-btn,
+.rp .rp-agent {
+  min-height: 34px;
+  height: 34px;
+  gap: 6px;
+}
+/* a small action in a band's header, as the Code page's bands carry theirs: the quiet underlined link */
+.rp .rp-link {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--aui-muted);
+  text-decoration: underline;
+}
+.rp .rp-link:hover {
+  color: var(--ink);
+}
+.rp .rp-link:focus-visible {
+  outline: 2px solid var(--aui-border-strong);
+  outline-offset: 1px;
 }
 /* the folder reads as a button but is a path: it shortens with an ellipsis in the room it has */
 .rp .rp-pick .st-btn[data-testid="report-folder"] {
