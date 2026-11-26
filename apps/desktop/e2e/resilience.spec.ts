@@ -71,6 +71,9 @@ test("bridge lost mid-turn: activity ends Stopped, Stop goes away, nothing is re
   await page.getByTestId("composer").fill("run something long");
   await page.getByTestId("composer").press("Enter");
   await expect(page.getByTestId("stop")).toBeVisible();
+  // Stop shows the moment Enter is pressed, before the send has crossed the socket. Wait for the send itself, or a
+  // loaded runner closes the socket first and the test sees no send at all (sends 0, not 1).
+  await expect.poll(() => sends).toBe(1);
   drop!();
   // Checked before the client reconnects: the lost turn is closed as stopped, not left live.
   await expect(page.getByTestId("stop")).toHaveCount(0, { timeout: 1000 });
