@@ -10,6 +10,15 @@
 //! `squashMergeAllowed` and `rebaseMergeAllowed`. `glab mr list --output json` prints GitLab's own merge request objects, which
 //! carry `detailed_merge_status`, `has_conflicts`, `draft` and `target_branch` but no pipeline (GitLab's merge requests API);
 //! glab is not on the Mac this was built on, so its answer is read as the API's object, as tasks.rs and review.rs read it.
+//!
+//! Watching costs little (item 100, part 3). A list read within [`KEEP_BOARD`] is given again without asking. After that, for
+//! GitHub, the shell first asks whether the list changed: `gh api --include` of the repository's open pull requests (REST),
+//! with `If-None-Match` and the ETag the last answer gave. GitHub answers an unchanged list `304 Not Modified`, which does not
+//! count against the rate limit, and the last list is given again. The list itself (`gh pr list --json`, GraphQL, which has no
+//! conditional request) is read only when GitHub says the list changed, when a check was still running in the last answer
+//! (a check finishing does not change the REST list), and at least every [`STALE`]. `gh api --help` on gh 2.104.0 lists
+//! `--include`, `-H` and `--method`; its `--cache` keeps an answer on disk for a time, which is not a conditional request and
+//! is not used. GitLab's lists are read as before, at most once in [`KEEP_BOARD`].
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -26,6 +35,11 @@ pub const BOARD_MAX: usize = 50;
 pub const FILES_MAX: usize = 300;
 /// An answer younger than this is given again without asking the host: the page reads a list at most once a minute.
 pub const KEEP_BOARD: Duration = Duration::from_secs(55);
+/// A list GitHub keeps saying is unchanged is still read in full this often: a check run again, or anything the REST list does
+/// not carry, shows within this time.
+pub const STALE: Duration = Duration::from_secs(10 * 60);
+/// The longest ETag sent back.
+const ETAG_MAX: usize = 200;
 
 const GH_BOARD: &str = "number,title,state,url,labels,author,createdAt,updatedAt,isDraft,headRefName,baseRefName,statusCheckRollup,isCrossRepository,headRepository,headRepositoryOwner,reviewDecision,mergeable";
 const GH_DETAIL: &str = "number,title,state,url,labels,author,createdAt,updatedAt,isDraft,headRefName,baseRefName,statusCheckRollup,isCrossRepository,headRepository,headRepositoryOwner,reviewDecision,mergeable,body,files,additions,deletions,changedFiles";
@@ -114,6 +128,52 @@ pub fn board_argv(source: Source, repo: &str) -> Result<Vec<String>, String> {
         Source::Github => vec![s("pr"), s("list"), s("--repo"), repo, s("--state"), s("open"), s("--json"), s(GH_BOARD), s("--limit"), (BOARD_MAX + 1).to_string()],
         Source::Gitlab => vec![s("mr"), s("list"), s("--repo"), repo, s("--output"), s("json"), s("--per-page"), BOARD_MAX.to_string(), s("--page"), s("1")],
     })
+}
+
+/// Whether `tag` may go back to GitHub as `If-None-Match`: one short run of visible ASCII, never a line end or a space.
+pub fn etag_ok(tag: &str) -> bool {
+    !tag.is_empty() && tag.len() <= ETAG_MAX && tag.bytes().all(|b| (0x21..=0x7e).contains(&b))
+}
+
+/// The argv (after `gh`) that asks GitHub whether `repo`'s open pull requests changed since the answer whose ETag is `etag`
+/// ("" for none): a GET of the REST list with the response's status line and headers, so its status and new ETag are read.
+pub fn probe_argv(repo: &str, etag: &str) -> Result<Vec<String>, String> {
+    let repo = check_repo(Source::Github, repo)?;
+    let mut a = vec![s("api"), s("--method"), s("GET"), s("--include"), s("-H"), s("Accept: application/vnd.github+json")];
+    if etag_ok(etag) {
+        a.extend([s("-H"), format!("If-None-Match: {etag}")]);
+    }
+    a.push(format!("repos/{repo}/pulls?state=open&per_page={}", BOARD_MAX + 1));
+    Ok(a)
+}
+
+/// What GitHub said of a list: unchanged (304), changed with its new ETag ("" when it gave none fit to send back), or nothing
+/// read (no answer, or an error: the list is then read in full).
+#[derive(Clone, Debug, PartialEq)]
+pub enum Probe {
+    Unchanged,
+    Changed(String),
+    Unread,
+}
+
+/// `gh api --include`'s answer: its status line (`HTTP/2.0 304 Not Modified`) and its headers come first. gh exits with an error
+/// for any status above 299, so a 304 is read from the status line, or from gh's own `gh: HTTP 304` line, whatever the exit code.
+pub fn read_probe(out: &str, err: &str) -> Probe {
+    let mut lines = out.split('\n').map(|l| l.trim_end_matches('\r'));
+    let status = lines.next().and_then(|l| l.split_whitespace().nth(1)).and_then(|c| c.parse::<u16>().ok());
+    if status == Some(304) || err.lines().any(|l| l.trim() == "gh: HTTP 304") {
+        return Probe::Unchanged;
+    }
+    if status != Some(200) {
+        return Probe::Unread;
+    }
+    let tag = lines.take_while(|l| !l.is_empty()).filter_map(|l| l.split_once(':')).find(|(k, _)| k.trim().eq_ignore_ascii_case("etag")).map(|(_, v)| v.trim().to_string()).unwrap_or_default();
+    Probe::Changed(if etag_ok(&tag) { tag } else { String::new() })
+}
+
+/// Whether a check was still running in `b`: finishing it changes no REST list, so such a list is read again in full.
+fn running(b: &Board) -> bool {
+    b.items.iter().any(|p| p.item.checks.as_ref().is_some_and(|c| c.pending > 0))
 }
 
 /// The argv that reads request `number` of `repo` with its files and counts.
@@ -234,6 +294,10 @@ struct Entry {
     board: Board,
     /// When the host was last asked about this list.
     asked: Instant,
+    /// When the list was last read in full.
+    full: Instant,
+    /// The ETag of the REST list as it was when the list was last read in full ("" for none).
+    etag: String,
 }
 
 /// The lists read this run, by `<program>:<repo>`. A list is kept only to give it again within [`KEEP_BOARD`].
@@ -242,18 +306,25 @@ pub struct Boards {
     /// tests: stand-ins for `gh` and `glab` (none: the ones found on this computer)
     cli: Option<(PathBuf, PathBuf)>,
     keep: Duration,
+    stale: Duration,
 }
 
 impl Default for Boards {
     fn default() -> Boards {
-        Boards { lists: Mutex::new(HashMap::new()), cli: None, keep: KEEP_BOARD }
+        Boards { lists: Mutex::new(HashMap::new()), cli: None, keep: KEEP_BOARD, stale: STALE }
     }
 }
 
 impl Boards {
     #[cfg(test)]
     pub(crate) fn with(gh: PathBuf, glab: PathBuf, keep: Duration) -> Boards {
-        Boards { lists: Mutex::new(HashMap::new()), cli: Some((gh, glab)), keep }
+        Boards { lists: Mutex::new(HashMap::new()), cli: Some((gh, glab)), keep, stale: STALE }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn stale_after(mut self, stale: Duration) -> Boards {
+        self.stale = stale;
+        self
     }
 
     fn run(&self, source: Source, argv: &[String]) -> Result<Ran, String> {
@@ -275,20 +346,49 @@ impl Boards {
         Ok(ran.out)
     }
 
-    /// `repo`'s open requests: the list read within [`KEEP_BOARD`] again, else read now.
-    pub fn board(&self, source: Source, repo: &str) -> Result<Board, String> {
-        let argv = board_argv(source, repo)?;
-        let key = format!("{}:{repo}", source.program());
-        if let Some(e) = self.lists.lock().ok().and_then(|m| m.get(&key).filter(|e| e.asked.elapsed() < self.keep).map(|e| e.board.clone())) {
-            return Ok(e);
-        }
-        let board = parse_board(source, &self.answer(source, &argv)?)?;
+    fn keep_list(&self, key: String, e: Entry) {
         if let Ok(mut m) = self.lists.lock() {
             if m.len() >= 64 && !m.contains_key(&key) {
                 m.clear();
             }
-            m.insert(key, Entry { board: board.clone(), asked: Instant::now() });
+            m.insert(key, e);
         }
+    }
+
+    /// `repo`'s open requests: the list read within [`KEEP_BOARD`] again; else, for GitHub, the last list again when GitHub says
+    /// it has not changed (see the top of this file); else read now.
+    pub fn board(&self, source: Source, repo: &str) -> Result<Board, String> {
+        let argv = board_argv(source, repo)?;
+        let key = format!("{}:{repo}", source.program());
+        let last = self.lists.lock().ok().and_then(|m| m.get(&key).map(|e| (e.board.clone(), e.asked, e.full, e.etag.clone())));
+        if let Some((b, asked, _, _)) = &last {
+            if asked.elapsed() < self.keep {
+                return Ok(b.clone());
+            }
+        }
+        let mut etag = String::new();
+        if source == Source::Github {
+            let sent = last.as_ref().map(|l| l.3.as_str()).unwrap_or("");
+            let probe = probe_argv(repo, sent).ok().and_then(|a| self.run(source, &a).ok()).map(|r| read_probe(&r.out, &r.err)).unwrap_or(Probe::Unread);
+            match probe {
+                Probe::Unchanged => {
+                    if let Some((b, _, full, tag)) = &last {
+                        if !tag.is_empty() && !running(b) && full.elapsed() < self.stale {
+                            let b = Board { at: now_secs(), ..b.clone() };
+                            self.keep_list(key, Entry { board: b.clone(), asked: Instant::now(), full: *full, etag: tag.clone() });
+                            return Ok(b);
+                        }
+                        etag = tag.clone();
+                    }
+                }
+                Probe::Changed(tag) => etag = tag,
+                Probe::Unread => {}
+            }
+        }
+        // the ETag is kept only with the list read after it: a list that failed to read is never taken as unchanged later
+        let board = parse_board(source, &self.answer(source, &argv)?)?;
+        let now = Instant::now();
+        self.keep_list(key, Entry { board: board.clone(), asked: now, full: now, etag });
         Ok(board)
     }
 
@@ -425,18 +525,120 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn asks_github_with_the_etag_it_was_given_and_reads_its_status_line() {
+        assert_eq!(probe_argv("shop/site", "").unwrap(), ["api", "--method", "GET", "--include", "-H", "Accept: application/vnd.github+json", "repos/shop/site/pulls?state=open&per_page=51"]);
+        let a = probe_argv("shop/site", "W/\"abc\"").unwrap();
+        assert_eq!(a[6..8], ["-H".to_string(), "If-None-Match: W/\"abc\"".to_string()]);
+        // an ETag with a line end or a space in it is never sent
+        for bad in ["W/\"a\"\r\nX-Evil: 1", "a b", &"x".repeat(201)] {
+            assert!(!probe_argv("shop/site", bad).unwrap().iter().any(|w| w.starts_with("If-None-Match")), "{bad:?}");
+        }
+        assert!(probe_argv("--repo/x", "").is_err());
+        assert_eq!(read_probe("HTTP/2.0 304 Not Modified\r\nEtag: W/\"abc\"\r\n\r\n", "gh: HTTP 304\n"), Probe::Unchanged);
+        assert_eq!(read_probe("", "gh: HTTP 304\n"), Probe::Unchanged);
+        assert_eq!(read_probe("HTTP/2.0 200 OK\r\nContent-Type: application/json\r\nEtag: W/\"def\"\r\n\r\n[]", ""), Probe::Changed("W/\"def\"".into()));
+        assert_eq!(read_probe("HTTP/2.0 200 OK\r\nETAG: \"x y\"\r\n\r\n[]", ""), Probe::Changed(String::new()));
+        assert_eq!(read_probe("HTTP/2.0 404 Not Found\r\n\r\n{}", "gh: Not Found (HTTP 404)"), Probe::Unread);
+        assert_eq!(read_probe("[]", ""), Probe::Unread);
+    }
+
+    /// A stand-in `gh` that answers `gh api` as GitHub does a conditional request: 304 (and gh's error line, exit 1) when the
+    /// `If-None-Match` it was sent is the ETag in `dir/etag`, else 200 with that ETag; and `pr list` from `dir/list.json`.
+    fn conditional_gh(dir: &Path) -> PathBuf {
+        let etag = dir.join("etag");
+        let list = dir.join("list.json");
+        stand_in(
+            dir,
+            &format!(
+                "tag=$(cat '{etag}')\ncase \"$1\" in\napi) for a in \"$@\"; do if [ \"$a\" = \"If-None-Match: $tag\" ]; then printf 'HTTP/2.0 304 Not Modified\\r\\nEtag: %s\\r\\n\\r\\n' \"$tag\"; echo 'gh: HTTP 304' >&2; exit 1; fi; done; printf 'HTTP/2.0 200 OK\\r\\nContent-Type: application/json\\r\\nEtag: %s\\r\\n\\r\\n[]' \"$tag\"; exit 0;;\npr) cat '{list}' || exit 1; exit 0;;\nesac\nexit 2",
+                etag = etag.display(),
+                list = list.display()
+            ),
+        )
+    }
+
+    #[test]
+    fn an_unchanged_list_costs_one_answer_of_304_and_no_read_of_the_list() {
+        let dir = temp("etag-304");
+        // a list whose checks all finished: nothing in it can change without GitHub's list changing too
+        let done: Vec<Value> = serde_json::from_str::<Vec<Value>>(GH_BOARD_OUT).unwrap().into_iter().filter(|p| p["number"] != 42).collect();
+        fs::write(dir.join("list.json"), serde_json::to_string(&done).unwrap()).unwrap();
+        fs::write(dir.join("etag"), "W/\"v1\"").unwrap();
+        let b = Boards::with(conditional_gh(&dir), dir.join("none"), Duration::ZERO);
+        let first = b.board(Source::Github, "shop/site").unwrap();
+        assert_eq!(first.items.len(), 5);
+        let log = log_lines(&dir);
+        assert_eq!(log.len(), 2, "{log:?}");
+        assert!(log[0].starts_with("api ") && !log[0].contains("If-None-Match"), "{log:?}");
+        assert!(log[1].starts_with("pr list"), "{log:?}");
+        // the same list again: one conditional request, answered 304, and the last list given again
+        let again = b.board(Source::Github, "shop/site").unwrap();
+        assert_eq!(again.items, first.items);
+        let log = log_lines(&dir);
+        assert_eq!(log.len(), 3, "{log:?}");
+        assert!(log[2].contains("If-None-Match: W/\"v1\""), "{log:?}");
+        b.board(Source::Github, "shop/site").unwrap();
+        assert_eq!(log_lines(&dir).iter().filter(|l| l.starts_with("pr list")).count(), 1);
+        // the list changed: GitHub's new ETag, and the list read in full once
+        fs::write(dir.join("etag"), "W/\"v2\"").unwrap();
+        b.board(Source::Github, "shop/site").unwrap();
+        b.board(Source::Github, "shop/site").unwrap();
+        let log = log_lines(&dir);
+        assert_eq!(log.iter().filter(|l| l.starts_with("pr list")).count(), 2, "{log:?}");
+        assert!(log.last().unwrap().contains("If-None-Match: W/\"v2\""), "{log:?}");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_list_with_a_check_running_or_read_long_ago_is_read_again_though_github_says_it_is_unchanged() {
+        let dir = temp("etag-running");
+        // #42 has a check still running: finishing it changes no REST list
+        fs::write(dir.join("list.json"), GH_BOARD_OUT).unwrap();
+        fs::write(dir.join("etag"), "W/\"v1\"").unwrap();
+        let b = Boards::with(conditional_gh(&dir), dir.join("none"), Duration::ZERO);
+        b.board(Source::Github, "shop/site").unwrap();
+        b.board(Source::Github, "shop/site").unwrap();
+        let log = log_lines(&dir);
+        assert_eq!(log.iter().filter(|l| l.starts_with("pr list")).count(), 2, "{log:?}");
+        // all finished, but the last full read is older than STALE: read in full again
+        let done: Vec<Value> = serde_json::from_str::<Vec<Value>>(GH_BOARD_OUT).unwrap().into_iter().filter(|p| p["number"] != 42).collect();
+        fs::write(dir.join("list.json"), serde_json::to_string(&done).unwrap()).unwrap();
+        let b = Boards::with(conditional_gh(&dir), dir.join("none"), Duration::ZERO).stale_after(Duration::ZERO);
+        b.board(Source::Github, "shop/site").unwrap();
+        b.board(Source::Github, "shop/site").unwrap();
+        assert_eq!(log_lines(&dir).iter().filter(|l| l.starts_with("pr list")).count(), 4);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_list_that_failed_to_read_is_never_taken_as_unchanged_later() {
+        let dir = temp("etag-failed");
+        fs::write(dir.join("etag"), "W/\"v1\"").unwrap();
+        // no list.json: the full read fails after GitHub said 200
+        let b = Boards::with(conditional_gh(&dir), dir.join("none"), Duration::ZERO);
+        assert!(b.board(Source::Github, "shop/site").is_err());
+        fs::write(dir.join("list.json"), GH_BOARD_OUT).unwrap();
+        assert_eq!(b.board(Source::Github, "shop/site").unwrap().items.len(), 6);
+        // the second probe sent no ETag, since none was kept with a list
+        let log = log_lines(&dir);
+        assert!(log.iter().filter(|l| l.starts_with("api ")).all(|l| !l.contains("If-None-Match")), "{log:?}");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn a_list_read_within_the_minute_is_given_again_without_asking() {
         let dir = temp("keep");
         fs::write(dir.join("list.json"), GH_BOARD_OUT).unwrap();
         let gh = stand_in(&dir, &format!("case \"$1 $2\" in\n\"pr list\") cat '{}'; exit 0;;\nesac\nexit 2", dir.join("list.json").display()));
+        let lists = || log_lines(&dir).iter().filter(|l| l.starts_with("pr list")).count();
         let b = Boards::with(gh.clone(), dir.join("none"), Duration::from_secs(60));
         assert_eq!(b.board(Source::Github, "shop/site").unwrap().items.len(), 6);
         assert_eq!(b.board(Source::Github, "shop/site").unwrap().items.len(), 6);
-        assert_eq!(log_lines(&dir).len(), 1);
-        // with no time kept, each read asks
+        assert_eq!(lists(), 1);
+        // with no time kept, each read asks (this stand-in answers no `gh api`, so the list is read in full)
         let b = Boards::with(gh, dir.join("none"), Duration::ZERO);
         b.board(Source::Github, "shop/site").unwrap();
-        assert_eq!(log_lines(&dir).len(), 2);
+        assert_eq!(lists(), 2);
         // glab missing: said so
         assert_eq!(b.board(Source::Gitlab, "shop/site"), Err("glab is not installed".into()));
         let _ = fs::remove_dir_all(dir);
