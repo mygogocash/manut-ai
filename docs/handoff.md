@@ -276,6 +276,13 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    `gh run view <id> --log-failed` for the errors. Helpers are now told to run every spec their change touches.
    Item 106 (use outside Manut AI, off by default) merged at 11:06; Codex's compressed sessions wait for a dependency
    the owner must allow (106b).
+   AT 11:45 ON 26 NOV THE ACCOUNT'S USAGE LIMIT STOPPED THE LEAD. State then: CI was green on `f6cf164d`, all six
+   browser shards included. Item 97 (`feat/thread-context`, `cc-item97-thread-context`) is built, merged with the lead
+   branch in its worktree and reviewed by the lead (unit tests, its spec and eight nearby specs pass; pictures looked
+   at): it needs only the gate, a merge message and the merge. Item 98 (`feat/chat-drawing`) is built and pushed and
+   NOT yet reviewed: its helper found a drawing's scripts cannot be run safely in the web view, so drawings show as
+   HTML, SVG and CSS only (`docs/security/chat-drawings.md` on its branch). Items 116 to 118 were ten minutes in;
+   their work is in their worktrees, and each helper resumes from `git status` and `git diff`.
    Running on 26 Nov at 10:25, each a subagent of the lead's session in its own worktree:
    - item 98, a drawing in the chat (`feat/chat-drawing`, Opus, `cc-item98-chat-drawing`): an agent's HTML in a closed
      frame, the safety model first; a no with evidence is an accepted result;
