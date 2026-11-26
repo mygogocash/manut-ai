@@ -324,6 +324,34 @@ describe("an owner", () => {
   });
 });
 
+describe("a shop the person began to make and never finished", () => {
+  it("goes with the account, though no list shows it, and its make leaves the journal", async () => {
+    const { forgetTodaysMakes } = await import("./people-fixtures");
+    await forgetTodaysMakes();
+    const person = await appleSignIn({ withCode: false });
+    // The make stops at its very last step, listing the shop: the shop is whole in its own object and on no list.
+    const stopping = failingWhere("AUTH", (request) => new URL(request.url).pathname === "/shops-made/finish");
+    const made = await callWith(stopping, "/v1/shops/new", { method: "POST",
+      headers: { ...person.headers, "cf-connecting-ip": "203.0.113.91" } as { authorization: string },
+      body: { name: "Half Made", ownerName: "Dao", template: null } });
+    expect(made.status).toBe(503);
+    const journal = () => runInDurableObject(authStub(), (_instance, state) =>
+      [...state.storage.kv.list<{ tenant: string; by: string | null }>({ prefix: "pilot-making:" })].map(([, row]) => row)
+        .filter((row) => row.by === person.tenant));
+    const [make] = await journal();
+    expect(make).toBeDefined();
+    const { readShop } = await import("../src/people");
+    expect(await readShop(bindings, make!.tenant)).not.toBeNull();
+    expect((await asSession<{ shops: unknown[] }>(person.headers, "GET", "/v1/shops")).body.shops).toEqual([]);
+
+    expect((await deleteAccount(person, [])).status).toBe(200);
+    expect(await readShop(bindings, make!.tenant)).toBeNull();
+    expect(await journal()).toEqual([]);
+    expect((await shopDeletion(make!.tenant))?.deletedAt).toBeDefined();
+    expect((await accountRecord(person.tenant))?.makes).toEqual([make!.tenant]);
+  });
+});
+
 describe("a helper", () => {
   it("deletes their account and leaves the shop, which keeps all of its data", async () => {
     const { shop, owner } = await ownedShop();

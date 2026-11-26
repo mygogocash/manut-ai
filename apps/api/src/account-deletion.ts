@@ -192,7 +192,10 @@ async function deleteAccount(env: AccountEnv, person: SignedInPerson, asked: { s
   }
   // 2. Shops they began to make and never finished.
   for (const tenant of record.makes) {
-    const done = await deleteUnfinishedMake(env, tenant, record.owned[0]?.account ?? "owner").catch(() =>
+    // The record names who asked by the account the make linked as the shop's owner, when its people record got so far.
+    const people = await readPeople(env, tenant);
+    const askedBy = people?.ownerAccount?.subject === person.tenant ? people.ownerAccount.id : "owner";
+    const done = await deleteUnfinishedMake(env, tenant, askedBy).catch(() =>
       ({ ok: false, error: "shop_unavailable" }) as OwnerShopDeletion);
     if (!done.ok) return stop("shops", [tenant]);
   }
