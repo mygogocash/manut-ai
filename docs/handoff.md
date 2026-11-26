@@ -262,19 +262,29 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    person picks; item 96's setting said less than Suggest sends, and its report named a test that had not been
    written; item 113's check read an indented line under a one-line value differently from a forgiving YAML reader;
    item 112 let jq print the environment. Read a helper's branch, not its report.
-   Running on 26 Nov at 10:20, each a subagent of the lead's session in its own worktree:
-   - item 114, the third read's fix for the app's own git work (`fix/git-auto-3`, Opus, `cc-item114-git-auto-3`):
-     built, reviewed, and joined by its helper with item 93, since both changed how an OpenCode chat's rule value is
-     built and checked (`agent_rules`, `acp_chat.rs`); it waits for the gate. The lead added one commit that lets ten
-     `http` settings that only pace a transfer pass the check;
+   Item 114 merged at 10:25 on 26 Nov, so every finding of the third security read is fixed on the branch (items 112 to
+   115). A FOURTH SECURITY READ, read-only, over the day's merges reported at 11:20: four high, seven medium and several
+   low, each run where it could be. They are items 116 to 118, started at once. Four reads in a row found lines the
+   command reader's lists missed, so item 116 changes its structure: only options named as harmless for a program go
+   without asking. The reader also found most of the rest sound (the lexer, the path checks, skill settings, the phone's
+   decisions, the title run's flags) and its write-ups say what it did not examine. Until 116 to 118 merge, the
+   branch still has those gaps, and the published 0.1.1 has every gap since the first read.
+   Item 107 (open in an editor) merged at 11:00. THE GATE DOES NOT RUN THE BROWSER SPECS: on 26 Nov five of them were
+   red in CI for hours unseen, because `gate.sh` runs unit tests, the type check and Rust only, and CI's "all shards"
+   job reads success when a shard failed. They are repaired (one was real: "Effort" left in English in three
+   languages). After every push of merged code, read the shard jobs: `gh run view <id> --json jobs`, and
+   `gh run view <id> --log-failed` for the errors. Helpers are now told to run every spec their change touches.
+   Item 106 (use outside Manut AI, off by default) merged at 11:06; Codex's compressed sessions wait for a dependency
+   the owner must allow (106b).
+   Running on 26 Nov at 10:25, each a subagent of the lead's session in its own worktree:
    - item 98, a drawing in the chat (`feat/chat-drawing`, Opus, `cc-item98-chat-drawing`): an agent's HTML in a closed
      frame, the safety model first; a no with evidence is an accepted result;
-   - item 107, open a lane or a project in the person's editor (`feat/open-in-editor`, Sonnet,
-     `cc-item107-open-in-editor`).
-   Next: items 97 and 106 (briefs written), then 100 and 101; a fourth security read once item 114 merges (and item
-   98, if it does); 78f part 2 (it needs a tailnet and phones to try); and a redeploy of dev for the API routes of
-   items 83, 84 and 78b's health answer (all behind flags that are off). The briefs the helpers were given are not
-   kept in the repository; each item's row in `docs/plan.md` says what it is.
+   - item 97, context from one thread to another (`feat/thread-context`, Opus, `cc-item97-thread-context`);
+   - items 116 to 118, the fourth read's fixes (`fix/dial-reading-4`, `fix/shown-and-masked`, `fix/git-auto-4`, all
+     Opus, worktrees `cc-item116-…` to `cc-item118-…`).
+   Next: items 100 and 101; the fourth read's fixes; 78f part 2 (it needs a tailnet and phones to try); and a redeploy
+   of dev for the API routes of items 83, 84 and 78b's health answer (all behind flags that are off). The briefs the
+   helpers were given are not kept in the repository; each item's row in `docs/plan.md` says what it is.
    At a load of 30 (five helpers and a gate on this 8 GB Mac) browser tests time out: `e2e/settings-column.spec.ts` "a
    deep link to a developer page" failed at three different lines in four runs on the lead branch and passed in two.
    Keep to four helpers.

@@ -89,17 +89,58 @@ pub struct AcpAgent {
 }
 
 /// An agent whose own default runs tools without asking. Before the chat starts, the shell runs the agent's fixed
-/// rule listing (`args`) in the session folder with the environment the chat gets, sets `var` to what `build` makes
-/// of it, lists again with `var` set and starts the chat only when `kept` (first listing, rules, second listing) says
-/// the agent took the rules as meant.
-/// Anything else (the listing fails, times out or does not parse, the rules did not hold, or `var` is already set
-/// in manut's own environment) refuses the chat with [`no_rules`].
+/// rule listing in the session folder with the environment the chat gets, sets `var` to what that listing's `build`
+/// makes of it, lists again the same way with `var` set and starts the chat only when its `kept` (first listing, rules,
+/// second listing) says the agent took the rules as meant ([`probe_rules`]).
+/// Anything else (no listing could be read, the rules did not hold, or `var` is already set in manut's own environment)
+/// refuses the chat with [`no_rules`].
 #[derive(Debug)]
 pub struct RuleProbe {
-    pub args: &'static [&'static str],
+    /// The listings to try, in order (item 114): one CLI's versions list their rules differently, and the first listing
+    /// whose own `build` reads its output is the one listed again.
+    pub forms: &'static [ProbeForm],
     pub var: &'static str,
+}
+
+/// One way an agent lists its rules: the arguments, how its output becomes the rules' value, and how a second listing with
+/// that value set is read as having kept them.
+#[derive(Debug)]
+pub struct ProbeForm {
+    pub args: &'static [&'static str],
     pub build: fn(&str) -> Option<String>,
     pub kept: fn(&str, &str, &str) -> bool,
+}
+
+/// What one listing gave: the program's output, or None when it failed, ran out of time or printed nothing readable.
+pub type Lister<'a> = dyn Fn(&[&str], &[(String, String)]) -> Option<String> + 'a;
+
+/// [`RuleProbe`]'s check, with `list` running the agent with a form's arguments and these variables (the account's, `env`,
+/// then the rule variable). The forms are tried in order, and the first whose output its own `build` reads is the one
+/// listed again with the value set; only that same form's `kept` starts the chat. A form whose listing fails or cannot be
+/// read moves on to the next (an older or newer CLI has no such listing), but one whose rules were read and then not kept
+/// refuses at once, so no other way of listing is tried against rules the agent did not take. None: refuse.
+///
+/// `notes`: the project's instructions file (item 93, `crate::project_notes`). It joins the value as its one `instructions`
+/// entry ([`with_instructions`]) BEFORE the second listing, in whichever form was read, so the value listed again is the
+/// very value the chat starts with: the ask rules, the formatter and language server switches ([`PROJECT_CODE_OFF`], part of
+/// what `build` makes), then the instructions entry. `kept` still compares the rules `build` made, which the entry leaves
+/// byte for byte. A path the value cannot carry refuses at once: it is not a listing another form could read better.
+pub fn probe_rules(probe: &RuleProbe, env: &[(String, String)], list: &Lister, notes: Option<&std::path::Path>) -> Option<(String, String)> {
+    for form in probe.forms {
+        let Some(first) = list(form.args, env) else { continue };
+        let Some(value) = (form.build)(&first) else { continue };
+        let sent = match notes {
+            Some(f) => with_instructions(&value, f)?,
+            None => value.clone(),
+        };
+        let mut with = env.to_vec();
+        with.push((probe.var.to_string(), sent.clone()));
+        return match list(form.args, &with) {
+            Some(again) if (form.kept)(&first, &value, &again) => Some((probe.var.to_string(), sent)),
+            _ => None,
+        };
+    }
+    None
 }
 
 /// Why OpenCode did not start (the UI shows it translated, `ss.noRules`).
@@ -112,12 +153,21 @@ pub fn no_rules(label: &str) -> String {
 
 /// The built-in ACP agents: OpenCode, whose own default runs tools unasked, with its rule check. The generic ones
 /// are rows of [`crate::acp_agents::ACP_LIST`].
+///
+/// OpenCode lists its agents two ways (item 114). 2.x: `opencode debug agents --standalone`, JSON, read by
+/// [`opencode2_ask`]; `--standalone` because without it the listing comes from OpenCode's background service, started
+/// earlier with other variables, while `opencode acp` always starts a server of its own that inherits the chat's (read in
+/// 2.3.0's bundle). 1.x: `opencode agent list`, read by [`opencode_ask`]; 2.3.0 has no such command and prints its help.
+/// The newer comes first, so a current OpenCode is listed once and the older command never reaches it.
 pub const ACP_AGENTS: [AcpAgent; 1] = [AcpAgent {
     id: "opencode",
     label: "OpenCode",
     login: "opencode auth login",
     skill_tool: Some("skill"),
-    rules: Some(RuleProbe { args: &["agent", "list"], var: "OPENCODE_CONFIG_CONTENT", build: opencode_ask, kept: opencode_kept }),
+    rules: Some(RuleProbe {
+        forms: &[ProbeForm { args: &["debug", "agents", "--standalone"], build: opencode2_ask, kept: opencode2_kept }, ProbeForm { args: &["agent", "list"], build: opencode_ask, kept: opencode_kept }],
+        var: "OPENCODE_CONFIG_CONTENT",
+    }),
 }];
 
 /// One UTF-16 unit as the agents' matcher compares it. On Windows (`fold`) the agents match without case, as a
@@ -187,6 +237,9 @@ fn effective(rules: Vec<(String, String, String)>) -> Vec<(String, String, Strin
     (0..rules.len()).filter(|&i| !dead(i)).map(|i| rules[i].clone()).collect()
 }
 
+/// How a listing is read into agents: [`resolved`] for OpenCode 1.x's `agent list`, [`resolved_json`] for 2.x's `debug agents`.
+type Reader = fn(&str, &str, &[(&str, &str)], bool) -> Option<Vec<Listed>>;
+
 /// Every agent of what `agent list` printed, as the agent resolved it (`fold`: as it matches on Windows). `None` when the listing has no `primary`
 /// agent (the default one: OpenCode's `build`) or holds a line, a mode or a rule this does not know.
 fn resolved(listing: &str, primary: &str, asked: &[(&str, &str)], fold: bool) -> Option<Vec<Listed>> {
@@ -220,21 +273,53 @@ fn resolved(listing: &str, primary: &str, asked: &[(&str, &str)], fold: bool) ->
             }
             rules.push((perm.to_string(), pattern.to_string(), action.to_string()));
         }
-        let mut tools = Vec::new();
-        for (tool, _) in asked {
-            let mut seen: Vec<(String, String)> = Vec::new();
-            for (perm, pattern, action) in rules.iter().rev() {
-                if wildcard(tool, perm, fold) && !seen.iter().any(|(p, _)| units(p, fold) == units(pattern, fold)) {
-                    seen.push((pattern.clone(), action.clone()));
-                }
-            }
-            seen.reverse();
-            tools.push(seen);
-        }
-        let rest = effective(rules.iter().filter(|(perm, _, _)| !asked.iter().any(|(_, key)| key == perm || guard_keys(key).contains(perm))).cloned().collect());
-        out.push(Listed { name, mode, tools, rest, rules });
+        out.push(listed_agent(name, mode, rules, asked, fold));
     }
     Some(out)
+}
+
+/// Every agent of what OpenCode 2.x's `debug agents` printed (item 114): a JSON array of agents, each with its `id` (the
+/// key its config names it by), its `mode` and its resolved `permissions`, each an `action` (the tool, a pattern), a
+/// `resource` (the input, a pattern) and an `effect`, the last match deciding, else ask (2.3.0's `Permission` evaluate, read
+/// in its bundle). Its matcher is [`wildcard`] without folding on every platform: 2.3.0's builds its pattern with no case
+/// flag. `None` when it is not that array, has no `primary` agent, or holds an agent, a mode or a rule this does not know.
+fn resolved_json(listing: &str, primary: &str, asked: &[(&str, &str)], fold: bool) -> Option<Vec<Listed>> {
+    let agents: Vec<Value> = serde_json::from_str(listing.trim()).ok()?;
+    let mut out = Vec::new();
+    for a in &agents {
+        let (name, mode) = (a.get("id")?.as_str()?, a.get("mode")?.as_str()?);
+        if name.is_empty() || !matches!(mode, "primary" | "subagent" | "all") {
+            return None;
+        }
+        let mut rules = Vec::new();
+        for r in a.get("permissions")?.as_array()? {
+            let (perm, pattern, action) = (r.get("action")?.as_str()?, r.get("resource")?.as_str()?, r.get("effect")?.as_str()?);
+            if !matches!(action, "allow" | "ask" | "deny") {
+                return None;
+            }
+            rules.push((perm.to_string(), pattern.to_string(), action.to_string()));
+        }
+        out.push(listed_agent(name.to_string(), mode.to_string(), rules, asked, fold));
+    }
+    out.iter().any(|a| a.name == primary).then_some(out)
+}
+
+/// One agent read from a listing, its rules in order (permission, pattern, action): per tool of `asked` each pattern once at
+/// its last place, and the rest ([`Listed`]).
+fn listed_agent(name: String, mode: String, rules: Vec<(String, String, String)>, asked: &[(&str, &str)], fold: bool) -> Listed {
+    let mut tools = Vec::new();
+    for (tool, _) in asked {
+        let mut seen: Vec<(String, String)> = Vec::new();
+        for (perm, pattern, action) in rules.iter().rev() {
+            if wildcard(tool, perm, fold) && !seen.iter().any(|(p, _)| units(p, fold) == units(pattern, fold)) {
+                seen.push((pattern.clone(), action.clone()));
+            }
+        }
+        seen.reverse();
+        tools.push(seen);
+    }
+    let rest = effective(rules.iter().filter(|(perm, _, _)| !asked.iter().any(|(_, key)| key == perm || guard_keys(key).contains(perm))).cloned().collect());
+    Listed { name, mode, tools, rest, rules }
 }
 
 /// OpenCode's `bash *` key also matches names beginning `bash `, not just `bash`. Those are not the tool manut
@@ -258,9 +343,9 @@ fn guards_kept(agent: &Listed, asked: &[(&str, &str)], fold: bool) -> bool {
 /// `asked`, the person's own resolved rules repeated after theirs, in the same order, with allow turned into ask.
 /// What they allow asks, what asks still asks, what they deny stays denied, for blanket and pattern rules alike.
 /// `None` also when the value would hold a config token ([`CONFIG_TOKENS`]).
-fn ask_rules(listing: &str, primary: &str, asked: &[(&str, &str)], fold: bool) -> Option<String> {
+fn ask_rules(read: Reader, listing: &str, primary: &str, asked: &[(&str, &str)], fold: bool) -> Option<String> {
     let q = |v: &str| Value::String(v.into()).to_string();
-    let agents = resolved(listing, primary, asked, fold)?
+    let agents = read(listing, primary, asked, fold)?
         .iter()
         .map(|agent| {
             let tools = asked
@@ -276,7 +361,7 @@ fn ask_rules(listing: &str, primary: &str, asked: &[(&str, &str)], fold: bool) -
             format!("{}:{{\"permission\":{{{}}}}}", q(&agent.name), tools.join(","))
         })
         .collect::<Vec<_>>();
-    let value = format!("{{\"agent\":{{{}}}}}", agents.join(","));
+    let value = format!("{{\"agent\":{{{}}}{PROJECT_CODE_OFF}}}", agents.join(","));
     // The agent replaces `{file:…}` and `{env:…}` (also written `${…}`) inside this value with a file's
     // content or a variable, though it left the same text literal in the project file it came from: no value at all
     // when an agent's name or a pattern holds the start of one, so the agent is not listed again with it.
@@ -285,6 +370,16 @@ fn ask_rules(listing: &str, primary: &str, asked: &[(&str, &str)], fold: bool) -
 
 /// How a reference to a file or to an environment variable starts in OpenCode's config text.
 const CONFIG_TOKENS: [&str; 2] = ["{file:", "{env:"];
+
+/// Item 114: what the value also says, after the ask rules. OpenCode runs formatters after its write, edit and patch tools
+/// and language servers for the files it touches, and both find and run the project's own tools and their configs (a
+/// project-local Prettier, an ESLint config), so a chat would run the project's code with no card even though the project's
+/// own config is left out (`OPENCODE_DISABLE_PROJECT_CONFIG`): the person's own config can switch them on. OpenCode's config
+/// takes `false` for both as "disabled" (its 1.x schema, "Omit or set to false to disable"; 2.3.0's parser takes a boolean
+/// for each, and a later `false` wins over an earlier `true`). Its own documents come before this value; only a managed or
+/// organisation config, which comes after, could switch them on again. A person loses, in an app chat, the formatting of the
+/// files the agent writes and the language servers' diagnostics the agent reads; a terminal keeps both.
+const PROJECT_CODE_OFF: &str = ",\"formatter\":false,\"lsp\":false";
 
 /// OpenCode's config `value` (a JSON object, as [`opencode_ask`] builds it) with the project's instructions file `file`
 /// added as its one `instructions` entry (item 93, `crate::project_notes`). OpenCode's rules page: an absolute path there
@@ -307,9 +402,9 @@ pub fn with_instructions(value: &str, file: &std::path::Path) -> Option<String> 
 /// and every permission manut wrote no rule for is decided by the same rules ([`Listed::rest`]). `None` when any of
 /// that differs: an agent appeared, went or changed mode, or a rule of the person's (their `webfetch` or
 /// `external_directory` deny, say) is gone because the agent replaced their entry with manut's.
-fn same_but_asked(first: &str, rules: &str, listing: &str, primary: &str, asked: &[(&str, &str)], fold: bool) -> Option<(Vec<Listed>, Vec<Listed>)> {
-    let (before, after) = (resolved(first, primary, asked, fold)?, resolved(listing, primary, asked, fold)?);
-    let same = ask_rules(first, primary, asked, fold).as_deref() == Some(rules)
+fn same_but_asked(read: Reader, first: &str, rules: &str, listing: &str, primary: &str, asked: &[(&str, &str)], fold: bool) -> Option<(Vec<Listed>, Vec<Listed>)> {
+    let (before, after) = (read(first, primary, asked, fold)?, read(listing, primary, asked, fold)?);
+    let same = ask_rules(read, first, primary, asked, fold).as_deref() == Some(rules)
         && before.len() == after.len()
         && before.iter().zip(&after).all(|(b, a)| b.name == a.name && b.mode == a.mode && b.rest == a.rest && guards_kept(a, asked, fold));
     same.then_some((before, after))
@@ -318,13 +413,13 @@ fn same_but_asked(first: &str, rules: &str, listing: &str, primary: &str, asked:
 /// Whether the agent, listed again with `rules` set (`listing`), took them as meant: no agent lets any of `asked`
 /// run unasked anywhere, and its rules are exactly the ones `rules` was built from. A later config layer that put
 /// an allow back after them fails this, and the chat does not start.
-fn rules_kept(rules: &str, listing: &str, primary: &str, asked: &[(&str, &str)], fold: bool) -> bool {
-    no_allow(listing, primary, asked, fold) && ask_rules(listing, primary, asked, fold).as_deref() == Some(rules)
+fn rules_kept(read: Reader, rules: &str, listing: &str, primary: &str, asked: &[(&str, &str)], fold: bool) -> bool {
+    no_allow(read, listing, primary, asked, fold) && ask_rules(read, listing, primary, asked, fold).as_deref() == Some(rules)
 }
 
 /// No agent of `listing` lets any of `asked` run unasked for any pattern.
-fn no_allow(listing: &str, primary: &str, asked: &[(&str, &str)], fold: bool) -> bool {
-    resolved(listing, primary, asked, fold).is_some_and(|agents| agents.iter().all(|a| a.tools.iter().flatten().all(|(_, a)| a != "allow")))
+fn no_allow(read: Reader, listing: &str, primary: &str, asked: &[(&str, &str)], fold: bool) -> bool {
+    read(listing, primary, asked, fold).is_some_and(|agents| agents.iter().all(|a| a.tools.iter().flatten().all(|(_, a)| a != "allow")))
 }
 
 /// OpenCode's ask rules (`OPENCODE_CONFIG_CONTENT`) for `bash` and `edit`, from `opencode agent list`.
@@ -334,7 +429,7 @@ pub fn opencode_ask(listing: &str) -> Option<String> {
 
 /// [`opencode_ask`] as OpenCode matches on Windows (`fold`) or elsewhere.
 fn opencode_ask_on(listing: &str, fold: bool) -> Option<String> {
-    ask_rules(listing, "build", &ASKED, fold)
+    ask_rules(resolved, listing, "build", &ASKED, fold)
 }
 
 /// Whether OpenCode kept [`opencode_ask`]'s rules: listed again it resolves exactly them for `bash` and `edit`, and
@@ -345,7 +440,24 @@ pub fn opencode_kept(first: &str, rules: &str, listing: &str) -> bool {
 
 /// [`opencode_kept`] as OpenCode matches on Windows (`fold`) or elsewhere.
 fn opencode_kept_on(first: &str, rules: &str, listing: &str, fold: bool) -> bool {
-    same_but_asked(first, rules, listing, "build", &ASKED, fold).is_some() && rules_kept(rules, listing, "build", &ASKED, fold)
+    same_but_asked(resolved, first, rules, listing, "build", &ASKED, fold).is_some() && rules_kept(resolved, rules, listing, "build", &ASKED, fold)
+}
+
+/// OpenCode 2.x's tools manut's card stands for, and the keys their ask rules go under (item 114). 2.3.0 names the shell
+/// tool `shell` (its config still takes `bash` and turns it into `shell`, and `write`, `patch` and `apply_patch` into
+/// `edit`), and reads a config key as the tool's pattern as it is otherwise written, so `"shell *"` matches `shell` and,
+/// as with 1.x, names beginning `shell `, which the guards deny ([`guard_keys`]).
+const ASKED_2: [(&str, &str); 2] = [("shell", "shell *"), ("edit", "edit *")];
+
+/// OpenCode 2.x's ask rules (`OPENCODE_CONFIG_CONTENT`) for `shell` and `edit`, from `opencode debug agents --standalone`
+/// ([`resolved_json`]). The same rules as [`opencode_ask`]'s, in the same config shape, which 2.3.0 reads too.
+pub fn opencode2_ask(listing: &str) -> Option<String> {
+    ask_rules(resolved_json, listing, "build", &ASKED_2, false)
+}
+
+/// Whether OpenCode 2.x kept [`opencode2_ask`]'s rules, as [`opencode_kept`] reads 1.x's.
+pub fn opencode2_kept(first: &str, rules: &str, listing: &str) -> bool {
+    same_but_asked(resolved_json, first, rules, listing, "build", &ASKED_2, false).is_some() && rules_kept(resolved_json, rules, listing, "build", &ASKED_2, false)
 }
 
 /// A cheap, conservative disjointness proof for two glob languages. Different literal prefixes cannot
@@ -858,6 +970,10 @@ impl Adapter for Acp {
         if !self.mcp.differs().is_empty() {
             emit(&mut st, ev("session.note", json!({"kind": "mcp_differs", "names": self.mcp.differs()})));
         }
+        // and those that would run the lane's own files, which its agent can change (item 114): said once, by name
+        if !self.mcp.lane_files().is_empty() {
+            emit(&mut st, ev("session.note", json!({"kind": "mcp_lane_files", "names": self.mcp.lane_files()})));
+        }
         self.call(
             &mut st,
             Call::Initialize,
@@ -1245,7 +1361,9 @@ fn decide_on(rules: &[(String, String, String)], tool: &str, input: &str, fold: 
         assert!(of(&st.events, "approval.request").is_empty());
         assert_eq!(of(&st.events, "tool.end")[0]["ok"], true);
         let probe = opencode().rules.as_ref().unwrap();
-        assert_eq!((probe.args, probe.var), (&["agent", "list"][..], "OPENCODE_CONFIG_CONTENT"));
+        // 2.x's listing first, then 1.x's (item 114)
+        let forms: Vec<&[&str]> = probe.forms.iter().map(|f| f.args).collect();
+        assert_eq!((forms, probe.var), (vec![&["debug", "agents", "--standalone"][..], &["agent", "list"][..]], "OPENCODE_CONFIG_CONTENT"));
     }
 
     /// `opencode agent list` from OpenCode 1.19.5 (scratch HOME, `opencode-rules.json`) for one person's config:
@@ -1284,7 +1402,9 @@ fn decide_on(rules: &[(String, String, String)], tool: &str, input: &str, fold: 
         // the very rules the recording started OpenCode with
         let p = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests").join("fixtures").join("acp").join("opencode-rules.json");
         let all: Value = serde_json::from_str(&std::fs::read_to_string(p).unwrap()).unwrap();
-        assert_eq!(rules, s(&all[case], "env_sent"), "{case}");
+        // (and, since item 114, formatters and language servers switched off after them)
+        let sent = s(&all[case], "env_sent");
+        assert_eq!(rules, format!("{}{PROJECT_CODE_OFF}}}", &sent[..sent.len() - 1]), "{case}");
         // OpenCode, started with these rules, resolved exactly them, and nothing in bash or edit is allowed unasked
         assert!(opencode_kept(&base, &rules, &in_manut), "{case}");
         assert!(!opencode_kept(&base, &rules, &base), "{case}: without the rules OpenCode runs tools unasked");
@@ -1343,6 +1463,78 @@ fn decide_on(rules: &[(String, String, String)], tool: &str, input: &str, fold: 
     #[test]
     fn real_opencode_rules_with_nothing_set_everything_asks() {
         check_rules("none", &[("bash", "echo hi", "allow", "ask"), ("bash", "rm -rf x", "allow", "ask"), ("edit", "a.md", "allow", "ask")]);
+    }
+
+    /// Item 114: what OpenCode 2.3.0 decides for `tool` on `input` under agent `agent` of a `debug agents` listing (its
+    /// `Permission` evaluate, read in its bundle: the last rule whose action and resource match, else ask; case counts).
+    fn decides2(listing: &str, agent: &str, tool: &str, input: &str) -> String {
+        let all: Vec<Value> = serde_json::from_str(listing).unwrap();
+        let a = all.iter().find(|a| s(a, "id") == agent).unwrap();
+        let rules = a["permissions"].as_array().unwrap();
+        rules.iter().rev().find(|r| wildcard(tool, &s(r, "action"), false) && wildcard(input, &s(r, "resource"), false)).map(|r| s(r, "effect")).unwrap_or_else(|| "ask".into())
+    }
+
+    /// Item 114: OpenCode 2.3.0 lists its agents as JSON with `debug agents --standalone` (recorded on this Mac for five
+    /// configs of a person's, `opencode2-rules.json`). The rules are built from it, OpenCode started with them lists exactly
+    /// them, and for every agent and every input below nothing is looser than in the person's own config: their deny
+    /// stays deny, and what they allowed for the shell and for edits asks.
+    #[test]
+    fn real_opencode_2_3_rules_keep_every_deny_and_make_every_allow_ask() {
+        let p = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests").join("fixtures").join("acp").join("opencode2-rules.json");
+        let all: Value = serde_json::from_str(&std::fs::read_to_string(p).unwrap()).unwrap();
+        // each case, and what the person's own config decides for build: (tool, input, theirs, inside the app)
+        let cases: [(&str, &[(&str, &str, &str, &str)]); 5] = [
+            ("none", &[("shell", "echo hi", "allow", "ask"), ("shell", "rm -rf x", "allow", "ask"), ("edit", "a.md", "allow", "ask")]),
+            ("pattern-deny", &[("shell", "rm -rf x", "deny", "deny"), ("shell", "echo hi", "allow", "ask"), ("edit", "a.md", "allow", "ask")]),
+            ("allow", &[("shell", "echo hi", "allow", "ask"), ("edit", "a.md", "allow", "ask")]),
+            ("string-deny", &[("shell", "echo hi", "deny", "deny"), ("edit", "a.md", "allow", "ask")]),
+            ("star-deny", &[("shell", "echo hi", "deny", "deny"), ("edit", "a.md", "deny", "deny")]),
+        ];
+        for (case, want) in cases {
+            let (base, in_manut, sent) = (s(&all[case], "debug_agents"), s(&all[case], "debug_agents_in_manut"), s(&all[case], "env_sent"));
+            let rules = opencode2_ask(&base).unwrap();
+            assert_eq!(rules, sent, "{case}: the very rules the recording started OpenCode with");
+            assert!(opencode2_kept(&base, &rules, &in_manut), "{case}");
+            assert!(!opencode2_kept(&base, &rules, &base), "{case}: without the rules OpenCode runs tools unasked");
+            // the 1.x reader never reads a 2.x listing, nor the other way round
+            assert_eq!(opencode_ask(&base), None, "{case}");
+            for agent in ["build", "general", "plan", "explore", "compaction", "summary", "title"] {
+                for (tool, input, own, inside) in want {
+                    let got = decides2(&in_manut, agent, tool, input);
+                    let never_looser = match decides2(&base, agent, tool, input).as_str() {
+                        "deny" => got == "deny",
+                        _ => got == "ask" || got == "deny",
+                    };
+                    assert!(never_looser, "{case} {agent} {tool} {input}: {got}");
+                    if agent == "build" {
+                        assert_eq!(decides2(&base, agent, tool, input), *own, "{case} build {tool} {input}: the person's own rule");
+                        assert_eq!(got, *inside, "{case} build {tool} {input}");
+                    }
+                }
+            }
+        }
+        let rules = opencode2_ask(&s(&all["none"], "debug_agents")).unwrap();
+        assert_eq!(opencode_ask(&s(&all["none"], "debug_agents_in_manut")), None);
+        assert!(!opencode_kept(&s(&all["none"], "debug_agents"), &rules, &s(&all["none"], "debug_agents_in_manut")));
+        // what 2.3.0 prints for `agent list` (its help) reads as no listing at all
+        assert_eq!(opencode_ask(&s(&all, "agent_list")), None);
+        assert_eq!(opencode2_ask(&s(&all, "agent_list")), None);
+    }
+
+    /// Item 114: OpenCode runs formatters after its write, edit and patch tools, and language servers for the files it
+    /// touches, and both find the project's own tools (a project-local Prettier and its config, an ESLint config): code of
+    /// the project's that runs without a card. The person's own config may switch them on even with the project's left out,
+    /// so the value the chat starts with switches both off, in the keys OpenCode's config takes for that ("Omit or set to
+    /// false to disable", its 1.x schema; `formatter: false` and `lsp: false` in 2.3.0's, read back with `debug config`).
+    #[test]
+    fn the_value_a_chat_starts_with_switches_off_formatters_and_language_servers() {
+        let (base, in_manut, _) = rules_case("none");
+        let rules = opencode_ask(&base).unwrap();
+        let v: Value = serde_json::from_str(&rules).unwrap();
+        assert_eq!((&v["formatter"], &v["lsp"]), (&Value::Bool(false), &Value::Bool(false)), "{rules}");
+        // the ask rules are as before, and still read back as kept
+        assert!(v["agent"]["build"]["permission"]["bash *"].is_object());
+        assert!(opencode_kept(&base, &rules, &in_manut));
     }
 
     #[test]
@@ -1475,6 +1667,11 @@ fn decide_on(rules: &[(String, String, String)], tool: &str, input: &str, fold: 
         // nothing differs, nothing is said
         let mut a = Acp::new(opencode(), "/w/lane", None);
         assert!(a.start().events.iter().all(|e| e["event"] != "session.note"));
+        // item 114: an approved server that would run the lane's own files is named the same way, under its own kind
+        let mut a = Acp::new(opencode(), "/w/lane", None).with_mcp(crate::acp_mcp::Approved::lane_files_of(&["local-tools"]));
+        let st = a.start();
+        let notes: Vec<&Value> = st.events.iter().filter(|e| e["event"] == "session.note").collect();
+        assert_eq!(notes, [&json!({"event": "session.note", "kind": "mcp_lane_files", "names": ["local-tools"]})]);
     }
 
     #[test]
@@ -1662,8 +1859,8 @@ fn decide_on(rules: &[(String, String, String)], tool: &str, input: &str, fold: 
         let person = [rule("*", "*", "allow"), rule("Bash", "*", "deny"), rule("Edit", "*", "allow"), rule("Edit", "*.key", "deny")];
         let first = listing(&[("build (primary)", &person)]);
         let rules = opencode_ask_on(&first, true).unwrap();
-        assert_eq!(rules, r#"{"agent":{"build":{"permission":{"bash *":{"*":"deny"},"bash ":{"*":"deny"},"bash ?*":{"*":"deny"},"edit *":{"*":"ask","*.key":"deny"},"edit ":{"*":"deny"},"edit ?*":{"*":"deny"}}}}}"#);
-        assert_eq!(opencode_ask_on(&first, false).unwrap(), r#"{"agent":{"build":{"permission":{"bash *":{"*":"ask"},"bash ":{"*":"deny"},"bash ?*":{"*":"deny"},"edit *":{"*":"ask"},"edit ":{"*":"deny"},"edit ?*":{"*":"deny"}}}}}"#);
+        assert_eq!(rules, r#"{"agent":{"build":{"permission":{"bash *":{"*":"deny"},"bash ":{"*":"deny"},"bash ?*":{"*":"deny"},"edit *":{"*":"ask","*.key":"deny"},"edit ":{"*":"deny"},"edit ?*":{"*":"deny"}}}},"formatter":false,"lsp":false}"#);
+        assert_eq!(opencode_ask_on(&first, false).unwrap(), r#"{"agent":{"build":{"permission":{"bash *":{"*":"ask"},"bash ":{"*":"deny"},"bash ?*":{"*":"deny"},"edit *":{"*":"ask"},"edit ":{"*":"deny"},"edit ?*":{"*":"deny"}}}},"formatter":false,"lsp":false}"#);
         let own = |fold: bool| if fold { vec![rule("bash *", "*", "deny"), rule("edit *", "*", "ask"), rule("edit *", "*.key", "deny")] } else { vec![rule("bash *", "*", "ask"), rule("edit *", "*", "ask")] };
         for fold in [true, false] {
             let rules = opencode_ask_on(&first, fold).unwrap();

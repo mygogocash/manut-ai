@@ -24,6 +24,8 @@ import { parseOrigin, readRuntimeSetting, type OriginRefusal, type RuntimeSettin
 import { Row } from "./DevRow";
 import { EmailSignIn } from "./EmailSignIn";
 import { MakeShop, makeShopOffer } from "./MakeShop";
+import { EditorSetting } from "./EditorSetting";
+import { getHost } from "../sessions/host";
 
 type Mode = RuntimeSetting["mode"];
 
@@ -54,6 +56,8 @@ export interface DeveloperViewProps {
   email?: ReactNode;
   /** Make your shop (MakeShop.tsx), drawn in a group of its own below the sign-in where `makeShopOffer` offers it */
   make?: ReactNode;
+  /** Settings › Developer › Editor (EditorSetting.tsx), drawn in a group of its own; none when absent */
+  editor?: ReactNode;
 }
 
 /** What the top row says under "Not signed in", for either way in: that the API ended the session, that a sign-out could
@@ -192,6 +196,14 @@ export function DeveloperView(p: DeveloperViewProps) {
           </div>
         </>
       )}
+      {p.editor && (
+        <>
+          <div className="st-gh">{t("editor.title")}</div>
+          <div className="st-grp" data-testid="dev-editor-group">
+            {p.editor}
+          </div>
+        </>
+      )}
       {p.make && (
         <>
           <div className="st-gh">{t("make.title")}</div>
@@ -255,6 +267,7 @@ export function DeveloperPage() {
       token={token}
       nonce={nonce}
       email={<EmailSignIn key={origin ?? "practice"} origin={origin} held={signingIn} />}
+      editor={<EditorSetting host={getHost()} />}
       make={offer ? <MakeShop key={origin ?? "practice"} practice={offer === "practice"} onMade={() => setMade(true)} /> : undefined}
       onMode={pick}
       onOriginText={setOriginText}

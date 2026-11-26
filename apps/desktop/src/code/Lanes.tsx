@@ -15,12 +15,15 @@
 // was rewound says Reverted, and offers Bring it back while the shell still keeps the files from before the rewind (until the
 // next turn starts): its panel (BringBack.tsx) opens under the row, filled in by `below`.
 import { dragRef } from "../chat/box/threadContext";
-import { useEffect, useRef, useSyncExternalStore, type ReactNode } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { elapsed, hhmm } from "../app/time";
 import { t } from "../i18n";
 import { maskSecrets } from "../lib/secrets";
 import { agentLabel, folderName, type SessionRec } from "../sessions/agents";
 import { pathKey } from "../sessions/folders";
+import { getHost } from "../sessions/host";
+import { workDir } from "./laneBranch";
+import { openFolderInEditor, useEditorChoice } from "./editor";
 import { getSessions, useSessions, type AgentLive } from "../sessions/sessions";
 import { pickTitle } from "../sessions/titles";
 import { askText, getStore, selectAsks, useStore } from "../state/store";
@@ -50,6 +53,8 @@ export interface LaneRow {
   rowKey?: string;
   /** The folder of its own the lane works in, where its main-moved note reads git; null: it works in the session's folder. */
   dir: string | null;
+  /** The folder the lane works in (`workDir`): its own folder when it has one, else the session's. What Open in <editor> opens. */
+  folder?: string;
   /** The lane's worktree, the folder the app made for it (lane.rs): what Put up for review names to the shell (Review.tsx). */
   worktree?: string;
   title: string;
@@ -119,6 +124,7 @@ export function laneRowOf(i: LaneRowInput, time: (ms: number) => string = (ms) =
     id: rec.id,
     rowKey: sessionRowKey(rec),
     dir: own?.dir ?? null,
+    folder: workDir(rec),
     ...(own?.worktree ? { worktree: own.worktree } : {}),
     title: pickTitle(rec, folderName(rec.cwd)).title,
     agent: i.agent,
@@ -319,7 +325,35 @@ function LaneItem({ row, now, onOpen, onPull, backOpen, onBack, below, place, ma
 /** A lane's menu (Pin, Snooze, Done for now, Archive): the one part of a row that keeps state, so the rest of the view stays a
  *  function of its props. It draws the quiet "more" button, and a right-click anywhere on the row opens the menu too. */
 export function LaneMore({ row, mark }: { row: LaneRow; mark: RowMark | undefined }) {
-  const menu = useRowMenu({ rowKey: laneKey(row), kind: "lane", mark, name: row.title, working: row.status === "working" });
+  // Open in <editor>, for the lane's own folder (never the developer's), only while an editor is installed here (code/editor.ts)
+  const editor = useEditorChoice(getHost());
+  const [why, setWhy] = useState("");
+  const folder = row.folder ?? row.dir;
+  const menu = useRowMenu({
+    rowKey: laneKey(row),
+    kind: "lane",
+    mark,
+    name: row.title,
+    working: row.status === "working",
+    extra:
+      editor && folder
+        ? (done) => (
+            <button
+              type="button"
+              role="menuitem"
+              className="row-mi"
+              onClick={() => {
+                done();
+                setWhy("");
+                void openFolderInEditor(getHost(), folder).catch((e: unknown) => setWhy(e instanceof Error ? e.message : ""));
+              }}
+              data-testid="lane-open-editor"
+            >
+              {t("editor.open", { name: editor.label })}
+            </button>
+          )
+        : undefined,
+  });
   const here = useRef<HTMLSpanElement>(null);
   const open = menu.open;
   useEffect(() => {
@@ -336,6 +370,11 @@ export function LaneMore({ row, mark }: { row: LaneRow; mark: RowMark | undefine
     <span ref={here} className="lane-more-wrap">
       <MoreButton name={row.title} onOpen={menu.open} className="lane-more" />
       {menu.menu}
+      {why && (
+        <span className="lane-editor-why" role="alert" data-testid="lane-editor-why">
+          {why}
+        </span>
+      )}
     </span>
   );
 }

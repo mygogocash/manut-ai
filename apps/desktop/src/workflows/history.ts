@@ -45,7 +45,10 @@ export type BlockWhy =
   /** the project's real path is not the one allowed */
   | "moved"
   /** no lane of its own could be made in the project (no branch and folder), so the agent was never started */
-  | "no_lane";
+  | "no_lane"
+  /** item 114: the run started with nobody there, and the project's own git config names a program for git to run or another
+   *  address to fetch from (the setting is the run's `detail`), so no lane was made and nothing ran */
+  | "config";
 
 export type RunState = "running" | "done" | "failed" | "stopped" | "skipped";
 
@@ -74,7 +77,7 @@ export interface RunRec {
 }
 
 const STATES: readonly RunState[] = ["running", "done", "failed", "stopped", "skipped"];
-const WHYS: readonly string[] = ["agent", "start", "send", "turn", "ended", "interrupted", "person", "off", "closed_lane", "app_closed", "closed", "asleep", "busy", "not_allowed", "changed", "missing", "link", "too_broad", "app_folder", "not_repo", "no_git", "unchecked", "moved", "no_lane"];
+const WHYS: readonly string[] = ["agent", "start", "send", "turn", "ended", "interrupted", "person", "off", "closed_lane", "app_closed", "closed", "asleep", "busy", "not_allowed", "changed", "missing", "link", "too_broad", "app_folder", "not_repo", "no_git", "unchecked", "moved", "no_lane", "config"];
 const num = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
 const short = (v: unknown, max: number): string | undefined => (typeof v === "string" && v && v.length <= max ? v : undefined);
 

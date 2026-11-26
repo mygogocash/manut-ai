@@ -293,3 +293,17 @@
   padding: 4px 10px 0;
   font-size: 12px;
 }
+
+/* Why Open in <editor> failed (item 107): one quiet line in the app's own words, under the lane or at the top of the page. */
+.kitp .lane .lane-editor-why {
+  display: block;
+  padding: 6px 10px 2px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.kitp .kit-editor-why {
+  margin: 0;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--muted);
+}

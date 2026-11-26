@@ -351,3 +351,22 @@
   width: 10px;
   height: 10px;
 }
+/* Counting use outside Manut AI: one row under the CLIs, not under one of them, so it starts at the column's edge. */
+.acc-outside {
+  display: flex;
+  gap: 8px;
+  margin: 20px 10px 0;
+  align-items: flex-start;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.acc-outside b {
+  font-weight: 500;
+  color: var(--body);
+  margin-right: 2px;
+}
+.acc-outside .acc-switch {
+  flex: none;
+  margin-top: 2px;
+}
