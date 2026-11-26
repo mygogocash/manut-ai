@@ -64,6 +64,8 @@ const effortWord = (e: string) => e.charAt(0).toUpperCase() + e.slice(1);
 export function AskSeveralView(p: AskSeveralViewProps) {
   return (
     <div className="ask-panel" data-testid="ask-panel">
+      {/* the heading and the explanation stay in view; only the rows and the box scroll under them */}
+      <div className="ask-head">
       <div className="ask-top">
         <button type="button" role="menuitem" className="ask-back" onClick={p.onBack} aria-label={t("several.back")} title={t("several.back")} data-testid="ask-back">
           <Icon name="chevron-left" />
@@ -74,6 +76,7 @@ export function AskSeveralView(p: AskSeveralViewProps) {
         </span>
       </div>
       <p className="ask-lead">{t("several.lead", { max: MAX_ASK })}</p>
+      </div>
       <div className="ask-rows" data-testid="ask-rows">
         {p.rows.map((r, i) => (
           <div key={i} className={`ask-row${r.limit ? " limited" : ""}`} data-testid={`ask-row-${i}`} data-agent={r.pick.agent} data-limited={r.limit ? "true" : undefined}>

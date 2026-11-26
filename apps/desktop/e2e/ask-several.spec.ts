@@ -198,11 +198,11 @@ test("a limited account's row in a panel that is already open cannot be sent", a
   await expect(panel.getByTestId("ask-agent-0").locator('option[value="codex"]')).toBeDisabled();
 });
 
-for (const theme of ["light", "dark"] as const) {
-  test(`pictures: the panel with three rows, ${theme}`, async ({ page }) => {
+for (const [theme, width] of [["light", 1280], ["dark", 1280], ["light", 900], ["dark", 900]] as const) {
+  test(`pictures: the panel with three rows, ${theme}, ${width} wide`, async ({ page }) => {
     test.skip(!SHOTS, "set MANUT_SHOTS=<dir> to write the pictures");
     mkdirSync(SHOTS, { recursive: true });
-    await page.setViewportSize({ width: 1280, height: 860 });
+    await page.setViewportSize({ width, height: 860 });
     const m = await menu(page, { theme, models: true });
     await m.getByTestId("session-ask-several").click();
     const panel = page.getByTestId("ask-panel");
@@ -212,10 +212,12 @@ for (const theme of ["light", "dark"] as const) {
     await panel.getByTestId("ask-agent-2").selectOption("claude");
     await panel.getByTestId("ask-model-2").selectOption("sonnet");
     await panel.getByTestId("composer").fill("Add a PromptPay QR to the checkout.");
-    await page.screenshot({ path: join(SHOTS, `ask-several-panel-${theme}.png`), animations: "disabled" });
+    // the whole explanation is in view, whatever the box's focus scrolled
+    await expect(panel.locator(".ask-lead")).toBeInViewport({ ratio: 1 });
+    await page.screenshot({ path: join(SHOTS, `ask-several-panel-${theme}-${width}.png`), animations: "disabled" });
     await panel.getByTestId("composer").press("Enter");
     await expect(page.locator('[data-testid^="lane-job-j"]')).toHaveCount(1);
     await page.locator('[data-testid^="lane-job-j"]').getByTestId("lane-job-open").click();
-    await page.screenshot({ path: join(SHOTS, `ask-several-job-${theme}.png`), animations: "disabled" });
+    await page.screenshot({ path: join(SHOTS, `ask-several-job-${theme}-${width}.png`), animations: "disabled" });
   });
 }
