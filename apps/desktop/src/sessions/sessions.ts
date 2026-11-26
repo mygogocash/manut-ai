@@ -53,6 +53,7 @@ import type { AccountCli, AccountGroup, ApprovalChoice, BridgeEvent, ClarifyAnsw
 import { settleApproval } from "../chat/cards/respond";
 import { kitAnswer, noteChange } from "../code/kitAsks";
 import { planLaneBranch, workDir, type LaneBranch } from "../code/laneBranch";
+import { openFolderInEditor } from "../code/editor";
 import { startOf, worktreeSettings } from "../lib/worktrees";
 import { forgetLane, keptLanesChanged, noteLaneEvent } from "../code/laneStore";
 import { forgetPreview } from "../code/previewStore";
@@ -1463,6 +1464,18 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     }
   };
 
+  /** Open session `id`'s folder in the person's editor, through the host this store was built with. A lane's own folder when it has
+   *  one (`workDir`), else the session's; a failure is said under its chat in the app's own words (code/editor.ts). */
+  const openInEditor = async (id: string) => {
+    const r = rec(id);
+    if (!r?.cwd) return;
+    try {
+      await openFolderInEditor(host, workDir(r));
+    } catch (e) {
+      note(id, errText(e));
+    }
+  };
+
   /** Change a draft's agent or folder (refused once it has started). */
   const setDraft = (id: string, p: { agent?: AgentId; cwd?: string }) => {
     const r = rec(id);
@@ -2791,6 +2804,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     continuePast,
     revealFolder,
     openTerminal,
+    openInEditor,
     setDraft,
     setOpen,
     chooseFolder,

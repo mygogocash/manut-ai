@@ -247,6 +247,11 @@ export interface SessionHost extends HistoryHost {
   reveal(cwd: string): Promise<void>;
   /** Open the person's own system terminal in folder `cwd` (their shell; nothing typed into it). */
   openTerminal(cwd: string): Promise<void>;
+  /** The editors installed on this computer, from the shell's fixed list (item 107); the page offers only those. Absent on a
+   *  shell older than the item: no editor is offered then. */
+  editors?(): Promise<{ id: string; label: string }[]>;
+  /** Open folder `cwd` in the editor `editor`, an id from that list and never a path or a command. */
+  openInEditor?(cwd: string, editor: string): Promise<void>;
   /** The recent conversations `agent` keeps for `cwds`, newest first (read-only). */
   pastChats(agent: "claude" | "codex", cwds: string[]): Promise<PastChat[]>;
   /** The last messages of `agent`'s conversation `id` in `cwd`. */
@@ -545,6 +550,16 @@ export class TauriHost implements SessionHost, BuddyHost {
     const { invoke } = await this.core();
     await invoke("session_open_terminal", { cwd });
   }
+  async editors() {
+    const { invoke } = await this.core();
+    const list = await invoke<unknown>("editors_installed");
+    // (id, label) pairs, as the shell sends them
+    return Array.isArray(list) ? list.flatMap((p) => (Array.isArray(p) && typeof p[0] === "string" && typeof p[1] === "string" ? [{ id: p[0], label: p[1] }] : [])) : [];
+  }
+  async openInEditor(cwd: string, editor: string) {
+    const { invoke } = await this.core();
+    await invoke("session_open_in_editor", { cwd, editor });
+  }
   async pastChats(agent: "claude" | "codex", cwds: string[]) {
     const { invoke } = await this.core();
     return invoke<PastChat[]>("past_chats_list", { agent, cwds });
@@ -681,6 +696,7 @@ export interface MockCall {
     | "import.read"
     | "reveal"
     | "terminal"
+    | "editor"
     | "main.moved"
     | "custom.preview"
     | "custom.botPreview"
@@ -705,6 +721,8 @@ export interface MockCall {
     | "buddy.file"
     | "providers"
     | "providerSave";
+  /** editor: the id of the editor the folder `cwd` was opened in */
+  editor?: string;
   /** providerSave: the fields the patch named (never a variable's value) */
   fields?: string[];
   id?: number | string;
@@ -867,6 +885,10 @@ export type MockGlobals = MockTurnGlobals & {
   /** e2e: Codex's own config runs without approvals and with full disk access (its thread reports
    *  `approvalPolicy: never`, `sandbox: dangerFullAccess`, as codex-12-late-step-init.jsonl) */
   __manutMockCodexUnguarded?: boolean;
+  /** e2e: the editors the mock shell finds installed (none set = Visual Studio Code and Cursor; [] = no editor) */
+  __manutEditors?: { id: string; label: string }[];
+  /** e2e: the text the mock shell refuses an Open in editor with */
+  __manutEditorFails?: string;
   /** e2e: the conversations Claude Code and Codex keep (none = the built-in ones) */
   __manutPastChats?: PastChat[];
   /** e2e: reads of those conversations, apart from the session calls (opening the + menu lists them) */
@@ -916,6 +938,11 @@ export interface MockProvider {
 const MOCK_PROGRAMS: Record<string, string> = { "cursor-agent": "/opt/homebrew/bin/cursor-agent", "acme-agent": "/opt/homebrew/bin/acme-agent", "stub-acp": "/usr/local/bin/stub-acp" };
 
 /** The mock's past conversations: two Claude Code and one Codex conversation in the e2e folders. */
+const MOCK_EDITORS = [
+  { id: "vscode", label: "Visual Studio Code" },
+  { id: "cursor", label: "Cursor" },
+];
+
 const MOCK_PAST: PastChat[] = [
   { agent: "claude", id: "aaaaaaaa-1111-4222-8333-444444444444", cwd: "/home/you/code/web-app", title: "Fix the login redirect", named: true, at: Date.now() / 1000 - 3_600 },
   { agent: "claude", id: "bbbbbbbb-1111-4222-8333-444444444444", cwd: "/home/you/code/manut", title: "Remember the word MARIGOLD for later", named: false, at: Date.now() / 1000 - 3 * 86_400 },
@@ -1638,6 +1665,15 @@ export class MockHost implements SessionHost, BuddyHost {
   }
   async openTerminal(cwd: string) {
     this.log({ op: "terminal", cwd });
+  }
+  async editors() {
+    return this.g.__manutEditors ?? MOCK_EDITORS;
+  }
+  async openInEditor(cwd: string, editor: string) {
+    this.log({ op: "editor", cwd, editor });
+    // a spec makes the shell refuse, with the shell's own words
+    const refuse = this.g.__manutEditorFails;
+    if (refuse) throw new Error(refuse);
   }
   async pastChats(agent: "claude" | "codex", cwds: string[]) {
     (this.g.__manutPastReads ??= []).push({ op: "list", agent, cwds });

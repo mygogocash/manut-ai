@@ -22,6 +22,8 @@ import { useRowMarks } from "../sidebar/rows";
 import { laneBase, LanesView, openLane, useLaneRows, useLaneSettle, type LaneRow, type LanesProps } from "./Lanes";
 import { openNewSessionMenu } from "../sessions/newMenu";
 import { usePlace } from "../palette/places";
+import { getHost } from "../sessions/host";
+import { openFolderInEditor } from "./editor";
 import { KeptLanes, useLaneProjects } from "./KeptLanes";
 import { MainMoved } from "./MainMoved";
 import { AutoPull } from "./AutoPull";
@@ -245,6 +247,27 @@ export function KitPanel() {
   // The command palette offers New lane while a project is open here, and presses this very link's function.
   const laneAction = useMemo(() => (root ? { newLane: () => openNewSessionMenu({ chat: true, folder: root }) } : null), [root]);
   usePlace("lane", laneAction);
+  // The palette's Open the project in <editor>: the developer's own folder of the open project, never a lane's. A failure is said
+  // on this page, in the app's own words, since the palette has closed.
+  const [editorWhy, setEditorWhy] = useState("");
+  const editorAction = useMemo(
+    () =>
+      root
+        ? {
+            open: () => {
+              setEditorWhy("");
+              void openFolderInEditor(getHost(), root).catch((e: unknown) => setEditorWhy(e instanceof Error ? e.message : ""));
+            },
+          }
+        : null,
+    [root],
+  );
+  usePlace("editorProject", editorAction);
+  useEffect(() => {
+    if (!editorWhy) return;
+    const id = window.setTimeout(() => setEditorWhy(""), 8000);
+    return () => window.clearTimeout(id);
+  }, [editorWhy]);
   // the lane whose Bring it back panel is open: one at a time
   const [backFor, setBackFor] = useState<string | null>(null);
   const closeBack = useCallback(() => setBackFor(null), []);
@@ -261,6 +284,11 @@ export function KitPanel() {
     .filter((k) => pathKey(ss.list.find((r) => r.id === k.session)?.cwd ?? "") === root);
   return (
     <>
+      {editorWhy && (
+        <p className="kit-editor-why" role="alert" data-testid="kit-editor-why">
+          {editorWhy}
+        </p>
+      )}
       <KitPanelView
         root={root}
         projects={projects}

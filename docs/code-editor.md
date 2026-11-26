@@ -892,7 +892,7 @@ another's files or the developer's folder.
   developer's run as its own would say its tests passed when nobody ran them on its work.
 - **What changes for the developer.** Their folder's branch, index, stash and HEAD never change because of a lane; before,
   `git checkout -b` moved the folder onto each lane's branch as the lane started. Kit's work is on the lane's branch, in the
-  lane's folder (Show folder on a kept one; the session's own Show in Finder and Open in Terminal open its folder); it
+  lane's folder (Show folder on a kept one; the session's own Show in Finder, Open in Terminal and Open in <editor> open its folder, and so does the lane's own Open in <editor>); it
   reaches the developer's folder only when they merge it or switch to it. While the lane's folder exists, git will not switch
   the developer's folder to the lane's branch (it is checked out in the lane's), and `git worktree list` lists the folder.
   Kit no longer sees the developer's uncommitted changes.
@@ -1654,3 +1654,26 @@ and the palette.
   move.
 - Kit asking for a secret, kept in this Mac's keychain without Kit seeing it: a keychain item per project, written from
   a password field and handed only to the commands that need it. That is Rust, and real secrets need the owner.
+
+## Open in an editor (item 107)
+
+A session row's menu, a lane's row menu and the command palette offer "Open in <Editor>", the third action of rule 30's folder
+actions (`src-tauri/src/folder_open.rs`). It follows the same rules: the folder is an absolute path to a folder that exists and
+is never put into a shell string, and nothing is run in it.
+
+- **Which editors.** A fixed list the shell knows, in this order: Visual Studio Code, Cursor, Windsurf, Zed, Xcode (macOS only).
+  Each is found on this computer by its app bundle (`/Applications`, `~/Applications`) or by its command (`code`, `cursor`,
+  `windsurf`, `zed`) on the person's PATH, through `accounts::search_dirs` and `resolve`, never through a shell. On a Mac the
+  bundle opens with `open -a <App> <folder>`, one argument each; a command found without a bundle, and every other system, runs
+  the editor's own command with the folder as its one argument. JetBrains' launchers are not on the list: how each takes a folder
+  was not confirmed from its documentation or from a `--help` on a computer that has one.
+- **What crosses.** `editors_installed` lists (id, label) of the editors found; `session_open_in_editor` takes the folder and an
+  id from the list. An id that is not on the list, or an editor not installed, is refused. A path or a command from the page is
+  never an editor.
+- **The choice.** Settings › Under the hood › Developer › Editor: Automatic (the first found, in the order above) or one found.
+  Saved on this computer (`manut.editor`); a saved editor that is no longer found falls back to the first found, and the row
+  says so. No free-text command: a typed command is a way to run anything, which needs the design of an ask (decisions).
+- **Which folder.** A session opens the folder it works in (`workDir`): a lane's own worktree folder when it has one, never the
+  developer's. The palette's "Open the project in <Editor>" opens the open project's folder on the Code page, which is the
+  developer's own. When no editor is installed the action is not offered; a failure is said in the app's own words under the
+  chat, under the lane, or at the top of the Code page.

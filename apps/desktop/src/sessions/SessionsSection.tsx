@@ -36,6 +36,7 @@ import { rowChoices } from "../sidebar/RowMenu";
 import { actOnRows, arrange, sessionRowKey, useRowMarks, type RowMark as PlaceMark } from "../sidebar/rows";
 import { CUE_PX, useEdgeFade } from "../sidebar/edgeFade";
 import { getHost, type PastChat } from "./host";
+import { useEditorChoice } from "../code/editor";
 import { getSessions, useSessions } from "./sessions";
 import { pickTitle } from "./titles";
 import { useTitleModel } from "../lib/titleModel";
@@ -1182,17 +1183,17 @@ const ageMs = (ms: number, now: number) => ageOf(ms / 1000, now);
 
 /** What a session row's menu offers, in order: Rename, Reveal the folder, Open the folder in the system terminal,
  *  Copy the conversation id (only when the agent reported one), New session here, Close session. */
-export function rowMenuItems(rec: Pick<SessionRec, "cwd" | "agentSession">): RowAction[] {
-  return ["rename", ...(rec.cwd ? (["reveal", "terminal"] as const) : []), ...(rec.agentSession ? (["copy"] as const) : []), "here", "close"];
+export function rowMenuItems(rec: Pick<SessionRec, "cwd" | "agentSession">, editor = false): RowAction[] {
+  return ["rename", ...(rec.cwd ? (["reveal", "terminal", ...(editor ? (["editor"] as const) : [])] as const) : []), ...(rec.agentSession ? (["copy"] as const) : []), "here", "close"];
 }
-/** A TERMINALS row's menu: Rename, Reveal, Open in the system terminal, Copy link (its `manut://terminal/…`),
+/** A TERMINALS row's menu: Rename, Reveal, Open in the system terminal, Open in the editor (only when one is installed, item 107), Copy link (its `manut://terminal/…`),
  *  New terminal here, Close. */
-export function termMenuItems(rec: Pick<SessionRec, "cwd" | "linkId">, mark?: PlaceMark | null, again = false): RowAction[] {
+export function termMenuItems(rec: Pick<SessionRec, "cwd" | "linkId">, mark?: PlaceMark | null, again = false, editor = false): RowAction[] {
   // Pin and Done for now come after Rename when the row's marks are given (item 76; a terminal has no Snooze or Archive)
   const marks: RowAction[] = mark === undefined ? [] : (rowChoices("terminal", mark ?? undefined) as RowAction[]);
-  return ["rename", ...(again ? (["retitle"] as const) : []), ...marks, ...(rec.cwd ? (["reveal", "terminal"] as const) : []), ...(rec.linkId ? (["link"] as const) : []), "here", "close"];
+  return ["rename", ...(again ? (["retitle"] as const) : []), ...marks, ...(rec.cwd ? (["reveal", "terminal", ...(editor ? (["editor"] as const) : [])] as const) : []), ...(rec.linkId ? (["link"] as const) : []), "here", "close"];
 }
-export type RowAction = "rename" | "retitle" | "reveal" | "terminal" | "copy" | "link" | "here" | "close" | "pin" | "unpin" | "settle" | "wake";
+export type RowAction = "rename" | "retitle" | "reveal" | "terminal" | "editor" | "copy" | "link" | "here" | "close" | "pin" | "unpin" | "settle" | "wake";
 
 /** \"Show in Finder\" on macOS, \"Show in Explorer\" on Windows, \"Show in file manager\" elsewhere. */
 const revealWord = () => {
@@ -1205,6 +1206,8 @@ const ROW_ACTION_LABEL: Record<RowAction, () => string> = {
   retitle: () => t("titles.again"),
   reveal: revealWord,
   terminal: () => t("ss.menu.terminal"),
+  // the menu names the editor itself (SessionMenu): this is only the word for a menu given none
+  editor: () => t("editor.openAny"),
   copy: () => t("ss.menu.copyId"),
   link: () => t("tlink.copy"),
   here: () => t("term.here"),
@@ -1219,6 +1222,7 @@ const ROW_ACTION_ID: Record<RowAction, string> = {
   retitle: "session-retitle",
   reveal: "session-reveal",
   terminal: "session-system-terminal",
+  editor: "session-open-editor",
   copy: "session-copy-id",
   link: "session-copy-link",
   here: "session-new-here",
@@ -1231,7 +1235,7 @@ const ROW_ACTION_ID: Record<RowAction, string> = {
 
 /** Right-click menu of a session row (rowMenuItems). Placed at the pointer, inside the window. Arrow keys move,
  *  Home / End jump, Enter picks, Esc closes. */
-function SessionMenu({ at, name, actions, onPick, onDismiss }: { at: { x: number; y: number }; name: string; actions: RowAction[]; onPick: (a: RowAction) => void; onDismiss: () => void }) {
+function SessionMenu({ at, name, actions, onPick, onDismiss, editor }: { at: { x: number; y: number }; name: string; actions: RowAction[]; onPick: (a: RowAction) => void; onDismiss: () => void; editor?: string }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     ref.current?.querySelector<HTMLButtonElement>("button")?.focus();
@@ -1276,7 +1280,7 @@ function SessionMenu({ at, name, actions, onPick, onDismiss }: { at: { x: number
             onPick(a);
           }}
         >
-          {ROW_ACTION_LABEL[a]()}
+          {a === "editor" && editor ? t("editor.open", { name: editor }) : ROW_ACTION_LABEL[a]()}
         </button>
       ))}
     </div>
@@ -1398,7 +1402,9 @@ const TermRow = memo(function TermRow({ rec, agents, unseen, active, ticking, on
   const running = live && markAgent !== null;
   const rowMark = useRowMarks()[sessionRowKey(rec)];
   const titleSettings = useTitleModel();
-  const actions = termMenuItems(rec, rowMark ?? null, rec.status !== "draft" && wantsTitle(rec, titleSettings, true));
+  // Open in <editor> is offered only while one is installed here (code/editor.ts)
+  const editor = useEditorChoice(getHost());
+  const actions = termMenuItems(rec, rowMark ?? null, rec.status !== "draft" && wantsTitle(rec, titleSettings, true), editor !== null);
   const pick = (a: RowAction) => {
     const sx = getSessions();
     if (a === "pin" || a === "unpin" || a === "settle" || a === "wake") actOnRows([sessionRowKey(rec)], { do: a }, title.title);
@@ -1406,6 +1412,7 @@ const TermRow = memo(function TermRow({ rec, agents, unseen, active, ticking, on
     else if (a === "retitle") void sx.rewriteTitle(rec.id);
     else if (a === "reveal") void sx.revealFolder(rec.id);
     else if (a === "terminal") void sx.openTerminal(rec.id);
+    else if (a === "editor") void sx.openInEditor(rec.id);
     else if (a === "link") void sx.copyLink(rec.id);
     else if (a === "here") sx.startTerminal(rec.agent, rec.cwd, rec.shell);
     else if (a === "close") onClose(rec);
@@ -1520,7 +1527,7 @@ const TermRow = memo(function TermRow({ rec, agents, unseen, active, ticking, on
           <CloseIcon />
         </button>
       )}
-      {menu && <SessionMenu at={menu} name={title.title} actions={actions} onPick={pick} onDismiss={() => setMenu(null)} />}
+      {menu && <SessionMenu at={menu} name={title.title} actions={actions} onPick={pick} onDismiss={() => setMenu(null)} editor={editor?.label} />}
     </div>
   );
 });
