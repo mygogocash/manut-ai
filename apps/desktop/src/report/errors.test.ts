@@ -1,6 +1,6 @@
 // The kept problems: memory only, one masked line each, the newest 50.
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { clearErrors, KEEP, LINE_MAX, recentErrors, recordError, watchPageErrors } from "./errors";
+import { clearErrors, KEEP, LINE_MAX, onErrors, recentErrors, recordError, watchPageErrors } from "./errors";
 
 const KEY = ["ghp", "_", "b".repeat(36)].join("");
 afterEach(() => {
@@ -42,5 +42,29 @@ describe("recordError", () => {
     fns.error({ message: "boom" });
     fns.unhandledrejection({ reason: new Error("refused") });
     expect(recentErrors().map((e) => e.text)).toEqual(["refused", "boom"]);
+  });
+});
+
+describe("onErrors", () => {
+  // Told through lib/changes.ts since item 125d, from a copy of the listeners taken first, as the module's own Set was.
+  it("tells each listener of a problem kept, from a copy taken first, and not after it unsubscribed", () => {
+    const told: string[] = [];
+    let offB = () => {};
+    let first = true;
+    const offA = onErrors(() => {
+      told.push("a");
+      if (!first) return;
+      first = false;
+      offB();
+    });
+    offB = onErrors(() => told.push("b"));
+    recordError("chat", "one", 10_000);
+    expect(told).toEqual(["a", "b"]);
+    recordError("chat", "two", 20_000);
+    expect(told).toEqual(["a", "b", "a"]);
+    offA();
+    recordError("chat", "three", 30_000);
+    recordError("chat", "", 40_000);
+    expect(told).toEqual(["a", "b", "a"]);
   });
 });

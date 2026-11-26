@@ -1,101 +1,140 @@
-# Manut AI
+<p align="center">
+  <img src="docs/assets/readme/icon.png" width="104" alt="Manut AI app icon: a person in profile">
+</p>
 
-One app for Thai shop owners: a chat with Buddy, an AI team that does the work and asks before anything public,
-costly or irreversible, and a code editor. This repository starts with the pilot (December 2026): a concierge
-service over LINE, where operators play the team and owners approve each reply from a link.
+<h1 align="center">Manut AI</h1>
 
-The plan this follows is the implementation plan doc ("Manut AI: implementation plan (reuse first)"). The screen
-spec is the Manut AI design canvas.
+<p align="center">
+  <b>Your shop's AI crew and a code editor that actually ships. One Mac app. You stay the boss.</b>
+</p>
 
-## Layout
+<p align="center">
+  <a href="https://github.com/mygogocash/manut-ai/actions/workflows/ci.yml?query=branch%3Apilot%2Fweek-1"><img src="https://github.com/mygogocash/manut-ai/actions/workflows/ci.yml/badge.svg?branch=pilot/week-1" alt="CI"></a>
+  <a href="https://github.com/mygogocash/manut-ai/releases"><img src="https://img.shields.io/github/v/release/mygogocash/manut-ai?include_prereleases&label=download&color=111111" alt="Latest release"></a>
+  <img src="https://img.shields.io/badge/macOS-Apple_silicon_%2B_Intel-111111" alt="macOS, Apple silicon and Intel">
+  <img src="https://img.shields.io/badge/Tauri-2-24C8DB?logo=tauri&logoColor=white" alt="Tauri 2">
+  <img src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black" alt="React 19">
+  <img src="https://img.shields.io/badge/Rust-stable-000000?logo=rust&logoColor=white" alt="Rust">
+  <img src="https://img.shields.io/badge/Cloudflare-Workers-F38020?logo=cloudflare&logoColor=white" alt="Cloudflare Workers">
+  <img src="https://img.shields.io/badge/status-pilot_Dec_2026-E8E4DC" alt="Status: pilot, December 2026">
+</p>
 
-| Path | What it is | Started from |
-| --- | --- | --- |
-| `apps/api` | Cloudflare Workers backend: tenants, members, tasks with exact-action approvals, a one-use dispatch broker, an encrypted credential vault, schedules, retention | GoSpark's `cloud/` at `a7537c80`, lifted whole |
-| `apps/web` | The owner's approval page (`/approve/:token`), the page an invite link opens (`/join/:token`, off until signing in by email is on), the owner's web app for the phone's home screen (`/app/`, `docs/web-app.md`, off until signing in by email is on) and the operator console (`/ops`), served from the API's own origin by a pages Worker behind the API Worker | The design canvas's classes and states; the desktop's reading of approvals (`apps/desktop/src/runtime/http/approvals.ts`) |
-| `apps/desktop` | The desktop app (Tauri 2 + React 19): shell, chat, Needs you, terminal and coding-agent adapters, running on a demo runtime until the real one exists | A fork of Oh My Hermes (`apps/omher` at `77b8646`), Hermes bridge removed |
-| `packages/approval-core` | Settle-once approval rules shared by every client | GoSpark's decision binding and Orca's settle-once journal |
-| `packages/agent-events` | The one event contract every agent reports through, with tolerant decoders and a timeline reducer | GoSpark's provider events (`ProviderSession.swift`) and their tests |
-| `packages/format` | How the app writes money and times (satang to text, typed text to satang, VAT split, relative times) | Written for Manut AI |
-| `packages/notify-rules` | What the app may show outside its window: notifications, buttons, quiet hours, hidden details, the Dock badge | Written for Manut AI |
-| `packages/promptpay` | PromptPay QR payloads for manual payments | dtinth/promptpay-qr's format and test vectors |
-| `packages/remote-channel` | A paired phone's channel to the Mac through the relay: pairing, an encrypted session, the one-use challenge a passkey signs for one Allow | GoSpark's pairing proof and decision challenges with their tests; WebAuthn Level 3's test vectors |
-| `packages/ui-kit` | Design tokens and component classes | The design canvas (`app.css`, `tokens.json`) |
-| `docs/pilot-api.md` | The contract between `apps/api` and `apps/web` | |
+<p align="center">
+  <a href="#get-it">Get it</a> ·
+  <a href="#what-it-does">What it does</a> ·
+  <a href="#run-it-locally">Run it locally</a> ·
+  <a href="#whats-in-the-box">What's in the box</a> ·
+  <a href="#built-different">Built different</a>
+</p>
 
-## Run it
+---
+
+## tl;dr
+
+**Manut** (มนุษย์) is Thai for *human*. That's the whole idea: the AI does the busywork, the human makes the calls.
+
+- **A chat that runs your shop.** Talk to Buddy and your AI team. They answer customers, draft replies, chase payments and remember what matters.
+- **They ask before anything big.** Sending, spending or publishing lands in *Needs you* first. No surprise posts, no surprise bills.
+- **A code editor that drives your agents.** Claude Code, Codex, Gemini CLI, Grok, OpenCode, Qwen Code, pi and friends, signed in with your own accounts, each job in its own lane, nothing live until you approve.
+- **Built for Thai shop owners.** LINE, PromptPay and Thai baht are home turf, not plugins.
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/agents-dark.png">
+    <img src="docs/assets/readme/agents-light.png" width="720" alt="Settings, Providers: Claude Code, Codex, pi, Grok, OpenCode, Gemini CLI and Qwen Code, each with its own logo and a switch">
+  </picture>
+</p>
+<p align="center"><sub>Bring your own agents. Every coding tool on your Mac, one switch each.</sub></p>
+
+## What it does
+
+| | |
+| --- | --- |
+| **Buddy and the team** | One chat, a whole crew. Each member has a job (customer replies, research, admin) and a face of its own. Pause everyone with one button. |
+| **Needs you** | The inbox for decisions. When the team wants to send, spend or publish, it asks here first, with the exact action spelled out. |
+| **Kit, the code editor** | Ask Kit to build or fix something. Each piece of work gets a lane (its own git worktree), a diff you can read, and a pull request on GitHub or GitLab when you say so. |
+| **Reads every command** | Kit reads what an agent wants to run. Reads and checks go alone; anything that writes, pushes or spends asks you, with the whole command shown and only the keys hidden. |
+| **Report a problem** | One button gathers what's wrong (versions, which agents are signed in, the last errors), masks every key and path, and hands it to your own agent to fix. |
+| **Practice mode** | Try the whole thing with a demo team. No account, nothing sent. |
+| **Light and dark** | Warm off-white by day, soft charcoal by night, Geist everywhere. Quiet, not loud. |
+
+<table>
+  <tr>
+    <td width="50%">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/needs-you-dark.png">
+        <img src="docs/assets/readme/needs-you-light.png" alt="Needs you: nothing needs you. When the team wants to send, spend or publish, it asks here first.">
+      </picture>
+      <p align="center"><sub>Needs you: the team asks before it sends, spends or publishes.</sub></p>
+    </td>
+    <td width="50%">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/code-dark.png">
+        <img src="docs/assets/readme/code-light.png" alt="Code: lanes, terminals, tasks from GitHub and GitLab, and your coding plans">
+      </picture>
+      <p align="center"><sub>Code: lanes, terminals, tasks and your coding plans in one place.</sub></p>
+    </td>
+  </tr>
+</table>
+
+## Get it
+
+Grab the latest `.dmg` from [Releases](https://github.com/mygogocash/manut-ai/releases): `aarch64` for Apple silicon, `x64` for Intel.
+
+> [!NOTE]
+> 0.1.1 is a pre-release and it's **unsigned** for now, so macOS will side-eye it on first open. Go to System Settings, Privacy & Security, and press **Open Anyway**. A signed build is next.
+
+## Run it locally
+
+You need Node 22, [pnpm](https://pnpm.io) and, for the desktop shell, stable Rust.
 
 ```bash
 pnpm install          # only esbuild and workerd may run install scripts (pnpm-workspace.yaml)
 pnpm test             # every package's tests
 pnpm typecheck
+
 pnpm --filter @manut/web dev    # the web app against an in-memory fake of the API
 pnpm --filter @manut/web e2e    # the owner's pages in WebKit and Chromium at phone sizes (docs/phone-pass.md)
 pnpm --filter @manut/api dev    # both Workers on localhost:8787: the API and the web app on one origin
 ```
 
-Set `VITE_API_ORIGIN` to point the web app at a running backend, or to `same-origin` for the API that served
-the page. The backend's tests run in real workerd (`pnpm --filter @manut/api test`), followed by two contracts
-on local Workers: the admin gate, and the one-origin configuration, pages and front door (`docs/pilot-api.md`). Nothing here
-deploys anything.
+The desktop app has its own guide: [`apps/desktop/README.md`](https://github.com/mygogocash/manut-ai/blob/pilot/week-1/apps/desktop/README.md). Set `VITE_API_ORIGIN` to point the web app at a running backend, or to `same-origin` for the API that served the page. The backend's tests run in real workerd (`pnpm --filter @manut/api test`). Nothing here deploys anything; deploying is in [`docs/deploying.md`](docs/deploying.md).
 
-## Deploying
+## What's in the box
 
-Dev is deployed at `https://dev.manut.xyz` (staging and production are not). `apps/api` deploys two Workers per environment: the pages Worker
-(`wrangler deploy -c wrangler.web.jsonc --env dev`, which builds the web app first) and then the API Worker
-(`wrangler deploy --env dev`), the front door that hands every non-API path to the pages
-(`docs/pilot-api.md`, "One origin"). Before the first deploy: create the Wrangler secrets (`CLOUD_API_KEY`,
-`APPROVAL_LINK_SECRET`, and the vault key `CRED_KEY`); give the API Worker the host's route; put `/ops` and
-`/v1/admin/*`, and nothing else, behind one Cloudflare Access application and set `ADMIN_ACCESS_AUD` to its
-audience; set `WEB_ORIGIN` and `PUBLIC_API_ORIGIN`, both that host's origin; and turn on the feature flags the
-pilot needs. The worker names are `manut-api-*` and `manut-web-*`, so a deploy from here can never replace one
-of GoSpark's services.
+A pnpm monorepo. Three apps, a stack of small shared packages.
+
+| Path | What it is |
+| --- | --- |
+| [`apps/desktop`](https://github.com/mygogocash/manut-ai/tree/pilot/week-1/apps/desktop) | The Mac app: Tauri 2 shell in Rust, React 19 front end. Chat, Needs you, Kit, terminals and the coding-agent adapters. |
+| [`apps/api`](apps/api) | The backend on Cloudflare Workers and Durable Objects: shops, people, tasks with exact-action approvals, an encrypted credential vault, schedules, retention. |
+| [`apps/web`](https://github.com/mygogocash/manut-ai/tree/pilot/week-1/apps/web) | The owner's approval page, invite links, the phone web app and the operator console, served from the API's own origin. |
+| [`packages/*`](https://github.com/mygogocash/manut-ai/tree/pilot/week-1/packages) | The shared rules: approvals that settle once, one event contract for every agent, money and time formatting, notification rules, PromptPay QR, the phone's encrypted channel, the design tokens, and more. |
+
+The plan lives in [`docs/plan.md`](https://github.com/mygogocash/manut-ai/blob/pilot/week-1/docs/plan.md) and the current state in [`docs/handoff.md`](https://github.com/mygogocash/manut-ai/blob/pilot/week-1/docs/handoff.md). Every call we made and why is in [`docs/decisions.md`](https://github.com/mygogocash/manut-ai/blob/pilot/week-1/docs/decisions.md).
+
+## Built different
+
+This repo is built by one human lead and a squad of AI coding agents working side by side, each in its own git worktree, each change reviewed and gated before it merges. Some receipts:
+
+- **Thousands of tests, every push.** Vitest across the apps and packages, the API in real workerd, Rust on Linux and macOS, and a Playwright suite of 200+ specs in parallel shards.
+- **Security reads on repeat.** Five rounds of security review so far, each one fixed and merged: what an approval shows is what runs, keys never reach a card or a phone, and a skill from a link can't sneak in settings.
+- **Motion with manners.** Every move comes from one motion file, respects Reduce Motion, and stays out of your way ([`docs/motion.md`](https://github.com/mygogocash/manut-ai/blob/pilot/week-1/docs/motion.md)).
+- **Plain words.** No jargon on screen, four languages (English, Japanese, Korean, Chinese), with Thai on the list.
+
+## Safety, but make it default
+
+- The team **asks before** anything public, costly or irreversible. You approve the exact action, not a vibe.
+- Coding agents run with **your own sign-in**, on your Mac. Kit reads each command before it runs and asks for anything that writes, pushes or spends.
+- **Keys stay hidden** on every approval, notification and phone screen; a command that could hide something is shown whole instead.
+- Deleting your account is **in the app**, two steps, and it takes your shop's data with it. What stays on your Mac stays.
+
+The longer reads: [`docs/code-editor.md`](https://github.com/mygogocash/manut-ai/blob/pilot/week-1/docs/code-editor.md), [`docs/remote-access.md`](https://github.com/mygogocash/manut-ai/blob/pilot/week-1/docs/remote-access.md), [`docs/security/`](https://github.com/mygogocash/manut-ai/tree/pilot/week-1/docs/security).
 
 ## Credits
 
-Code lifted from other projects keeps its notice here: GoSpark (`mygogocash/gospark`, our own; for the Mac App Store build, its App Store work as read in the checkout on the owner's Mac on 26 Nov 2026: the password database's home, Claude Code's scratch folder in the sandbox, and the package checks in `apps/desktop/scripts/appstore-mac.sh`); Oh My Hermes
-(MIT, `apps/desktop`, see its `NOTICE.md` and `THIRD_PARTY_NOTICES.md`; its `omher-release.yml` for the release workflow's tag check and target matrix, `.github/workflows/release-desktop.yml`); Orca (MIT) as its code arrives; dtinth/promptpay-qr (MIT) for the PromptPay format and test vectors. T3 Code (MIT, `pingdotgg/t3code` at `dca3ab2`) for the
-idea behind an added account's home: Codex's own home shared entry by entry as links, its sign-in kept apart
-(`apps/desktop/src-tauri/src/accounts.rs`, `share`; rewritten in Rust with an allow-list, no code copied); and for the
-idea of the sidebar's places (pinned on top, snoozed and done-for-now below, an archive, the pull request on a row, a suggested
-next message): `apps/desktop/src/sidebar/rows.ts`, written here from the description, no code copied; and (at `1c3f0ee`) for
-Settings › Providers' layout and field names (a list of the agents with a switch each; for the chosen one a display name,
-the program's path, its home folder, launch arguments and environment variables whose values are never sent back):
-`apps/desktop/src/settings/providers/` and `src-tauri/src/providers.rs`, read for behaviour and wording, no code copied. T3 Code again (MIT, at `8f5fd28`) for
-Settings › Source control (item 75): the page's shape and its words (Automatically pull, keeping the default branch current
-when the checkout has no local changes or commits; Default merge method with the last one chosen; Remove agent credits when
-merging, keeping human co-authors), and `removeAgentCredits` with its tests and its list of agent addresses and names
-(`packages/source-control-core/src/server/mergeMessage.ts`), ported to Rust in `apps/desktop/src-tauri/src/credits.rs` and
-`apps/desktop/src/lib/agentCredits.json`. T3 Code again (MIT, at `b61af8a`) for Settings › Workflows (item 77b): the
-Labs switch that is off by default and runs nothing in the workflows folder while off, "Skipped runs kept" with its bounds,
-a time missed while the app was down kept as skipped rather than made up, and "Run workflow" in the command palette
-(its `docs/user/workflows.md`, `apps/server/src/workflows/triggers.ts` and `packages/contracts/src/settings.ts`, read for
-behaviour and wording); `apps/desktop/src/workflows/` and `src-tauri/src/workflows.rs` are written here, with a JSON file of
-plain-text steps in place of its TypeScript workflows, no code copied. T3 Code again (MIT, at `e75534b`) for the sidebar as an
-inbox (item 94): undoing a settle, a snooze, a pin or an archive (`packages/client-runtime/src/state/threadUndo.ts`), a snooze
-until a picked time with its check that the date and time exist and are ahead (`resolveCustomSnooze` in `threadSettled.ts`,
-lifted into `pickedTime` in `apps/desktop/src/sidebar/rows.ts`), a Working group and settling by itself (`threadInbox.ts`, read
-for behaviour); the rest of `rows.ts`, `selection.ts` and `inbox.ts` is written here. Orca
-(MIT, Copyright (c) 2026 Lovecast Inc., `stablyai/orca` at `a634526a1d0995af34a75cc4845e3eef17610085`) for computer use
-(`apps/desktop/src-tauri/src/computer/`, `docs/computer-use.md`): its command names as the MCP tools, its
-`orca-computer-use` skill adapted as `computer/SKILL.md`, the macOS shortcuts it never sends
-(`computer-blocked-key-combos.ts`, which Orca ported from vercel-labs/agent-desktop, Apache-2.0), its lock check
-(`SessionLockProbe.swift`), the window number through `_AXUIElementGetWindow` (`AccessibilityWindowIdentity.swift`),
-the window picture and which windows count (`main.swift`), and the two System Settings addresses.
+Manut AI stands on good open-source shoulders: GoSpark (our own), Oh My Hermes, Orca, T3 Code, dtinth/promptpay-qr, Lobe Icons and more. Every one, with what we took and its licence, is in [`CREDITS.md`](CREDITS.md).
 
-GoSpark again (at `a7537c80`) for the remote channel (item 78a, `packages/remote-channel`): `RemoteAuthentication.proof` and
-`RemotePairingInvitation` (`Shared/Remote/RemoteHandshake.swift`), `RemoteDecisionChallenges` and the refusals in
-`Tests/Shared/RemoteAuthenticationTests.swift`, ported to TypeScript and Web Crypto; and the W3C Web Authentication Level 3
-specification's section 16 test vectors (read 25 Nov 2026), copied into its tests. GoSpark again (at `a7537c80`) for the
-Mac's side of it (item 78b, `apps/desktop/src/remote/`): `RemoteEventJournal` (the last 500 events or 1 MB a chat, catch-up
-from a cursor or the whole chat again), ported as `journal.ts` with its rules; the consent sheet's points, their order and
-the consent kept with the version of its words (`RemoteRelayConsent.swift`, `Shared/Remote/RemoteRelayNotice.swift`),
-reworded for this app with the operator's sentence left for the owner; and `docs/relay-protocol-v1.md` and
-`docs/security/remote-relay-threat-model.md`, copied into `docs/` with a note on where this app differs.
+There's no licence file yet; that one is the owner's call. The code we borrowed keeps its own licence.
 
-Libraries added for one feature are named here too: `qrcode` 1.5.4 (MIT, soldair/node-qrcode), already the web app's,
-pinned in the desktop for the pairing code's QR image (`apps/desktop/src/remote/QrCode.tsx`, lifted from
-`apps/web/src/ops/QrCode.tsx`); only its `create` is used, which returns the modules and reaches no network; `objc2-speech`, `objc2-avf-audio` and `objc2-av-foundation`
-(the objc2 project's bindings to Apple's Speech, AVFAudio and AVFoundation frameworks, Zlib OR Apache-2.0 OR MIT), which
-reach the Mac's own speech recognition and the microphone for voice in the chat box (`apps/desktop/src-tauri/src/voice.rs`,
-`docs/voice.md`).
+<p align="center"><sub>Made in Thailand by GoGoCash and a lot of agents.</sub></p>
