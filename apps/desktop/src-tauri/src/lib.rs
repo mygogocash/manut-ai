@@ -1368,6 +1368,19 @@ async fn session_open_terminal(cwd: String) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || folder_open::open_terminal(&cwd)).await.map_err(|e| e.to_string())?
 }
 
+/// The editors found on this computer, as (id, label), so the page offers only those (item 107).
+#[tauri::command]
+async fn editors_installed() -> Result<Vec<(String, String)>, String> {
+    tauri::async_runtime::spawn_blocking(folder_open::editors_installed).await.map_err(|e| e.to_string())
+}
+
+/// Open a folder in an editor named by an id from the fixed list (rule 30, item 107): the folder is an absolute path to
+/// a folder that exists, the editor never a path or a command from the page.
+#[tauri::command]
+async fn session_open_in_editor(cwd: String, editor: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || folder_open::open_in_editor(&cwd, &editor)).await.map_err(|e| e.to_string())?
+}
+
 /// The home a session of `agent` reads its conversations from: the account it ran with (`account`), else the account
 /// picked for new sessions, else the CLI's own (rule 30). An `account` whose folder is gone is an error, not another
 /// home: its conversation is not known to be missing, only out of reach.
@@ -1724,6 +1737,8 @@ fn commands(invoke: tauri::ipc::Invoke) -> bool {
         buddy_close_all,
         session_reveal,
         session_open_terminal,
+        editors_installed,
+        session_open_in_editor,
         past_chats_list,
         past_chat_messages,
         conversation_state,
