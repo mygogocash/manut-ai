@@ -7,12 +7,23 @@
 # change to the docs runs two short jobs, and only a change to the shell's Rust runs the Rust jobs. A pull request
 # whose branch already runs CI on its pushes skips every job, since that run checks the same commit. A skipped job
 # counts as passed. Whenever what changed is not certain, every job runs (.github/scripts/changed-areas.mjs).
+#
+# Several agents build at once, each on its own branch, so CI runs on every push of a helper's branch too (the owner,
+# 26 Nov 2026: CI that works in parallel for many agents). A helper merges the lead's branch in and pushes, this checks
+# it on GitHub instead of on the lead's Mac, and the lead merges on green (.claude/skills/lead-merge). A helper's first
+# push is measured from the newest commit CI passed on main or a pilot branch that its history holds.
+#
+# How many runs fit at once: GitHub's Free plan runs 20 jobs at a time for the whole organisation, 5 of them on macOS
+# (GitHub's "Actions limits", job concurrency for standard hosted runners). A full run is 17 jobs at its widest, once
+# What changed is done: nine checks (one of them on macOS) and eight Playwright shards. So one full run fits, and a
+# second full run started at the same moment begins with 3 places and takes the rest as the first run's short jobs end,
+# a few minutes later. Most pushes are not full runs: a docs push is three jobs, and a push to the desktop app twelve.
 name: CI
 
 on:
   pull_request:
   push:
-    branches: [main, "pilot/**", "cloud/**"]
+    branches: [main, "pilot/**", "cloud/**", "feat/**", "fix/**", "refactor/**", "test/**", "docs/**", "ci/**", "chore/**"]
   workflow_dispatch:
 
 # One run at a time for each branch or pull request. On a helper's branch or a pull request, a newer push makes the run
