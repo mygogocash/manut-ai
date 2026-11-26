@@ -195,7 +195,7 @@ check_app() { # app identity-prefix profile-kind
     "CFBundleName=$PRODUCT"
     "CFBundleShortVersionString=$VERSION"
     "CFBundleVersion=$BUILD_NUMBER"
-    "LSApplicationCategoryType=public.app-category.developer-tools"
+    "LSApplicationCategoryType=public.app-category.business"
     "ITSAppUsesNonExemptEncryption=false"
     "LSMinimumSystemVersion=12.0"
   )
@@ -284,7 +284,7 @@ if [ "$DRY_RUN" = 1 ]; then
   codesign -d --entitlements :- compared with $(basename "$ENTITLEMENTS"), key for key
   the embedded profile: application identifier $TEAM_ID.$IDENTIFIER, team $TEAM_ID, a store profile
   Info.plist: CFBundleIdentifier, CFBundleName, CFBundleShortVersionString $VERSION, CFBundleVersion $BUILD_NUMBER,
-    LSApplicationCategoryType developer-tools, ITSAppUsesNonExemptEncryption false, LSMinimumSystemVersion 12.0
+    LSApplicationCategoryType business, ITSAppUsesNonExemptEncryption false, LSMinimumSystemVersion 12.0
   pkgutil --check-signature, then the app inside the package checked again
   Not run, ever: installer, altool, notarytool, Transporter, or any upload.
 EOF

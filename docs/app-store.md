@@ -103,7 +103,7 @@ What it checks, each a line in `checks.txt`, and the run fails on the first that
 5. The embedded profile is a store profile for `N66J8AA6TA.co.gogocash.gogocode`, team `N66J8AA6TA`, and the signed
    application identifier matches it.
 6. Info.plist: `CFBundleIdentifier`, `CFBundleName` Manut AI, `CFBundleShortVersionString` 2.0.0, `CFBundleVersion` the
-   build number, `LSApplicationCategoryType` `public.app-category.developer-tools`, `ITSAppUsesNonExemptEncryption`
+   build number, `LSApplicationCategoryType` `public.app-category.business`, `ITSAppUsesNonExemptEncryption`
    false, `LSMinimumSystemVersion` 12.0, and the microphone and speech recognition reasons.
 7. The program is arm64.
 8. `pkgutil --check-signature` names the "3rd Party Mac Developer Installer" certificate, and the app inside the package
@@ -146,7 +146,7 @@ folders on this Mac, `~/.manut/computer` and `~/.manut/terminals` (24 KB), and t
 `ITSAppUsesNonExemptEncryption` is false. The app's connections use the system's HTTPS and TLS. Beyond that it encrypts
 only through the system's own WebCrypto in WebKit: AES-256-GCM with ECDH and HKDF for the paired phone's end-to-end
 channel (`packages/remote-channel`) and AES-GCM for the sealed shop cache. Standard algorithms in Apple's own
-implementation; whether that changes the answer is the owner's call before the upload.
+implementation. The owner decided on 26 Nov 2026 to declare it exempt on that basis.
 
 ## What the owner does next
 

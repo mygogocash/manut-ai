@@ -6,7 +6,7 @@
   "bundle": {
     "targets": ["app"],
     "createUpdaterArtifacts": false,
-    "category": "DeveloperTool",
+    "category": "Business",
     "macOS": {
       "minimumSystemVersion": "12.0",
       "entitlements": "./AppStore.entitlements",
