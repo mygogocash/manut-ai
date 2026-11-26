@@ -232,24 +232,29 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    and pages), 85e (the brand's faces), 85g (an approval's card and Needs you), 85h (Settings as one column), and
    eight browser specs brought up to the motion rules.
    A SECOND SECURITY REVIEW, read on 26 Nov over those fixes and the night's merges, found eight more problems: one
-   critical or high, three high, four medium. Unlike the first review's, several are in the published 0.1.1: how Kit's
+   critical or high, three high, four medium. Unlike the first review's, several are in the published 0.1.1 (how Kit's
    dial reads a command, a repository's own agent settings taking effect in a lane with no question asked, and the
-   Code page's own git reads in a repository with submodules. Each needs a hostile repository, a hostile page the
-   agent reads, or another program already on the Mac. They are items 88 to 92, each fixed with a failing test first;
-   the details stay out of these docs until the fixes merge. No build is cut before they merge, and the owner decides
-   what to say on the 0.1.1 release page.
-   Running on 26 Nov at 03:30, each a subagent of the lead's session in its own worktree:
-   - items 88 to 92, the second review's fixes (`fix/dial-reading`, `fix/lane-trust`, `fix/git-submodules`,
-     `fix/workflow-binding`, `fix/computer-use-cards`, all Opus, worktrees `cc-item88-dial-reading` to
-     `cc-item92-computer-use-cards`);
-   - item 78b, the Mac's side of reaching it from a phone and Settings, Sharing and access, built switched off
-     (`feat/remote-mac`, Opus, `cc-item78b-remote-mac`);
-   - item 85i, the last sweep of the audit (`feat/quiet-sweep`, Opus, `cc-item85i-quiet-sweep`). Item 85f, the chat's
-     type, merged at 03:45 with the serif bundled.
-   Next: 78c and 78f part 2 (they need the owner's relay, a tailnet and phones to try), a third read of the security
-   fixes once they merge, and a redeploy of dev for the API routes of items 83 and 84 (both behind flags that are
-   off). The briefs the helpers were given are not kept in the repository; each item's row in `docs/plan.md` says what
-   it is.
+   Code page's own git reads in a repository with submodules). All eight are fixed and merged as items 88 to 92 by
+   08:45 on 26 Nov, each with a failing test first; the merge commits say what was wrong. The fixes are not in any
+   build: 0.1.1 is still the only release, and the owner decides what its page says and when 0.1.2 is cut. Item 89 has
+   one cost a developer will notice: a lane's Claude Code no longer reads the project's own settings, hooks, MCP list
+   or `CLAUDE.md` (the person's own all still load); item 93 hands the project's instructions back as plain text. What
+   the fixes could not rule out is in each merge commit and in `docs/code-editor.md`; the one for the owner is that at
+   "edits alone" an agent may edit a test file and then run the tests without asking.
+   Also merged on 26 Nov: 78b, the Mac's side of reaching it from a phone, with Settings, Sharing and access, switched
+   off.
+   Running on 26 Nov at 08:45, each a subagent of the lead's session in its own worktree:
+   - item 78c, the phone's side of reaching the Mac (`feat/remote-phone`, Opus, `cc-item78c-remote-phone`);
+   - item 85i, the last sweep of the audit (`feat/quiet-sweep`, Opus, `cc-item85i-quiet-sweep`);
+   - item 93, a project's instructions handed to a lane's agent as text (`feat/project-instructions`, Opus,
+     `cc-item93-project-instructions`);
+   - four browser specs that fail in CI's shards since the visual items merged, one of which says a member's face
+     moves when the status line comes (`fix/specs-after-sweep`, Sonnet, `cc-fix-specs-after-sweep`).
+   Next: a third read of the security fixes, 78f part 2 (it needs a tailnet and phones to try), and a redeploy of dev
+   for the API routes of items 83, 84 and 78b's health answer (all behind flags that are off). The briefs the helpers
+   were given are not kept in the repository; each item's row in `docs/plan.md` says what it is.
+   The account reached its five-hour limit a second time at 03:48 on 26 Nov, with seven helpers mid-work, and reset at
+   07:50; each was sent on in its own thread with its work intact, as after the first.
    At 23:55 on 25 Nov the account reached its five-hour limit and six helpers stopped mid-work; the limit reset at
    02:50 and each was sent on in its own thread, with its uncommitted work intact. From about 22:50 the Mac had also
    been sleeping fifteen minutes in every seventeen once the owner was away, which timed tests out and failed two
