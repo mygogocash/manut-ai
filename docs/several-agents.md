@@ -481,6 +481,18 @@ the screens are built on tested ground.
   other chat, the shop and account refusals. Tests: block parsing, the cards, the store's routing, an e2e spec. Safety
   tests: a read of a chat not listed is refused before it is read; a message arriving while the target's ask waits leaves
   it pending, even when its words are "Allow"; a chat of another shop is refused.
+  **Built 27 Nov 2026** (`src/jobs/reachBlocks.ts`, `reachList.ts`, `reachAsks.ts`, `reachChats.ts`, `ReachCards.tsx`,
+  `MayReach.tsx`, `route` and `startOpenedLane` in `sessions/sessions.ts`, their tests, and `e2e/reach-chats.spec.ts`;
+  `docs/decisions/102k-reach-chats.md`). The list is under any started coding chat's box that runs as the app's chat (not a
+  draft, a workflow's lane, a terminal or a folder chat), added to from item 97's Bring context picker, saved with the session;
+  the agent names a chat by its number there. The blocks are `manut-read` `{"chat"}`, `manut-send` `{"chat", "message"}` and
+  `manut-open` (a helper's five keys), read with item 102e's shared fence walk, hidden while streaming only in a turn that
+  started with a chat listed. What changed from the design or was settled on the way: one block an answer (a second refuses
+  the request); shops and accounts are checked both ways, at the add, at the card and again at the press; a message goes only
+  to a coding chat on this Mac and waits as a held row while that chat's turn runs or any ask or question of it waits, never
+  steered in; a message and a brief are masked as shown and sent masked; Start lane starts the lane at once with the brief as
+  its first message (marked as from the asking chat), named by the card's title and not opened in front of the person; open is
+  offered only while the list holds a chat; the cards are not in Needs you and do not survive a restart.
 
 ### Phase 4: later, with others
 
