@@ -7,6 +7,20 @@ import { join } from "node:path";
 import { chatOpen } from "./start";
 
 const SHOTS = process.env.MANUT_SHOTS || "";
+const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
+
+// The mock bridge keeps a question another spec file left open, and every note the page sends is counted here, so each
+// test starts from a clean bridge: CI's shards put spec files side by side by their time, and on 26 Nov 2026 this file
+// ran after clarify-shots.spec.ts and counted its "Friren needs you".
+test.beforeEach(async () => {
+  const ws = new WebSocket(`ws://127.0.0.1:${MOCK}/?token=e2e`);
+  await new Promise<void>((res) => (ws.onopen = () => res()));
+  await new Promise<void>((res) => {
+    ws.onmessage = (m) => JSON.parse(String(m.data)).id === "x1" && res();
+    ws.send(JSON.stringify({ id: "x1", op: "mock.reset" }));
+  });
+  ws.close();
+});
 
 async function open(page: Page, free: number, theme: "dark" | "light" = "dark") {
   await page.emulateMedia({ colorScheme: theme });

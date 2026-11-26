@@ -7,6 +7,11 @@
 // longest first, and each goes to the shard with the least time so far (ties to the lower shard); a file with the same
 // time as another goes by its name. The same files and timings therefore always give the same shards.
 //
+// A spec file therefore runs after different neighbours whenever the times change, so it must not depend on what ran
+// before it on the shared mock bridge: a file that counts notes or asks resets the bridge first (`mock.reset`), and a
+// file that leaves an ask open resets it after (26 Nov 2026: disk-chip.spec.ts, placed after clarify-shots.spec.ts,
+// counted the interview that file left open).
+//
 // The times come from apps/desktop/e2e/timings.json (spec file -> seconds), which a CI run writes afresh as its
 // `e2e-timings` artifact and the lead commits with .github/scripts/e2e-timings.mjs. The files themselves come from the
 // folder, not from that list: a spec file added since the timings were taken counts as the median and still runs, and
