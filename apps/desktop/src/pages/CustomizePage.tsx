@@ -498,7 +498,7 @@ function RoutinesPane({ p, automations, plugins }: { p: RoutinesPaneProps } & Cu
             <li>
               <button type="button" className="rowl" onClick={automations.open} data-testid="nav-automations">
                 <span className="grow">
-                  <span className="l1">{t("nav.automations")}</span>
+                  <span className="l1">{t("customize.allRoutines")}</span>
                   <span className="l2">{t("customize.automations")}</span>
                 </span>
                 {automations.count > 0 && <span className="when">{automations.count}</span>}

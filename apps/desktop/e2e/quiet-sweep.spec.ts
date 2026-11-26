@@ -177,6 +177,28 @@ test("at 900 wide, Team's and Customize's right panel follows the list at its ow
   await expect.poll(() => page.getByTestId("routines").evaluate((e) => getComputedStyle(e).borderLeftWidth)).toBe("1px");
 });
 
+test("the Voice board's words on everyday pages: team members, Routines, Skills and tools; and a member's picture button is the face's square", async ({ page }) => {
+  await start(page);
+  // Home's button and Customize's entry name the routines with the one word
+  await expect(page.getByTestId("page-home").getByRole("button", { name: /^Routines/ })).toBeVisible();
+  await page.getByTestId("menu-customize").click();
+  await expect(page.getByTestId("nav-automations").locator(".l1")).toHaveText("All routines");
+  await expect(page.getByTestId("nav-plugins").locator(".l1")).toHaveText("Skills and tools");
+  expect(await page.getByTestId("page-customize").innerText()).not.toMatch(/Automations|Plugins/);
+  // Settings names the team, never bots, on its everyday side
+  await page.getByTestId("nav-settings").click();
+  const list = page.locator(".st-nav");
+  await expect(list).toContainText("Team members");
+  await expect(list).toContainText("All team members");
+  expect(await list.innerText()).not.toMatch(/\bbots?\b/i);
+  await page.locator(".st-nav").getByText("Kami", { exact: true }).click();
+  const pic = page.getByTestId("avatar-edit");
+  await expect(pic).toBeVisible();
+  // the mark's corner, 22.5% of the 64px tile, as the face's own tile is drawn (no longer a circle)
+  expect(await pic.evaluate((e) => getComputedStyle(e).borderRadius)).toBe("22.5%");
+  await expect(page.getByTestId("settings-view")).not.toContainText("Profile ID");
+});
+
 test("pictures of every menu page and Settings, at 1280 and 900, light and dark", async ({ page }) => {
   test.skip(!SHOTS, "QUIET_SHOTS=<dir> keeps the pictures");
   test.setTimeout(240_000);

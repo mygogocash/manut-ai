@@ -107,7 +107,13 @@ The fixes are items 85e to 85i in `docs/plan.md`; the motion is items 85a to 85c
 
 21. Technical words where the Voice board is plain (`i18n/en.ts`): "Bots", "Automations" beside "Routines", "Plugins",
     "Idle", "New session", "Deny", "Allow for session", "Waiting for approval", "Profile ID", "Reasoning", "Providers",
-    "Worktrees". The board says team member, Routines, Needs you, Under the hood. Seen.
+    "Worktrees". The board says team member, Routines, Needs you, Under the hood. Seen. Fixed in item 85i (26 Nov) on the
+    everyday pages: team members for bots in Settings, Routines for Automations (Customize's entry is "All routines",
+    beside its Routines), Skills and tools for Plugins, New chat or terminal for New session, Needs you for Waiting for
+    approval, Internal name for Profile ID, Thinking for Reasoning, and the Needs you tag a noun (Approval). Kept: "Idle",
+    which StatesTeam and BrandThai use for a member with nothing to do; "Deny" and "Allow for session", because the
+    Voice board gives no replacement for an ask's choices; an untitled session's name and the developer pages'
+    words (Providers, Worktrees, the terminals' menus).
 
 ## The order of work
 

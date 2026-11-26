@@ -159,7 +159,7 @@ test("settings opens and closes; theme Light sets data-theme; bot pages", async 
 
   // the popover's "Bot settings" link opens the bot's page
   await page.getByTestId("model-pill").click();
-  await page.getByRole("button", { name: "Bot settings" }).click();
+  await page.getByRole("button", { name: "Team member's settings" }).click();
   await expect(page.getByTestId("settings-page-bot-kami")).toBeVisible();
   // the menu's account row only opens Settings; ⌘, closes it again, as the sidebar's Settings button did
   const mod = await page.evaluate(() => (/Mac/.test(navigator.platform) ? "Meta" : "Control"));

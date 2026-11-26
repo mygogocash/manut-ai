@@ -60,7 +60,7 @@ describe("Settings' list", () => {
     expect(at(list, "settings-nav-bots")).toBeLessThan(at(list, "settings-hood"));
     expect(list).toMatch(/data-testid="settings-nav-general"[^>]*>General</);
     // the group names are words in sentence case; the stylesheet draws them as bands
-    expect(list).toContain('<div class="st-sh">Bots</div>');
+    expect(list).toContain('<div class="st-sh">Team members</div>');
   });
 
   it("opens the hood by itself when a link names one of its pages, with that page chosen", () => {

@@ -336,11 +336,13 @@
 .be-av-wrap {
   flex: none;
 }
+/* The picture button is the face's own tile, a rounded square with the mark's corner (22.5%, face.css), not a circle
+   (item 85i: the faces of item 85e are square). */
 .be-av {
   position: relative;
   width: 64px;
   height: 64px;
-  border-radius: 50%;
+  border-radius: 22.5%;
   padding: 0;
   outline-offset: 3px;
 }
@@ -350,7 +352,7 @@
 .be-av-cover {
   position: absolute;
   inset: 0;
-  border-radius: 50%;
+  border-radius: 22.5%;
   display: grid;
   place-items: center;
   color: #fff;

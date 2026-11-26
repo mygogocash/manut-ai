@@ -33,7 +33,7 @@ test.skip("first run: an empty chat shows just the chat, with no first-run panel
   await expect(page.getByTestId("bot-default")).toHaveAttribute("aria-current", "true");
   expect(await page.locator(".bot-list button.bot").count()).toBe(1);
   await expect(page.getByTestId("timeline")).toContainText("Hi, I'm Hermes.");
-  await expect(page.getByTestId("session-none")).toHaveText("New session");
+  await expect(page.getByTestId("session-none")).toHaveText("New chat or terminal");
   await expect(page.getByTestId("session-start")).toHaveAttribute("title", /^Run a coding agent in a folder, as a chat\./);
   // another bot comes in from + in one click; its empty chat is just the chat
   await page.getByRole("button", { name: "Add a bot" }).click();

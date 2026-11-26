@@ -575,7 +575,7 @@ describe("Automations and Plugins, when the runtime has them", () => {
     expect(html).toContain('data-testid="nav-plugins"');
     expect(text).toContain("Jobs the team runs on a schedule");
     expect(text).toContain("Skills and tools a team member can use");
-    expect(text).toMatch(/Automations .*3/);
+    expect(text).toMatch(/All routines .*3/);
     expect(html.indexOf('data-testid="routines"')).toBeLessThan(html.indexOf('data-testid="nav-automations"'));
   });
 });
