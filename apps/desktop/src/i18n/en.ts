@@ -1820,6 +1820,7 @@ export const en = {
   "out.reading": "Reading",
   "out.failed": "Could not read: {error}",
   "out.none": "Nothing outside Manut AI in the last 30 days.",
+  "out.compressed": "Its sessions on this Mac are kept compressed, and those are not read yet.",
   "out.day": "Day",
   "out.folder": "Folder",
   "out.tokens": "Tokens",

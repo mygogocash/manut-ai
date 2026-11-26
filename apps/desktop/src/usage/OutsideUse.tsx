@@ -96,7 +96,9 @@ export function OutsideView({ on, reads, open, onOpen, openSettings, now }: View
     return r && "error" in r ? [r.error] : [];
   });
   const loaded = reports.length + errors.length === OUTSIDE_TOOLS.length;
-  const empty = loaded && reports.length > 0 && reports.every((r) => r.rows.length === 0);
+  // a tool whose sessions here are all compressed has not used nothing: its files could not be read, and the line says so
+  const unread = (r: OutsideReport) => r.rows.length === 0 && r.skipped.compressed > 0;
+  const empty = loaded && reports.length > 0 && reports.every((r) => r.rows.length === 0 && !unread(r));
   const skipped = reports.reduce((n, r) => n + skippedCount(r.skipped), 0);
   const partial = reports.some((r) => r.partial);
   const last = reports.length ? Math.min(...reports.map((r) => r.read_at)) : null;
@@ -116,7 +118,7 @@ export function OutsideView({ on, reads, open, onOpen, openSettings, now }: View
               <div className="out-r1">
                 <span className="out-name">{t("out.tool", { tool: PROVIDER_NAME[r.tool] ?? r.tool })}</span>
                 <span className="out-n" data-testid={`outside-${r.tool}-n`}>
-                  {t("out.today", { n: tokenText(r.today) })} · {t("out.week", { n: tokenText(r.week) })}
+                  {unread(r) ? t("out.compressed") : `${t("out.today", { n: tokenText(r.today) })} · ${t("out.week", { n: tokenText(r.week) })}`}
                 </span>
                 {r.rows.length > 0 && (
                   <button type="button" className="out-link" aria-expanded={shown} data-testid={`outside-${r.tool}-details`} onClick={() => onOpen(shown ? null : tool)}>

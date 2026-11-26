@@ -1814,6 +1814,7 @@ export const zh: Record<Key, string> = {
   "out.reading": "正在读取",
   "out.failed": "无法读取：{error}",
   "out.none": "过去 30 天没有在 Manut AI 之外的使用。",
+  "out.compressed": "这台 Mac 上它的会话是压缩保存的，暂时还读不了。",
   "out.day": "日期",
   "out.folder": "文件夹",
   "out.tokens": "token",

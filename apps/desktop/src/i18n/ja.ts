@@ -1814,6 +1814,7 @@ export const ja: Record<Key, string> = {
   "out.reading": "読み取り中",
   "out.failed": "読み取れませんでした: {error}",
   "out.none": "過去 30 日間に Manut AI の外での使用はありません。",
+  "out.compressed": "この Mac ではセッションが圧縮して保存されていて、まだ読めません。",
   "out.day": "日付",
   "out.folder": "フォルダ",
   "out.tokens": "トークン",

@@ -1814,6 +1814,7 @@ export const ko: Record<Key, string> = {
   "out.reading": "읽는 중",
   "out.failed": "읽지 못했어요: {error}",
   "out.none": "최근 30일 동안 Manut AI 밖에서 쓴 기록이 없어요.",
+  "out.compressed": "이 Mac에서는 세션이 압축되어 저장되어 있어 아직 읽지 못해요.",
   "out.day": "날짜",
   "out.folder": "폴더",
   "out.tokens": "토큰",

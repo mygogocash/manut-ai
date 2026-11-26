@@ -35,6 +35,23 @@ describe("Outside Manut AI lines", () => {
     expect(html).not.toContain("outside-claude");
   });
 
+  it("says a tool's sessions are compressed and unread, never that it used nothing", () => {
+    const zipped = report("codex", { rows: [], today: 0, week: 0, skipped: { links: 0, too_big: 0, not_json: 0, compressed: 6, app_started: 0, over_limit: 0 } });
+    const reads: Partial<Record<"claude" | "codex", Read>> = { claude: { report: report("claude") }, codex: { report: zipped } };
+    const html = view({ reads });
+    const codex = text(html.slice(html.indexOf('data-testid="outside-codex"')));
+    expect(codex).toContain("Its sessions on this Mac are kept compressed, and those are not read yet.");
+    expect(codex).not.toContain("0 today");
+    expect(html).not.toContain('data-testid="outside-codex-details"');
+    // and when the other tool has nothing either, the page does not say nothing was used
+    const none = report("claude", { rows: [], today: 0, week: 0 });
+    const both = view({ reads: { claude: { report: none }, codex: { report: zipped } } });
+    expect(both).not.toContain('data-testid="outside-empty"');
+    expect(text(both)).toContain("kept compressed");
+    // with nothing skipped as compressed, nothing found is still said plainly
+    expect(view({ reads: { claude: { report: none }, codex: { report: report("codex", { rows: [], today: 0, week: 0 }) } } })).toContain('data-testid="outside-empty"');
+  });
+
   it("says it is reading before the first answer", () => {
     expect(view({})).toContain('data-testid="outside-reading"');
   });
