@@ -10,7 +10,8 @@ rows are 78a to 78f.
 
 ## The first version
 
-A paired phone watches Buddy and Kit's lanes live from anywhere, and answers their asks. Every Allow needs Face ID.
+A paired phone watches Buddy and Kit's lanes live from anywhere, and answers their asks. Every Allow and every answer
+to a question needs Face ID.
 
 It covers: network access (through the relay, not a port on the local network), approval of new devices (always on),
 permissions (one fixed set for every phone), and notifications with no content in them (the last phase).
@@ -29,8 +30,8 @@ What a person does:
    own, so there is nothing to compare and press Allow on by habit: a phone that was raced by someone who photographed
    the code is refused and shows no digits, so there is nothing to type.
 5. The phone lists the chats as Working, Needs you or Done. Opening one shows its messages, its current step and its
-   asks, with the whole command as the card shows it. The person can Allow once (Face ID), say No, answer a question,
-   or stop the turn.
+   asks, with the whole command as the card shows it. The person can Allow once (Face ID), say No, answer a question
+   (Face ID), or stop the turn.
 
 Left out on purpose: sending messages, Always allow, Kit's dial, modes, diffs and files, Live Activities, guest links,
 linked environments, the preview, and a listener on the local network (Tailscale is the second road, below). The need
@@ -54,7 +55,8 @@ app's content policy already lets it reach `wss://*.manut.xyz`, and the store an
 - `serve.ts`: the only code that turns a phone's request into a store action, and only for six allowed requests.
 - `project.ts`: what the phone sees, masked with `lib/secrets.ts`.
 - Keys live in a new keychain item (account `remote`), read and written by a new `remote_keys.rs` with `api_link.rs`'s
-  `read_item` and `write_item`, and imported by the page so script cannot read them back, as `shop-cache-key` is.
+  `read_item` and `write_item`. The relay key's private half stays in the shell, which makes it and signs with it;
+  each phone's K is imported by the page so script cannot read it back, as `shop-cache-key` is.
 - No listener and no open port.
 
 If the page's socket is held back while the window is hidden or the Mac is locked (to be checked in phase 2),
@@ -94,7 +96,10 @@ needs a QR reader, which the repository does not have: the browser's own is used
 - K is drawn by the Mac once the code is typed, so the code's secret, photographed or not, never opens a session.
 - Unpair ends what is open on the Mac's own side: it closes that phone's sessions and drops its waiting decision
   challenges, since the relay's `revoke` is not trusted to end anything and a phone that comes another way has no
-  relay.
+  relay. Since the third review (26 Nov 2026) it forgets the phone's K in the page before anything awaits, so while the
+  keychain write waits a relay that ignores the revoke gets that phone no new session, and nothing is sent to a phone
+  no longer paired, checked at the moment each message is sealed. A pairing cancelled while the keychain wrote ends
+  the new phone's streams the same way.
 - The Mac cannot tell that the grant reached the phone, so 78b counts a phone as paired only once its passkey
   registration has come back over the pairing channel. The passkey's key is read from the authenticator's own data
   (WebAuthn Level 3, section 7.1), and every answer is also refused from another site's frame or with a counter that
@@ -112,9 +117,25 @@ needs a QR reader, which the repository does not have: the browser's own is used
   consent sheet; the app turns it back on at launch only for a person who did (`resumeRemote`).
 - **The keychain item** (account `remote`) is one JSON document: the relay key as its JWK's `d`, `x` and `y`, and per
   phone its id, name, `pairedAt`, `lastSeen`, K (64 hex digits), door token hash, passkey credential id and public key
-  (base64url) and counter. The page reads it once, imports the relay key and each K as keys script cannot read back,
-  and changes it only through `remote_keys_set_host`, `_add_device`, `_touch_device` and `_remove_device`, which check
-  every field, refuse a second relay key and a passkey that belongs to another phone, and never take a counter back.
+  (base64url) and counter. The shell checks every field, refuses a second relay key and a passkey that belongs to
+  another phone, and never takes a counter back.
+- **What the page may hold of it** (third review, 26 Nov 2026). A script injected into the main window can call every
+  command the page can, so the shell hands out as little as the page needs:
+  - The relay key's private half never reaches the page. The shell makes the key (`remote_host_make`, with Security's
+    own generator, on a key never put in any keychain but the item) and signs the relay's challenge itself
+    (`remote_host_sign`), and signs nothing but `gospark-relay-v1|host|<this key's host id>|<a 32-byte nonce>`. The
+    page's read (`remote_keys_read`) carries only the public half.
+  - Each phone's K is in that read only while the shell's own switch is on (`remote_switch`, turned on by the page after
+    the consent and off with the switch); the page imports it at once as a key script cannot read back.
+  - A phone is added (`remote_keys_add_device`) only while the shell has a pairing open (`remote_pairing`, opened while
+    a code is shown, at most five minutes, only while the switch is on), one phone a pairing. A counter moves
+    (`_touch_device`) only while the switch is on. Unpair (`_remove_device`) is never held back.
+  - Not closed: the shell cannot tell the page from a script in it. A script that turns the shell's switch on and opens
+    a pairing first still gets K and can still add a phone, and while it runs it can have the shell sign a relay
+    challenge. What it can no longer do is read the relay key, or read K or add a phone with one call while the switch
+    is off. Closing the rest needs either a confirmation the shell shows itself (a native window the page cannot
+    press) before a phone is added, or the session handshake moved into the shell so K never reaches the page; both
+    are the owner's call.
 - **Messages inside a pairing channel**, after the grant (the package's 82 bytes): the Mac sends
   `{"t":"passkey","challenge","rp":{"id"},"user"}`; the phone answers `{"t":"registered","name","credentialId",
   "clientDataJSON","authenticatorData"}` (base64url); the Mac answers `{"t":"paired"}` or `{"t":"refused","reason"}`
@@ -122,15 +143,25 @@ needs a QR reader, which the repository does not have: the browser's own is used
   name arrives only here, so the Mac's field reads "Type the four digits your phone shows." without it.
 - **Messages inside a session** are JSON with a number `id` the phone picks: `list`, `open` (`chat`), `catchup`
   (`chat`, `cursor`), `allow` (`chat`, `ask`, `revision`; then again with `option: "once"` and the passkey's `answer`
-  to the challenge), `reply` (`chat`, `ask`, `revision`, and `no: true` or `answer`, or `answers` for an interview),
-  `stop` (`chat`). The Mac answers `chats`, `chat` (a view and a cursor), `events`, `challenge`, `done` or
-  `refused` (`request`, `reason`), and pushes `event` for each change of a chat the phone has open. Anything else is
-  refused by name: `stays_on_mac` for Always allow, the session, a folder, the dial, pairing, Unpair, the switch and the
-  consent; `unknown_request` for the rest. The challenge binds the device, `["<chat>","<ask>"]` as JSON, the revision
-  and `once`.
+  to the challenge), `reply` (`chat`, `ask`, `revision`, and `no: true` for No; or `answer`, or `answers` for an
+  interview, then again with the same answer and the passkey's answer to the challenge as `passkey`), `stop`
+  (`chat`). The Mac answers `chats`, `chat` (a view and a cursor), `events`, `challenge`, `done` or `refused`
+  (`request`, `reason`), and pushes `event` for each change of a chat the phone has open. Anything else is refused by
+  name: `stays_on_mac` for Always allow, the session, a folder, the dial, pairing, Unpair, the switch and the consent;
+  `unknown_request` for the rest. The challenge binds the device, `["<chat>","<ask>"]` as JSON, the revision and the
+  choice: `once` for an Allow, and for an answer `answer:` with a digest of the exact words (the package's
+  `answerOption`), so the words sent, the words challenged and the words the passkey signed must all be the same.
+- **Answers need Face ID too** (third review, 26 Nov 2026). An answer to a question steers the agent as much as an
+  Allow does, so it takes the same one-use challenge, for a typed answer and a picked choice alike. Only No to an
+  approval and Stop go without one: they can only hold something back.
 - **Revisions.** The store's approvals carry none, so the Mac counts them for a phone: 1 when an ask is first shown, one
-  more whenever what it shows changes. An Allow or a No on another revision is refused as `changed`, also when the ask
-  changed while the person looked at Face ID.
+  more whenever what it shows changes. An Allow, a No or an answer on another revision is refused as `changed`, also
+  when the ask changed while the person looked at Face ID. Since the third review (26 Nov 2026) a revision is never
+  given twice to one ask while the app runs: it is kept when every phone leaves and across the switch going off and on
+  (one `Projector` for the RemoteMac's life), and an ask that leaves the store and comes back with the same id goes on
+  counting. The Mac also keeps, per phone, the newest revision of each ask it sent that phone, and acts only on that
+  one: a phone answering a chat it never opened, or a Mac started again, is refused as `changed`, and the phone opens
+  the chat again.
 - **What a phone sees** is masked with `lib/secrets.ts`, the command included (the card masks it too), and shown whole. The masker's
   patterns are `lib/secrets.json`, shared with the shell's `tasks::mask_secrets` and held by one table both run
   (`lib/secrets.cases.json`): tokens by their prefix, private key blocks, JSON web tokens, credentials in HTTP headers,
@@ -181,9 +212,11 @@ needs a QR reader, which the repository does not have: the browser's own is used
   prompt, and the passkey signs what the phone computed from its own screen. Allow once tries the prompt at once and,
   when the browser refuses one that did not come from a tap, offers Confirm while the challenge lasts.
 - **Answers to questions** go through the same signed path as Allow once (`#decide`), following the security review of
-  26 Nov 2026 (item 115): a Mac that sends a challenge for an answer gets it checked against the exact answer's digest,
-  and the signature back; today's Mac takes the answer at once. The digest (`answerOption`) and the field step two
-  carries it in (`passkey`) are in `decision.ts`, to be matched to item 115's final shape.
+  26 Nov 2026 (item 115): the Mac's challenge is checked against the package's `answerOption` of the exact answer (an
+  interview's questions in the order the ask lists them) before any prompt, and step two repeats the request with the
+  passkey's answer as `passkey` (`decision.ts`). The phone sends exactly the questions its screen shows. Through the
+  real relay, `remote-phone.test.ts` has the Mac take a correct answer and refuse one with no challenge, a replayed
+  challenge, and a signature over other words than the ones sent.
 - **The greyed view.** When the session drops, what was shown stays greyed with when the Mac last confirmed it, offers
   no answer, and is cleared from memory 15 minutes after that time (checked again when the app comes back into view,
   since a phone that slept ran no timer). The phone dials again after one second, doubling to a minute. A phone the Mac
@@ -321,7 +354,8 @@ installed iPhone web app opens the socket, what Android Chrome asks, and how fas
   at that moment.
 - **Stays on the Mac:** the dial, Always allow, Allow this folder, pairing, Unpair, the switch, and any ask the card
   marks as needing an app update.
-- **A lost or stolen phone** can read the chats, say No and Stop. It cannot Allow without Face ID or the passcode.
+- **A lost or stolen phone** can read the chats, say No and Stop. It cannot Allow, or answer an agent's question,
+  without Face ID or the passcode.
   Unpair on the Mac sends `revoke`: the relay closes that phone's door and the Mac deletes its K. A copied token opens
   only the relay's door, never the session.
 - **What the relay sees:** internet addresses (Cloudflare sees them; the relay object keeps only a digest), times, byte

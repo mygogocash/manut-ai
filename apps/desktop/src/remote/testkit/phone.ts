@@ -7,6 +7,7 @@ import {
   type Channel,
   type PairingOffer,
   type RelyingParty,
+  answerOption,
   decisionChallenge,
   decodePairingGrant,
   fromBase64Url,
@@ -327,6 +328,35 @@ export class TestPhone {
       signature: toBase64Url(passkey.signature),
     };
     return session.request({ t: "allow", ...params, option: "once", answer: await tamper(answer, challenge) });
+  }
+
+  /** Answers a question, both steps, with Face ID as the authenticator gives it: the challenge is bound to the exact
+   *  answer, which the phone recomputes from what it shows (`answerOption`). `given` is `{ answer }`, or `{ answers }`
+   *  with the questions in the order the ask lists them. */
+  async answer(
+    session: PhoneSession,
+    params: { chat: string; ask: string; revision: number },
+    given: { answer: string } | { answers: Record<string, string | null> },
+  ): Promise<Record<string, unknown>> {
+    const challenge = await session.request({ t: "reply", ...params, ...given });
+    if (challenge.t !== "challenge") return challenge;
+    if (!this.deviceId || !this.rp) throw new Error("not paired");
+    const shown = "answer" in given ? given.answer : Object.entries(given.answers);
+    const signed = await decisionChallenge(fromBase64Url(String(challenge.nonce)), {
+      deviceId: this.deviceId,
+      requestId: JSON.stringify([params.chat, params.ask]),
+      revision: params.revision,
+      optionId: await answerOption(shown),
+    });
+    const passkey = await this.authenticator.get(this.rp, signed);
+    const proof = {
+      challengeId: String(challenge.nonce),
+      credentialId: toBase64Url(passkey.credentialId),
+      clientDataJSON: toBase64Url(passkey.clientDataJSON),
+      authenticatorData: toBase64Url(passkey.authenticatorData),
+      signature: toBase64Url(passkey.signature),
+    };
+    return session.request({ t: "reply", ...params, ...given, passkey: proof });
   }
 
   /** The secrets this phone holds, for a test that scans the relay's frames for them. */

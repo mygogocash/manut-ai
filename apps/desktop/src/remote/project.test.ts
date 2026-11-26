@@ -115,8 +115,25 @@ describe("what a phone is shown", () => {
     expect(projector.ask(changed, "req-1")?.revision).toBe(2);
     // Another chat's ask with the same id has its own revisions.
     expect(projector.ask({ ...changed, key: "kit" }, "req-1")?.revision).toBe(1);
-    projector.forget("buddy");
-    expect(projector.ask(changed, "req-1")?.revision).toBe(1);
+    // Letting go of a chat's asks never gives a revision twice: an ask still in the store keeps its revision, and one
+    // that left and comes back with the same id goes on counting.
+    projector.retire("buddy", changed);
+    expect(projector.ask(changed, "req-1")?.revision).toBe(2);
+    projector.retire("buddy", { ...changed, items: changed.items.filter((i) => i.kind === "message") });
+    expect(projector.ask(source, "req-1")?.revision).toBe(3);
+    expect(projector.ask(changed, "req-1")?.revision).toBe(4);
+  });
+
+  it("keeps, per phone, the newest revision of each ask it was sent", () => {
+    const projector = new Projector();
+    projector.sent("A", "buddy", [{ id: "req-1", revision: 2 }]);
+    projector.sent("A", "buddy", [{ id: "req-1", revision: 1 }]);
+    expect(projector.wasShown("A", "buddy", "req-1", 2)).toBe(true);
+    expect(projector.wasShown("A", "buddy", "req-1", 1)).toBe(false);
+    expect(projector.wasShown("B", "buddy", "req-1", 2)).toBe(false);
+    expect(projector.wasShown("A", "kit", "req-1", 2)).toBe(false);
+    projector.forgetDevice("A");
+    expect(projector.wasShown("A", "buddy", "req-1", 2)).toBe(false);
   });
 
   it("binds a challenge to the chat and the ask so no two pairs run into each other", () => {

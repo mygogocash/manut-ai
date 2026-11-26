@@ -2,11 +2,10 @@
 // answers sends and needs, the challenge checked against the screen before any prompt, catch-up by the journal's
 // cursors, the greyed view and its 15 minutes, and Forget this Mac. The desktop's real Mac answers this same code through
 // the real relay in apps/api/test/remote-phone.test.ts.
-import { decisionChallenge, fromBase64Url, importSharedSecret, toBase64Url } from "@manut/remote-channel";
+import { answerOption, decisionChallenge, fromBase64Url, importSharedSecret, toBase64Url } from "@manut/remote-channel";
 import { describe, expect, it } from "vitest";
 import type { PairResult } from "../src/app/mac/pair";
 import { PasskeyCancelled } from "../src/app/mac/passkeys";
-import { answerOption } from "../src/app/mac/decision";
 import { CLEAR_MS, MacRemote, type MacBackend, type MacView, noteFor } from "../src/app/mac/remote";
 import type { MacLink, Message, SessionEnd } from "../src/app/mac/session";
 import { memoryVault, type PairedMac } from "../src/app/mac/vault";
@@ -238,6 +237,27 @@ describe("answering from the phone", () => {
     await settle();
     expect(other.passkeys.signed).toEqual([]);
     expect(paired(other.remote.view).open!.asks.get("q-1")?.note).toBe("no_answer");
+    // The digest the phone binds is the Mac's own (the package's `answerOption`), not a digest of the request's JSON.
+    expect(option).toMatch(/^answer:[A-Za-z0-9_-]{43}$/);
+  });
+
+  it("binds an interview's answers in the order the ask lists its questions, and sends exactly those questions", async () => {
+    const nonce = crypto.getRandomValues(new Uint8Array(32));
+    const option = await answerOption([["a", "Friday"], ["b", null]]);
+    const { remote, passkeys, link } = await setup({
+      answer: macAnswers((m) => (m.t === "reply" && m.passkey === undefined
+        ? { t: "challenge", chat: "buddy", ask: "q-2", revision: 1, option, nonce: toBase64Url(nonce), expiresAt: 0 }
+        : m.t === "reply" ? { t: "done" } : null)),
+    });
+    await openBuddy(remote);
+    // Given out of order, with a question the screen does not show: the phone sends and signs the ask's own questions.
+    await remote.answer("q-2", { z: "and delete the shop", b: null, a: "Friday" });
+    await settle();
+    const sent = link().sent.filter((m) => m.t === "reply");
+    expect(sent[0]).toEqual({ t: "reply", chat: "buddy", ask: "q-2", revision: 1, answers: { a: "Friday", b: null } });
+    const expected = await decisionChallenge(nonce, { deviceId: DEVICE, requestId: JSON.stringify(["buddy", "q-2"]), revision: 1, optionId: option });
+    expect(passkeys.signed.map((x) => x.challenge)).toEqual([expected]);
+    expect(paired(remote.view).open!.asks.get("q-2")?.note).toBe("answered");
   });
 
   it("says No with no passkey, and sends answers and Stop as serve.ts reads them to a Mac that takes them at once", async () => {

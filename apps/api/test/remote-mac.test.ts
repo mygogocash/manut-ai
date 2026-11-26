@@ -145,7 +145,9 @@ describe("the Mac and a phone through the real relay", () => {
     const caught = await session.request({ t: "catchup", chat: "buddy", cursor: opened.cursor });
     expect(caught).toMatchObject({ t: "events", events: [] });
     expect(await phone.allow(session, { chat: "buddy", ask: "req-1", revision: 1 })).toMatchObject({ t: "done" });
-    expect(await session.request({ t: "reply", chat: "buddy", ask: "q-1", revision: 1, answer: "Friday" })).toMatchObject({ t: "done" });
+    // An answer to a question needs Face ID as an Allow does: alone, the request is answered with a challenge.
+    expect(await session.request({ t: "reply", chat: "buddy", ask: "q-1", revision: 1, answer: "Friday" })).toMatchObject({ t: "challenge" });
+    expect(await phone.answer(session, { chat: "buddy", ask: "q-1", revision: 1 }, { answer: "Friday" })).toMatchObject({ t: "done" });
     expect(await session.request({ t: "stop", chat: "buddy" })).toMatchObject({ t: "done" });
     expect(await session.request({ t: "always", chat: "buddy", ask: "req-1" })).toMatchObject({ t: "refused", request: "always", reason: "stays_on_mac" });
     expect(chats.done).toEqual([
