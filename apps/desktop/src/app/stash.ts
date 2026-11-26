@@ -235,6 +235,21 @@ export function takeHanded(key: string): Stashed | null {
   return e;
 }
 
+/** Files handed to chat `key`'s box as they are, with nothing saved on disk: a snapshot's picture of a window (item 104,
+ *  computer/snapshot.ts). The box takes them once, as it takes a draft's files. */
+const loose = new Map<string, File[]>();
+
+export function handLoose(key: string, files: readonly File[]): void {
+  if (files.length) loose.set(key, [...(loose.get(key) ?? []), ...files]);
+}
+
+/** The files handed to chat `key`'s box as they are, once. */
+export function takeLoose(key: string): File[] {
+  const f = loose.get(key) ?? [];
+  loose.delete(key);
+  return f;
+}
+
 /** A taken draft's files as files a box can hold, read back from their saved copies; the copies then go. A file that
  *  cannot be read is named in `missing`. */
 export async function filesOf(e: Stashed): Promise<{ files: File[]; missing: string[] }> {
@@ -272,6 +287,7 @@ export function reloadStash(): void {
   if (dropTimer) clearTimeout(dropTimer);
   dropTimer = null;
   handed.clear();
+  loose.clear();
   list = parseStash(storage()?.getItem(STASH_KEY) ?? null);
   dropped = null;
   snap = { list, dropped };

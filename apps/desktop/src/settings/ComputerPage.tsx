@@ -2,14 +2,16 @@
 // the Mac without asking for either; a button for each that opens its pane of System Settings, where only the person
 // can turn Manut AI on; one line that says when all is ready or what is missing; and Re-check, which reads again (as
 // does coming back to the window from System Settings). Under them, what the agent may look at and what asks first,
-// and, for a copy not signed with a Developer ID, that macOS forgets both after each update.
+// and, for a copy not signed with a Developer ID, that macOS forgets both after each update. Then the snapshot's key
+// (item 104, SnapshotRows.tsx), off until the person turns it on; not in the App Store edition, whose sandbox refuses it.
 //
 // `ComputerView` draws a given state so a test can draw each one (ComputerPage.test.tsx); `ComputerPage` reads and acts.
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { t } from "../i18n";
 import { isAppStore } from "../appStore";
 import { computerOffered, getComputerShell, statusLine, type ComputerStatus, type Pane } from "../computer/computer";
 import { Row } from "./DevRow";
+import { SnapshotRows } from "./SnapshotRows";
 
 export interface ComputerViewProps {
   /** Computer use works here (the Mac app). */
@@ -22,6 +24,8 @@ export interface ComputerViewProps {
   onRecheck: () => void;
   /** The Mac App Store edition, whose sandbox refuses what computer use needs (docs/app-store.md). */
   appStore?: boolean;
+  /** The snapshot's key and its rows (item 104), drawn last. */
+  snapshot?: ReactNode;
 }
 
 export function ComputerView(p: ComputerViewProps) {
@@ -99,6 +103,7 @@ export function ComputerView(p: ComputerViewProps) {
           {t("computer.unsigned")}
         </div>
       )}
+      {!p.appStore && p.snapshot}
     </div>
   );
 }
@@ -126,5 +131,15 @@ export function ComputerPage() {
     window.addEventListener("focus", read);
     return () => window.removeEventListener("focus", read);
   }, [offered, read]);
-  return <ComputerView offered={offered} status={status} failed={failed} onOpen={(pane) => void getComputerShell().open(pane).catch(() => undefined)} onRecheck={read} appStore={isAppStore()} />;
+  return (
+    <ComputerView
+      offered={offered}
+      status={status}
+      failed={failed}
+      onOpen={(pane) => void getComputerShell().open(pane).catch(() => undefined)}
+      onRecheck={read}
+      appStore={isAppStore()}
+      snapshot={<SnapshotRows accessibility={status?.accessibility} />}
+    />
+  );
 }

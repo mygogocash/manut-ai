@@ -118,6 +118,7 @@ import { shops } from "./ja/shops";
 import { side } from "./ja/side";
 import { skills } from "./ja/skills";
 import { skl } from "./ja/skl";
+import { snap } from "./ja/snap";
 import { sounds } from "./ja/sounds";
 import { split } from "./ja/split";
 import { sq } from "./ja/sq";
@@ -275,6 +276,7 @@ export const ja: Record<Key, string> = {
   ...side,
   ...skills,
   ...skl,
+  ...snap,
   ...sounds,
   ...split,
   ...sq,

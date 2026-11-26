@@ -63,6 +63,7 @@ extern "C" {
     fn AXIsProcessTrusted() -> u8;
     fn AXUIElementCreateApplication(pid: i32) -> AXUIElementRef;
     fn AXUIElementCreateSystemWide() -> AXUIElementRef;
+    fn AXUIElementGetPid(element: AXUIElementRef, pid: *mut i32) -> AXError;
     fn AXUIElementCopyAttributeValue(element: AXUIElementRef, attribute: CFStringRef, value: *mut CFTypeRef) -> AXError;
     fn AXUIElementSetAttributeValue(element: AXUIElementRef, attribute: CFStringRef, value: CFTypeRef) -> AXError;
     fn AXUIElementPerformAction(element: AXUIElementRef, action: CFStringRef) -> AXError;
@@ -101,6 +102,7 @@ extern "C" {
     fn TISCreateInputSourceList(properties: CFDictionaryRef, include_all_installed: u8) -> CFArrayRef;
     fn TISGetInputSourceProperty(source: CFTypeRef, key: CFStringRef) -> CFTypeRef;
     fn LMGetKbdType() -> u8;
+    fn CopySymbolicHotKeys(out_hot_key_array: *mut CFArrayRef) -> i32;
     static kTISPropertyUnicodeKeyLayoutData: CFStringRef;
     static kTISPropertyLocalizedName: CFStringRef;
     static kTISPropertyInputSourceType: CFStringRef;
@@ -205,6 +207,37 @@ fn read_keyboard() -> Option<Keyboard> {
         list.iter().filter(|p| !p.is_null()).filter_map(|p| layout_of(*p)).filter(|l| *l != current).collect()
     };
     Some(Keyboard { current, others })
+}
+
+/// The shortcuts macOS itself answers system-wide and that are turned on, each as its virtual key code and its Carbon
+/// modifiers (`cmdKey` 256, `shiftKey` 512, `optionKey` 2048, `controlKey` 4096, and 0x20000 with the Fn key), read
+/// with `CopySymbolicHotKeys` (`HIToolbox/CarbonEvents.h`: "the system-wide symbolic hotkeys that are defined in the
+/// Keyboard preferences pane", so the person's own changes there count; "It does not include customized
+/// application-specific command keys"). Reading them asks nothing. The header says the call is not thread safe, so it
+/// runs on the main thread; with no answer, none are known.
+pub fn symbolic_hot_keys() -> Vec<(u16, u32)> {
+    on_main(read_symbolic_hot_keys).unwrap_or_default()
+}
+
+fn read_symbolic_hot_keys() -> Vec<(u16, u32)> {
+    let mut list: CFArrayRef = std::ptr::null();
+    // the array is the caller's to release (the create rule); its dictionaries go with it
+    if unsafe { CopySymbolicHotKeys(&mut list) } != 0 || list.is_null() {
+        return Vec::new();
+    }
+    let list: CFArray = unsafe { CFArray::wrap_under_create_rule(list) };
+    let mut out = Vec::new();
+    for p in list.iter().filter(|p| !p.is_null()) {
+        let d: CFDictionary<CFString, CFType> = unsafe { CFDictionary::wrap_under_get_rule(*p as CFDictionaryRef) };
+        let num = |k: &str| d.find(CFString::new(k)).and_then(|v| v.downcast::<CFNumber>()).and_then(|n| n.to_i64());
+        let on = d.find(CFString::new("kHISymbolicHotKeyEnabled")).and_then(|v| v.downcast::<CFBoolean>()).map(bool::from) == Some(true);
+        if let (true, Some(code), Some(mods)) = (on, num("kHISymbolicHotKeyCode"), num("kHISymbolicHotKeyModifiers")) {
+            if let (Ok(code), Ok(mods)) = (u16::try_from(code), u32::try_from(mods)) {
+                out.push((code, mods));
+            }
+        }
+    }
+    out
 }
 
 #[link(name = "ImageIO", kind = "framework")]
@@ -479,6 +512,17 @@ mod tests {
         assert_eq!(kb.current.keys.len(), char_codes().count());
         assert!(!kb.current.name.is_empty());
     }
+
+    /// macOS's own shortcuts, read as the snapshot's key is checked against them (snap.rs): this Mac's are read by the
+    /// same call, which asks nothing, and come as key codes with Carbon's modifier bits (on this Mac on 27 Nov 2026,
+    /// 234 of them, ⌘⇧3 as key 20 with 768 among those turned on). A test is not a UI application, so it calls the read
+    /// itself, off the main thread, one thread at a time.
+    #[test]
+    fn this_macs_own_shortcuts_are_read_without_asking() {
+        let keys = read_symbolic_hot_keys();
+        assert!(!keys.is_empty(), "macOS turns some on by default (Spotlight, the screenshots)");
+        assert!(keys.iter().all(|(_, mods)| *mods < 1 << 24), "{keys:?}");
+    }
 }
 
 /// `_AXUIElementGetWindow`, which HIServices exports without declaring: the window number of a window element, found
@@ -717,6 +761,17 @@ impl Desk for Mac {
         let node = Ax(el.0.clone()).node(0)?;
         let place = self.place(&node.handle)?;
         Some(Focus { window, control: Some((node, place)) })
+    }
+
+    fn front(&self) -> Option<i32> {
+        // the system-wide element's focused application (`kAXFocusedApplicationAttribute`), and its process
+        // (`AXUIElementGetPid`): the app the person was typing in when they pressed the snapshot's key, since a Carbon hot
+        // key does not bring Manut AI to the front
+        let sys = Ax::created(unsafe { AXUIElementCreateSystemWide() })?;
+        let app = sys.element("AXFocusedApplication")?;
+        let mut pid: i32 = 0;
+        let err = unsafe { AXUIElementGetPid(app.ptr(), &mut pid) };
+        (err == 0 && pid > 0).then_some(pid)
     }
 
     fn press(&self, handle: &Handle) -> Result<(), String> {
