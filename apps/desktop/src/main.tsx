@@ -8,9 +8,13 @@ import { startTermShare } from "./sessions/termShare";
 import { resolveTheme } from "./app/theme";
 import { readTheme } from "./state/store";
 import { learnThisHost } from "./terminal/host";
+import { watchPageErrors } from "./report/errors";
 
 // The theme is set before <App> mounts, so the first paint is already in the person's theme.
 document.documentElement.dataset.theme = resolveTheme(readTheme());
+
+// the page's own uncaught errors, kept in memory for Settings › Report a problem and nowhere else
+watchPageErrors();
 
 // A reload keeps the shell (and any agent the last page started) alive: stop those before any UI exists.
 void getSessions().reset();

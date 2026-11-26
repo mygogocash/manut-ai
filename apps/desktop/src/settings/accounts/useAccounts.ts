@@ -157,6 +157,8 @@ async function lapseNotice(groups: AccountGroup[]): Promise<void> {
 
 /** The accounts as last read (null before the first read); SESSIONS notes which one a new session runs as. */
 export const accountGroups = (): AccountGroup[] | null => snap.groups;
+/** What the shared copy holds now, for a reader that is not a component (Settings › Report a problem). */
+export const accountsNow = (): Snap => snap;
 
 export function useAccounts(): Snap {
   return useSyncExternalStore(
