@@ -361,8 +361,10 @@ export function createReach(deps: ReachDeps) {
         deps.store().dispatch({ type: "reach.done", bot: key, id: askId, done: "no" });
         return { ok: true };
       }
+      // settled before anything moves: a read starts the asking chat's next turn, whose start takes back every card still open
+      deps.store().dispatch({ type: "reach.done", bot: key, id: askId, done: "yes" });
       const did = await act(card.ask, at);
-      deps.store().dispatch({ type: "reach.done", bot: key, id: askId, done: "yes", ...did });
+      if (did.lane || did.error) deps.store().dispatch({ type: "reach.done", bot: key, id: askId, done: "yes", ...did });
       return { ok: true };
     },
     /** Session `id` closed: what was kept for it goes. */

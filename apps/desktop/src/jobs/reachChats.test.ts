@@ -260,7 +260,7 @@ describe("adding to the list", () => {
 const DEV = "/w/baanmali-preorder";
 const laneDir = (branch: string) => `/w/.manut/lanes/baanmali-preorder/${branch.slice(4)}`;
 
-async function setup() {
+async function setup(over: { echo?: boolean } = {}) {
   (globalThis as { localStorage?: unknown }).localStorage = memory();
   resetKitProjects();
   resetKitAsks();
@@ -287,6 +287,8 @@ async function setup() {
     },
     chatInput: async (h: number, i: { kind: string; text?: string }) => {
       inputs.push({ id: hostOf.get(h) ?? "?", kind: i.kind, ...(i.text !== undefined ? { text: i.text } : {}) });
+      // as an agent does: a message starts its turn at once
+      if (over.echo && i.kind === "send") sinks.get(hostOf.get(h) ?? "")?.({ event: "turn.start" });
     },
     chatClose: async () => {},
     removeFiles: async () => {},
@@ -472,7 +474,7 @@ describe("in the sessions store", () => {
   });
 
   it("a read sends that chat's text to Kit only on Let Kit read, exactly as its card showed it", async () => {
-    const t = await setup();
+    const t = await setup({ echo: true });
     const a = await t.startIn("Add a PromptPay QR");
     const b = await t.startIn("Fix the receipt layout", "codex");
     t.ss.addReach(a, { kind: "session", id: b });
@@ -487,5 +489,8 @@ describe("in the sessions store", () => {
     expect(withoutReachNote(sent[0].text!)).toBe(card.ask.kind === "read" ? card.ask.text : "");
     // the bubble draws it as that chat's context, folded under its title (item 97)
     expect(t.users(a).at(-1)?.text).toBe(card.ask.kind === "read" ? card.ask.text : "");
+    // the turn it starts takes back the cards still open, never the one just pressed
+    expect(t.chat(a)!.turn).toBeTruthy();
+    expect(t.cards(a)[0].done).toBe("yes");
   });
 });

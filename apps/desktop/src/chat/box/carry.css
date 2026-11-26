@@ -210,7 +210,7 @@ button.bx-carry-n:hover {
   font-size: 14px;
 }
 /* a message that arrived from another chat (Bubble.tsx, item 102k): where it came from, in the muted second colour above its words */
-.msg-from {
+.msg-reached {
   display: flex;
   align-items: center;
   gap: 5px;

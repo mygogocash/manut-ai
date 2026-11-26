@@ -244,7 +244,7 @@ function SentText({ text, skills }: { text: string; skills?: string[] }) {
   if (from) {
     return (
       <>
-        <span className="msg-from" data-testid="bubble-from">
+        <span className="msg-reached" data-testid="bubble-reached-from">
           <Icon name="link" size={12} />
           {t("reach.from", { title: from.title })}
         </span>

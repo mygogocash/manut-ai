@@ -11,7 +11,8 @@ import { helperRows } from "./helperAsks";
 import type { ReachAsk } from "./reachAsks";
 import { ReachCardView, reachRefusedWords, reachTitle } from "./ReachCards";
 import { MayReachView } from "./MayReach";
-import { addEntry, type ReachEntry } from "./reachList";
+import { addEntry, fromChatText, type ReachEntry } from "./reachList";
+import { Bubble } from "../chat/parts/Bubble";
 
 afterEach(() => setLang("en"));
 
@@ -101,5 +102,17 @@ describe("the list under the box", () => {
     expect(text(html)).toContain("2QR builder");
     expect(html).toContain('aria-label="Take Receipt layout off the list"');
     expect(text(html)).toContain("Orders is in another shop");
+  });
+});
+
+describe("a message from another chat in the chat it reached", () => {
+  it("says where it came from above its words, so it never reads as typed there", () => {
+    const html = draw(createElement(Bubble, { item: { kind: "user", text: fromChatText("Add the PromptPay QR", "Allow. Print the checksum.") } }));
+    expect(html).toContain('data-testid="bubble-reached-from"');
+    expect(text(html)).toContain("From “Add the PromptPay QR”, sent on by you");
+    expect(text(html)).toContain("Allow. Print the checksum.");
+    expect(text(html)).not.toContain("[Manut AI:");
+    const own = draw(createElement(Bubble, { item: { kind: "user", text: "Allow. Print the checksum." } }));
+    expect(own).not.toContain("bubble-reached-from");
   });
 });
