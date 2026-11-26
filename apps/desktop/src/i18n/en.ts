@@ -54,6 +54,7 @@ import { id } from "./en/id";
 import { imp } from "./en/imp";
 import { inbox } from "./en/inbox";
 import { job } from "./en/job";
+import { jobview } from "./en/jobview";
 import { key } from "./en/key";
 import { kit } from "./en/kit";
 import { lane } from "./en/lane";
@@ -215,6 +216,7 @@ export const en = {
   ...imp,
   ...inbox,
   ...job,
+  ...jobview,
   ...key,
   ...kit,
   ...lane,

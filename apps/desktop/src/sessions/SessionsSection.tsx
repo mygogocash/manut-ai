@@ -280,7 +280,7 @@ function NewSessionMenu({ onClose, trigger, start }: { onClose: () => void; trig
   // Ask several agents (item 102a): offered when two or more chat rows can start (two agents, or one with two models)
   const choices = useAgentChoices();
   const several = offersAskSeveral(ss.agents ? offeredAgents(ss.agents) : null, ss.recent, choices, accounts.groups);
-  const [asking, setAsking] = useState(false);
+  const [asking, setAsking] = useState(!!start?.again?.length);
   // the agents that are not installed stay folded until the person opens them
   const [unfold, setUnfold] = useState(false);
   const [copied, setCopied] = useState<AgentId | null>(null);
@@ -422,7 +422,7 @@ function NewSessionMenu({ onClose, trigger, start }: { onClose: () => void; trig
         {/* placed as the menu is: on the side with room, and the panel scrolls inside what is left (a chat box under three rows is tall) */}
         <div ref={box} data-testid="ask-wrap">
           <div className="ss-scroll" style={fit ? { maxHeight: fit.max } : undefined} data-testid="ask-scroll">
-            <AskSeveralPanel at={at} accountWord={(a) => sessionAccountSuffix(accounts.groups, a)} onBack={() => setAsking(false)} onClose={() => close("pick")} />
+            <AskSeveralPanel at={at} initial={start?.again} accountWord={(a) => sessionAccountSuffix(accounts.groups, a)} onBack={() => setAsking(false)} onClose={() => close("pick")} />
           </div>
         </div>
       </Popover>

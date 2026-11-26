@@ -1,0 +1,188 @@
+/* The job's side-by-side view (SideBySide.tsx, item 102b). It sits in the Code page's body, which is a flex column, and measures
+   its own width (a container query), not the window's: three columns where each has room, tabs where it has not. */
+.jv {
+  container: jv / inline-size;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 16px 16px;
+  height: 100%;
+  box-sizing: border-box;
+}
+.jv-none {
+  align-items: flex-start;
+}
+.jv-bar {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+.jv-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.jv-title {
+  flex: 1 1 200px;
+  min-width: 0;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.jv-bar-acts,
+.jv-confirm {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.jv-confirm {
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--rad);
+  background: var(--aui-subtle);
+  font-size: 13px;
+}
+/* a Stop is a quiet button that reads as the careful one only while it can act */
+.jv .jv-stop:not(:disabled) {
+  color: var(--aui-danger, var(--ink));
+}
+.jv .btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* the tabs stand in for the columns only where they do not fit */
+.jv-tabs {
+  display: none;
+  flex: none;
+  gap: 6px;
+  overflow-x: auto;
+}
+.jv-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--rad);
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.jv-tab[aria-selected="true"] {
+  background: var(--aui-subtle);
+  border-color: var(--ink);
+}
+
+.jv-cols {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(var(--jv-n, 3), minmax(0, 1fr));
+  gap: 12px;
+}
+.jv-col {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--rad);
+  background: var(--aui-surface, var(--main));
+}
+.jv-h {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+.jv-who {
+  flex: 1 1 0;
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px 6px;
+  min-width: 0;
+}
+.jv-agent {
+  font-weight: 600;
+}
+.jv-model,
+.jv-branch {
+  font-size: 12px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.jv-branch {
+  order: 3;
+  flex: 1 1 100%;
+}
+.jv-h .tag {
+  flex: none;
+}
+/* the lane's own timeline, smaller: its column is a third of the page, so its rows use all of it */
+.jv-chat {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--line);
+  font-size: 13px;
+}
+.jv-chat .thread {
+  padding: 10px 0 12px;
+  gap: 12px;
+}
+.jv-chat .thread > * {
+  width: calc(100% - 12px);
+}
+/* the card fills its column: it is the lane's own card, only wider than the chat's reading width */
+.jv-asks .card {
+  max-width: none;
+  width: 100%;
+  box-sizing: border-box;
+}
+.jv-asks {
+  flex: none;
+  max-height: 45%;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.jv-acts {
+  flex: none;
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+@container jv (max-width: 760px) {
+  .jv-tabs {
+    display: flex;
+  }
+  .jv-cols {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .jv-col[data-active="false"] {
+    display: none;
+  }
+  /* the tab already names the agent and its state */
+  .jv-col .jv-h .tag {
+    display: none;
+  }
+}

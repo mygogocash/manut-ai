@@ -1,6 +1,7 @@
 // Open the SESSIONS + menu from elsewhere (⌘N, the first-run card's "New session"). The menu's header registers here.
 // Also: the shells this computer offers for a Shell row (the + menu's Shell ▸ list, Settings › Terminal), asked once.
 import { useEffect, useState } from "react";
+import type { AskPick } from "../jobs/ask";
 import { getShellHost, type ShellInfo } from "../terminal/host";
 
 /** How the menu opens when something other than the + button asks for it. `chat` puts the focus on the first Chat with Kit
@@ -8,6 +9,8 @@ import { getShellHost, type ShellInfo } from "../terminal/host";
 export interface NewMenuStart {
   chat?: boolean;
   folder?: string;
+  /** The side-by-side view's Ask them again (item 102b): the menu opens on Ask several agents' panel with these rows. Nothing is sent. */
+  again?: AskPick[];
 }
 
 const openers = new Set<(start?: NewMenuStart) => void>();

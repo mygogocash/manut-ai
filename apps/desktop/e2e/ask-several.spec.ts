@@ -162,7 +162,7 @@ test("one send starts one lane for each row, each in its agent's Ask mode and a 
   await expect(job).toContainText("3 agents: Add a PromptPay QR to the checkout");
   await expect(job.locator('[data-testid^="lane-job-agent-"]')).toHaveCount(3);
   await expect(job.getByTestId("lane-job-lanes")).toHaveCount(0);
-  await job.getByTestId("lane-job-open").click();
+  await job.getByTestId("lane-job-toggle").click();
   const lanes = job.locator(".job-lanes > .lane");
   await expect(lanes).toHaveCount(3);
   await expect(lanes.first()).toContainText("Kit · Claude Code");
@@ -217,7 +217,7 @@ for (const [theme, width] of [["light", 1280], ["dark", 1280], ["light", 900], [
     await page.screenshot({ path: join(SHOTS, `ask-several-panel-${theme}-${width}.png`), animations: "disabled" });
     await panel.getByTestId("composer").press("Enter");
     await expect(page.locator('[data-testid^="lane-job-j"]')).toHaveCount(1);
-    await page.locator('[data-testid^="lane-job-j"]').getByTestId("lane-job-open").click();
+    await page.locator('[data-testid^="lane-job-j"]').getByTestId("lane-job-toggle").click();
     await page.screenshot({ path: join(SHOTS, `ask-several-job-${theme}-${width}.png`), animations: "disabled" });
   });
 }

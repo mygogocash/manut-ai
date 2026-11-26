@@ -13,6 +13,10 @@ import { SessionBackgroundMenu } from "../sessions/SessionBackgroundMenu";
 import { listFolder, SessionList, SessionsHeader } from "../sessions/SessionsSection";
 import { TasksBar } from "../tasks/TasksBar";
 import { KitPanel } from "../code/KitPanel";
+import { SideBySide, type Again } from "../jobs/SideBySide";
+import { BOX_KEY } from "../jobs/AskSeveralPanel";
+import { setDraft } from "../app/drafts";
+import { openNewSessionMenu } from "../sessions/newMenu";
 import { NewProject } from "../code/NewProject";
 import { getHost } from "../sessions/host";
 import { MenuPageFrame } from "./MenuPage";
@@ -32,6 +36,20 @@ export function CodePage() {
   const [making, setMaking] = useState(false);
   const host = getHost();
   const offerNew = SESSIONS_ENTRY && !!host.projectNew;
+  // the job whose lanes are watched side by side (item 102b): it fills the page body, since three columns need more than the reading column
+  const [several, setSeveral] = useState<string | null>(null);
+  // Ask them again: the panel opens with the same rows and message, unsent. The view closes first, so the + menu is on the page to open.
+  const again = (a: Again) => {
+    setSeveral(null);
+    setDraft(BOX_KEY, a.text);
+    openNewSessionMenu({ chat: true, folder: a.cwd, again: a.picks });
+  };
+  if (several)
+    return (
+      <MenuPageFrame page="code" title={t("menu.code")}>
+        <SideBySide job={several} onBack={() => setSeveral(null)} onAgain={again} />
+      </MenuPageFrame>
+    );
   return (
     <MenuPageFrame
       page="code"
@@ -46,7 +64,7 @@ export function CodePage() {
     >
       <div className="col">
         {offerNew && <NewProject host={host} home={home} open={making} onClose={() => setMaking(false)} onMade={listFolder} />}
-        {SESSIONS_ENTRY && <KitPanel />}
+        {SESSIONS_ENTRY && <KitPanel onJobView={setSeveral} />}
         {SESSIONS_ENTRY && (
           // It keeps the sidebar section's test id, so what found TERMINALS there finds it here.
           <section
