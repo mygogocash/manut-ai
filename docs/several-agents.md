@@ -1,7 +1,7 @@
 # Several agents on one job (item 102)
 
 The design for plan item 102 (`docs/plan.md`; `docs/t3code-parity.md`, "Orchestration", group 3 of its order: "must be
-designed first because it can act for the person"). Status on 27 Nov 2026: design only, nothing built. It covers three
+designed first because it can act for the person"). Status on 27 Nov 2026: design, with slice 102a built (Ask several agents: the + menu row, its panel, one send starting one lane for each row, the job saved with each session and its row in the Lanes band; see "Phases and slices"). The rest is not built. It covers three
 things:
 
 1. **Ask several agents.** One message from the person starts lanes on different agents and models side by side, and their
@@ -400,11 +400,16 @@ the screens are built on tested ground.
 
 ### Phase 1: several agents from one message (no agent starts anything)
 
-- **102a. Ask several: the job and its lanes.** The + menu row and its panel (agents, models, efforts, accounts and their
+- **102a. Ask several: the job and its lanes. Built 27 Nov 2026** (`src/jobs/ask.ts`, `choices.ts`, `AskSeveralPanel.tsx`, `startJob` in `sessions/sessions.ts`, `jobGroups` in `code/Lanes.tsx`; decisions in `docs/decisions/102a-ask-several.md`). The + menu row and its panel (agents, models, efforts, accounts and their
   limit state, the shared box), one send starting one lane per row through `start`, `SessionRec.job` saved and read back,
   the job's row in the Lanes band. Tests: `newMenu.test.ts` (when the row shows), a sessions store test (one send, three
   `chat_start`s, each with its agent's Ask mode, one job), a restart test. Safety test: each lane's `chat_start` names its
   own lane folder and `ASK_MODE`'s value, and a limited account's row cannot be sent.
+  What changed from the design: the panel replaces the menu as a second step and shows the folder chip read-only (Back to
+  change it); models and efforts come from what each agent last listed, kept on this computer, so a fresh Mac offers
+  "Agent's own" until a lane of that agent has run; the job's row is closed until pressed and groups only two or more lanes;
+  there is no "This Mac runs 2 at once" line and the lanes start one after the other until 102d and 102h give the cap; a
+  folder that is not a repository starts nothing.
 - **102b. The side-by-side view.** Columns at wide, tabs at narrow, each with its state tag, compact chat, ask card, Open
   lane and Stop; Stop all; Ask them again. Tests: the view's props-only component, an e2e spec on the stand-in agent
   (`e2e/several-agents.spec.ts`) with pictures at 1280 and 900, light and dark. Safety test: an ask answered in a column is

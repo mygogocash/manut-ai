@@ -114,6 +114,7 @@ import { rw } from "./ja/rw";
 import { sched } from "./ja/sched";
 import { sessions } from "./ja/sessions";
 import { set } from "./ja/set";
+import { several } from "./ja/several";
 import { shops } from "./ja/shops";
 import { side } from "./ja/side";
 import { skills } from "./ja/skills";
@@ -272,6 +273,7 @@ export const ja: Record<Key, string> = {
   ...sched,
   ...sessions,
   ...set,
+  ...several,
   ...shops,
   ...side,
   ...skills,

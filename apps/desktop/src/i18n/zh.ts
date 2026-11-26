@@ -114,6 +114,7 @@ import { rw } from "./zh/rw";
 import { sched } from "./zh/sched";
 import { sessions } from "./zh/sessions";
 import { set } from "./zh/set";
+import { several } from "./zh/several";
 import { shops } from "./zh/shops";
 import { side } from "./zh/side";
 import { skills } from "./zh/skills";
@@ -272,6 +273,7 @@ export const zh: Record<Key, string> = {
   ...sched,
   ...sessions,
   ...set,
+  ...several,
   ...shops,
   ...side,
   ...skills,
