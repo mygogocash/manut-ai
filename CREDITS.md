@@ -99,6 +99,13 @@ GoSpark again (at `a7537c80`, the same checkout, 27 Nov 2026) for the helper lan
 ported to TypeScript with their numbers; and their tests (`BuddyBatchingTests`, `BuddyHeadCapTests`, `BuddyReportTests`,
 `BuddyFailureClassTests`, `BuddyBudgetTests`, the tally in `APIKeyToolsTests`), ported case by case as tables in `rules.test.ts`.
 
+GoSpark again (at `a7537c80`, the same checkout, 27 Nov 2026) for a helper lane's snapshot of its lead's folder (item 102f,
+`apps/desktop/src-tauri/src/lane_helper.rs`): `Git.captureTree()` (a temporary `GIT_INDEX_FILE` copied from the real index,
+`add -A`, `write-tree`), `commitTree` and `captureCheckpoint` (`commit-tree` on top of HEAD under the app's own name, kept by a
+ref of the app's own) in `GoGoCode/Git/Git.swift`, and the isolated copy each Buddy head starts from (`makeBuddyCopy` in
+`GoGoCode/App/AppModel+Buddy.swift`, `BuddyCopySnapshots` in `GoGoCode/Models/BuddyCopySnapshot.swift`), rewritten in Rust.
+Here the ref is under `refs/manut/helpers/` and the copy is a worktree on a branch of its own rather than a detached one.
+
 The Agent Client Protocol's agent registry (Apache-2.0, `agentclientprotocol/registry`, release `v2026.11.26-3667256` at
 commit `36672565f76e7fb9796eb15182e0e14fb9e77c33`) for Settings › Providers › From the ACP registry (item 101c): its
 published `registry.json` is pinned byte for byte in `apps/desktop/src-tauri/acp-registry/` with its `quarantine.json`
