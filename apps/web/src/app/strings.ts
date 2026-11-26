@@ -24,7 +24,7 @@ export type AppStrings = {
   tryAgain: string;
 
   needYou: (n: number) => string;
-  tabs: { today: string; needs: string; chat: string; shops: string };
+  tabs: { today: string; needs: string; chat: string; shops: string; mac: string };
   sections: string;
   greeting: (part: "morning" | "afternoon" | "evening", name: string | null) => string;
 
@@ -102,6 +102,137 @@ export type AppStrings = {
   offlineBody: string;
   offlineHeld: (when: string) => string;
   backOnline: string;
+
+  /// The Your Mac tab (src/app/mac/, docs/remote-access.md).
+  mac: MacStrings;
+};
+
+/// Every word of the Your Mac tab. A phone pairs with the person's Mac by its code, then watches the Mac's chats and
+/// answers their asks. The approval card's own words are the Mac's ("Allow once", "Approval needed", "in {cwd}",
+/// "Start working on this plan?", apps/desktop/src/i18n/en.ts), so an ask reads the same on both.
+export type MacStrings = {
+  title: string;
+  checking: string;
+  unavailableTitle: string;
+  unavailableBody: string;
+
+  scanTitle: string;
+  scanBody: string;
+  scan: string;
+  scanning: string;
+  cancelScan: string;
+  noScanner: string;
+  cameraRefused: string;
+  scanNotCode: string;
+  pasteLabel: string;
+  pasteHelp: string;
+  pair: string;
+  outsideTitle: string;
+  outsideBody: string;
+  copyLink: string;
+  copied: string;
+
+  connecting: string;
+  digitsTitle: string;
+  digitsBody: string;
+  digitsSpoken: (digits: string) => string;
+  waitingForMac: string;
+  passkeyTitle: string;
+  passkeyBody: string;
+  makePasskey: string;
+  passkeyClosed: string;
+  finishing: string;
+  failed: Record<
+    | "bad_link"
+    | "other_site"
+    | "used"
+    | "storage"
+    | "no_passkeys"
+    | "door"
+    | "relay_off"
+    | "unreachable"
+    | "mac_away"
+    | "ended"
+    | "taken"
+    | "full"
+    | "passkey_failed",
+    string
+  >;
+  failedTitle: string;
+  startAgain: string;
+
+  live: string;
+  reaching: string;
+  down: (why: string, away: "offline" | "paused" | "sleeping" | "off" | null) => string;
+  greyed: (when: string) => string;
+  clearedTitle: string;
+  clearedBody: string;
+  forgottenTitle: string;
+  forgottenBody: string;
+  states: { working: string; needs_you: string; done: string };
+  loadingChats: string;
+  noChatsTitle: string;
+  noChatsBody: string;
+  updated: (when: string) => string;
+  allChats: string;
+  stepNow: (step: string) => string;
+  you: string;
+  reply: string;
+  messagesTitle: string;
+  linksNote: string;
+  asksTitle: string;
+
+  approvalNeeded: string;
+  startPlan: string;
+  inCwd: (cwd: string) => string;
+  askedBy: (who: string) => string;
+  allowOnce: string;
+  allowing: string;
+  no: string;
+  sayingNo: string;
+  confirm: string;
+  answerLabel: string;
+  sendAnswer: string;
+  sending: string;
+  skipHint: string;
+  onlyOnMac: string;
+  answerWhenBack: string;
+  notes: Record<
+    | "allowed"
+    | "declined"
+    | "answered"
+    | "stopped"
+    | "confirm"
+    | "passkey_failed"
+    | "changed"
+    | "closed"
+    | "gone"
+    | "not_offered"
+    | "needs_update"
+    | "busy"
+    | "late"
+    | "not_taken"
+    | "no_turn"
+    | "passkey_refused"
+    | "forgotten"
+    | "no_answer",
+    string
+  >;
+  outcomes: { allowed: string; declined: string; expired: string; answered: string };
+  stop: string;
+  stopping: string;
+
+  forget: string;
+  forgetting: string;
+  forgetTitle: string;
+  forgetBody: string;
+  forgetConfirm: string;
+  keep: string;
+  forgetFailed: string;
+
+  passkeyName: string;
+  practice: string;
+  practiceTypeDigits: string;
 };
 
 /// Who decided, as the app can tell: the person, the shop's owner (from the LINE link or another way), a helper whose
@@ -184,7 +315,7 @@ export const en: AppStrings = {
   tryAgain: "Try again",
 
   needYou: (n) => `${n} need you`,
-  tabs: { today: "Today", needs: "Needs you", chat: "Chat", shops: "Shops" },
+  tabs: { today: "Today", needs: "Needs you", chat: "Chat", shops: "Shops", mac: "Your Mac" },
   sections: "Sections",
   greeting: (part, name) => `Good ${part}${name ? `, ${name}` : ""}`,
 
@@ -272,6 +403,144 @@ export const en: AppStrings = {
   offlineBody: "What waits for you can't be shown or answered offline. It shows again when you're back online.",
   offlineHeld: (when) => `Read at ${when}. These may have changed, so they can't be answered until you're back online.`,
   backOnline: "Back online. Reading what waits for you again.",
+
+  mac: {
+    title: "Your Mac",
+    checking: "Checking whether your Mac can be reached",
+    unavailableTitle: "Reaching your Mac isn't available yet",
+    unavailableBody: "Manut AI hasn't switched on the way a phone reaches a Mac. Sharing and access in your Mac's Settings says when it is.",
+
+    scanTitle: "Scan the code on your Mac",
+    scanBody: "On your Mac, open Settings, then Sharing and access, and press Pair a phone.",
+    scan: "Scan",
+    scanning: "Point the camera at the code on your Mac.",
+    cancelScan: "Cancel",
+    noScanner: "This browser can't read a code with the camera. Press Copy link on your Mac and paste it below.",
+    cameraRefused: "The camera isn't available, so nothing was scanned. Paste the link instead.",
+    scanNotCode: "That code isn't from Manut AI. Scan the code under Pair a phone on your Mac.",
+    pasteLabel: "or paste the link",
+    pasteHelp: "The link your Mac copies when you press Copy link. It works once.",
+    pair: "Pair",
+    outsideTitle: "Pair from the app on your Home Screen",
+    outsideBody:
+      "This link opened in the browser, which keeps nothing for the app on your Home Screen, so nothing was paired. Copy the link, open Manut AI from your Home Screen, go to Your Mac and paste it there.",
+    copyLink: "Copy link",
+    copied: "Copied. Paste it in the app.",
+
+    connecting: "Reaching your Mac",
+    digitsTitle: "Type these on your Mac",
+    digitsBody: "Your Mac asks for the four digits this phone shows. They work once.",
+    digitsSpoken: (digits) => `The four digits are ${digits.split("").join(" ")}`,
+    waitingForMac: "Waiting for your Mac",
+    passkeyTitle: "Your Mac took the code",
+    passkeyBody: "Make a passkey to finish. Your phone asks for Face ID or its passcode, and every Allow from this phone asks again.",
+    makePasskey: "Make a passkey",
+    passkeyClosed: "The passkey wasn't made. Press Make a passkey again while your Mac waits.",
+    finishing: "Finishing",
+    failed: {
+      bad_link: "That isn't a pairing code from Manut AI. Copy the link on your Mac again.",
+      other_site: "That code is for another Manut AI address. Pair from the Manut AI your Mac uses.",
+      used: "This phone already used that code. On your Mac, press Pair a phone again for a new one.",
+      storage: "This phone could not keep the pairing. If your Mac lists this phone, unpair it there, then start again.",
+      no_passkeys: "This browser can't make a passkey, so it can't answer for your Mac. Use Safari on an iPhone, or Chrome on Android.",
+      door: "That code has run out or was used. On your Mac, press Pair a phone again for a new one.",
+      relay_off: "Reaching your Mac isn't available yet.",
+      unreachable: "Manut AI could not be reached. Check your connection, then start again on your Mac.",
+      mac_away: "Your Mac isn't connected. Open Manut AI on your Mac, then start again there.",
+      ended: "Your Mac ended this pairing. If the digits were typed wrong or too late, press Pair a phone on your Mac and start again.",
+      taken: "That passkey already belongs to another phone your Mac knows. Start again on your Mac.",
+      full: "Your Mac already has the most phones it pairs. Unpair one on your Mac, then start again.",
+      passkey_failed: "This phone could not make the passkey. Start again on your Mac.",
+    },
+    failedTitle: "This phone isn't paired",
+    startAgain: "Start again",
+
+    live: "Connected to your Mac",
+    reaching: "Reaching your Mac",
+    down: (why, away) =>
+      why === "offline"
+        ? "You're offline."
+        : why === "mac_away"
+          ? away === "sleeping"
+            ? "Your Mac is asleep."
+            : away === "paused" || away === "off"
+              ? "Your Mac has reaching it from a phone switched off."
+              : "Your Mac isn't connected."
+          : why === "relay_off"
+            ? "Reaching your Mac isn't available right now."
+            : why === "replaced"
+              ? "Another copy of this phone connected to your Mac."
+              : "Your Mac isn't answering.",
+    greyed: (when) => `What you see was current at ${when}. Nothing can be answered until your Mac is back, and this clears 15 minutes after that time.`,
+    clearedTitle: "Waiting for your Mac",
+    clearedBody: "Your Mac hasn't answered for 15 minutes, so this phone cleared what it showed. It shows again when your Mac is back.",
+    forgottenTitle: "Your Mac doesn't know this phone",
+    forgottenBody: "It was unpaired on the Mac. Forget this Mac here, then pair again from your Mac if you want to.",
+    states: { working: "Working", needs_you: "Needs you", done: "Done" },
+    loadingChats: "Loading your Mac's chats",
+    noChatsTitle: "No chats yet",
+    noChatsBody: "Chats you start on your Mac show here.",
+    updated: (when) => `Updated ${when}`,
+    allChats: "All chats",
+    stepNow: (step) => `Now: ${step}`,
+    you: "You",
+    reply: "Reply",
+    messagesTitle: "Messages",
+    linksNote: "Links in replies don't open from here. Open them on your Mac.",
+    asksTitle: "Asks",
+
+    approvalNeeded: "Approval needed",
+    startPlan: "Start working on this plan?",
+    inCwd: (cwd) => `in ${cwd}`,
+    askedBy: (who) => `Asked by ${who}`,
+    allowOnce: "Allow once",
+    allowing: "Allowing",
+    no: "No",
+    sayingNo: "Saying no",
+    confirm: "Confirm",
+    answerLabel: "Your answer",
+    sendAnswer: "Send answer",
+    sending: "Sending",
+    skipHint: "Leave one empty to skip it.",
+    onlyOnMac: "Answer this one on your Mac.",
+    answerWhenBack: "It can be answered once your Mac is back.",
+    notes: {
+      allowed: "Allowed once.",
+      declined: "You said no.",
+      answered: "Answer sent.",
+      stopped: "Stopped.",
+      confirm: "Allowing needs Face ID or your passcode. Press Confirm to try again.",
+      passkey_failed: "This phone could not use its passkey. Allow it on your Mac instead.",
+      changed: "It changed since you saw it. Read it again before you answer.",
+      closed: "This was already answered.",
+      gone: "This is no longer on your Mac.",
+      not_offered: "That answer is only on your Mac.",
+      needs_update: "This needs a newer Manut AI on the Mac. Answer it on your Mac.",
+      busy: "Your Mac has too many answers waiting. Try again in a moment.",
+      late: "That took too long. Press Allow once again.",
+      not_taken: "Your Mac could not do it. Look on your Mac.",
+      no_turn: "Nothing is running in this chat now.",
+      passkey_refused: "Your Mac did not accept this phone's passkey. Allow it on your Mac instead.",
+      forgotten: "Your Mac doesn't know this phone any more.",
+      no_answer: "Your Mac did not answer, so nothing was done. Try again once it is back.",
+    },
+    outcomes: { allowed: "Allowed", declined: "Declined", expired: "Nobody answered in time", answered: "Answered" },
+    stop: "Stop",
+    stopping: "Stopping",
+
+    forget: "Forget this Mac",
+    forgetting: "Forgetting",
+    forgetTitle: "Forget this Mac?",
+    forgetBody:
+      "This phone deletes its key for your Mac and stops showing its chats. Unpair the phone on your Mac too. The passkey stays in this phone's passwords until you delete it there.",
+    forgetConfirm: "Forget",
+    keep: "Keep it",
+    forgetFailed: "This phone could not delete its key. Try again.",
+
+    passkeyName: "Your Mac",
+    practice: "There is no Mac in practice: paste any text to pair with a pretend one, which is forgotten when the page reloads.",
+    practiceTypeDigits: "Type them for me",
+  },
 };
 
 export function appStrings(): AppStrings {
