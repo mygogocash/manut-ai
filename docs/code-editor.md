@@ -428,10 +428,44 @@ conversation to put away. A row is in one place: each choice replaces the others
   opens its list; a lane leaves the Lanes band and is listed behind its "Snoozed and archived (n)" line. Each is brought back from its
   own menu ("Bring back from the archive"). Archiving only sets a mark: it never closes a session or touches a lane's folder or
   branch (Settings, Worktrees and Kit's kept folders handle those).
-- **Where it is kept.** A chat's marks are kept on this computer (`localStorage` `manut.sidebar.rows`, chats only), where the chat
-  itself lives on across restarts. A lane's and a terminal's marks are of this run of the app, as their list is: the sessions list is
-  not saved, so their marks go when the session is closed. A record saved before this (no marks) reads as none, and a field this build
-  does not know is dropped when it is read, never an error.
+- **Where it is kept.** Every row's marks are kept on this computer (`localStorage` `manut.sidebar.rows`). Since item 94 a lane is known
+  by its own folder (`lane:<folder>`, whose record is under `~/.manut/lanes`) and a terminal or a lane with no folder by its link id
+  (`session:<linkId>`, drawn when the session is made and kept across restarts), never by the session's number, which a later run may
+  give to another session; so their marks come back with the sessions' list after a restart. A session's marks go when this run saw it
+  listed and then closed (a terminal closed with Undo still open keeps them). A record saved before this (no marks) reads as none,
+  and a field this build does not know is dropped when it is read, never an error.
+
+### The sidebar as an inbox (item 94)
+
+The rest of T3 Code's inbox (the owner, 26 Nov; `docs/t3code-parity.md`), on the same marks. The rules are `sidebar/rows.ts`,
+`sidebar/selection.ts` and `sidebar/inbox.ts`; each has its tests beside it, and `e2e/inbox.spec.ts` walks the select-several, the
+undo toast, the picked time, the Working group and a quiet chat settling, in light and dark (`INBOX_SHOTS=<dir>` keeps the pictures).
+
+- **Undo.** Pin, Snooze, Done for now and Archive are held for six seconds, the newest one only, with exactly the mark each row it
+  touched had before; Undo puts that back and nothing else, for one row or every row of a bulk action. The app's one toast (the closed
+  terminal's, `sessions/CloseToasts.tsx`) shows it with Undo and no countdown, and ⌘Z (Ctrl+Shift+Z elsewhere) takes it back while the
+  focus is in the side menu, on a row (`data-row-key`) or on the toast; a chat box or a terminal keeps its own ⌘Z. After a menu
+  choice the focus goes back to the row's "more" button, so the key reaches it. An ask still wins: the watcher wakes a row that asks
+  whatever an Undo put back.
+- **Snooze until.** After the three fixed times, "Until it finishes" for a chat or lane whose turn runs (back when the turn ends, or at
+  once when it asks), and "Pick a time" with a date and a time field (the kit's form parts), which refuses a time that has passed or
+  does not exist, in the app's own words.
+- **The Working group**, off by default (Settings › General › Side menu, the group that also holds the tasks bar). When on, a chat whose
+  turn runs waits in a quiet "Working" list under Recent and is back on top of Recent when its turn ends (the end is its newest
+  activity). A chat that asks something, a pinned one and a settled or snoozed one are never put there.
+- **Several rows at once**, in Recent (with the Working group) and in History's days: Shift-click selects from the last row picked,
+  Cmd-click (Ctrl-click elsewhere) adds or removes one, Shift with an arrow does it from the keyboard, Escape clears, and a plain click
+  still opens its row. A selected row has the kit's selected band (`data-sel`). The menu of a selected row offers Pin, Snooze, Done for
+  now and Archive for all of them ("2 chats"), and one Undo takes the whole action back.
+- **Settling by itself**, two choices in the same Settings group, each with its plain line. A chat or lane with no message either way
+  and no ask waiting for 3 days (Off, 1, 3, 7 or 14) is marked Done for now, counted from the last thing the app knows happened in it:
+  a runtime that does not say when a chat last moved (Practice's) gives no time, and such a chat is left alone until something
+  happens in it this run. A lane whose pull request the host said merged is marked Done for now too (on by default): "said" is a list
+  the app read showing this repository's own request merged (`tasks/pulls.ts` `mergedFor`), or the app's own Merge finishing; a
+  request that is just no longer open never counts, and a fork's never does. A row the person marked, one working, one asking and the
+  one open are never settled this way, and Undo does not hold it (the person did not do it). A mark that leaves a row notes when
+  (`back`), so the quiet days count from there and a row brought back is not put away again at once. The row's quiet second line says
+  why: "Done after 3 quiet days", "Done: its pull request merged" (Recent, History's tag, a lane's line).
 - **The pull request on a lane's row.** The shell's pull request list now carries the branch each request is made from (`gh`
   `headRefName`, GitLab `source_branch`). A lane's own branch is matched to the open requests of its repository: those the Tasks page
   has already listed, else one read of that repository's first page when the cache is older than five minutes. It is one call for the
