@@ -354,6 +354,9 @@ struct Secrets {
     prefix: Regex,
     /// a character the shell acts on: in a command, a masked value stops at it
     shell: Regex,
+    /// a value that is a reference (`${DB_PASSWORD}`), and a word that says there is none (`none`): no key
+    reference: Regex,
+    plain: Regex,
 }
 
 /// A pattern of secrets.json as the page's JavaScript reads it: `{names}` and `{prefixes}` filled in, its flags (`i`, `m`),
@@ -395,6 +398,8 @@ fn secrets() -> &'static Secrets {
             run: one("run"),
             prefix: pattern(&format!("^{prefixes}"), "", &names, &prefixes),
             shell: one("shell"),
+            reference: one("ref"),
+            plain: pattern(&get("plain"), "i", &names, &prefixes),
         }
     })
 }
@@ -415,6 +420,11 @@ fn key_shaped(s: &Secrets, m: &str) -> bool {
         return s.named.is_match(m) || s.run.find_iter(m).any(|r| s.needs.is_match(r.as_str()));
     }
     s.needs.is_match(&s.prefix.replace(m, ""))
+}
+
+/// Whether a named value is a key at all: not a reference and not a word that says there is none (src/lib/secrets.ts `aKey`).
+fn a_key(s: &Secrets, v: &str) -> bool {
+    !s.reference.is_match(v) && !s.plain.is_match(v)
 }
 
 /// How much of a value may be masked in a command: up to the first character the shell acts on.
@@ -470,9 +480,9 @@ pub fn mask_secrets(t: &str) -> String {
     }
     t = mask_tokens(s, &s.tokens, t);
     for rx in &s.kept {
-        t = rx.replace_all(&t, |c: &regex::Captures| format!("{}{}{}", &c[1], s.mask, &c[3])).into_owned();
+        t = rx.replace_all(&t, |c: &regex::Captures| if a_key(s, &c[2]) { format!("{}{}{}", &c[1], s.mask, &c[3]) } else { c[0].to_string() }).into_owned();
     }
-    s.assigned.replace_all(&t, |c: &regex::Captures| format!("{}={}", &c[1], s.mask)).into_owned()
+    s.assigned.replace_all(&t, |c: &regex::Captures| if a_key(s, &c[0][c[1].len() + 1..]) { format!("{}={}", &c[1], s.mask) } else { c[0].to_string() }).into_owned()
 }
 
 /// One line of a command, masked as [`mask_command`] says.
@@ -481,7 +491,7 @@ fn command_line(s: &Secrets, line: &str) -> String {
     for rx in &s.kept {
         t = rx.replace_all(&t, |c: &regex::Captures| {
             let v = &c[2];
-            match up_to(s, v) {
+            match if a_key(s, v) { up_to(s, v) } else { 0 } {
                 0 => c[0].to_string(),
                 n => format!("{}{}{}{}", &c[1], s.mask, &v[n..], &c[3]),
             }
@@ -489,7 +499,7 @@ fn command_line(s: &Secrets, line: &str) -> String {
     }
     s.assigned.replace_all(&t, |c: &regex::Captures| {
         let v = &c[0][c[1].len() + 1..];
-        match up_to(s, v) {
+        match if a_key(s, v) { up_to(s, v) } else { 0 } {
             0 => c[0].to_string(),
             n => format!("{}={}{}", &c[1], s.mask, &v[n..]),
         }

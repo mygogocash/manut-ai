@@ -117,7 +117,10 @@ The states whose rules are pure functions, with their tests, then the screens th
   sign (`~/.aws/credentials`), `DB_PASS`, `MYSQL_PWD`, `SMTP_PASS`, `APP_KEY`, `SECRET_KEY_BASE`, a vendor's `_KEY=`, a JSON
   `"key"`, `.netrc`'s password, `curl -u`, `mysql -p`, Slack's and Discord's webhook addresses, and the Resend, Replicate,
   Perplexity, xAI, Docker, age, Google OAuth client, Slack refresh, Atlassian, Postman, Netlify and Mapbox prefixes, each in
-  the shared table beside an ordinary line it leaves alone. Since item 117 the count never goes down (a key taken
+  the shared table beside an ordinary line it leaves alone. Ordinary text stays as it is, so it is no key in the changes
+  either: a CSS class or a name that starts with `sk-` (`sk-folding-cube`, `sk-learn-pipeline`), a value that is a
+  reference (`${DB_PASSWORD}`, `` `Bearer ${token}` ``), and a word that says there is none (`Token: none`, `null`, `false`).
+  Since item 117 the count never goes down (a key taken
   out again may already be in a commit), and a commit or a push the dial would otherwise let go alone first reads what it
   saves: the lane's own diff, from the shell's read-only `lane_diff` (bounded, `--no-ext-diff --no-textconv`, no clean filter,
   each file's diff masked by the shell's twin). A file an added line of which holds a key makes the step ask, whoever wrote it,

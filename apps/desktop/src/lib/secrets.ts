@@ -26,6 +26,12 @@ const NAMED = new RegExp(spec.named);
 const RUN = new RegExp(spec.run, "g");
 const PREFIX = new RegExp(`^${spec.prefixes}`);
 const SHELL = new RegExp(spec.shell);
+const REF = new RegExp(spec.ref);
+const PLAIN = new RegExp(spec.plain, "i");
+
+/** Whether a named value is a key at all: not a reference (`${DB_PASSWORD}`, `` `Bearer ${token}` ``) and not a word that says
+ *  there is none (`Token: none`), which are ordinary text and stay as they are (item 117). */
+const aKey = (value: string): boolean => !REF.test(value) && !PLAIN.test(value);
 
 /** A replacer's last two arguments: where the match is, and the text it was found in. */
 type At = [offset: number, text: string];
@@ -75,8 +81,8 @@ export function maskSecrets(text: string): string {
   text = maskWhole(text);
   for (const [rx, n] of SPLIT) text = text.replace(rx, (all, body: string) => splitToken(all, body, n));
   text = text.replace(TOKENS, (m: string, ...args: unknown[]) => (alone(m, at(args)) && keyShaped(m) ? spec.mask : m));
-  for (const rx of KEPT) text = text.replace(rx, (_m, before: string, _secret: string, after: string) => `${before}${spec.mask}${after}`);
-  return text.replace(ASSIGNED, (_m, name: string) => `${name}=${spec.mask}`);
+  for (const rx of KEPT) text = text.replace(rx, (m: string, before: string, secret: string, after: string) => (aKey(secret) ? `${before}${spec.mask}${after}` : m));
+  return text.replace(ASSIGNED, (m: string, name: string) => (aKey(m.slice(name.length + 1)) ? `${name}=${spec.mask}` : m));
 }
 
 /** One line of a command, masked as `maskCommand` says. */
@@ -85,13 +91,13 @@ function commandLine(line: string): string {
   line = line.replace(WORD, (m: string, ...args: unknown[]) => (alone(m, at(args)) && keyShaped(m) ? spec.mask : m));
   for (const rx of KEPT) {
     line = line.replace(rx, (m: string, before: string, secret: string, after: string) => {
-      const n = upTo(secret);
+      const n = aKey(secret) ? upTo(secret) : 0;
       return n ? `${before}${spec.mask}${secret.slice(n)}${after}` : m;
     });
   }
   return line.replace(ASSIGNED, (m: string, name: string) => {
     const value = m.slice(name.length + 1);
-    const n = upTo(value);
+    const n = aKey(value) ? upTo(value) : 0;
     return n ? `${name}=${spec.mask}${value.slice(n)}` : m;
   });
 }
