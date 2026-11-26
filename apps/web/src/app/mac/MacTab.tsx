@@ -143,6 +143,7 @@ function CodeForm({ m, remote, opened, scanner: given }: { m: MacStrings; remote
   const [scanning, setScanning] = useState(false);
   const [scanNote, setScanNote] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [empty, setEmpty] = useState(false);
   const video = useRef<HTMLVideoElement>(null);
   const stop = useRef<AbortController | null>(null);
 
@@ -199,6 +200,7 @@ function CodeForm({ m, remote, opened, scanner: given }: { m: MacStrings; remote
   };
   const submit = (event: FormEvent) => {
     event.preventDefault();
+    setEmpty(!text.trim());
     if (text.trim()) void remote.pair(text);
   };
   const canScan = scanner?.available === true;
@@ -254,15 +256,25 @@ function CodeForm({ m, remote, opened, scanner: given }: { m: MacStrings; remote
             autoCorrect="off"
             spellCheck={false}
             value={text}
-            onChange={(e) => setText(e.target.value)}
+            onChange={(e) => {
+              setText(e.target.value);
+              setEmpty(false);
+            }}
+            aria-invalid={empty || undefined}
             aria-describedby="mac-link-help"
           />
-          <span id="mac-link-help" className="help">
-            {m.pasteHelp}
-          </span>
+          {empty ? (
+            <span id="mac-link-help" className="help err" role="alert">
+              {m.pasteFirst}
+            </span>
+          ) : (
+            <span id="mac-link-help" className="help">
+              {m.pasteHelp}
+            </span>
+          )}
         </div>
         <div>
-          <button type="submit" className={canScan ? "btn" : "btn dark"} style={TAP} disabled={!text.trim()}>
+          <button type="submit" className={canScan ? "btn" : "btn dark"} style={TAP}>
             {m.pair}
           </button>
         </div>
@@ -310,7 +322,7 @@ function PairingCard({ m, step, practice }: { m: MacStrings; step: Extract<MacVi
           </section>
           {practice && (
             <div className="banner info" role="note">
-              <span className="grow">{m.practice}</span>
+              <span className="grow">{m.practiceDigits}</span>
               <button type="button" className="btn" style={TAP} onClick={() => practice.typeDigits()}>
                 {m.practiceTypeDigits}
               </button>
@@ -634,6 +646,7 @@ type Pick = { chosen: string[]; other: string };
 function Choices({
   idBase,
   question,
+  hideQuestion = false,
   choices,
   multi,
   pick,
@@ -643,6 +656,8 @@ function Choices({
 }: {
   idBase: string;
   question: string;
+  /// The question is already the card's title: said to a screen reader only.
+  hideQuestion?: boolean;
   choices: readonly string[];
   multi: boolean;
   pick: Pick;
@@ -652,7 +667,7 @@ function Choices({
 }) {
   return (
     <fieldset style={{ margin: 0, padding: 0, border: 0, display: "flex", flexDirection: "column", gap: 4, minWidth: 0 }}>
-      <legend className="lab" style={{ padding: 0, marginBottom: 4, overflowWrap: "anywhere" }}>
+      <legend className={hideQuestion ? "vh" : "lab"} style={{ padding: 0, marginBottom: 4, overflowWrap: "anywhere" }}>
         {question}
       </legend>
       {choices.map((choice) => {
@@ -667,15 +682,16 @@ function Choices({
             style={{ textAlign: "left", overflowWrap: "anywhere" }}
             onClick={() => onChange({ ...pick, chosen: multi ? (on ? pick.chosen.filter((c) => c !== choice) : [...pick.chosen, choice]) : on ? [] : [choice] })}
           >
+            {/* The kit's row: the choice, then its mark at the end (packages/ui-kit/app.css, .pick and .dot). */}
+            <span>{choice}</span>
             <span className="dot" aria-hidden="true">
               <CheckIcon />
             </span>
-            <span>{choice}</span>
           </button>
         );
       })}
       <div className="field">
-        <label htmlFor={`${idBase}-other`}>{m.answerLabel}</label>
+        <label htmlFor={`${idBase}-other`}>{choices.length > 0 ? m.otherLabel : m.answerLabel}</label>
         <input id={`${idBase}-other`} className="input" type="text" value={pick.other} disabled={disabled} onChange={(e) => onChange({ ...pick, other: e.target.value })} />
       </div>
     </fieldset>
@@ -685,12 +701,16 @@ function Choices({
 /// A question, or an interview of several, answered by choosing or typing. Nothing goes until Send is pressed.
 function QuestionCard({ m, ask, state, live, remote }: { m: MacStrings; ask: QuestionAsk; state: AskState | null; live: boolean; remote: MacRemote }) {
   const [picks, setPicks] = useState<Record<string, Pick>>({});
+  const [unready, setUnready] = useState(false);
   const titleId = `mac-ask-${ask.id}`;
   const busy = state?.busy === "answer";
   const settled = state?.note === "answered";
   const interview = ask.questions ?? null;
   const pickOf = (id: string): Pick => picks[id] ?? { chosen: [], other: "" };
-  const set = (id: string, pick: Pick) => setPicks((all) => ({ ...all, [id]: pick }));
+  const set = (id: string, pick: Pick) => {
+    setUnready(false);
+    setPicks((all) => ({ ...all, [id]: pick }));
+  };
   const single = answerOf(pickOf("").chosen, pickOf("").other, !!ask.multi);
   const answers = interview ? Object.fromEntries(interview.map((q) => [q.id, answerOf(pickOf(q.id).chosen, pickOf(q.id).other, !!q.multi)])) : null;
   const ready = interview ? Object.values(answers!).some((a) => a !== null) : single !== null;
@@ -709,6 +729,7 @@ function QuestionCard({ m, ask, state, live, remote }: { m: MacStrings; ask: Que
         <form
           onSubmit={(e) => {
             e.preventDefault();
+            setUnready(!ready);
             if (ready && !busy) send();
           }}
           style={{ display: "flex", flexDirection: "column", gap: 12 }}
@@ -723,10 +744,15 @@ function QuestionCard({ m, ask, state, live, remote }: { m: MacStrings; ask: Que
               </p>
             </>
           ) : (
-            <Choices idBase={titleId} question={m.answerLabel} choices={ask.choices ?? []} multi={!!ask.multi} pick={pickOf("")} disabled={busy} onChange={(p) => set("", p)} m={m} />
+            <Choices idBase={titleId} question={ask.question} hideQuestion choices={ask.choices ?? []} multi={!!ask.multi} pick={pickOf("")} disabled={busy} onChange={(p) => set("", p)} m={m} />
+          )}
+          {unready && (
+            <p className="help err" role="alert" style={{ margin: 0 }}>
+              {m.answerFirst}
+            </p>
           )}
           <div>
-            <button type="submit" className="btn dark" style={TAP} disabled={!ready || busy} aria-busy={busy || undefined}>
+            <button type="submit" className="btn dark" style={TAP} disabled={busy} aria-busy={busy || undefined}>
               {busy ? (
                 <>
                   <Pulse />

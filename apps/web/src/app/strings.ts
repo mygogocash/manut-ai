@@ -126,6 +126,7 @@ export type MacStrings = {
   scanNotCode: string;
   pasteLabel: string;
   pasteHelp: string;
+  pasteFirst: string;
   pair: string;
   outsideTitle: string;
   outsideBody: string;
@@ -192,7 +193,9 @@ export type MacStrings = {
   sayingNo: string;
   confirm: string;
   answerLabel: string;
+  otherLabel: string;
   sendAnswer: string;
+  answerFirst: string;
   sending: string;
   skipHint: string;
   onlyOnMac: string;
@@ -232,6 +235,7 @@ export type MacStrings = {
 
   passkeyName: string;
   practice: string;
+  practiceDigits: string;
   practiceTypeDigits: string;
 };
 
@@ -420,6 +424,7 @@ export const en: AppStrings = {
     scanNotCode: "That code isn't from Manut AI. Scan the code under Pair a phone on your Mac.",
     pasteLabel: "or paste the link",
     pasteHelp: "The link your Mac copies when you press Copy link. It works once.",
+    pasteFirst: "Paste the link from your Mac first.",
     pair: "Pair",
     outsideTitle: "Pair from the app on your Home Screen",
     outsideBody:
@@ -499,7 +504,9 @@ export const en: AppStrings = {
     sayingNo: "Saying no",
     confirm: "Confirm",
     answerLabel: "Your answer",
+    otherLabel: "Or type your own",
     sendAnswer: "Send answer",
+    answerFirst: "Choose or type an answer first.",
     sending: "Sending",
     skipHint: "Leave one empty to skip it.",
     onlyOnMac: "Answer this one on your Mac.",
@@ -539,6 +546,7 @@ export const en: AppStrings = {
 
     passkeyName: "Your Mac",
     practice: "There is no Mac in practice: paste any text to pair with a pretend one, which is forgotten when the page reloads.",
+    practiceDigits: "There is no Mac in practice to type these into.",
     practiceTypeDigits: "Type them for me",
   },
 };

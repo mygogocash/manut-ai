@@ -45,7 +45,10 @@ describe("the Your Mac tab", () => {
     expect(await screen.findByRole("heading", { name: m.scanTitle })).toBeTruthy();
     expect(screen.queryByRole("button", { name: m.scan })).toBeNull();
     expect(await screen.findByText(m.noScanner)).toBeTruthy();
-    expect((screen.getByRole("button", { name: m.pair }) as HTMLButtonElement).disabled).toBe(true);
+    // Pair with nothing pasted says what to do, and pairs nothing.
+    fireEvent.click(screen.getByRole("button", { name: m.pair }));
+    expect(await screen.findByText(m.pasteFirst)).toBeTruthy();
+    expect(screen.queryByTestId("mac-digits")).toBeNull();
   });
 
   it("scans only when Scan is pressed, and pairs with what it read", async () => {
@@ -127,6 +130,8 @@ describe("the Your Mac tab", () => {
     await waitFor(() => expect(document.querySelector('[data-ask="broadcast"]')?.textContent).toContain(m.outcomes.allowed));
 
     const question = document.querySelector('[data-ask="day"]') as HTMLElement;
+    fireEvent.click(within(question).getByRole("button", { name: m.sendAnswer }));
+    expect(await within(question).findByText(m.answerFirst)).toBeTruthy();
     fireEvent.click(within(question).getByRole("button", { name: "Friday" }));
     fireEvent.click(within(question).getByRole("button", { name: m.sendAnswer }));
     expect(await screen.findByText(m.notes.answered)).toBeTruthy();

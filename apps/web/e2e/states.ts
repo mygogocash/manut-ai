@@ -65,6 +65,42 @@ async function approveIn(page: Page, request: string, outcome: string | RegExp):
   await page.getByText(outcome).first().waitFor();
 }
 
+/// What a phone says when it loses its connection; every engine takes this the same way.
+async function goOffline(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, "onLine", { configurable: true, get: () => false });
+    window.dispatchEvent(new Event("offline"));
+  });
+}
+
+/// Your Mac in practice: a pasted link, Pair, and the pretend Mac's four digits.
+async function macDigits(page: Page): Promise<void> {
+  await page.getByLabel("or paste the link").fill("https://dev.manut.xyz/app/#pair=practice");
+  await tap(page, "Pair");
+  await page.getByRole("heading", { name: "Type these on your Mac" }).waitFor();
+}
+
+/// The digits "typed at the Mac", so the passkey step shows.
+async function macPasskey(page: Page): Promise<void> {
+  await macDigits(page);
+  await tap(page, "Type them for me");
+  await page.getByRole("heading", { name: "Your Mac took the code" }).waitFor();
+}
+
+/// Paired: the pretend passkey made, and the Mac's chats listed.
+async function macPaired(page: Page): Promise<void> {
+  await macPasskey(page);
+  await tap(page, "Make a passkey");
+  await page.getByRole("heading", { name: "Needs you" }).waitFor();
+}
+
+/// One chat open, with its approval and its question.
+async function macChat(page: Page): Promise<void> {
+  await macPaired(page);
+  await page.getByRole("button", { name: /Shop launch plan/ }).tap();
+  await page.getByRole("button", { name: "Allow once", exact: true }).waitFor();
+}
+
 export const STATES: PageState[] = [
   {
     page: "approval",
@@ -441,6 +477,72 @@ export const STATES: PageState[] = [
     path: "/app/?demo=sign-in-off",
     shows: "Signing in isn't on yet",
     buttons: [],
+  },
+  // Your Mac (src/app/mac/, docs/remote-access.md), which needs no sign-in, on practice's pretend Mac: each state from
+  // not available to a chat with its asks, and the view greyed while the Mac is out of reach.
+  {
+    page: "app",
+    name: "your Mac: reaching it is not available yet",
+    path: "/app/?demo=mac-off#mac",
+    shows: "Reaching your Mac isn't available yet",
+    buttons: [],
+  },
+  {
+    page: "app",
+    name: "your Mac: scan or paste the code",
+    path: "/app/#mac",
+    shows: "Scan the code on your Mac",
+    buttons: ["Pair"],
+  },
+  {
+    page: "app",
+    name: "your Mac: a pairing link opened outside the installed app",
+    path: "/app/#pair=AQID",
+    shows: "Pair from the app on your Home Screen",
+    buttons: ["Copy link"],
+  },
+  {
+    page: "app",
+    name: "your Mac: the four digits to type on the Mac",
+    path: "/app/#mac",
+    reach: macDigits,
+    shows: "Type these on your Mac",
+    buttons: ["Type them for me"],
+  },
+  {
+    page: "app",
+    name: "your Mac: making the passkey",
+    path: "/app/#mac",
+    reach: macPasskey,
+    shows: "Your Mac took the code",
+    buttons: ["Make a passkey"],
+  },
+  {
+    page: "app",
+    name: "your Mac: the paired Mac's chats",
+    path: "/app/#mac",
+    reach: macPaired,
+    shows: "Connected to your Mac",
+    buttons: ["Forget this Mac"],
+  },
+  {
+    page: "app",
+    name: "your Mac: a chat with an approval and a question",
+    path: "/app/#mac",
+    reach: macChat,
+    shows: "Send a LINE broadcast",
+    buttons: ["Allow once", "No", "Send answer", "Stop"],
+  },
+  {
+    page: "app",
+    name: "your Mac: greyed while the Mac is out of reach",
+    path: "/app/#mac",
+    reach: async (page) => {
+      await macChat(page);
+      await goOffline(page);
+    },
+    shows: /What you see was current at/,
+    buttons: ["All chats"],
   },
 ];
 

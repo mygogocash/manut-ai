@@ -10,8 +10,9 @@ import { defineConfig, devices } from "@playwright/test";
 //
 // The server has a port of its own, so it never collides with the desktop's (5307, 5308) and a second run says so
 // instead of quietly testing another checkout's server: `reuseExistingServer` is off. If a run was killed and left
-// its server behind, stop it with `pkill -f "vite --host 127.0.0.1 --port 5417"`.
-const port = 5417;
+// its server behind, stop it with `pkill -f "vite --host 127.0.0.1 --port 5417"`. `MANUT_WEB_PORT` picks another port,
+// for a run beside one that already has 5417.
+const port = Number(process.env.MANUT_WEB_PORT ?? 5417);
 
 export default defineConfig({
   testDir: "e2e",

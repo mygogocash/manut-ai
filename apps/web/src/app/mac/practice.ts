@@ -17,8 +17,9 @@ export const PRACTICE_DIGITS = "4821";
 /// `/app/?demo=mac-off` shows the tab as it is wherever the relay is off.
 export const PRACTICE_MAC_OFF = "demo=mac-off";
 
-/// The pretend Mac's chats, as the real Mac would show them.
-function sampleChats(): ChatView[] {
+/// The pretend Mac's chats, as the real Mac would show them, timed a little before `now` (seconds, as the Mac's are).
+function sampleChats(now: number): ChatView[] {
+  const ago = (minutes: number) => Math.floor(now / 1000) - minutes * 60;
   return [
     {
       chat: "launch",
@@ -26,12 +27,12 @@ function sampleChats(): ChatView[] {
       state: "needs_you",
       step: "Waiting for your answer",
       messages: [
-        { id: "l1", role: "user", text: "Plan the October sale and tell every customer on LINE.", ts: 1_798_700_000 },
+        { id: "l1", role: "user", text: "Plan the October sale and tell every customer on LINE.", ts: ago(14) },
         {
           id: "l2",
           role: "assistant",
           text: "I drafted the LINE broadcast. It goes to all 412 customers once you allow it. The sale page is at https://baanmali.example/sale.",
-          ts: 1_798_700_060,
+          ts: ago(12),
         },
       ],
       asks: [
@@ -40,7 +41,7 @@ function sampleChats(): ChatView[] {
           id: "broadcast",
           revision: 1,
           open: true,
-          ts: 1_798_700_070,
+          ts: ago(12),
           title: "Send a LINE broadcast",
           command: 'line broadcast --to all-customers --text "October sale: 20% off everything, Friday to Sunday. Show this message at the till."',
           cwd: "/Users/fon/shop",
@@ -51,7 +52,7 @@ function sampleChats(): ChatView[] {
           id: "day",
           revision: 1,
           open: true,
-          ts: 1_798_700_080,
+          ts: ago(11),
           question: "Which day should the sale start?",
           choices: ["Friday", "Saturday"],
         },
@@ -62,7 +63,7 @@ function sampleChats(): ChatView[] {
       title: "Price list for October",
       state: "working",
       step: "Comparing the suppliers' prices",
-      messages: [{ id: "p1", role: "user", text: "Update the price list from the new supplier sheets.", ts: 1_798_690_000 }],
+      messages: [{ id: "p1", role: "user", text: "Update the price list from the new supplier sheets.", ts: ago(40) }],
       asks: [],
     },
     {
@@ -71,8 +72,8 @@ function sampleChats(): ChatView[] {
       state: "done",
       step: null,
       messages: [
-        { id: "s1", role: "user", text: "Fix the opening hours on the website.", ts: 1_798_600_000 },
-        { id: "s2", role: "assistant", text: "Done. The website now says 9:00 to 18:00, every day but Monday.", ts: 1_798_600_300 },
+        { id: "s1", role: "user", text: "Fix the opening hours on the website.", ts: ago(190) },
+        { id: "s2", role: "assistant", text: "Done. The website now says 9:00 to 18:00, every day but Monday.", ts: ago(185) },
       ],
       asks: [],
     },
@@ -147,7 +148,7 @@ class PracticeLink implements MacLink {
     const refuse = (reason: string) => ({ t: "refused", request: message.t, reason });
     switch (message.t) {
       case "list":
-        return { t: "chats", chats: this.#chats.map((c, i) => ({ chat: c.chat, title: c.title, state: c.state, updatedAt: 1_798_700_100 - i * 50_000 })) };
+        return { t: "chats", chats: this.#chats.map((c) => ({ chat: c.chat, title: c.title, state: c.state, updatedAt: Math.max(...c.messages.map((x) => x.ts), ...c.asks.map((x) => x.ts)) })) };
       case "open":
       case "catchup":
         if (!chat) return refuse("no_chat");
@@ -197,7 +198,7 @@ export interface PracticeBackend extends MacBackend {
 export function practiceBackend(options: { relay?: "on" | "off"; timers?: Timers } = {}): PracticeBackend {
   const timers = options.timers ?? systemTimers;
   const vault = memoryVault();
-  const chats = sampleChats();
+  const chats = sampleChats(Date.now());
   let typed: (() => void) | null = null;
   const wait = (ms: number) => new Promise<void>((resolve) => timers.set(resolve, ms));
   return {
