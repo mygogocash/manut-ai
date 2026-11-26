@@ -73,8 +73,11 @@ test("a deep link to a developer page opens the hood with that page chosen: the 
   // the list has taken the words before Enter picks its first row: on a loaded machine the press could land on the list
   // as it was before them, whose first row is New (seen in a batch at load 8.7, 26 Nov)
   await expect(page.getByTestId("palette-row").first()).toHaveText("Settings › Terminal");
-  await page.keyboard.press("Enter");
-  await expect(page.getByTestId("settings-page-terminal")).toBeVisible();
+  // the row is clicked, not taken by Enter: a pointer resting over the list can move the palette's cursor to another row
+  // (a chat that matches the words) as the list fills in, which Enter then opens; the palette's own spec covers its keys
+  await page.getByTestId("palette-row").first().click();
+  // a cold dev server compiles the Settings pages on first use
+  await expect(page.getByTestId("settings-page-terminal")).toBeVisible({ timeout: 15_000 });
   await expect(page.getByTestId("settings-hood")).toHaveAttribute("aria-expanded", "true");
   await expect(page.getByTestId("settings-nav-terminal")).toHaveAttribute("aria-current", "page");
 
