@@ -3,6 +3,7 @@ import { isAppStore } from "../appStore";
 import { t } from "../i18n";
 import { harness, harnessByName } from "../harness/registry";
 import type { LaneBranch } from "../code/laneBranch";
+import type { ReachEntry } from "../jobs/reachList";
 
 // The agent programs a session can run, and the pure helpers the sidebar and the session views share.
 // Two kinds, both decided by the shell (it refuses anything else):
@@ -402,6 +403,12 @@ export interface SessionRec {
   /** Helpers is on in this lane's box (item 102e, src/jobs/leadLanes.ts): its agent is told how to ask for helper lanes, and a request
    *  becomes a Start helpers card. Only a lane's chat with a folder of its own may have it. Saved with the session. */
   helpers?: true;
+  /** The "Kit may reach" list under this chat's box (item 102k, src/jobs/reachList.ts): the chats the person put in front of its agent,
+   *  the only ones its reach blocks may name, each read, sent to or opened only from a card. Saved with the session. */
+  reach?: ReachEntry[];
+  /** A lane opened by Start lane on another chat's card (item 102k): that chat's session. Like a workflow's or a job's lane, it is a
+   *  chat whatever way the agent was last opened and starts only in a lane of its own. Not saved: once started, it is a lane like any. */
+  openedBy?: string;
   /** Continue with… (item 97, continueWith.ts): the link id of the chat this one continues, and of the chat that continues this
    *  one, each shown as a quiet line linking the other. */
   continuedFrom?: string;

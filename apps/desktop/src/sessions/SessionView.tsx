@@ -54,6 +54,7 @@ import { LanePane } from "../code/LanePane";
 import { LaneReview } from "../code/Review";
 import { isLaneChat } from "../code/laneStore";
 import { HelpersSwitch } from "../jobs/HelpersSwitch";
+import { MayReach } from "../jobs/MayReach";
 import { chatPullOf, useChatPullsVersion, type ChatPull } from "../code/chatPull";
 import { usePullsVersion } from "../tasks/pulls";
 import { showBoardPull } from "../tasks/state";
@@ -248,7 +249,13 @@ function ChatPane({ rec, chatKey }: { rec: SessionRec; chatKey: string }) {
             <HelpersSwitch rec={rec} />
           </>
         }
-        foot={<Context rec={rec} />}
+        foot={
+          <>
+            <Context rec={rec} />
+            {/* the chats this chat's agent may ask to reach, each only after a card (item 102k) */}
+            <MayReach rec={rec} chatKey={chatKey} />
+          </>
+        }
         // a note or another chat's context made under another account of this agent is not sent here (item 97)
         scope={chatScope(chatKey, null, rec, null)}
       />

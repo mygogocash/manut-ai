@@ -101,6 +101,7 @@ import { prov } from "./en/prov";
 import { prs } from "./en/prs";
 import { pull } from "./en/pull";
 import { pv } from "./en/pv";
+import { reach } from "./en/reach";
 import { resume } from "./en/resume";
 import { review } from "./en/review";
 import { risk } from "./en/risk";
@@ -261,6 +262,7 @@ export const en = {
   ...prs,
   ...pull,
   ...pv,
+  ...reach,
   ...resume,
   ...review,
   ...risk,

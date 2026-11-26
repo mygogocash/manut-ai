@@ -15,6 +15,7 @@ import { QueueMark, type QueueChoice, type QueueOffReasons } from "./QueueMark";
 import type { Quote } from "./answers";
 import { Icon } from "../../ui/icons";
 import { splitSent } from "../box/carry";
+import { readFromChat } from "../../jobs/reachList";
 import "../box/carry.css";
 
 /** Messenger bubble, filled on both sides. Bot text renders markdown; user text stays plain. Files the bot
@@ -234,8 +235,23 @@ function draftless(text: string, chatKey: string, streaming: boolean): string {
 }
 
 /** The person's own message: the notes it carried in front (item 97, chat/box/carry.ts) drawn as their quote with their note
- *  under it, another chat's context folded under its title, then what they typed. A message with none is the typed text. */
+ *  under it, another chat's context folded under its title, then what they typed. A message with none is the typed text. One that
+ *  came from another chat (item 102k) says where from, above its words. */
 function SentText({ text, skills }: { text: string; skills?: string[] }) {
+  // a message that arrived from another chat on its card's Send there, or a lane's brief from Start lane (item 102k): the chat it
+  // came from above its words, so it never reads as typed here
+  const from = readFromChat(text);
+  if (from) {
+    return (
+      <>
+        <span className="msg-from" data-testid="bubble-from">
+          <Icon name="link" size={12} />
+          {t("reach.from", { title: from.title })}
+        </span>
+        <SkillText text={from.words} skills={skills} />
+      </>
+    );
+  }
   const parts = splitSent(text);
   if (!parts.quotes.length && !parts.contexts.length) return <SkillText text={text} skills={skills} />;
   return (

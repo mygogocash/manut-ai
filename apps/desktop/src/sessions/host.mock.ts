@@ -9,6 +9,7 @@ import type { AskTool } from "../lib/protocol";
 import { t } from "../i18n";
 import { steersOf } from "./controls";
 import { withoutHelperPolicy } from "../jobs/helperPolicy";
+import { withoutReachNote } from "../jobs/reachList";
 import type { DiskLevel, DiskState } from "../lib/disk";
 import type { ImportApp, ImportProfile } from "./term/import";
 import { type GitView } from "../code/moved";
@@ -1379,6 +1380,27 @@ const MOCK_HELPERS: Record<string, string> = {
   many: ["Ten small parts.", "", "```manut-helpers", JSON.stringify(Array.from({ length: 10 }, (_, k) => ({ title: `Part ${k + 1}`, brief: `Do part ${k + 1} of the checkout.` }))), "```"].join("\n"),
 };
 
+/** A reach block as a coding chat's agent writes one (item 102k). */
+const reachBlock = (word: string, o: Record<string, unknown>) => `\`\`\`manut-${word}\n${JSON.stringify(o)}\n\`\`\``;
+
+/** The stand-in agent's answers to `/reach <word>` (item 102k): a read, a send and an open of the chat its list calls 1, a key a
+ *  block never takes, and a chat that is not on the list. */
+const MOCK_REACH: Record<string, string> = {
+  read: ["I'll look at how the other lane built the QR first.", "", reachBlock("read", { chat: "1" })].join("\n"),
+  send: ["The receipt lane should know the QR payload changed.", "", reachBlock("send", { chat: "1", message: "Allow. The PromptPay payload now ends with a CRC-16 checksum: please make the receipt print the last four characters under the QR." })].join("\n"),
+  open: [
+    "This wants a lane of its own.",
+    "",
+    reachBlock("open", {
+      title: "Thai date on the receipt",
+      brief: "In src/receipt.tsx the date shows as 2026-11-27. Show it in the Thai Buddhist calendar with Intl.DateTimeFormat. Do not touch src/qr.ts. Check with pnpm test src/receipt.test.ts.",
+      agent: "codex",
+    }),
+  ].join("\n"),
+  mode: ["Reading it in full.", "", reachBlock("read", { chat: "1", mode: "bypassPermissions" })].join("\n"),
+  unlisted: ["Let me read the payments chat.", "", reachBlock("read", { chat: "Payments" })].join("\n"),
+};
+
 class MockChat {
   private timers: ReturnType<typeof setTimeout>[] = [];
   private turn = false;
@@ -1569,7 +1591,8 @@ class MockChat {
       }
       if (this.how.noChat) return; // the old program reads it and says nothing
       // the lead's note in front of a message while Helpers is on (item 102e) is read as instructions, not as the command
-      const text = withoutHelperPolicy(i.text).trim();
+      // and the note naming its "Kit may reach" list (item 102k)
+      const text = withoutReachNote(withoutHelperPolicy(i.text)).trim();
       if (text === "/exit") {
         this.at(30, () => {
           // a clean exit mid-turn, as the Rust watcher reports it (exit_turn_end)
@@ -1677,6 +1700,22 @@ class MockChat {
         this.took(i.id);
         const word = text.slice(8).trim() || "two";
         const reply = MOCK_HELPERS[word] ?? `No such request: ${word}`;
+        let at = 60;
+        for (let k = 0; k < reply.length; k += 32) {
+          const part = reply.slice(k, k + 32);
+          this.at(at, () => this.emit({ event: "delta", text: part }));
+          at += 90;
+        }
+        this.at(at + 60, () => this.emit({ event: "message", id: `m${++this.seq}`, text: reply }));
+        this.at(at + 200, () => this.end("done"));
+        return;
+      }
+      if (text.startsWith("/reach")) {
+        // a coding chat's answer ending with a reach block (item 102k, src/jobs/reachBlocks.ts), streamed a few words at a time so
+        // the page is seen hiding the block while it is written
+        this.took(i.id);
+        const word = text.slice(6).trim() || "read";
+        const reply = MOCK_REACH[word] ?? `No such request: ${word}`;
         let at = 60;
         for (let k = 0; k < reply.length; k += 32) {
           const part = reply.slice(k, k + 32);
