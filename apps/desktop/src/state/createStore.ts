@@ -1,6 +1,8 @@
 // The store: the state, its actions and the bridge, as one object a view subscribes to. Split out of store.ts
 // (item 125d), which keeps the app's one store and re-exports every name here.
 import { recordError } from "../report/errors";
+import { changes } from "../lib/changes";
+import { errText } from "../lib/errText";
 import { bareText } from "../chat/box/carry";
 import { SESSIONS_ENTRY } from "../sessions/entry";
 import type { RuntimeAdapter } from "../runtime";
@@ -327,9 +329,6 @@ function lastUserReplied(state: AppState, bot: string): boolean {
   return false;
 }
 
-const errText = (e: unknown) =>
-  typeof e === "object" && e && "message" in e ? String((e as { message: unknown }).message) : String(e);
-
 export interface StoreOptions {
   now?: () => number;
   /** Called for every bridge event after it is applied; the app uses it for system notifications. */
@@ -394,7 +393,7 @@ export function onBridgeEvent(fn: (ev: BridgeEvent) => void): () => void {
 export function createStore(bridge: BridgeLike, opts: StoreOptions = {}): Store {
   const now = opts.now ?? Date.now;
   let state = initialState();
-  const listeners = new Set<() => void>();
+  const listeners = changes();
   let localSeq = 0;
   let snapshot: (AppState & Actions) | null = null;
   let started = false;
@@ -421,7 +420,7 @@ export function createStore(bridge: BridgeLike, opts: StoreOptions = {}): Store 
     if (next === state) return;
     state = next;
     snapshot = null;
-    for (const l of [...listeners]) l();
+    listeners.emitSnapshot();
     opts.onAction?.(a, state);
     flushQueues();
   };
@@ -1546,8 +1545,7 @@ export function createStore(bridge: BridgeLike, opts: StoreOptions = {}): Store 
     getState: () => state,
     getSnapshot: () => (snapshot ??= { ...state, ...actions }),
     subscribe(fn) {
-      listeners.add(fn);
-      return () => listeners.delete(fn);
+      return listeners.subscribe(fn);
     },
     dispatch,
     actions,
