@@ -2580,6 +2580,8 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     forgetSentFiles(id);
     const key = keys.get(id);
     if (key) {
+      // a title being written for it stops with it (item 96): nobody is left to read it, and it is the person's own use
+      if (writingTitle.has(id)) void host.titleCancel?.(key).catch(() => undefined);
       setChatRoute(key, null);
       store().dispatch({ type: "chat.forget", bot: key }); // its asks leave the Needs-you strip with it
       forgetLane(key);
@@ -2659,7 +2661,6 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
   const writeTitle = async (id: string, again = false) => {
     const r = rec(id);
     const settings = titleModel();
-    const host = getHost();
     const key = keys.get(id);
     if (!r || !key || !host.titleRun || writingTitle.has(id) || !wantsTitle(r, settings, again)) return;
     const material = chatMaterial(chatOf(key)?.messages ?? []);
