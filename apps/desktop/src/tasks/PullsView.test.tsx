@@ -127,6 +127,10 @@ describe("a request opened in the app", () => {
     const html = renderToString(<PullDetailView row={row(fork)} detail={null} error={null} merge={<span data-testid="merge-here" />} onClose={noop} onOpenUrl={noop} />);
     expect(html).not.toContain("merge-here");
     expect(words(html)).toContain(t("prs.fork", { from: "stranger/site", host: "GitHub" }));
+    // GitLab names no fork's repository: the note says so without a name
+    const gl = renderToString(<PullDetailView row={{ ...row(pull(5, { same: false, from: "" })), source: "gitlab" }} detail={null} error={null} merge={<span data-testid="merge-here" />} onClose={noop} onOpenUrl={noop} />);
+    expect(gl).not.toContain("merge-here");
+    expect(words(gl)).toContain(t("prs.forkNoName", { host: "GitLab" }));
   });
 
   it("reads GitLab's count of changed files alone", () => {

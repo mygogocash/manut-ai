@@ -3976,4 +3976,5 @@ export const ja: Record<Key, string> = {
   "review.why.method_not_allowed": "このリポジトリはこの方法でのマージを許可していません。別の方法を選んでください。",
   "prs.chat": "チャット「{title}」から",
   "prs.openChat": "チャット「{title}」を開く",
+  "prs.forkNoName": "このプルリクエストは別のリポジトリから来ています。{host} でマージしてください。",
 };

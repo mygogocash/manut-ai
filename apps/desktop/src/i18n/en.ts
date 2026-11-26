@@ -4014,4 +4014,5 @@ export const en = {
   "review.why.method_not_allowed": "The repository does not allow merging this way. Choose another way.",
   "prs.chat": "From the chat {title}",
   "prs.openChat": "Open the chat {title}",
+  "prs.forkNoName": "This pull request comes from another repository. Merge it on {host}.",
 };

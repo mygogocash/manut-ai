@@ -3976,4 +3976,5 @@ export const ko: Record<Key, string> = {
   "review.why.method_not_allowed": "이 저장소는 이 방식의 병합을 허용하지 않습니다. 다른 방식을 고르세요.",
   "prs.chat": "채팅 '{title}'에서",
   "prs.openChat": "채팅 '{title}' 열기",
+  "prs.forkNoName": "이 풀 리퀘스트는 다른 저장소에서 왔습니다. {host}에서 병합하세요.",
 };

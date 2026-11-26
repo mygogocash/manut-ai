@@ -199,7 +199,7 @@ export function PullDetailView({ row, detail, error, merge, chat = null, onOpenC
       <div className="prs-acts">
         {p.same === false ? (
           <p className="l2" data-testid="prs-fork">
-            {t("prs.fork", { from: p.from || "?", host })}
+            {p.from ? t("prs.fork", { from: p.from, host }) : t("prs.forkNoName", { host })}
           </p>
         ) : (
           merge

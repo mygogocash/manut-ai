@@ -3976,4 +3976,5 @@ export const zh: Record<Key, string> = {
   "review.why.method_not_allowed": "这个仓库不允许用这种方式合并。请选择另一种方式。",
   "prs.chat": "来自聊天「{title}」",
   "prs.openChat": "打开聊天「{title}」",
+  "prs.forkNoName": "这个拉取请求来自另一个仓库。请在 {host} 上合并。",
 };
