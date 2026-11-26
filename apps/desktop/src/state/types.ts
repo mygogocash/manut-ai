@@ -30,6 +30,7 @@ import type {
 } from "../lib/protocol";
 import type { ThreadRow } from "../threads/types";
 import type { HelpersAsk } from "../jobs/helperAsks";
+import type { ReachAsk } from "../jobs/reachAsks";
 
 export type PanelTabId = "details" | "terminal" | "schedule" | "worktrees" | "diff" | "runs";
 
@@ -85,6 +86,9 @@ export interface Turn {
   /** A lead lane's turn that started with Helpers on in its box (item 102e, src/jobs/): its helper blocks are the app's to read, so
    *  the chat hides them while the answer streams and takes them out of the answer it keeps (`shownText`). */
   helpers?: true;
+  /** A coding chat's turn that started with chats on its "Kit may reach" list (item 102k, src/jobs/reachChats.ts): its reach blocks
+   *  are the app's to read, so the chat hides them while the answer streams and takes them out of the answer it keeps. */
+  reach?: true;
 }
 
 /** One subagent of a fan-out, as its latest event left it. */
@@ -298,6 +302,19 @@ export type HelpersAskItem = {
   ask: HelpersAsk;
   done?: "started" | "notNow" | "gone";
 };
+/** A reach card (item 102k, src/jobs/ReachCards.tsx): a coding chat's agent asks to read a chat on its "Kit may reach" list, to
+ *  send one a message, or to open a new lane. One approval of the asking chat, settled once through approval-core
+ *  (src/jobs/reachAsks.ts). `done`: what became of it here (`yes` pressed, `no` pressed, `gone` taken back); `lane`: the lane Start
+ *  lane opened; `error`: what went wrong after a yes. Never saved: after a restart the card is gone and nothing of it happens. */
+export type ReachAskItem = {
+  kind: "reachAsk";
+  id: string;
+  ts: number;
+  ask: ReachAsk;
+  done?: "yes" | "no" | "gone";
+  lane?: string;
+  error?: string;
+};
 export type ChatItem =
   | MessageItem
   | ActivityItem
@@ -310,7 +327,8 @@ export type ChatItem =
   | BriefNoticeItem
   | ThreadLinkItem
   | ThreadRouteItem
-  | HelpersAskItem;
+  | HelpersAskItem
+  | ReachAskItem;
 export type TimelineItem = ChatItem;
 
 export interface Chat {

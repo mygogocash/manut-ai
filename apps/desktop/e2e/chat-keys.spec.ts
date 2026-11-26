@@ -323,11 +323,12 @@ test.describe("send when the limit resets", () => {
     await page.clock.fastForward("03:05:00");
     const row = page.getByTestId("later-row");
     await expect(row).toHaveAttribute("data-late", "true");
-    await expect(row).toContainText(/This was waiting since \d\d:\d\d\. Send it now\?/);
+    // three hours on from a run that starts after 21:00 is the next day, and the time then carries its day ("Thu 21:44")
+    await expect(row).toContainText(/This was waiting since (?:[A-Z][a-z]{2} )?\d\d:\d\d\. Send it now\?/);
     expect(await sessionSends(page)).not.toContain("run the tests");
     await page.getByTestId("menu-new").click();
     const home = page.getByTestId("home-later");
-    await expect(home).toContainText(/A message to .+ was waiting since \d\d:\d\d\. Send it now\?/);
+    await expect(home).toContainText(/A message to .+ was waiting since (?:[A-Z][a-z]{2} )?\d\d:\d\d\. Send it now\?/);
     await home.getByTestId("later-send-now").click();
     await expect.poll(() => sessionSends(page)).toContain("run the tests");
     await expect(page.getByTestId("home-later")).toHaveCount(0);

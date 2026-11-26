@@ -100,6 +100,7 @@ import { prov } from "./zh/prov";
 import { prs } from "./zh/prs";
 import { pull } from "./zh/pull";
 import { pv } from "./zh/pv";
+import { reach } from "./zh/reach";
 import { resume } from "./zh/resume";
 import { review } from "./zh/review";
 import { risk } from "./zh/risk";
@@ -260,6 +261,7 @@ export const zh: Record<Key, string> = {
   ...prs,
   ...pull,
   ...pv,
+  ...reach,
   ...resume,
   ...review,
   ...risk,

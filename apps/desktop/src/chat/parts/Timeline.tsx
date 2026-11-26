@@ -21,6 +21,7 @@ import { ActivityFallback, CardFallback, RoutineFallback } from "./fallbacks";
 import { PluginAddedCard, RoutineAddedCard } from "../../pages/ChatCards";
 import { ThreadLinkLine, ThreadRouteCard } from "../cards/ThreadNotes";
 import { HelpersAskCard } from "../../jobs/HelpersCard";
+import { ReachAskCard } from "../../jobs/ReachCards";
 import { BriefNotice, WatchLine } from "../../routines/WatchLine";
 import { t } from "../../i18n";
 import { useBotReady } from "../connect/ready";
@@ -188,6 +189,9 @@ export function Timeline({
       case "helpersAsk":
         // a lead lane's Start helpers card (item 102e)
         return <HelpersAskCard item={it} />;
+      case "reachAsk":
+        // a coding chat's read, send or open card (item 102k)
+        return <ReachAskCard item={it} />;
       case "briefNotice":
         return <BriefNotice bot={bot} />;
       case "system":

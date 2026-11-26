@@ -38,12 +38,12 @@ import { getShellHost, learnThisHost } from "../terminal/host";
 import { onSessionFg } from "./fg";
 import { termActs } from "./termActivity";
 import { isLinkId, LINK_COPIED_EVENT, newLinkId, termLinkUrl } from "./termLink";
-import { acpRow, agentDef, agentLabel, continues, draftAgent, draftFolder, draftOpen, hermesOnly, idInUse, installLine, isBuiltin, isGone, isShell, isTerminalRec, LAST_LINE_MAX, refusedResume, SHELL, termEnd, termMarkAgent, lastPrintedLine, OPEN_KEY, setsUpScreen, UI_BYTES, opensAs, pushRecent, savedOpen, RECENT_KEY, registerAcp, sessionMode, type AgentId, type OpenAs, type Unseen, type SessionRec } from "./agents";
+import { acpRow, agentDef, agentLabel, continues, draftAgent, draftFolder, draftOpen, hermesOnly, idInUse, installLine, isBuiltin, isGone, isShell, isTerminalRec, LAST_LINE_MAX, refusedResume, SHELL, termEnd, termMarkAgent, lastPrintedLine, OPEN_KEY, setsUpScreen, UI_BYTES, opensAs, pushRecent, savedOpen, RECENT_KEY, registerAcp, sessionMode, folderName, type AgentId, type OpenAs, type Unseen, type SessionRec } from "./agents";
 import { clearSuggestion, noteSuggestion } from "../chat/suggestion";
 import { suggestOn, suggestWorks } from "../lib/suggest";
 import { acceptTitle, chatMaterial, titleRequest, wantsTitle, whyKey } from "./titleWords";
 import { titleModel } from "../lib/titleModel";
-import { NAME_MAX, promptTitle, putTitle, TITLES_KEY } from "./titles";
+import { NAME_MAX, pickTitle, promptTitle, putTitle, TITLES_KEY } from "./titles";
 import { getDraft, setDraft as setUnsent } from "../app/drafts";
 import { getHost, type ChatEvent, type ChatInput, type ConvState, type PastChat, type SessionHost } from "./host";
 import { localBot } from "../peers/peerKey";
@@ -75,6 +75,10 @@ import { t as tr, type Key } from "../i18n";
 import { recordError } from "../report/errors";
 import { notesSaid } from "./projectNotes";
 import { createLeadLanes } from "../jobs/leadLanes";
+import { createReach, type OpenLane } from "../jobs/reachChats";
+import { appReader } from "../chat/box/contextReader";
+import { chatScope } from "../chat/box/scope";
+import type { ThreadRef } from "../chat/box/threadContext";
 import { windowWatched, type SessionNote } from "../lib/notify";
 import { createCloseGrace, graceMs, restoreSplitIn, type SplitWas } from "./closeGrace";
 import { watchOpenFolder } from "./revealOpen";
@@ -143,6 +147,38 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     models: (id) => state.models[id] ?? [],
     efforts: (id) => state.live[id]?.efforts ?? [],
   });
+  /** Chats that reach other chats (item 102k, src/jobs/reachChats.ts): the "Kit may reach" list under a chat's box, the note naming it
+   *  in front of each message, and the read, send and open cards a turn's answer can ask for. Nothing of another chat moves but from
+   *  a card's press; a message into another chat goes through `route`, which sends text and nothing else. */
+  const reach = createReach({
+    rec,
+    chatKey: (id) => keys.get(id),
+    store: () => store(),
+    agents: () => state.agents,
+    models: (id) => state.models[id] ?? [],
+    efforts: (id) => state.live[id]?.efforts ?? [],
+    reader: () =>
+      appReader({
+        store: store(),
+        sessions: { getState: () => state, chatKey: (id: string | null) => (id ? (keys.get(id) ?? null) : null), byKey: (key: string) => byKey(key) },
+        host,
+        groups: accounts,
+      }),
+    setList: (id, list) => patchRec(id, { reach: list.length ? [...list] : undefined }),
+    sendTo: (id, text) => send(id, text, "queue"),
+    route: (id, text) => route(id, text),
+    running: (id) => {
+      const p = procs.get(id);
+      return p?.kind === "agent" && p.hostId !== undefined && rec(id)?.status === "running";
+    },
+    openLane: (p) => startOpenedLane(p),
+    laneScope: (agent) => chatScope("agent:", null, { agent: agent as AgentId, status: "draft" }, accounts()),
+  });
+  /** The session whose chat has app-store key `key`. */
+  const byKey = (key: string) => {
+    for (const [id, k] of keys) if (k === key) return rec(id) ?? null;
+    return null;
+  };
   /** A link id no session in the list holds (termLink.ts). */
   const freshLinkId = (taken: ReadonlySet<string> = new Set(state.list.map((r) => r.linkId).filter((x): x is string => !!x))): string => {
     for (;;) {
@@ -604,12 +640,17 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
         // a lead lane with Helpers on: its turn is marked so the chat hides its helper blocks, and what it writes is kept for its
         // end to read (item 102e)
         ev = leads.before(id, ev);
+        // a chat with chats on its "Kit may reach" list: its turn is marked so the chat hides its reach blocks, and what it writes is
+        // kept for its end to read (item 102k)
+        ev = reach.before(id, ev);
         // Kit's dial: the card is added either way, so the chat says what was done; its answer goes through the card
         const kit = kitAsk(id, ev);
         dispatchChat(id, ev, !!kit);
         if (kit) void kit();
         // the turn's end: a helper request becomes the Start helpers card under the answer, or a line saying why not
         void leads.after(id, ev);
+        // and a reach block becomes its card, or a line saying why not (item 102k)
+        void reach.after(id, ev);
         if (ev.event === "tool.diff" && Array.isArray(ev.files)) noteChange(keys.get(id) ?? "", ev.files as DiffFile[]);
         // what the lane's work has shown: its test runs read from their output, and the files that changed
         noteLaneEvent(keys.get(id) ?? "", ev, Date.now(), laneWhere(id));
@@ -791,7 +832,8 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
         // a message of the person's reaches the agent: it gets its own rounds of helper lanes, and while Helpers is on the lead's
         // note goes in front of it, never into the bubble (item 102e)
         leads.personSpoke(id);
-        i = { ...i, text: leads.wire(id, i.text) };
+        // and while chats are on its "Kit may reach" list, the note naming them goes in front too (item 102k)
+        i = { ...i, text: leads.wire(id, reach.wire(id, i.text)) };
       }
       await host.chatInput(proc.hostId, i);
       return;
@@ -973,6 +1015,26 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
       st.dispatch({ type: "send.failed", bot: key, id: lid, error: errText(e) });
       return false;
     }
+  };
+
+  /**
+   * A message from another chat into session `id`'s chat (item 102k, after Send there on that chat's card): marked by the caller as
+   * from that chat. It is only ever sent as text, so it has no way to answer, allow, deny or dismiss an ask, whatever its words. It
+   * waits as a held row while a turn runs, while messages wait ahead of it, or while an ask or a question of this chat waits on the
+   * person, and goes when the turn ends or when the person presses Send now on it; it is never steered into a running turn, whatever
+   * the person's Return does. False when nothing could be sent (no agent of the app's running there).
+   */
+  const route = async (id: string, text: string): Promise<boolean> => {
+    const key = keys.get(id);
+    const t = text.trim();
+    if (!key || !t || procs.get(id)?.kind !== "agent") return false;
+    const asks = selectAsks(store().getState()).some((a) => a.bot === key);
+    if (mustHoldHere(id, key) || asks) {
+      const lid = `local-s${++localSeq}`;
+      hold(id, key, lid, { kind: "send", text: t, id: lid }, () => store().dispatch({ type: "local.user", bot: key, id: lid, text: t, now: Date.now(), held: true }));
+      return true;
+    }
+    return send(id, t, "queue");
   };
 
   // ---- files --------------------------------------------------------------------------------
@@ -1294,6 +1356,45 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     return { ok: true, job, ids, failed };
   };
 
+  // ---- a lane another chat's card opened (item 102k) -------------------------------------------------------------------------
+
+  /**
+   * Start lane on another chat's open card: an ordinary lane on `agent` in the developer's folder `cwd` (`start`: a branch and a folder
+   * of its own, listed in the Lanes band), started in its agent's Ask mode with `first` (the card's brief, marked as from the asking
+   * chat) as its first message, named with the card's title. Made beside the person's drafts and never opened in front of them, as a
+   * workflow's lane is, and it changes neither how they last opened the agent nor their last folder. The card's press is the only
+   * caller. A folder that is not a repository makes no lane, and no agent starts in it (rule R1): the answer then says why.
+   */
+  const startOpenedLane = async (p: OpenLane): Promise<{ ok: true; id: string } | { ok: false; why: string }> => {
+    if (state.agents === null) await loadAgents();
+    const agent = p.agent as AgentId;
+    const id = `s${++seq}`;
+    const ask = ASK_MODE[agent];
+    const r: SessionRec = {
+      id,
+      linkId: freshLinkId(),
+      agent,
+      cwd: p.cwd,
+      startedAt: Date.now(),
+      status: "draft",
+      view: "chat",
+      title: p.title.replace(/\s+/g, " ").trim().slice(0, NAME_MAX),
+      openedBy: p.from,
+      // the agent's own Ask mode, named on its command line whatever mode the person last used (item 89)
+      ...(ask && modesOf(agent).includes(ask) ? { mode: ask } : {}),
+      ...(p.model ? { modelWant: p.model } : {}),
+      ...(p.effort ? { effort: p.effort } : {}),
+    };
+    set({ list: [r, ...state.list] });
+    const started = await start(id, p.first).catch(() => false);
+    if (laneless.delete(id)) return { ok: false, why: tr("reach.noLane") };
+    if (!started) return { ok: false, why: tr("reach.notStarted") };
+    const key = keys.get(id);
+    const from = rec(p.from);
+    if (key) store().dispatch({ type: "system.note", bot: key, text: tr("reach.opened.note", { title: from ? pickTitle(from, folderName(from.cwd)).title : tr("ss.session") }), now: Date.now() });
+    return { ok: true, id };
+  };
+
   // ---- Continue with (item 97) ----------------------------------------------------------------------------------------
 
   /** Whether session `id`'s turn runs (an ask of it waits inside its turn). */
@@ -1559,7 +1660,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     if (!r || r.status !== "draft") return false; // closed or started meanwhile
     // a workflow's lane and a job's lane (Ask several, item 102a) are chats whatever way the person last opened the agent, and run
     // only in a lane of their own: a folder that is not a repository gets no agent (rule R1 of docs/several-agents.md)
-    const own = !!(r.workflow || r.job);
+    const own = !!(r.workflow || r.job || r.openedBy);
     const open = own ? "chat" : draftOpen(r.agent, state.agents, state.opens);
     const mode = sessionMode(state.agents, { agent: r.agent, open });
     // such a lane runs only in a lane of its own, which only a chat has
@@ -2453,6 +2554,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
         ...(s.lane ? { lane: s.lane } : {}),
         ...(s.workflow ? { workflow: s.workflow } : {}),
         ...(s.helpers ? { helpers: true as const } : {}),
+        ...(s.reach?.length ? { reach: s.reach } : {}),
         ...(s.continuedFrom ? { continuedFrom: s.continuedFrom } : {}),
         ...(s.continuedIn ? { continuedIn: s.continuedIn } : {}),
         ...(s.job ? { job: s.job } : {}),
@@ -2655,6 +2757,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     turns.forget(id);
     forgetSentFiles(id);
     leads.forget(id);
+    reach.forget(id);
     const key = keys.get(id);
     if (key) {
       // a title being written for it stops with it (item 96): nobody is left to read it, and it is the person's own use
@@ -2897,6 +3000,15 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     setMode,
     setEffort,
     setHelpers,
+    /** Session `id` shows the "Kit may reach" list under its box (item 102k). */
+    reachOffered: (id: string): boolean => reach.offered(id),
+    /** Adds chat `ref` to session `id`'s "Kit may reach" list, at the person's press: null when added, else the line to show. */
+    addReach: (id: string, ref: ThreadRef): string | null => reach.add(id, ref),
+    /** Takes listed chat `n` off session `id`'s list; a card still open that names it is taken back. */
+    removeReach: (id: string, n: number): void => reach.remove(id, n),
+    /** The person's yes (`yes`) or no on reach card `askId` of session `id`: checked again, settled once in approval-core, and only
+     *  then read, sent or opened (item 102k). */
+    answerReach: (id: string, askId: string, yes: boolean) => reach.answer(id, askId, yes),
     /** Session `id` may show the Helpers switch (item 102e). */
     helpersOffered: (id: string): boolean => leads.offered(id),
     /** The person's Start helpers (`start`) or Not now on the card `askId` of session `id`: settled once in approval-core; no agent
@@ -2985,10 +3097,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     /** Changes each time Restart starts session `id`'s terminal program again. */
     termRun: (id: string) => termRuns.get(id) ?? 0,
     /** The session whose chat has app-store key `key`. */
-    byKey: (key: string) => {
-      for (const [id, k] of keys) if (k === key) return rec(id) ?? null;
-      return null;
-    },
+    byKey,
     /** The app-store chat key of session `id`'s chat, if it has one. */
     chatKey: (id: string | null) => (id ? (keys.get(id) ?? null) : null),
     /** Hook for system notifications of session chats (the app sets it). */

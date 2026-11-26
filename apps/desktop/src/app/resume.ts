@@ -6,6 +6,7 @@
 import type { PanelTabId, Ui } from "../state/store";
 import { continues, isAgentId, type AgentId } from "../sessions/agents";
 import { isLinkId } from "../sessions/termLink";
+import { parseEntries, type ReachEntry } from "../jobs/reachList";
 import { cleanShellId } from "../sessions/term/settings";
 import { isObj } from "../lib/guards";
 
@@ -76,6 +77,8 @@ export interface SavedSession {
   workflow?: string;
   /** Helpers is on in the lane's box (SessionRec `helpers`, item 102e). */
   helpers?: true;
+  /** The "Kit may reach" list under the chat's box (SessionRec `reach`, item 102k). */
+  reach?: ReachEntry[];
   /** Continue with… (item 97, continueWith.ts): the link id of the chat this one continues, and of the chat that continues this
    *  one, each shown as a quiet line linking the other. */
   continuedFrom?: string;
@@ -169,6 +172,9 @@ function parseSession(v: unknown): SavedSession | null {
   if (lane) out.lane = lane;
   // only a lane with a folder of its own may have Helpers on (item 102e)
   if (v.helpers === true && lane?.dir) out.helpers = true;
+  // the chats the person listed under its box, each checked as it is read back; one that cannot be read is left out (item 102k)
+  const reach = parseEntries(v.reach);
+  if (reach.length) out.reach = reach;
   if (Array.isArray(v.messages)) {
     const msgs = v.messages.map(parseMsg).filter((m): m is SavedMsg => !!m).slice(-MAX_MESSAGES);
     if (msgs.length) out.messages = msgs;

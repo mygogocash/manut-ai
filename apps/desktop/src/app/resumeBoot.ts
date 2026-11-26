@@ -72,6 +72,8 @@ function snapshot(): ResumeSnap {
         ...(r.workflow ? { workflow: r.workflow } : {}),
         // the Helpers switch stays as the person left it (item 102e)
         ...(r.helpers ? { helpers: true as const } : {}),
+        // the "Kit may reach" list stays as the person left it (item 102k)
+        ...(r.reach?.length ? { reach: r.reach } : {}),
         // Continue with's links both ways, and a continued chat's model still to set (item 97)
         ...(r.continuedFrom ? { continuedFrom: r.continuedFrom } : {}),
         ...(r.continuedIn ? { continuedIn: r.continuedIn } : {}),
