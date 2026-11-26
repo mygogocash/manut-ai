@@ -331,8 +331,11 @@ export class ApiSession {
   }
 
   /** Exchanges an identity token and its raw nonce for a session and keeps it in the keychain. The session the
-   *  keychain held before (this origin's or another's) is ended first, so a sign-in never leaves one live on an API. */
-  async signIn(identityToken: string, nonce: string): Promise<SignInState> {
+   *  keychain held before (this origin's or another's) is ended first, so a sign-in never leaves one live on an API.
+   *  `authorizationCode` is the code Apple gives the app with the identity token, when the sign-in has it: the API
+   *  exchanges it for the token that deleting the account revokes at Apple (docs/pilot-api.md, "Deleting your own
+   *  account"). It goes once, in the body, and is never kept here. */
+  async signIn(identityToken: string, nonce: string, authorizationCode?: string): Promise<SignInState> {
     await this.load();
     if (this.state.kind === "no_keychain") return this.state;
     if (this.signingIn) return this.signingIn;
@@ -340,11 +343,13 @@ export class ApiSession {
     if (this.trying) return { kind: "signing_in" };
     const token = identityToken.trim();
     const raw = nonce.trim();
+    const code = authorizationCode?.trim() || undefined;
     if (!token || !raw || token.length > MAX_IDENTITY || raw.length > MAX_NONCE) return this.set({ kind: "signed_out", failure: "invalid_identity" });
+    if (code !== undefined && !APPLE_CODE.test(code)) return this.set({ kind: "signed_out", failure: "invalid_identity" });
     this.signingIn = (async () => {
       if (this.record) await this.signOut();
       else if (this.foreign) await this.endForeign(this.foreign);
-      return this.exchange(token, raw);
+      return this.exchange(token, raw, code);
     })().finally(() => {
       this.signingIn = null;
     });
@@ -420,6 +425,26 @@ export class ApiSession {
       this.set({ kind: "signed_out", failure: "keychain" });
     }
     return { revoked };
+  }
+
+  /** Deletes the signed-in account (`POST /v1/account/deletion`, exactly `{ owned }`; docs/pilot-api.md, "Deleting your
+   *  own account"): every shop it owns, each named with the name the person typed, its places as a helper, and every
+   *  session of it. It is sent as an ask is answered (`write`): once, and once more only after a 401, which the API
+   *  answers from the session before it reads the body. Once the API says it is done, the session and the shop sessions
+   *  are forgotten here as a sign-out forgets them, with no call back: the API ended them all. Any other answer leaves the
+   *  session as it is, so the person can press again, which finishes a deletion that stopped part way. */
+  async deleteAccount(owned: readonly { shop: string; name: string }[]): Promise<AccountDeletion> {
+    const result = readAccountDeletion(await this.write("/v1/account/deletion", { owned: owned.map(({ shop, name }) => ({ shop, name })) }));
+    if (result.kind !== "deleted") return result;
+    this.letGo();
+    await this.ended();
+    try {
+      await this.wipe();
+      this.set({ kind: "signed_out" });
+    } catch {
+      this.set({ kind: "signed_out", failure: "keychain" });
+    }
+    return result;
   }
 
   /** The shop session this computer holds for `shop`, or null. */
@@ -555,10 +580,11 @@ export class ApiSession {
     }
   }
 
-  private async exchange(identityToken: string, nonce: string): Promise<SignInState> {
+  private async exchange(identityToken: string, nonce: string, authorizationCode?: string): Promise<SignInState> {
     this.set({ kind: "signing_in" });
     const deviceId = this.newDeviceId();
-    const res = await this.send("POST", "/v1/auth/exchange", null, { provider: "apple", identityToken, nonce, deviceId });
+    const res = await this.send("POST", "/v1/auth/exchange", null, { provider: "apple", identityToken, nonce, deviceId,
+      ...(authorizationCode ? { authorizationCode } : {}) });
     if (res.kind !== "answer") return this.set({ kind: "signed_out", failure: res.kind });
     if (res.status !== 200) return this.set({ kind: "signed_out", failure: exchangeFailure(res.status, res.text) });
     const pair = decodePair(res.text);
@@ -748,6 +774,69 @@ export class ApiSession {
     } catch (e) {
       return { kind: e instanceof LinkDown && e.kind === "offline" ? "offline" : "unavailable" };
     }
+  }
+}
+
+/** What deleting the account came to, read from the API's answer (docs/pilot-api.md, "Deleting your own account"). */
+export type AccountDeletion =
+  /** Done. `shops` were deleted with it and `left` are the shops the person no longer helps at; `apple` is what became of
+   *  the Sign in with Apple link, for an account made with Apple only. */
+  | { kind: "deleted"; shops: ShopName[]; left: ShopName[]; apple?: AppleEnd }
+  /** 409 `owned_changed`: the shops the account owns are not the ones sent, which `owned` lists as they now are. Nothing
+   *  was deleted. */
+  | { kind: "owned_changed"; owned: ShopName[] }
+  /** 409 `name_mismatch`: a name typed is not the shop's. Nothing was deleted. */
+  | { kind: "name_mismatch"; shop: string }
+  /** 409 `deletion_running`: another press is still running. */
+  | { kind: "running" }
+  /** 500 `deletion_incomplete`: it stopped part way; the same request finishes it. */
+  | { kind: "incomplete" }
+  | { kind: "signed_out" }
+  /** No answer: it may have started. Pressing again finishes one that did, and never deletes twice. */
+  | { kind: "offline" }
+  /** Any other refusal or outage, which the API answers before it deletes anything. */
+  | { kind: "failed" };
+
+export type ShopName = { id: string; name: string };
+export type AppleEnd = "revoked" | "retrying" | "no_token" | "gave_up";
+
+const APPLE_ENDS: readonly AppleEnd[] = ["revoked", "retrying", "no_token", "gave_up"];
+/** Apple's authorization code as the API takes it (`isAuthorizationCode` in apps/api/src/apple-tokens.ts). */
+const APPLE_CODE = /^[A-Za-z0-9._-]{1,1024}$/;
+
+function shopNames(value: unknown): ShopName[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((one) => {
+    const o = one as { id?: unknown; name?: unknown } | null;
+    return o && typeof o.id === "string" && o.id.length <= MAX_SHOP_ID && typeof o.name === "string" ? [{ id: o.id, name: o.name }] : [];
+  });
+}
+
+/** The API's answer to `POST /v1/account/deletion`, as the page reads it. Only a 200 that says `deleted` is a deletion. */
+export function readAccountDeletion(answer: Answer): AccountDeletion {
+  switch (answer.kind) {
+    case "signed_out":
+      return { kind: "signed_out" };
+    case "offline":
+      return { kind: "offline" };
+    case "ok": {
+      const json = answer.json as { deleted?: unknown; shops?: unknown; left?: unknown; apple?: unknown } | null;
+      if (answer.status !== 200 || json?.deleted !== true) return { kind: "offline" };
+      const apple = APPLE_ENDS.find((one) => one === json.apple);
+      return { kind: "deleted", shops: shopNames(json.shops), left: shopNames(json.left), ...(apple ? { apple } : {}) };
+    }
+    case "refused": {
+      const json = answer.json as { owned?: unknown; shop?: unknown } | null;
+      if (answer.status === 409 && answer.code === "owned_changed") return { kind: "owned_changed", owned: shopNames(json?.owned) };
+      if (answer.status === 409 && answer.code === "name_mismatch") return { kind: "name_mismatch", shop: typeof json?.shop === "string" ? json.shop : "" };
+      if (answer.status === 409 && answer.code === "deletion_running") return { kind: "running" };
+      return { kind: "failed" };
+    }
+    case "unavailable":
+      if (answer.status === 500 && answer.code === "deletion_incomplete") return { kind: "incomplete" };
+      // The API's own 503s come before anything is deleted. Anything else (a 2xx that is not JSON, a 5xx it did not word,
+      // no status at all) may have come after a deletion started: it is said as no answer.
+      return answer.status === 503 && answer.code ? { kind: "failed" } : { kind: "offline" };
   }
 }
 

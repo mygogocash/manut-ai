@@ -2780,7 +2780,12 @@ export function createStore(bridge: BridgeLike, opts: StoreOptions = {}): Store 
     let r: OpMap["shops.list"]["result"];
     try {
       r = await bridge.request("shops.list", {});
-    } catch {
+    } catch (e) {
+      // A runtime that says the person is signed out holds no shop of theirs: the account row and the switcher stop naming
+      // them (a deleted account's shop above all, item 124). Any other refusal keeps the list as it was.
+      if ((e as { code?: unknown } | null)?.code === "signed_out" && state.shops.list.length > 0) {
+        dispatch({ type: "shops", list: [], current: null, left: state.shops.left });
+      }
       return;
     }
     const before = state.shops;

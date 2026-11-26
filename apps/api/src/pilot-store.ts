@@ -767,6 +767,9 @@ export type PilotDeletionRecord = {
   name: string;
   requestedAt: string;
   deletedBy: string | null;
+  /// The owner's linked account, by its id, when the owner asked from their own app by deleting their account (item 124,
+  /// account-deletion.ts); `deletedBy` is then null, since no operator asked. Absent when an operator asked.
+  askedBy?: string;
   confirmationId?: string;
   deletedAt?: string;
   counts?: Record<string, number>;
@@ -904,9 +907,9 @@ export type OpenedConfirmation = {
 /// decision could settle. Who asked and when are those of the request that
 /// opened the confirmation; asking again while it waits changes neither.
 async function openConfirmation(storage: DurableObjectStorage, tenant: string, body: Record<string, unknown>) {
-  const { name, deletedBy, detail } = body;
+  const { name, deletedBy, detail, askedBy } = body;
   if (!bounded(name, 200) || (deletedBy !== null && !bounded(deletedBy)) || !isDeletionDetail(detail) ||
-      detail.tenant !== tenant) {
+      detail.tenant !== tenant || (askedBy !== undefined && !bounded(askedBy))) {
     return json({ error: "invalid_request" }, 400);
   }
   const answer = await storage.transaction(async (txn): Promise<OpenedConfirmation> => {
@@ -935,6 +938,7 @@ async function openConfirmation(storage: DurableObjectStorage, tenant: string, b
       name,
       requestedAt: new Date(now).toISOString(),
       deletedBy,
+      ...(askedBy === undefined ? {} : { askedBy }),
       confirmationId: id,
     };
     await txn.put({ [pilotDeletionKey(tenant)]: record, [key]: opened.next });
