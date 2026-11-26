@@ -296,6 +296,42 @@ describe("A4: a command that reaches the network", () => {
   });
 });
 
+describe("B1: a command with several actions, or a word read as the first of its kind", () => {
+  it("reads every command a find runs and every action it takes, not only the first", () => {
+    counted += holds([
+      ["find . -maxdepth 0 -exec true {} \\; -exec sh -c \"rm -rf x\" \\;", "find . -maxdepth 0 -exec true {} \\;", "read"],
+      ["find . -name x -exec cat {} \\; -execdir rm {} \\;", "find . -name x -exec cat {} \\;", "read"],
+      ["find . -exec echo {} + -ok rm {} \\;", "find . -exec echo {} +", "read"],
+      ["find . -type f -exec wc -l {} + -okdir rm {} \\;", "find . -type f -exec wc -l {} +", "read"],
+      ["find . -exec cat {} + -exec sh -c x {} +", "find . -name '*.ts' -exec grep -n foo {} +", "read"],
+      ["find . -exec cat {} \\; -fprint out.txt", "find . -exec cat {} \\; -print", "read"],
+      ["find . -exec cat {} \\; -fls out.txt", "find . -exec cat {} \\; -ls", "read"],
+      ["find . -exec cat {} \\; -fprintf out.txt %p", "find . -exec cat {} \\; -printf %p", "read"],
+      ["find . -exec cat {} \\; -fprint0 out.txt", "find . -exec cat {} \\; -print0", "read"],
+      ["find . -name x -files0-from list.txt", "find . -name x -print -quit", "read"],
+      ["find . -type f -newer /Users/fon/.ssh/id_rsa", "find . -type f -newer package.json", "read"],
+      ["find . -samefile /Users/fon/.ssh/id_rsa", "find -s . -name x", "read"],
+      ["find . -newermt 2026-01-01 -exec rm {} +", "find . -newermt 2026-01-01", "read"],
+      ["find . -mtime -7 -execdir sh -c x \\;", "find . -mtime -7 -type f", "read"],
+    ]);
+    // find reads a `+` as the end of a command only right after `{}`: elsewhere it is a word of the command
+    expect(read("find . -exec echo + -exec rm -rf src \\;").action).toBe("read");
+    // a delete that only takes what matches a name still reads as it did
+    expect(read("find . -name '*.log' -delete").action).toBe("delete");
+  });
+
+  it("reads a subcommand only where its program looks for it", () => {
+    counted += holds([
+      ["git stash -m list", "git stash list", "read"],
+      ["git stash -m show", "git stash show -p", "read"],
+      ["docker compose -p ps up -d", "docker compose ps", "read"],
+      ["docker compose --env-file logs up", "docker compose logs", "read"],
+      ["docker compose --project-directory ls up", "docker compose ls", "read"],
+      ["docker compose config -o out.yml", "docker compose config", "read"],
+    ]);
+  });
+});
+
 describe("the table", () => {
   it("holds at least 120 hostile lines, each beside the plain line it imitates", () => {
     expect(counted).toBeGreaterThanOrEqual(120);

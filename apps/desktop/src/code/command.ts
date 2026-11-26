@@ -782,10 +782,14 @@ function git(words: string[], where: Where): Verdict {
     case "tag":
       if (has(args, "-d", "--delete")) return del();
       return onlyLists(args, "tag") ? history() : { ...change(), text: textAfter(words, ["-m", "--message"]) };
-    case "stash":
-      if (["drop", "clear"].includes(rest[0] ?? "")) return del();
-      if (["list", "show"].includes(rest[0] ?? "")) return history();
+    case "stash": {
+      // git takes a stash's subcommand only as the word right after `stash`: with an option first it is a push, and the
+      // word after `-m` is its message (`git stash -m list` stashes the changes away)
+      const act = words[head] ?? "";
+      if (["drop", "clear"].includes(act)) return del();
+      if (["list", "show"].includes(act)) return history();
       return { ...change(), text: textAfter(words, ["-m", "--message"]) };
+    }
     case "worktree":
       if (["remove", "prune"].includes(rest[0] ?? "")) return del();
       return rest[0] === "list" ? history() : change();
@@ -1208,7 +1212,12 @@ function docker(words: string[]): Verdict {
   if (sub === "push") return live();
   if (sub === "build") return v("change", say("kit.say.build"), 2);
   if (sub === "compose") {
-    const act = words.find((w, i) => i > 1 && !w.startsWith("-")) ?? "";
+    // Its own options come before the command, and several take a value (`-p ps up` runs `up` in a project named ps), so
+    // the command is read only when it comes first.
+    const act = words[2] ?? "";
+    if (act.startsWith("-")) return unknownProgram("docker");
+    // `config -o` saves what it prints into a file
+    if (act === "config" && hasIn("", words.slice(3), "-o", "--output")) return v("change", say("kit.say.change"), "exact");
     if (["ps", "logs", "config", "ls"].includes(act)) return v("read", say("kit.say.read"));
     if (["up", "down", "build", "start", "stop", "restart"].includes(act)) return v("change", say("kit.say.run"), 3);
     return unknownProgram("docker");
@@ -1431,18 +1440,80 @@ function at$(r: Verdict, by: number): Verdict {
   return { ...r, ...(head === undefined ? {} : { head }), ...(text ? { text } : {}) };
 }
 
+/** find's (BSD's and GNU's) options and tests that only choose where it looks, match a file, or print to its own output.
+ *  Any other word starting with `-` is not read in advance: it may be one that deletes, writes a file, or reads its list of
+ *  files from one (`-files0-from`), or one this list has not met. */
+const FIND_FLAGS = new Set([
+  "-E", "-H", "-L", "-P", "-X", "-d", "-s", "-x", "-O0", "-O1", "-O2", "-O3", "-depth", "-empty", "-executable", "-readable",
+  "-writable", "-false", "-true", "-follow", "-ignore_readdir_race", "-noignore_readdir_race", "-ls", "-mount", "-xdev", "-noleaf",
+  "-nogroup", "-nouser", "-print", "-print0", "-prune", "-quit", "-sparse", "-xattr", "-acl", "-not", "-a", "-and", "-o", "-or",
+  "-daystart", "-warn", "-nowarn", "-help", "--help", "-version", "--version",
+]);
+/** Its tests whose value is text: a pattern, a number, a type, a format printed to its own output. */
+const FIND_TEXT = new Set([
+  "-name", "-iname", "-path", "-ipath", "-regex", "-iregex", "-wholename", "-iwholename", "-lname", "-ilname", "-type", "-xtype",
+  "-perm", "-user", "-group", "-uid", "-gid", "-size", "-mtime", "-mmin", "-atime", "-amin", "-ctime", "-cmin", "-Btime", "-Bmin",
+  "-used", "-maxdepth", "-mindepth", "-links", "-inum", "-fstype", "-flags", "-printf", "-regextype", "-context", "-xattrname", "-D",
+]);
+/** Its tests that look at another file's times or identity: the file is a path like any other, checked against the project. */
+const FIND_FILE = new Set(["-newer", "-anewer", "-cnewer", "-mnewer", "-Bnewer", "-samefile", "-f"]);
+const FIND_FILTERS = new Set(["-name", "-iname", "-path", "-ipath", "-regex", "-iregex", "-wholename", "-iwholename", "-newer", "-mtime", "-mmin", "-size"]);
+/** Its actions that run a program for each file: each one's command runs, however many there are. */
+const FIND_RUNS = new Set(["-exec", "-execdir", "-ok", "-okdir"]);
+
+/** A find, read word by word. Every command it runs (each `-exec`, `-execdir`, `-ok` and `-okdir`, not only the first) is
+ *  read as a command of its own, and the find is as strict as the strictest of them. A command ends at `;`, or at a `+`
+ *  right after `{}` (a `+` anywhere else is one of its words, as find reads it). `-ok` asks on its input, which a pipe can
+ *  answer, so it is read as `-exec` is. */
 function find(words: string[], where: Where): Verdict {
-  const text = textAfter(words, ["-name", "-iname", "-path", "-ipath", "-regex", "-iregex", "-wholename", "-iwholename", "-lname", "-ilname", "-type", "-newer", "-perm", "-user", "-group", "-size", "-mtime", "-mmin", "-atime", "-ctime", "-maxdepth", "-mindepth"]);
-  const filtered = words.some((w) => ["-name", "-iname", "-path", "-ipath", "-regex", "-iregex", "-wholename", "-iwholename", "-newer", "-mtime", "-mmin", "-size"].includes(w));
-  if (words.includes("-delete")) return v("delete", say("kit.say.delete"), "exact", { text, ...(filtered ? { filtered: true as const } : {}) });
-  const exec = words.findIndex((w) => ["-exec", "-execdir", "-ok", "-okdir"].includes(w));
-  if (exec >= 0) {
-    const end = words.findIndex((w, i) => i > exec && (w === ";" || w === "+"));
-    const inner = at$(classify(words.slice(exec + 1, end < 0 ? undefined : end), where), exec + 1);
-    return strictest([v("read", say("kit.say.read"), undefined, { text }), { ...inner, head: inner.action === "read" || inner.action === "check" ? undefined : "exact" }]);
+  const text = new Set<number>();
+  const parts: Verdict[] = [];
+  /** Its own `-delete`. */
+  const own = v("delete", say("kit.say.delete"), "exact");
+  let filtered = false;
+  for (let i = 1; i < words.length; i++) {
+    const w = words[i];
+    if (FIND_RUNS.has(w)) {
+      let end = i + 1;
+      while (end < words.length && words[end] !== ";" && !(words[end] === "+" && words[end - 1] === "{}")) end++;
+      const inner = at$(classify(words.slice(i + 1, end), where), i + 1);
+      parts.push({ ...inner, head: inner.action === "read" || inner.action === "check" ? undefined : "exact" });
+      i = end;
+      continue;
+    }
+    // a place to start from, or an operator (`!`, `(`, `)`, `,`)
+    if (!w.startsWith("-") || w === "-") continue;
+    if (FIND_FILTERS.has(w)) filtered = true;
+    if (FIND_FLAGS.has(w) || /^-[EHLPXdsx]+$/.test(w)) continue;
+    if (FIND_TEXT.has(w)) {
+      if (i + 1 < words.length) text.add(i + 1);
+      i++;
+      continue;
+    }
+    // `-newermt 2026-01-01` and the like compare with a time or a file: a value that is a path is checked as one
+    if (FIND_FILE.has(w) || /^-newer[aBcmt][aBcmt]$/.test(w)) {
+      i++;
+      continue;
+    }
+    if (w === "-delete") {
+      parts.push(own);
+      continue;
+    }
+    // each writes its list into the file it names; `-fprintf`'s format, after the file, is text
+    if (["-fprint", "-fprint0", "-fls", "-fprintf"].includes(w)) {
+      parts.push(v("change", say("kit.say.change"), "exact"));
+      if (w === "-fprintf" && i + 2 < words.length) text.add(i + 2);
+      i += w === "-fprintf" ? 2 : 1;
+      continue;
+    }
+    return unknownProgram("find");
   }
-  if (words.some((w) => ["-fprint", "-fprint0", "-fprintf", "-fls"].includes(w))) return v("change", say("kit.say.change"), "exact", { text });
-  return v("read", say("kit.say.read"), undefined, { text });
+  // the words of each command it runs that are text stay text
+  for (const p of parts) for (const i of p.text ?? []) text.add(i);
+  const whole = strictest([v("read", say("kit.say.read")), ...parts]);
+  // `-delete` with a test on the name or the age, wherever it comes in the words, deletes only what matches: its folders
+  // are where it looks, not what it deletes
+  return { ...whole, text, ...(whole === own && filtered ? { filtered: true as const } : {}) };
 }
 
 function strictest(list: Verdict[]): Verdict {

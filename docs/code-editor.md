@@ -224,6 +224,14 @@ program or reaches the network. What it does not understand is `unknown`, and as
   (a later change to its path lands where it leads), `git clean -x`, zsh's `=word` and `>!`, and `>& file` read as the
   file it is.
 
+#### What the third review added (item 112)
+
+- **Every action, not the first.** A find is read word by word from a list of its known tests and options: each command
+  it runs (every `-exec`, `-execdir`, `-ok`, `-okdir`) is read as a command of its own, `-delete`, `-fprint`, `-fls` and
+  any test or action the list does not know make it no read, and a file it compares with (`-newer`, `-samefile`) is
+  checked against the project. A subcommand is read only where its program looks for it: `git stash -m list` is a push
+  of the stash, and `docker compose` with its own options before the command asks.
+
 `command.hostile.test.ts` holds 170 such lines, each beside the plain line it imitates, which reads as it did.
 
 #### Files a change to which always asks (item 88)
