@@ -2,7 +2,8 @@
 // offered, the lead's note in front of each message, the blocks hidden while an answer streams, the Start helpers card when the turn
 // ends, and what a press does. The slice's safety tests (R3, R4 of docs/several-agents.md): a block with an unknown key is refused
 // whole; an unanswered, declined or refused card starts no agent (the fake shell sees no `chatStart` and item 102h's hand-off hears
-// nothing); a third round for one message shows no card. Approving a round starts no agent either: that is item 102h's.
+// nothing); a third round for one message shows no card. What an approved round starts is item 102h's (helperRuns.test.ts): this
+// fake shell makes no helper lane's folder, so here an approved round is only recorded and handed over.
 import { beforeEach, describe, expect, it } from "vitest";
 import { resetLanes } from "../code/laneStore";
 import { resetKitProjects } from "../code/project";
@@ -248,7 +249,7 @@ describe("pressing the card", () => {
     return { ...t, id, card: t.cards(id)[0], startsBefore: starts };
   }
 
-  it("Start helpers settles the card once, records the round by item 102d's rules and hands it to 102h, and starts no agent", async () => {
+  it("Start helpers settles the card once, records the round by item 102d's rules and hands it to 102h, and starts nothing itself", async () => {
     const t = await asked();
     expect(await t.ss.answerHelpers(t.id, t.card.id, true)).toEqual({ ok: true });
     expect(t.cards(t.id)[0].done).toBe("started");
@@ -258,7 +259,8 @@ describe("pressing the card", () => {
     expect(r.rounds.map((x) => x.id)).toEqual([t.card.id]);
     expect(r.waiting.map((w) => w.brief.title)).toEqual(["Tests for the QR builder", "The receipt's Thai date"]);
     expect(r.roundsThisMessage).toBe(1);
-    // the hand-off heard it once, with exactly the rows the card showed; nothing started
+    // the hand-off heard it once, with exactly the rows the card showed; nothing started here (item 102h starts them, in a folder
+    // this fake shell cannot make)
     expect(t.handed).toEqual([{ lead: t.id, round: t.card.id, helpers: t.card.ask.rows, heldBack: 0 }]);
     expect(t.starts.length).toBe(t.startsBefore);
   });

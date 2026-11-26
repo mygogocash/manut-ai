@@ -501,14 +501,16 @@ function SessionApproval({ rec }: { rec: SessionRec }) {
   // a workflow's lane asks before every change, whatever the project's dial says (sessions.ts `kitAsk`): its box says that level
   // and why, and offers no dial, since the project's would not reach it
   const careful = !!rec.workflow;
+  // a helper lane runs in its agent's Ask mode, set by the job: its box says so and offers no other (item 102h, rule R3)
+  const helper = !!rec.helperOf;
   return (
     <ApprovalMenu
-      modes={modes}
+      modes={helper ? [] : modes}
       current={cur}
       own={own ? { words: own, from: t("ctl.own.from", { agent: agentDef(rec.agent).label }) } : null}
-      live={live || !modes.length}
+      live={!helper && (live || !modes.length)}
       onPick={(m) => void getSessions().setMode(rec.id, m)}
-      label={t(`kit.level.${careful ? DEFAULT_KIT_LEVEL : project.level}`)}
+      label={helper ? t("helpers.run.modeSet") : t(`kit.level.${careful ? DEFAULT_KIT_LEVEL : project.level}`)}
       foot={rec.agent === "codex" ? t("ctl.modeFoot") : undefined}
       testId={modes.length ? "session-mode" : "session-approval"}
       extra={

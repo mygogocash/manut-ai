@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { LANGS, setLang, t } from "../i18n";
 import { emptyLane, noteLane, type LaneRecord } from "./lane";
 import { sessionRowKey, type RowMarks } from "../sidebar/rows";
-import { LanesView, jobGroups, laneBase, laneKey, laneRowOf, type LaneRow, type LaneRowInput } from "./Lanes";
+import { LanesView, helperGroups, jobGroups, laneBase, laneKey, laneRowOf, type LaneRow, type LaneRowInput } from "./Lanes";
 
 type Ev = { event: string; [k: string]: unknown };
 const feed = (events: Ev[]): LaneRecord => events.reduce((lane, ev, i) => noteLane(lane, ev, 1_000 + i), emptyLane());
@@ -462,6 +462,59 @@ describe("a job's row (Ask several agents, item 102a)", () => {
     for (const lang of LANGS) {
       setLang(lang);
       expect(renderToString(createElement(LanesView, { rows: job(), now: 100_000, onOpen: vi.fn() })), lang).toContain(t("several.jobRow", { n: 3, title: "Add the PromptPay QR" }));
+    }
+  });
+});
+
+describe("helper lanes under their lead (item 102h)", () => {
+  const LEAD = "Add the PromptPay QR";
+  const lead = laneRowOf(input({ rec: { id: "s1", agent: "claude", cwd: "/Users/fon/baanmali-preorder", status: "running", promptTitle: LEAD, startedAt: 1_000, lane: { name: "kit/promptpay-qr", base: "main" } } }));
+  const helper = (id: string, index: number, agent: string, over: Partial<LaneRowInput> = {}) =>
+    laneRowOf(
+      input({
+        rec: { id, agent: agent as never, cwd: "/Users/fon/baanmali-preorder", status: "running", title: `Part ${index + 1}`, startedAt: 2_000 + index, lane: { name: `kit/promptpay-qr-help-${index + 1}`, base: "kit/promptpay-qr" }, helperOf: { lead: "s1", job: "jk7m2", round: "r1", index } },
+        agent,
+        live: { branch: `kit/promptpay-qr-help-${index + 1}` },
+        leadTitle: LEAD,
+        ...over,
+      }),
+    );
+  const rows = (): LaneRow[] => [helper("s3", 1, "Codex", { turn: { status: "Running pnpm test", startedAt: 1 } }), lead, helper("s2", 0, "Claude Code", { asks: ["Allow pnpm add qrcode?"] })];
+
+  it("keeps its lead and its number on the row", () => {
+    expect(helper("s2", 0, "Claude Code").helper).toEqual({ lead: "s1", n: 1, leadTitle: LEAD });
+    expect(lead.helper).toBeUndefined();
+  });
+
+  it("draws each helper lane indented under its lead's row, in its round's order, each saying whose helper it is", () => {
+    const g = helperGroups(rows());
+    expect(g.of.get("s1")!.map((r) => r.id)).toEqual(["s2", "s3"]);
+    expect([...g.under].sort()).toEqual(["s2", "s3"]);
+    const out = renderToString(createElement(LanesView, { rows: rows(), now: 100_000, onOpen: vi.fn() }));
+    const block = out.slice(out.indexOf('data-testid="lane-helpers-s1"'));
+    expect(block.indexOf('data-testid="lane-s2"')).toBeGreaterThan(-1);
+    expect(block.indexOf('data-testid="lane-s2"')).toBeLessThan(block.indexOf('data-testid="lane-s3"'));
+    // the lead's row comes first, then its helper lanes under it
+    expect(out.indexOf('data-testid="lane-s1"')).toBeLessThan(out.indexOf('data-testid="lane-helpers-s1"'));
+    expect(out.split('data-testid="lane-helper-of"').length - 1).toBe(2);
+    expect(out).toContain("Helper 1 of Add the PromptPay QR");
+    expect(out).toContain("Helper 2 of Add the PromptPay QR");
+    expect(out).toContain('data-helper-of="s1"');
+    // a helper lane's ask reads Needs you on its own row, as any lane's does
+    expect(out).toMatch(/data-testid="lane-s2"[^>]*data-status="needs_you"/);
+  });
+
+  it("draws a helper lane whose lead is not listed as an ordinary row that still names its lead", () => {
+    const out = renderToString(createElement(LanesView, { rows: [helper("s2", 0, "Claude Code")], now: 100_000, onOpen: vi.fn() }));
+    expect(out).toContain('data-testid="lane-s2"');
+    expect(out).not.toContain("lane-helpers-");
+    expect(out).toContain("Helper 1 of Add the PromptPay QR");
+  });
+
+  it("reads in every language", () => {
+    for (const lang of LANGS) {
+      setLang(lang);
+      expect(renderToString(createElement(LanesView, { rows: rows(), now: 100_000, onOpen: vi.fn() })), lang).toContain(t("helpers.run.laneOf", { n: 1, lead: LEAD }));
     }
   });
 });

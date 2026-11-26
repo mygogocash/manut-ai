@@ -87,6 +87,8 @@ export interface SavedSession {
   modelWant?: string;
   /** The job (Ask several agents, item 102a) whose one message started this lane. */
   job?: string;
+  /** A helper lane's lead, job, round and place in it (SessionRec `helperOf`, item 102h). */
+  helperOf?: { lead: string; job: string; round: string; index: number };
 }
 
 export interface SavedLane {
@@ -137,6 +139,18 @@ function parseLane(v: unknown): SavedLane | null {
   return absolute(dir) && absolute(worktree) ? { name, base, dir, worktree } : { name, base };
 }
 
+/** A helper lane's `helperOf` read back: its lead's session id, a job's id the shell takes, the round's id and its place, else null. */
+function parseHelperOf(v: unknown): SavedSession["helperOf"] | null {
+  if (!isObj(v)) return null;
+  const lead = str(v.lead, 12);
+  const job = str(v.job, 40);
+  const round = str(v.round, 200);
+  const index = v.index;
+  if (!lead || !SESSION_ID.test(lead) || !job || !/^[a-z0-9]+(-[a-z0-9]+)*$/.test(job) || !round) return null;
+  if (typeof index !== "number" || !Number.isInteger(index) || index < 0 || index > 99) return null;
+  return { lead, job, round, index };
+}
+
 function parseSession(v: unknown): SavedSession | null {
   if (!isObj(v)) return null;
   const id = str(v.id, 12);
@@ -172,6 +186,9 @@ function parseSession(v: unknown): SavedSession | null {
   if (lane) out.lane = lane;
   // only a lane with a folder of its own may have Helpers on (item 102e)
   if (v.helpers === true && lane?.dir) out.helpers = true;
+  // a helper lane keeps what names its lead and its round (item 102h); one that cannot be read is an ordinary lane
+  const helperOf = parseHelperOf(v.helperOf);
+  if (helperOf && lane?.dir) out.helperOf = helperOf;
   // the chats the person listed under its box, each checked as it is read back; one that cannot be read is left out (item 102k)
   const reach = parseEntries(v.reach);
   if (reach.length) out.reach = reach;

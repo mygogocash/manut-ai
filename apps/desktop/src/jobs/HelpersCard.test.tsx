@@ -115,6 +115,15 @@ describe("the card", () => {
     expect(words).toContain("Kit asked for 5. A round takes at most 8, so the last 3 are left out.");
   });
 
+  it("says this Mac's cap once the memory was read, and only when the round asks for more than it runs at once (item 102h)", () => {
+    expect(text(draw(createElement(HelpersCardView, { ask: ask(), atOnce: 2 })))).not.toContain("at once");
+    expect(text(draw(createElement(HelpersCardView, { ask: ask(), atOnce: null })))).not.toContain("at once");
+    const three = ask({ rows: [...ask().rows, { title: "c", brief: "c", agent: "claude", own: true }] });
+    const words = text(draw(createElement(HelpersCardView, { ask: three, atOnce: 2 })));
+    expect(words).toContain("This Mac runs 2 at once; the rest wait their turn.");
+    expect(draw(createElement(HelpersCardView, { ask: three, atOnce: 2 }))).toContain('data-testid="helpers-at-once"');
+  });
+
   it("holds its buttons while a press is on its way, and says why one was not taken", () => {
     const html = draw(createElement(HelpersCardView, { ask: ask(), busy: true, error: refusedWords("already_decided") }));
     expect(html).toMatch(/disabled=""[^>]*data-testid="helpers-not-now"/);
@@ -126,7 +135,7 @@ describe("the card", () => {
   });
 
   it.each([
-    { done: "started" as const, line: "You approved this round. This version does not start helper lanes yet, so none started." },
+    { done: "started" as const, line: "You approved this round. Its helper lanes start below." },
     { done: "notNow" as const, line: "Not now: no helper lanes started." },
     { done: "gone" as const, line: "No longer open, so no helper lanes started." },
   ])("settled as $done, it is one line with no button", ({ done, line }) => {
