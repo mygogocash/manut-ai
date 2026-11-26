@@ -897,6 +897,45 @@ and a pull request after a Yes, Remove) runs git with their settings and the rep
 hooks and the file monitor aside: they chose to act on that project, and a refusal there would break a repository-local LFS or
 deploy-key ssh setup the person relies on.
 
+**Where a fetch goes and what it trusts** (item 114, third security review). A repository's own config could also send the
+automatic pull's fetch, or the merged clean-up's, through a proxy of someone else's choosing, which answers 401 and is handed
+the person's git login (`git_pull.rs` shows it with git 2.54, a stand-in proxy on the Mac and a made-up credential helper).
+Read family by family from `git help config`, the repository's own scopes now also stop automatic work at:
+
+- `http.*` and `http.<url>.*`, every key: a proxy with its authentication and certificates, a name resolved to another
+  address (`curloptResolve`), redirects, which certificates and keys are trusted (`sslVerify`, `sslCAInfo`, `sslCAPath`,
+  `pinnedPubkey`, `sslBackend`), what is sent (`sslCert`, `sslKey`, `extraHeader`, `cookieFile`, `saveCookies`, `emptyAuth`,
+  `proactiveAuth`, `delegation`, `userAgent`), and the few that only tune a transfer, which are not worth telling apart.
+- `remote.<name>.proxy` and `.proxyAuthMethod`, beside `.uploadpack`, `.receivepack`, `.vcs` and a `<transport>::` address.
+  The remote's own plain address stays: the fetch goes to the remote the repository names, as in a terminal. `.fetch` is not
+  read: the app's fetch now passes an empty `--refmap=`, since a configured refspec otherwise writes the fetched commit onto
+  another ref too (git's "opportunistic" update moved one of the person's own branches in a test). `.tagOpt`, `.prune`,
+  `.pruneTags`, `.mirror`, `.push`, `.serverOption`, `.followRemoteHEAD`, `.promisor` and `.partialCloneFilter` name no
+  address and run nothing (a promisor's lazy fetch goes to that same remote).
+- `url.<base>.*`: both its keys, as before.
+- `credential.*` and `credential.<url>.*`, every key: a helper is a program, and the rest says what is sent and how it is
+  protected (`username`, `useHttpPath`, `protectProtocol`, `sanitizePrompt`, `interactive`).
+- `ssh.variant`: how git passes options to the ssh program.
+- `protocol.allow`, `protocol.<name>.allow` and `protocol.version`: which transports git takes (every automatic run still
+  passes `-c protocol.ext.allow=never`).
+- `fetch.bundleURI` and `transfer.bundleURI`: a download from another address first, or from one the server names. The rest
+  of `fetch.*` and `transfer.*` only tune a fetch (`prune`, `pruneTags`, `fsckObjects`, `unpackLimit`, `writeCommitGraph`,
+  `parallel`, `output`, `negotiationAlgorithm`, `hideRefs`, `credentialsInUrl`) or are overridden on the command line
+  (`fetch.recurseSubmodules` by `--no-recurse-submodules`; with the explicit refspec, pruning reaches only that one branch,
+  checked with git 2.54).
+- `core.protectHFS` and `core.protectNTFS`: turned off in a repository, a checkout could write into `.git` through a name
+  the disk reads as the same. The rest of `core.*`: `sshCommand`, `gitProxy`, `askPass` and `alternateRefsCommand` as
+  before; `hooksPath` and `fsmonitor` overridden by `-c`; `editor` and `pager` start only for a terminal; `worktree` only says
+  where the work tree is, and git reads that folder's own repository there; the others are about the disk and the index.
+- `submodule.<name>.update` naming a command (`!`). The rest of `submodule.*` acts only inside a submodule, or when one is
+  cloned or updated, which the app never does by itself (item 90).
+- `pull.*` is not read by anything the app runs: it never runs `git pull`, but a fetch and `git merge --ff-only`, whose
+  settings are switched off on its command line as above (a merge driver runs only for a real merge, never a fast-forward).
+
+What a person sees: a project with any of these in its own `.git/config` is not pulled by itself and its merged lanes are not
+cleaned up by themselves, and the line names the setting (an address in a subsection shown as `*`). The person's own global
+and system settings, their proxy among them, stay theirs, and a pull in a terminal works as before.
+
 **Submodules** (item 90). A git that goes into a submodule reads that submodule's own config (`.git/modules/<name>/config`,
 nested ones too) and attributes, which none of the above reached, so a folder someone sent with a submodule whose config names a
 clean filter ran it within a minute of being opened. Two guards now:

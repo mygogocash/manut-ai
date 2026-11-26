@@ -414,6 +414,74 @@ mod tests {
         let _ = fs::remove_dir_all(home);
     }
 
+    /// A stand-in HTTP proxy on this computer, for item 114: it answers every request with 401 and a request for a password,
+    /// as a hostile proxy does to be handed one, and keeps each request's head, so a test sees whether git came to it and
+    /// what it sent.
+    fn proxy() -> (u16, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
+        use std::io::{Read, Write};
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = l.local_addr().unwrap().port();
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let kept = seen.clone();
+        std::thread::spawn(move || {
+            for c in l.incoming() {
+                let Ok(mut c) = c else { continue };
+                let _ = c.set_read_timeout(Some(Duration::from_secs(5)));
+                let mut head = Vec::new();
+                let mut chunk = [0u8; 4096];
+                while !head.windows(4).any(|w| w == b"\r\n\r\n") {
+                    match c.read(&mut chunk) {
+                        Ok(0) | Err(_) => break,
+                        Ok(n) => head.extend_from_slice(&chunk[..n]),
+                    }
+                }
+                kept.lock().unwrap().push(String::from_utf8_lossy(&head).into_owned());
+                let _ = c.write_all(b"HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Basic realm=\"x\"\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+            }
+        });
+        (port, seen)
+    }
+
+    /// Item 114 (third security review, 26 Nov 2026). A repository's own `http.proxy` sends a fetch through a program of
+    /// someone else's choosing, which answers 401 and is handed the person's git login. First with git itself, a made-up
+    /// credential helper in a global config of the test's own (no real one is ever asked): the proxy receives that login.
+    /// Then the automatic pull: it stops at the setting, says it, and never reaches the proxy at all. The remote's address
+    /// is a name that does not exist (`.invalid`), so even a run that went wrong asks no real helper for anything.
+    #[test]
+    fn a_pull_never_goes_through_a_proxy_the_repository_names_and_no_login_reaches_it() {
+        let Some((home, d, _, _)) = behind("pull-proxy") else { return };
+        let (port, seen) = proxy();
+        sh(&d, &["remote", "set-url", "origin", "http://manut-test.invalid/o/r.git"]);
+        for (key, value) in [("http.proxy", format!("http://127.0.0.1:{port}")), ("remote.origin.proxy", format!("http://127.0.0.1:{port}")), ("http.http://manut-test.invalid/.proxy", format!("http://127.0.0.1:{port}"))] {
+            sh(&d, &["config", key, &value]);
+            // what git itself does with it, for a person whose own global config has a credential helper
+            let global = home.join("global.gitconfig");
+            fs::write(&global, "[credential]\n\thelper = \"!f() { echo username=manut-test; echo password=made-up-password; }; f\"\n").unwrap();
+            let before = seen.lock().unwrap().len();
+            let ran = std::process::Command::new("git")
+                .args(["-C", d.to_str().unwrap(), "fetch", "-q", "origin"])
+                .env("GIT_CONFIG_GLOBAL", &global)
+                .env("GIT_CONFIG_NOSYSTEM", "1")
+                .env("GIT_TERMINAL_PROMPT", "0")
+                .env_remove("GIT_ASKPASS")
+                .env_remove("SSH_ASKPASS")
+                .output()
+                .unwrap();
+            assert!(!ran.status.success());
+            let heads = seen.lock().unwrap()[before..].join("\n");
+            // base64 of `manut-test:made-up-password`: the login reached the proxy
+            assert!(heads.contains("Authorization: Basic bWFudXQtdGVzdDptYWRlLXVwLXBhc3N3b3Jk"), "{key}: {heads}");
+            // the automatic pull: refused by name, and the proxy never hears from it
+            let before = seen.lock().unwrap().len();
+            let got = pull(&home, &d);
+            let shown = if key.starts_with("http.http") { "http.*.proxy" } else { key };
+            assert_eq!((got.done, got.why.as_str(), got.setting.as_str()), (false, "config", shown), "{key}: {got:?}");
+            assert_eq!(seen.lock().unwrap().len(), before, "{key}: the pull reached the proxy");
+            sh(&d, &["config", "--unset", key]);
+        }
+        let _ = fs::remove_dir_all(home);
+    }
+
     #[test]
     fn a_pull_runs_no_program_a_submodule_s_own_config_names() {
         let Some((home, d)) = repo("pull-submodule") else { return };
