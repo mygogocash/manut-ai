@@ -11,7 +11,8 @@
 # pushes, and this reads the answer.
 #
 # Only a run started by a push or by hand counts: a pull request's run of a branch that CI runs on its pushes skips
-# every job and is green without checking anything (.github/scripts/changed-areas.mjs). It only reads GitHub.
+# every job and is green without checking anything (.github/scripts/changed-areas.mjs). CI_WAIT_EVENTS (item 130) widens
+# that for a branch CI does not run on a push of, such as Dependabot's. It only reads GitHub.
 set -u
 repo=mygogocash/manut-ai
 branch=${1:?usage: ci-wait.sh <branch> [<commit>]}
@@ -25,6 +26,13 @@ tries=${CI_WAIT_TRIES:-20}
 # The account that sees the organisation, as the ci-read skill's script uses; without it, gh's own login.
 if [ -z "${GH_TOKEN:-}" ]; then token=$(gh auth token --user KunanonJ 2>/dev/null) && [ -n "$token" ] && export GH_TOKEN="$token"; fi
 
+# Which runs count. Only a push's or a person's by default; auto-merge-dependabot.sh adds pull_request, because
+# Dependabot's branches (dependabot/...) are not ones CI runs on a push of, so the pull request's own run is the check.
+events=${CI_WAIT_EVENTS:-push workflow_dispatch}
+case "$events" in *[!a-z_\ ]*) echo "CI_WAIT_EVENTS must be event names"; exit 2 ;; esac
+event_filter=false
+for e in $events; do event_filter=".event == \"$e\" or $event_filter"; done
+
 head=$(git ls-remote "$remote" "refs/heads/$branch" | cut -f1)
 [ -n "$head" ] || { echo "$branch is not on GitHub: push it first"; exit 2; }
 if [ -n "$want" ] && [ "$head" != "$want" ]; then
@@ -36,7 +44,7 @@ echo "CI for $branch at ${head:0:7}"
 # The newest run of this commit that a push or a person started. A run takes a few seconds to appear after a push.
 find_run() {
   gh run list --repo "$repo" --workflow ci.yml --branch "$branch" --commit "$head" --limit 10 \
-    --json databaseId,event --jq '[.[] | select(.event == "push" or .event == "workflow_dispatch")][0].databaseId // empty'
+    --json databaseId,event --jq "[.[] | select($event_filter)][0].databaseId // empty"
 }
 id=""
 for _ in $(seq 1 "$tries"); do
