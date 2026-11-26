@@ -5,7 +5,7 @@
 # Why: the owner agreed on 26 Nov 2026 that minor and patch dependency bumps merge on a green CI run. Dependabot's
 # version updates target pilot/week-1 (item 127). For each open Dependabot pull request into pilot/week-1 it fetches the
 # head, asks the classifier (.github/scripts/merge-risk.mjs, the LEAD's copy) for `low` or `review`, and reads CI's run
-# of that exact commit. Only `low` with a green run is merged, with `gh pr merge --merge`, matched to the head it checked.
+# of that exact commit. Only `low` with a green run is merged, with `gh pr merge --merge`, matched to the head it checked, or the asynchronous merge endpoint if that is refused.
 # Everything else is listed with why, for the lead.
 #
 # Dry run by default: it prints what it would merge. --yes merges. By default it does not wait for a run that is still
@@ -35,6 +35,32 @@ list=$(gh pr list --repo "$repo" --base "$base" --author "app/dependabot" --stat
 [ -n "$list" ] || { echo "no open Dependabot pull requests into $base"; exit 0; }
 git -C "$clone" fetch -q origin "+refs/heads/$base:refs/remotes/origin/$base" || { echo "could not fetch $base"; exit 1; }
 
+# The asynchronous merge, for when gh pr merge is refused (GitHub refuses the synchronous endpoint for a stacked pull
+# request, as it did for #1). PUT .../pulls/N/merge-async answers 202 {status: "pending", details: {uuid}} (200 if already
+# merged, 409 with the pending request's uuid, 400 for a draft or closed pull request); GET .../merge-async/<uuid> is
+# then polled until status is merged (details.sha is the merge commit) or failed (details.message says why). The sha
+# makes it merge only the head that was checked.
+merge_async() {
+  local n=$1 sha=$2 reply status uuid
+  reply=$(gh api -X PUT "repos/$repo/pulls/$n/merge-async" -f merge_method=merge -f merge_action=direct_merge -f sha="$sha" 2>&1) || {
+    # A 409 means a request is already pending: its uuid is in the body, so wait on that one.
+    printf '%s' "$reply" | grep -q '"uuid"' || return 1
+  }
+  status=$(printf '%s' "$reply" | jq -r '.status // empty' 2>/dev/null)
+  uuid=$(printf '%s' "$reply" | jq -r '.details.uuid // empty' 2>/dev/null)
+  [ "$status" = "merged" ] && return 0
+  [ -n "$uuid" ] || return 1
+  for _ in $(seq 1 "${AUTO_MERGE_POLL_TRIES:-40}"); do
+    status=$(gh api "repos/$repo/pulls/$n/merge-async/$uuid" --jq '.status' 2>/dev/null) || return 1
+    case "$status" in
+      merged) return 0 ;;
+      failed) return 1 ;;
+    esac
+    sleep "${AUTO_MERGE_POLL:-3}"
+  done
+  return 1
+}
+
 merged=0; left=0
 while IFS=$'\t' read -r number sha branch title; do
   [ -n "$number" ] || continue
@@ -62,11 +88,10 @@ while IFS=$'\t' read -r number sha branch title; do
     left=$((left + 1)); continue
   fi
   if [ $yes -eq 0 ]; then echo "would merge  $tag (low risk, CI green on ${sha:0:7})"; continue; fi
-  if gh pr merge "$number" --repo "$repo" --merge --match-head-commit "$sha" >/dev/null 2>&1 ||
-     gh api -X PUT "repos/$repo/pulls/$number/merge" -f merge_method=merge -f sha="$sha" >/dev/null 2>&1; then
+  if gh pr merge "$number" --repo "$repo" --merge --match-head-commit "$sha" >/dev/null 2>&1 || merge_async "$number" "$sha"; then
     echo "merged   $tag"; merged=$((merged + 1))
   else
-    echo "review   $tag: low risk and green, but GitHub refused the merge (a conflict, or the head moved)"; left=$((left + 1))
+    echo "review   $tag: low risk and green, but GitHub refused the merge (a conflict, a draft, or the head moved)"; left=$((left + 1))
   fi
 done <<< "$list"
 echo "done: $merged merged, $left left for the lead$([ $yes -eq 0 ] && echo " (dry run: nothing is merged without --yes)")"

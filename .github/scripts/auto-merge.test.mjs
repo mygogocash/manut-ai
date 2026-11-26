@@ -205,7 +205,8 @@ describe("auto-merge.sh", () => {
 });
 
 /** A stand-in gh for the Dependabot script: lists pull requests from prs.json, answers run list and run view from files
- *  (runs-<sha>.json for a commit, run-<id>.json), and records `pr merge` and `api` calls; GH_REFUSE=1 makes pr merge fail. */
+ *  (runs-<sha>.json for a commit, run-<id>.json), and records `pr merge` and `api` calls; GH_REFUSE=1 makes pr merge fail; async-put.json is the merge-async answer (async-put.fail
+ *  makes it exit 1, as gh does for a 409 or 400) and each line of async-status answers one poll. */
 function fakeGh(dir) {
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "gh"), `#!/bin/bash
@@ -218,7 +219,9 @@ case "$1 $2" in
   "run list") f="${dir}/runs-$(commit "$@").json"; [ -f "$f" ] || { echo "[]" > "$f"; } ;;
   "run view") f="${dir}/run-$3.json" ;;
   "pr merge") [ -n "\${GH_REFUSE:-}" ] && exit 1; exit 0 ;;
-  "api -X") exit 0 ;;
+  "api -X") f="${dir}/async-put.json"; [ -f "$f" ] || echo '{"status":"pending","details":{"uuid":"u1"}}' > "$f"
+            cat "$f"; [ -f "${dir}/async-put.fail" ] && exit 1; exit 0 ;;
+  "api repos/"*"/merge-async/"*) l=$(head -1 "${dir}/async-status" 2>/dev/null); sed -i.bak 1d "${dir}/async-status" 2>/dev/null; echo "\${l:-pending}"; exit 0 ;;
   *) echo "unexpected gh $*" >&2; exit 3 ;;
 esac
 jq -r "$(jqarg "$@")" < "$f"
@@ -278,7 +281,7 @@ describe("auto-merge-dependabot.sh", () => {
     const calls = () => (existsSync(join(bin, "calls")) ? readFileSync(join(bin, "calls"), "utf8") : "");
     const run = (extra = {}, ...args) => {
       const out = spawnSync("bash", [join(scriptDir, "auto-merge-dependabot.sh"), ...args], {
-        env: { ...env, ...extra, PATH: `${bin}:${env.PATH}`, CI_WAIT_POLL: "0" }, encoding: "utf8",
+        env: { ...env, ...extra, PATH: `${bin}:${env.PATH}`, CI_WAIT_POLL: "0", AUTO_MERGE_POLL: "0", AUTO_MERGE_POLL_TRIES: "5" }, encoding: "utf8",
       });
       return { status: out.status, out: out.stdout + out.stderr };
     };
@@ -348,11 +351,55 @@ describe("auto-merge-dependabot.sh", () => {
     assert.equal(merges(w.calls()).length, 2);
   });
 
-  it("falls back to the REST merge endpoint when gh pr merge is refused, and lists the pull request when both are", () => {
-    const w = world("dep-fallback", [{ ...minor }]);
+  const asyncCalls = (calls) => calls.split("\n").filter((l) => l.includes("merge-async"));
+  const setup = (name, put, statuses, fail = false) => {
+    const w = world(name, [{ ...minor }]);
+    const bin = join(scratch, name, "bin");
+    if (put) writeFileSync(join(bin, "async-put.json"), put);
+    if (fail) writeFileSync(join(bin, "async-put.fail"), "");
+    writeFileSync(join(bin, "async-status"), statuses.map((x) => `${x}\n`).join(""));
+    return w;
+  };
+
+  it("falls back to the asynchronous merge when gh pr merge is refused: PUT merge-async with the checked head, then polls its uuid until merged", () => {
+    const w = setup("dep-async", "", ["pending", "pending", "merged"]);
     const { out } = w.run({ GH_REFUSE: "1" }, "--yes");
     assert.match(out, /merged {3}#1 Bump minor/);
-    assert.match(w.calls(), new RegExp(`api -X PUT repos/mygogocash/manut-ai/pulls/1/merge -f merge_method=merge -f sha=${w.prs[0].sha}`));
+    const calls = asyncCalls(w.calls());
+    assert.equal(calls[0], `api -X PUT repos/mygogocash/manut-ai/pulls/1/merge-async -f merge_method=merge -f merge_action=direct_merge -f sha=${w.prs[0].sha}`);
+    assert.deepEqual(calls.slice(1), Array(3).fill("api repos/mygogocash/manut-ai/pulls/1/merge-async/u1 --jq .status"));
+    // The synchronous endpoint, which GitHub refuses for stacked pull requests, is never used.
+    assert.ok(!w.calls().split("\n").some((l) => /^api .*pulls\/1\/merge( |$)/.test(l)));
+  });
+
+  it("takes an already merged answer (200) without polling", () => {
+    const w = setup("dep-async-done", '{"status":"merged","details":{"sha":"abc"}}', []);
+    const { out } = w.run({ GH_REFUSE: "1" }, "--yes");
+    assert.match(out, /merged {3}#1 Bump minor/);
+    assert.equal(asyncCalls(w.calls()).length, 1);
+  });
+
+  it("waits on the pending request's uuid when GitHub answers 409", () => {
+    const w = setup("dep-async-409", '{"message":"already pending","status":"pending","details":{"uuid":"u9"}}', ["merged"], true);
+    const { out } = w.run({ GH_REFUSE: "1" }, "--yes");
+    assert.match(out, /merged {3}#1 Bump minor/);
+    assert.match(asyncCalls(w.calls()).at(-1), /merge-async\/u9 /);
+  });
+
+  it("lists the pull request when the asynchronous merge fails, is refused (400) or never finishes", () => {
+    for (const [name, put, statuses, fail] of [["dep-async-failed", "", ["failed"], false], ["dep-async-400", '{"message":"Pull request is a draft"}', [], true],
+      ["dep-async-slow", "", ["pending", "pending", "pending", "pending", "pending", "pending"], false]]) {
+      const w = setup(name, put, statuses, fail);
+      const { out } = w.run({ GH_REFUSE: "1" }, "--yes");
+      assert.match(out, /review {3}#1 Bump minor: low risk and green, but GitHub refused the merge/, name);
+      assert.match(out, /done: 0 merged, 1 left/, name);
+    }
+  });
+
+  it("does not use the asynchronous endpoint when gh pr merge worked", () => {
+    const w = world("dep-sync-ok", [{ ...minor }]);
+    w.run({}, "--yes");
+    assert.deepEqual(asyncCalls(w.calls()), []);
   });
 
   it("lists a pull request whose head moved after it was listed", () => {

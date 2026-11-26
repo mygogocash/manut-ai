@@ -146,8 +146,17 @@ classifier's decision and stops, with no wait for CI and no merge.
 only those the classifier calls `low` with a green pull request run on that head, using `gh pr merge --merge
 --match-head-commit <sha>`. Dependabot's branches are not ones CI runs on a push of, so it reads the pull request's own
 run (`CI_WAIT_EVENTS` in `ci-wait.sh`). A run still going is listed as waiting: run it again, or pass `--wait`. If
-GitHub refuses the merge it tries the REST merge endpoint with the same head, and lists the pull request if that fails
-too. It never closes, comments on or touches a pull request that is not Dependabot's. Dependabot's major bumps, new
+`gh pr merge` is refused (GitHub refuses the synchronous endpoint for a stacked pull request, as it did for #1) it uses the
+asynchronous one, never `PUT .../pulls/N/merge`:
+
+```bash
+gh api -X PUT repos/mygogocash/manut-ai/pulls/N/merge-async -f merge_method=merge -f merge_action=direct_merge -f sha=<checked head>
+# 202 {status: "pending", details: {uuid}}; 200 already merged; 409 returns the pending request's uuid; 400 draft or closed
+gh api repos/mygogocash/manut-ai/pulls/N/merge-async/<uuid> --jq .status   # poll until "merged" (details.sha is the merge commit) or "failed" (details.message)
+```
+
+A failed or refused merge lists the pull request for the lead. It never closes, comments on or touches a pull request that
+is not Dependabot's. Dependabot's major bumps, new
 packages and 0.x minors come back as `review`: read them like any other item.
 
 ## When the Mac or the account stops
