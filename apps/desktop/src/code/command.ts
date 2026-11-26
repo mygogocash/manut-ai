@@ -125,7 +125,7 @@ const GUARDED_FILES = new Set([
   "lefthook-local.yml", "lefthook-local.yaml", ".simple-git-hooks.json", ".simple-git-hooks.js", ".simple-git-hooks.cjs",
   "simple-git-hooks.json", ".gitlab-ci.yml", "azure-pipelines.yml", "bitbucket-pipelines.yml", "jenkinsfile", "makefile",
   "gnumakefile", "justfile", ".justfile", "taskfile.yml", "taskfile.yaml", "taskfile.dist.yml", "taskfile.dist.yaml", "mise.toml",
-  ".mise.toml", "mise.local.toml", ".mise.local.toml", "composer.json", "deno.json", "deno.jsonc", "project.json", "nx.json",
+  ".mise.toml", "mise.local.toml", ".mise.local.toml", "composer.json", "deno.json", "deno.jsonc", "project.json", "nx.json", "turbo.json",
   ".nvim.lua", ".nvimrc", ".exrc",
 ]);
 const GUARDED_NAMES = [/^\.pnpmfile\./, /^\.lintstagedrc/, /^lint-staged\.config\./, /\.code-workspace$/, /^\.?mise\..+\.toml$/];
@@ -346,7 +346,11 @@ function lex(line: string): Lexed {
       continue;
     }
     // `$'…'` decodes escapes (`$'\x2dexec'` is `-exec`) and `$"…"` translates its text: neither is what it looks like.
-    if (c === "`" || (c === "$" && next !== undefined && /[A-Za-z_({0-9?@*#!$'"-]/.test(next))) {
+    // zsh, the shell Codex and Claude Code run commands in on a Mac, expands more after a `$` than bash does: `$=X` and
+    // `${=X}` split a variable into words (options among them), `$~X` reads it as a pattern, `$^X`, `$+X`, `${(z)X}` and
+    // `${(e)X}` do more again. So a `$` followed by anything but a blank or the line's end is never read as itself, and
+    // since no expansion is read, a variable set earlier in the line cannot reach a later word unseen.
+    if (c === "`" || (c === "$" && next !== undefined && !/[\s]/.test(next))) {
       opaque = true;
       word += c;
       inWord = true;
@@ -413,6 +417,29 @@ function operands(words: string[], from: number, takesValue: ReadonlySet<string>
     }
     if (w.startsWith("-") && w !== "-") {
       if (takesValue.has(w)) i++;
+      continue;
+    }
+    out.push(i);
+  }
+  return out;
+}
+
+/** jq's operands (and yq's, which takes jq's options): `--arg`, `--argjson`, `--slurpfile` and `--rawfile` each take a name and
+ *  then a value, where its other options with a value take one. Read as one-value options, `--arg x 1 '<filter>'` made `1` the
+ *  filter and left the real filter unread. */
+const JQ_TWO_VALUES = new Set(["--arg", "--argjson", "--slurpfile", "--rawfile"]);
+const JQ_ONE_VALUE = new Set(["--indent", "-L", "--library-path", "--seq-prefix", "--stream-errors-to"]);
+function jqOperands(words: string[]): number[] {
+  const out: number[] = [];
+  for (let i = 1; i < words.length; i++) {
+    const w = words[i];
+    if (w === "--") {
+      for (let j = i + 1; j < words.length; j++) out.push(j);
+      break;
+    }
+    if (w.startsWith("-") && w !== "-") {
+      if (JQ_TWO_VALUES.has(w)) i += 2;
+      else if (JQ_ONE_VALUE.has(w)) i++;
       continue;
     }
     out.push(i);
@@ -539,7 +566,7 @@ function packageManager(words: string[], where: Where): Verdict {
   }
   // dlx fetches the tool from the registry every time; exec (and bun's x) runs the project's own
   if (sub === "dlx") return v("unknown", say("kit.say.opaque"));
-  if (["exec", "x"].includes(sub)) return at$(tool(words.slice(head), where), head);
+  if (["exec", "x"].includes(sub)) return at$(tool(words.slice(head), where, pm === "npm" ? NPX_FLAGS : undefined), head);
   if (["publish", "deploy"].includes(sub)) return live();
   if (sub === "pack") return v("change", say("kit.say.build"), head);
   // its settings can name the shell every script runs in, so only reading them is a read
@@ -728,6 +755,8 @@ function git(words: string[], where: Where): Verdict {
     case "var":
       return history();
     case "grep":
+      // with `-f` the patterns come from a file, which is checked as any path is, and only the words after `-e` are patterns
+      if (hasIn(GIT_GREP_VALUES, args, "-f")) return { ...history(), text: textAfter(words, ["-e"]) };
       return { ...history(), text: new Set(ops.slice(1, 2)) };
     case "fetch":
       return fetch(words, head);
@@ -738,7 +767,9 @@ function git(words: string[], where: Where): Verdict {
     case "reflog":
       return has(args, "expire", "delete") ? del() : history();
     case "commit":
-      return v("change", say("kit.say.commit"), head, { saves: true, text: textAfter(words, ["-m", "--message", "-F", "--file", "--author", "--date", "-C", "-c", "--fixup", "--squash", "--template", "-t"]) });
+      // the file a message or a template is read from (`-F`, `--file`, `-t`) is a path like any other: a key read into a
+      // message would leave with the next push
+      return v("change", say("kit.say.commit"), head, { saves: true, text: textAfter(words, ["-m", "--message", "--author", "--date", "-C", "-c", "--fixup", "--squash"]) });
     case "switch":
       if (has(args, "--force", "-f", "--discard-changes")) return del(say("kit.say.discard"));
       return { ...change(), text: textAfter(words, ["-c", "--create", "-C", "--force-create"]) };
@@ -782,10 +813,14 @@ function git(words: string[], where: Where): Verdict {
     case "tag":
       if (has(args, "-d", "--delete")) return del();
       return onlyLists(args, "tag") ? history() : { ...change(), text: textAfter(words, ["-m", "--message"]) };
-    case "stash":
-      if (["drop", "clear"].includes(rest[0] ?? "")) return del();
-      if (["list", "show"].includes(rest[0] ?? "")) return history();
+    case "stash": {
+      // git takes a stash's subcommand only as the word right after `stash`: with an option first it is a push, and the
+      // word after `-m` is its message (`git stash -m list` stashes the changes away)
+      const act = words[head] ?? "";
+      if (["drop", "clear"].includes(act)) return del();
+      if (["list", "show"].includes(act)) return history();
       return { ...change(), text: textAfter(words, ["-m", "--message"]) };
+    }
     case "worktree":
       if (["remove", "prune"].includes(rest[0] ?? "")) return del();
       return rest[0] === "list" ? history() : change();
@@ -929,6 +964,11 @@ const RUNS_PROGRAM: Record<string, { opts: string[]; values: string }> = {
   more: { opts: ["-k", "--lesskey-file", "--lesskey-src", "--lesskey-content"], values: "bhjopPtTxyzO#" },
 };
 const CHANGES = new Set(["mkdir", "touch", "cp", "mv", "chmod", "install", "tar", "unzip", "zip", "gzip", "gunzip", "dos2unix", "truncate"]);
+/** The options of uniq and xxd that take a value: what is left are the files it reads and writes (a second one is the file
+ *  it writes). Each program has its own: taking `-c` for one that takes a value, as both once shared, swallowed uniq's
+ *  input and hid the file it writes. An option left out here only counts one more file, which asks more, never less. */
+const UNIQ_VALUES: ReadonlySet<string> = new Set(["-f", "-s", "-w"]);
+const XXD_VALUES: ReadonlySet<string> = new Set(["-c", "-g", "-l", "-n", "-o", "-s"]);
 /** Programs that write files the command does not name: a link (`ln`, `link`, `cp -s`) makes a later change to its path
  *  land where the link leads, and a patch names its own files inside. */
 const WRITES_UNNAMED = new Set(["ln", "link", "patch"]);
@@ -977,7 +1017,18 @@ const CHECK_RUNS = new Set([
   "snapshotresolver", "testsequencer", "watchplugins", "exec", "toolexec", "vettool", "overlay", "shellcheck", "pyflakes",
   "customformatter", "customsyntax", "pre", "hostnamebin", "scriptshell", "nodeoptions", "rcfile", "resolvepluginsrelativeto",
   "ldflags", "gccgoflags", "asmflags", "modfile", "overrideini", "basetemp", "preload",
+  // options a runner hands to node for its workers (mocha's `--node-option`, ava's `--node-arguments`, vitest's
+  // `execArgv`), where `--import` and `--require` load a program as `NODE_OPTIONS` would
+  "nodeoption", "nodearguments", "nodeargs", "execargv", "customprovidermodule",
 ]);
+/** Long options only one runner reads this way (another runner's option of the same name is harmless): vitest's diff
+ *  settings, pool and workspace name a module it loads, and its benchmark's JSON is a file it writes. */
+const CHECK_LONG: Record<string, Record<string, "runs" | "writes" | "config" | "loads">> = {
+  vitest: { diff: "loads", pool: "loads", workspace: "config", outputjson: "writes" },
+  jest: { runner: "loads" },
+  // words a package manager hands to a script nobody has read may reach either
+  "": { diff: "loads", pool: "loads", outputjson: "writes", runner: "loads" },
+};
 const CHECK_SENDS = new Set(["pastebin"]);
 /** Options that name what a runner loads: a name of its own (`--reporter=dot`) is fine, a file is a program. */
 const CHECK_LOADS = new Set(["reporter", "reporters", "format", "formatter", "environment", "testenvironment", "ui", "preset", "rules", "sequencer"]);
@@ -993,7 +1044,7 @@ const CHECK_WRITES = new Set([
 const CHECK_SHORT: Record<string, Record<string, "runs" | "writes" | "config" | "loads">> = {
   vitest: { u: "writes", c: "config" },
   jest: { u: "writes", c: "config" },
-  mocha: { r: "runs", R: "loads", u: "loads" },
+  mocha: { r: "runs", R: "loads", u: "loads", n: "runs" },
   pytest: { p: "runs", o: "runs", c: "config" },
   "py.test": { p: "runs", o: "runs", c: "config" },
   eslint: { c: "config", f: "loads", o: "writes" },
@@ -1011,7 +1062,7 @@ const CHECK_SHORT: Record<string, Record<string, "runs" | "writes" | "config" | 
 /** Runners that read `-name` as a long option, as Go's own flags do. */
 const GO_FLAGS = new Set(["go", "actionlint"]);
 const looksLikeSettings = (value: string) =>
-  /(^|[._-])config([._-]|$)|rc(\.[a-z]+)?$|^\.[a-z0-9_-]*rc|^(pyproject\.toml|setup\.cfg|tox\.ini|pytest\.ini|mypy\.ini|ruff\.toml|biome\.jsonc?|t?sconfig.*\.json|jsconfig.*\.json)$/i.test(value.split(/[\\/]/).pop() ?? "");
+  /(^|[._-])(config|workspace)([._-]|$)|rc(\.[a-z]+)?$|^\.[a-z0-9_-]*rc|^(pyproject\.toml|setup\.cfg|tox\.ini|pytest\.ini|mypy\.ini|ruff\.toml|biome\.jsonc?|t?sconfig.*\.json|jsconfig.*\.json)$/i.test(value.split(/[\\/]/).pop() ?? "");
 const namesAFile = (value: string) => /[\\/]/.test(value) || value.startsWith(".") || /\.(c|m)?[jt]sx?$|\.py$/i.test(value);
 
 /** What a check's own options make of it, or null when they leave it a check: an option that loads a program, a settings
@@ -1043,6 +1094,8 @@ function checkOptions(runner: string, args: readonly string[]): Verdict | null {
         if (CHECK_WRITES.has(n)) kind("writes", value);
         if (CHECK_CONFIG.has(n)) kind("config", value);
         if (CHECK_LOADS.has(n)) kind("loads", value);
+        const own = CHECK_LONG[runner]?.[n];
+        if (own) kind(own, value);
         if (go && short[n]) kind(short[n], value);
       }
       continue;
@@ -1058,13 +1111,24 @@ function checkOptions(runner: string, args: readonly string[]): Verdict | null {
   return found;
 }
 
-/** A tool run by name, through npx or a package manager's exec as much as directly. */
-function tool(words: string[], where: Where): Verdict {
-  // npx's own options come before the tool; one that names the package to fetch (`-p`, `--package`, `-c`) runs what
-  // that package holds, not the project's own tool of that name
+/** npx's (and npm exec's) own options that only answer its question about fetching the tool, or say less. npm reads any
+ *  other option before the tool as one of its settings: `--node-options` loads a program into the tool, `--registry`
+ *  fetches the tool from another computer, `--userconfig` and `--script-shell` change what runs. */
+const NPX_FLAGS: ReadonlySet<string> = new Set(["-y", "--yes", "--no", "-q", "--quiet", "-s", "--silent"]);
+
+/** A tool run by name, through npx or a package manager's exec as much as directly. Its runner's own options come before
+ *  the tool, and only those in `flags` are read: any other (`--env-file`, `--shell-mode`, a setting) is not read in
+ *  advance. One that names the package to fetch (`-p`, `--package`, `-c`) runs what that package holds, not the
+ *  project's own tool of that name. */
+function tool(words: string[], where: Where, flags: ReadonlySet<string> = new Set()): Verdict {
   let i = 0;
-  while (i < words.length && words[i].startsWith("-")) i++;
-  if (has(words.slice(0, i), "-p", "--package", "-c", "--call")) return v("unknown", say("kit.say.opaque"));
+  for (; i < words.length && words[i].startsWith("-"); i++) {
+    if (words[i] === "--") {
+      i++;
+      break;
+    }
+    if (!flags.has(words[i])) return v("unknown", say("kit.say.opaque"));
+  }
   if (words.slice(i).some((w) => ["-p", "--package", "-c", "--call"].includes(w) || w.startsWith("--package=") || w.startsWith("--call="))) return v("unknown", say("kit.say.opaque"));
   return i < words.length ? at$(classify(words.slice(i), where), i) : v("unknown", say("kit.say.opaque"));
 }
@@ -1102,8 +1166,9 @@ function lang(name: string, words: string[]): Verdict {
       if (opts) return opts;
     }
     if (["test", "vet"].includes(sub)) return v("check", sub === "test" ? say("kit.say.test") : say("kit.say.check"));
-    // a module at a version is looked up through the module proxy, which fetches it from the host its name begins with
-    if (sub === "list" && words.slice(2).some((w) => !w.startsWith("-") && w.includes("@"))) return sends();
+    // a module at a version, its versions, its updates or its retractions are looked up through the module proxy, which
+    // fetches them from the host the module's name begins with
+    if (sub === "list" && (words.slice(2).some((w) => !w.startsWith("-") && w.includes("@")) || hasNamed(words.slice(2), "versions", "u", "retracted"))) return sends();
     if (["build", "generate"].includes(sub)) return v("change", say("kit.say.build"), 2);
     if (sub === "fmt") return v("change", say("kit.say.format"), 2);
     if (sub === "get" || (sub === "mod" && ["tidy", "download", "vendor"].includes(third))) return v("install", say("kit.say.update"), sub === "mod" ? 3 : 2);
@@ -1152,6 +1217,11 @@ function pip(words: string[]): Verdict {
   return unknownProgram(words[0]);
 }
 
+/** An option's name as written, in lower case, without its dashes or its value: `--Cache-Dir=x` is `cache-dir`. */
+const optName = (w: string) => (w.startsWith("-") ? w.replace(/^-+/, "").split("=")[0].toLowerCase() : "");
+/** Whether any of `words` is one of the options `names` (by `optName`), with one dash or two, its value joined or not. */
+const hasNamed = (words: readonly string[], ...names: string[]) => words.some((w) => names.includes(optName(w)));
+
 /** A program that deploys, and the words of its own that do not. */
 function deployer(name: string, words: string[]): Verdict | null {
   const sub = words[1] ?? "";
@@ -1178,21 +1248,36 @@ function deployer(name: string, words: string[]): Verdict | null {
       if (["deploy", "up", "redeploy"].includes(sub)) return live();
       return ["status", "logs"].includes(sub) ? look() : unknownProgram(name);
     case "kubectl":
+      // `-s` is its short `--server`, whose value need not be a link; a kubeconfig or kuberc it is pointed at can name a
+      // program it runs for a key (`exec`) and the server it sends to
+      if (hasNamed(words, "server", "s")) return sends();
+      if (hasNamed(words, "kubeconfig", "kuberc")) return unknownProgram(name);
+      // its cache and a profile are files it writes (a profile lands in the folder it runs in)
+      if (hasNamed(words, "cache-dir", "profile-output") || words.some((w, i) => optName(w) === "profile" && (w.split("=")[1] ?? words[i + 1]) !== "none")) return v("change", say("kit.say.change"), "exact");
       if (["get", "describe", "logs", "explain", "version", "diff"].includes(sub)) return look();
       return ["apply", "create", "delete", "replace", "patch", "rollout", "scale", "set", "edit", "run"].includes(sub) ? live() : unknownProgram(name);
     case "terraform":
     case "tofu":
+      // a plan saved to a file, and configuration it writes for what it imports, are files it writes
+      if (sub === "plan" && hasNamed(words, "out", "generate-config-out", "state-out")) return v("change", say("kit.say.change"), "exact");
       if (["plan", "validate", "show", "output"].includes(sub)) return look();
       if (["apply", "destroy", "import"].includes(sub)) return live();
       return sub === "init" ? v("install", say("kit.say.update"), 2) : sub === "fmt" ? v("change", say("kit.say.format"), 2) : unknownProgram(name);
     case "pulumi":
+      if (sub === "preview" && hasNamed(words, "save-plan")) return v("change", say("kit.say.change"), "exact");
       return sub === "preview" ? look() : ["up", "destroy", "refresh"].includes(sub) ? live() : unknownProgram(name);
     case "helm":
+      if (hasNamed(words, "kube-apiserver")) return sends();
+      if (hasNamed(words, "kubeconfig")) return unknownProgram(name);
+      // a post-renderer is a program it runs on what it renders; `--output-dir` writes what it renders into files
+      if (hasNamed(words, "post-renderer")) return unknownProgram(name);
+      if (hasNamed(words, "output-dir")) return v("change", say("kit.say.change"), "exact");
       return ["list", "status", "template", "lint"].includes(sub) ? look() : ["install", "upgrade", "uninstall", "rollback"].includes(sub) ? live() : unknownProgram(name);
     case "serverless":
     case "sls":
     case "cdk":
-      return ["deploy", "remove", "destroy"].includes(sub) ? live() : ["synth", "diff"].includes(sub) ? look() : unknownProgram(name);
+      // a synth (and a diff, which synths first) runs the project's app and writes what it makes into a folder
+      return ["deploy", "remove", "destroy"].includes(sub) ? live() : ["synth", "diff"].includes(sub) ? v("change", say("kit.say.build"), 2) : unknownProgram(name);
     case "eas":
     case "expo":
       return ["submit", "update", "publish"].includes(sub) ? live() : unknownProgram(name);
@@ -1208,7 +1293,12 @@ function docker(words: string[]): Verdict {
   if (sub === "push") return live();
   if (sub === "build") return v("change", say("kit.say.build"), 2);
   if (sub === "compose") {
-    const act = words.find((w, i) => i > 1 && !w.startsWith("-")) ?? "";
+    // Its own options come before the command, and several take a value (`-p ps up` runs `up` in a project named ps), so
+    // the command is read only when it comes first.
+    const act = words[2] ?? "";
+    if (act.startsWith("-")) return unknownProgram("docker");
+    // `config -o` saves what it prints into a file
+    if (act === "config" && hasIn("", words.slice(3), "-o", "--output")) return v("change", say("kit.say.change"), "exact");
     if (["ps", "logs", "config", "ls"].includes(act)) return v("read", say("kit.say.read"));
     if (["up", "down", "build", "start", "stop", "restart"].includes(act)) return v("change", say("kit.say.run"), 3);
     return unknownProgram("docker");
@@ -1244,9 +1334,9 @@ function classify(words: string[], where: Where): Verdict {
   // xargs adds the words it reads to the program's: options (`--pre=sh`), paths outside the project, anything. What it
   // runs is not known until it runs.
   if (name === "xargs") return v("unknown", say("kit.say.opaque"));
-  if (["npx", "bunx", "pnpx"].includes(name)) {
-    return at$(tool(words.slice(1), where), 1);
-  }
+  // pnpx is `pnpm dlx`, which fetches the tool from the registry every time; bunx's own options are not read here
+  if (name === "pnpx") return v("unknown", say("kit.say.opaque"));
+  if (name === "npx" || name === "bunx") return at$(tool(words.slice(1), where, name === "npx" ? NPX_FLAGS : undefined), 1);
   if (name === "uv" || name === "poetry" || name === "pipenv" || name === "bundle") {
     const sub = words[1];
     if ((sub === "run" || sub === "exec") && words.length > 2) return from(2);
@@ -1276,6 +1366,14 @@ function classify(words: string[], where: Where): Verdict {
   if (["grep", "egrep", "fgrep"].includes(name)) return (search(words, "grep"));
   if (["rg", "ag"].includes(name)) return (search(words, "rg"));
   if (name === "find") return find(words, where);
+  // A list of files read from a file (`--files0-from`, `--files-from`, tar's `-T`, zip's `-@`): the files it reads, or
+  // packs into the project, are named nowhere in the command, so whether they are outside it is not known.
+  if (
+    words.slice(1).some((w) => ["files0-from", "files-from"].includes(optName(w))) ||
+    (name === "tar" && (hasIn("fCbTXKNLHV", words.slice(1), "-T") || /^[A-Za-z]*T/.test(words[1] ?? ""))) ||
+    (name === "zip" && words.slice(1).some((w) => /^-[^-]*@/.test(w)))
+  )
+    return unknownProgram(name);
   if (RUNS_PROGRAM[name] && hasIn(RUNS_PROGRAM[name].values, words.slice(1), ...RUNS_PROGRAM[name].opts)) return unknownProgram(name);
   if ((name === "less" || name === "more") && words.some((w) => w.startsWith("+") && /[!|]/.test(w))) return unknownProgram(name);
   if (name === "sed") {
@@ -1346,13 +1444,25 @@ function classify(words: string[], where: Where): Verdict {
   // `-R` runs tree again in every folder with `-o`, writing a file in each
   if (name === "tree" && hasIn("LPIHT", words.slice(1), "-o", "-R")) return v("change", say("kit.say.change"), 1);
   // programs that read, but write their output into a file named after the input (uniq, xxd) or by an option
-  if ((name === "uniq" || name === "xxd") && operands(words, 1, new Set(["-f", "-s", "-w", "-c", "-g", "-l", "-o", "-n"])).length > 1) return v("change", say("kit.say.change"), 1);
+  if ((name === "uniq" || name === "xxd") && operands(words, 1, name === "uniq" ? UNIQ_VALUES : XXD_VALUES).length > 1) return v("change", say("kit.say.change"), 1);
+  // lsof's device cache, on a system built with one, is a file it builds and updates
+  if (name === "lsof" && words.some((w) => w.startsWith("-D"))) return v("change", say("kit.say.change"), 1);
   if ((name === "less" || name === "more") && hasIn("bhjkpPtTxyz#", words.slice(1), "-o", "-O", "--log-file", "--LOG-FILE")) return v("change", say("kit.say.change"), 1);
   if (name === "file" && hasIn("mfFeP", words.slice(1), "-C", "--compile")) return v("change", say("kit.say.change"), 1);
   if (name === "hostname" && operands(words, 1).length) return thisMac();
   if (name === "jq" || name === "yq") {
-    if (hasIn("poIs", words.slice(1), "-i", "--inplace")) return (v("change", say("kit.say.change"), 1));
-    const ops = operands(words, 1, new Set(["--arg", "--argjson", "-f", "--from-file", "--indent"]));
+    // yq's `--split-exp` writes each result into a file its expression names
+    if (hasIn("poIs", words.slice(1), "-i", "--inplace") || (name === "yq" && hasIn("poI", words.slice(1), "-s", "--split-exp"))) return (v("change", say("kit.say.change"), 1));
+    // With `-f` the filter comes from a file: jq takes the first file it is given as the filter wherever `-f` stands, and
+    // every word is a file it reads, so none is text and each is checked as any path is.
+    if (hasIn("L", words.slice(1), "-f", "--from-file")) return v("read", say("kit.say.read"));
+    const ops = jqOperands(words);
+    // a module a filter imports or includes is read from a folder of jq's own, `~/.jq` among them, or one `-L` names
+    if (name === "jq" && ops.length && /\b(import|include)\b/.test(words[ops[0]])) return unknownProgram(name);
+    // `env` and `$ENV` (jq), `env(NAME)` and `strenv(NAME)` (yq) print the variables set for this program, keys among them,
+    // as printenv does, so they are read as it is. A field or a key called env (`.env`, `{env: 1}`) and jq's own `$env`
+    // variable are only names.
+    if (ops.length && /(?<![.\w$])(?:env|strenv|envsubst)\b(?!\s*:)|\$ENV\b|\$__prog_args\b/.test(words[ops[0]])) return thisMac();
     return (v("read", say("kit.say.read"), undefined, { text: new Set(ops.slice(0, 1)) }));
   }
   if (name === "sort") return (hasIn("ktST", words.slice(1), "-o", "--output") ? v("change", say("kit.say.change"), 1) : v("read", say("kit.say.read")));
@@ -1362,6 +1472,9 @@ function classify(words: string[], where: Where): Verdict {
     const to = ops.length ? words[ops[0]] : "~";
     return to === "-" ? v("unknown", say("kit.say.opaque")) : v("read", say("kit.say.read"), undefined, { cd: to });
   }
+  // bash's and zsh's printf take one option, `-v NAME`, which puts its text into a variable instead of printing it: into
+  // PATH, it decides which program every later word of the line runs
+  if (name === "printf" && /^-./.test(words[1] ?? "") && words[1] !== "--") return v("unknown", say("kit.say.opaque"));
   if (ONLY_TEXT.has(name)) return v("read", say("kit.say.read"), undefined, { text: new Set(words.map((_, i) => i).slice(1)) });
   if (READS.has(name)) return v("read", say("kit.say.read"));
   if (DELETES.has(name)) return v("delete", say("kit.say.delete"), "exact");
@@ -1431,18 +1544,80 @@ function at$(r: Verdict, by: number): Verdict {
   return { ...r, ...(head === undefined ? {} : { head }), ...(text ? { text } : {}) };
 }
 
+/** find's (BSD's and GNU's) options and tests that only choose where it looks, match a file, or print to its own output.
+ *  Any other word starting with `-` is not read in advance: it may be one that deletes, writes a file, or reads its list of
+ *  files from one (`-files0-from`), or one this list has not met. */
+const FIND_FLAGS = new Set([
+  "-E", "-H", "-L", "-P", "-X", "-d", "-s", "-x", "-O0", "-O1", "-O2", "-O3", "-depth", "-empty", "-executable", "-readable",
+  "-writable", "-false", "-true", "-follow", "-ignore_readdir_race", "-noignore_readdir_race", "-ls", "-mount", "-xdev", "-noleaf",
+  "-nogroup", "-nouser", "-print", "-print0", "-prune", "-quit", "-sparse", "-xattr", "-acl", "-not", "-a", "-and", "-o", "-or",
+  "-daystart", "-warn", "-nowarn", "-help", "--help", "-version", "--version",
+]);
+/** Its tests whose value is text: a pattern, a number, a type, a format printed to its own output. */
+const FIND_TEXT = new Set([
+  "-name", "-iname", "-path", "-ipath", "-regex", "-iregex", "-wholename", "-iwholename", "-lname", "-ilname", "-type", "-xtype",
+  "-perm", "-user", "-group", "-uid", "-gid", "-size", "-mtime", "-mmin", "-atime", "-amin", "-ctime", "-cmin", "-Btime", "-Bmin",
+  "-used", "-maxdepth", "-mindepth", "-links", "-inum", "-fstype", "-flags", "-printf", "-regextype", "-context", "-xattrname", "-D",
+]);
+/** Its tests that look at another file's times or identity: the file is a path like any other, checked against the project. */
+const FIND_FILE = new Set(["-newer", "-anewer", "-cnewer", "-mnewer", "-Bnewer", "-samefile", "-f"]);
+const FIND_FILTERS = new Set(["-name", "-iname", "-path", "-ipath", "-regex", "-iregex", "-wholename", "-iwholename", "-newer", "-mtime", "-mmin", "-size"]);
+/** Its actions that run a program for each file: each one's command runs, however many there are. */
+const FIND_RUNS = new Set(["-exec", "-execdir", "-ok", "-okdir"]);
+
+/** A find, read word by word. Every command it runs (each `-exec`, `-execdir`, `-ok` and `-okdir`, not only the first) is
+ *  read as a command of its own, and the find is as strict as the strictest of them. A command ends at `;`, or at a `+`
+ *  right after `{}` (a `+` anywhere else is one of its words, as find reads it). `-ok` asks on its input, which a pipe can
+ *  answer, so it is read as `-exec` is. */
 function find(words: string[], where: Where): Verdict {
-  const text = textAfter(words, ["-name", "-iname", "-path", "-ipath", "-regex", "-iregex", "-wholename", "-iwholename", "-lname", "-ilname", "-type", "-newer", "-perm", "-user", "-group", "-size", "-mtime", "-mmin", "-atime", "-ctime", "-maxdepth", "-mindepth"]);
-  const filtered = words.some((w) => ["-name", "-iname", "-path", "-ipath", "-regex", "-iregex", "-wholename", "-iwholename", "-newer", "-mtime", "-mmin", "-size"].includes(w));
-  if (words.includes("-delete")) return v("delete", say("kit.say.delete"), "exact", { text, ...(filtered ? { filtered: true as const } : {}) });
-  const exec = words.findIndex((w) => ["-exec", "-execdir", "-ok", "-okdir"].includes(w));
-  if (exec >= 0) {
-    const end = words.findIndex((w, i) => i > exec && (w === ";" || w === "+"));
-    const inner = at$(classify(words.slice(exec + 1, end < 0 ? undefined : end), where), exec + 1);
-    return strictest([v("read", say("kit.say.read"), undefined, { text }), { ...inner, head: inner.action === "read" || inner.action === "check" ? undefined : "exact" }]);
+  const text = new Set<number>();
+  const parts: Verdict[] = [];
+  /** Its own `-delete`. */
+  const own = v("delete", say("kit.say.delete"), "exact");
+  let filtered = false;
+  for (let i = 1; i < words.length; i++) {
+    const w = words[i];
+    if (FIND_RUNS.has(w)) {
+      let end = i + 1;
+      while (end < words.length && words[end] !== ";" && !(words[end] === "+" && words[end - 1] === "{}")) end++;
+      const inner = at$(classify(words.slice(i + 1, end), where), i + 1);
+      parts.push({ ...inner, head: inner.action === "read" || inner.action === "check" ? undefined : "exact" });
+      i = end;
+      continue;
+    }
+    // a place to start from, or an operator (`!`, `(`, `)`, `,`)
+    if (!w.startsWith("-") || w === "-") continue;
+    if (FIND_FILTERS.has(w)) filtered = true;
+    if (FIND_FLAGS.has(w) || /^-[EHLPXdsx]+$/.test(w)) continue;
+    if (FIND_TEXT.has(w)) {
+      if (i + 1 < words.length) text.add(i + 1);
+      i++;
+      continue;
+    }
+    // `-newermt 2026-01-01` and the like compare with a time or a file: a value that is a path is checked as one
+    if (FIND_FILE.has(w) || /^-newer[aBcmt][aBcmt]$/.test(w)) {
+      i++;
+      continue;
+    }
+    if (w === "-delete") {
+      parts.push(own);
+      continue;
+    }
+    // each writes its list into the file it names; `-fprintf`'s format, after the file, is text
+    if (["-fprint", "-fprint0", "-fls", "-fprintf"].includes(w)) {
+      parts.push(v("change", say("kit.say.change"), "exact"));
+      if (w === "-fprintf" && i + 2 < words.length) text.add(i + 2);
+      i += w === "-fprintf" ? 2 : 1;
+      continue;
+    }
+    return unknownProgram("find");
   }
-  if (words.some((w) => ["-fprint", "-fprint0", "-fprintf", "-fls"].includes(w))) return v("change", say("kit.say.change"), "exact", { text });
-  return v("read", say("kit.say.read"), undefined, { text });
+  // the words of each command it runs that are text stay text
+  for (const p of parts) for (const i of p.text ?? []) text.add(i);
+  const whole = strictest([v("read", say("kit.say.read")), ...parts]);
+  // `-delete` with a test on the name or the age, wherever it comes in the words, deletes only what matches: its folders
+  // are where it looks, not what it deletes
+  return { ...whole, text, ...(whole === own && filtered ? { filtered: true as const } : {}) };
 }
 
 function strictest(list: Verdict[]): Verdict {
@@ -1469,10 +1644,34 @@ function valuesIn(w: string): string[] {
       }
     }
   }
+  // `@file` is a file read for its words (a response file, curl's and gh's `@` for a field's value): one from a root, the
+  // home folder or a folder above is the path it names. `@~1` and `@{u}` are git's names for a commit.
+  for (const x of [...out]) if (x.startsWith("@") && /^(\/|~(\/|$)|\.\.([\\/]|$)|[A-Za-z]:[\\/]|\\\\)/.test(x.slice(1))) out.push(x.slice(1));
   return out;
 }
 
 const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
+
+/** Options whose value is a computer to talk to: a server, an API, a registry, a proxy, a link (`--index-url`). turbo's
+ *  `--token` and `--team` send its cache to that team. Compared by name in lower case, a dotted one (`--api.host`) by its
+ *  first part. */
+const ELSEWHERE = /^(server|api|repo|repository|registry|endpoint|url|host|hostname|remote|proxy)$|-(url|host|proxy|server|endpoint|registry|api|repo)$/;
+
+/** Whether a step reaches another computer by its words: any word but text that holds an address (`scheme://`, a file://
+ *  link aside), and, for a read or a check, an option that names a server. git and gh read their own addresses (a remote
+ *  is the project's own, github.com is GitHub's), and curl and wget always send. */
+function reachesOut(words: string[], verdict: Verdict): boolean {
+  const prog = (words[0] ?? "").split(/[\\/]/).pop() ?? "";
+  if (["git", "gh", "curl", "wget"].includes(prog)) return false;
+  const looks = verdict.action === "read" || verdict.action === "check";
+  return words.some((w, i) => {
+    if (i === 0 || verdict.text?.has(i)) return false;
+    if (w.includes("://") && !/^(-[^=]*=)?file:\/\//i.test(w)) return true;
+    if (!looks || !w.startsWith("--")) return false;
+    const n = optName(w);
+    return ELSEWHERE.test(n) || ELSEWHERE.test(n.split(".")[0]) || (prog === "turbo" && ["token", "team"].includes(n));
+  });
+}
 
 /** What `line` does when it runs at `where`. */
 export function readCommand(line: string, where: Where): ReadCommand {
@@ -1506,7 +1705,9 @@ export function readCommand(line: string, where: Where): ReadCommand {
       verdicts.push(v("unknown", say("kit.say.opaque")));
       continue;
     }
-    const read = classify(words, { ...where, cwd });
+    const classified = classify(words, { ...where, cwd });
+    // reaching another computer is not reading or changing the project, whatever the program
+    const read = RANK[classified.action] < RANK.unknown && reachesOut(words, classified) ? { ...sends(), text: classified.text } : classified;
     // writing the output into a file changes the project, whatever the program is
     const writesFile = c.writes.some((w) => !NULL_DEVICES.has(w));
     const verdict = writesFile && RANK[read.action] < RANK.change ? { ...read, action: "change" as const, say: say("kit.say.change"), head: undefined } : read;

@@ -54,6 +54,7 @@ import { LanePane } from "../code/LanePane";
 import { LaneReview } from "../code/Review";
 import { isLaneChat } from "../code/laneStore";
 import { Icon } from "../ui/icons";
+import { usePlace } from "../palette/places";
 
 const STATUS: Record<string, Key> = { starting: "ss.starting", running: "ss.running", exited: "ss.ended", failed: "ss.couldNotStart" };
 
@@ -757,6 +758,10 @@ export function SessionView() {
       document.removeEventListener("visibilitychange", see);
     };
   }, [shown, unseen]);
+  // The palette's Open this session in <editor>: the session's own folder (a lane's when it has one), through the store's host
+  const editable = rec?.cwd ? shown : null;
+  const editorAction = useMemo(() => (editable ? { open: () => void getSessions().openInEditor(editable) } : null), [editable]);
+  usePlace("editorSession", editorAction);
   if (!rec) {
     return (
       <div className="chat-empty" data-testid="session-gone">

@@ -1,5 +1,5 @@
 import { SELF } from "cloudflare:test";
-import { readPairingLink } from "@manut/remote-channel";
+import { answerOption, readPairingLink } from "@manut/remote-channel";
 import { describe, expect, it, vi } from "vitest";
 import { RemoteMac } from "../../desktop/src/remote/host";
 import { memoryKeyring } from "../../desktop/src/remote/keys";
@@ -11,7 +11,8 @@ import { liveBackend } from "../../web/src/app/mac/live";
 import type { PairStep } from "../../web/src/app/mac/pair";
 import { PasskeyCancelled, type Passkeys } from "../../web/src/app/mac/passkeys";
 import type { PhoneSocket } from "../../web/src/app/mac/relay";
-import { MacRemote, type MacView } from "../../web/src/app/mac/remote";
+import { type MacBackend, MacRemote, type MacView } from "../../web/src/app/mac/remote";
+import type { MacLink, Message } from "../../web/src/app/mac/session";
 import { memoryVault } from "../../web/src/app/mac/vault";
 
 /// The phone's side of reaching the Mac (item 78c, apps/web/src/app/mac/), run against the REAL relay object in workerd
@@ -165,6 +166,44 @@ function phoneOnRelay(carried: Carried[], passkeys: Passkeys) {
   return { phone, vault };
 }
 
+/// The phone as `phoneOnRelay` makes it, with every request its own session code sends and what came back kept, and a
+/// hook that changes a request before it is sealed or an answer after it is opened (for the refusal tests: no relay
+/// could do either, since both travel encrypted).
+function tappedPhoneOnRelay(carried: Carried[], passkeys: Passkeys) {
+  const vault = memoryVault();
+  const base = liveBackend({
+    origin: ORIGIN,
+    connect: (url) => socketTo(new URL(url.replace(/^wss:/, "https:")).pathname, "phone", carried),
+    vault,
+    passkeys,
+    relay: async () => "on",
+    name: NAME,
+    label: "Your Mac",
+  });
+  const links: MacLink[] = [];
+  const exchanges: { sent: Message; got: Message | null }[] = [];
+  const tap: { change: null | { out(message: Message): Message; in(answer: Message | null): Promise<Message | null> } } = { change: null };
+  const backend: MacBackend = {
+    ...base,
+    connect: async (mac) => {
+      const opened = await base.connect(mac);
+      if (!opened.ok) return opened;
+      const link = opened.link;
+      const request = link.request.bind(link);
+      link.request = async (message, ms) => {
+        const sent = tap.change ? tap.change.out(message) : message;
+        const answer = await request(sent, ms);
+        const got = tap.change ? await tap.change.in(answer) : answer;
+        exchanges.push({ sent, got });
+        return got;
+      };
+      links.push(link);
+      return opened;
+    },
+  };
+  return { phone: new MacRemote(backend), vault, tap, exchanges, link: () => links.at(-1)! };
+}
+
 const paired = (view: MacView) => (view.phase === "paired" ? view : null);
 
 /// Pairs the phone: it reads the code, shows its digits, the person types them at the Mac, and then makes the passkey.
@@ -254,8 +293,10 @@ describe("the phone and the Mac through the real relay", () => {
     expect(passkeys.calls.length).toBe(gets);
 
     // The question, and stopping the turn.
+    // An answer needs Face ID as an Allow does: the Mac's challenge, signed with the passkey.
     await phone.answer("q-1", "Friday");
-    expect(paired(phone.view)!.open!.asks.get("q-1")?.note).toBe("answered");
+    await vi.waitFor(() => expect(paired(phone.view)!.open!.asks.get("q-1")?.note).toBe("answered"), { timeout: 5_000 });
+    expect(passkeys.calls.at(-1)).toBe("get");
     await phone.stop();
     expect(paired(phone.view)!.open!.stopNote).toBe("stopped");
     expect(chats.done).toEqual([
@@ -327,6 +368,63 @@ describe("the phone and the Mac through the real relay", () => {
     phone.dispose();
     mac.turnOff();
   });
+
+  it("answers a question only through the Mac's challenge and the passkey, bound to the exact words", async () => {
+    const carried: Carried[] = [];
+    const { mac, chats } = await macOnRelay(carried);
+    const passkeys = standInPasskeys(new TestAuthenticator(0xc4));
+    const { phone, vault, tap, exchanges, link } = tappedPhoneOnRelay(carried, passkeys);
+    await phone.start();
+    await pairThrough(mac, phone);
+    const kept = (await vault.load())!;
+    await vi.waitFor(() => expect(paired(phone.view)?.link).toBe("live"), { timeout: 5_000 });
+    await phone.openChat("buddy");
+    const q1 = { t: "reply", chat: "buddy", ask: "q-1", revision: 1 };
+    const answers = () => chats.done.filter((d) => d.action === "answer");
+
+    // An answer with no challenge: alone, the request is answered with a challenge for exactly those words, and nothing
+    // is done.
+    expect(await link().request({ ...q1, answer: "Saturday" })).toMatchObject({ t: "challenge", ask: "q-1", revision: 1, option: await answerOption("Saturday") });
+    expect(answers()).toEqual([]);
+
+    // A signature over other words than the ones sent: the phone's screen and its passkey say Friday, and what reaches
+    // the Mac says Saturday at both steps, with the challenge's choice made to look like Friday's on the way back.
+    const friday = await answerOption("Friday");
+    tap.change = {
+      out: (message) => (message.t === "reply" ? { ...message, answer: "Saturday" } : message),
+      in: async (answer) => (answer?.t === "challenge" ? { ...answer, option: friday } : answer),
+    };
+    await phone.answer("q-1", "Friday");
+    const stepTwo = () => exchanges.at(-1)?.sent.passkey !== undefined;
+    await vi.waitFor(() => expect(stepTwo()).toBe(true), { timeout: 5_000 });
+    tap.change = null;
+    expect(passkeys.calls.at(-1)).toBe("get");
+    expect(exchanges.at(-1)).toMatchObject({ sent: { ...q1, answer: "Saturday", passkey: {} }, got: { t: "refused", reason: "wrong_challenge" } });
+    expect(answers()).toEqual([]);
+
+    // A replayed challenge: the runtime does not take the first answer, so the question stays open, and the same signed
+    // step two sent again finds its challenge spent. A passkey answer to a challenge the Mac never issued is refused too.
+    chats.answerWith = "Not taken";
+    const before = exchanges.length;
+    await phone.answer("q-1", "Friday");
+    await vi.waitFor(() => expect(exchanges.length === before + 2 && stepTwo()).toBe(true), { timeout: 5_000 });
+    chats.answerWith = null;
+    const signed = exchanges.at(-1)!;
+    expect(signed).toMatchObject({ sent: { ...q1, answer: "Friday", passkey: {} }, got: { t: "refused", reason: "not_taken" } });
+    const taken = answers().length;
+    expect(await link().request(signed.sent)).toMatchObject({ t: "refused", reason: "unknown" });
+    const madeUp = { ...signed.sent, passkey: { ...(signed.sent.passkey as Message), challengeId: toB64Url(new Uint8Array(32).fill(9)) } };
+    expect(await link().request(madeUp)).toMatchObject({ t: "refused", reason: "unknown" });
+    expect(answers()).toHaveLength(taken);
+
+    // A correct answer, through the web app's own code: the challenge, Face ID, and the Mac takes it.
+    await phone.answer("q-1", "Friday");
+    await vi.waitFor(() => expect(paired(phone.view)!.open!.asks.get("q-1")?.note).toBe("answered"), { timeout: 5_000 });
+    expect(exchanges.at(-1)!.got).toEqual({ t: "done", id: expect.any(Number) });
+    expect(answers().at(-1)).toEqual({ action: "answer", chat: "buddy", ask: "q-1", by: kept.deviceId, answer: "Friday" });
+    phone.dispose();
+    mac.turnOff();
+  }, 30_000);
 
   it("refuses a code the relay no longer has, after the Mac cancelled it", async () => {
     const carried: Carried[] = [];

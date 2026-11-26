@@ -110,6 +110,12 @@ pub struct Start {
     pub root: String,
     #[serde(default)]
     pub remote: bool,
+    /// The lane is made with nobody there (a workflow by the clock, item 114): it is then the app's own doing, so it reads
+    /// the repository's own config first and runs git as the automatic pull does ([`Git::automatic`], [`Git::config_risk`]).
+    /// A lane the person starts themselves (the chat box, Run now) leaves it false, and is made with their settings and the
+    /// repository's, as item 86 decided.
+    #[serde(default)]
+    pub unattended: bool,
 }
 
 /// The app's record of one worktree it made, `<lanes>/<project>/<words>.json`, beside the folder it names.
@@ -258,11 +264,27 @@ pub(crate) struct Git {
 /// repository with alternates), `credential.helper` and `credential.<url>.helper` (run by a fetch over https),
 /// `remote.<name>.uploadpack`, `.receivepack` and `.vcs` (a program for a remote), a `remote.<name>.url` or `.pushurl` of the
 /// `<transport>::<address>` form (a remote helper, `ext::` runs a shell command), and `url.<base>.insteadOf` and
-/// `.pushInsteadOf` (a fetch sent elsewhere). What the app's own runs switch off instead is not listed: hooks
-/// (`core.hooksPath`), `core.fsmonitor`, an external diff and a text conversion (`--no-ext-diff --no-textconv` on every diff),
-/// a signature check's `gpg.program` (`--no-verify-signatures` on the pull's one write), and a pager or an editor, which git
-/// starts only for a terminal. `key` is as `git config --list` prints it (section and name in lower case).
+/// `.pushInsteadOf` (a fetch sent elsewhere).
+///
+/// Item 114 (third security review, 26 Nov 2026), read family by family from `git help config` (git 2.54): what sends a
+/// fetch to another place, changes what it trusts or what it sends. Every `http.*` and `http.<url>.*` key (a proxy that
+/// answers 401 is handed the person's login; certificates, pinned keys, a name resolved elsewhere, redirects, headers,
+/// cookies), `remote.<name>.proxy` and `.proxyAuthMethod`, every `credential.*` key, `ssh.variant`, every `protocol.*` key
+/// (which transports git takes), `fetch.bundleURI` and `transfer.bundleURI` (a download from another address), and
+/// `core.protectHFS` and `.protectNTFS` (a checkout's guard against names that write into `.git`), and a
+/// `submodule.<name>.update` that names a command (`!`). `docs/code-editor.md` has each family's decision.
+///
+/// What the app's own runs switch off instead is not listed: hooks (`core.hooksPath`), `core.fsmonitor`, an external diff and
+/// a text conversion (`--no-ext-diff --no-textconv` on every diff), a signature check's `gpg.program`
+/// (`--no-verify-signatures` on the pull's one write), a configured fetch refspec (`--refmap=` on the fetch), and a pager or
+/// an editor, which git starts only for a terminal. `key` is as `git config --list` prints it (section and name in lower
+/// case).
 fn runs_or_redirects(key: &str, value: &str) -> bool {
+    // The `http.*` settings that only pace a transfer: buffer and request sizes, the speed below which git gives up, how many
+    // connections it keeps, the HTTP version, keep-alive timing and passive FTP. `git help config` (git 2.54), read one by
+    // one: none names an address, a program, a file, a header, a credential or a certificate.
+    const HTTP_PACING: &[&str] =
+        &["postbuffer", "lowspeedlimit", "lowspeedtime", "maxrequests", "minsessions", "version", "keepaliveidle", "keepaliveinterval", "keepalivecount", "noepsv"];
     let lower = key.to_ascii_lowercase();
     let (section, rest) = lower.split_once('.').unwrap_or((lower.as_str(), ""));
     let name = rest.rsplit('.').next().unwrap_or("");
@@ -270,10 +292,15 @@ fn runs_or_redirects(key: &str, value: &str) -> bool {
     let helper = |v: &str| v.split_once("::").is_some_and(|(t, _)| !t.is_empty() && t.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'+' | b'-' | b'.')));
     match section {
         "filter" => sub && matches!(name, "clean" | "smudge" | "process"),
-        "core" => !sub && matches!(name, "sshcommand" | "gitproxy" | "askpass" | "alternaterefscommand"),
-        "credential" => name == "helper",
-        "remote" => sub && (matches!(name, "uploadpack" | "receivepack" | "vcs") || (matches!(name, "url" | "pushurl") && helper(value))),
-        "url" => sub && matches!(name, "insteadof" | "pushinsteadof"),
+        "core" => !sub && matches!(name, "sshcommand" | "gitproxy" | "askpass" | "alternaterefscommand" | "protecthfs" | "protectntfs"),
+        // every key of these: each says where a fetch goes, what it trusts or what it sends, or is a program
+        "credential" | "url" | "ssh" | "protocol" => true,
+        // and every http key but the few that only pace a transfer (`HTTP_PACING`): a repository often has one of those set
+        // for a large push, and it sends a fetch nowhere else and changes nothing it trusts or sends
+        "http" => !HTTP_PACING.contains(&name),
+        "remote" => sub && (matches!(name, "uploadpack" | "receivepack" | "vcs" | "proxy" | "proxyauthmethod") || (matches!(name, "url" | "pushurl") && helper(value))),
+        "fetch" | "transfer" => !sub && name == "bundleuri",
+        "submodule" => sub && name == "update" && value.trim_start().starts_with('!'),
         _ => false,
     }
 }
@@ -311,7 +338,7 @@ fn risky_by(listing: &str, scoped: bool, risky: fn(&str, &str) -> bool) -> Optio
         if risky(key, value) {
             let lower = key.to_ascii_lowercase();
             let shown = match lower.split_once('.') {
-                Some((section @ ("url" | "credential"), rest)) if rest.contains('.') => format!("{section}.*.{}", rest.rsplit('.').next().unwrap_or("")),
+                Some((section @ ("url" | "credential" | "http"), rest)) if rest.contains('.') => format!("{section}.*.{}", rest.rsplit('.').next().unwrap_or("")),
                 _ => key.to_string(),
             };
             return Some(tasks::mask_secrets(&shown));
@@ -883,7 +910,8 @@ pub(crate) fn net_env(git: &Git, cwd: &Path) -> Vec<(&'static str, String)> {
 
 /// Fetches branch `branch` of `remote` into its remote-tracking branch, nothing else: no tags, no submodules, no other
 /// branch, no maintenance run. Err is git's own last line, or the time limit. The only write is the remote-tracking branch,
-/// as any `git fetch` makes.
+/// as any `git fetch` makes: `--refmap=` (an empty one) keeps a configured `remote.<name>.fetch` from also writing the
+/// fetched commit onto another ref, which git otherwise does for a branch named on the command line (item 114).
 pub(crate) fn fetch_branch(git: &Git, cwd: &Path, remote: &str, branch: &str) -> Result<(), String> {
     if !safe_rev(remote) || !safe_rev(branch) {
         return Err("bad_name".into());
@@ -891,7 +919,7 @@ pub(crate) fn fetch_branch(git: &Git, cwd: &Path, remote: &str, branch: &str) ->
     let spec = format!("+refs/heads/{branch}:refs/remotes/{remote}/{branch}");
     let env = net_env(git, cwd);
     let env: Vec<(&str, &str)> = env.iter().map(|(k, v)| (*k, v.as_str())).collect();
-    let ran = git.run_with(cwd, &["fetch", "--no-tags", "--no-recurse-submodules", "--no-write-fetch-head", "--no-auto-maintenance", remote, &spec], FETCH_LIMIT, &env)?;
+    let ran = git.run_with(cwd, &["fetch", "--refmap=", "--no-tags", "--no-recurse-submodules", "--no-write-fetch-head", "--no-auto-maintenance", remote, &spec], FETCH_LIMIT, &env)?;
     if ran.code == Some(0) {
         Ok(())
     } else {
@@ -951,6 +979,12 @@ pub fn make(home: &Path, cwd: &Path, names: &[String]) -> Result<Made, String> {
 /// The folder is under `start.root` when the person chose one (checked again here: a code from [`check_lanes_root`] when it is
 /// no longer usable, and the lane is then not made anywhere else), else under [`lanes_dir`]; the record is under [`lanes_dir`]
 /// either way.
+///
+/// With `start.unattended` (item 114) the lane is the app's own doing: git runs as for the automatic pull, and nothing is
+/// made, checked out, counted or fetched while the repository's own config, or a submodule's, names a program git would run
+/// or another address to fetch from. `git worktree add` runs a smudge filter as it checks the files out, the count of what
+/// did not come along a clean filter, and a start from the remote an `ext::` address or a proxy. The answer is then
+/// `config:<setting>`, the setting named as the automatic pull names it.
 pub fn make_with(home: &Path, cwd: &Path, names: &[String], start: &Start) -> Result<Made, String> {
     if names.is_empty() || names.len() > NAMES_MAX || !names.iter().all(|n| valid_name(n)) {
         return Err("bad_name".into());
@@ -967,7 +1001,13 @@ pub fn make_with(home: &Path, cwd: &Path, names: &[String], start: &Start) -> Re
     if in_progress(&git_dir) {
         return Err("busy".into());
     }
-    let git = Git::new(home)?;
+    let git = if start.unattended { Git::automatic(home)? } else { Git::new(home)? };
+    // with nobody there, the repository's own config is read before git does anything that could run a program it names
+    if start.unattended {
+        if let Some(setting) = git.config_risk(cwd) {
+            return Err(format!("config:{setting}"));
+        }
+    }
     // no commit yet: there is nothing to make a branch from
     let Some(at) = git.line(cwd, &["rev-parse", "--verify", "--quiet", "HEAD^{commit}"]).filter(|l| l.len() >= 40 && l.bytes().all(|b| b.is_ascii_hexdigit())) else {
         return Err("no_commit".into());
@@ -1877,6 +1917,163 @@ pub(crate) mod tests {
         let _ = fs::remove_dir_all(home);
     }
 
+    /// Item 114 (third security review, 26 Nov 2026): the settings that send a fetch somewhere else, change what it trusts or
+    /// what it sends, read family by family from `git help config` (git 2.54). Every one of them in the repository's own scopes
+    /// stops automatic work, named (an address in a subsection shown as `*`); the ones that only tune a fetch do not.
+    #[test]
+    fn every_repository_setting_that_sends_a_fetch_elsewhere_or_changes_what_it_trusts_is_read() {
+        let entry = |scope: &str, kv: &str| format!("{scope}\0{kv}\0");
+        for (kv, shown) in [
+            // http: where it goes (a proxy, a name resolved to another address, a redirect), what it trusts, what it sends
+            ("http.proxy\nhttp://127.0.0.1:9", "http.proxy"),
+            ("http.https://github.com/.proxy\nhttp://127.0.0.1:9", "http.*.proxy"),
+            ("http.https://TOKEN@github.com/.extraheader\nAuthorization: x", "http.*.extraheader"),
+            ("http.proxyauthmethod\nbasic", "http.proxyauthmethod"),
+            ("http.proxysslcainfo\n/tmp/ca", "http.proxysslcainfo"),
+            ("http.sslverify\nfalse", "http.sslverify"),
+            ("http.sslcainfo\n/tmp/ca.pem", "http.sslcainfo"),
+            ("http.sslcapath\n/tmp/ca", "http.sslcapath"),
+            ("http.sslcert\n/tmp/c.pem", "http.sslcert"),
+            ("http.sslkey\n/tmp/k.pem", "http.sslkey"),
+            ("http.pinnedpubkey\nsha256//x", "http.pinnedpubkey"),
+            ("http.extraheader\nAuthorization: Basic x", "http.extraheader"),
+            ("http.cookiefile\n/tmp/cookies", "http.cookiefile"),
+            ("http.savecookies\ntrue", "http.savecookies"),
+            ("http.curloptresolve\ngithub.com:443:127.0.0.1", "http.curloptresolve"),
+            ("http.followredirects\ntrue", "http.followredirects"),
+            ("http.emptyauth\ntrue", "http.emptyauth"),
+            ("http.proactiveauth\nbasic", "http.proactiveauth"),
+            ("http.delegation\nalways", "http.delegation"),
+            ("http.sslbackend\nopenssl", "http.sslbackend"),
+            ("http.useragent\nx", "http.useragent"),
+            // a remote's own proxy
+            ("remote.origin.proxy\nhttp://127.0.0.1:9", "remote.origin.proxy"),
+            ("remote.origin.proxyauthmethod\nbasic", "remote.origin.proxyauthmethod"),
+            // every credential setting: what is sent, to which address, and how it is protected
+            ("credential.username\nme", "credential.username"),
+            ("credential.usehttppath\ntrue", "credential.usehttppath"),
+            ("credential.protectprotocol\nfalse", "credential.protectprotocol"),
+            ("credential.sanitizeprompt\nfalse", "credential.sanitizeprompt"),
+            ("credential.interactive\nfalse", "credential.interactive"),
+            ("credential.https://ghp_abcdefghijklmnopqrstuvwxyz0123456789@github.com.username\nme", "credential.*.username"),
+            // how git talks to the ssh program, and which transports it allows
+            ("ssh.variant\nplink", "ssh.variant"),
+            ("protocol.allow\nalways", "protocol.allow"),
+            ("protocol.ext.allow\nalways", "protocol.ext.allow"),
+            ("protocol.file.allow\nalways", "protocol.file.allow"),
+            // a fetch that downloads from another address first, or follows one the server names
+            ("fetch.bundleuri\nhttps://elsewhere.example/b", "fetch.bundleuri"),
+            ("transfer.bundleuri\ntrue", "transfer.bundleuri"),
+            // checkout's protection against paths that write into `.git` on this kind of disk
+            ("core.protecthfs\nfalse", "core.protecthfs"),
+            ("core.protectntfs\nfalse", "core.protectntfs"),
+            // a submodule update that runs a command
+            ("submodule.sub.update\n!sh -c x", "submodule.sub.update"),
+        ] {
+            assert_eq!(risky_setting(&entry("local", kv), true).as_deref(), Some(shown), "{kv}");
+            assert_eq!(risky_setting(&entry("worktree", kv), true).as_deref(), Some(shown), "{kv}");
+            assert_eq!(risky_setting(&format!("{kv}\0"), false).as_deref(), Some(shown), "{kv}");
+            // the person's own global and system settings stay theirs
+            assert_eq!(risky_setting(&entry("global", kv), true), None, "{kv}");
+            assert_eq!(risky_setting(&entry("system", kv), true), None, "{kv}");
+        }
+        // what only tunes a fetch, or names what the app's runs override or never run, stops nothing
+        for kv in [
+            "remote.origin.url\nhttps://github.com/o/r.git",
+            "remote.origin.fetch\n+refs/heads/*:refs/remotes/origin/*",
+            "remote.origin.tagopt\n--no-tags",
+            "remote.origin.prune\ntrue",
+            "remote.pushdefault\norigin",
+            "fetch.prune\ntrue",
+            "fetch.prunetags\ntrue",
+            "fetch.fsckobjects\ntrue",
+            "fetch.recursesubmodules\nfalse",
+            "transfer.fsckobjects\ntrue",
+            "pull.rebase\ntrue",
+            "submodule.sub.url\n../sub.git",
+            "submodule.sub.update\nrebase",
+            "core.worktree\n../w",
+            "core.autocrlf\ninput",
+            "branch.main.remote\norigin",
+            // http settings that only pace a transfer, which a repository often has for a large push
+            "http.postbuffer\n524288000",
+            "http.https://github.com/.postbuffer\n524288000",
+            "http.lowspeedlimit\n1000",
+            "http.lowspeedtime\n60",
+            "http.maxrequests\n5",
+            "http.minsessions\n1",
+            "http.version\nHTTP/1.1",
+            "http.keepaliveidle\n30",
+            "http.keepaliveinterval\n30",
+            "http.keepalivecount\n3",
+            "http.noepsv\ntrue",
+        ] {
+            assert_eq!(risky_setting(&entry("local", kv), true), None, "{kv}");
+        }
+    }
+
+    /// A configured fetch refspec maps what the app fetches onto other refs too (git's "opportunistic" update): a
+    /// repository's `remote.<name>.fetch` could move one of the person's own branches. The app's fetch writes its own
+    /// remote-tracking branch and nothing else, whatever that setting says.
+    #[test]
+    fn the_fetch_writes_only_its_own_remote_tracking_branch_whatever_the_configured_refspec() {
+        let Some((home, d)) = repo("refmap") else { return };
+        let bare = with_origin(&home, &d);
+        sh(&d, &["branch", "keep"]);
+        let keep = sh(&d, &["rev-parse", "keep"]);
+        let theirs = advance_remote(&home, &bare, "r.txt");
+        sh(&d, &["config", "remote.origin.fetch", "+refs/heads/main:refs/heads/keep"]);
+        fetch_branch(&Git::automatic(&home).unwrap(), &d, "origin", "main").unwrap();
+        assert_eq!(sh(&d, &["rev-parse", "refs/remotes/origin/main"]), theirs);
+        assert_eq!(sh(&d, &["rev-parse", "keep"]), keep, "a branch of the person's moved");
+        let _ = fs::remove_dir_all(home);
+    }
+
+    /// Item 114: a lane made with nobody there (a workflow by the clock; `unattended`, as the page sends it) first reads the
+    /// repository's own config, as the automatic pull does, and makes nothing while it names a program or another address:
+    /// `git worktree add` runs a smudge filter while it checks the files out, `git status` a clean filter, and a start from
+    /// the remote an `ext::` address. A lane the person starts themselves is made as before (item 86).
+    #[test]
+    fn a_lane_made_with_nobody_there_is_not_made_where_the_repository_s_config_names_a_program() {
+        let Some((home, d)) = repo("unattended") else { return };
+        let unattended = |remote: bool| -> Start { serde_json::from_value(serde_json::json!({"root": "", "remote": remote, "unattended": true})).unwrap() };
+        let (script, marker) = spy(&home, "smudge", false);
+        let attrs = d.join(".git/info/attributes");
+        fs::create_dir_all(attrs.parent().unwrap()).unwrap();
+        fs::write(&attrs, "*.txt filter=spy\n").unwrap();
+        let ran = || fs::read_to_string(&marker).unwrap_or_default();
+        type Plant<'a> = (&'a str, Vec<(&'a str, String)>, bool, &'a str);
+        let cases: Vec<Plant> = vec![
+            ("a smudge filter, run by the checkout", vec![("filter.spy.smudge", script.clone())], false, "filter.spy.smudge"),
+            ("a clean filter, run by the count of what did not come along", vec![("filter.spy.clean", script.clone())], false, "filter.spy.clean"),
+            ("a remote that is a shell command, run by a start from the remote", vec![("remote.origin.url", format!("ext::{script} %S")), ("protocol.ext.allow", "always".into())], true, "remote.origin.url"),
+            ("a proxy for the start from the remote", vec![("remote.origin.url", "http://manut-test.invalid/o/r.git".into()), ("http.proxy", "http://127.0.0.1:9".into())], true, "http.proxy"),
+        ];
+        sh(&d, &["remote", "add", "origin", "https://example.invalid/o/r.git"]);
+        for (what, plant, remote, named) in &cases {
+            for (k, v) in plant {
+                sh(&d, &["config", k, v]);
+            }
+            let got = make_with(&home, &d, &names(&["kit/nightly"]), &unattended(*remote));
+            assert_eq!(got, Err(format!("config:{named}")), "{what}");
+            assert!(!marker.exists(), "{what}: a program ran: {}", ran());
+            assert_eq!(sh(&d, &["branch", "--list", "kit/*"]), "", "{what}: a branch was made");
+            assert!(!home.join(".manut/lanes/web-app/nightly").exists(), "{what}: a folder was made");
+            for (k, _) in plant {
+                let _ = std::process::Command::new("git").args(["-C", d.to_str().unwrap(), "config", "--unset", k]).output();
+            }
+            sh(&d, &["remote", "set-url", "origin", "https://example.invalid/o/r.git"]);
+        }
+        // with nothing of that kind it is made, as a person's own lane is
+        let made = make_with(&home, &d, &names(&["kit/nightly"]), &unattended(false)).unwrap();
+        assert_eq!(made.branch, "kit/nightly");
+        // the person's own start, from the chat box, keeps item 86's rule: their repository's settings apply, as in a terminal
+        sh(&d, &["config", "filter.spy.smudge", &script]);
+        let mine = make(&home, &d, &names(&["kit/mine"])).unwrap();
+        assert_eq!(mine.branch, "kit/mine");
+        let _ = fs::remove_dir_all(home);
+    }
+
     #[test]
     fn a_clean_up_never_removes_a_folder_with_submodules_whose_work_it_does_not_count() {
         let Some((home, d)) = repo("sub-release") else { return };
@@ -2189,7 +2386,7 @@ pub(crate) mod tests {
         let Some((home, d)) = repo("chosen") else { return };
         let old = make(&home, &d, &names(&["kit/old"])).unwrap();
         let root = home.join("work/lanes");
-        let start = Start { root: root.to_string_lossy().into(), remote: false };
+        let start = Start { root: root.to_string_lossy().into(), ..Start::default() };
         let made = make_with(&home, &d, &names(&["kit/new"]), &start).unwrap();
         let wt = root.canonicalize().unwrap().join("web-app/new");
         assert_eq!(made.worktree, wt.to_string_lossy());

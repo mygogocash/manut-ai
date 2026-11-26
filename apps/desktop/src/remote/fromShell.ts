@@ -1,4 +1,4 @@
-// The desktop shell's side of reaching this Mac from a phone: the `remote` keychain item through remote_keys.rs's five
+// The desktop shell's side of reaching this Mac from a phone: the `remote` keychain item through remote_keys.rs's
 // commands, the page's own WebSocket for the relay (the app's content policy lets it reach `wss://*.manut.xyz`), and the
 // API's public health answer, read through the shell's request command, for whether the relay is switched on.
 import { type FetchLike, shellFetch } from "../runtime/http/shell";
@@ -24,11 +24,15 @@ export function readKeyDoc(text: string | null): KeyDoc | null {
   }
 }
 
-/** The `remote` keychain item. Outside the desktop app every call fails, and the page keeps nothing. */
+/** The `remote` keychain item and the shell's own switch and pairing window. Outside the desktop app every call fails,
+ *  and the page keeps nothing. The relay key's private half stays in the shell: it is made there and signs there. */
 export function shellKeyring(): Keyring {
   return {
     read: async () => readKeyDoc(await invoke<string | null>("remote_keys_read")),
-    setHost: (host) => invoke<void>("remote_keys_set_host", { host }),
+    makeHost: () => invoke<void>("remote_host_make"),
+    signHost: (message) => invoke<string>("remote_host_sign", { message }),
+    setSwitch: (on) => invoke<void>("remote_switch", { on }),
+    setPairing: (open) => invoke<void>("remote_pairing", { open }),
     addDevice: (device) => invoke<void>("remote_keys_add_device", { device }),
     touchDevice: (id, lastSeen, signCount) => invoke<void>("remote_keys_touch_device", { id, lastSeen, signCount }),
     removeDevice: (id) => invoke<void>("remote_keys_remove_device", { id }),

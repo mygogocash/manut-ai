@@ -100,6 +100,7 @@ describe("Unpair", () => {
     await turnOn(h);
     const { phone } = await pairPhone(h);
     const session = await phone.connect();
+    await session.request({ t: "open", chat: "buddy" });
     expect(await session.request({ t: "allow", chat: "buddy", ask: "req-1", revision: 1 })).toMatchObject({ t: "challenge" });
     expect(h.remote.challenges.size).toBe(1);
     await h.remote.unpair(phone.deviceId!);
@@ -137,6 +138,36 @@ describe("Unpair", () => {
     await waitFor(() => !h.relay.devices.has(phone.deviceId!));
     expect(session.inbox.closed).not.toBeNull();
   });
+  it("ends the phone's sessions before the keychain write, so a relay that ignores the revoke gets it no new session and no event", async () => {
+    const h = macHarness();
+    await turnOn(h);
+    const { phone } = await pairPhone(h);
+    const first = await phone.connect();
+    await first.request({ t: "open", chat: "buddy" });
+    h.relay.hostile = true;
+    // The keychain takes its time to forget the phone.
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    const remove = h.keyring.removeDevice;
+    h.keyring.removeDevice = async (id) => {
+      await held;
+      return remove(id);
+    };
+    const unpairing = h.remote.unpair(phone.deviceId!);
+    // While the keychain write waits, the phone dials again through the relay that ignored the revoke, and asks.
+    const again = await phone.connect().catch(() => null);
+    const asked = again ? await again.request({ t: "open", chat: "buddy" }, 500).catch(() => null) : null;
+    release();
+    await unpairing;
+    // The store changes and the Mac tells the phones watching: nothing reaches the unpaired phone.
+    h.chats.update("buddy", (items) => [...items, { kind: "message", id: "m9", role: "assistant", text: "After the unpair", ts: 1_800_000_900 }]);
+    h.remote.publish();
+    await settle();
+    const heard = again ? await again.pushed(1, 300).catch(() => []) : [];
+    expect({ session: again !== null, asked: asked?.t ?? null, heard: heard.length }).toEqual({ session: false, asked: null, heard: 0 });
+    expect(h.remote.snapshot().phones).toEqual([]);
+    expect(h.relay.openPhones).toBe(0);
+  });
 });
 
 describe("turning the switch off", () => {
@@ -168,6 +199,28 @@ describe("turning the switch off", () => {
   });
 });
 
+describe("the revision a phone was shown, across the switch", () => {
+  it("is refused once the ask changed while the switch was off, and kept when it did not", async () => {
+    const h = macHarness();
+    await turnOn(h);
+    const { phone } = await pairPhone(h);
+    let session = await phone.connect();
+    await session.request({ t: "open", chat: "buddy" });
+    h.chats.update("buddy", (items) => [...items, { kind: "approval", id: "req-7", ts: 7, open: true, title: "Post the sale", command: "post --page shop", choices: ["once", "deny"] }]);
+    h.remote.publish();
+    await session.pushed(1);
+    // Off, the ask changes, on again: the phone comes back with what it saw.
+    h.remote.turnOff();
+    h.chats.update("buddy", (items) => items.map((i) => (i.kind === "approval" && i.id === "req-1" ? { ...i, command: "line broadcast --to everyone" } : i)));
+    await turnOn(h);
+    session = await phone.connect();
+    expect(await session.request({ t: "allow", chat: "buddy", ask: "req-1", revision: 1 })).toMatchObject({ t: "refused", reason: "changed" });
+    // The ask that did not change keeps the revision the phone saw.
+    expect(await phone.allow(session, { chat: "buddy", ask: "req-7", revision: 1 })).toMatchObject({ t: "done" });
+    expect(h.chats.done).toEqual([{ action: "allowOnce", chat: "buddy", ask: "req-7", by: phone.deviceId }]);
+  });
+});
+
 describe("what crosses the relay", () => {
   it("carries no chat's or ask's words, no phone's name and no key in a form anyone can read", async () => {
     const h = macHarness();
@@ -177,6 +230,8 @@ describe("what crosses the relay", () => {
     await session.request({ t: "list" });
     await session.request({ t: "open", chat: "buddy" });
     expect(await phone.allow(session, { chat: "buddy", ask: "req-1", revision: 1 })).toMatchObject({ t: "done" });
+    expect(await phone.answer(session, { chat: "buddy", ask: "q-1", revision: 1 }, { answer: "Saturday" })).toMatchObject({ t: "done" });
+    expect(h.chats.done.at(-1)).toEqual({ action: "answer", chat: "buddy", ask: "q-1", by: phone.deviceId, answer: "Saturday" });
     const { secret } = phone.secrets();
     const words = [PLAIN.title, PLAIN.message, PLAIN.reply, PLAIN.command, PLAIN.question, "Somchai"];
     const contains = (hay: Uint8Array, needle: Uint8Array) => {

@@ -64,6 +64,8 @@ const PATHS: [string, string][] = [
   ["Makefile", "make.md"],
   ["justfile", "just.md"],
   ["Taskfile.yml", "tasks.yml"],
+  // turbo's settings can send its cache, and the key it is sent with, to a server they name (item 112)
+  ["turbo.json", "turbo.md"],
   [".pre-commit-config.yaml", "pre-commit.md"],
   ["lefthook.yml", "lefthook.md"],
   [".lintstagedrc.json", "lintstaged.md"],

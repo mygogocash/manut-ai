@@ -1,6 +1,10 @@
 // Settings › MCP and Skills › Install skills from a link (item 84). Someone shared skills with a link; this reads them, shows every
-// file with its size and each script marked, lets the person choose all or some skills and the coding agent to install them for,
-// and asks before anything is written. The words of the ask say what a skill is and that nothing runs now.
+// file with its size, SKILL.md marked as the instructions the agent follows and each script marked, lets the person choose all or
+// some skills and the coding agent to install them for, and asks before anything is written. The words of the ask say what a skill
+// is, that nothing runs now, and that in a later chat the agent may follow it and ask to run its scripts, each step asking as usual.
+// A skill with something an agent would act on by itself, without its prompt (skillBundle.ts `fileActsAlone`: `allowed-tools`,
+// `hooks`, a command run as it loads, any setting not on the harmless list), is named with its file and setting and cannot be
+// chosen; the shell refuses it again at the ask and before writing.
 //
 // Behind Settings › Artifacts › Allow sharing skills by link: while it is off nothing is read, fetched or written. The link must be
 // on the artifact origin the API names (read with the shop's links, `artifacts.list`), checked here and again by the shell before
@@ -13,15 +17,18 @@ import { t } from "../../i18n";
 import { useArtifactSettings } from "../../lib/artifactLinks";
 import { SkillFiles } from "../../pages/SkillFiles";
 import type { FileReview } from "../../runtime/fileReview";
-import type { InstallAsk, LinkRead } from "../../runtime/skillBundle";
+import { skillActsAlone, type InstallAsk, type LinkRead } from "../../runtime/skillBundle";
 import { answerInstallAsk, installReview, openInstallAsk, withdrawInstallAsk } from "../../runtime/skillInstallAsks";
 import { getHost } from "../../sessions/host";
 import { agentLabel } from "../../sessions/agents";
 import { getStore } from "../../state/store";
 import { Row } from "../DevRow";
-import { installWords, linkOnOrigin } from "./installLink";
+import { actsWords, installWords, linkOnOrigin } from "./installLink";
 
 type Agent = "claude" | "codex";
+
+/** The chosen skills of `bundle` that can be installed: never one an agent would act on by itself (the shell refuses it again). */
+const installable = (bundle: LinkRead, chosen: readonly string[]) => bundle.skills.filter((k) => chosen.includes(k.name) && !skillActsAlone(k));
 
 /** Where the section stands: off, waiting for a link, reading it, the bundle read (with what is chosen), or its ask. */
 export type InstallState =
@@ -103,11 +110,24 @@ export function InstallSkillsView(p: InstallSkillsViewProps) {
             <b>{s.bundle.title || t("skl.untitled")}</b> {t("skl.in.from")}
           </div>
           <div className="st-grp">
-            {s.bundle.skills.map((k) => (
-              <Row key={k.name} title={k.name} hint={t("skl.in.files", { n: k.files.length })}>
-                <input type="checkbox" checked={s.chosen.includes(k.name)} disabled={p.busy} aria-label={k.name} onChange={() => p.onChoose(k.name)} data-testid="skl-install-skill" data-name={k.name} />
-              </Row>
-            ))}
+            {s.bundle.skills.map((k) => {
+              // A skill an agent would act on by itself is named with its file and setting, and cannot be chosen.
+              const acts = skillActsAlone(k);
+              return (
+                <Row key={k.name} title={k.name} hint={acts ? actsWords(acts.why, `${k.name}/${acts.path}`, acts.field) : t("skl.in.files", { n: k.files.length })}>
+                  <input
+                    type="checkbox"
+                    checked={!acts && s.chosen.includes(k.name)}
+                    disabled={p.busy || !!acts}
+                    aria-label={k.name}
+                    onChange={() => p.onChoose(k.name)}
+                    data-testid="skl-install-skill"
+                    data-name={k.name}
+                    data-acts={acts ? acts.why : undefined}
+                  />
+                </Row>
+              );
+            })}
             <Row title={t("skl.in.agent")} hint={t("skl.in.agentHint")}>
               <span className="st-pair" role="radiogroup" aria-label={t("skl.in.agent")}>
                 {(["claude", "codex"] as const).map((a) => (
@@ -118,9 +138,9 @@ export function InstallSkillsView(p: InstallSkillsViewProps) {
               </span>
             </Row>
           </div>
-          <SkillFiles skills={s.bundle.skills.filter((k) => s.chosen.includes(k.name))} review={null} shown={p.shown} onView={p.onView} onTick={p.onTick} buttonClass="st-btn" />
+          <SkillFiles skills={installable(s.bundle, s.chosen)} review={null} shown={p.shown} onView={p.onView} onTick={p.onTick} buttonClass="st-btn" />
           <div className="st-note">
-            <button type="button" className="st-btn" disabled={p.busy || s.chosen.length === 0} onClick={p.onInstall} data-testid="skl-install-go">
+            <button type="button" className="st-btn" disabled={p.busy || installable(s.bundle, s.chosen).length === 0} onClick={p.onInstall} data-testid="skl-install-go">
               {t("skl.in.install")}
             </button>{" "}
             <button type="button" className="st-btn" disabled={p.busy} onClick={p.onCancel} data-testid="skl-install-cancel">
@@ -220,7 +240,7 @@ export function InstallSkills() {
     }
     try {
       const bundle = await host.skillLinkRead(link.trim(), origin);
-      setState({ step: "read", bundle, chosen: bundle.skills.map((k) => k.name), agent: "claude" });
+      setState({ step: "read", bundle, chosen: installable(bundle, bundle.skills.map((k) => k.name)).map((k) => k.name), agent: "claude" });
     } catch (e) {
       setState({ step: "link" });
       setError(installWords(e instanceof Error ? e.message : String(e)));
@@ -234,7 +254,7 @@ export function InstallSkills() {
     setBusy(true);
     setError(null);
     try {
-      const ask = await host.skillInstallAsk(state.bundle.read, state.chosen, state.agent);
+      const ask = await host.skillInstallAsk(state.bundle.read, installable(state.bundle, state.chosen).map((k) => k.name), state.agent);
       await openInstallAsk(ask);
       setShown(null);
       setState({ step: "ask", bundle: state.bundle, ask });

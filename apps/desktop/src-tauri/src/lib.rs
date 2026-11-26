@@ -25,6 +25,7 @@ mod lane;
 mod lane_clean;
 mod lane_config;
 mod lane_diff;
+mod outside_use;
 mod past_chats;
 mod project_notes;
 mod platform;
@@ -600,36 +601,57 @@ async fn shop_cache_seal_key_clear() -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(shop_cache_key::clear).await.map_err(|_| "keychain".to_string())?
 }
 
-/// What the keychain keeps for reaching this Mac from a phone (remote_keys.rs): the relay key and the paired phones, as
-/// the JSON document the page reads once and imports at once as keys script cannot read back; null when none is kept.
-/// `unavailable` on a computer with no keychain support, where the page keeps nothing. Reading makes nothing.
+/// What the keychain keeps for reaching this Mac from a phone (remote_keys.rs), as the page is given it: the relay key's
+/// public half (never its private half) and the paired phones, each with K only while the shell's switch is on; null when
+/// none is kept. `unavailable` on a computer with no keychain support, where the page keeps nothing. Reading makes nothing.
 #[tauri::command]
 async fn remote_keys_read() -> Result<Option<String>, String> {
     let text = tauri::async_runtime::spawn_blocking(remote_keys::read).await.map_err(|_| "keychain".to_string())??;
     Ok(text.map(|t| t.as_str().to_owned()))
 }
 
-/// Keeps the Mac's relay key, made by the page once the person turned the switch on. Refused (`exists`) when one is kept.
+/// The shell's own record of "Reach this Mac from your phone": the page turns it on after the person's consent and off
+/// with the switch. Off, the shell gives no K, signs nothing and adds no phone.
 #[tauri::command]
-async fn remote_keys_set_host(host: remote_keys::HostKey) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || remote_keys::change(|doc| remote_keys::with_host(doc, host)))
-        .await
-        .map_err(|_| "keychain".to_string())?
+fn remote_switch(on: bool) {
+    remote_keys::gate().set_switch(on);
 }
 
-/// Keeps a newly paired phone. Refused for a malformed record (`invalid`), an id or a passkey already kept (`exists`,
-/// `credential_taken`), and past seven phones (`full`).
+/// Opens (for at most five minutes, only while the switch is on) or closes the shell's window for adding one phone, while
+/// the page shows a pairing code.
+#[tauri::command]
+fn remote_pairing(open: bool) -> Result<(), String> {
+    remote_keys::gate().set_pairing(open, std::time::Instant::now()).map_err(String::from)
+}
+
+/// Makes the Mac's relay key in the shell and keeps it, once the person turned the switch on; its private half never
+/// leaves the shell. Refused (`exists`) when one is kept, and (`off`) with the switch off.
+#[tauri::command]
+async fn remote_host_make() -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(remote_keys::make_host).await.map_err(|_| "keychain".to_string())?
+}
+
+/// The relay's challenge signed with the relay key (a raw P-256 signature, base64url). Refused for any other message
+/// (`not_a_challenge`) and with the switch off.
+#[tauri::command]
+async fn remote_host_sign(message: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || remote_keys::sign_host(&message)).await.map_err(|_| "keychain".to_string())?
+}
+
+/// Keeps a newly paired phone, spending the shell's open pairing. Refused without one (`no_pairing`), for a malformed
+/// record (`invalid`), an id or a passkey already kept (`exists`, `credential_taken`), and past seven phones (`full`).
 #[tauri::command]
 async fn remote_keys_add_device(device: remote_keys::Device) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || remote_keys::change(|doc| remote_keys::with_device(doc, device)))
+    tauri::async_runtime::spawn_blocking(move || remote_keys::add_device(device))
         .await
         .map_err(|_| "keychain".to_string())?
 }
 
-/// Notes when a phone was last seen and its passkey's counter, which may not go down (`counter`).
+/// Notes when a phone was last seen and its passkey's counter, which may not go down (`counter`); only while the switch
+/// is on (`off`).
 #[tauri::command]
 async fn remote_keys_touch_device(id: String, last_seen: u64, sign_count: u32) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || remote_keys::change(|doc| remote_keys::with_touch(doc, &id, last_seen, sign_count)))
+    tauri::async_runtime::spawn_blocking(move || remote_keys::touch_device(&id, last_seen, sign_count))
         .await
         .map_err(|_| "keychain".to_string())?
 }
@@ -937,7 +959,8 @@ async fn skill_link_read(installs: State<'_, Arc<skill_links::Installs>>, link: 
 }
 
 /// The ask to install skills `names` of kept bundle `read` for `agent`, into that agent's own skills folder. Writes nothing;
-/// rejects `exists:<name>` for a skill it has, `link_root`, `bad_bundle:<why>`, `not_found` or `expired`.
+/// rejects `exists:<name>` for a skill it has, `link_root`, `bad_bundle:<why>`, `acts_alone:<why>:<skill>/<path>[:<field>]` for a
+/// skill an agent would act on by itself (skill_links.rs `file_acts_alone`), `not_found` or `expired`.
 #[tauri::command]
 async fn skill_install_ask(installs: State<'_, Arc<skill_links::Installs>>, read: String, names: Vec<String>, agent: String) -> Result<skill_links::InstallAsk, String> {
     let home = user_home()?;
@@ -1368,6 +1391,19 @@ async fn session_open_terminal(cwd: String) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || folder_open::open_terminal(&cwd)).await.map_err(|e| e.to_string())?
 }
 
+/// The editors found on this computer, as (id, label), so the page offers only those (item 107).
+#[tauri::command]
+async fn editors_installed() -> Result<Vec<(String, String)>, String> {
+    tauri::async_runtime::spawn_blocking(folder_open::editors_installed).await.map_err(|e| e.to_string())
+}
+
+/// Open a folder in an editor named by an id from the fixed list (rule 30, item 107): the folder is an absolute path to
+/// a folder that exists, the editor never a path or a command from the page.
+#[tauri::command]
+async fn session_open_in_editor(cwd: String, editor: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || folder_open::open_in_editor(&cwd, &editor)).await.map_err(|e| e.to_string())?
+}
+
 /// The home a session of `agent` reads its conversations from: the account it ran with (`account`), else the account
 /// picked for new sessions, else the CLI's own (rule 30). An `account` whose folder is gone is an error, not another
 /// home: its conversation is not known to be missing, only out of reach.
@@ -1393,6 +1429,38 @@ fn past_home_in(home: &std::path::Path, agent: &str, account: Option<&str>, var:
 #[tauri::command]
 async fn past_chats_list(agent: String, cwds: Vec<String>) -> Result<Vec<past_chats::PastChat>, String> {
     tauri::async_runtime::spawn_blocking(move || past_chats::list(&past_home(&agent, None)?, &agent, &cwds)).await.map_err(|e| e.to_string())?
+}
+
+/// What Claude Code or Codex used in sessions outside Manut AI, read from the tool's own files on this Mac (item 106,
+/// `outside_use.rs`): numbers, dates and a project folder's name, never a path above it or a word of a conversation. The
+/// page names the tool and the ids of the sessions it started (matched, never opened) and a number to cancel by; the folders
+/// read are the tool's own and the account homes Manut AI made, chosen here.
+#[tauri::command]
+async fn outside_use_scan(tool: String, exclude: Vec<String>, scan_id: u32) -> Result<outside_use::Report, String> {
+    if !outside_use::supported(&tool) {
+        return Err(format!("{tool} use is not read"));
+    }
+    let flag = outside_use::register(scan_id);
+    let r = tauri::async_runtime::spawn_blocking(move || {
+        let user = user_home()?;
+        let primary = past_home(&tool, None).ok();
+        let homes = outside_use::homes_for(&user, &tool, primary);
+        let exclude = outside_use::clean_ids(exclude);
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0);
+        let opts = outside_use::Opts { now, offset: &outside_use::system_offset, exclude: &exclude, limits: outside_use::Limits::default(), cancel: &*flag };
+        let mut cache = outside_use::shared_cache().lock().map_err(|_| "busy".to_string())?;
+        Ok::<_, String>(outside_use::scan(&tool, &homes, &opts, &mut cache))
+    })
+    .await
+    .map_err(|e| e.to_string());
+    outside_use::finish(scan_id);
+    r?
+}
+
+/// The page closed: stop its scan between files.
+#[tauri::command]
+fn outside_use_cancel(scan_id: u32) {
+    outside_use::cancel(scan_id);
 }
 
 /// The conversation the Codex in the foreground of TERMINALS session `id` holds open, for the session to continue
@@ -1724,7 +1792,11 @@ fn commands(invoke: tauri::ipc::Invoke) -> bool {
         buddy_close_all,
         session_reveal,
         session_open_terminal,
+        editors_installed,
+        session_open_in_editor,
         past_chats_list,
+        outside_use_scan,
+        outside_use_cancel,
         past_chat_messages,
         conversation_state,
         codex_conversation,
@@ -1758,7 +1830,10 @@ fn commands(invoke: tauri::ipc::Invoke) -> bool {
         shop_cache_seal_key,
         shop_cache_seal_key_clear,
         remote_keys_read,
-        remote_keys_set_host,
+        remote_switch,
+        remote_pairing,
+        remote_host_make,
+        remote_host_sign,
         remote_keys_add_device,
         remote_keys_touch_device,
         remote_keys_remove_device,

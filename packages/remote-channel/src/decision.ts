@@ -84,6 +84,23 @@ function checkedBinding(binding: DecisionBinding): DecisionBinding {
   };
 }
 
+const ANSWER_LABEL = utf8("manut-remote-v1 answer");
+
+/// A phone's answer to an agent's question: one text, or for an interview each question's id with
+/// its text or null (skipped), in the order the ask lists its questions.
+export type QuestionAnswer = string | readonly (readonly [string, string | null])[];
+
+/// The choice (`optionId`) an answer's challenge is bound to: `answer:` and the base64url
+/// SHA-256 of "manut-remote-v1 answer" || 0x00 || the answer as JSON, `["text", <text>]` or
+/// `["answers", [[<id>, <text or null>], ...]]`. An answer steers the agent as much as an Allow
+/// does, so the passkey signs the exact words: a phone that sends other words than it signed, or
+/// signs other words than it was challenged for, is refused. Arrays, not an object, so the order
+/// is the ask's and never the engine's (which puts number-like keys first).
+export async function answerOption(answer: QuestionAnswer): Promise<string> {
+  const json = typeof answer === "string" ? JSON.stringify(["text", answer]) : JSON.stringify(["answers", answer]);
+  return `answer:${toBase64Url(await sha256(ANSWER_LABEL, Uint8Array.of(0), utf8(json)))}`;
+}
+
 /// The bytes a passkey signs for one decision, as the Mac issues them and the phone recomputes.
 export async function decisionChallenge(nonce: Uint8Array, binding: DecisionBinding): Promise<Bytes> {
   if (nonce.length !== 32) throw new RemoteChannelError("invalid");

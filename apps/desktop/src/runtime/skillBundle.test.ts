@@ -5,6 +5,8 @@ import { describe, expect, it } from "vitest";
 import { MAX_ARTIFACT_BYTES } from "./artifacts";
 import {
   bundleBytes,
+  fileActsAlone,
+  isInstructions,
   isScript,
   readInstallAsk,
   readLinkRead,
@@ -15,6 +17,7 @@ import {
   skillsRefusal,
   type SkillEntry,
 } from "./skillBundle";
+import actsTable from "./skillActs.cases.json";
 
 const SKILL: SkillEntry = { name: "promptpay", files: [{ path: "SKILL.md", text: "---\nname: promptpay\n---\n" }, { path: "scripts/qr.py", text: "print(1)\n" }] };
 const KEY = "ghp_" + "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8";
@@ -43,6 +46,11 @@ describe("a bundle's rules", () => {
     expect(refused).toEqual({ reason: "secret", skill: "deploy", path: "notes.md" });
     expect(JSON.stringify(refused)).not.toContain(KEY);
     expect(skillsPlanRefusal({ title: "Mine", skills: [{ name: "x", files: [{ path: "SKILL.md", text: "api_key=abc123def456" }] }] })?.reason).toBe("secret");
+    // the forms the masker learned in item 113 stop a publish too: a key block, a header, a YAML password, a quoted key
+    for (const text of [`-----BEGIN RSA PRIVATE KEY-----\n${"X".repeat(24)}\n-----END RSA PRIVATE KEY-----`, "Authorization: Bearer abc123def456",
+      "db:\n  password: hunter2\n", 'export API_KEY="abc def"', "postgres://u:hunter2@db.test/x"]) {
+      expect(secretFiles([{ name: "x", files: [{ path: "SKILL.md", text: "Plain." }, { path: "ref.md", text }] }]), text).toEqual([{ skill: "x", path: "ref.md" }]);
+    }
     expect(skillsPlanRefusal({ title: "Mine", skills: [SKILL] })).toBeNull();
     // the whole manifest counts against the pages' size
     const big: SkillEntry = { name: "big", files: [{ path: "SKILL.md", text: "a".repeat(MAX_ARTIFACT_BYTES) }] };
@@ -56,6 +64,40 @@ describe("a bundle's rules", () => {
     expect(isScript("tool", "binary-ish text", true)).toBe(true);
     expect(isScript("SKILL.md", "---")).toBe(false);
     expect(isScript(".sh", "x")).toBe(false);
+    // anything in a scripts or bin folder is one the agent may ask to run, in any letter case
+    for (const p of ["scripts/qr", "Scripts/notes.txt", "tools/bin/run", "a/SCRIPTS/b/c"]) expect(isScript(p, "plain"), p).toBe(true);
+    for (const p of ["scripts", "references/scripts.md", "binary/notes.txt"]) expect(isScript(p, "plain"), p).toBe(false);
+  });
+
+  it("marks the top SKILL.md as the instructions the agent follows", () => {
+    expect(isInstructions("SKILL.md")).toBe(true);
+    for (const p of ["sub/SKILL.md", "README.md", "skill.md"]) expect(isInstructions(p), p).toBe(false);
+  });
+});
+
+/** A one-file case of skillActs.cases.json as a skill: the file, beside a plain SKILL.md when it is not SKILL.md itself. */
+const caseSkill = (path: string, text: string): SkillEntry => ({
+  name: "x",
+  files: path === "SKILL.md" ? [{ path, text }] : [{ path: "SKILL.md", text: "Plain instructions." }, { path, text }],
+});
+
+describe("a skill that a coding agent would act on by itself", () => {
+  it("stops a publish for every row of the shared table (skillActs.cases.json, also run by skill_links.rs), naming the file and the field", () => {
+    expect(actsTable.cases.length).toBeGreaterThan(60);
+    for (const [path, text, why, field] of actsTable.cases) {
+      const want = why === "" ? null : { reason: "acts_alone", skill: "x", path, why, ...(why === "field" ? { field } : {}) };
+      expect(skillsPlanRefusal({ title: "t", skills: [caseSkill(path, text)] }), JSON.stringify([path, text])).toEqual(want);
+      expect(fileActsAlone(path, text), JSON.stringify([path, text])).toEqual(why === "" ? null : { why, ...(why === "field" ? { field } : {}) });
+    }
+  });
+
+  it("takes only the harmless settings: a skill with no settings, or name and description alone, installs", () => {
+    expect(fileActsAlone("SKILL.md", "")).toBeNull();
+    expect(fileActsAlone("SKILL.md", "---\nname: a\ndescription: b\n---\n")).toBeNull();
+    // a setting not on the list is refused by name, even one that sounds harmless: what is not known is not taken
+    expect(fileActsAlone("SKILL.md", "---\nname: a\nauthor: Mali\n---\n")).toEqual({ why: "field", field: "author" });
+    // the same settings in a file no agent reads as a skill are text
+    expect(fileActsAlone("data/config.json", "{\"allowed-tools\": \"Bash\"}")).toBeNull();
   });
 });
 

@@ -33,8 +33,9 @@ else in a real environment. Practice mode shows everything else.
   sign-in, so it shows in the nav before signing in too (Today and Your Mac). The person scans the Mac's code (where the
   browser can read one) or pastes its link, the phone shows four digits to type on the Mac, and then makes a passkey.
   Paired, it lists the Mac's chats as Needs you, Working and Done, and a chat shows its messages, its current step and its
-  asks whole, with Allow once (Face ID or the passcode), No, an answer and Stop, and nothing else. It says "not available
-  yet" while the API's `/v1/health` says the relay is off, or when the page is not on the API's own origin.
+  asks whole, with Allow once and an answer to a question (each with Face ID or the passcode), No and Stop, and nothing
+  else. It says "not available yet" while the API's `/v1/health` says the relay is off, or when the page is not on the
+  API's own origin.
 
 The web is not told helpers' names, so another helper's decision reads "a helper". What waits is read on opening, every
 minute while the app is in view, when it comes back into view or online, and after each answer.

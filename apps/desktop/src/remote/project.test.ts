@@ -37,6 +37,35 @@ describe("what a phone is shown", () => {
     expect(text).toContain("••••");
   });
 
+  it("masks the common forms a key takes in what an agent writes, not only tokens (item 113)", () => {
+    const X = "X".repeat(24);
+    const leaks = [
+      `-----BEGIN OPENSSH PRIVATE KEY-----\n${X}\n-----END OPENSSH PRIVATE KEY-----`,
+      `sk_live_${X}`,
+      "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJtYWxpIn0.c2lnbmF0dXJlLWhlcmU",
+      "hunter2-bearer-value",
+      "hunter2-yaml",
+      "hunter2-json",
+      "hunter2-url",
+      "hunter2-quoted",
+    ];
+    const text = [
+      `Here is the key:\n${leaks[0]}`,
+      `Stripe: ${leaks[1]}`,
+      `JWT ${leaks[2]}`,
+      `curl -H "Authorization: Bearer ${leaks[3]}" https://x.test`,
+      `password: ${leaks[4]}`,
+      `{"password": "${leaks[5]}"}`,
+      `postgres://admin:${leaks[6]}@db.test/app`,
+      `export API_KEY="${leaks[7]}"`,
+    ].join("\n");
+    const source: ChatSource = { ...chat(), items: [{ kind: "message", id: "m", role: "assistant", text, ts: 1 }] };
+    const shown = JSON.stringify(new Projector().view(source));
+    for (const leak of leaks) expect(shown, leak).not.toContain(leak);
+    // what frames each one stays readable
+    for (const kept of ["Authorization: Bearer ••••", "password: ••••", "postgres://admin:••••@db.test/app", 'API_KEY=\\"••••\\"']) expect(shown).toContain(kept);
+  });
+
   it("shows an ask whole, with every field its card shows, and nothing cut short", () => {
     const long = `${"line broadcast --to everyone ".repeat(400)}--confirm`;
     const source: ChatSource = { ...chat(), items: [{ kind: "approval", id: "r", ts: 2, open: true, title: "Broadcast", command: long, cwd: "/shop", plan: "1. Draft\n2. Send", choices: ["once", "deny"], from: "Kit" }] };
@@ -86,8 +115,25 @@ describe("what a phone is shown", () => {
     expect(projector.ask(changed, "req-1")?.revision).toBe(2);
     // Another chat's ask with the same id has its own revisions.
     expect(projector.ask({ ...changed, key: "kit" }, "req-1")?.revision).toBe(1);
-    projector.forget("buddy");
-    expect(projector.ask(changed, "req-1")?.revision).toBe(1);
+    // Letting go of a chat's asks never gives a revision twice: an ask still in the store keeps its revision, and one
+    // that left and comes back with the same id goes on counting.
+    projector.retire("buddy", changed);
+    expect(projector.ask(changed, "req-1")?.revision).toBe(2);
+    projector.retire("buddy", { ...changed, items: changed.items.filter((i) => i.kind === "message") });
+    expect(projector.ask(source, "req-1")?.revision).toBe(3);
+    expect(projector.ask(changed, "req-1")?.revision).toBe(4);
+  });
+
+  it("keeps, per phone, the newest revision of each ask it was sent", () => {
+    const projector = new Projector();
+    projector.sent("A", "buddy", [{ id: "req-1", revision: 2 }]);
+    projector.sent("A", "buddy", [{ id: "req-1", revision: 1 }]);
+    expect(projector.wasShown("A", "buddy", "req-1", 2)).toBe(true);
+    expect(projector.wasShown("A", "buddy", "req-1", 1)).toBe(false);
+    expect(projector.wasShown("B", "buddy", "req-1", 2)).toBe(false);
+    expect(projector.wasShown("A", "kit", "req-1", 2)).toBe(false);
+    projector.forgetDevice("A");
+    expect(projector.wasShown("A", "buddy", "req-1", 2)).toBe(false);
   });
 
   it("binds a challenge to the chat and the ask so no two pairs run into each other", () => {
