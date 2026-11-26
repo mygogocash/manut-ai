@@ -848,6 +848,26 @@ describe("C4: a read that prints a secret from outside the project without namin
   });
 });
 
+describe("C5: git pointed at another folder, and a program named by a path (item 116)", () => {
+  it("reads git only in the project's own folder, and a tool only from a node_modules/.bin of the project", () => {
+    counted += holds([
+      ["git -C fixtures/evil.git show HEAD", "git show HEAD", "read"],
+      ["git -C x status", "git status", "read"],
+      ["git -C sub/x log --oneline", "git log --oneline", "read"],
+      [`git -C ${root}/x status`, `git -C ${root} status`, "read"],
+      ["git -C . -C x status", "git -C . status", "read"],
+      ["git --git-dir=x log", "git --no-pager log", "read"],
+      ["git --work-tree=x status", "git -P log -1", "read"],
+      ["git --git-dir x --work-tree . diff", "git diff --stat", "read"],
+      ["node_modules/.bin/../../scripts/test", "node_modules/.bin/vitest run", "check"],
+      ["./node_modules/.bin/../../bin/git status", "./node_modules/.bin/vitest run", "check"],
+      ["/tmp/x/node_modules/.bin/vitest run", "apps/desktop/node_modules/.bin/vitest run", "check"],
+      ["fixtures/node_modules/.bin/../x/node_modules/.bin/../../../scripts/test", `${root}/node_modules/.bin/vitest run`, "check"],
+      ["../node_modules/.bin/vitest run", "./node_modules/.bin/tsc --noEmit", "check"],
+    ]);
+  });
+});
+
 describe("everyday commands", () => {
   /** What a developer and an agent run all day, each as it read before item 112 (only `cdk synth`, now a build, moved).
    *  None of these may start to ask because a hostile line beside it does. */

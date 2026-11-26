@@ -135,7 +135,9 @@ describe("what a step does", () => {
       "git archive --remote=x HEAD",
     ])
       expect([line, action(line)]).toEqual([line, "unknown"]);
-    expect(action("git -C sub status")).toBe("read");
+    // only the project's own folder: any other may be plain files git takes for a repository (item 116)
+    expect(action("git -C sub status")).toBe("unknown");
+    expect(action("git -C . status")).toBe("read");
     expect(action("git --no-pager log --oneline")).toBe("read");
     expect(action("git config --get user.name")).toBe("read");
     expect(action("git log --output=log.txt")).toBe("change");

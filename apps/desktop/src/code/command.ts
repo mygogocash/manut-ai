@@ -746,11 +746,17 @@ function configReads(args: string[], rest: string[]): boolean {
 
 function git(words: string[], where: Where): Verdict {
   let at = 1;
+  // `-C` moves git to another folder, each from the last: only the project's own is read (item 116). Any other may be a
+  // folder of plain files that git takes for a repository, whose settings name a program it runs on a read.
+  let dir: string | null = where.cwd || where.root;
   while (at < words.length && words[at].startsWith("-")) {
-    if (words[at] === "-C") at += 2;
-    else if (GIT_GLOBAL_SAFE.has(words[at])) at++;
+    if (words[at] === "-C") {
+      dir = dir === null || words[at + 1] === undefined ? null : resolve(words[at + 1], dir, where.home);
+      at += 2;
+    } else if (GIT_GLOBAL_SAFE.has(words[at])) at++;
     else return unknownProgram("git");
   }
+  if (at > 1 && words.slice(1, at).includes("-C") && (dir === null || !samePath(dir, where.root))) return unknownProgram("git");
   if (at >= words.length) return v("read", say("kit.say.read"));
   const ops = operands(words, at);
   const sub = words[at];
@@ -1619,7 +1625,14 @@ function classify(words: string[], where: Where): Verdict {
     return unknownProgram(name);
   }
 
-  if (/(^|[\\/])node_modules[\\/]\.bin[\\/]/.test(raw)) return classify([name, ...words.slice(1)], where);
+  // A tool run by its path is the tool of that name only where the path really leads, `..` taken out, to a
+  // `node_modules/.bin` of the project or of a folder in it (item 116). Any other path is a program nobody has read.
+  if (/[\\/]/.test(raw)) {
+    const abs = resolve(raw, where.cwd || where.root, where.home);
+    const p = abs === null ? null : parts(abs).list;
+    const inBin = p !== null && p.length >= 3 && p[p.length - 3] === "node_modules" && p[p.length - 2] === ".bin";
+    if (inBin && abs !== null && within(abs, where.root)) return classify([p[p.length - 1], ...words.slice(1)], where);
+  }
   if (raw.includes("/") || raw.includes("\\")) {
     // a script of the project's own, run by its path: known by name only when it deploys
     const base = name.replace(/\.[A-Za-z0-9]+$/, "");

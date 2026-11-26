@@ -281,6 +281,20 @@ yq's `load` and its kinds and its `env` read after `eval` or `eval-all` too, and
 plain twin (`kubectl get pods`, `terraform plan`, `docker ps`, `git config --get user.name`, `ps aux`) stays a read.
 `pnpm config list` and a bare `yarn config` now ask.
 
+#### git in another folder, and a program named by a path (item 116)
+
+- **git reads only the project's own folder.** `git -C` naming any folder but the project's (one folder after another
+  for several), and `--git-dir` or `--work-tree`, ask: a folder of a few plain files git takes for a repository can
+  name a program git runs on a read. Every agent the app starts also runs git with `safe.bareRepository=explicit`
+  (`bare_explicit` in `src-tauri/src/providers.rs`, through `GIT_CONFIG_COUNT`, after any the person set), so its git
+  refuses such a folder found by `-C` or by its own folder. For a person this means a bare repository works in an
+  agent's session only when named with `--git-dir` or `GIT_DIR`; a normal repository, a lane's worktree and `.git`
+  itself work as before.
+- **A tool by its path.** A program named by a path is read by where the path leads once `..` is taken out: only
+  `node_modules/.bin/<name>` in the project or a folder of it is the tool of that name. Anything else
+  (`node_modules/.bin/../../scripts/test`, `/tmp/x/node_modules/.bin/vitest`, `../node_modules/.bin/vitest`) is a
+  program nobody has read, and asks.
+
 #### What a kept rule covers (item 116)
 
 "Always allow in this project" keeps a command's first words and, since item 116, the step it was kept for (a change,
