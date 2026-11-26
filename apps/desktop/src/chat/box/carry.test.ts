@@ -25,6 +25,10 @@ import {
   setCarried,
   setCarryStorage,
   splitSent,
+  tookIn,
+  throughOf,
+  THROUGH_KEY,
+  withThrough,
   THREADS_MAX,
   withCarried,
   type Carried,
@@ -121,6 +125,20 @@ describe("the shop and account a chip belongs to", () => {
     expect(scopeRefusal({ account: "claude:work" }, { account: "codex:default" })).toBeNull();
   });
 
+  it("refuses a chip anywhere one of the shops it passed through differs (item 121)", () => {
+    // a coding chat that took in shop a's context gives chips that carry shop a with them
+    const via = { account: "claude:work", through: ["a"] };
+    expect(scopeRefusal(via, { shop: "b" })).toBe("shop");
+    expect(scopeRefusal(via, { shop: "a" })).toBeNull();
+    expect(scopeRefusal(via, {})).toBeNull();
+    expect(scopeRefusal(via, { account: "claude:work" })).toBeNull();
+    // a team chat that took in another shop's context, before the rule: refused in its own shop too
+    expect(scopeRefusal({ shop: "a", through: ["b"] }, { shop: "a" })).toBe("shop");
+    // a chip made where no shop is listed carries the empty shop, which another shop's chat refuses
+    expect(scopeRefusal({ shop: "", through: [] }, { shop: "a" })).toBe("shop");
+    expect(goes([thread("x", { through: ["a"] } as never), thread("y", {} as never)], { shop: "b" }).map((c) => c.id)).toEqual(["t-y"]);
+  });
+
   it("sends only what may go to this chat, and leaves out the rest", () => {
     const mine = noteChip("ours", "yes", SHOP, "n1")!;
     const theirs = noteChip("theirs", "no", { shop: "other" }, "n2")!;
@@ -165,6 +183,35 @@ describe("kept by chat", () => {
   beforeEach(() => {
     mem = new Mem();
     setCarryStorage(mem);
+  });
+
+  it("remembers every shop whose context a chat took in, so its own chips carry them on (item 121)", () => {
+    // shop a's chat, brought into a coding chat and sent there
+    tookIn("agent:s1", [thread("a1", { shop: "a" } as never)]);
+    expect(throughOf("agent:s1")).toEqual(["a"]);
+    expect(withThrough("agent:s1", { account: "claude:work" })).toEqual({ account: "claude:work", through: ["a"] });
+    // that coding chat's context, brought into another coding chat, carries shop a on
+    tookIn("agent:s2", [thread("s1", withThrough("agent:s1", { account: "claude:work" }) as never)]);
+    expect(throughOf("agent:s2")).toEqual(["a"]);
+    // and then into shop b's chat it is refused, two hops on
+    expect(scopeRefusal(withThrough("agent:s2", {}), { shop: "b" })).toBe("shop");
+    // a chat that took in nothing gives its scope as it was
+    expect(withThrough("agent:s9", { account: "codex:default" })).toEqual({ account: "codex:default" });
+    // kept across a restart, and read back only as a list of shops
+    setCarryStorage(mem);
+    expect(throughOf("agent:s2")).toEqual(["a"]);
+    const raw = JSON.parse(mem.getItem(THROUGH_KEY)!);
+    raw["agent:bad"] = "a";
+    raw["agent:mixed"] = ["b", 3];
+    mem.setItem(THROUGH_KEY, JSON.stringify(raw));
+    setCarryStorage(mem);
+    expect(throughOf("agent:bad")).toEqual([]);
+    expect(throughOf("agent:mixed")).toEqual(["b"]);
+    // a chip saved with the shops it passed through reads back with them; a wrong kind is no chip
+    carry("agent:s3", thread("x", { through: ["a"] } as never));
+    setCarryStorage(mem);
+    expect(getCarried("agent:s3")[0]?.scope).toEqual({ through: ["a"] });
+    expect(parseCarry(JSON.stringify({ k: [{ kind: "thread", id: "t", ref: "r", title: "T", text: "x", scope: { through: "a" } }] }))).toEqual({});
   });
 
   it("keeps a chat's notes across a restart, and reads back only what it can", () => {

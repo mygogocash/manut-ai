@@ -138,7 +138,12 @@ The states whose rules are pure functions, with their tests, then the screens th
   for text that never runs, and `maskCommand` for what an ask's card shows, which masks a key and never a substitution, a
   pipe, a second command or a command's own operand (a token-shaped word is a key only as a whole word with a key's
   shape); a private key block keeps its BEGIN and END lines around one masked line only inside a quoted string or a heredoc's
-  body, where the shell reads it as data, and its body holds only key characters; anywhere else it is shown whole. The card shows a command whole, its line breaks kept, scrolling in its block.
+  body that a writer (`cat`, `tee`, `echo`, `printf`) leading the command only writes out, and its body holds only base64
+  and PEM header lines; anywhere else it is shown whole. Since item 121 a masked value also stops at a blank, a quote, `#`
+  and a glob character, and the masked command must split into the command's own shell words or it is shown as it is with
+  a note that it may hold a key, and every character that does not show, or that reorders what does, is a visible mark
+  such as `⟨U+202E⟩`, with a note that the command holds hidden characters (docs/remote-access.md, "An approval shows
+  what runs"). The card shows a command whole, its line breaks kept, scrolling in its block.
 - `apps/desktop/src/code/kitAsks.ts`: the dial at work on a session's asks, through the asks' own cards.
 - `apps/desktop/src/code/KitCardParts.tsx`, `KitPanel.tsx`, `kit.css`: Kit's words on an ask's card, and Kit on the
   Code page.
@@ -2142,7 +2147,10 @@ through the store, sessions and shell it is handed), `SelectionNote.tsx`, `Bring
   menu: a + whose one row is files still opens the picker at once, and there a chat comes in by a drag.
 - **Shop and account.** Each chip names the shop (a team chat) or the agent account (a coding chat) it was made under. A chat of
   another shop, or of another account of the same agent, is refused in a plain line before anything of it is read; a kept chip
-  of another shop is red and never sent.
+  of another shop is red and never sent. Since item 121 a chip also carries every shop whose chat's context the chat it came
+  from took in (kept by chat as `manut.box.through` whenever a send takes chips), and is refused anywhere one of those shops
+  differs, so a shop's context cannot reach another shop by way of a coding chat. Sends made before item 121 were not
+  recorded, so a coding chat that took a shop's context in before then carries no shop for it.
 - **Continue with….** A started coding chat's agent chip opens the other models of its agent and the other installed agents that
   chat. A pick opens a NEW chat in the same lane (no second folder or branch) or folder, with the old chat's context above its
   box, unsent; its agent starts with the person's first message, the picked model set first, its own agent keeping the old

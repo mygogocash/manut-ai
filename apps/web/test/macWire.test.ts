@@ -16,4 +16,14 @@ describe("an approval as the phone reads it", () => {
     // only `true` marks it: anything else is read as an ordinary command
     expect(readAsk(approval({ long: "yes" }))).not.toHaveProperty("long");
   });
+
+  it("never offers Allow once for a command the Mac keeps because it may hold a key (item 121)", () => {
+    expect(readAsk(approval({ command: "", keyed: true }))).toMatchObject({ keyed: true, command: "", offers: ["deny"] });
+    expect(readAsk(approval({ keyed: 1 }))).not.toHaveProperty("keyed");
+  });
+
+  it("keeps the Mac's mark that a command holds hidden characters, which it shows as marks (item 121)", () => {
+    expect(readAsk(approval({ command: "rm -rf build⟨U+202E⟩src", hidden: true }))).toMatchObject({ hidden: true, offers: ["once", "deny"] });
+    expect(readAsk(approval({ hidden: "yes" }))).not.toHaveProperty("hidden");
+  });
 });

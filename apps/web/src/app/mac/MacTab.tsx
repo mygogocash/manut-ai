@@ -580,7 +580,8 @@ function AskFrom({ m, from }: { m: MacStrings; from: string | undefined }) {
 
 /// An approval, as the Mac's card shows it: who asks, the title (or "Start working on this plan?"), the whole command,
 /// the plan and the folder. Allow once and No only, and only while the Mac is connected. A command too long for a phone
-/// shows its start and says only the Mac can allow it; No stays.
+/// shows its start and says only the Mac can allow it; No stays. One the Mac keeps because it may hold a key says so, and
+/// only No stays (item 121).
 function ApprovalCard({ m, ask, state, live, remote }: { m: MacStrings; ask: ApprovalAsk; state: AskState | null; live: boolean; remote: MacRemote }) {
   const titleId = `mac-ask-${ask.id}`;
   const busy = state?.busy ?? null;
@@ -598,6 +599,16 @@ function ApprovalCard({ m, ask, state, live, remote }: { m: MacStrings; ask: App
       {ask.long && (
         <p className="hint" style={{ margin: 0 }} data-testid="mac-command-long">
           {m.tooLongHere}
+        </p>
+      )}
+      {ask.keyed && (
+        <p className="hint" style={{ margin: 0 }} data-testid="mac-command-keyed">
+          {m.keyedHere}
+        </p>
+      )}
+      {ask.hidden && (
+        <p className="hint" style={{ margin: 0 }} data-testid="mac-command-hidden">
+          {m.hiddenHere}
         </p>
       )}
       {ask.plan && <p style={SOFT}>{ask.plan}</p>}
