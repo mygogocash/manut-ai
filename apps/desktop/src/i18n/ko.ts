@@ -3,6 +3,7 @@ import type { Key } from "./index";
 import { ab } from "./ko/ab";
 import { acc } from "./ko/acc";
 import { acct } from "./ko/acct";
+import { acpreg } from "./ko/acpreg";
 import { act } from "./ko/act";
 import { ag } from "./ko/ag";
 import { art } from "./ko/art";
@@ -159,6 +160,7 @@ export const ko: Record<Key, string> = {
   ...ab,
   ...acc,
   ...acct,
+  ...acpreg,
   ...act,
   ...ag,
   ...art,

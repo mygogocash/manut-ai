@@ -804,3 +804,48 @@ Source: https://android.googlesource.com/platform/frameworks/base/+/1cdfff555f4a
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
+
+## The ACP registry on Settings › Providers
+
+Settings › Providers › From the ACP registry (item 101c) lists the agents of one release of the Agent Client Protocol's
+agent registry, whose `registry.json` the shell carries byte for byte (`src-tauri/acp-registry/registry.json`, its source,
+release and SHA-256 in `pin.json` beside it) and reads to show each agent's name, description, version and how it is
+installed. The agents it lists are their makers' and keep their own licences; the app installs and downloads none of
+them. The list's search is lifted from T3 Code.
+
+### ACP registry (agentclientprotocol/registry)
+
+Source: <https://github.com/agentclientprotocol/registry>, release `v2026.11.26-3667256` (commit
+`36672565f76e7fb9796eb15182e0e14fb9e77c33`), asset `registry.json`, and `quarantine.json` at that commit. No NOTICE file
+is published with it. Under the Apache License, Version 2.0, reproduced in full under Android notification tones above
+(the registry's own `LICENSE` is that text without its appendix).
+
+### T3 Code (pingdotgg/t3code)
+
+Source: <https://github.com/pingdotgg/t3code> at `ae945dd`: `searchRank` in
+`packages/provider-acp-registry/src/server/AcpRegistrySupport.ts`, lifted as `searchRank` in
+`src/settings/agents/acpRegistry.ts`.
+
+```
+MIT License
+
+Copyright (c) 2026 T3 Tools Inc.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```

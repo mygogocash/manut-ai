@@ -156,3 +156,78 @@
   justify-content: flex-end;
   margin-top: 6px;
 }
+/* From the ACP registry (item 101c): a search over the list, which scrolls in its own box so the accounts below stay
+   near; each row a mark, the registry's name and description, and Add… or why not; the pinned release once at the foot. */
+.areg-search {
+  padding-top: 0;
+  padding-bottom: 0;
+}
+.areg-search .ag-in {
+  width: 100%;
+}
+.areg-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 420px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+/* a row keeps its own height in the scrolling box: shrunk, a two-line description ran into the next row */
+.areg-list > * {
+  flex: none;
+}
+.areg-row {
+  justify-content: flex-start;
+  gap: 10px;
+}
+.areg-row .areg-mark {
+  flex: none;
+  align-self: flex-start;
+  margin-top: 3px;
+}
+.areg-k {
+  flex: 1;
+}
+.areg-k b {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.areg-v {
+  display: inline !important;
+  font-family: var(--mono);
+  font-size: 12px !important;
+  font-weight: 400;
+}
+.areg-d {
+  display: -webkit-box !important;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.areg-row.held .areg-k b {
+  color: var(--body);
+}
+.areg-why {
+  max-width: 260px;
+  text-align: right;
+}
+.areg-foot {
+  margin: 6px 10px 0;
+  font-size: 12px;
+  color: var(--aui-muted);
+}
+/* the registry's part of the confirm card: where the agent comes from and how the person installs it */
+.ag-reg {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+.ag-reg-sum {
+  color: var(--muted);
+  font-size: 12px;
+}
