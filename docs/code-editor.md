@@ -1140,6 +1140,35 @@ that repository only, to rewrite to the bare folder, and stand-ins for `gh` and 
 reaches a real remote. `glab` is not installed on the Mac this was built on, so its argv follows its documentation and is
 covered by the stand-in only.
 
+### Pull requests across projects (item 100)
+
+**Tasks › Pull requests** (`tasks/PullsView.tsx`, `tasks/board.ts`, `src-tauri/src/pulls.rs`) is the Tasks page's third scope. It
+lists the open pull / merge requests of every project the Code page lists (each folder's remote, read once per repository) under
+grey bands by readiness: ready (approved, or no review asked, with green checks and no conflict), checks running, review needed,
+changes asked, checks failing, conflicts, drafts; the newest change first in each. A row names its repository and number, who
+opened it, when it changed, its checks and review, and whether it is a lane's or a chat's. The shell reads `gh pr list --json
+...,reviewDecision,mergeable,baseRefName` and `glab mr list --output json` (`detailed_merge_status`, `has_conflicts`), masked as
+Tasks masks. A row opens the request in the app: title, description as plain text, checks, at most 300 changed files with their
+counts (`gh pr view --json files,additions,deletions,changedFiles`; GitLab's `changes_count` alone), Open on GitHub, and Merge.
+
+**Merge from the list is the lane's ask.** A lane's request goes to `review_ask_merge` with the lane's folder, as the lane's own
+Merge does. Any other goes to `review_ask_merge_pull` (`review.rs` `ask_merge_pull`) with the project's folder: the folder's
+remote must name the request's repository (`not_this_project`), the branch must be that repository's own (`other_repo`; the
+detail offers no Merge for a fork's request), a lane folder of the app's on that branch sends it to the lane's ask, and the rest
+is the lane's ask without a lane's tip: able to merge now, a method GitHub says the repository allows (`gh repo view --json
+mergeCommitAllowed,squashMergeAllowed,rebaseMergeAllowed`; `method_not_allowed`), the message exactly as sent, the merge bound to
+the head commit shown and the request read again before it runs. Same `Plan::Merge`, same `settle`, same approval-core request.
+
+**A chat's own pull request** (`code/chatPull.ts`). When a Claude Code or Codex chat ends a command the dial reads as a push with
+`gh pr create` in it, the last github.com pull request address in its output is read, the chat's folder's remote must name that
+repository, and one `gh pr view` must say the branch is that repository's own. The chat's header then names the request, the
+request's row names the chat, and the chat's Lanes row shows it as a lane's row does. Of this run; nothing is written.
+
+**Watching costs little.** The page reads the lists once when shown, then at most once a minute while shown and in front, never
+while hidden. The shell gives a list read within 55 seconds again, and before reading a GitHub list again asks `gh api --method
+GET --include -H 'If-None-Match: <ETag>' repos/<r>/pulls?state=open&per_page=51`: a 304 gives the last list again and costs no
+rate limit. The GraphQL list is read only when GitHub says the list changed, a check was still running, or ten minutes passed.
+
 ### MCP servers and skills
 
 What a person already has works wherever an agent runs here (item 72). Chats, terminals and Buddy start the agent with the
