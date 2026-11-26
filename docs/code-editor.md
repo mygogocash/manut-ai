@@ -269,8 +269,11 @@ program or reaches the network. What it does not understand is `unknown`, and as
 221 everyday commands, each pinned to what it read as before item 112 (only `cdk synth` moved, to a build).
 
 Still read as reads or checks, for the owner to decide (a design question, not a reading): a check, `terraform plan` and
-`pulumi preview` run the project's own code, which an agent may have edited at Edits alone; and a command that prints
-the environment (`jq -n env`) shows the keys set for the session.
+`pulumi preview` run the project's own code, which an agent may have edited at Edits alone, and `terraform plan`,
+`go list -m all` and a check that fetches what it needs reach the network with what the person is signed in to.
+A jq or yq filter that prints the environment (`env`, `$ENV`, yq's `env(NAME)` and `strenv`) asks, as `printenv` does;
+a field or key called env is only a name. jq's `--arg`, `--argjson`, `--slurpfile` and `--rawfile` are read with their
+two values, so the word after them is not taken for the filter.
 
 #### Files a change to which always asks (item 88)
 

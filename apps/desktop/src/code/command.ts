@@ -424,6 +424,29 @@ function operands(words: string[], from: number, takesValue: ReadonlySet<string>
   return out;
 }
 
+/** jq's operands (and yq's, which takes jq's options): `--arg`, `--argjson`, `--slurpfile` and `--rawfile` each take a name and
+ *  then a value, where its other options with a value take one. Read as one-value options, `--arg x 1 '<filter>'` made `1` the
+ *  filter and left the real filter unread. */
+const JQ_TWO_VALUES = new Set(["--arg", "--argjson", "--slurpfile", "--rawfile"]);
+const JQ_ONE_VALUE = new Set(["--indent", "-L", "--library-path", "--seq-prefix", "--stream-errors-to"]);
+function jqOperands(words: string[]): number[] {
+  const out: number[] = [];
+  for (let i = 1; i < words.length; i++) {
+    const w = words[i];
+    if (w === "--") {
+      for (let j = i + 1; j < words.length; j++) out.push(j);
+      break;
+    }
+    if (w.startsWith("-") && w !== "-") {
+      if (JQ_TWO_VALUES.has(w)) i += 2;
+      else if (JQ_ONE_VALUE.has(w)) i++;
+      continue;
+    }
+    out.push(i);
+  }
+  return out;
+}
+
 /** Whether the word `w` is the option `opt` in a form the program reads as it: a long one in full, with `=value`, or
  *  shortened to any start of its name (git and every program built on GNU getopt take an unambiguous start, so
  *  `--upload-pa` is `--upload-pack`); a short one alone, joined to its value (`-ofile`) or bundled after other short ones
@@ -1433,9 +1456,13 @@ function classify(words: string[], where: Where): Verdict {
     // With `-f` the filter comes from a file: jq takes the first file it is given as the filter wherever `-f` stands, and
     // every word is a file it reads, so none is text and each is checked as any path is.
     if (hasIn("L", words.slice(1), "-f", "--from-file")) return v("read", say("kit.say.read"));
-    const ops = operands(words, 1, new Set(["--arg", "--argjson", "--indent", "-L", "--library-path"]));
+    const ops = jqOperands(words);
     // a module a filter imports or includes is read from a folder of jq's own, `~/.jq` among them, or one `-L` names
     if (name === "jq" && ops.length && /\b(import|include)\b/.test(words[ops[0]])) return unknownProgram(name);
+    // `env` and `$ENV` (jq), `env(NAME)` and `strenv(NAME)` (yq) print the variables set for this program, keys among them,
+    // as printenv does, so they are read as it is. A field or a key called env (`.env`, `{env: 1}`) and jq's own `$env`
+    // variable are only names.
+    if (ops.length && /(?<![.\w$])(?:env|strenv|envsubst)\b(?!\s*:)|\$ENV\b|\$__prog_args\b/.test(words[ops[0]])) return thisMac();
     return (v("read", say("kit.say.read"), undefined, { text: new Set(ops.slice(0, 1)) }));
   }
   if (name === "sort") return (hasIn("ktST", words.slice(1), "-o", "--output") ? v("change", say("kit.say.change"), 1) : v("read", say("kit.say.read")));
