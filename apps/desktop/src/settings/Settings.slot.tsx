@@ -2,7 +2,8 @@
 // 85h): a quiet list of its pages beside one reading column. The list leads with the everyday pages (General, Voice),
 // then the team (Bots: one page per bot, Profile, Model, Work) and the shop's People; the developer pages (Terminal,
 // Providers, Computer, Worktrees, Source control, Artifacts, MCP and Skills, Workflows, Developer) live under one entry,
-// "Under the hood", which opens their list. Providers (item 74) is the coding agents with their settings, the person's
+// "Under the hood", which opens their list. Each App page is one entry in pages.ts, with the component that draws it
+// (item 128), so a new page adds nothing here. Providers (item 74) is the coding agents with their settings, the person's
 // own agents and the accounts, in every mode; the page ids of the two pages it replaced, `agents` and `accounts`, open
 // it (`accounts` at its accounts). Pages are `bot:<name>` and the App page names; the page lives in the store
 // (`ui.settingsPage`) so the model popover can deep-link to a bot, and a link to a page under the hood opens the hood.
@@ -19,33 +20,21 @@ import { Avatar, ModelIcon, SourceIcon } from "../ui";
 import { Modes } from "../ui/Modes";
 import { reasoningLabel } from "../chat/model/levels";
 import { Appearance } from "./Appearance";
-import { TerminalPage } from "./terminal/TerminalPage";
+import { APP_PAGES, EVERYDAY_PAGES, HOOD_PAGES, LIST_ICON, inHood } from "./pages";
 import { setBar, useTasks } from "../tasks/state";
 import { DISK_WARN_CHOICES, diskWarn, setDiskWarn } from "../lib/disk";
 import { hideDetails, quietHours, setHideDetails, setQuietHours } from "../lib/outside";
 import { Toggle } from "../pages/kit";
 import { awakeEnabled, closeHides, isMacPlatform, setAwakeEnabled, setCloseHides } from "../lib/power";
 import { isAppStore } from "../appStore";
-import { ProvidersPage } from "./providers/ProvidersPage";
 import { AvatarEditor, BotFacts, NameEditor, PictureActions, placeName, useBotInfo, usePictureEditor } from "./BotIdentity";
 import { ShopSettings } from "../onboarding/ShopSettings";
 import { PeoplePage, peopleOffered } from "../pages/PeoplePane";
-import { DeveloperPage } from "./DeveloperPage";
-import { ReportPage } from "../report/ReportPage";
 import { AccountRows, DeleteAccountPage, DELETE_PAGE } from "./DeleteAccount";
-import { WorktreesPage } from "./WorktreesPage";
-import { SourceControlPage } from "./SourceControlPage";
-import { ArtifactLinksPage } from "./ArtifactLinksPage";
-import { RemotePage } from "./RemotePage";
 import { setSuggestOn, useSuggestOn } from "../lib/suggest";
 import { modLabel, setAfterSend, setFollowUp, useAfterSend, usePickedFollowUp, type AfterSend, type FollowUp } from "../chat/box/keys";
 import { QUIET_DAYS, setInbox, useInbox } from "../sidebar/inbox";
 import { TITLE_EFFORTS, TITLE_MODELS, setTitleModel, useTitleModel } from "../lib/titleModel";
-import { VoicePage } from "./VoicePage";
-import { ComputerPage } from "./ComputerPage";
-import { McpSkillsPage } from "./mcp/McpSkillsPage";
-import { WorkflowsPage } from "../workflows/WorkflowsPage";
-import { APP_PAGES, EVERYDAY_PAGES, HOOD_PAGES, LIST_ICON, inHood } from "./pages";
 import { Icon, type IconName } from "../ui/icons";
 
 export const slot = "settings";
@@ -113,6 +102,8 @@ export default function Settings({ page }: SlotProps["settings"]) {
   const [hood, toggleHood] = useHood(current);
   // Delete account is General's own page, reached from its row: General stays marked in the list while it shows.
   const marked = current === DELETE_PAGE ? "general" : current;
+  // An App page is drawn by the component its entry in pages.ts names; General has none and is drawn here.
+  const View = APP_PAGES.find((p) => p.id === current)?.view;
 
   return (
     <div className="st" data-testid="settings-view">
@@ -175,34 +166,12 @@ export default function Settings({ page }: SlotProps["settings"]) {
           <BotPage bot={bot} />
         ) : current === "bots" ? (
           <BotsPage />
-        ) : current === "terminal" ? (
-          <TerminalPage />
-        ) : current === "providers" ? (
-          <ProvidersPage focus={page === "accounts" ? "accounts" : undefined} />
-        ) : current === "computer" ? (
-          <ComputerPage />
-        ) : current === "voice" ? (
-          <VoicePage />
-        ) : current === "worktrees" ? (
-          <WorktreesPage />
-        ) : current === "source" ? (
-          <SourceControlPage />
-        ) : current === "artifacts" ? (
-          <ArtifactLinksPage />
-        ) : current === "remote" ? (
-          <RemotePage />
-        ) : current === "mcp" ? (
-          <McpSkillsPage />
-        ) : current === "workflows" ? (
-          <WorkflowsPage />
-        ) : current === "developer" ? (
-          <DeveloperPage />
-        ) : current === "report" ? (
-          <ReportPage />
         ) : current === "people" ? (
           <PeoplePage />
         ) : current === DELETE_PAGE ? (
           <DeleteAccountPage />
+        ) : View ? (
+          <View page={page} />
         ) : (
           <GeneralPage />
         )}
