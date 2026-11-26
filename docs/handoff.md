@@ -729,8 +729,6 @@ Every switch that turns a built part on, and what each needs from the owner, is 
   `outpost::item::tests::keeps_this_macs_outpost_in_its_own_keychain_item_beside_the_session`: six failed once on 25
   Nov with `Err("keychain")` in a suite that took ten minutes, while the Mac slept between dark wakes; alone the same
   tree passed. The gate now runs the Rust suite a second time by itself.
-- `apps/web` `test/JoinPage.test.tsx`, "counts down to a new code from when the answer arrived": failed once in a loaded
-  gate on 25 Nov (it looks for the exact second, 0:42) and passed alone and in the next whole run.
 - `apps/api` `test/model-alerts.test.ts` ("notes 80% and then 100%"), `test/google-books.test.ts` ("makes the sheet once") and
   `test/approvals-route.test.ts` ("lists the session's open approvals"): all three passed five seconds in one CI run on
   `7ef8505` (25 Nov) and passed on the next commit; each has thirty seconds since.
