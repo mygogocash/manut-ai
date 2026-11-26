@@ -279,6 +279,16 @@
 .acc-signin-t b {
   font-weight: 500;
 }
+/* pi's one sentence about /login is read whole, not cut at the buttons */
+.acc-sub.acc-wrap {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+}
+.acc-pibtns {
+  display: flex;
+  gap: 8px;
+}
 .acc-spin {
   justify-self: center;
   width: 14px;

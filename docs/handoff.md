@@ -301,7 +301,9 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    101a (Cursor and Antigravity as chats) and 101e (the first-launch offer to bring over Claude Code and Codex work)
    merged, then 131 (GoSpark's sounds, asked for by the owner that night; the owner should listen to them on a real
    Mac), then 101b (Grok as a chat; Muse Code needs the owner). Then 132 (GoSpark's effort card, asked for by the owner
-   that night). Running: 101c (the ACP registry), 101d (Grok and pi accounts) and 104 (a snapshot of any app). Needs the owner from 101b: Grok signed in and `permission_mode = "ask"`
+   that night) and 101d (Grok and pi accounts). Running: 101c (the ACP registry), 104 (a snapshot of any app), 102a
+   and 102d (from the design `docs/several-agents.md`, whose eight open questions the lead answered provisionally with
+   its own recommendations, logged in `docs/decisions/102-several-agents.md`), and 133 (motion-lists steady). Needs the owner from 101b: Grok signed in and `permission_mode = "ask"`
    under `[ui]` in `~/.grok/config.toml` (it says always-approve, so Grok chats are refused), and Muse Code's CLI. From 101e: all 325 Codex sessions on the owner's Mac are compressed, so
    only Claude Code's conversations are offered until 106b. Needs the owner from 101a: Cursor's Approval mode set to Allowlist (it is Run Everything, so Cursor
    chats are refused), and a Cursor plan with messages left to record a real tool call. GitHub reported 7 Dependabot alerts on `main` (2 critical) at that push, for the owner to look at.
