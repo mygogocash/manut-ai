@@ -2279,4 +2279,12 @@ mod tests {
     fn what_the_page_is_told_when_a_rewind_is_settled() {
         assert_eq!(serde_json::to_value(Settled { back: true }).unwrap(), serde_json::json!({ "back": true }));
     }
+
+    /// A copy's blobs are found again by these ids, so an id is the standard SHA-256 in lower-case hex (FIPS 180-2's
+    /// vectors), and a new version of the hashing crate cannot change one that an earlier build wrote.
+    #[test]
+    fn a_content_id_is_the_standard_sha256_in_hex() {
+        assert_eq!(sha256_hex(b""), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+        assert_eq!(sha256_hex(b"abc"), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+    }
 }

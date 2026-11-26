@@ -1187,6 +1187,15 @@ mod tests {
     const TOKEN_KEYS: [&str; 6] = ["access_token", "refresh_token", "id_token", "api_key", "OPENAI_API_KEY", "tokens"];
     const SECRET: &str = "sk-SECRET-never-shown";
 
+    /// The note of the last settings copy is compared with a fresh digest, so a digest is the standard SHA-256 in
+    /// lower-case hex (FIPS 180-2's vectors): a new version of the hashing crate must not make a note an earlier build
+    /// wrote read as changed.
+    #[test]
+    fn a_settings_digest_is_the_standard_sha256_in_hex() {
+        assert_eq!(sha256_hex(b""), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+        assert_eq!(sha256_hex(b"abc"), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+    }
+
     #[test]
     fn env_per_cli_points_at_the_account_folder() {
         let home = Path::new("/h");
