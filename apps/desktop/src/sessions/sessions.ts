@@ -47,21 +47,26 @@ import { NAME_MAX, parseTitles, promptTitle, putTitle, TITLES_KEY } from "./titl
 import { getDraft, setDraft as setUnsent } from "../app/drafts";
 import { getHost, type ChatEvent, type ChatInput, type ConvState, type PastChat, type SessionHost } from "./host";
 import { localBot } from "../peers/peerKey";
-import { folderKey, getStore, notifySessionEvent, notifySessionNote, onBridgeEvent, selectAsks, setChatRoute, setSessionKeyLookup, type OutFile, type SentFile, type Store } from "../state/store";
+import { askOpen, folderKey, getStore, notifySessionEvent, notifySessionNote, onBridgeEvent, selectAsks, setChatRoute, setSessionKeyLookup, type ApprovalItem, type OutFile, type SentFile, type Store } from "../state/store";
 import { blobType, bytesOf, inlinePicture, parseSentFiles, pathsTyped, putSentFiles, SENT_FILES_KEY, shellQuote, wireText, type SavedFile, type SentFilesBook } from "./attach";
 import type { AccountCli, AccountGroup, ApprovalChoice, BridgeEvent, ClarifyAnswers, DiffFile, EventOf, Msg } from "../lib/protocol";
 import { settleApproval } from "../chat/cards/respond";
-import { kitAnswer, noteChange } from "../code/kitAsks";
+import { kitAnswer, noteChange, noteSaved, savesAlone } from "../code/kitAsks";
+import { readSaved } from "../code/secrets";
 import { planLaneBranch, workDir, type LaneBranch } from "../code/laneBranch";
 import { openFolderInEditor } from "../code/editor";
 import { startOf, worktreeSettings } from "../lib/worktrees";
 import { forgetLane, keptLanesChanged, noteLaneEvent } from "../code/laneStore";
+import { forgetChatPull, noteChatPull } from "../code/chatPull";
+import { taskHost, type TaskHost } from "../tasks/host";
 import { forgetPreview } from "../code/previewStore";
 import { continuesItself, type SavedSession } from "../app/resume";
 import { accountGroups } from "../settings/accounts/useAccounts";
 import { ASK_MODE, modesOf, steersOf } from "./controls";
 import { followUp as savedFollowUp, type FollowUp } from "../chat/box/keys";
 import { draftFolders } from "../app/stash";
+import { bareText, carry, type Scope } from "../chat/box/carry";
+import { busyMate, continuedDraft, laneFree, type ContinuePick } from "./continueWith";
 import { parseCommands, type AgentCommand } from "../chat/parts/commands";
 import { noteMcpSeen } from "../settings/mcp/agentConfig";
 import { t as tr, type Key } from "../i18n";
@@ -304,7 +309,8 @@ const readOpens = () => {
   }
 };
 
-export function createSessions(host: SessionHost, store: () => Store = getStore, accounts: () => AccountGroup[] | null = () => null) {
+/** `pulls`: the Tasks host a chat's own pull request is read through (item 100, code/chatPull.ts); none reads nothing. */
+export function createSessions(host: SessionHost, store: () => Store = getStore, accounts: () => AccountGroup[] | null = () => null, pulls: () => Pick<TaskHost, "remote" | "view"> | null = () => null) {
   let state: SessionsState = { agents: null, home: null, list: [], recent: readRecent(), opens: readOpens(), models: {}, notes: {}, live: {}, unseen: {} };
   const listeners = new Set<() => void>();
   const terms = new Map<string, Term>();
@@ -522,7 +528,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
   const refreshDrafts = () => {
     for (const r of state.list) {
       // a workflow's lane is a draft only while it starts, on the agent and folder its file names
-      if (r.status !== "draft" || r.workflow) continue;
+      if (r.status !== "draft" || r.workflow || r.continuedFrom) continue;
       const p = picked.get(r.id) ?? {};
       const patch: Partial<SessionRec> = {};
       if (!p.agent) {
@@ -563,8 +569,24 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     if (ev.event !== "approval.request" || !key?.startsWith("agent:") || !r?.cwd) return null;
     const ask = ev as unknown as EventOf<"approval.request">;
     // a lane's project is the session's folder, whose settings the dial keeps; what is inside it is the lane's own folder
-    const a = kitAnswer(ask, { chat: key, root: workDir(r), project: r.cwd, home: state.home, branch: state.live[id]?.branch, ...(r.workflow ? { careful: true } : {}) });
-    return a ? () => settleApproval(store(), key, { id: `approval-${ask.request_id}`, request_id: ask.request_id }, a.choice) : null;
+    const ctx = { chat: key, root: workDir(r), project: r.cwd, home: state.home, branch: state.live[id]?.branch, ...(r.workflow ? { careful: true } : {}) };
+    const card = { id: `approval-${ask.request_id}`, request_id: ask.request_id };
+    if (savesAlone(ask, ctx)) {
+      // a commit or a push the dial would let go alone: what it saves is read first (item 117), and a key there, or a read not
+      // made whole and in time, leaves it to the person, who is then told of it as of any ask
+      const dir = ctx.root;
+      return async () => {
+        const saved = await readSaved(() => (host.laneKeys ? host.laneKeys(dir) : Promise.resolve(null)));
+        const a = kitAnswer(ask, ctx, Date.now(), saved);
+        if (a) return settleApproval(store(), key, card, a.choice);
+        noteSaved(key, saved?.files ?? []);
+        const items = store().getState().chats[key]?.items ?? [];
+        const item = items.find((i): i is ApprovalItem => i.kind === "approval" && i.request_id === ask.request_id);
+        if (item && askOpen(items, item)) notify?.({ ...ev, bot: key } as unknown as BridgeEvent);
+      };
+    }
+    const a = kitAnswer(ask, ctx);
+    return a ? () => settleApproval(store(), key, card, a.choice) : null;
   };
 
   /** The chat's program is gone (it exited, or manut stopped it): a turn the chat still shows ends with it. The
@@ -746,6 +768,12 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
         if (ev.event === "tool.diff" && Array.isArray(ev.files)) noteChange(keys.get(id) ?? "", ev.files as DiffFile[]);
         // what the lane's work has shown: its test runs read from their output, and the files that changed
         noteLaneEvent(keys.get(id) ?? "", ev, Date.now(), laneWhere(id));
+        // a pull request the chat opened itself, by a command that printed its address: linked once checked (item 100)
+        if (ev.event === "tool.end" && typeof ev.command === "string") {
+          const tasks = pulls();
+          const w = laneWhere(id);
+          if (tasks && w) void noteChatPull(tasks, keys.get(id) ?? "", ev, { cwd: w.root, root: w.root, ...(w.home ? { home: w.home } : {}) }).catch(() => undefined);
+        }
         if (ev.event === "turn.end") afterTurn(id, ev.outcome === "interrupted");
         // the files as the turn left them: what changes before the next turn reads as changed by hand (rewind.ts)
         if (ev.event === "turn.end") turns.afterTurn(id);
@@ -1068,6 +1096,8 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     const t = text.trim();
     const key = keys.get(id);
     if (!t || !key) return false;
+    // one working agent in a lane: the box holds it while the chat it continues (or that continues it) works (item 97)
+    if (waitsFor(id)) return false;
     const st = store();
     const lid = `local-s${++localSeq}`;
     if (mustHoldHere(id, key)) {
@@ -1079,7 +1109,8 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     // the first message that says something names the session until the agent or the person does
     const r = rec(id);
     if (r && !r.promptTitle) {
-      const pt = promptTitle(t);
+      // what was typed names it, never the notes or another chat's context in front (item 97)
+      const pt = promptTitle(bareText(t));
       if (pt) patchRec(id, { promptTitle: pt });
     }
     try {
@@ -1145,7 +1176,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     store().dispatch({ type: "local.user", bot: key, id: lid, text: t, now, files: p.shown });
     saveSentFiles(putSentFiles(sentFiles, id, String(now), { ts: now / 1000, text: t, files: p.saved }));
     const r = rec(id);
-    const pt = t ? promptTitle(t) : "";
+    const pt = t ? promptTitle(bareText(t)) : "";
     if (r && !r.promptTitle && pt) patchRec(id, { promptTitle: pt });
     return lid;
   };
@@ -1162,6 +1193,8 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     const key = keys.get(id);
     if (!key) return;
     if (procs.get(id)?.kind !== "agent") throw new Error(tr("ss.agentNotRunning", { agent: agentDef(rec(id)?.agent ?? "claude").label }));
+    const busy = waitsFor(id);
+    if (busy) throw new Error(tr("cont.wait", { agent: agentLabel(busy.agent, state.agents) }));
     const p = await prepare(id, text, files);
     if (mustHoldHere(id, key)) {
       // held with its saved files: they go with it when it goes out
@@ -1268,7 +1301,8 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
    */
   const draft = (agent?: AgentId): string => {
     // a workflow's lane, a draft only while it starts, is never the person's
-    const open = state.list.find((r) => r.status === "draft" && !r.workflow);
+    // nor a chat Continue with made (item 97): it is tied to its lane and the chat it continues
+    const open = state.list.find((r) => r.status === "draft" && !r.workflow && !r.continuedFrom);
     if (open) {
       if (agent) setDraft(open.id, { agent });
       store().actions.openSession(open.id);
@@ -1348,6 +1382,63 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     const key = keys.get(id);
     if (started && key) store().dispatch({ type: "system.note", bot: key, text: tr("wf.lane.note", { name: p.workflow }), now: Date.now() });
     return started ? "started" : "failed";
+  };
+
+  // ---- Continue with (item 97) ----------------------------------------------------------------------------------------
+
+  /** Whether session `id`'s turn runs (an ask of it waits inside its turn). */
+  const working = (sid: string) => {
+    const k = keys.get(sid);
+    return !!k && !!store().getState().chats[k]?.turn;
+  };
+  /** The chat linked to `id` by Continue with that works in its lane or folder now: `id` waits for it (continueWith.ts). */
+  const waitsFor = (id: string): SessionRec | null => {
+    const r = rec(id);
+    return r ? busyMate(state.list, r, working) : null;
+  };
+
+  /** A continued chat's model, picked in Continue with: set once its agent runs, before its first message goes. */
+  const setWanted = async (id: string) => {
+    const want = rec(id)?.modelWant;
+    if (!want) return;
+    patchRec(id, { modelWant: undefined });
+    if (procs.get(id)?.kind !== "agent") return;
+    try {
+      await input(id, { kind: "model", model: want });
+    } catch (e) {
+      note(id, errText(e));
+    }
+  };
+
+  /**
+   * Continue chat `id` with another agent or model: a NEW chat in the same folder and, for a lane, the same lane, linked from
+   * `id` both ways, with `id`'s context above its box as one chip (`context`, built by the caller with no model), unsent. It is
+   * opened; nothing starts until the person sends. `id` is left as it is. Null when `id` is not a started chat.
+   */
+  const continueWith = (id: string, pick: ContinuePick, context?: { title: string; text: string; ref: string; scope: Scope }): string | null => {
+    const old = rec(id);
+    if (!old || old.status === "draft" || !keys.get(id)) return null;
+    const linkId = old.linkId ?? freshLinkId();
+    if (!old.linkId) patchRec(id, { linkId });
+    const r = continuedDraft({ ...old, linkId }, pick, { id: `s${++seq}`, linkId: freshLinkId(), now: Date.now() });
+    picked.set(r.id, { agent: true, cwd: true });
+    set({ list: [r, ...state.list] });
+    patchRec(id, { continuedIn: r.linkId });
+    // a chat, whatever way the agent was last opened, as Chat with Kit opens one
+    setOpen(r.id, "chat");
+    if (context) carry(`agent:${r.id}`, { kind: "thread", id: `x${r.id}`, ref: context.ref, title: context.title, text: context.text, scope: context.scope });
+    store().actions.openSession(r.id);
+    return r.id;
+  };
+
+  /** Stop chat `id`'s agent, only while it is idle (no turn runs): the person said so after Continue with. Its chat stays and can be
+   *  opened; Restart starts it again. False when it works or is not running. */
+  const stopIdle = async (id: string): Promise<boolean> => {
+    const r = rec(id);
+    if (!r || r.status !== "running" || working(id)) return false;
+    await stopChat(id);
+    patchRec(id, { status: "exited", exitCode: null });
+    return true;
   };
 
   /** New session here: a draft with session `id`'s agent and folder (an open draft takes them instead). */
@@ -1549,6 +1640,8 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
   const start = async (id: string, first?: string, startedAs?: string, files: OutFile[] = []): Promise<boolean> => {
     const r0 = rec(id);
     if (!r0 || r0.status !== "draft" || !r0.cwd) return false;
+    // a continued chat starts its agent in the shared lane only while the other chat there does not work (item 97)
+    if (waitsFor(id)) return false;
     await ready();
     const r = rec(id);
     if (!r || r.status !== "draft") return false; // closed or started meanwhile
@@ -1574,7 +1667,8 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     const app = store().getState();
     const startedAt = Date.now();
     // the account it runs as is the one picked for new sessions now (recorded so a restart continues as it)
-    const account = accountFor(accounts(), r.agent);
+    // a chat continued on the same agent keeps the account it ran as (item 97)
+    const account = r.account ?? accountFor(accounts(), r.agent);
     // a workflow's folder is not the person's last one: their next New session opens where they last worked
     if (!r.workflow) {
       const recent = pushRecent(state.recent, { agent: r.agent, cwd: r.cwd, at: startedAt });
@@ -1592,7 +1686,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
       // only a way the agent does not open by itself is kept on the session
       ...(open === "terminal" && sessionMode(state.agents, { agent: r.agent }) !== "terminal" ? { open } : {}),
       ...(account ? { account } : {}),
-      ...(startedAs ? { startedAs } : {}),
+      ...(r.startedAs || startedAs ? { startedAs: r.startedAs ?? startedAs } : {}),
       // oh-my-hermes runs on the bot you were looking at (else the first bot)
       // a folder chat runs on this computer: a bot on another one (`<peer>:<name>`) is never its engine
       ...(mode === "hermes" ? { bot: localBot(app.selectedBot, app.bots) } : {}),
@@ -1601,15 +1695,16 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     // (a terminal starts without the text and files the draft held)
     if (text || files.length || mode === "terminal") setUnsent(`agent:${id}`, "");
     // the first message names the session (as a later one would in send) until the agent or the person does
-    const pt = text ? promptTitle(text) : "";
+    const pt = text ? promptTitle(bareText(text)) : "";
     if (pt) patchRec(id, { promptTitle: pt });
     if (mode === "chat") {
       keys.set(id, `agent:${id}`);
       registerRoute(id);
       openChat(id);
       if (!text && !withFiles) {
-        if (!(await startLane(id)) && r.workflow) return refuseLaneless(id);
+        if (!r.lane && !(await startLane(id)) && r.workflow) return refuseLaneless(id);
         await startAgentChat(id);
+        await setWanted(id);
         return true;
       }
       // the first prompt shows at once (with its files) and goes to the agent as soon as it runs
@@ -1617,9 +1712,11 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
       const key = keys.get(id)!;
       const lid = withFiles ? showWithFiles(id, key, text, withFiles) : `local-s${++localSeq}`;
       if (!withFiles) st.dispatch({ type: "local.user", bot: key, id: lid, text, now: Date.now() });
-      // the lane's own branch is there before the agent has a chance to change a file; a workflow's agent starts only in one
-      if (!(await startLane(id)) && r.workflow) return refuseLaneless(id);
+      // the lane's own branch is there before the agent has a chance to change a file; a workflow's agent starts only in one. A
+      // chat made by Continue with already has the lane it shares (item 97): no second folder or branch is made
+      if (!r.lane && !(await startLane(id)) && r.workflow) return refuseLaneless(id);
       await startAgentChat(id);
+      await setWanted(id);
       try {
         await input(id, withFiles ? { ...withFiles.input, id: lid } : { kind: "send", text, id: lid });
       } catch (e) {
@@ -2372,7 +2469,16 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
       }
       if (s.draft) {
         // a New session chat that never started: a draft again, with its agent and folder fixed by the person
-        list.push({ id: s.id, agent: s.agent, cwd: s.cwd, startedAt: s.startedAt, view: "chat", status: "draft" });
+        list.push({
+          id: s.id,
+          agent: s.agent,
+          cwd: s.cwd,
+          startedAt: s.startedAt,
+          view: "chat",
+          status: "draft",
+          // a chat made by Continue with keeps the lane it shares, its link and the account it continues under (item 97)
+          ...(s.continuedFrom ? { continuedFrom: s.continuedFrom, ...(s.lane ? { lane: s.lane } : {}), ...(s.account ? { account: s.account } : {}), ...(s.modelWant ? { modelWant: s.modelWant } : {}) } : {}),
+        });
         picked.set(s.id, { agent: true, cwd: true });
         seq = Math.max(seq, Number(s.id.slice(1)) || 0);
         continue;
@@ -2424,6 +2530,8 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
         // a lane keeps its branch and its own folder: Resume and Restart start its agent there, never in the developer's
         ...(s.lane ? { lane: s.lane } : {}),
         ...(s.workflow ? { workflow: s.workflow } : {}),
+        ...(s.continuedFrom ? { continuedFrom: s.continuedFrom } : {}),
+        ...(s.continuedIn ? { continuedIn: s.continuedIn } : {}),
         ...(s.running && !auto && !termAuto && !folderAuto ? { paused: true } : {}),
       };
       list.push(r);
@@ -2617,7 +2725,9 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     if (r && isTerminalRec(state.agents, { ...r, status: "exited" })) forgetHistory(host, id);
     disposeTerm(id);
     // the lane's folder goes once its agent has stopped, when nothing in it would be lost
-    void stopChat(id).then(() => Promise.all([host.removeFiles(id).catch(() => undefined), letLaneGo(r?.lane)]));
+    // a lane two chats share (Continue with, item 97) keeps its folder until the last of them is closed
+    const free = !r || laneFree(state.list, r);
+    void stopChat(id).then(() => Promise.all([host.removeFiles(id).catch(() => undefined), free ? letLaneGo(r?.lane) : undefined]));
     turns.forget(id);
     forgetSentFiles(id);
     const key = keys.get(id);
@@ -2627,6 +2737,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
       setChatRoute(key, null);
       store().dispatch({ type: "chat.forget", bot: key }); // its asks leave the Needs-you strip with it
       forgetLane(key);
+      forgetChatPull(key);
       // the lane's preview stops with its session, so no dev server of a closed lane runs on unseen
       forgetPreview(key);
     }
@@ -2815,6 +2926,10 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
       };
     },
     draftHere,
+    continueWith,
+    stopIdle,
+    /** The chat linked by Continue with that works in session `id`'s lane now, so `id` waits (null: none). */
+    waitsFor,
     startTerminal,
     setSessionFg,
     /** The pty id session `id`'s terminal runs on (the `session-fg` event's id), null before it started. */
@@ -2948,7 +3063,7 @@ export type SessionsStore = ReturnType<typeof createSessions>;
 let singleton: SessionsStore | null = null;
 export function getSessions(): SessionsStore {
   if (!singleton) {
-    const s = createSessions(getHost(), getStore, accountGroups);
+    const s = createSessions(getHost(), getStore, accountGroups, taskHost);
     singleton = s;
     // e2e (mock host only): drive a terminal's foreground CLI the way the shell's event will
     if (typeof window !== "undefined" && !("__TAURI_INTERNALS__" in window)) (window as unknown as { __manutSessions?: SessionsStore }).__manutSessions = s;

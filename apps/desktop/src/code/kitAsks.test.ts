@@ -13,7 +13,10 @@ const bridge: BridgeLike = { connect: async () => undefined, onAny: () => () => 
 const ROOT = "/w/baanmali-preorder";
 const FAKE_KEY = "sk-FAKE0000000000000000TEST";
 
-async function session() {
+/** What the stand-in shell's read of the session's folder finds in what a commit or a push would save (`SessionHost.laneKeys`). */
+type Saved = () => Promise<{ files: string[]; unread: boolean } | null>;
+
+async function session(saved: Saved = async () => ({ files: [], unread: false })) {
   (globalThis as { localStorage?: unknown }).localStorage = { getItem: () => null, setItem: () => {}, removeItem: () => {} };
   const sinks = new Map<number, (e: ChatEvent) => void>();
   const inputs: ChatInput[] = [];
@@ -28,6 +31,7 @@ async function session() {
     resize: async () => {},
     close: async () => {},
     branch: async () => "kit/promptpay-qr",
+    laneKeys: () => saved(),
     chatStart: async (_a: string, _c: string, on: (e: ChatEvent) => void) => {
       sinks.set(1, on);
       return 1;
@@ -133,6 +137,37 @@ describe("Kit's dial on a coding session's asks", () => {
     const shown = kitCard(asked("r7", "Run this command?", "git commit -m 'Add the QR'"), { chat: s.key, root: ROOT, home: "/w" });
     expect(shown).toEqual({ root: ROOT, say: { key: "kit.say.commit" }, always: null, keys: ["src/config.ts"] });
     expect(JSON.stringify(shown)).not.toContain(FAKE_KEY);
+  });
+
+  it("asks before a commit when what it saves holds a key a command wrote, which no file tool's diff showed (item 117)", async () => {
+    updateKitProjects((p) => setLevel(p, ROOT, "everything_in_project"));
+    const s = await session(async () => ({ files: ["notes.md"], unread: false }));
+    // `cat .env >> notes.md` ran as a command: no tool.diff, nothing counted from events
+    expect(keysIn(s.key)).toEqual([]);
+    const card = await s.ask("k1", "Run this command?", "git commit -am notes");
+    expect(card.resolved).toBeUndefined();
+    expect(s.answers()).toEqual([]);
+    // the card names the file, and the person is told of the ask as of any other
+    expect(keysIn(s.key)).toEqual(["notes.md"]);
+    expect(kitCard(asked("k1", "Run this command?", "git commit -am notes"), { chat: s.key, root: ROOT, home: "/w" })?.keys).toEqual(["notes.md"]);
+    expect(s.told.filter((e) => e.event === "approval.request").map((e) => (e as EventOf<"approval.request">).request_id)).toEqual(["k1"]);
+    const push = await s.ask("k2", "Run this command?", "git push origin kit/promptpay-qr");
+    expect(push.resolved).toBeUndefined();
+  });
+
+  it("asks before a commit or a push when what it saves could not be read whole, in time, or at all (item 117)", async () => {
+    updateKitProjects((p) => setLevel(p, ROOT, "everything_in_project"));
+    for (const [name, saved] of [
+      ["unread", async () => ({ files: [], unread: true })],
+      ["no read", async () => null],
+      ["refused", () => Promise.reject(new Error("not a folder the app made"))],
+    ] as const) {
+      resetKitAsks();
+      const s = await session(saved as Saved);
+      const card = await s.ask(`u-${name}`, "Run this command?", "git commit -m 'Add the QR'");
+      expect(card.resolved, name).toBeUndefined();
+      expect(s.answers(), name).toEqual([]);
+    }
   });
 
   it("asks before going live, whatever the level", async () => {

@@ -586,6 +586,18 @@ body.side-resizing * {
   min-width: 0;
 }
 
+/* the pull request the chat opened itself (item 100): a quiet link on the header's second line, in its colour and size */
+.ss-head-pr {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
 .ss-head-st {
   margin-left: 4px;
   font-size: 11.5px;
@@ -2018,4 +2030,29 @@ body.split-dragging .xterm {
 }
 .ss-row.tr.settled {
   opacity: 0.65;
+}
+
+/* Continue with (item 97): the agent chip opens its menu; the lines that link the two chats, each with Open */
+.ss-cont-line {
+  display: flex;
+  justify-content: center;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 12px;
+}
+.ss-cont-line button {
+  color: var(--ink);
+  font-size: 12px;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.ss-cont-line button:hover {
+  color: var(--muted);
+}
+/* the menu's heading in sentence case, as the kit's grey bands are */
+.mp-h.cont-h {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 12px;
+  font-weight: 600;
 }

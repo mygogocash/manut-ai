@@ -53,7 +53,7 @@ state that needs the owner: a real GitHub account, money, a real sign-in or real
 | State | Desktop | Where |
 | --- | --- | --- |
 | Kit needs a secret: typed once into the vault, Kit uses it without seeing it | Lacks on the desktop. The API's vault keeps the shop's sign-ins; the desktop keeps only its own session in the keychain (Owner: real secrets) | `apps/api/src/sign-in-vault.ts`, `src-tauri/src/api_link.rs` |
-| A secret found in the code: moved out, never committed | Part (this branch): a key in Kit's changes is found and named, a commit or push then asks at every level, and no diff shows it. Moving it to a vault lacks | `code/secrets.ts`, `code/kitAsks.ts`, `chat/activity/Work.tsx` |
+| A secret found in the code: moved out, never committed | Part (this branch): a key in Kit's changes is found and named, a commit or push then asks at every level, and no diff shows it. Since item 117 a commit or a push the dial would let go alone first reads what it saves (the lane's own diff), so a key a command wrote makes it ask too, as does a diff that could not be read. Moving it to a vault lacks | `code/secrets.ts`, `code/kitAsks.ts`, `chat/activity/Work.tsx` |
 | No secret in the preview: a sample until the owner adds one | Part (this branch): the state and its words. A secret Kit's changed code reads by name (`process.env.PROMPTPAY_SHOP_ID`) shows as Sample, "The preview has no shop ID yet, so the QR code is a sample", with Add the shop ID, which says the vault comes later. The rule for what a preview runs with (a sample unless the owner added that secret) is `previewEnv`, and the preview of a lane runs with it (this branch), with a sample too for each secret the lane folder's `.env.example` names. Nothing adds a secret: the owner has not said where a developer's secrets live (Owner: real secrets) | `code/preview.ts`, `code/previewRun.ts` (`previewSecrets`), `code/PreviewSample.tsx` |
 
 ### The project and its history
@@ -113,7 +113,24 @@ The states whose rules are pure functions, with their tests, then the screens th
 - `apps/desktop/src/code/secrets.ts`: keys in Kit's changes, counted with the app's one masker (`src/lib/secrets.ts`). Since
   item 113 the masker also knows private key blocks, provider-prefixed keys, JSON web tokens, credentials in HTTP headers,
   `password:` and `"password":` values, the password in `scheme://user:pass@host`, quoted `KEY="..."` and `--password value`,
-  so a change holding any of them makes a commit or a push ask too.
+  so a change holding any of them makes a commit or a push ask too. Item 117 added `name = value` with blanks round the
+  sign (`~/.aws/credentials`), `DB_PASS`, `MYSQL_PWD`, `SMTP_PASS`, `APP_KEY`, `SECRET_KEY_BASE`, a vendor's `_KEY=`, a JSON
+  `"key"`, `.netrc`'s password, `curl -u`, `mysql -p`, Slack's and Discord's webhook addresses, and the Resend, Replicate,
+  Perplexity, xAI, Docker, age, Google OAuth client, Slack refresh, Atlassian, Postman, Netlify and Mapbox prefixes, each in
+  the shared table beside an ordinary line it leaves alone. Ordinary text stays as it is, so it is no key in the changes
+  either: a CSS class or a name that starts with `sk-` (`sk-folding-cube`, `sk-learn-pipeline`), a value that is a
+  reference (`${DB_PASSWORD}`, `` `Bearer ${token}` ``), and a word that says there is none (`Token: none`, `null`, `false`).
+  Since item 117 the count never goes down (a key taken
+  out again may already be in a commit), and a commit or a push the dial would otherwise let go alone first reads what it
+  saves: the lane's own diff, from the shell's read-only `lane_diff` (bounded, `--no-ext-diff --no-textconv`, no clean filter,
+  each file's diff masked by the shell's twin). A file an added line of which holds a key makes the step ask, whoever wrote it,
+  and so does a file it could not read whole (binary, too large, past its budget or its list) or a read that failed or took
+  more than five seconds. That read only reaches a folder the app made, so a commit or a push from a session in the
+  developer's own folder always asks. Since item 117 the masker has two forms: `maskSecrets`
+  for text that never runs, and `maskCommand` for what an ask's card shows, which masks a key and never a substitution, a
+  pipe, a second command or a command's own operand (a token-shaped word is a key only as a whole word with a key's
+  shape); a private key block keeps its BEGIN and END lines around one masked line only inside a quoted string or a heredoc's
+  body, where the shell reads it as data, and its body holds only key characters; anywhere else it is shown whole. The card shows a command whole, its line breaks kept, scrolling in its block.
 - `apps/desktop/src/code/kitAsks.ts`: the dial at work on a session's asks, through the asks' own cards.
 - `apps/desktop/src/code/KitCardParts.tsx`, `KitPanel.tsx`, `kit.css`: Kit's words on an ask's card, and Kit on the
   Code page.
@@ -184,8 +201,9 @@ The states whose rules are pure functions, with their tests, then the screens th
 
 ### How an ask is read
 
-An ask's title and command are for the person: the shell cuts them to one short line. So the shell also names what
-the agent asked, from the agent's own message, and the dial reads that:
+An ask's title and command are for the person: since item 117 the command is whole, its line breaks kept, and the card
+masks only its keys (`maskCommand`). The dial does not decide from those words, which the masker has been over, so the
+shell also names what the agent asked, from the agent's own message, and the dial reads that:
 
 | Agent | Where it comes from | What is named |
 | --- | --- | --- |
@@ -628,8 +646,11 @@ and no other agent here has been checked. The setting says so.
 - **The run** (`src-tauri/src/title_run.rs`, commands `title_run` and `title_cancel`): `claude -p` with `--tools ""`, `--strict-mcp-config`
   and no MCP config, `--disable-slash-commands`, `--permission-mode default`, `--no-session-persistence`, `--setting-sources user`, and the
   chosen `--model` and `--effort` (each checked). It starts as a chat does (the allow-list, the child `PATH`, the account's home) in the
-  empty folder `~/.manut/titles`. The text goes in on standard input, masked and cut to 6,000 characters. One run at a time, 45 seconds, four
-  starts a minute, cancel by key. The answer is cleaned and only returned. Its rate-limit event reaches the usage the meter reads.
+  empty folder `~/.manut/titles`. The text goes in on standard input, masked and cut to 6,000 characters, inside a fence one backtick
+  longer than any run of backticks it holds, so nothing in it can close the fence (item 117). One run at a time, 45 seconds, four
+  starts a minute, cancel by key. The answer is cleaned and only returned: since item 117 a title and a description are plain words
+  only, with every image, link target, bare address and HTML tag dropped (`plain`), so a description cannot make GitHub fetch an
+  address that carries a private diff's words when the pull request is shown. Its rate-limit event reaches the usage the meter reads.
 - **A chat's title** (`sessions/titleWords.ts`): after a turn ends done, from the first message and first answer. It becomes
   `SessionRec.modelTitle`, which `pickTitle` ranks below a name the person gave and above the agent's title and the summary. A result that
   arrives after a rename is dropped. Row menu › Write the title again asks for another, and is offered only for a chat the person has not
@@ -1144,6 +1165,93 @@ What a person sees: a project with any of these in its own `.git/config` is not 
 cleaned up by themselves, and the line names the setting (an address in a subsection shown as `*`). The person's own global
 and system settings, their proxy among them, stay theirs, and a pull in a terminal works as before.
 
+**Includes, and the folder git runs in** (item 118, fourth security review). A repository's config can include another file
+of settings, and `includeIf` includes it only where a condition holds: on a branch with a given name (`onbranch:`), in a git
+folder at a given place (`gitdir:`, `gitdir/i:`), or where a remote has a given address (`hasconfig:remote.*.url:`). git lists
+only the include's own key wherever the condition does not hold, so a file that defined a filter only on a lane's branch, or
+only in a lane's git folder, was invisible to the read made in the developer's folder, and a lane made with nobody there
+then ran it. Now:
+
+- Every `include.*` and `includeIf.*` key in the repository's own scopes stops automatic work, whatever its condition, named
+  `include.path` or `includeif.*.path` (a condition can hold an address, so it is shown as `*`). The app cannot read what the
+  included file would say in every folder git runs in. A submodule's own config is read the same way. The person's own
+  global and system includes stay theirs.
+- A lane made with nobody there is added with nothing checked out (`git worktree add --no-checkout`), its config is read
+  again from inside the new folder, where the lane's branch and git folder are what a condition tests and anything written
+  to the shared config since the first read shows, and only then are its files written, by the command `git worktree add`
+  runs for its own checkout (`git reset --hard --no-recurse-submodules --quiet` in the new, empty folder; seen with
+  `GIT_TRACE` on git 2.54). If that read finds anything, the folder and its branch are taken back (`git worktree remove
+  --force`, which skips git's own clean check and so runs nothing in the folder, then `git branch -D`), its record goes, and
+  the run is skipped with the setting, as before.
+- Every other automatic path was read for a git that runs in a folder other than the one its config was read in. The
+  merged clean-up and a deleted chat's clean-up read the lane's folder, and they remove it by running git in the
+  repository's own git folder (`git worktree remove`, `git branch`), where git reads the developer's folder's own worktree
+  config (`extensions.worktreeConfig`) and the lane's read does not: that git folder's config is now read too
+  (`Git::lane_config_risk`). The lane's Diff lists worktrees there, so it reads it too. The automatic pull runs every
+  command in the folder it read, on the same branch, but its fetch takes up to ten seconds and the config is shared with
+  every lane's agent, so the config is read again just before its one write, beside the folder's cleanliness. The kept
+  list reads each folder it counts in (the developer's, then each lane's), and the main-moved note reads the folder it
+  diffs in, so neither changed. Start from the remote fetches in the developer's folder, which the first read covers.
+
+What a person sees: a project whose own config has any include is not pulled by itself, its merged lanes are not cleaned up,
+its Diff falls back, and a workflow by the clock is skipped, each with the include named, in the words the other settings
+already use.
+
+**git-lfs, and the other helpers a repository's config can aim** (item 118). The person's own global settings stay theirs,
+but some programs a person commonly has set up globally then read the repository's settings as well. git-lfs is one:
+`git lfs install` puts its filter in the person's global config, and git-lfs reads its settings from every file `git config
+-l` reads, the repository's included, and also from a `.lfsconfig` in the work tree, else the index, else HEAD, from which
+it takes only a short list of keys (git-lfs-config(5), read from git-lfs's own manual; git-lfs is not installed on the Mac
+this was built on, so nothing was run). Some of its keys name a program (`lfs.customtransfer.<name>.path` and `.args`, the
+latter expanded by a shell, `lfs.standalonetransferagent`, `lfs.extension.<name>.clean` and `.smudge`), some another
+address (`lfs.url`, `lfs.pushurl`, `lfs.<url>.access`, `remote.<name>.lfsurl` and `.lfspushurl`). Now:
+
+- Every `lfs.*` key in the repository's own scopes, and `remote.<name>.lfsurl` and `.lfspushurl`, stops automatic work, a
+  subsection shown as `*` (`lfs.<url>.access` holds an address).
+- `.lfsconfig` is read from all three places git-lfs reads it, with the same rule, and named `.lfsconfig:<setting>`: the
+  work tree's file (a link, a file over 64 KB or one git cannot read is `.lfsconfig:?`), the index's and HEAD's
+  (`git config --blob`). Every key in it counts, not only the ones git-lfs takes today, since an older git-lfs took more.
+  The automatic pull also reads the `.lfsconfig` of the commit it would move to before its one write, and a lane made with
+  nobody there reads its own commit's from inside its new folder, so a lane started from the remote's newest commit is read
+  too.
+- Every git the app starts by itself runs with `GIT_LFS_SKIP_SMUDGE=1`, so the person's LFS filter downloads nothing for a
+  checkout the app makes: it writes the pointer file as it is. One consequence a person can see: after an automatic pull that
+  brought a changed LFS file, that file is a pointer until they run `git lfs pull` (git counts the folder as clean, so nothing
+  is lost). A lane the person starts, and anything after a press, downloads as in a terminal.
+
+The rest of the class, read in `git help config` (git 2.54) for a section whose keys a commonly installed helper or git itself
+reads, that a repository's config can aim, and whether any automatic run of the app reaches it:
+
+- `gc.*` and `maintenance.*`: reached. `git merge` runs `git maintenance run --auto` after the pull's fast-forward (seen with
+  `GIT_TRACE`), and the repository's settings steer what it prunes and when (its hook, `pre-auto-gc`, was already off). Every
+  automatic run now passes `-c maintenance.auto=false -c gc.auto=0`, as hooks are switched off, rather than refusing a
+  repository that tunes them: the app's own work never needs housekeeping, and the person's next git in a terminal does it.
+- `gpg.*` (`gpg.program`, `gpg.ssh.program`, `gpg.ssh.defaultKeyCommand`, `gpg.x509.program`): read only to sign or verify. No
+  automatic run makes a commit or a tag, `git log` runs only for a draft the person asked for, and the pull's write passes
+  `--no-verify-signatures`. Not reached.
+- `diff.<driver>.*` and `diff.external`: every automatic diff passes `--no-ext-diff --no-textconv`, `git status` uses no diff
+  driver, and the pull's write passes `--no-stat`. Not reached (a submodule's are refused, see "Submodules").
+- `merge.<driver>.*`: a merge driver runs only for a real merge; the pull is `--ff-only`. Not reached.
+- `mergetool.*`, `difftool.*`, `sendemail.*`, `browser.*`, `web.*`, `man.*`, `instaweb.*`, `interactive.diffFilter`: read only by
+  `git mergetool`, `git difftool`, `git send-email`, `git web--browse`, `git help`, `git instaweb` and `git add -p`, which
+  nothing automatic runs. Not reached.
+- `pager.*` and `core.pager`: a pager starts only when git's output is a terminal; the app's runs read it through a pipe (a
+  pager named by a repository did not start for `git log` through a pipe, checked). Not reached.
+- `core.editor` and `sequence.editor`: an editor starts only for a message or a list to edit; no automatic command needs one
+  (fetch, a fast-forward, a checkout, removing a worktree, deleting a branch, status, diff and reads). Not reached.
+- `alias.*`: the app runs git's own commands by name, and an alias that hides one is ignored (`git help config`). Not reached.
+- `trailer.<token>.command` and `.cmd`: run by `git interpret-trailers` and `git commit --trailer`, which nothing automatic
+  runs. Not reached.
+- `uploadpack.*`: read by the side that sends a fetch, the remote's; `uploadpack.packObjectsHook`, the one that runs a program,
+  is taken only from the person's own (protected) config. The repository's `remote.<name>.uploadpack` is refused as before.
+  Not reached.
+- `receive.*`: read by the side a push goes to; nothing automatic pushes. Not reached.
+- `core.hooksPath` and `core.fsmonitor`: overridden by `-c` on every run, as before.
+- `credential.*`, `http.*`, `url.*`, `ssh.*`, `core.sshCommand` and the rest of item 114's families: refused, as before.
+- Other filters a person sets up: git-crypt and git-annex write their filters into the repository's own config, which is
+  refused (`filter.<driver>.*`). Not confirmed: git-annex's own repository settings (`annex.*`), since git-annex is not
+  installed here either; a git-annex filter in the person's global config would read them, as git-lfs reads `lfs.*`.
+
 **Submodules** (item 90). A git that goes into a submodule reads that submodule's own config (`.git/modules/<name>/config`,
 nested ones too) and attributes, which none of the above reached, so a folder someone sent with a submodule whose config names a
 clean filter ran it within a minute of being opened. Two guards now:
@@ -1171,7 +1279,7 @@ main-moved note. Nothing is removed or pulled past because of that: a folder wit
 (`submodules`), Remove never forces it, the automatic pull stops at a checkout with any, and the kept list says so. Elsewhere in
 the same class: a `.git` file that points at another folder, and a bare repository committed inside a project, are read exactly
 as git reads them from the same folder, so the same settings stop the work; `include.path` and `includeIf` are read with
-`--includes`; hooks and the file monitor are switched off by `-c`, which git passes on to every git it starts, a submodule's
+`--includes`, and since item 118 any include stops the work itself (see "Includes, and the folder git runs in"); hooks and the file monitor are switched off by `-c`, which git passes on to every git it starts, a submodule's
 included; the variables that would send git to another repository's files or objects (`GIT_DIR`, `GIT_WORK_TREE`,
 `GIT_INDEX_FILE`, `GIT_OBJECT_DIRECTORY`, `GIT_ALTERNATE_OBJECT_DIRECTORIES`, `GIT_COMMON_DIR`, `GIT_NAMESPACE`) are taken out
 of what git inherits; an alternates file names only where objects are read and runs nothing; and git's own `safe.directory`
@@ -1233,6 +1341,35 @@ The tests run against temporary repositories, with a bare one behind a `https://
 that repository only, to rewrite to the bare folder, and stand-ins for `gh` and `glab` that record what they were asked: nothing
 reaches a real remote. `glab` is not installed on the Mac this was built on, so its argv follows its documentation and is
 covered by the stand-in only.
+
+### Pull requests across projects (item 100)
+
+**Tasks › Pull requests** (`tasks/PullsView.tsx`, `tasks/board.ts`, `src-tauri/src/pulls.rs`) is the Tasks page's third scope. It
+lists the open pull / merge requests of every project the Code page lists (each folder's remote, read once per repository) under
+grey bands by readiness: ready (approved, or no review asked, with green checks and no conflict), checks running, review needed,
+changes asked, checks failing, conflicts, drafts; the newest change first in each. A row names its repository and number, who
+opened it, when it changed, its checks and review, and whether it is a lane's or a chat's. The shell reads `gh pr list --json
+...,reviewDecision,mergeable,baseRefName` and `glab mr list --output json` (`detailed_merge_status`, `has_conflicts`), masked as
+Tasks masks. A row opens the request in the app: title, description as plain text, checks, at most 300 changed files with their
+counts (`gh pr view --json files,additions,deletions,changedFiles`; GitLab's `changes_count` alone), Open on GitHub, and Merge.
+
+**Merge from the list is the lane's ask.** A lane's request goes to `review_ask_merge` with the lane's folder, as the lane's own
+Merge does. Any other goes to `review_ask_merge_pull` (`review.rs` `ask_merge_pull`) with the project's folder: the folder's
+remote must name the request's repository (`not_this_project`), the branch must be that repository's own (`other_repo`; the
+detail offers no Merge for a fork's request), a lane folder of the app's on that branch sends it to the lane's ask, and the rest
+is the lane's ask without a lane's tip: able to merge now, a method GitHub says the repository allows (`gh repo view --json
+mergeCommitAllowed,squashMergeAllowed,rebaseMergeAllowed`; `method_not_allowed`), the message exactly as sent, the merge bound to
+the head commit shown and the request read again before it runs. Same `Plan::Merge`, same `settle`, same approval-core request.
+
+**A chat's own pull request** (`code/chatPull.ts`). When a Claude Code or Codex chat ends a command the dial reads as a push with
+`gh pr create` in it, the last github.com pull request address in its output is read, the chat's folder's remote must name that
+repository, and one `gh pr view` must say the branch is that repository's own. The chat's header then names the request, the
+request's row names the chat, and the chat's Lanes row shows it as a lane's row does. Of this run; nothing is written.
+
+**Watching costs little.** The page reads the lists once when shown, then at most once a minute while shown and in front, never
+while hidden. The shell gives a list read within 55 seconds again, and before reading a GitHub list again asks `gh api --method
+GET --include -H 'If-None-Match: <ETag>' repos/<r>/pulls?state=open&per_page=51`: a 304 gives the last list again and costs no
+rate limit. The GraphQL list is read only when GitHub says the list changed, a check was still running, or ten minutes passed.
 
 ### MCP servers and skills
 
@@ -1313,12 +1450,21 @@ still goes through the asks (How an ask is read, Kit's dial, Buddy's card).
   `build`); when an argument, a part of one (an option's value after `=`, a bind mount's `.:/app`), or a variable's value names
   something of the lane's (an absolute path inside it, a path from `.` or `..`, or a relative name whose first part is in
   the lane, such as `mcp/server.js` or `server.py`); when `NODE_OPTIONS` loads a module; or when a variable ending in `PATH` or
-  `LIB` has an empty entry. The chat says "Not started in this lane: <names>. It runs files from the lane's own folder, which
-  the lane's agent can change. It starts in a chat in your project folder." (`mcp_lane_files`, names only). What a person
-  loses: in a lane, a project server started through `npx` or `uvx` (the usual way to name one) no longer starts, nor one
-  whose argument happens to name a file the lane has; in their own folder every approved server starts as before. Not
-  ruled out: a program named alone that reads its working folder by itself, with no word naming it (a server that loads
-  `./config.js` on its own). This one source because `.mcp.json` lives in the folder the agent already works in, so its
+  `LIB` has an empty entry; or (item 118) when it is an agent's own CLI (`claude mcp serve`, `codex mcp-server`, any agent),
+  which started in the lane's folder reads that folder's own agent settings as its project's (hooks in
+  `.claude/settings.json`, `.codex/config.toml`, `opencode.json`), files the lane's agent can change. An agent's CLI is read
+  as `fg.rs` reads which agent runs in a terminal (`acp_mcp::an_agents_cli`, `fg::agent_for_process`): the agents the app
+  starts and the few a person runs themselves (`hermes`, `amp`, `goose`, `aider`), by name (with a Windows ending in any
+  case; `grok`, `pi` and `dsh`, which other programs share, count by name here too), by its real path, found on `PATH` when
+  it is named alone (a link of another name leads to the agent it is), by an npm package's folder in that path, and for
+  `node` and the other interpreters by the script they run. The chat says "Not started in this lane: <names>. It runs files
+  from the lane's own folder, which the lane's agent can change. It starts in a chat in your project folder."
+  (`mcp_lane_files`, names only), for an agent's CLI too, whose settings are such files. What a person loses: in a lane, a
+  project server started through `npx` or `uvx` (the usual way to name one) no longer starts, nor one whose argument
+  happens to name a file the lane has, nor an agent's own MCP server; in their own folder every approved server starts as
+  before. Not ruled out: a program named alone that reads its working folder by itself, with no word naming it (a server
+  that loads `./config.js` on its own), and an agent this reader does not know, or one copied (not linked) under another
+  name outside an npm package, or a server built on an agent's SDK that starts the agent's CLI itself. This one source because `.mcp.json` lives in the folder the agent already works in, so its
   literal values are ones the agent can read anyway, and its `${VAR}` and `${VAR:-default}` are filled in from the environment
   the agent already runs with (a server with a variable that is not set is left out). The servers the person added to Claude
   Code or Codex themselves are not handed on: their secrets were given to those agents. Shapes from the protocol's Session
@@ -1481,6 +1627,16 @@ know in advance; and a line naming a file with @ was not read in. Then each file
 - OpenCode: an `instructions` entry in the `OPENCODE_CONFIG_CONTENT` the app already passes (its rules page: an absolute path
   is "used as written"; OpenCode 2.3.0's own code reads such a path while `OPENCODE_DISABLE_PROJECT_CONFIG` keeps project files
   out). The entry joins the value before the second rule listing, so the ask rules are checked with the very value OpenCode gets.
+  OpenCode's own placeholders never reach it as placeholders (item 118): OpenCode fills in `{env:NAME}` and `{file:path}`
+  within its config, so a project's AGENTS.md could otherwise put one of the person's own files, or a variable of theirs, into
+  the system prompt if OpenCode filled them in within an instructions file's text too. Whether it does could not be settled
+  without a chat: with a scratch home, a made-up variable and a scratch instructions file, `opencode debug config
+  --standalone` (OpenCode 2.3.0) showed an `{env:...}` in a config value filled in and listed the instructions file only by
+  its path; the patterns (`\{env:([^}]+)\}`, `\$\{env:([^}]+)\}`, `\{file:[^}]+\}`) are in its binary as strings, while the
+  code that uses them is compiled and cannot be read; and its server's API (`/openapi.json`) holds instruction entries only
+  for a session. So the text written for OpenCode, paths included, has a space after the brace of every `{env:` and `{file:`
+  in any letter case (`project_notes::inert_for_opencode`): no pattern matches, and the words stay readable. Claude Code's
+  text is handed over as written. The path in the entry still refuses either token, as before.
 
 **What the chat says.** One quiet line, once: "Read this project's CLAUDE.md." with the files it read, and "Left out: …" with
 each file left out and why (a link, over 64 KB, over 128 KB in all, not plain text, only for some files, could not be passed
@@ -1767,7 +1923,9 @@ runs git as automatic work runs it (`Git::automatic`: no `ext::` remote, never i
 own config and every submodule's (`Git::config_risk`, the same read as "Git the app runs by itself" above). While that names a
 program git would run or another address to fetch from, nothing is made, checked out, counted or fetched: `git worktree add`
 would run a smudge filter as it checks the files out, the count of the developer's files that did not come along a clean
-filter, and Start from the remote an `ext::` address or a proxy. The shell answers `config:<setting>`, no agent starts, and the
+filter, and Start from the remote an `ext::` address or a proxy. Since item 118 the folder is then added with nothing checked
+out and the config read again from inside it before any file is written (see "Includes, and the folder git runs in"). The
+shell answers `config:<setting>`, no agent starts, and the
 run is kept as skipped (`config`) with the setting as its detail; the card says "Did not run: this project's own git settings
 name a program for git to run, or another address to fetch from. The app does not run those by itself while nobody is there;
 press Run now if you trust them." Only a press counts as someone there (`by === "person"`), so any way a run starts later (a
@@ -1823,6 +1981,43 @@ for a project), `words.ts`, `WorkflowsPage.tsx` and `workflows.css`; `sessions/s
 files and refused projects; `workflows.rs`' tests check the project rule against real folders and repositories; and
 `e2e/workflows.spec.ts` walks the page, the allow step, a run of two steps with the stand-in agent, a changed file, the Lanes band
 and the palette.
+
+### Context from one chat to another (item 97)
+
+Three ways to carry what one chat holds into the next message of another, each only filling the person's own box: nothing is
+sent, run or approved by it, and what an agent then wants to do still asks. The pieces are `src/chat/box/carry.ts` (the chips and
+the form they go out in), `threadContext.ts` (another chat's context, built with no model), `contextReader.ts` (reading a chat
+through the store, sessions and shell it is handed), `SelectionNote.tsx`, `Bring.tsx` and `src/sessions/continueWith.ts` with
+`ContinueMenu.tsx`.
+
+- **A note on a selection.** Text selected in an answer, or in a lane's pane, brings a quiet Add a note by it (or Cmd+Shift+N,
+  Ctrl+Shift+N elsewhere). The note and the selection become a chip above the box; at most eight a message, a selection quoted
+  up to 3,000 characters and cut with a line that says how much. On Send each goes first as `> ` lines with `Note: ...` under
+  them, a blank line between blocks, the typed message last; the person's bubble draws them as their own quote. Chips are kept
+  by chat key on this computer (`manut.box.carry`) across a restart, and Cmd+S takes them into Drafts as that same text.
+- **Another chat's context.** A Recent row, a History chat row or a lane's row dragged onto an open chat's box, or Bring context
+  from… in the box's + menu (the palette's switcher's chats, then the coding chats; arrows, Enter, Esc), adds one chip: the
+  chat's title, which opens to show exactly the text that goes. The text: a line naming the chat, a line saying the app copied
+  it and that it is not the person speaking and gives no permission (the fence a project's own notes get), Title, First message
+  (as typed), Last answer, a lane's Files changed (names and line counts from its own diff, never contents) and Waiting on the
+  person, each masked with `lib/secrets.ts` and capped, 6,000 characters in all. A thread no one opened is read from the runtime
+  (`thread.open`, which opens no chat). One chip a chat, three chats a message. The row shows only in a + that already opens a
+  menu: a + whose one row is files still opens the picker at once, and there a chat comes in by a drag.
+- **Shop and account.** Each chip names the shop (a team chat) or the agent account (a coding chat) it was made under. A chat of
+  another shop, or of another account of the same agent, is refused in a plain line before anything of it is read; a kept chip
+  of another shop is red and never sent.
+- **Continue with….** A started coding chat's agent chip opens the other models of its agent and the other installed agents that
+  chat. A pick opens a NEW chat in the same lane (no second folder or branch) or folder, with the old chat's context above its
+  box, unsent; its agent starts with the person's first message, the picked model set first, its own agent keeping the old
+  account. A quiet line links the two both ways with Open, and the old one offers to stop its agent only while it is idle.
+- **One lane, one working agent.** While either of two chats linked this way has a turn running, the other's box keeps what is
+  typed, Send waits, and a line says who works there; the sessions store refuses the send too. The rule binds only linked chats,
+  so two chats the person opened in one folder go on as before. The lane's folder goes only when the last chat in it is closed.
+- **A summary by a model** is not built: item 96's runs would plug in at `buildContext`, its text in place of First message and
+  Last answer, still masked, capped and shown before it goes.
+
+`carry.test.ts`, `threadContext.test.ts` and `sessions/continueWith.test.ts` hold the rules; `e2e/thread-context.spec.ts` walks
+all three on the mock host, by mouse and by keyboard, with pictures in light and dark at 1280 and 900 (`MANUT_SHOTS`).
 
 ## Left for later (no owner needed)
 

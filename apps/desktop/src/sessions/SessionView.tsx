@@ -53,7 +53,12 @@ import { TermShareCards } from "./TermShareCard";
 import { LanePane } from "../code/LanePane";
 import { LaneReview } from "../code/Review";
 import { isLaneChat } from "../code/laneStore";
+import { chatPullOf, useChatPullsVersion, type ChatPull } from "../code/chatPull";
+import { usePullsVersion } from "../tasks/pulls";
+import { showBoardPull } from "../tasks/state";
 import { Icon } from "../ui/icons";
+import { chatScope } from "../chat/box/scope";
+import { AgentContinue, ContinueLines, useLaneWait } from "./ContinueMenu";
 import { usePlace } from "../palette/places";
 
 const STATUS: Record<string, Key> = { starting: "ss.starting", running: "ss.running", exited: "ss.ended", failed: "ss.couldNotStart" };
@@ -184,6 +189,8 @@ function ChatPane({ rec, chatKey }: { rec: SessionRec; chatKey: string }) {
   // the agent's predicted next message, when the person turned suggestions on and this agent can give one (lib/suggest.ts)
   const suggestion = useSuggestion(chatKey);
   const limitOffer = useLimitOffer(chatKey, rec);
+  // one working agent in a lane: while the chat this one is linked with by Continue with works there, the box holds (item 97)
+  const laneWait = useLaneWait(rec);
   return (
     <div className="pane ss-chat" data-pane={chatKey} data-testid="session-chat">
       <Timeline
@@ -195,6 +202,8 @@ function ChatPane({ rec, chatKey }: { rec: SessionRec; chatKey: string }) {
       />
       {rec.paused ? <Paused rec={rec} /> : ended && <Ended rec={rec} />}
       <OwnApprovals agent={rec.agent} />
+      {/* the chat this one continued in or from (item 97), each with Open */}
+      <ContinueLines rec={rec} />
       {/* a message kept to send when this chat's account resets (item 95) */}
       <WaitingRow chatKey={chatKey} />
       <Composer
@@ -226,15 +235,19 @@ function ChatPane({ rec, chatKey }: { rec: SessionRec; chatKey: string }) {
         rows
         // the microphone and voice mode (item 81): voice mode talks with this session's agent, its asks on their cards
         voice
+        waitNote={laneWait}
         tools={
           <>
-            <AgentFixed agent={rec.agent} />
+            {/* an agent chat's agent chip opens Continue with… (item 97); a Hermes folder chat's stays as it was */}
+            {takesFiles && rec.status !== "draft" ? <AgentContinue rec={rec} /> : <AgentFixed agent={rec.agent} />}
             {/* the chat box's model with its effort, and how much the agent may do before asking (item 80) */}
             <SessionModel rec={rec} options={ss.models[rec.id]} note={ss.notes[rec.id]} />
             {(modesOf(rec.agent).length > 0 || takesFiles) && <SessionApproval rec={rec} />}
           </>
         }
         foot={<Context rec={rec} />}
+        // a note or another chat's context made under another account of this agent is not sent here (item 97)
+        scope={chatScope(chatKey, null, rec, null)}
       />
     </div>
   );
@@ -418,6 +431,26 @@ function Context({ rec, account }: { rec: SessionRec; account?: string }) {
 
 const BranchIcon = () => <Icon name="git-branch" />;
 
+/** The pull request the chat opened itself (item 100, code/chatPull.ts), after the agent on the header's second line: pressed, it
+ *  opens in Tasks › Pull requests. Nothing when the chat opened none. */
+export function ChatPullView({ pull, onOpen }: { pull: ChatPull | null; onOpen: (p: ChatPull) => void }) {
+  if (!pull) return null;
+  return (
+    <>
+      {" · "}
+      <button type="button" className="lk ss-head-pr" title={t("lane.prTip")} onClick={() => onOpen(pull)} data-testid="session-pull" data-state={pull.state}>
+        {t("lane.pr", { n: pull.number, state: t(`tasks.st.${pull.state}` as Key) })}
+      </button>
+    </>
+  );
+}
+
+function ChatPullLink({ chatKey }: { chatKey: string | null | undefined }) {
+  useChatPullsVersion();
+  usePullsVersion();
+  return <ChatPullView pull={chatPullOf(chatKey)} onOpen={(p) => showBoardPull(p.source, p.repo, p.number) && getStore().actions.openTasks()} />;
+}
+
 /** The rest of the line under a running chat: the folder's git branch (none outside a repository) and how full the
  *  context is, both as the shell and the agent reported them. */
 function LiveFoot({ rec }: { rec: SessionRec }) {
@@ -516,6 +549,8 @@ function DraftPane({ rec }: { rec: SessionRec }) {
   };
   // the composer takes the focus once it can be typed in (the folder or the agent list may arrive after it shows)
   const live = ready && !terminal;
+  // a chat made by Continue with waits while the chat it continues works in their lane (item 97)
+  const laneWait = useLaneWait(rec);
   useEffect(() => {
     if (live) document.querySelector<HTMLTextAreaElement>(`[data-pane="${key}"] [data-testid=composer]`)?.focus();
   }, [live, key]);
@@ -531,8 +566,10 @@ function DraftPane({ rec }: { rec: SessionRec }) {
         </div>
       </div>
       <OwnApprovals agent={rec.agent} />
+      <ContinueLines rec={rec} />
       <Composer
         key={key}
+        waitNote={laneWait}
         bot={bot}
         running={false}
         offline={!ready || terminal}
@@ -557,6 +594,7 @@ function DraftPane({ rec }: { rec: SessionRec }) {
           ) : undefined
         }
         foot={<Context rec={rec} account={account} />}
+        scope={chatScope(key, null, rec, accounts.groups)}
       />
     </div>
   );
@@ -850,6 +888,7 @@ export function SessionView() {
             <span data-testid="session-cwd">{tildePath(rec.cwd, ss.home)}</span>
             {" · "}
             <span data-testid="session-agent">{label}</span>
+            <ChatPullLink chatKey={chatKey} />
           </span>
           <span className="ss-head-now">
             <span

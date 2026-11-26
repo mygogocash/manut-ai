@@ -135,6 +135,8 @@ fn pull_into(home: &Path, cwd: &Path, out: &mut Pulled) -> &'static str {
     if fetch_branch(&git, &top, &remote, &merge).is_err() {
         return "fetch_failed";
     }
+    #[cfg(test)]
+    lane::between::at("fetched", &top);
     let tracking = format!("refs/remotes/{remote}/{merge}^{{commit}}");
     let Some(tip) = git.line(&top, &["rev-parse", "--verify", "--quiet", &tracking]).filter(|t| commit_id(t)) else { return "fetch_failed" };
     let Some(head) = git.line(&top, &["rev-parse", "--verify", "--quiet", "HEAD^{commit}"]).filter(|h| commit_id(h)) else { return "unread" };
@@ -146,7 +148,17 @@ fn pull_into(home: &Path, cwd: &Path, out: &mut Pulled) -> &'static str {
     if !git.run(&top, &["merge-base", "--is-ancestor", &head, &tip]).is_ok_and(|r| r.code == Some(0)) {
         return "diverged";
     }
-    // read again just before the one write: the fetch took time, and the person may have started something since
+    // the `.lfsconfig` the incoming commit brings, which git-lfs reads once the fast-forward has written it (item 118)
+    if let Some(setting) = lane::lfsconfig_at(&|args: &[&str]| git.run(&top, args).ok(), &format!("{tip}:.lfsconfig")) {
+        out.setting = setting;
+        return "config";
+    }
+    // read again just before the one write: the fetch took time, and the person may have started something since, or anything
+    // may have written the repository's config, which every lane's agent shares (item 118)
+    if let Some(setting) = git.config_risk(&top) {
+        out.setting = setting;
+        return "config";
+    }
     if git.busy(&top) {
         return "busy";
     }
@@ -512,6 +524,49 @@ mod tests {
         sh(&d, &["submodule", "deinit", "-q", "-f", "sub"]);
         let _ = fs::remove_dir_all(d.join(".git/modules"));
         assert_eq!(pull(&home, &d).why, "submodules");
+        let _ = fs::remove_dir_all(home);
+    }
+
+    /// Item 118 (fourth security review, 26 Nov 2026): the fetch can take ten seconds, and the repository's config is shared
+    /// with every lane's agent, so it is read again just before the one write, as the folder's cleanliness is. A smudge filter
+    /// written to it while the fetch ran would otherwise run on every file the fast-forward brings.
+    #[test]
+    fn a_setting_written_while_the_pull_fetched_stops_it_before_the_one_write() {
+        let Some((home, d, _, _)) = behind("pull-reread") else { return };
+        let (script, marker) = crate::lane::tests::spy(&home, "smudge", false);
+        fs::create_dir_all(d.join(".git/info")).unwrap();
+        fs::write(d.join(".git/info/attributes"), "*.txt filter=spy\n").unwrap();
+        let mine = sh(&d, &["rev-parse", "HEAD"]);
+        let plant = d.clone();
+        lane::between::set(Some(Box::new(move |step, _| {
+            if step == "fetched" {
+                sh(&plant, &["config", "filter.spy.smudge", &script]);
+            }
+        })));
+        let got = pull(&home, &d);
+        lane::between::set(None);
+        assert_eq!((got.done, got.why.as_str(), got.setting.as_str()), (false, "config", "filter.spy.smudge"), "{got:?}");
+        assert!(!marker.exists(), "a program ran: {}", fs::read_to_string(&marker).unwrap_or_default());
+        assert_eq!(sh(&d, &["rev-parse", "HEAD"]), mine);
+        assert!(!d.join("r0.txt").exists());
+        let _ = fs::remove_dir_all(home);
+    }
+
+    /// Item 118: a commit the pull would bring can add a `.lfsconfig`, which git-lfs reads as soon as the fast-forward writes it
+    /// (git-lfs-config(5)). The incoming commit's own file is read before the one write, and the pull stops at it, named.
+    #[test]
+    fn a_pull_stops_at_an_lfsconfig_the_incoming_commit_brings() {
+        let Some((home, d)) = repo("pull-lfsconfig") else { return };
+        let bare = with_origin(&home, &d);
+        let other = home.join("other");
+        sh(&home, &["clone", "-q", bare.to_str().unwrap(), other.to_str().unwrap()]);
+        commit_in(&other, ".lfsconfig", "[lfs]\n\turl = https://elsewhere.example/x\n");
+        sh(&other, &["push", "-q", "origin", "main"]);
+        let mine = sh(&d, &["rev-parse", "HEAD"]);
+        let got = pull(&home, &d);
+        assert_eq!((got.done, got.why.as_str(), got.setting.as_str()), (false, "config", ".lfsconfig:lfs.url"), "{got:?}");
+        assert_eq!(sh(&d, &["rev-parse", "HEAD"]), mine);
+        assert!(!d.join(".lfsconfig").exists());
         let _ = fs::remove_dir_all(home);
     }
 

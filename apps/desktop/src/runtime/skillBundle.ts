@@ -139,10 +139,15 @@ const BLANK = /^[\s\u0085]*$/;
 /** Space within a line: blank, but no line break. */
 const SPACE = "[\\t \\u00a0\\u1680\\u2000-\\u200a\\u202f\\u205f\\u3000\\ufeff]";
 /** `!` then a backtick, with only space between: Claude Code's command run as a skill loads. Taken anywhere in the text, though
- *  Claude Code itself runs it only at a line's start or after a space, since a reading that is wider only refuses more. */
-const BANG_TICK = new RegExp(`!${SPACE}*\``);
-/** A fence of three or more backticks or tildes whose word starts with `!`: the many-line form of the same. */
-const BANG_FENCE = new RegExp(`(\`{3,}|~{3,})${SPACE}*!`);
+ *  Claude Code itself runs it only at a line's start or after a space, since a reading that is wider only refuses more. `!` then
+ *  a `$` too (item 118): an argument or a variable (`$ARGUMENTS`, `$1`, `$name`, `${CLAUDE_SKILL_DIR}`), which Claude Code fills
+ *  in; its documentation does not say whether before or after it runs the commands, and before, an argument could finish one. */
+const BANG_TICK = new RegExp(`!${SPACE}*[\`$]`);
+/** A fence of three or more backticks or tildes whose word starts with `!`, or with a `$` an argument could make one: the
+ *  many-line form of the same. */
+const BANG_FENCE = new RegExp(`(\`{3,}|~{3,})${SPACE}*[!$]`);
+/** Whether `text` holds a command Claude Code would run as the skill loads ([`BANG_TICK`], [`BANG_FENCE`]). */
+const runsOnLoad = (text: string): boolean => BANG_TICK.test(text) || BANG_FENCE.test(text);
 /** One plain setting at the top: a name of letters, digits, `_` and `-`, then a colon and a space or the line's end, and what
  *  follows on its line. */
 const SETTING = /^([A-Za-z][A-Za-z0-9_-]{0,63})[ \t]*:(?:$|[ \t](.*)$)/;
@@ -181,20 +186,23 @@ function settingsRefusal(lines: readonly string[], from: number, fenced: boolean
   return fenced ? { why: "unreadable" } : null;
 }
 
-/** What in file `path` of a skill an agent would act on by itself, or null: the settings at the top of any markdown file and any
- *  command run as it loads, and the settings of a Codex `agents/*.yaml`. Every other file is text the agent may read or a script
- *  it may ask to run, and each such step asks as usual. */
+/** What in file `path` of a skill an agent would act on by itself, or null: the settings at the top of any markdown file and of a
+ *  Codex `agents/*.yaml`, and a command run as it loads in any file that is not a script ([`isScript`] by its path or first
+ *  line). Claude Code runs those commands in the `SKILL.md` it loads, and attaches a file an `@` reference names; which other
+ *  files it reads as instructions is up to Claude, so every text file is read for one (item 118: wider only refuses more). A
+ *  script is run, not loaded, and each run asks as usual. */
 export function fileActsAlone(path: string, text: string): ActsAlone | null {
   const markdown = MARKDOWN.test(path);
   const agentYaml = AGENT_YAML.test(path);
-  if (!markdown && !agentYaml) return null;
+  if (!markdown && !agentYaml) return !isScript(path, text) && runsOnLoad(text) ? { why: "command" } : null;
   const lines = text.replace(/^\ufeff+/, "").split(BREAK);
   const first = lines.findIndex((l) => !BLANK.test(l));
   if (agentYaml) {
     if (first < 0) return null;
     const top = lines[first]!;
     if (top.startsWith("---") && top !== "---") return { why: "unreadable" };
-    return settingsRefusal(lines, top === "---" ? first + 1 : first, false, HARMLESS_AGENT_FIELDS);
+    const refused = settingsRefusal(lines, top === "---" ? first + 1 : first, false, HARMLESS_AGENT_FIELDS);
+    return refused ?? (runsOnLoad(text) ? { why: "command" } : null);
   }
   if (first >= 0) {
     const top = lines[first]!.replace(/^[\s\u0085]+/, "");
@@ -204,7 +212,7 @@ export function fileActsAlone(path: string, text: string): ActsAlone | null {
       if (refused) return refused;
     }
   }
-  return BANG_TICK.test(text) || BANG_FENCE.test(text) ? { why: "command" } : null;
+  return runsOnLoad(text) ? { why: "command" } : null;
 }
 
 /** The first file of `skill`, in its order, that an agent would act on by itself, with why. */
@@ -225,7 +233,7 @@ export function actsAloneSkills(skills: readonly SkillEntry[]): ({ skill: string
   });
 }
 
-/** File endings that are programs or scripts a computer can run. */
+/** File endings that are programs or scripts a computer can run. src-tauri/src/skill_links.rs `SCRIPT_ENDINGS` is the same list. */
 const SCRIPT_ENDINGS = new Set([
   "sh", "bash", "zsh", "fish", "ksh", "csh", "command", "py", "pyw", "rb", "pl", "pm", "php", "js", "mjs", "cjs", "ts", "mts", "cts",
   "jsx", "tsx", "ps1", "psm1", "bat", "cmd", "vbs", "applescript", "scpt", "swift", "go", "rs", "lua", "r", "jl", "tcl", "awk",

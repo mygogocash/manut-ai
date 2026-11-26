@@ -3160,7 +3160,9 @@ the desktop installs from. No HTML is ever made from a bundle. Every answer carr
 **The desktop.** Publishing: the Artifacts page's Share skills as a link, behind Settings › Artifacts › Allow sharing skills by
 link (off by default). The person picks their own skills (never a plugin's or a project's); the shell reads each folder without
 following any link; a link, a binary file, a file in which the app's key masker finds a key, or a skill an agent would act on
-by itself (below) stops the publish, named and never shown; the ask (`public_post`) shows every file with its size, SKILL.md
+by itself (below) stops the publish, named and never shown (since item 117 the masker also finds `name = value` keys as
+`~/.aws/credentials` writes them, `.netrc` passwords, webhook addresses and more provider keys, and no longer counts a CSS class
+or a name that starts with `sk-`, a `${…}` reference or a `none` as a key); the ask (`public_post`) shows every file with its size, SKILL.md
 marked as the instructions the agent follows and each script marked, and its Yes is refused until every file was opened or "I
 have looked at every file" is ticked. Installing: Settings › MCP and Skills › Install skills from a link, behind
 the same switch. A link on any host but `origin` is refused before anything is fetched, by the page and again by the shell; the
@@ -3178,7 +3180,11 @@ server at an address. The desktop takes a skill only when every markdown file's 
 an allow-list of ones that describe the skill or only narrow when it is used: `name`, `description`, `when_to_use`,
 `argument-hint`, `disable-model-invocation`, `user-invocable`, `license`, `compatibility` and `metadata`; when no markdown file
 holds a command run as it loads (`!` then a backtick, or a fence opened with three backticks or tildes and `!`); and when a Codex
-`agents/*.yaml` sets only `interface`. Any other setting, and settings it cannot read as plain `name: value` lines (a quoted or
+`agents/*.yaml` sets only `interface`. Item 118 widened the command check: `!` followed by a `$` (`$ARGUMENTS`, `$1`, a named
+argument, `${CLAUDE_SKILL_DIR}`), and a fence whose word starts with `$`, count as a command too, since Claude Code fills those
+in and its documentation does not say whether before or after it runs the commands; and every file of the skill that is not a
+script (by its folder, its ending or a `#!` first line) is read for one, not only markdown, since Claude Code attaches a file an
+`@` reference names and Claude may read any other as instructions. A script is run, not loaded, and each run asks. Any other setting, and settings it cannot read as plain `name: value` lines (a quoted or
 indented name, a fence that never closes, another document marker), refuse the skill whole, naming the file and the setting
 (`acts_alone:<why>:<skill>/<path>[:<field>]`): the page says so before a publish or an install is asked, and the shell refuses
 again at the ask and before writing. Nothing is stripped so that the rest can be installed. The table both readers run is

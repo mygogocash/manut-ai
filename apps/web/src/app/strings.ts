@@ -199,6 +199,8 @@ export type MacStrings = {
   sending: string;
   skipHint: string;
   onlyOnMac: string;
+  /// A command longer than a phone is sent: its start is shown, and only the Mac can allow it.
+  tooLongHere: string;
   answerWhenBack: string;
   notes: Record<
     | "allowed"
@@ -510,6 +512,7 @@ export const en: AppStrings = {
     sending: "Sending",
     skipHint: "Leave one empty to skip it.",
     onlyOnMac: "Answer this one on your Mac.",
+    tooLongHere: "This command is too long to show here in full, so only your Mac can allow it.",
     answerWhenBack: "It can be answered once your Mac is back.",
     notes: {
       allowed: "Allowed once.",

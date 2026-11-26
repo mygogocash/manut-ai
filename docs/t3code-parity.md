@@ -55,10 +55,10 @@ keeps them:
 | Sub-agents across agents and models from one prompt | part: cards show an agent's own subagents; the app starts none | 102 |
 | A worktree for each thread | has (lanes, Settings, Worktrees) | |
 | Agents open, manage and message other threads | part: the fork's thread cards work in Practice only | 102 |
-| Drag a thread into another for its context | no | 97 |
+| Drag a thread into another for its context | has (item 97): a Recent, History or lane row dropped on a box, or Bring context from… in the + menu; the app builds the text with no model and shows it before it goes | 97 |
 | The app as an MCP server that other apps drive | no (an MCP server for computer use only) | 103 |
-| Hand a thread to another agent mid-way | no | 97 |
-| Annotations on a selection, sent with the next message | no | 97 |
+| Hand a thread to another agent mid-way | has (item 97): Continue with… on a coding chat's agent chip, a new chat in the same lane with the old one's context unsent; one agent works in a lane at a time | 97 |
+| Annotations on a selection, sent with the next message | has (item 97): Add a note by a selection in an answer or a lane's pane, sent before the message as a quote | 97 |
 
 ## Other machines
 
@@ -102,19 +102,19 @@ keeps them:
 
 | Feature | Today | Plan |
 | --- | --- | --- |
-| A thread links the PR it opened; a PR viewer | part: lanes show their open PR, read only | 100 |
-| A PR tab to review and merge, by merge readiness | part: the Tasks page lists and sorts by what needs attention; merging is from a lane, asked first | 100 |
+| A thread links the PR it opened; a PR viewer | has (item 100): a coding chat that runs `gh pr create` is linked to the request both ways once one view finds it in the chat's own repository; Tasks › Pull requests opens any request in the app (description, checks, files and counts) | 100 |
+| A PR tab to review and merge, by merge readiness | has (item 100): Tasks › Pull requests lists every project's open requests under bands by readiness; Merge is the lane's own ask, for a lane's request or any other of the project's | 100 |
 | A thread settles when its PR merges | has, for a lane, when the host said it merged (item 94) | 94 |
-| Frugal PR monitoring | part: caches and one query; no conditional requests | 100 |
-| GitHub, GitLab, Bitbucket, Azure DevOps, Forgejo | part: GitHub and GitLab | 100 |
-| Control worktrees; no-project threads; new project with GitHub | part: where and how; no new project | 100 |
-| Project icons | no | 100 |
+| Frugal PR monitoring | has (item 100): a GitHub list is read again only after `If-None-Match` says it changed (a 304 costs no rate limit), a check still ran, or ten minutes passed; the page reads at most once a minute while shown, never hidden | 100 |
+| GitHub, GitLab, Bitbucket, Azure DevOps, Forgejo | part: GitHub and GitLab; the others are item 100's part 4, left for a later run | 100 |
+| Control worktrees; no-project threads; new project with GitHub | part: where and how; no new project (item 100's part 5, left for a later run) | 100 |
+| Project icons | no (item 100's part 6, left for a later run) | 100 |
 
 ## In the chat, use, look and trouble
 
 | Feature | Today | Plan |
 | --- | --- | --- |
-| HTML an agent draws, with scripts | no (a lane's Preview and shared pages only) | 98 |
+| HTML an agent draws, with scripts | part (item 98): an html or svg block of an answer shows as a drawing on Show drawing, in a closed box, without its scripts: in WebKit a sandboxed script can reach the network in ways no policy covers (`docs/security/chat-drawings.md`) | 98 |
 | Files land where the agent can use them | has | |
 | Use across accounts and machines, outside sessions too | part: what Manut AI starts and, with a switch, what Claude Code and Codex write for sessions run outside it, this Mac (item 106; Codex only when not compressed; other Macs are item 108) | 106 |
 | Limits left for each account | has | |

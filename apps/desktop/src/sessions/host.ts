@@ -14,6 +14,7 @@ import { steersOf } from "./controls";
 import type { DiskLevel, DiskState } from "../lib/disk";
 import type { ImportApp, ImportProfile } from "./term/import";
 import { readLaneFolder, type LaneFolder } from "../code/laneFolder";
+import { savedKeys, type SavedKeys } from "../code/secrets";
 import { readView, type GitView } from "../code/moved";
 import { MOCK_MOVED, MOCK_MOVED_ROOT } from "../code/mockMoved";
 import { readCleaned, readKept, readMade, readReleased, readRemoved, type KeptLane, type LaneCleaned, type LaneMade, type LaneReleased, type LaneRemoveAsk, type LaneRemoved } from "../code/laneBranch";
@@ -215,6 +216,10 @@ export interface SessionHost extends HistoryHost {
    *  Writes nothing; rejects with a code (`cannot_merge:<why>`,
    *  `not_this_lane`, `not_signed_in`, ...). */
   reviewMerge?(worktree: string, number: number, method: MergeMethod, credits?: boolean): Promise<ReviewAsk>;
+  /** The same ask for request `number` of `repo` from the Pull requests list (item 100): `folder` is the project it was listed
+   *  for, whose remote must name `repo` (`not_this_project` otherwise). A lane's request is asked as the lane's own Merge. Writes
+   *  nothing. */
+  reviewMergePull?(folder: string, source: "github" | "gitlab", repo: string, number: number, method: MergeMethod, credits?: boolean): Promise<ReviewAsk>;
   /** The person's answer to ask `id`, after approval-core settled it (code/reviewAsk.ts is the only caller): a No runs nothing, a
    *  Yes runs what the ask named, once. Only the id and the answer go to the shell. Rejects with `already_decided`,
    *  `withdrawn`, `expired` or `not_found`. */
@@ -243,6 +248,10 @@ export interface SessionHost extends HistoryHost {
   /** What really changed in the lane's own folder `worktree` since the lane started, from git (the Diff beside the lane): each file
    *  with its state and text, bounded. null when this host cannot read a folder; rejects for a folder the app did not make. */
   laneDiff(worktree: string): Promise<LaneFolder | null>;
+  /** The keys in what a commit or a push from the lane's folder `worktree` would save, from the same read-only, bounded read
+   *  (code/secrets.ts `savedKeys`, item 117). null when this host cannot read a folder; rejects for a folder the app did not
+   *  make. Kit's dial asks before a commit or a push unless this answered in time with nothing unread and no key. */
+  laneKeys?(worktree: string): Promise<SavedKeys | null>;
   /** Show folder `cwd` in the file manager. */
   reveal(cwd: string): Promise<void>;
   /** Open the person's own system terminal in folder `cwd` (their shell; nothing typed into it). */
@@ -497,6 +506,12 @@ export class TauriHost implements SessionHost, BuddyHost {
     if (!ask || ask.kind !== "merge") throw new Error("unread");
     return ask;
   }
+  async reviewMergePull(folder: string, source: "github" | "gitlab", repo: string, number: number, method: MergeMethod, credits = false) {
+    const { invoke } = await this.core();
+    const ask = readAsk(await invoke<unknown>("review_ask_merge_pull", { folder, source, repo, number, method, credits }));
+    if (!ask || ask.kind !== "merge") throw new Error("unread");
+    return ask;
+  }
   async reviewSettle(id: string, yes: boolean) {
     const { invoke } = await this.core();
     const done = readDone(await invoke<unknown>("review_settle", { id, yes }));
@@ -537,6 +552,10 @@ export class TauriHost implements SessionHost, BuddyHost {
   async laneDiff(worktree: string) {
     const { invoke } = await this.core();
     return readLaneFolder(await invoke<unknown>("lane_diff", { worktree }));
+  }
+  async laneKeys(worktree: string) {
+    const { invoke } = await this.core();
+    return savedKeys(await invoke<unknown>("lane_diff", { worktree }));
   }
   async mainMoved(cwd: string, o: { base?: string | null; show?: string[] } = {}) {
     const { invoke } = await this.core();
@@ -864,6 +883,11 @@ export type MockGlobals = MockTurnGlobals & {
   /** e2e: what each lane would go up for review with, by worktree: its repository, its commits' subjects, a code its ask is
    *  refused with, or the step its Yes fails at */
   __manutReview?: Record<string, { source?: "github" | "gitlab"; repo?: string; commits?: string[]; refuse?: string; fail?: { step: string; error: string }; cannot?: string; title?: string }>;
+  /** e2e: what the Pull requests list's Merge asks (item 100), by `<source>:<repo>:<number>`: why it cannot merge, a code it is
+   *  refused with, the branch it is from and its title; none: it can merge, from `change/<number>` */
+  __manutPullMerge?: Record<string, { cannot?: string; refuse?: string; branch?: string; title?: string; base?: string }>;
+  /** e2e: the Tasks mock's folders and their remotes (tasks/host.ts), which the list's Merge checks the project against */
+  __manutTasks?: { remotes?: Record<string, { source: string; repo: string }> };
   /** e2e: what a merged clean-up of each project's lanes finds */
   __manutCleanMerged?: Record<string, { removed: string[]; kept: { branch: string; why: string }[]; cannot: string | null }>;
   /** e2e: how many changed files the developer's folders have, by folder: they do not come along into a lane's */
@@ -1583,6 +1607,25 @@ export class MockHost implements SessionHost, BuddyHost {
     this.log({ op: "review.ask", path: worktree, branch: lane.branch });
     return ask;
   }
+  /** As the shell: the request must be of the project's own repository and able to merge (`__manutPullMerge`), and the ask names its
+   *  repository and branch with GitHub's own message. */
+  async reviewMergePull(folder: string, source: "github" | "gitlab", repo: string, number: number, method: MergeMethod, _credits = false): Promise<ReviewAsk> {
+    const remote = this.g.__manutTasks?.remotes?.[folder];
+    if (!remote) throw new Error("no_remote");
+    if (remote.source !== source || remote.repo.toLowerCase() !== repo.toLowerCase()) throw new Error("not_this_project");
+    const r = this.g.__manutPullMerge?.[`${source}:${repo}:${number}`] ?? {};
+    if (r.refuse) throw new Error(r.refuse);
+    if (r.cannot) throw new Error(`cannot_merge:${r.cannot}`);
+    const branch = r.branch ?? `change/${number}`;
+    const title = r.title ?? `Change ${number}`;
+    const owner = repo.split("/")[0];
+    const [subject, message] = method === "rebase" ? ["", ""] : method === "squash" ? [`${title} (#${number})`, title] : [`Merge pull request #${number} from ${owner}/${branch}`, title];
+    const id = Array.from({ length: 32 }, () => "0123456789abcdef"[Math.floor(Math.random() * 16)]).join("");
+    const ask: ReviewAsk = { id, kind: "merge", source, repo, remote: "origin", from: repo, branch, base: r.base ?? "main", head: "c".repeat(40), commits: 1, uncommitted: 0, title, body: "", number, url: `https://github.com/${repo}/pull/${number}`, method, subject, message, dropped: 0 };
+    this.asks.set(id, { state: "waiting", ask });
+    this.log({ op: "review.ask", path: folder, branch });
+    return ask;
+  }
   async reviewSettle(id: string, yes: boolean): Promise<ReviewDone> {
     const e = this.asks.get(id);
     if (!e) throw new Error("not_found");
@@ -1650,6 +1693,10 @@ export class MockHost implements SessionHost, BuddyHost {
   }
   async laneDiff() {
     // a browser reads no folder: the pane shows what the chat's events say
+    return null;
+  }
+  async laneKeys() {
+    // nor what a commit would save: a commit or a push asks
     return null;
   }
   async mainMoved(cwd: string, o: { base?: string | null; show?: string[] } = {}) {

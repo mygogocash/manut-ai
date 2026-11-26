@@ -11,6 +11,9 @@ import { resetKitAsks } from "../code/kitAsks";
 import type { LaneMade, LaneRemoveAsk } from "../code/laneBranch";
 import { createStore, type BridgeLike } from "../state/store";
 import { createSessions } from "./sessions";
+import { chatOfPull, chatPullOf, resetChatPulls } from "../code/chatPull";
+import { resetPulls } from "../tasks/pulls";
+import type { TaskHost } from "../tasks/host";
 import type { ChatEvent, ChatInput, SessionHost } from "./host";
 
 const bridge: BridgeLike = { connect: async () => undefined, onAny: () => () => {}, onStatus: () => () => {}, request: (async () => ({})) as BridgeLike["request"] };
@@ -31,7 +34,7 @@ interface Setup {
 /** The folder the fake shell makes for a lane, as lane.rs names it. */
 const laneDir = (branch: string, cwd = DEV) => `/w/.manut/lanes/${cwd.split("/").pop()}/${branch.slice(4)}`;
 
-async function setup(over: { branch?: string; left?: number; laneWorktree?: SessionHost["laneWorktree"] | null; settings?: Record<string, unknown>; release?: boolean; made?: Partial<LaneMade> } = {}) {
+async function setup(over: { branch?: string; left?: number; laneWorktree?: SessionHost["laneWorktree"] | null; settings?: Record<string, unknown>; release?: boolean; made?: Partial<LaneMade>; pulls?: Pick<TaskHost, "remote" | "view"> } = {}) {
   // Settings › Worktrees are read from storage: `over.settings` is what the person saved
   const saved = over.settings ? JSON.stringify(over.settings) : null;
   (globalThis as { localStorage?: unknown }).localStorage = { getItem: (k: string) => (k === "manut.worktrees" ? saved : null), setItem: () => {}, removeItem: () => {} };
@@ -93,7 +96,7 @@ async function setup(over: { branch?: string; left?: number; laneWorktree?: Sess
     : {};
   const host = { ...base, ...release, ...(over.laneWorktree === null ? {} : { laneWorktree: over.laneWorktree ?? lane }) } as unknown as SessionHost;
   const store = createStore(bridge);
-  const ss = createSessions(host, () => store);
+  const ss = createSessions(host, () => store, undefined, over.pulls ? () => over.pulls! : undefined);
   await ss.loadAgents();
   const startIn = async (text: string, cwd = DEV) => {
     const id = ss.draft("claude" as never);
@@ -215,6 +218,42 @@ test("teaches the lane what its test runs said, and forgets the lane when the se
   expect(laneOf(key).revertedAt).toBeTypeOf("number");
   t.ss.close(id);
   expect(laneOf(key)).toEqual({ steps: {}, changed: false });
+});
+
+test("a pull request the chat opened itself is linked once it is read in the lane's own repository, and goes when the session closes", async () => {
+  resetChatPulls();
+  resetPulls();
+  const asked: string[] = [];
+  const pulls: Pick<TaskHost, "remote" | "view"> = {
+    remote: async (cwd) => {
+      asked.push(`remote ${cwd}`);
+      return { source: "github", repo: "baanmali/preorder" };
+    },
+    view: async (source, repo, kind, number) => {
+      asked.push(`view ${source} ${repo} ${kind} ${number}`);
+      return { item: { number, title: "Fix the totals", state: "open", url: `https://github.com/${repo}/pull/${number}`, labels: [], author: "kit", created: 0, updated: 0, checks: null, head: "kit/fix-totals", same: true, from: repo }, body: "", comments: [], checks: [] };
+    },
+  };
+  const t = await setup({ pulls });
+  const id = await t.startIn("Fix the totals");
+  const key = t.ss.chatKey(id)!;
+  t.emit(id, { event: "turn.start" });
+  t.emit(id, { event: "tool.start", tool_id: "t1", name: "terminal", detail: "gh pr create --fill" });
+  t.emit(id, { event: "tool.end", tool_id: "t1", name: "", ok: true, ms: 900, command: "gh pr create --fill", output: "https://github.com/baanmali/preorder/pull/12\n" });
+  await new Promise((r) => setTimeout(r, 0));
+  await new Promise((r) => setTimeout(r, 0));
+  // read where the lane works, and one view of the address it printed
+  expect(asked).toEqual([`remote ${laneDir("kit/fix-totals")}`, "view github baanmali/preorder prs 12"]);
+  expect(chatPullOf(key)).toMatchObject({ repo: "baanmali/preorder", number: 12, state: "open" });
+  expect(chatOfPull("github", "baanmali/preorder", 12)).toBe(key);
+  t.ss.close(id);
+  expect(chatPullOf(key)).toBeNull();
+  // a store given no Tasks host reads nothing
+  const quiet = await setup();
+  const q = await quiet.startIn("Fix the totals");
+  quiet.emit(q, { event: "tool.end", tool_id: "t1", name: "", ok: true, ms: 900, command: "gh pr create --fill", output: "https://github.com/baanmali/preorder/pull/12\n" });
+  await new Promise((r) => setTimeout(r, 0));
+  expect(chatPullOf(quiet.ss.chatKey(q))).toBeNull();
 });
 
 test("a test run in the developer's folder is not the lane's", async () => {

@@ -4,9 +4,11 @@
 import "../parts/skills.css";
 import "../parts/attach.css";
 import "./box.css";
+import { useState } from "react";
 import { t } from "../../i18n";
 import { folderLabel, type Member } from "./context";
 import { Icon } from "../../ui/icons";
+import { chipWords, dropCarried, refusalWords, scopeRefusal, type Carried, type Scope } from "./carry";
 
 const FolderMark = () => (
   <Icon name="folder" />
@@ -57,5 +59,67 @@ export function MentionPicker({ items, active, onPick, onHover }: { items: Membe
         <div className="sk-none">{t("box.mentionNone")}</div>
       )}
     </div>
+  );
+}
+
+/** What this chat's box carries besides files and folders (item 97, carry.ts): a note on a selection, as “first words…” · the
+ *  note, and another chat's context, as its title, which opens to show exactly the text that goes. A chip made under another
+ *  shop or account is red and says it will not be sent here; × takes any chip out. */
+export function CarriedChips({ chatKey, list, scope, onRemoved }: { chatKey: string; list: readonly Carried[]; scope: Scope; onRemoved?: () => void }) {
+  const [open, setOpen] = useState<string | null>(null);
+  if (!list.length) return null;
+  const shown = list.find((c) => c.id === open && c.kind === "thread");
+  return (
+    <>
+      <div className="att-chips" data-testid="carry-chips">
+        {list.map((c) => {
+          const why = refusalWords(scopeRefusal(c.scope, scope));
+          const words = chipWords(c);
+          return (
+            <div key={c.id} className={`att-chip bx-carry${why ? " bad" : ""}${open === c.id ? " on" : ""}`} title={why ? `${words} · ${why}` : words} data-testid="carry-chip" data-kind={c.kind} data-refused={why ? "true" : undefined}>
+              <span className="att-thumb att-badge" aria-hidden="true">
+                <Icon name={c.kind === "note" ? "pencil" : "message"} />
+              </span>
+              {c.kind === "thread" ? (
+                <button type="button" className="bx-carry-n" aria-expanded={open === c.id} onClick={() => setOpen((o) => (o === c.id ? null : c.id))} data-testid="carry-open">
+                  {words}
+                </button>
+              ) : (
+                <span className="att-name bx-carry-n">{words}</span>
+              )}
+              {why && (
+                <span className="att-size" data-testid="carry-refused">
+                  {why}
+                </span>
+              )}
+              <button
+                type="button"
+                className="att-x"
+                aria-label={t("att.removeOf", { name: words })}
+                onClick={() => {
+                  if (open === c.id) setOpen(null);
+                  dropCarried(chatKey, c.id);
+                  onRemoved?.();
+                }}
+                data-testid="carry-remove"
+              >
+                ×
+              </button>
+            </div>
+          );
+        })}
+      </div>
+      {shown && shown.kind === "thread" && (
+        <div className="bx-ctx" role="region" aria-label={shown.title} data-testid="carry-panel">
+          <p className="bx-ctx-note">{t("carry.sees")}</p>
+          <pre className="bx-ctx-text" tabIndex={0} data-testid="carry-text">
+            {shown.text}
+          </pre>
+          <button type="button" className="card-btn" onClick={() => setOpen(null)} data-testid="carry-close">
+            {t("carry.close")}
+          </button>
+        </div>
+      )}
+    </>
   );
 }

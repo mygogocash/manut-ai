@@ -92,6 +92,52 @@ export function repoOk(source: CliSource, repo: string): boolean {
   return n && parts.every((p) => /^[A-Za-z0-9._-]{1,100}$/.test(p) && !p.startsWith("-") && !p.startsWith("."));
 }
 
+// ---- Tasks › Pull requests (item 100): the open requests of the person's projects, by how ready each is to merge ----------
+// (src-tauri/src/pulls.rs)
+
+/** A request as the Pull requests list shows it: Tasks' row and what its readiness is read from. */
+export interface PullRow extends TaskItem {
+  /** `approved`, `changes` (changes asked), `required` (a review is still needed), or "" (none asked, or the host did not say) */
+  review: "approved" | "changes" | "required" | "";
+  /** the host says the branch conflicts with its base */
+  conflict: boolean;
+  /** the branch it would merge into */
+  base: string;
+}
+
+export interface PullBoard {
+  items: PullRow[];
+  more: boolean;
+  /** when the list was last read or confirmed by the host, in seconds since 1970 */
+  at: number;
+}
+
+export interface FileCount {
+  path: string;
+  additions: number;
+  deletions: number;
+}
+
+/** One request opened in the app: its description as plain text, its checks, and its changed files and counts (null: the
+ *  host did not say). */
+export interface PullDetail {
+  pull: PullRow;
+  body: string;
+  checks: TaskCheck[];
+  files: FileCount[];
+  additions: number | null;
+  deletions: number | null;
+  changed: number | null;
+}
+
+/** The merge methods a repository allows; `read`: the host said (else all three, and the host refuses one it does not allow). */
+export interface MergeMethods {
+  merge: boolean;
+  squash: boolean;
+  rebase: boolean;
+  read: boolean;
+}
+
 // ---- Tasks › 나 (Me): my pull requests, reviews, issues and mentions across repositories, per GitHub account --------
 // (src-tauri/src/gh_me.rs)
 

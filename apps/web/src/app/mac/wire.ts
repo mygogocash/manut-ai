@@ -33,6 +33,8 @@ export interface ApprovalAsk {
   readonly ts: number;
   readonly title: string;
   readonly command: string;
+  /// The command is longer than the Mac sends a phone: `command` is its start, and it is allowed only on the Mac.
+  readonly long?: true;
   readonly cwd?: string;
   readonly plan?: string;
   readonly from?: string;
@@ -134,7 +136,9 @@ export function readAsk(value: unknown): AskView | null {
   if (o.kind === "approval") {
     const title = str(o.title);
     const command = str(o.command);
-    const offers = strs(o.offers)?.filter((x): x is PhoneOption => x === "once" || x === "deny");
+    // A command the Mac could not send whole is never allowed from here, whatever the offers say.
+    const long = o.long === true;
+    const offers = strs(o.offers)?.filter((x): x is PhoneOption => x === "deny" || (x === "once" && !long));
     if (title === null || command === null || !offers) return null;
     const outcome: ApprovalAsk["outcome"] | null = o.outcome === "allowed" || o.outcome === "declined" || o.outcome === "expired" ? o.outcome : null;
     return {
@@ -145,6 +149,7 @@ export function readAsk(value: unknown): AskView | null {
       ts,
       title,
       command,
+      ...(long ? { long: true as const } : {}),
       ...optional("cwd", str(o.cwd)),
       ...optional("plan", str(o.plan)),
       ...optional("from", from),

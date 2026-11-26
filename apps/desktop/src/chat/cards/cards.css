@@ -69,6 +69,34 @@
   overflow-wrap: anywhere;
   max-height: 172px;
   overflow-y: auto;
+  /* Since item 117 the command is whole, so a long one has more below the fold: its scrollbar is always drawn, thin and in
+     the app's scrollbar colour, so a person sees there is more to read before Allow once. A styled ::-webkit-scrollbar is
+     a permanent bar in WebKit, WebView2 and WebKitGTK; the standard scrollbar-width and scrollbar-color are left off, since
+     where set they win and leave an overlay bar that macOS hides until scrolled. */
+  overscroll-behavior: contain;
+}
+.card-cmd::-webkit-scrollbar {
+  width: 6px;
+}
+.card-cmd::-webkit-scrollbar-track {
+  background: transparent;
+}
+.card-cmd::-webkit-scrollbar-thumb {
+  border-radius: 3px;
+  background: var(--scrollbar);
+}
+/* More of the command below the fold: its lower edge fades into the block, as a long list of agents does (.ss-scroll.more),
+   so it reads as one that scrolls; gone once it is scrolled to its end (CommandBlock). The fade sits over the padding and
+   the last line's lower half, and adds no text, so what is copied or read aloud is the command alone. */
+.card-cmd.more::after {
+  content: "";
+  position: sticky;
+  bottom: -12px;
+  display: block;
+  height: 28px;
+  margin: -28px -14px -12px;
+  background: linear-gradient(to bottom, transparent, var(--soft));
+  pointer-events: none;
 }
 /* A browser write's sentence names the site, the page, the form and every value it will type, and is read whole before it
    is approved: its block grows with it, with no height it is cut at and nothing scrolled out of sight. */

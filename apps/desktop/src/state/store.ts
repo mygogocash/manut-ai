@@ -1,5 +1,6 @@
 // The whole app view model: one reducer, one store, one React hook. UI nodes only read this and call
 // its actions; they never edit this file.
+import { bareText } from "../chat/box/carry";
 import { SESSIONS_ENTRY } from "../sessions/entry";
 import { useSyncExternalStore } from "react";
 import type { BridgeStatus } from "../lib/bridge";
@@ -11,6 +12,7 @@ import { bringToFront, createNoteGate, noteFor, sessionNote, sessionRings, showN
 import { noteAsk } from "../chat/cards/askNote";
 import { settleApproval } from "../chat/cards/respond";
 import { appSounds, soundFor, type SoundBoard } from "../lib/sounds";
+import { maskCommand } from "../lib/secrets";
 import { promptText } from "../chat/parts/attachFiles";
 import { findTokens, toWire } from "../chat/parts/skillTokens";
 import { forBots, parseResume, RESUME_KEY, type ResumeSnap } from "../app/resume";
@@ -1047,7 +1049,7 @@ export type Action =
   | { type: "hello"; hello: HelloResult }
   | { type: "error"; message: string | null }
   | { type: "bots"; bots: Bot[] }
-  | { type: "select"; bot: string }
+  | { type: "select"; bot: string; behind?: boolean }
   | { type: "chat.opened"; bot: string; res: ChatOpenResult; now: number; since?: number }
   /** Automation answers that came in while manut was closed (or not attached): `count` more unread. */
   | { type: "watch.missed"; bot: string; count: number }
@@ -1506,7 +1508,10 @@ export function reduce(state: AppState, a: Action): AppState {
     case "bots":
       return { ...state, bots: a.bots };
     case "select":
-      return { ...state, selectedBot: a.bot, unread: { ...state.unread, [a.bot]: 0 }, ui: { ...state.ui, view: "chat", thread: null } };
+      // `behind`: the member is chosen behind the page shown, which stays (the app starting while the person already opened one)
+      return a.behind
+        ? { ...state, selectedBot: a.bot }
+        : { ...state, selectedBot: a.bot, unread: { ...state.unread, [a.bot]: 0 }, ui: { ...state.ui, view: "chat", thread: null } };
     case "ui.thread":
       return {
         ...state,
@@ -2063,9 +2068,10 @@ export function askFrom(state: AppState, key: string): string {
   return chatRoute(key)?.label ?? state.bots.find((b) => b.name === key)?.display_name ?? key;
 }
 
-/** One plain line for an ask: "Allow `rm -rf build/`?" or the (first) question. */
+/** One plain line for an ask: "Allow `rm -rf build/`?" or the (first) question. A command's keys are masked as on its
+ *  card (maskCommand), never anything else in it; a browser write's sentence is as typed. */
 export function askText(it: ApprovalItem | ClarifyItem): string {
-  if (it.kind === "approval") return it.command ? tr("ask.allowCmd", { cmd: `\`${it.command}\`` }) : it.title || tr("ask.allowThis");
+  if (it.kind === "approval") return it.command ? tr("ask.allowCmd", { cmd: `\`${it.whole ? it.command : maskCommand(it.command)}\`` }) : it.title || tr("ask.allowThis");
   const n = it.questions?.length ?? 0;
   return n > 1 ? tr("ask.questions", { n, first: it.questions![0].question }) : it.question;
 }
@@ -2319,6 +2325,9 @@ export interface Actions {
   newThreadWith(bot: string, first: string, away?: boolean): Promise<string | null>;
   /** Show thread `thread` of `bot` (reads its messages the first time); null = the bot's main chat. */
   openThread(bot: string, thread: string | null): Promise<void>;
+  /** A thread's messages as the runtime keeps them, read and nothing more: no chat opens, nothing in the store changes (item 97,
+   *  another chat's context brought into a box). */
+  readThread(bot: string, thread: string): Promise<{ role: "user" | "assistant"; text: string }[]>;
   /** Send in a thread; the first message names it. `how` as `send`'s. */
   threadSend(bot: string, thread: string, text: string, how?: FollowUp): Promise<void>;
   threadInterrupt(bot: string, thread: string): Promise<void>;
@@ -2712,11 +2721,11 @@ export function createStore(bridge: BridgeLike, opts: StoreOptions = {}): Store 
     setRoster([...(roster ?? []), ...seed.filter((n) => !roster?.includes(n))]);
   };
 
-  const selectBot = async (bot: string) => {
+  const selectBot = async (bot: string, behind = false) => {
     // the open chat always has its row: a bot opened from Needs you, an @mention or Settings joins the list
     if (state.ui.roster && state.bots.some((b) => b.name === bot)) listBot(bot, true);
-    dispatch({ type: "select", bot });
-    markWatchSeen(bot);
+    dispatch({ type: "select", bot, ...(behind ? { behind: true } : {}) });
+    if (!behind) markWatchSeen(bot);
     const jobs: Promise<unknown>[] = [loadElsewhere(bot), loadRoutines(bot), loadModels(bot)];
     if (!state.threads[bot]) jobs.push(loadThreads(bot));
     if (!state.chats[bot]?.loaded) jobs.push(loadChat(bot).catch(fail));
@@ -2942,10 +2951,16 @@ export function createStore(bridge: BridgeLike, opts: StoreOptions = {}): Store 
               ? back.bot
               : listed[0];
         void loadAutomations();
+        // The person may already have opened a page while the app was connecting (the side menu answers at once): the
+        // first member is then chosen behind that page, and nothing below takes the person away from it. Before this, the
+        // start chose the member's chat and then Home, and undid the click.
+        const moved = state.ui.view !== "chat" || state.ui.thread !== null || !!state.ui.session;
         // the panel and view come back as the bot is selected, before its chat and lists load: put back only once
         // those reads ended, a click on the panel in the meantime (the places chip, ⌘.) was undone by it
-        const loading = first ? selectBot(first) : Promise.resolve();
-        if (back?.bot && back.bot === first) {
+        const loading = first ? selectBot(first, moved) : Promise.resolve();
+        if (moved) {
+          // the page the person opened stays; what was saved before the restart is not put back over it
+        } else if (back?.bot && back.bot === first) {
           const { panelOpen, panelTab, runsFull, runId } = back;
           // a TERMINALS session comes back open (sessions/entry.ts)
           const session = SESSIONS_ENTRY ? back.session : null;
@@ -2954,7 +2969,7 @@ export function createStore(bridge: BridgeLike, opts: StoreOptions = {}): Store 
         // Home is where the app starts: on a first run, after a restart that left Home open, and when the member saved
         // before the restart is gone. The first member is still chosen above, so its chat, lists and drafts load behind
         // Home. A chat or a terminal session the person left open comes back instead (resume.ts).
-        if (state.ui.view === "chat" && (!back?.bot || back.view === "home")) dispatch({ type: "ui.page", page: "home" });
+        if (!moved && state.ui.view === "chat" && (!back?.bot || back.view === "home")) dispatch({ type: "ui.page", page: "home" });
         await loading;
         // Load the other listed chats too, so the sidebar can show previews and unread counts. A profile outside
         // the list is not opened as a chat (that would make its Bot Chat, and list it): it is only asked for the
@@ -3452,6 +3467,10 @@ export function createStore(bridge: BridgeLike, opts: StoreOptions = {}): Store 
       if (thread && first.trim()) await actions.threadSend(bot, thread, first);
       return thread;
     },
+    async readThread(bot, thread) {
+      const res = await threadReq("thread.open", { bot, thread });
+      return (res.messages ?? []).flatMap((m) => (m.role === "user" || m.role === "assistant" ? [{ role: m.role, text: m.text }] : []));
+    },
     async openThread(bot, thread) {
       if (state.ui.roster && state.bots.some((b) => b.name === bot)) listBot(bot, true);
       if (!thread) return selectBot(bot);
@@ -3467,7 +3486,7 @@ export function createStore(bridge: BridgeLike, opts: StoreOptions = {}): Store 
       dispatch({ type: "local.user", bot: key, id, text: t, now: now() });
       const row = (state.threads[bot] ?? []).find((r) => r.thread === thread);
       // the row reads the first words at once; Hermes' own title replaces them when it lands
-      if (row && !row.title) dispatch({ type: "thread.upsert", bot, row: { ...row, title: firstWords(text), last: now() / 1000 } });
+      if (row && !row.title) dispatch({ type: "thread.upsert", bot, row: { ...row, title: firstWords(bareText(text)), last: now() / 1000 } });
       try {
         await bridge.request("chat.send", { bot, session: thread, text: text.trim() });
         dispatch({ type: "send.ok", bot: key, id, now: now() });
@@ -3494,7 +3513,7 @@ export function createStore(bridge: BridgeLike, opts: StoreOptions = {}): Store 
       const sent = promptText(text, results);
       dispatch({ type: "local.user", bot: key, id, text: t, now: now(), files: shown, sent });
       const row = (state.threads[bot] ?? []).find((r) => r.thread === thread);
-      if (row && !row.title) dispatch({ type: "thread.upsert", bot, row: { ...row, title: firstWords(t || files[0].name), last: now() / 1000 } });
+      if (row && !row.title) dispatch({ type: "thread.upsert", bot, row: { ...row, title: firstWords(bareText(t) || files[0].name), last: now() / 1000 } });
       try {
         await bridge.request("chat.send", { bot, session: thread, text: sent });
         dispatch({ type: "send.ok", bot: key, id, now: now() });

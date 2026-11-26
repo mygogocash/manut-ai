@@ -329,21 +329,44 @@ pub struct Status {
 const SECRETS: &str = include_str!("../../src/lib/secrets.json");
 
 struct Secrets {
-    /// replaced whole, first: private key blocks, provider-prefixed keys, JSON web tokens
-    whole: Vec<Regex>,
+    /// replaced whole, first: private key blocks, provider-prefixed keys, JSON web tokens; with its kind: `word` (the match
+    /// must stand alone as a word), `block` (a private key block, which a command masks through `blocks` instead), or ""
+    whole: Vec<(Regex, String)>,
+    /// a command's private key blocks: (pattern with (BEGIN)(body)(END) groups, the line break before the mask, no END)
+    blocks: Vec<(Regex, String, bool)>,
+    block_begin: Regex,
+    block_end: Regex,
     /// a fixed-length family broken over lines: (pattern, body length)
     split: Vec<(Regex, usize)>,
     tokens: Regex,
+    /// `tokens` as one word, for a command
+    word: Regex,
     /// three groups each: the first and third kept, the second masked
     kept: Vec<Regex>,
     assigned: Regex,
     mask: String,
+    /// a character that, glued to a token, makes it part of a longer name
+    edge: Regex,
+    /// what a token's body holds: a capital or a digit; or the token has a provider's exact shape and length
+    needs: Regex,
+    exact: Regex,
+    /// a prefix that ordinary names start with too (`sk-`), its named forms, and the run of letters and digits it needs
+    wordlike: Regex,
+    named: Regex,
+    run: Regex,
+    /// a token's prefix, at the start
+    prefix: Regex,
+    /// a character the shell acts on: in a command, a masked value stops at it
+    shell: Regex,
+    /// a value that is a reference (`${DB_PASSWORD}`), and a word that says there is none (`none`): no key
+    reference: Regex,
+    plain: Regex,
 }
 
-/// A pattern of secrets.json as the page's JavaScript reads it: `{names}` filled in, its flags (`i`, `m`), and `\b` an ASCII
-/// word boundary, so a token right after Thai text, which JavaScript sees as no word, is masked here too.
-fn pattern(p: &str, flags: &str, names: &str) -> Regex {
-    RegexBuilder::new(&p.replace("{names}", names).replace(r"\b", r"(?-u:\b)"))
+/// A pattern of secrets.json as the page's JavaScript reads it: `{names}` and `{prefixes}` filled in, its flags (`i`, `m`),
+/// and `\b` an ASCII word boundary, so a token right after Thai text, which JavaScript sees as no word, is masked here too.
+fn pattern(p: &str, flags: &str, names: &str, prefixes: &str) -> Regex {
+    RegexBuilder::new(&p.replace("{names}", names).replace("{prefixes}", prefixes).replace(r"\b", r"(?-u:\b)"))
         .case_insensitive(flags.contains('i'))
         .multi_line(flags.contains('m'))
         .build()
@@ -356,23 +379,241 @@ fn secrets() -> &'static Secrets {
         let v: Value = serde_json::from_str(SECRETS).expect("secrets.json");
         let get = |k: &str| v[k].as_str().expect("secrets.json key").to_string();
         let names = get("names");
-        let list = |k: &str| -> Vec<Regex> {
-            v[k].as_array().expect("secrets.json list").iter()
-                .map(|e| pattern(e[0].as_str().expect("pattern"), e[1].as_str().expect("flags"), &names))
-                .collect()
-        };
-        let split = v["split"].as_array().expect("secrets.json split").iter()
-            .map(|e| (pattern(e[0].as_str().expect("split pattern"), "", &names), e[1].as_u64().expect("split length") as usize))
+        let prefixes = get("prefixes");
+        let one = |k: &str| pattern(&get(k), "", &names, &prefixes);
+        let entries = |k: &str| v[k].as_array().expect("secrets.json list").clone();
+        let compiled = |e: &Value| pattern(e[0].as_str().expect("pattern"), e[1].as_str().expect("flags"), &names, &prefixes);
+        let split = entries("split").iter()
+            .map(|e| (pattern(e[0].as_str().expect("split pattern"), "", &names, &prefixes), e[1].as_u64().expect("split length") as usize))
             .collect();
         Secrets {
-            whole: list("whole"),
+            whole: entries("whole").iter().map(|e| (compiled(e), e.get(2).and_then(Value::as_str).unwrap_or("").to_string())).collect(),
+            blocks: entries("blocks")
+                .iter()
+                .map(|e| (pattern(e[0].as_str().expect("block pattern"), e.get(3).and_then(Value::as_str).unwrap_or(""), &names, &prefixes), e[1].as_str().expect("block break").to_string(), e.get(2).and_then(Value::as_str) == Some("unended")))
+                .collect(),
+            block_begin: one("blockBegin"),
+            block_end: one("blockEnd"),
             split,
-            tokens: pattern(&get("tokens"), "", &names),
-            kept: list("kept"),
-            assigned: pattern(&get("assigned"), "i", &names),
+            tokens: one("tokens"),
+            word: one("word"),
+            kept: entries("kept").iter().map(compiled).collect(),
+            assigned: pattern(&get("assigned"), "i", &names, &prefixes),
             mask: get("mask"),
+            edge: one("edge"),
+            needs: one("needs"),
+            exact: one("exact"),
+            wordlike: one("wordlike"),
+            named: one("named"),
+            run: one("run"),
+            prefix: pattern(&format!("^{prefixes}"), "", &names, &prefixes),
+            shell: one("shell"),
+            reference: one("ref"),
+            plain: pattern(&get("plain"), "i", &names, &prefixes),
         }
     })
+}
+
+/// Whether the match `m` in `t` stands alone: no letter, digit, `_` or `-` glued to either side, so a token inside a
+/// longer name (`build-sk-…`) is the name's and stays (src/lib/secrets.ts `alone`).
+fn alone(s: &Secrets, t: &str, m: regex::Match) -> bool {
+    let touches = |c: Option<char>| c.is_some_and(|c| s.edge.is_match(c.encode_utf8(&mut [0; 4])));
+    !touches(t[..m.start()].chars().next_back()) && !touches(t[m.end()..].chars().next())
+}
+
+/// Whether a `tokens` match has a key's shape (src/lib/secrets.ts `keyShaped`).
+fn key_shaped(s: &Secrets, m: &str) -> bool {
+    if s.exact.is_match(m) {
+        return true;
+    }
+    if s.wordlike.is_match(m) {
+        return s.named.is_match(m) || s.run.find_iter(m).any(|r| s.needs.is_match(r.as_str()));
+    }
+    s.needs.is_match(&s.prefix.replace(m, ""))
+}
+
+/// Whether a named value is a key at all: not a reference and not a word that says there is none (src/lib/secrets.ts `aKey`).
+fn a_key(s: &Secrets, v: &str) -> bool {
+    !s.reference.is_match(v) && !s.plain.is_match(v)
+}
+
+/// How much of a value may be masked in a command: up to the first character the shell acts on.
+fn up_to(s: &Secrets, v: &str) -> usize {
+    s.shell.find(v).map_or(v.len(), |m| m.start())
+}
+
+/// `t`'s `whole` matches masked; in a command (`command`), not a key block, which [`mask_blocks`] masked first.
+fn mask_whole(s: &Secrets, mut t: String, command: bool) -> String {
+    for (rx, kind) in &s.whole {
+        if command && kind == "block" {
+            continue;
+        }
+        t = rx.replace_all(&t, |c: &regex::Captures| {
+            let m = c.get(0).expect("match");
+            if kind == "word" && !alone(s, &t, m) { m.as_str().to_string() } else { s.mask.clone() }
+        }).into_owned();
+    }
+    t
+}
+
+/// A heredoc still to come or being read: its terminator word, and whether tabs before it are allowed (`<<-`).
+struct Heredoc {
+    word: String,
+    dash: bool,
+}
+
+/// One line read as the shell reads it, from quote state `quote` (src/lib/secrets.ts `scanLine`): the quote open at its end and
+/// the heredocs it begins, or None when it holds what this reading cannot follow. `stop` (a byte offset) ends it early.
+fn scan_line(l: &str, mut quote: Option<char>, stop: usize) -> Option<(Option<char>, Vec<Heredoc>)> {
+    static WORD: OnceLock<Regex> = OnceLock::new();
+    let word = WORD.get_or_init(|| Regex::new(r#"^<<(-?)[ \t]*(?:'([^']+)'|"([^"]+)"|\\?([A-Za-z0-9_]+))"#).expect("heredoc"));
+    let mut heredocs = Vec::new();
+    let b: Vec<(usize, char)> = l.char_indices().take_while(|(i, _)| *i < stop).collect();
+    let mut k = 0;
+    while k < b.len() {
+        let (i, c) = b[k];
+        let next = b.get(k + 1).map(|x| x.1);
+        if quote == Some('\'') {
+            if c == '\'' {
+                quote = None;
+            }
+            k += 1;
+            continue;
+        }
+        if c == '`' || (c == '$' && matches!(next, Some('(') | Some('{'))) {
+            return None;
+        }
+        if c == '\\' {
+            k += 2;
+            continue;
+        }
+        if quote == Some('"') {
+            if c == '"' {
+                quote = None;
+            }
+            k += 1;
+            continue;
+        }
+        if c == '\'' || c == '"' {
+            quote = Some(c);
+        } else if c == '#' && (k == 0 || b[k - 1].1.is_whitespace()) {
+            break;
+        } else if c == '<' && next == Some('<') && b.get(k + 2).map(|x| x.1) != Some('<') {
+            let m = word.captures(&l[i..])?;
+            let w = m.get(2).or_else(|| m.get(3)).or_else(|| m.get(4)).map(|x| x.as_str().to_string()).unwrap_or_default();
+            heredocs.push(Heredoc { word: w, dash: &m[1] == "-" });
+            let past = i + m[0].len();
+            while k < b.len() && b[k].0 < past {
+                k += 1;
+            }
+            continue;
+        }
+        k += 1;
+    }
+    Some((quote, heredocs))
+}
+
+/// How the shell reads `text` up to the start of its line at byte `line` (src/lib/secrets.ts `readTo`): the quote still open
+/// there and the heredoc whose body that line is in, or None when the reading cannot be followed.
+fn read_to(text: &str, line: usize) -> Option<(Option<char>, Option<Heredoc>)> {
+    let mut quote = None;
+    let mut queue: std::collections::VecDeque<Heredoc> = std::collections::VecDeque::new();
+    let mut body: Option<Heredoc> = None;
+    let mut at = 0;
+    while at < line {
+        let end = text[at..].find('\n').map_or(text.len(), |i| at + i);
+        let l = text[at..end].strip_suffix('\r').unwrap_or(&text[at..end]);
+        if let Some(h) = &body {
+            let shown = if h.dash { l.trim_start_matches('\t') } else { l };
+            if shown == h.word {
+                body = queue.pop_front();
+            }
+        } else {
+            let (q, found) = scan_line(l, quote, l.len())?;
+            quote = q;
+            if !found.is_empty() {
+                if quote.is_some() {
+                    return None;
+                }
+                queue.extend(found);
+                body = queue.pop_front();
+            }
+        }
+        at = end + 1;
+    }
+    Some((quote, body))
+}
+
+/// Whether the shell reads the key block from byte `from` to `to` of `text` as data, never as commands (src/lib/secrets.ts
+/// `shellData`): in a quoted string opened on its BEGIN line, still open at its end and closing after it, or in a heredoc's body
+/// whose terminator line does not come before its end. Anything else, and anything unsure, is no.
+fn shell_data(text: &str, from: usize, to: usize) -> bool {
+    let line = text[..from].rfind('\n').map_or(0, |i| i + 1);
+    let Some((quote, heredoc)) = read_to(text, line) else { return false };
+    if let Some(h) = heredoc {
+        let last = text[to..].find('\n').map_or(text.len(), |i| to + i);
+        return !text[line..last].split('\n').any(|l| {
+            let l = l.strip_suffix('\r').unwrap_or(l);
+            (if h.dash { l.trim_start_matches('\t') } else { l }) == h.word
+        });
+    }
+    if quote.is_some() {
+        return false;
+    }
+    let end = text[line..].find('\n').map_or(text.len(), |i| line + i);
+    let Some((Some(q), found)) = scan_line(&text[line..end], None, from - line) else { return false };
+    if !found.is_empty() {
+        return false;
+    }
+    let mut rest = text[to..].chars();
+    while let Some(c) = rest.next() {
+        if q == '\'' {
+            if c == '\'' {
+                return true;
+            }
+            continue;
+        }
+        if c == '`' || c == '$' {
+            return false;
+        }
+        if c == '\\' {
+            rest.next();
+        } else if c == '"' {
+            return true;
+        }
+    }
+    false
+}
+
+/// A command's private key blocks whose body holds only key characters, where the shell reads them as data ([`shell_data`]):
+/// the BEGIN and END lines stay, the body is one mask line (src/lib/secrets.ts `maskCommand`). A block with no END of its own is
+/// masked only when none comes before the next BEGIN.
+fn mask_blocks(s: &Secrets, mut t: String) -> String {
+    for (rx, sep, open) in &s.blocks {
+        t = rx.replace_all(&t, |c: &regex::Captures| {
+            let m = c.get(0).expect("match");
+            if *open {
+                let rest = &t[m.end()..];
+                let scope = s.block_begin.find(rest).map_or(rest, |b| &rest[..b.start()]);
+                if s.block_end.is_match(scope) {
+                    return m.as_str().to_string();
+                }
+            }
+            if !shell_data(&t, m.start(), m.end()) {
+                return m.as_str().to_string();
+            }
+            format!("{}{}{}{}", &c[1], sep, s.mask, &c[3])
+        }).into_owned();
+    }
+    t
+}
+
+/// `t`'s token matches of `rx` masked, when they stand alone and have a key's shape.
+fn mask_tokens(s: &Secrets, rx: &Regex, t: String) -> String {
+    rx.replace_all(&t, |c: &regex::Captures| {
+        let m = c.get(0).expect("match");
+        if alone(s, &t, m) && key_shaped(s, m.as_str()) { s.mask.clone() } else { m.as_str().to_string() }
+    }).into_owned()
 }
 
 /// A `split` match: the prefix and the body's pieces up to exactly `n` token characters become `mask` (the pieces
@@ -394,21 +635,48 @@ fn split_token(c: &regex::Captures, n: usize, mask: &str) -> String {
 }
 
 /// `t` with every token-like string replaced by `••••` (src/lib/secrets.ts `maskSecrets`, step for step). A secret with a name
-/// keeps its name and what frames it (`token=••••`, `"password": "••••"`, `Authorization: Bearer ••••`).
+/// keeps its name and what frames it (`token=••••`, `"password": "••••"`, `Authorization: Bearer ••••`). For text that never
+/// runs: what an approval shows goes through [`mask_command`].
 pub fn mask_secrets(t: &str) -> String {
     let s = secrets();
-    let mut t = t.to_string();
-    for rx in &s.whole {
-        t = rx.replace_all(&t, regex::NoExpand(&s.mask)).into_owned();
-    }
+    let mut t = mask_whole(s, t.to_string(), false);
     for (rx, n) in &s.split {
         t = rx.replace_all(&t, |c: &regex::Captures| split_token(c, *n, &s.mask)).into_owned();
     }
-    t = s.tokens.replace_all(&t, regex::NoExpand(&s.mask)).into_owned();
+    t = mask_tokens(s, &s.tokens, t);
     for rx in &s.kept {
-        t = rx.replace_all(&t, |c: &regex::Captures| format!("{}{}{}", &c[1], s.mask, &c[3])).into_owned();
+        t = rx.replace_all(&t, |c: &regex::Captures| if a_key(s, &c[2]) { format!("{}{}{}", &c[1], s.mask, &c[3]) } else { c[0].to_string() }).into_owned();
     }
-    s.assigned.replace_all(&t, |c: &regex::Captures| format!("{}={}", &c[1], s.mask)).into_owned()
+    s.assigned.replace_all(&t, |c: &regex::Captures| if a_key(s, &c[0][c[1].len() + 1..]) { format!("{}={}", &c[1], s.mask) } else { c[0].to_string() }).into_owned()
+}
+
+/// One line of a command, masked as [`mask_command`] says. A value that already holds the mask (a key block's) is left as it is.
+fn command_line(s: &Secrets, line: &str) -> String {
+    let mut t = mask_tokens(s, &s.word, mask_whole(s, line.to_string(), true));
+    for rx in &s.kept {
+        t = rx.replace_all(&t, |c: &regex::Captures| {
+            let v = &c[2];
+            match if a_key(s, v) && !v.contains(s.mask.as_str()) { up_to(s, v) } else { 0 } {
+                0 => c[0].to_string(),
+                n => format!("{}{}{}{}", &c[1], s.mask, &v[n..], &c[3]),
+            }
+        }).into_owned();
+    }
+    s.assigned.replace_all(&t, |c: &regex::Captures| {
+        let v = &c[0][c[1].len() + 1..];
+        match if a_key(s, v) && !v.contains(s.mask.as_str()) { up_to(s, v) } else { 0 } {
+            0 => c[0].to_string(),
+            n => format!("{}={}{}", &c[1], s.mask, &v[n..]),
+        }
+    }).into_owned()
+}
+
+/// A command, or anything else an approval shows, with its keys masked and nothing else (src/lib/secrets.ts `maskCommand`,
+/// step for step): line by line, never joined across a blank, and a masked value stops at the first character the shell
+/// acts on, which is shown with what follows it.
+pub fn mask_command(t: &str) -> String {
+    let s = secrets();
+    mask_blocks(s, t.to_string()).split('\n').map(|l| command_line(s, l)).collect::<Vec<_>>().join("\n")
 }
 
 /// A text field of a CLI answer: control characters out, token-like strings masked.
@@ -542,7 +810,7 @@ pub(crate) fn gl_same_project(v: &Value) -> bool {
     matches!((id("source_project_id"), id("target_project_id")), (Some(a), Some(b)) if a == b)
 }
 
-fn gh_item(v: &Value, change: bool) -> Item {
+pub(crate) fn gh_item(v: &Value, change: bool) -> Item {
     let draft = v.get("isDraft").and_then(Value::as_bool).unwrap_or(false);
     let state = match text(v, "state").to_ascii_uppercase().as_str() {
         "MERGED" => "merged",
@@ -566,7 +834,7 @@ fn gh_item(v: &Value, change: bool) -> Item {
     }
 }
 
-fn gl_item(v: &Value, change: bool) -> Item {
+pub(crate) fn gl_item(v: &Value, change: bool) -> Item {
     let draft = v.get("draft").and_then(Value::as_bool).unwrap_or(false) || v.get("work_in_progress").and_then(Value::as_bool).unwrap_or(false);
     let state = match text(v, "state").as_str() {
         "merged" => "merged",
@@ -1358,6 +1626,26 @@ mod tests {
         for c in cases {
             assert_eq!(mask_secrets(c[0].as_str().unwrap()), c[1].as_str().unwrap(), "{c}");
         }
+        // what an approval shows (item 117): the command form, the same rows the page runs
+        let command = v["command"].as_array().unwrap();
+        assert!(command.len() > 25);
+        // a value also stops at a backslash; a key block on one line keeps its own, which escape only its masked characters;
+        // a key block's body becomes one line, so only its line breaks may go
+        let shell = |s: &str| s.chars().filter(|c| "`$()|;&<>{}\n".contains(*c)).collect::<String>();
+        let block = Regex::new(r"-{4,5} ?BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY").unwrap();
+        for c in command {
+            let (text, want) = (c[0].as_str().unwrap(), c[1].as_str().unwrap());
+            assert_eq!(mask_command(text), want, "{c}");
+        }
+        for c in command.iter().chain(cases) {
+            let text = c[0].as_str().unwrap();
+            let lines = |x: String| if block.is_match(text) { x.replace('\n', "") } else { x };
+            assert_eq!(lines(shell(&mask_command(text))), lines(shell(text)), "{c}");
+        }
+        // an sk- key of 32 lowercase hex, built here so no scanner reads the table as a live key
+        let key = format!("sk-{}", "0a1b2c3d".repeat(4));
+        assert_eq!(mask_secrets(&format!("deepseek {key} done")), "deepseek •••• done");
+        assert_eq!(mask_command(&format!("DEEPSEEK={key} pnpm test")), "DEEPSEEK=•••• pnpm test");
         // the verifier's V4 (PR #2908): a token broken by a line break, through parse_view
         let raw = serde_json::json!({"number": 1, "title": "safe", "body": format!("before ghp_XXXX\n{} after", "X".repeat(32))}).to_string();
         assert_eq!(parse_view(Source::Github, Kind::Issues, &raw).unwrap().body, "before •••• after");
