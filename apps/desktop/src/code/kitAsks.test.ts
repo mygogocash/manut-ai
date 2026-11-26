@@ -245,4 +245,17 @@ describe("Kit's dial for a lane in a folder of its own", () => {
     updateKitProjects((p) => addRule(p, ROOT, { words: ["pnpm", "add"] }));
     expect(kitAnswer({ ...asked("r6", "Run this command?", "pnpm add qrcode"), cwd: LANE }, ctx)).toEqual({ choice: "once", answer: { by: "rule" } });
   });
+
+  it("shows what a package.json script runs, for a script the command names but does not say", () => {
+    const pkg = JSON.stringify({ scripts: { "db:migrate": "node scripts/migrate.mjs --prod", build: "vite build", test: "vitest run" } });
+    const run = (line: string, cwd = LANE) => kitCard({ ...asked("r7", "Run this command?", line), cwd, tool: { kind: "command", name: "Bash", line, cwd } }, ctx, pkg);
+    expect(run("pnpm run db:migrate")?.script).toEqual({ name: "db:migrate", text: "node scripts/migrate.mjs --prod" });
+    expect(run("pnpm build")?.script).toEqual({ name: "build", text: "vite build" });
+    expect(run("npm test")?.script).toEqual({ name: "test", text: "vitest run" });
+    // not a script of this folder's package.json, or not one at all: no line
+    for (const line of ["pnpm --filter web build", "pnpm run nope", "pnpm add qrcode", "vitest run", "pnpm build && git push"]) expect([line, run(line)?.script]).toEqual([line, undefined]);
+    expect(run("pnpm build", `${LANE}/apps/web`)?.script).toBeUndefined();
+    // package.json not read yet: the card says what it always said
+    expect(kitCard({ ...asked("r8", "Run this command?", "pnpm run db:migrate"), cwd: LANE }, ctx)?.script).toBeUndefined();
+  });
 });

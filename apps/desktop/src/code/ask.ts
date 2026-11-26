@@ -12,7 +12,7 @@
 // not cover whole (a plan, a tool that is not a file tool, a path the shell cut short, a change that names no file)
 // is left as it is.
 import { kitDecide, type Connection, type KitAction, type KitDecision } from "@manut/member-grants";
-import { IN_GIT_DIR, folderOf, insideProject, readCommand, ruleMatches, type Rule, type Say, type Where } from "./command";
+import { IN_GIT_DIR, folderOf, guardedPath, insideProject, readCommand, ruleMatches, type Rule, type Say, type Where } from "./command";
 import type { KitProject } from "./project";
 import type { AskTool } from "../lib/protocol";
 
@@ -143,9 +143,10 @@ function readTool(tool: unknown, where: Where): AskRead | null {
   const outside = outsideOf(paths, at, []);
   let action: KitAction = t.kind === "delete" ? "delete" : "edit";
   let say: Say = t.kind === "delete" ? { key: "kit.say.delete" } : { key: "kit.say.edit", vars: { path: listed(paths, at) } };
-  // git's own folder holds its settings and hooks, which can make a later read run a program: a change there asks at
-  // every level
-  if (paths.some((p) => IN_GIT_DIR.test(p))) action = "unknown";
+  // git's own folder holds its settings and hooks, which can make a later read run a program, and the agents' settings
+  // and instructions, the hooks a tool runs by itself and package.json do the same (`guardedPath`): a change to one, a
+  // move into one or out of one included, asks at every level
+  if (paths.some((p) => IN_GIT_DIR.test(p) || guardedPath(p, at))) action = "unknown";
   // deleting the project, or a folder it is in, is no step any level lets Kit take alone
   if (t.kind === "delete" && paths.some((p) => {
     const abs = absolute(p, at);
@@ -169,7 +170,7 @@ function readWords(ask: AskWords, where: Where): AskRead | null {
     const outside = outsideOf(paths, at, []);
     // git's own folder holds its settings and hooks, which can make a later read run a program: a change there asks
     // at every level
-    const gitOwn = paths.some((p) => IN_GIT_DIR.test(p));
+    const gitOwn = paths.some((p) => IN_GIT_DIR.test(p) || guardedPath(p, at));
     return { what: "edit", action: gitOwn ? "unknown" : "edit", outside, folder: outside.length ? folderOf(outside[0], at) : null, saves: false, rule: null, say: { key: "kit.say.edit", vars: { path: list } } };
   }
   if (READ.test(ask.title)) {
