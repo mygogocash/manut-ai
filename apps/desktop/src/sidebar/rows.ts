@@ -31,7 +31,13 @@ export interface RowMark {
   /** Snoozed until its turn ends (item 94): the time it was snoozed. It is back when the turn ends, or at once when it asks. */
   untilDone?: number;
   settled?: true;
+  /** Settled by itself (item 94), and why: after `days` quiet days, or because its pull request merged. None: the person did it. */
+  why?: "quiet" | "merged";
+  days?: number;
   archived?: number;
+  /** When a mark last left the row (it was brought back, unpinned, woken, its snooze ran out): a row on its own place again. The
+   *  quiet days that settle a row by itself count from here too, so a row the person just brought back is not put away again. */
+  back?: number;
 }
 export type RowMarks = Readonly<Record<string, RowMark>>;
 
@@ -68,6 +74,11 @@ export function parseRowMarks(raw: string | null): Record<string, RowMark> {
       if (snoozed !== undefined) mark.snoozed = snoozed;
       if (untilDone !== undefined) mark.untilDone = untilDone;
       if (r.settled === true) mark.settled = true;
+      if (r.settled === true && (r.why === "quiet" || r.why === "merged")) mark.why = r.why;
+      const days = num(r.days);
+      if (mark.why === "quiet" && days !== undefined && Number.isInteger(days) && days > 0) mark.days = days;
+      const back = num(r.back);
+      if (back !== undefined) mark.back = back;
       if (archived !== undefined) mark.archived = archived;
       if (Object.keys(mark).length) out[key] = one(mark);
       if (Object.keys(out).length >= MAX) break;
@@ -85,7 +96,8 @@ function one(m: RowMark): RowMark {
   if (m.pinned !== undefined) return { pinned: m.pinned };
   if (m.snoozed !== undefined) return { snoozed: m.snoozed };
   if (m.untilDone !== undefined) return { untilDone: m.untilDone };
-  return m.settled ? { settled: true } : {};
+  if (m.settled) return { settled: true, ...(m.why ? { why: m.why } : {}), ...(m.days !== undefined ? { days: m.days } : {}) };
+  return m.back !== undefined ? { back: m.back } : {};
 }
 
 /** Whether a row is snoozed (until a time, or until its turn ends): what an ask wakes. */
@@ -116,7 +128,20 @@ export function arrange<T extends { key: string; needs?: boolean; working?: bool
 }
 
 /** A change to one row. */
-export type RowAction = { do: "pin" } | { do: "unpin" } | { do: "snooze"; until: number } | { do: "snoozeTurn" } | { do: "settle" } | { do: "wake" } | { do: "open" } | { do: "archive" } | { do: "restore" };
+export type RowAction =
+  | { do: "pin" }
+  | { do: "unpin" }
+  | { do: "snooze"; until: number }
+  | { do: "snoozeTurn" }
+  | { do: "settle" }
+  | { do: "autoSettle"; why: "quiet" | "merged"; days?: number }
+  | { do: "wake" }
+  | { do: "open" }
+  | { do: "archive" }
+  | { do: "restore" };
+
+/** A row with no mark but when one last left it: on its own place. */
+const bare = (m: RowMark | undefined): boolean => !m || Object.keys(m).every((k) => k === "back");
 
 /** `marks` with `action` done to `key` at `now`. The same object back when nothing changes. */
 export function applyRow(marks: RowMarks, key: string, action: RowAction, now: number): RowMarks {
@@ -139,6 +164,10 @@ export function applyRow(marks: RowMarks, key: string, action: RowAction, now: n
       // settling a settled row changes nothing (and so holds nothing to undo)
       next = was?.archived !== undefined || was?.settled ? was : { settled: true };
       break;
+    case "autoSettle":
+      // only a row on its own place: never over the person's pin, snooze, settle or archive
+      next = bare(was) ? { settled: true, why: action.why, ...(action.why === "quiet" && action.days ? { days: action.days } : {}) } : was;
+      break;
     case "wake":
       next = away(was) ? null : was ?? null;
       break;
@@ -154,6 +183,8 @@ export function applyRow(marks: RowMarks, key: string, action: RowAction, now: n
       break;
   }
   if (next === (was ?? null)) return marks;
+  // a mark that leaves a row notes when (`back`), so the quiet days that settle it by itself count from then
+  if (next === null && !bare(was)) next = { back: now };
   const rest = Object.fromEntries(Object.entries(marks).filter(([k]) => k !== key));
   return next ? { ...rest, [key]: next } : rest;
 }
@@ -225,15 +256,68 @@ export function wakeAll(marks: RowMarks, keys: readonly string[], now: number): 
 
 /** `marks` without the rows `alive` does not name (a lane or session that was closed) and without a snooze that has ended. */
 export function sweep(marks: RowMarks, now: number, alive: (key: string) => boolean): RowMarks {
-  const kept = Object.entries(marks).filter(([k, m]) => alive(k) && !(m.snoozed !== undefined && m.snoozed <= now));
-  return kept.length === Object.keys(marks).length ? marks : Object.fromEntries(kept);
+  let changed = false;
+  const kept: [string, RowMark][] = [];
+  for (const [k, m] of Object.entries(marks)) {
+    if (!alive(k)) changed = true;
+    // a snooze that ran out: the row is back, from the time it was due
+    else if (m.snoozed !== undefined && m.snoozed <= now) (changed = true), kept.push([k, { back: m.snoozed }]);
+    else kept.push([k, m]);
+  }
+  return changed ? Object.fromEntries(kept) : marks;
 }
 
 /** `marks` without the snoozes until a turn ends of the rows in `done`: rows listed now whose turn is not running (item 94). */
-export function finishAll(marks: RowMarks, done: readonly string[]): RowMarks {
+export function finishAll(marks: RowMarks, done: readonly string[], now: number): RowMarks {
   let out = marks;
-  for (const k of done) if (out[k]?.untilDone !== undefined) out = applyRow(out, k, { do: "wake" }, 0);
+  for (const k of done) if (out[k]?.untilDone !== undefined) out = applyRow(out, k, { do: "wake" }, now);
   return out;
+}
+
+// ---- settling by itself (item 94) -----------------------------------------------------------------------------------
+//
+// Two choices in Settings › General › Side menu (inbox.ts): a chat or a lane untouched for N days is marked Done for now (3 by
+// default, 0 is off), and a lane whose pull request the host says merged is marked Done for now (on by default). "Untouched" is no
+// message from either side and no ask waiting, counted from the last thing the app knows happened in it, or from when the person
+// last brought it back. A row the person marked in any way, one whose turn runs, one that asks something and the one open now are
+// never settled by this; a settled row loses nothing and comes back when it is opened or asks. The idea of settling by itself
+// comes from T3 Code's sidebar (pingdotgg/t3code, MIT License); the code is this app's own.
+
+export const DAY_MS = 86_400_000;
+
+/** A row the settle rule looks at. `last`: when the last message either way was (ms), or null when the app does not know it, which
+ *  is never settled by quiet days. `merged`: the host said its pull request merged (a lane's, this repository's own). */
+export interface SettleRow {
+  key: string;
+  last: number | null;
+  needs: boolean;
+  working: boolean;
+  merged?: boolean;
+}
+
+/** The rows of `rows` to settle now, and why. `open`: the row in the main column, which the person is looking at. */
+export function settleDue(rows: readonly SettleRow[], marks: RowMarks, now: number, rules: { quietDays: number; merged: boolean }, open: string | null = null): { key: string; action: Extract<RowAction, { do: "autoSettle" }> }[] {
+  const out: { key: string; action: Extract<RowAction, { do: "autoSettle" }> }[] = [];
+  for (const r of rows) {
+    const mark = marks[r.key];
+    if (r.key === open || r.needs || r.working || !bare(mark)) continue;
+    if (rules.merged && r.merged) {
+      out.push({ key: r.key, action: { do: "autoSettle", why: "merged" } });
+      continue;
+    }
+    if (rules.quietDays <= 0 || r.last === null) continue;
+    const since = Math.max(r.last, mark?.back ?? 0);
+    if (now - since >= rules.quietDays * DAY_MS) out.push({ key: r.key, action: { do: "autoSettle", why: "quiet", days: rules.quietDays } });
+  }
+  return out;
+}
+
+/** Settle what `settleDue` names (a no-op when it names nothing). Not something Undo holds: the person did not do it. */
+export function settleRows(due: ReturnType<typeof settleDue>, now: number = Date.now()): void {
+  if (!due.length) return;
+  let out = load();
+  for (const d of due) out = applyRow(out, d.key, d.action, now);
+  setRowMarks(out);
 }
 
 /** When the next snooze ends after `now` (ms), or null when none is running. */
@@ -358,7 +442,7 @@ export const useRowUndo = (): RowUndo | null => useSyncExternalStore(subscribeUn
 /** Clear the snoozed and settled marks of `keys` (a no-op when none has one). */
 export const wakeRows = (keys: readonly string[], now: number = Date.now()): void => setRowMarks(wakeAll(load(), keys, now));
 /** Bring back the rows of `keys` snoozed until their turn ended, now that it has (a no-op when none is). */
-export const finishRows = (keys: readonly string[]): void => setRowMarks(finishAll(load(), keys));
+export const finishRows = (keys: readonly string[], now: number = Date.now()): void => setRowMarks(finishAll(load(), keys, now));
 /** Drop what `sweep` says. */
 export const sweepRows = (alive: (key: string) => boolean, now: number = Date.now()): void => setRowMarks(sweep(load(), now, alive));
 /** A test starts from none. */

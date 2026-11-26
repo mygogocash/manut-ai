@@ -1,7 +1,7 @@
 // The row marks (item 76): reading a saved record (an older build's, one with a field this build does not know, a broken one), the
 // places a row goes, that an ask always brings a snoozed or settled row back, and what is kept across a restart. Item 94: undo.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { actOnRows, applyRow, applyRows, arrange, changedFrom, finishAll, pickedTime, getRowMarks, getRowUndo, markRow, nextWake, parseRowMarks, placeOf, resetRowMarks, restoreRows, ROWS_KEY, setRowMarks, snoozeUntil, sweep, threadRowKey, sessionRowKey, undoRows, UNDO_MS, wakeAll, wakeRows, type RowAction, type RowMark, type RowMarks } from "./rows";
+import { actOnRows, applyRow, applyRows, arrange, changedFrom, DAY_MS, finishAll, pickedTime, settleDue, settleRows, type SettleRow, getRowMarks, getRowUndo, markRow, nextWake, parseRowMarks, placeOf, resetRowMarks, restoreRows, ROWS_KEY, setRowMarks, snoozeUntil, sweep, threadRowKey, sessionRowKey, undoRows, UNDO_MS, wakeAll, wakeRows, type RowAction, type RowMark, type RowMarks } from "./rows";
 
 const HOUR = 3_600_000;
 const T = threadRowKey("buddy", "t1");
@@ -62,7 +62,8 @@ describe("changing a row", () => {
     const a = applyRow({}, "k", { do: "pin" }, 5);
     expect(a).toEqual({ k: { pinned: 5 } });
     expect(applyRow(a, "k", { do: "pin" }, 9)).toBe(a);
-    expect(applyRow(a, "k", { do: "unpin" }, 9)).toEqual({});
+    // the row is on its own place again, from 9 (item 94: when a mark left it)
+    expect(applyRow(a, "k", { do: "unpin" }, 9)).toEqual({ k: { back: 9 } });
     expect(applyRow({}, "k", { do: "unpin" }, 9)).toEqual({});
   });
 
@@ -77,23 +78,28 @@ describe("changing a row", () => {
   it("does not pin, snooze or settle an archived row; restore brings it back and nothing more", () => {
     const gone: RowMarks = { k: { archived: 1 } };
     for (const a of [{ do: "pin" }, { do: "snooze", until: 5 }, { do: "settle" }] as const) expect(applyRow(gone, "k", a, 9), a.do).toBe(gone);
-    expect(applyRow(gone, "k", { do: "restore" }, 9)).toEqual({});
+    expect(applyRow(gone, "k", { do: "restore" }, 9)).toEqual({ k: { back: 9 } });
     expect(applyRow({ k: { pinned: 1 } }, "k", { do: "restore" }, 9)).toEqual({ k: { pinned: 1 } });
   });
 
   it("wakes a snoozed or settled row and leaves a pin alone; opening clears a settle but not a snooze", () => {
-    expect(applyRow({ k: { snoozed: 50 } }, "k", { do: "wake" }, 1)).toEqual({});
-    expect(applyRow({ k: { settled: true } }, "k", { do: "wake" }, 1)).toEqual({});
+    expect(applyRow({ k: { snoozed: 50 } }, "k", { do: "wake" }, 1)).toEqual({ k: { back: 1 } });
+    expect(applyRow({ k: { settled: true } }, "k", { do: "wake" }, 1)).toEqual({ k: { back: 1 } });
     const pinned: RowMarks = { k: { pinned: 1 } };
     expect(applyRow(pinned, "k", { do: "wake" }, 1)).toBe(pinned);
-    expect(applyRow({ k: { settled: true } }, "k", { do: "open" }, 1)).toEqual({});
+    expect(applyRow({ k: { settled: true } }, "k", { do: "open" }, 1)).toEqual({ k: { back: 1 } });
+    // a row with only that note is on its own place, and waking or opening it changes nothing
+    const back: RowMarks = { k: { back: 1 } };
+    expect(placeOf(back.k, false, 5)).toBe("normal");
+    expect(applyRow(back, "k", { do: "wake" }, 5)).toBe(back);
+    expect(applyRow(back, "k", { do: "open" }, 5)).toBe(back);
     const snoozed: RowMarks = { k: { snoozed: 50 } };
     expect(applyRow(snoozed, "k", { do: "open" }, 1)).toBe(snoozed);
   });
 
   it("wakes every row an ask came to", () => {
     const marks: RowMarks = { a: { settled: true }, b: { snoozed: 99 }, c: { pinned: 1 }, d: { settled: true } };
-    expect(wakeAll(marks, ["a", "b", "c"], 1)).toEqual({ c: { pinned: 1 }, d: { settled: true } });
+    expect(wakeAll(marks, ["a", "b", "c"], 1)).toEqual({ a: { back: 1 }, b: { back: 1 }, c: { pinned: 1 }, d: { settled: true } });
   });
 });
 
@@ -115,7 +121,8 @@ describe("snoozing", () => {
     const marks: RowMarks = { a: { snoozed: 500 }, b: { snoozed: 300 }, c: { pinned: 1 }, "session:s1": { pinned: 2 }, "session:s2": { settled: true } };
     expect(nextWake(marks, 100)).toBe(300);
     expect(nextWake({ c: { pinned: 1 } }, 100)).toBeNull();
-    expect(sweep(marks, 400, (k) => k !== "session:s2")).toEqual({ a: { snoozed: 500 }, c: { pinned: 1 }, "session:s1": { pinned: 2 } });
+    // an ended snooze leaves the time it was due (item 94), and a closed session's marks go whole
+    expect(sweep(marks, 400, (k) => k !== "session:s2")).toEqual({ a: { snoozed: 500 }, b: { back: 300 }, c: { pinned: 1 }, "session:s1": { pinned: 2 } });
     // nothing to drop: the same object
     expect(sweep(marks, 100, () => true)).toBe(marks);
   });
@@ -155,8 +162,8 @@ describe("what is kept", () => {
 
   it("clears a mark when an ask wakes the row, and says nothing for a row with none", () => {
     setRowMarks({ [T]: { settled: true } });
-    wakeRows([T, "thread:buddy:other"]);
-    expect(getRowMarks()).toEqual({});
+    wakeRows([T, "thread:buddy:other"], 70);
+    expect(getRowMarks()).toEqual({ [T]: { back: 70 } });
   });
 });
 
@@ -258,8 +265,8 @@ describe("snooze until a picked time, or until it finishes (item 94)", () => {
     expect(placeOf(marks[K], false, NOW, false)).toBe("normal");
     // the watcher clears it for a row whose turn is not running, and leaves every other mark alone
     const others: RowMarks = { ...marks, a: { snoozed: NOW + HOUR }, b: { settled: true } };
-    expect(finishAll(others, [K, "a", "b"])).toEqual({ a: { snoozed: NOW + HOUR }, b: { settled: true } });
-    expect(finishAll(others, ["a"])).toBe(others);
+    expect(finishAll(others, [K, "a", "b"], NOW + 5)).toEqual({ a: { snoozed: NOW + HOUR }, b: { settled: true }, [K]: { back: NOW + 5 } });
+    expect(finishAll(others, ["a"], NOW)).toBe(others);
   });
 
   it("is woken at once by an ask, whether snoozed until a picked time or until it finishes", () => {
@@ -267,7 +274,7 @@ describe("snooze until a picked time, or until it finishes (item 94)", () => {
     const turn = applyRow({}, K, { do: "snoozeTurn" }, NOW);
     for (const m of [picked, turn]) {
       expect(placeOf(m[K], true, NOW, true)).toBe("normal");
-      expect(wakeAll(m, [K], NOW)).toEqual({});
+      expect(placeOf(wakeAll(m, [K], NOW)[K], false, NOW, true)).toBe("normal");
     }
   });
 
@@ -279,5 +286,73 @@ describe("snooze until a picked time, or until it finishes (item 94)", () => {
     expect(getRowUndo()?.kind).toBe("snooze");
     undoRows();
     expect(getRowMarks()).toEqual({ [K]: { pinned: 1 } });
+  });
+});
+
+describe("settling by itself (item 94)", () => {
+  const NOW = 100 * DAY_MS;
+  const rules = { quietDays: 3, merged: true };
+  const quiet = (key: string, daysAgo: number, over: Partial<SettleRow> = {}): SettleRow => ({ key, last: NOW - daysAgo * DAY_MS, needs: false, working: false, ...over });
+
+  it("settles a row untouched for the days set, counted on the clock given, and says why", () => {
+    const due = settleDue([quiet("a", 3), quiet("b", 2.9), quiet("c", 10)], {}, NOW, rules);
+    expect(due).toEqual([
+      { key: "a", action: { do: "autoSettle", why: "quiet", days: 3 } },
+      { key: "c", action: { do: "autoSettle", why: "quiet", days: 3 } },
+    ]);
+    const marks = applyRow({}, "a", due[0]!.action, NOW);
+    expect(marks.a).toEqual({ settled: true, why: "quiet", days: 3 });
+    expect(placeOf(marks.a, false, NOW)).toBe("settled");
+  });
+
+  it("is off at 0 days", () => {
+    expect(settleDue([quiet("a", 400)], {}, NOW, { quietDays: 0, merged: true })).toEqual([]);
+  });
+
+  it("never settles a row with an ask waiting, one whose turn runs, the one open, or one the app has no time for", () => {
+    expect(settleDue([quiet("a", 9, { needs: true }), quiet("b", 9, { working: true }), quiet("c", 9), quiet("d", 9, { last: null })], {}, NOW, rules, "c")).toEqual([]);
+  });
+
+  it("never settles over the person's own mark, and counts from when a row was last brought back", () => {
+    const marks: RowMarks = { a: { pinned: 1 }, b: { snoozed: NOW + 1 }, c: { settled: true }, d: { archived: 1 }, e: { untilDone: 1 }, f: { back: NOW - DAY_MS } };
+    expect(settleDue(["a", "b", "c", "d", "e", "f"].map((k) => quiet(k, 30)), marks, NOW, rules)).toEqual([]);
+    // brought back four days ago and quiet since: it settles again
+    expect(settleDue([quiet("f", 30)], { f: { back: NOW - 4 * DAY_MS } }, NOW, rules).map((d) => d.key)).toEqual(["f"]);
+  });
+
+  it("is back, with nothing lost, when it is opened or asks, and is not settled again until it has been quiet as long again", () => {
+    const settled = applyRow({}, "a", { do: "autoSettle", why: "quiet", days: 3 }, NOW);
+    const opened = applyRow(settled, "a", { do: "open" }, NOW + 1);
+    expect(opened).toEqual({ a: { back: NOW + 1 } });
+    expect(settleDue([quiet("a", 30)], opened, NOW + 2, rules)).toEqual([]);
+    expect(settleDue([quiet("a", 30)], opened, NOW + 1 + 3 * DAY_MS, rules).map((d) => d.key)).toEqual(["a"]);
+    const asked = applyRow(settled, "a", { do: "wake" }, NOW + 1);
+    expect(placeOf(asked.a, false, NOW + 1)).toBe("normal");
+  });
+
+  it("settles a lane whose pull request the host said merged, only with that setting on, and says so", () => {
+    const lane = quiet("lane:/l/a", 0, { merged: true });
+    expect(settleDue([lane], {}, NOW, rules)).toEqual([{ key: "lane:/l/a", action: { do: "autoSettle", why: "merged" } }]);
+    expect(settleDue([lane], {}, NOW, { quietDays: 3, merged: false })).toEqual([]);
+    // not merged: nothing, however it looks
+    expect(settleDue([quiet("lane:/l/b", 0, { merged: false })], {}, NOW, rules)).toEqual([]);
+    // and never with an ask waiting
+    expect(settleDue([quiet("lane:/l/a", 0, { merged: true, needs: true })], {}, NOW, rules)).toEqual([]);
+  });
+
+  it("is not something Undo holds: the person did not do it", () => {
+    resetRowMarks({});
+    settleRows(settleDue([quiet("a", 9)], {}, NOW, rules), NOW);
+    expect(getRowMarks()).toEqual({ a: { settled: true, why: "quiet", days: 3 } });
+    expect(getRowUndo()).toBeNull();
+  });
+
+  it("reads why a row settled, and drops a why that does not fit", () => {
+    expect(parseRowMarks(JSON.stringify({ [T]: { settled: true, why: "quiet", days: 3 } }))).toEqual({ [T]: { settled: true, why: "quiet", days: 3 } });
+    expect(parseRowMarks(JSON.stringify({ [T]: { settled: true, why: "merged", days: 3 } }))).toEqual({ [T]: { settled: true, why: "merged" } });
+    expect(parseRowMarks(JSON.stringify({ [T]: { settled: true, why: "bored" } }))).toEqual({ [T]: { settled: true } });
+    expect(parseRowMarks(JSON.stringify({ [T]: { why: "quiet" } }))).toEqual({});
+    expect(parseRowMarks(JSON.stringify({ [T]: { back: 5 } }))).toEqual({ [T]: { back: 5 } });
+    expect(parseRowMarks(JSON.stringify({ [T]: { back: 5, pinned: 2 } }))).toEqual({ [T]: { pinned: 2 } });
   });
 });

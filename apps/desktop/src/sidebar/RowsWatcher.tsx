@@ -3,14 +3,20 @@
 //    stays back after the ask is answered; a terminal that rang does the same;
 //  - opening a settled row brings it back, and a row snoozed until it finishes is back once its turn has ended (item 94);
 //  - a snooze that has run out is dropped when its time comes, so the row returns on time with no other event; and
+//  - a chat untouched for the days Settings names is marked Done for now by itself (item 94; a lane is, on the Code page that
+//    lists it: code/Lanes.tsx `useLaneSettle`);
 //  - the marks of a lane or terminal session the person closed go with it (item 94: only one this run saw open, since the marks
 //    are kept across a restart and the sessions' list comes back after this first draws).
 // It draws nothing. It is read-only for everything but the marks.
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { getSessions, useSessions } from "../sessions/sessions";
 import { selectSidebarBots, selectAsks, useStore } from "../state/store";
 import { rowStatus } from "../threads/ThreadTree";
-import { finishRows, isSessionKey, markRow, nextWake, sessionRowKey, sweepRows, threadRowKey, useRowMarks, wakeRows } from "./rows";
+import { finishRows, isSessionKey, markRow, nextWake, sessionRowKey, settleDue, settleRows, sweepRows, threadRowKey, useRowMarks, wakeRows } from "./rows";
+import { useInbox } from "./inbox";
+
+/** How often the quiet days are looked at again while nothing else changes. */
+const SETTLE_TICK_MS = 15 * 60_000;
 
 /** The longest a timer may wait (a browser keeps the delay in 31 bits). */
 const LONGEST = 2_147_483_647;
@@ -75,6 +81,32 @@ export function RowsWatcher() {
   useEffect(() => {
     if (open) markRow(open, { do: "open" });
   }, [open]);
+
+  // a chat untouched for the days Settings names settles by itself: counted from the last thing the app knows happened in it (a
+  // runtime that does not say gives no time, and such a chat is left alone until something happens in it)
+  const inbox = useInbox();
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setTick((n) => n + 1), SETTLE_TICK_MS);
+    return () => clearInterval(id);
+  }, []);
+  const due = settleDue(
+    members.flatMap((bot) =>
+      (s.threads[bot] ?? []).map((row) => {
+        const st = rowStatus(s, bot, row);
+        return { key: threadRowKey(bot, row.thread), last: row.last ? row.last * 1000 : null, needs: st === "needs_you", working: st === "running" };
+      }),
+    ),
+    marks,
+    Date.now(),
+    { quietDays: inbox.quietDays, merged: false },
+    open,
+  );
+  const dueKey = due.map((d) => d.key).join("\n");
+  useEffect(() => {
+    if (due.length) settleRows(due);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dueKey, tick]);
 
   // a closed session's marks go, and a snooze that has run out. A row closed with Undo still open (closeGrace.ts) is not gone yet.
   const listed = [...ss.list, ...getSessions().closing().map((g) => g.data.rec)].map((r) => sessionRowKey(r));

@@ -25,7 +25,7 @@ import { isDesktop } from "../settings/accounts/native";
 import { accountLabel, EMPTY_SHOP } from "../onboarding/shop";
 import { currentRow, MENU_ROWS, recentParts, rowPage, type MenuRow } from "./menu";
 import { rowStatus } from "../threads/ThreadTree";
-import { MoreButton, useRowMenu } from "./RowMenu";
+import { MoreButton, settledWhy, useRowMenu } from "./RowMenu";
 import { threadRowKey, useRowMarks } from "./rows";
 import { RowsWatcher } from "./RowsWatcher";
 import { useInbox } from "./inbox";
@@ -61,6 +61,8 @@ export interface RecentItem {
   rowKey?: string;
   /** Its turn runs: Snooze also offers "Until it finishes" (item 94). */
   working?: boolean;
+  /** Why it settled by itself, on its quiet second line ("Done after 3 quiet days"); none for a row the person settled. */
+  why?: string | null;
 }
 
 /** One chat of Recent: the row, and the menu of what can be done to it (Pin, Snooze, Done for now, Archive), to it alone or to every
@@ -80,6 +82,11 @@ function RecentRow({ item, select }: { item: RecentItem; select: RowSelect }) {
           </span>
         )}
         {item.title}
+        {item.why && (
+          <span className="rec-why" data-testid="menu-recent-why">
+            {item.why}
+          </span>
+        )}
         {selected && <span className="vh">, {t("row.selected")}</span>}
       </button>
       {item.rowKey && <MoreButton name={item.title} onOpen={menu.open} className="rec-more" />}
@@ -246,6 +253,7 @@ export function Sidebar() {
     place,
     rowKey: threadRowKey(r.bot, r.thread),
     working: r.working,
+    why: place === "settled" ? settledWhy(marks[threadRowKey(r.bot, r.thread)]) : null,
   });
   const recent = [...parts.pinned.map(item("pinned")), ...parts.recent.map(item(undefined)), ...parts.settled.map(item("settled"))];
   // New (and the brand mark) opens Home; every other row opens its own page.

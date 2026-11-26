@@ -175,6 +175,28 @@ for (const theme of ["light", "dark"] as const) {
       await expect(page.locator(".rec-li[data-sel]")).toHaveCount(0);
     });
 
+    test("a chat quiet for three days settles by itself, says why, and is back when opened", async ({ page }) => {
+      await begin(page, theme);
+      await page.getByTestId("nav-settings").click();
+      await expect(page.getByTestId("set-quiet-days")).toBeVisible();
+      await page.getByTestId("set-inbox").scrollIntoViewIfNeeded();
+      await shot(page, `settle-settings-${theme}`);
+      // the runtime says the chat last moved four days ago
+      await page.evaluate(async () => {
+        const m = (await import(/* @vite-ignore */ "/src/state/store.ts" as string)) as { getStore(): { getState(): { threads: Record<string, { title: string }[]> }; dispatch(a: unknown): void } };
+        const st = m.getStore();
+        const row = st.getState().threads.kami!.find((r) => r.title === "Check the books")!;
+        st.dispatch({ type: "thread.upsert", bot: "kami", row: { ...row, last: Date.now() / 1000 - 4 * 86_400 } });
+      });
+      const row = recent(page, "Check the books");
+      await expect(row).toHaveAttribute("data-place", "settled");
+      await expect(row.getByTestId("menu-recent-why")).toHaveText("Done after 3 quiet days");
+      await shot(page, `settled-why-${theme}`);
+      await row.getByTestId("menu-recent").click();
+      await expect(row).not.toHaveAttribute("data-place", "settled");
+      await expect(row.getByTestId("menu-recent-why")).toHaveCount(0);
+    });
+
     test("⌘Z in the chat box leaves a row's mark alone", async ({ page }) => {
       await begin(page, theme);
       const row = recent(page, "The 12.12 teaser");

@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { LANGS, setLang, t } from "../i18n";
 import { emptyLane, noteLane, type LaneRecord } from "./lane";
 import { sessionRowKey, type RowMarks } from "../sidebar/rows";
-import { LanesView, laneBase, laneRowOf, type LaneRow, type LaneRowInput } from "./Lanes";
+import { LanesView, laneBase, laneKey, laneRowOf, type LaneRow, type LaneRowInput } from "./Lanes";
 
 type Ev = { event: string; [k: string]: unknown };
 const feed = (events: Ev[]): LaneRecord => events.reduce((lane, ev, i) => noteLane(lane, ev, 1_000 + i), emptyLane());
@@ -365,6 +365,20 @@ describe("pinned, settled, snoozed and archived lanes (item 76)", () => {
     const out = renderToString(createElement(LanesView, { rows: canvas(), now: NOW, onOpen: vi.fn(), marks: { [sessionRowKey({ id: "s1" })]: { pinned: 1 }, [sessionRowKey({ id: "s2" })]: { settled: true } } }));
     expect(out).toContain('data-testid="lane-pin"');
     expect(out).toMatch(/class="lane settled"[^>]*data-testid="lane-s2"/);
+  });
+
+  it("says on a lane settled by itself why, and nothing on one the person settled (item 94)", () => {
+    setLang("en");
+    const rows = canvas();
+    const out = renderToString(createElement(LanesView, { rows, now: NOW, onOpen: vi.fn(), marks: { [laneKey(rows[0]!)]: { settled: true, why: "merged" }, [laneKey(rows[1]!)]: { settled: true } } }));
+    expect(out.match(/data-testid="lane-why"/g)?.length).toBe(1);
+    expect(out).toContain("Done: its pull request merged");
+  });
+
+  it("counts a lane's quiet days from its last message, else from when it started (item 94)", () => {
+    const rec = { ...input().rec, startedAt: 5_000 };
+    expect(laneRowOf(input({ rec })).lastAt).toBe(5_000);
+    expect(laneRowOf(input({ rec, lastMessage: 9_000 })).lastAt).toBe(9_000);
   });
 });
 

@@ -26,9 +26,10 @@ import { askText, getStore, selectAsks, useStore } from "../state/store";
 import { failedNames, laneLine, laneStatus, laneTag, testState, type LaneRecord, type LaneStatus } from "./lane";
 import { isLaneChat, laneOf, useLanesVersion } from "./laneStore";
 import type { Say } from "./command";
-import { usePullRequests, type LanePull } from "../tasks/pulls";
-import { MoreButton, useRowMenu } from "../sidebar/RowMenu";
-import { arrange, sessionRowKey, untilWord, type RowMark, type RowMarks, type RowPlace } from "../sidebar/rows";
+import { useLanePulls, type LanePull } from "../tasks/pulls";
+import { MoreButton, settledWhy, useRowMenu } from "../sidebar/RowMenu";
+import { arrange, sessionRowKey, settleDue, settleRows, untilWord, useRowMarks, type RowMark, type RowMarks, type RowPlace } from "../sidebar/rows";
+import { useInbox } from "../sidebar/inbox";
 
 /** A lane's row key for its marks. */
 export const laneKey = (row: Pick<LaneRow, "id" | "rowKey">): string => row.rowKey ?? sessionRowKey({ id: row.id });
@@ -66,13 +67,17 @@ export interface LaneRow {
   error: string;
   /** The open pull request made from the lane's branch, when the app has read one (tasks/pulls.ts); set by `useLaneRows`. */
   pull?: LanePull;
+  /** The host said the pull request from the lane's own branch merged (tasks/pulls.ts `mergedFor`); set by `useLaneRows` (item 94). */
+  merged?: boolean;
+  /** When the last message either way was in its chat (ms), else when it started: what its quiet days count from (item 94). */
+  lastAt?: number;
   /** The lane is Reverted by a rewind that put the files back, and the shell still keeps the files from before it: the row
    *  offers Bring it back. */
   canBringBack: boolean;
 }
 
 export interface LaneRowInput {
-  rec: Pick<SessionRec, "id" | "agent" | "cwd" | "status"> & Partial<Pick<SessionRec, "title" | "agentTitle" | "promptTitle" | "error" | "lane" | "linkId">>;
+  rec: Pick<SessionRec, "id" | "agent" | "cwd" | "status"> & Partial<Pick<SessionRec, "title" | "agentTitle" | "promptTitle" | "error" | "lane" | "linkId" | "startedAt">>;
   agent: string;
   live?: Pick<AgentLive, "branch">;
   lane: LaneRecord;
@@ -82,6 +87,8 @@ export interface LaneRowInput {
   asks: string[];
   /** The shell keeps the files as they were just before the session's last rewind (the turn book's `backs`). */
   canBringBack?: boolean;
+  /** When the last message either way was in its chat (ms); none: it has none yet. */
+  lastMessage?: number;
 }
 
 /** The branch a lane works on and the branch it was made from (`lane.base`), while its folder is on that branch: what the lane's
@@ -125,6 +132,7 @@ export function laneRowOf(i: LaneRowInput, time: (ms: number) => string = (ms) =
     error,
     // only a rewind that put the files back has files to bring back: the agent's own rewind of the last message left them
     canBringBack: status === "reverted" && lane.revertedFiles === true && i.canBringBack === true,
+    ...(rec.startedAt !== undefined || i.lastMessage !== undefined ? { lastAt: Math.max(rec.startedAt ?? 0, i.lastMessage ?? 0) } : {}),
   };
 }
 
@@ -155,18 +163,44 @@ export function useLaneRows(root: string): LaneRow[] {
         // the ask as plain words: its command sits between backticks for a place that draws markdown
         asks: asks.filter((a) => a.bot === key).map((a) => maskSecrets(askText(a.item)).replaceAll("`", "")),
         canBringBack: backs[rec.id] !== undefined,
+        // seconds, as a message's time is kept
+        lastMessage: (app.chats[key]?.messages ?? []).reduce((m, x) => Math.max(m, x.ts * 1000), 0) || undefined,
       }),
     ];
   });
   // each lane with a branch of its own gets the open pull request made from it, when the app has read one (tasks/pulls.ts)
-  const pulls = usePullRequests(
+  const pulls = useLanePulls(
     root,
     rows.flatMap((r) => (r.branch?.kind === "own" ? [r.branch.name] : [])),
   );
   return rows.map((r) => {
-    const pull = r.branch?.kind === "own" ? pulls.get(r.branch.name) : undefined;
-    return pull ? { ...r, pull } : r;
+    const own = r.branch?.kind === "own" ? r.branch.name : null;
+    const pull = own ? pulls.open.get(own) : undefined;
+    const merged = own !== null && pulls.merged.has(own);
+    return pull || merged ? { ...r, ...(pull ? { pull } : {}), ...(merged ? { merged } : {}) } : r;
   });
+}
+
+/** A lane settles by itself (item 94, sidebar/rows.ts `settleDue`) while the Code page lists it: when the host said its pull request
+ *  merged, or after the quiet days Settings names. The one open in the main column, one whose turn runs and one that asks are left
+ *  alone, and so is one the person marked. */
+export function useLaneSettle(rows: readonly LaneRow[]): void {
+  const inbox = useInbox();
+  const marks = useRowMarks();
+  const app = useStore();
+  const open = app.ui.view === "session" ? app.ui.session : null;
+  const due = settleDue(
+    rows.map((r) => ({ key: laneKey(r), last: r.lastAt ?? null, needs: r.status === "needs_you", working: r.status === "working", merged: r.merged === true })),
+    marks,
+    Date.now(),
+    { quietDays: inbox.quietDays, merged: inbox.merged },
+    rows.find((r) => r.id === open) ? laneKey(rows.find((r) => r.id === open)!) : null,
+  );
+  const dueKey = due.map((d) => `${d.key}:${d.action.why}`).join("\n");
+  useEffect(() => {
+    if (due.length) settleRows(due);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dueKey]);
 }
 
 /** Opens the session of a lane in the main column, as a notification would. */
@@ -238,6 +272,11 @@ function LaneItem({ row, now, onOpen, onPull, backOpen, onBack, below, place, ma
           <button type="button" className="lk" title={t("lane.prTip")} onClick={() => row.pull && onPull?.(row.pull, row.id)} data-testid="lane-pr" data-state={row.pull.state}>
             {t("lane.pr", { n: row.pull.number, state: t(row.pull.state === "draft" ? "tasks.st.draft" : "tasks.st.open") })}
           </button>
+        </p>
+      )}
+      {place === "settled" && settledWhy(mark) && (
+        <p className="mut lline" data-testid="lane-why">
+          {settledWhy(mark)}
         </p>
       )}
       {line && (

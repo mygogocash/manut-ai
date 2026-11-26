@@ -3,7 +3,7 @@ import { createElement } from "react";
 import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it } from "vitest";
 import { LANGS, setLang, t, type Key } from "../i18n";
-import { pickStart, RowMenu, rowChoices, snoozeChoices } from "./RowMenu";
+import { pickStart, RowMenu, rowChoices, settledWhy, snoozeChoices } from "./RowMenu";
 
 afterEach(() => setLang("en"));
 
@@ -30,6 +30,15 @@ describe("what a row's menu offers", () => {
     expect(rowChoices("chat", { untilDone: 5 })).toEqual(["pin", "snooze", "wake", "archive"]);
   });
 
+  it("says on the row's second line why it settled by itself, and nothing for a row the person settled (item 94)", () => {
+    setLang("en");
+    expect(settledWhy({ settled: true, why: "quiet", days: 3 })).toBe("Done after 3 quiet days");
+    expect(settledWhy({ settled: true, why: "quiet", days: 1 })).toBe("Done after a quiet day");
+    expect(settledWhy({ settled: true, why: "merged" })).toBe("Done: its pull request merged");
+    expect(settledWhy({ settled: true })).toBeNull();
+    expect(settledWhy({ back: 4 })).toBeNull();
+  });
+
   it("starts a picked time at the next whole hour", () => {
     expect(pickStart(new Date(2026, 10, 26, 14, 30).getTime())).toEqual({ date: "2026-11-26", time: "15:00" });
     expect(pickStart(new Date(2026, 10, 30, 23, 10).getTime())).toEqual({ date: "2026-12-01", time: "00:00" });
@@ -52,7 +61,7 @@ describe("what a row's menu offers", () => {
   });
 
   it("has words for every choice in all four languages", () => {
-    const keys: Key[] = ["row.pin", "row.unpin", "row.snooze", "row.snooze.hour", "row.snooze.tomorrow", "row.snooze.week", "row.settle", "row.wake", "row.archive", "row.restore", "row.snooze.done", "row.snooze.doneTip", "row.snooze.pick", "row.pick.date", "row.pick.time", "row.pick.late", "row.snoozedDone", "row.done.pin", "row.done.snooze", "row.done.settle", "row.done.archive"];
+    const keys: Key[] = ["row.pin", "row.unpin", "row.snooze", "row.snooze.hour", "row.snooze.tomorrow", "row.snooze.week", "row.settle", "row.wake", "row.archive", "row.restore", "row.snooze.done", "row.snooze.doneTip", "row.snooze.pick", "row.pick.date", "row.pick.time", "row.pick.late", "row.snoozedDone", "row.done.pin", "row.done.snooze", "row.done.settle", "row.done.archive", "row.why.quiet", "row.why.quiet1", "row.why.merged", "row.count", "row.selected", "inbox.group", "inbox.working", "inbox.workingHint", "inbox.quiet", "inbox.quietHint", "inbox.merged", "inbox.mergedHint", "inbox.day1", "inbox.days", "menu.working"];
     for (const l of LANGS) {
       setLang(l);
       for (const k of keys) expect(t(k), `${l} ${k}`).not.toBe(k);

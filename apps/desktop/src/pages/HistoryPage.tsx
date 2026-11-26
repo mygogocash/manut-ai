@@ -23,7 +23,7 @@ import { stageTag } from "./job";
 import { useShowOlder, type OlderView } from "./older";
 import { useJobList } from "./RecentWork";
 import { ShowOlder } from "./ShowOlder";
-import { MoreButton, useRowMenu } from "../sidebar/RowMenu";
+import { MoreButton, settledWhy, useRowMenu } from "../sidebar/RowMenu";
 import { NO_SELECT, useRowSelect, useSelectionEscape, type RowSelect } from "../sidebar/useRowSelect";
 import { placeOf, threadRowKey, untilWord, useRowMarks, type RowMark, type RowMarks, type RowPlace } from "../sidebar/rows";
 
@@ -179,7 +179,7 @@ function markWord(r: HistoryRowView, nowMs: number): { text: string; tip?: strin
   if (r.place === "pinned") return { text: t("row.pinned") };
   if (r.place === "snoozed" && r.mark?.snoozed !== undefined) return { text: t("row.snoozed", { when: untilWord(r.mark.snoozed, nowMs) }), tip: t("row.snoozedTip") };
   if (r.place === "snoozed" && r.mark?.untilDone !== undefined) return { text: t("row.snoozedDone"), tip: t("row.snooze.doneTip") };
-  if (r.place === "settled") return { text: t("row.settled") };
+  if (r.place === "settled") return { text: settledWhy(r.mark) ?? t("row.settled") };
   return null;
 }
 

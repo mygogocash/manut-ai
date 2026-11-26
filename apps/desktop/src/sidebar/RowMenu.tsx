@@ -51,6 +51,14 @@ export function menuAt(x: number, y: number, rows = 5): { x: number; y: number }
   return { x: Math.max(6, Math.min(x, window.innerWidth - W - 6)), y: Math.max(6, Math.min(y, window.innerHeight - height(rows) - 6)) };
 }
 
+/** Why a row settled by itself, in the words its quiet second line shows ("Done after 3 quiet days", "Done: its pull request
+ *  merged"), or null for a row the person settled or one not settled (item 94). */
+export function settledWhy(mark: RowMark | undefined): string | null {
+  if (!mark?.settled || !mark.why) return null;
+  if (mark.why === "merged") return t("row.why.merged");
+  return mark.days === 1 ? t("row.why.quiet1") : t("row.why.quiet", { n: mark.days ?? 0 });
+}
+
 /** The snooze step's choices after the three fixed times: until the turn ends (only for a row whose turn runs) and a picked time. */
 export function snoozeChoices(working: boolean): ("done" | "pick")[] {
   return working ? ["done", "pick"] : ["pick"];
