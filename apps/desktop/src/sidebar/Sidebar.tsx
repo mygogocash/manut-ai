@@ -33,6 +33,7 @@ import { threadRowKey, useRowMarks } from "./rows";
 import { RowsWatcher } from "./RowsWatcher";
 import { useInbox } from "./inbox";
 import { useRowSelect, useSelectionEscape } from "./useRowSelect";
+import { dragRef, type ThreadRef } from "../chat/box/threadContext";
 
 type RowSelect = ReturnType<typeof useRowSelect>;
 import { togglePalette } from "../palette/state";
@@ -67,6 +68,8 @@ export interface RecentItem {
   working?: boolean;
   /** Why it settled by itself, on its quiet second line ("Done after 3 quiet days"); none for a row the person settled. */
   why?: string | null;
+  /** The chat it is, for a drag onto an open chat's box (item 97); none: not draggable. */
+  drag?: ThreadRef;
 }
 
 /** One chat of Recent: the row, and the menu of what can be done to it (Pin, Snooze, Done for now, Archive), to it alone or to every
@@ -79,7 +82,7 @@ function RecentRow({ item, select }: { item: RecentItem; select: RowSelect }) {
   const selected = select.selected(item.rowKey);
   return (
     <li className={`rec-li${item.place ? ` ${item.place}` : ""}${menu.isOpen ? " menu-open" : ""}`} data-place={item.place} data-flip={item.key} data-row-key={item.rowKey} data-sel={selected || undefined} onContextMenu={item.rowKey ? menu.onContextMenu : undefined}>
-      <button type="button" className="rec" title={item.title} onClick={(e) => select.click(e, item.rowKey, item.open)} onKeyDown={(e) => select.keyDown(e, item.rowKey)} data-testid="menu-recent">
+      <button type="button" className="rec" title={item.title} onClick={(e) => select.click(e, item.rowKey, item.open)} onKeyDown={(e) => select.keyDown(e, item.rowKey)} {...(item.drag ? dragRef(item.drag) : {})} data-testid="menu-recent">
         {item.place === "pinned" && (
           <span className="rec-pin" role="img" aria-label={t("row.pinned")} title={t("row.pinned")} data-testid="menu-recent-pin">
             <PinGlyph />
@@ -280,6 +283,7 @@ export function Sidebar() {
     rowKey: threadRowKey(r.bot, r.thread),
     working: r.working,
     why: place === "settled" ? settledWhy(marks[threadRowKey(r.bot, r.thread)]) : null,
+    drag: { kind: "thread", bot: r.bot, thread: r.thread },
   });
   const recent = [...parts.pinned.map(item("pinned")), ...parts.recent.map(item(undefined)), ...parts.settled.map(item("settled"))];
   // New (and the brand mark) opens Home; every other row opens its own page.

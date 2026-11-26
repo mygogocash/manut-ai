@@ -7,6 +7,7 @@
 //
 // A summary written by a model (item 96's runs) would plug in at `buildContext`: its text would take the place of the first
 // message and last answer, under its own label, and still be masked, capped and shown in full before it goes. Not built here.
+import type { DragEvent } from "react";
 import { t } from "../../i18n";
 import { maskSecrets } from "../../lib/secrets";
 import { bareText, firstWords, scopeRefusal, type Carried, type Scope } from "./carry";
@@ -105,6 +106,17 @@ export type ThreadRef = { kind: "thread"; bot: string; thread: string } | { kind
 
 /** The drag's own data type: a row dragged onto a box carries its chat this way, and nothing else does. */
 export const THREAD_DRAG = "application/x-manut-thread";
+
+/** What makes a row draggable onto a chat box: it carries its chat as THREAD_DRAG, to be copied, never moved. */
+export function dragRef(ref: ThreadRef): { draggable: true; onDragStart: (e: DragEvent) => void } {
+  return {
+    draggable: true,
+    onDragStart: (e) => {
+      e.dataTransfer.setData(THREAD_DRAG, refText(ref));
+      e.dataTransfer.effectAllowed = "copy";
+    },
+  };
+}
 
 /** `ref` as the drag carries it, and back; anything else reads as null. */
 export const refText = (ref: ThreadRef): string => JSON.stringify(ref);

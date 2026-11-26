@@ -2320,6 +2320,9 @@ export interface Actions {
   newThreadWith(bot: string, first: string, away?: boolean): Promise<string | null>;
   /** Show thread `thread` of `bot` (reads its messages the first time); null = the bot's main chat. */
   openThread(bot: string, thread: string | null): Promise<void>;
+  /** A thread's messages as the runtime keeps them, read and nothing more: no chat opens, nothing in the store changes (item 97,
+   *  another chat's context brought into a box). */
+  readThread(bot: string, thread: string): Promise<{ role: "user" | "assistant"; text: string }[]>;
   /** Send in a thread; the first message names it. `how` as `send`'s. */
   threadSend(bot: string, thread: string, text: string, how?: FollowUp): Promise<void>;
   threadInterrupt(bot: string, thread: string): Promise<void>;
@@ -3452,6 +3455,10 @@ export function createStore(bridge: BridgeLike, opts: StoreOptions = {}): Store 
       const thread = await actions.newThread(bot, away);
       if (thread && first.trim()) await actions.threadSend(bot, thread, first);
       return thread;
+    },
+    async readThread(bot, thread) {
+      const res = await threadReq("thread.open", { bot, thread });
+      return (res.messages ?? []).flatMap((m) => (m.role === "user" || m.role === "assistant" ? [{ role: m.role, text: m.text }] : []));
     },
     async openThread(bot, thread) {
       if (state.ui.roster && state.bots.some((b) => b.name === bot)) listBot(bot, true);

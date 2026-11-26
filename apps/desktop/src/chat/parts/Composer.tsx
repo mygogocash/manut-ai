@@ -18,6 +18,9 @@ import { addAt, matchMembers, mentionAt, putMention, withAction, withFolders, ty
 import { CarriedChips, FolderChips, MentionPicker } from "../box/BoxParts";
 import { goes, setCarried, useCarried, withCarried, type Scope } from "../box/carry";
 import { SelectionNote } from "../box/SelectionNote";
+import { BringPicker, bringInto, bringRows } from "../box/Bring";
+import { readRef, THREAD_DRAG, type ThreadRef } from "../box/threadContext";
+import { getSessions } from "../../sessions/sessions";
 import { useBoxVoice } from "../box/Voice";
 import { voiceOffered } from "../../voice/engine";
 import { keysCaption, sendKey, stashKey, useFollowUp, whileRunning, type BoxKind, type FollowUp } from "../box/keys";
@@ -148,6 +151,9 @@ export function Composer({
   /** Actions from the + over text already typed: the `/` menu is open for it, and a pick goes in front of the text. */
   const [forced, setForced] = useState(false);
   const [sending, setSending] = useState(false);
+  /** Bring context from… is open over the box (item 97); a row dragged over the box is on it. */
+  const [bringing, setBringing] = useState(false);
+  const [dropOn, setDropOn] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   /** Cmd+S just put the draft aside: one quiet line says where it went, until the person types again. */
   const [aside, setAside] = useState(false);
@@ -489,6 +495,22 @@ export function Composer({
   useEffect(() => () => latest.current.forEach((c) => c.url && URL.revokeObjectURL(c.url)), []);
 
   const overlay = useDropZone(wrap, !offline && !!onSendFiles, add);
+  /** Another chat's context as one chip above the box (item 97), from a row dropped on it or picked in Bring context from…; a
+   *  refusal or a chat that could not be read is said where a file's problem is. Nothing is sent. */
+  const bring = async (r: ThreadRef) => {
+    setBringing(false);
+    setErr(null);
+    const line = await bringInto(bot.name, scope, r);
+    if (line) setErr(line);
+    ref.current?.focus();
+  };
+  const listBring = useCallback(
+    (query: string) => {
+      const ss = getSessions();
+      return bringRows(store, { list: ss.getState().list, agents: ss.getState().agents, chatKey: ss.chatKey }, query, bot.name);
+    },
+    [store, bot.name],
+  );
   const follow = useFollowUp(boxKind);
 
   /** Send with Enter or Cmd+Enter (`key`): while an answer runs they choose between waiting for it and adding it now. */
@@ -556,6 +578,7 @@ export function Composer({
       onFolder={onFolder ? () => void addFolder() : undefined}
       onMention={mentions?.length ? addMention : undefined}
       onActions={actions ? openActions : undefined}
+      onBring={offline ? undefined : () => setBringing(true)}
     />
   );
   const fieldEl = (
@@ -752,6 +775,7 @@ export function Composer({
       {threadPicking && <ThreadPicker bot={bot.display_name} active onPick={pickThread} popRef={tPop} />}
       {picking && <SkillPicker items={items} active={at} onPick={pick} onHover={setActive} popRef={pop} />}
       {cmdOpen && cmd && <CommandPicker items={cmd.shown} more={cmd.total - cmd.shown.length} active={cmdAt} onPick={pickCommand} onHover={setCmdActive} popRef={cmdPop} />}
+      {bringing && <BringPicker rows={listBring} onPick={(r) => void bring(r)} onClose={() => (setBringing(false), ref.current?.focus())} />}
       {mentioning && <MentionPicker items={mItems} active={mAt} onPick={pickMention} onHover={setMActive} />}
       {hint && (
         <div className="hint" role="note" data-testid="skill-hint" data-kind={hint}>
@@ -762,7 +786,32 @@ export function Composer({
         </div>
       )}
       {vc.above}
-      <div className={`composer${has ? " has" : ""}${rows ? " bx-rows" : ""}`} data-testid="composer-box">
+      <div
+        className={`composer${has ? " has" : ""}${rows ? " bx-rows" : ""}${dropOn ? " drop-ctx" : ""}`}
+        data-testid="composer-box"
+        // a side-menu, History or lane row dragged onto the box brings that chat's context (item 97)
+        onDragOver={(e) => {
+          if (offline || ![...e.dataTransfer.types].includes(THREAD_DRAG)) return;
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "copy";
+          setDropOn(true);
+        }}
+        onDragLeave={(e) => {
+          if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropOn(false);
+        }}
+        onDrop={(e) => {
+          const r = readRef(e.dataTransfer.getData(THREAD_DRAG));
+          setDropOn(false);
+          if (!r) return;
+          e.preventDefault();
+          void bring(r);
+        }}
+      >
+        {dropOn && (
+          <div className="bx-drop-ctx" aria-hidden="true">
+            {t("carry.drop")}
+          </div>
+        )}
         <Chips chips={chips} onRemove={remove} />
         <FolderChips folders={folders} onRemove={(f) => setFolders((cur) => cur.filter((x) => x !== f))} />
         <CarriedChips chatKey={bot.name} list={carried} scope={scope} onRemoved={() => ref.current?.focus()} />

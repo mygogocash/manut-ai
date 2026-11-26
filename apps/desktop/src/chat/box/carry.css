@@ -151,3 +151,53 @@ button.bx-carry-n:hover {
   font-size: 13px;
   color: var(--muted);
 }
+
+/* another chat dragged over the box: its edge darkens and one line says what a drop does */
+.composer.drop-ctx {
+  position: relative;
+  border-color: var(--muted);
+}
+.bx-drop-ctx {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--raise) 92%, transparent);
+  color: var(--ink);
+  font-size: 13px;
+  pointer-events: none;
+}
+/* Bring context from…: the `@` menu's list with a search field on top */
+.bring-pop {
+  max-height: none;
+  overflow: visible;
+  padding-top: 6px;
+}
+.bring-q {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  margin: 0 6px 6px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--rad);
+  color: var(--muted);
+}
+.bring-q input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font-size: 14px;
+}
+.bring-q input::placeholder {
+  color: var(--quiet);
+}
+.bring-list {
+  max-height: 260px;
+  overflow-y: auto;
+}

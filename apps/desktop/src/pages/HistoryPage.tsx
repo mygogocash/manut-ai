@@ -26,6 +26,7 @@ import { ShowOlder } from "./ShowOlder";
 import { MoreButton, settledWhy, useRowMenu } from "../sidebar/RowMenu";
 import { NO_SELECT, useRowSelect, useSelectionEscape, type RowSelect } from "../sidebar/useRowSelect";
 import { placeOf, threadRowKey, untilWord, useRowMarks, type RowMark, type RowMarks, type RowPlace } from "../sidebar/rows";
+import { dragRef } from "../chat/box/threadContext";
 
 /** One thread as its row shows it. */
 export interface HistoryRowView {
@@ -341,7 +342,15 @@ export function HistoryView({
                   const st = r.tag ? { word: r.tag.word, tag: r.tag.cls } : STATUS[r.status];
                   return (
                     <li key={r.key} className="hist-li" data-flip={r.key} data-place={r.place} data-row-key={r.rowKey} data-sel={select.selected(r.rowKey) || undefined}>
-                      <button type="button" className="rowl" onClick={(e) => select.click(e, r.rowKey, r.open)} onKeyDown={(e) => select.keyDown(e, r.rowKey)} data-testid="history-row">
+                      <button
+                        type="button"
+                        className="rowl"
+                        onClick={(e) => select.click(e, r.rowKey, r.open)}
+                        onKeyDown={(e) => select.keyDown(e, r.rowKey)}
+                        // a chat's row dragged onto an open chat's box brings its context (item 97); a job has no chat to bring
+                        {...(r.rowKey && r.kind !== "job" ? dragRef({ kind: "thread", bot: r.bot, thread: r.key.slice(r.bot.length + 1) }) : {})}
+                        data-testid="history-row"
+                      >
                         {r.lane && (
                           <span className="tag kind" data-testid="history-kind">
                             {t(LANE_WORD[r.lane])}
