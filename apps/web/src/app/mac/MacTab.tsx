@@ -725,7 +725,14 @@ function QuestionCard({ m, ask, state, live, remote }: { m: MacStrings; ask: Que
         {ask.question}
       </p>
       {state?.note && <NoteBanner m={m} note={state.note} />}
-      {live && !settled ? (
+      {state?.confirm && live ? (
+        <div>
+          {/* The passkey prompt opens inside this tap, as Safari requires. */}
+          <button type="button" className="btn dark" style={TAP} onClick={() => state.confirm?.()}>
+            {m.confirm}
+          </button>
+        </div>
+      ) : live && !settled ? (
         <form
           onSubmit={(e) => {
             e.preventDefault();

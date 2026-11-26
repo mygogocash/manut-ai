@@ -6,6 +6,7 @@ import { decisionChallenge, fromBase64Url, importSharedSecret, toBase64Url } fro
 import { describe, expect, it } from "vitest";
 import type { PairResult } from "../src/app/mac/pair";
 import { PasskeyCancelled } from "../src/app/mac/passkeys";
+import { answerOption } from "../src/app/mac/decision";
 import { CLEAR_MS, MacRemote, type MacBackend, type MacView, noteFor } from "../src/app/mac/remote";
 import type { MacLink, Message, SessionEnd } from "../src/app/mac/session";
 import { memoryVault, type PairedMac } from "../src/app/mac/vault";
@@ -211,7 +212,35 @@ describe("answering from the phone", () => {
     expect(paired(remote.view).open!.asks.get("req-1")).toMatchObject({ note: "allowed", confirm: null });
   });
 
-  it("says No, answers a question and an interview, and stops the turn, each with no passkey, as serve.ts reads them", async () => {
+  it("answers a question through the same challenge and passkey as Allow once when the Mac asks for one, bound to the exact answer", async () => {
+    const nonce = crypto.getRandomValues(new Uint8Array(32));
+    const option = await answerOption("Friday");
+    const { remote, passkeys, link } = await setup({
+      answer: macAnswers((m) => (m.t === "reply" && m.passkey === undefined
+        ? { t: "challenge", chat: "buddy", ask: "q-1", revision: 1, option, nonce: toBase64Url(nonce), expiresAt: 0 }
+        : m.t === "reply" ? { t: "done" } : null)),
+    });
+    await openBuddy(remote);
+    await remote.answer("q-1", "Friday");
+    await settle();
+    const sent = link().sent.filter((m) => m.t === "reply");
+    expect(sent[0]).toEqual({ t: "reply", chat: "buddy", ask: "q-1", revision: 1, answer: "Friday" });
+    const expected = await decisionChallenge(nonce, { deviceId: DEVICE, requestId: JSON.stringify(["buddy", "q-1"]), revision: 1, optionId: option });
+    expect(passkeys.signed.map((x) => x.challenge)).toEqual([expected]);
+    expect(sent[1]).toMatchObject({ t: "reply", chat: "buddy", ask: "q-1", revision: 1, answer: "Friday", passkey: { challengeId: toBase64Url(nonce) } });
+    expect(paired(remote.view).open!.asks.get("q-1")?.note).toBe("answered");
+    // A challenge bound to another answer than the one on the screen opens no prompt.
+    const other = await setup({
+      answer: macAnswers((m) => (m.t === "reply" ? { t: "challenge", chat: "buddy", ask: "q-1", revision: 1, option: option.replace(/^./, "x"), nonce: toBase64Url(nonce), expiresAt: 0 } : null)),
+    });
+    await openBuddy(other.remote);
+    await other.remote.answer("q-1", "Saturday");
+    await settle();
+    expect(other.passkeys.signed).toEqual([]);
+    expect(paired(other.remote.view).open!.asks.get("q-1")?.note).toBe("no_answer");
+  });
+
+  it("says No with no passkey, and sends answers and Stop as serve.ts reads them to a Mac that takes them at once", async () => {
     const { remote, passkeys, link } = await setup({ answer: macAnswers((m) => (m.t === "reply" || m.t === "stop" ? { t: "done" } : null)) });
     await openBuddy(remote);
     await remote.no("req-1");

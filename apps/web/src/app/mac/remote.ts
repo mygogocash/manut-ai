@@ -5,10 +5,11 @@
 /// no messages are sent, and Always allow, the dial and the rest stay on the Mac.
 ///
 /// The rules it keeps:
-/// - **Allow once leaves only as a passkey answer.** The Mac issues a one-use challenge for this phone, this ask, the
-///   revision on the screen and Allow once; the phone recomputes the challenge from what its own screen shows
-///   (`decisionChallenge`), asks the passkey to sign it, and sends the signature. A challenge for anything else than
-///   what the screen shows is refused here before any prompt.
+/// - **Allow once leaves only as a passkey answer, and so does an answer to a question once the Mac asks for one.** The
+///   Mac issues a one-use challenge for this phone, this ask, the revision on the screen and the choice; the phone
+///   recomputes the challenge from what its own screen shows (`decisionChallenge`), asks the passkey to sign it, and
+///   sends the signature. A challenge for anything else than what the screen shows is refused here before any prompt.
+///   Both go through one function (`#decide`), with their fields in decision.ts.
 /// - **Catch-up.** Every event carries the journal's cursor (apps/desktop/src/remote/journal.ts). The open chat keeps
 ///   the cursor of the last event it holds; after a reconnect, or an event that skips a number, it asks the Mac for
 ///   what came after, and takes the whole chat again when the Mac says the range is gone.
@@ -16,9 +17,10 @@
 ///   answer offered, and is cleared from memory 15 minutes after the Mac last confirmed it (GoSpark's `docs/remote.md`).
 /// - **Nothing of a chat is kept.** Chats, asks and messages are in this object only: never in storage, the address, a
 ///   log or a notification.
-import { decisionChallenge, fromBase64Url, toBase64Url } from "@manut/remote-channel";
+import { decisionChallenge, fromBase64Url } from "@manut/remote-channel";
+import { type SignedDecision, allowDecision, answerDecision, proofOf } from "./decision";
 import type { PairFailure, PairResult, PairStep } from "./pair";
-import { PasskeyCancelled, type Assertion, type Passkeys } from "./passkeys";
+import { PasskeyCancelled, type Passkeys } from "./passkeys";
 import type { Timers } from "./relay";
 import type { MacLink, Message, SessionEnd } from "./session";
 import type { PairedMac, PhoneVault } from "./vault";
@@ -496,67 +498,8 @@ export class MacRemote {
   /// passkey. Nothing but that signature allows.
   async allowOnce(id: string): Promise<void> {
     const shown = this.#shown(id);
-    const mac = this.#mac;
-    if (!shown || !mac || shown.ask.kind !== "approval" || !shown.ask.offers.includes("once") || shown.ask.needsUpdate) return;
-    if (this.#askState(id).busy) return;
-    const { chat, ask } = shown;
-    this.#setAsk(chat, id, { busy: "allow", note: null, confirm: null });
-    const challenge = await this.#ask({ t: "allow", chat, ask: id, revision: ask.revision });
-    if (!challenge) return this.#setAsk(chat, id, { busy: null, note: "no_answer" });
-    if (challenge.t === "refused") return this.#setAsk(chat, id, { busy: null, note: noteFor(challenge.reason) });
-    const nonce = typeof challenge.nonce === "string" ? challenge.nonce : null;
-    let nonceBytes: Uint8Array | null = null;
-    try {
-      nonceBytes = nonce ? fromBase64Url(nonce) : null;
-    } catch {
-      nonceBytes = null;
-    }
-    // The challenge must be for exactly what the screen shows, or no prompt opens.
-    if (
-      challenge.t !== "challenge" ||
-      challenge.chat !== chat ||
-      challenge.ask !== id ||
-      challenge.revision !== ask.revision ||
-      challenge.option !== "once" ||
-      !nonce ||
-      !nonceBytes ||
-      nonceBytes.length !== 32
-    ) {
-      return this.#setAsk(chat, id, { busy: null, note: "no_answer" });
-    }
-    const signed = await decisionChallenge(nonceBytes, { deviceId: mac.deviceId, requestId: askBinding(chat, id), revision: ask.revision, optionId: "once" });
-    const send = (passkey: Assertion) =>
-      this.#ask({
-        t: "allow",
-        chat,
-        ask: id,
-        revision: ask.revision,
-        option: "once",
-        answer: {
-          challengeId: nonce,
-          credentialId: toBase64Url(passkey.credentialId),
-          clientDataJSON: toBase64Url(passkey.clientDataJSON),
-          authenticatorData: toBase64Url(passkey.authenticatorData),
-          signature: toBase64Url(passkey.signature),
-        },
-      });
-    const settle = (answer: Message | null) =>
-      this.#setAsk(chat, id, { busy: null, confirm: null, note: !answer ? "no_answer" : answer.t === "done" ? "allowed" : noteFor(answer.reason) });
-    const prompt = (): void => {
-      // Started inside the person's tap when it comes from Confirm: the prompt opens before anything awaits.
-      const asked = this.#backend.passkeys.get({ rpId: mac.rpId, challenge: signed, credentialId: mac.credentialId });
-      this.#setAsk(chat, id, { busy: "allow", confirm: null });
-      asked.then(
-        async (passkey) => settle(await send(passkey)),
-        (error: unknown) => {
-          // A closed prompt, or one the browser would not open without a fresh tap: the challenge still holds, so the
-          // person can confirm again while it lasts. The Mac refuses it once it ran out.
-          if (error instanceof PasskeyCancelled) this.#setAsk(chat, id, { busy: null, note: "confirm", confirm: prompt });
-          else this.#setAsk(chat, id, { busy: null, note: "passkey_failed", confirm: null });
-        },
-      );
-    };
-    prompt();
+    if (!shown || shown.ask.kind !== "approval" || !shown.ask.offers.includes("once") || shown.ask.needsUpdate) return;
+    await this.#decide(shown.chat, id, allowDecision(shown.chat, id, shown.ask.revision));
   }
 
   /// No: needs no passkey, as the package's README says.
@@ -569,16 +512,66 @@ export class MacRemote {
     this.#setAsk(chat, id, { busy: null, note: !answer ? "no_answer" : answer.t === "done" ? "declined" : noteFor(answer.reason) });
   }
 
-  /// The answer to a question: one text, or one per question of an interview (null for one skipped).
+  /// The answer to a question: one text, or one per question of an interview (null for one skipped). It goes through
+  /// the same challenge and passkey as Allow once whenever the Mac asks for them (decision.ts).
   async answer(id: string, given: string | Record<string, string | null>): Promise<void> {
     const shown = this.#shown(id);
-    if (!shown || shown.ask.kind !== "question" || this.#askState(id).busy) return;
-    const { chat, ask } = shown;
-    const interview = !!ask.questions?.length;
+    if (!shown || shown.ask.kind !== "question") return;
+    const interview = !!shown.ask.questions?.length;
     if (interview !== (typeof given !== "string")) return;
-    this.#setAsk(chat, id, { busy: "answer", note: null, confirm: null });
-    const answer = await this.#ask({ t: "reply", chat, ask: id, revision: ask.revision, ...(interview ? { answers: given } : { answer: given }) });
-    this.#setAsk(chat, id, { busy: null, note: !answer ? "no_answer" : answer.t === "done" ? "answered" : noteFor(answer.reason) });
+    await this.#decide(shown.chat, id, await answerDecision(shown.chat, id, shown.ask.revision, given));
+  }
+
+  /// The one path for an answer the passkey signs (Allow once, and an answer to a question): step one asks; a Mac that
+  /// needs no signature for it answers `done`; otherwise its challenge must be for exactly what the screen shows (this
+  /// chat, this ask, the revision shown and this choice), or no prompt opens. The phone computes what the passkey signs
+  /// from its own screen, never from the challenge, and sends the signature in step two.
+  async #decide(chat: string, id: string, decision: SignedDecision): Promise<void> {
+    const mac = this.#mac;
+    const revision = decision.request.revision;
+    if (!mac || this.#askState(id).busy || typeof revision !== "number") return;
+    this.#setAsk(chat, id, { busy: decision.busy, note: null, confirm: null });
+    const first = await this.#ask(decision.request);
+    if (!first) return this.#setAsk(chat, id, { busy: null, note: "no_answer" });
+    if (first.t === "done") return this.#setAsk(chat, id, { busy: null, note: decision.done });
+    if (first.t === "refused") return this.#setAsk(chat, id, { busy: null, note: noteFor(first.reason) });
+    const nonce = typeof first.nonce === "string" ? first.nonce : null;
+    let nonceBytes: Uint8Array | null = null;
+    try {
+      nonceBytes = nonce ? fromBase64Url(nonce) : null;
+    } catch {
+      nonceBytes = null;
+    }
+    if (
+      first.t !== "challenge" ||
+      first.chat !== chat ||
+      first.ask !== id ||
+      first.revision !== revision ||
+      first.option !== decision.optionId ||
+      !nonce ||
+      !nonceBytes ||
+      nonceBytes.length !== 32
+    ) {
+      return this.#setAsk(chat, id, { busy: null, note: "no_answer" });
+    }
+    const signed = await decisionChallenge(nonceBytes, { deviceId: mac.deviceId, requestId: askBinding(chat, id), revision, optionId: decision.optionId });
+    const settle = (answer: Message | null) =>
+      this.#setAsk(chat, id, { busy: null, confirm: null, note: !answer ? "no_answer" : answer.t === "done" ? decision.done : noteFor(answer.reason) });
+    const prompt = (): void => {
+      // Started inside the person's tap when it comes from Confirm: the prompt opens before anything awaits.
+      const asked = this.#backend.passkeys.get({ rpId: mac.rpId, challenge: signed, credentialId: mac.credentialId });
+      this.#setAsk(chat, id, { busy: decision.busy, confirm: null });
+      asked.then(
+        async (passkey) => settle(await this.#ask({ ...decision.request, ...decision.second, [decision.proofField]: proofOf(nonce, passkey) })),
+        (error: unknown) => {
+          // A closed prompt, or one the browser would not open without a fresh tap: the challenge still holds, so the
+          // person can confirm again while it lasts. The Mac refuses it once it ran out.
+          if (error instanceof PasskeyCancelled) this.#setAsk(chat, id, { busy: null, note: "confirm", confirm: prompt });
+          else this.#setAsk(chat, id, { busy: null, note: "passkey_failed", confirm: null });
+        },
+      );
+    };
+    prompt();
   }
 
   /// Stops the open chat's running turn.
