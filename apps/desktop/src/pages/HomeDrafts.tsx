@@ -14,6 +14,8 @@ import { folderName, isGone } from "../sessions/agents";
 import { pathKey } from "../sessions/folders";
 import { laneOf } from "../code/askKit";
 import { dropDraft, intoChat, STASH_MAX, takeDraft, undoLetGo, useStash, type Stashed } from "../app/stash";
+import { useAllWaiting } from "../chat/box/later";
+import { LateOnHome } from "../chat/box/LaterRows";
 
 /** A place a draft can go: a box it is put into. */
 export interface DraftPlace {
@@ -135,7 +137,7 @@ export function placeName(s: S, key: string): string | null {
 }
 
 /** Open the chat `key` names (a member's main chat, a thread or a session). */
-function openChat(s: S, key: string): void {
+export function openChat(s: S, key: string): void {
   if (key.startsWith("agent:")) return s.openSession(key.slice(6));
   const { bot, session } = chatTarget(key);
   void (session ? s.openThread(bot, session) : s.selectBot(bot));
@@ -197,8 +199,18 @@ export function draftRows(s: S, list: readonly Stashed[], nowMs: number, here: (
   });
 }
 
-/** The list for Home, kept fresh as drafts come and go. */
+/** The list for Home, kept fresh as drafts come and go; above it, any message kept for a limit's reset that is now long
+ *  past it, asking before it goes (chat/box/LaterRows.tsx). */
 export function HomeDrafts({ s, nowMs, here }: { s: S; nowMs: number; here: (text: string) => void }) {
   const { list, dropped } = useStash();
-  return <DraftsView rows={draftRows(s, list, nowMs, here)} dropped={dropped ? draftWords(dropped.text) || t("drafts.onlyFiles") : null} onUndo={undoLetGo} />;
+  const waiting = useAllWaiting();
+  const late = Object.values(waiting)
+    .filter((w) => w.late)
+    .map((w) => ({ w, name: placeName(s, w.key) ?? t("later.aChat"), open: () => openChat(s, w.key) }));
+  return (
+    <>
+      <LateOnHome items={late} />
+      <DraftsView rows={draftRows(s, list, nowMs, here)} dropped={dropped ? draftWords(dropped.text) || t("drafts.onlyFiles") : null} onUndo={undoLetGo} />
+    </>
+  );
 }

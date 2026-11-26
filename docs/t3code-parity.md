@@ -118,7 +118,7 @@ keeps them:
 | Files land where the agent can use them | has | |
 | Use across accounts and machines, outside sessions too | part: what Manut AI starts, this Mac | 106 |
 | Limits left for each account | has | |
-| Send when the limit resets | no | 95 |
+| Send when the limit resets | has (item 95): a coding chat on a limited account offers Send at <time>; sent once when the account is usable, within the hour, else it asks first | 95 |
 | Themes, VS Code themes, chat width and fonts | part: light and dark, text size; item 85i removes the six palettes as the brand asks | 99 (owner) |
 | Keybindings you set | no | 99 |
 | Settings for a project or an environment | part: Kit's level, rules and folders for a project | 99 |

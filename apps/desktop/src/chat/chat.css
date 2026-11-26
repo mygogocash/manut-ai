@@ -1159,3 +1159,48 @@
   line-height: 1.4;
   color: var(--muted);
 }
+/* Item 95: the account is at its limit. The line under the box says until when, with Send at <time> beside it. */
+.cmp-later {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+}
+/* A message kept to send when the limit resets: one quiet row above the box with what waits and Cancel; long past the
+   reset it asks, with Send now. The same row asks on Home. */
+.later-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  /* in a chat it lines up with the box under it (.cw's column); on Home it fills the box's column */
+  width: min(var(--thread-w), calc(100% - 56px));
+  margin: 0 auto 8px;
+  flex: none;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--rad);
+  background: var(--aui-surface);
+  color: var(--ink);
+  font-size: 13px;
+}
+.later-words {
+  flex: 1 1 240px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.later-text {
+  color: var(--muted);
+}
+.later-acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.later-home {
+  display: flex;
+  flex-direction: column;
+}
+.later-home .later-row {
+  width: 100%;
+}

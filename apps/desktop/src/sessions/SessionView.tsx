@@ -6,6 +6,7 @@
 // read-only too. A chat agent's composer takes files as the bot chat's does (paste, the + menu, a drop on the chat),
 // in a draft too; a file dropped or pasted on a terminal is saved and its path typed at the prompt. A TERMINALS session
 // can split with up to three others on any side (SplitView: ⌘D / ⌘⇧D in its terminal, or a TERMINALS row dragged onto it).
+import { useLimitOffer, WaitingRow } from "../chat/box/LaterRows";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { getStore, selectAsks, useStore, type Chat, type OutFile } from "../state/store";
 import { useResolvedTheme } from "../app/theme";
@@ -180,6 +181,7 @@ function ChatPane({ rec, chatKey }: { rec: SessionRec; chatKey: string }) {
   const commands = ss.live[rec.id]?.commands?.length ? ss.live[rec.id]!.commands : undefined;
   // the agent's predicted next message, when the person turned suggestions on and this agent can give one (lib/suggest.ts)
   const suggestion = useSuggestion(chatKey);
+  const limitOffer = useLimitOffer(chatKey, rec);
   return (
     <div className="pane ss-chat" data-pane={chatKey} data-testid="session-chat">
       <Timeline
@@ -191,6 +193,8 @@ function ChatPane({ rec, chatKey }: { rec: SessionRec; chatKey: string }) {
       />
       {rec.paused ? <Paused rec={rec} /> : ended && <Ended rec={rec} />}
       <OwnApprovals agent={rec.agent} />
+      {/* a message kept to send when this chat's account resets (item 95) */}
+      <WaitingRow chatKey={chatKey} />
       <Composer
         key={chatKey}
         bot={bot}
@@ -207,6 +211,8 @@ function ChatPane({ rec, chatKey }: { rec: SessionRec; chatKey: string }) {
         onSendFiles={takesFiles ? (t, files, how) => (clearSuggestion(chatKey), getSessions().sendFiles(rec.id, t, files, how)) : undefined}
         // only the agents with a mid-turn input of their own take a message into a running answer (controls.ts STEERS)
         steers={steersOf(rec.agent)}
+        // its account at its limit: Send at the reset keeps what is typed (chat/box/later.ts)
+        limit={limitOffer}
         onStop={() => void getSessions().interrupt(rec.id)}
         commands={commands}
         // Add context: a folder is named by its path (the dial reads one outside the project as blocked, with Allow this

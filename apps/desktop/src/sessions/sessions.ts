@@ -70,7 +70,7 @@ import { folderGroups, getFolderPrefs, orderFolders, pathKey, ranElsewhere, reve
 import { broughtBackNote, REWINDS, rewoundNote, TurnBook, turnTitle } from "./rewind";
 
 /** The Accounts CLI a session of `agent` signs in as (mirrors `session_cli` in src-tauri/src/accounts.rs). */
-const ACCOUNT_CLI: Partial<Record<AgentId, AccountCli>> = { claude: "claude", codex: "codex", grok: "grok" };
+export const ACCOUNT_CLI: Partial<Record<AgentId, AccountCli>> = { claude: "claude", codex: "codex", grok: "grok" };
 
 /** The account a new session of `agent` runs as, from the Accounts list when it is loaded (none = unknown or the
  *  agent has no accounts; the shell then uses the one picked for new sessions). */

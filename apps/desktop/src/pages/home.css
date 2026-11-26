@@ -264,7 +264,7 @@
   max-width: 696px;
   margin: -8px 0 0;
   padding: 0 18px;
-  color: var(--aui-muted);
+  color: var(--muted);
   font-size: 13px;
 }
 .home .started .grow {
@@ -301,7 +301,7 @@
   font-size: 13.5px;
 }
 .home .think .when {
-  color: var(--aui-muted);
+  color: var(--muted);
   font-size: 12.5px;
   font-variant-numeric: tabular-nums;
 }
@@ -377,7 +377,7 @@
   gap: 12px;
   margin: 0;
   padding: 4px 10px;
-  color: var(--aui-muted);
+  color: var(--muted);
   font-size: 13px;
 }
 .home .dnote .grow {

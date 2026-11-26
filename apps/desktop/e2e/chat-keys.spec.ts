@@ -7,8 +7,11 @@
 //   Buddy's own coding agent takes no message mid-answer, so there both keys wait and the line says so.
 // - Drafts (Practice): words left in Home's box wait in Drafts at the top of Home; Cmd+S in a chat box puts the draft
 //   aside there, picture and all; from there it is put back, or moved into another chat's box, and nothing is sent.
-// What each key does in each state is pinned in src/chat/box/keys.test.ts, and the list in src/app/stash.test.ts; this
-// spec presses them.
+// - Send when the limit resets (mock bridge, a Claude Code chat on the stand-in agent): with its account at its limit the
+//   box offers Send at <time>; the message waits above the box and Cancel gives it back; once the reset passes and the
+//   account is usable it goes once; long past the reset it asks first, in the chat and on Home.
+// What each key does in each state is pinned in src/chat/box/keys.test.ts, the list in src/app/stash.test.ts and the
+// reset's rules in src/chat/box/later.test.ts; this spec presses them.
 import { expect, test, type Page } from "@playwright/test";
 import { chatOpen, homeOpen, openChat } from "./start";
 
@@ -224,4 +227,157 @@ test.describe("Drafts at the top of Home", () => {
     await page.getByTestId("menu-new").click();
     await expect(page.getByTestId("home-drafts")).toHaveCount(0);
   });
+});
+
+test.describe("send when the limit resets", () => {
+  const ROOT = "/home/you/code/baanmali-preorder";
+  type SessionCall = { op: string; input?: { kind: string; text?: string } };
+  const sessionSends = (page: Page) =>
+    page.evaluate(() => ((window as unknown as { __manutSessionCalls?: SessionCall[] }).__manutSessionCalls ?? []).filter((c) => c.op === "chat.input" && c.input?.kind === "send").map((c) => c.input!.text));
+
+  /** A Claude Code chat in a project, open, its agent ready; its account (Claude Code's own login) then at its limit. */
+  async function limited(page: Page, clock = false) {
+    await mock("mock.reset");
+    if (clock) await page.clock.install();
+    await page.addInitScript((root) => {
+      localStorage.removeItem("manut.kit.projects");
+      (window as any).__manutBranches = { [root]: "main" };
+    }, ROOT);
+    await page.goto("/");
+    await chatOpen(page);
+    const id = await page.evaluate(async (root) => {
+      const s = (window as any).__manutSessions;
+      await s.loadAgents();
+      const id = s.draft("claude");
+      s.setDraft(id, { cwd: root });
+      await s.start(id, "/status");
+      const store = (await import(/* @vite-ignore */ "/src/state/store.ts" as string)) as { getStore(): { actions: { openSession(id: string): void } } };
+      store.getStore().actions.openSession(id);
+      return id as string;
+    }, ROOT);
+    await expect(page.getByTestId("session-status")).toHaveText("Ready");
+    await mock("mock.accounts", { cli: "claude", limit: "default" });
+    return id;
+  }
+
+  test("the box offers Send at the reset; the message waits above it, and Cancel gives it back", async ({ page }) => {
+    await limited(page);
+    await box(page).fill("run the tests");
+    const offer = page.getByTestId("composer-limit");
+    await expect(offer).toContainText(/This account is at its limit until \d\d:\d\d\. Enter sends now anyway\./);
+    await offer.getByTestId("composer-wait").click();
+    await expect(box(page)).toHaveValue("");
+    const row = page.getByTestId("later-row");
+    await expect(row).toContainText(/Waiting to send at \d\d:\d\d: run the tests/);
+    expect(await sessionSends(page)).not.toContain("run the tests");
+    // kept on this computer: a reload brings it back
+    await page.reload();
+    await expect(page.getByTestId("later-row")).toContainText("run the tests");
+    await page.getByTestId("later-cancel").click();
+    await expect(page.getByTestId("later-row")).toHaveCount(0);
+    await expect(box(page)).toHaveValue("run the tests");
+  });
+
+  test("after the reset, once the account is usable again, it goes once", async ({ page }) => {
+    await limited(page, true);
+    await box(page).fill("run the tests");
+    await page.getByTestId("composer-wait").click();
+    await expect(page.getByTestId("later-row")).toBeVisible();
+    // before the reset nothing goes, however long the app looks
+    await page.clock.fastForward("01:00:00");
+    expect(await sessionSends(page)).not.toContain("run the tests");
+    await mock("mock.accounts", { cli: "claude", lift: "default" });
+    await page.clock.fastForward("01:01:00");
+    await expect.poll(() => sessionSends(page)).toContain("run the tests");
+    await expect(page.getByTestId("later-row")).toHaveCount(0);
+    await page.clock.fastForward("00:02:00");
+    expect((await sessionSends(page)).filter((t) => t === "run the tests")).toHaveLength(1);
+  });
+
+  test("long past the reset it asks first, in the chat and on Home, and goes only on the person's yes", async ({ page }) => {
+    await limited(page, true);
+    await box(page).fill("run the tests");
+    await page.getByTestId("composer-wait").click();
+    await page.clock.fastForward("03:05:00");
+    const row = page.getByTestId("later-row");
+    await expect(row).toHaveAttribute("data-late", "true");
+    await expect(row).toContainText(/This was waiting since \d\d:\d\d\. Send it now\?/);
+    expect(await sessionSends(page)).not.toContain("run the tests");
+    await page.getByTestId("menu-new").click();
+    const home = page.getByTestId("home-later");
+    await expect(home).toContainText(/A message to .+ was waiting since \d\d:\d\d\. Send it now\?/);
+    await home.getByTestId("later-send-now").click();
+    await expect.poll(() => sessionSends(page)).toContain("run the tests");
+    await expect(page.getByTestId("home-later")).toHaveCount(0);
+  });
+
+  for (const theme of ["light", "dark"] as const) {
+    test(`shots ${theme}`, async ({ page }) => {
+      const DIR = process.env.CHAT_KEYS_SHOTS || "";
+      test.skip(!DIR, "CHAT_KEYS_SHOTS not set");
+      const shot = (name: string) => page.screenshot({ path: `${DIR}/${name}-${theme}.png`, animations: "disabled" });
+      await page.addInitScript((t) => localStorage.setItem("manut.theme", t), theme);
+      await limited(page, true);
+      await box(page).fill("run the tests, then write the PR description");
+      await expect(page.getByTestId("composer-limit")).toBeVisible();
+      await shot("limit-offer");
+      await page.getByTestId("composer-wait").click();
+      await expect(page.getByTestId("later-row")).toBeVisible();
+      await shot("limit-waiting");
+      await page.clock.fastForward("03:05:00");
+      await expect(page.getByTestId("later-row")).toHaveAttribute("data-late", "true");
+      await page.getByTestId("menu-new").click();
+      await expect(page.getByTestId("home-later")).toBeVisible();
+      await shot("limit-late-home");
+    });
+  }
+});
+
+// Pictures of each new state, light and dark, at 1280x820: CHAT_KEYS_SHOTS=<dir>.
+test.describe("shots", () => {
+  const DIR = process.env.CHAT_KEYS_SHOTS || "";
+  for (const theme of ["light", "dark"] as const) {
+    test(`shots ${theme}`, async ({ page }) => {
+      test.skip(!DIR, "CHAT_KEYS_SHOTS not set");
+      const shot = (name: string) => page.screenshot({ path: `${DIR}/${name}-${theme}.png`, animations: "disabled" });
+      await page.addInitScript((t) => localStorage.setItem("manut.theme", t), theme);
+      // Home: a send that stayed, and three drafts
+      await practice(page);
+      for (const words of ["Plan the 12.12 sale", "Reply to Khun Mali about the late parcel", "Price list for the jasmine candles"]) {
+        await ask(page).fill(words);
+        await ask(page).press("ControlOrMeta+s");
+      }
+      await page.getByTestId("home-mode-chat").click();
+      await ask(page).fill("Translate a message");
+      await ask(page).press(CMD);
+      await expect(page.getByTestId("home-started")).toBeVisible();
+      await shot("home-drafts");
+      // Settings › General › Chat box
+      await page.getByTestId("nav-settings").click();
+      await page.getByTestId("set-box").scrollIntoViewIfNeeded();
+      await shot("settings-chat-box");
+      // Buddy's chat after Cmd+S: the line under the box
+      await page.getByTestId("menu-team").click();
+      await page.getByTestId("team-buddy").click();
+      await box(page).fill("Which shelf is the jasmine candle on?");
+      await box(page).press("ControlOrMeta+s");
+      await expect(page.getByTestId("composer-stashed")).toBeVisible();
+      await shot("chat-put-aside");
+    });
+    test(`shots running ${theme}`, async ({ page }) => {
+      test.skip(!DIR, "CHAT_KEYS_SHOTS not set");
+      const shot = (name: string) => page.screenshot({ path: `${DIR}/${name}-${theme}.png`, animations: "disabled" });
+      await page.addInitScript((t) => localStorage.setItem("manut.theme", t), theme);
+      await mock("mock.reset");
+      await mock("mock.manual", { bot: "kami" });
+      await page.goto("/");
+      await chatOpen(page);
+      await box(page).fill("Refactor the gateway retry code");
+      await box(page).press("Enter");
+      await expect(page.getByTestId("stop")).toBeVisible();
+      await box(page).fill("keep the old timeout too");
+      await expect(page.getByTestId("composer-keys")).toBeVisible();
+      await shot("chat-keys-caption");
+    });
+  }
 });

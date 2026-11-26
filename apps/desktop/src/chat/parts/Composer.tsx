@@ -69,6 +69,7 @@ export function Composer({
   onSuggestionTaken,
   voice = false,
   steers = true,
+  limit,
 }: {
   bot: Bot;
   running: boolean;
@@ -123,6 +124,9 @@ export function Composer({
   /** This chat's agent can take a message mid-answer (a steer). Without one, a message typed during an answer always
    *  waits, with Enter or Cmd+Enter, and the line under the box says so. */
   steers?: boolean;
+  /** The account this chat runs on is at its limit (item 95, chat/box/later.ts): until when, and how to keep what is
+   *  typed to send then. `onWait` is false when a message already waits in this chat. */
+  limit?: { until: string; onWait: (text: string) => boolean } | null;
 }) {
   // unsent text survives switching chats and restarts (drafts.ts; the composer is keyed by its chat)
   const [text, setText] = useState(() => getDraft(bot.name));
@@ -792,6 +796,28 @@ export function Composer({
       {heldNote && has && (
         <div className="cmp-held" role="note" data-testid="composer-held">
           {heldNote}
+        </div>
+      )}
+      {/* The account is at its limit: Enter still sends now, and one button keeps the words to send at the reset. A
+          message with files cannot wait (its copies are the session's), so the line only says when the limit lifts. */}
+      {limit && has && !running && !offline && !action && (
+        <div className="cmp-keys cmp-later" role="note" data-testid="composer-limit">
+          <span>{t(good.length ? "later.limitFiles" : "later.limit", { when: limit.until })}</span>
+          {!good.length && (
+            <button
+              type="button"
+              className="card-btn"
+              onClick={() => {
+                const body = folders.length ? withFolders(text, folders) : text;
+                if (!limit.onWait(body)) return;
+                edit("");
+                setFolders([]);
+              }}
+              data-testid="composer-wait"
+            >
+              {t("later.sendAt", { when: limit.until })}
+            </button>
+          )}
         </div>
       )}
       {aside && (
