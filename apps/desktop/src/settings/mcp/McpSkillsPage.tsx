@@ -4,13 +4,17 @@
 // changes nothing and says which command changes what. Below the lists, where else the same settings reach: lanes, added
 // accounts and the ACP agents (docs/code-editor.md, "MCP servers and skills").
 //
+// Install skills from a link (item 84) sits below the lists, behind Settings › Artifacts › Allow sharing skills by link
+// (InstallSkills.tsx).
+//
 // `McpSkillsView` draws a given state so a test can draw each one; `McpSkillsPage` asks the shell and keeps the project.
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { t, type Key } from "../../i18n";
 import { getHost } from "../../sessions/host";
 import { agentLabel } from "../../sessions/agents";
 import { Row } from "../DevRow";
 import { mcpSeen, useMcpSeenVersion, type AgentConfig, type ConfigItem, type SeenStatus } from "./agentConfig";
+import { InstallSkills } from "./InstallSkills";
 
 type AgentKey = AgentConfig["agent"];
 
@@ -35,6 +39,8 @@ export interface McpSkillsViewProps {
   labels: Record<AgentKey, string>;
   onChoose: () => void;
   onClear: () => void;
+  /** Install skills from a link, drawn below the lists (absent in a test that draws the lists alone) */
+  install?: ReactNode;
 }
 
 function fromWords(i: { from: ConfigItem["from"] | "seen"; plugin?: string }): string {
@@ -147,6 +153,7 @@ export function McpSkillsView(p: McpSkillsViewProps) {
             list.map((a) => <Agent key={a.agent} a={a} label={p.labels[a.agent]} seen={p.seen[a.agent]} />)
           )}
           <div className="st-note">{t("mcp.others")}</div>
+          {p.install}
         </>
       )}
       <div className="st-gh">{t("mcp.where")}</div>
@@ -196,6 +203,7 @@ export function McpSkillsPage() {
       labels={{ claude: agentLabel("claude", null), codex: agentLabel("codex", null) }}
       onChoose={() => void choose()}
       onClear={() => setProject("")}
+      install={<InstallSkills />}
     />
   );
 }

@@ -1369,6 +1369,7 @@ export class MockHost {
     // op is refused here with words that say so, and nothing is kept or sent.
     "artifacts.list": () => this.practiceLinks(),
     "artifacts.publish": () => this.practiceLinks(),
+    "artifacts.publishSkills": () => this.practiceLinks(),
     "artifacts.remove": () => this.practiceLinks(),
 
     // ---- Settings › People: the sample owner, helper and invite, which only the person's own shop has. The list is the shop

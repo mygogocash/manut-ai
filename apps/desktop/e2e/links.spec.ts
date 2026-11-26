@@ -167,7 +167,16 @@ test("labels are readable at rest and ink on hover; no pill fill at rest", async
     await page.waitForTimeout(300); // the text colour has settled too
     const rest = await chip.evaluate((a) => {
       const bub = a.closest(".b")!;
-      return { color: getComputedStyle(a).color, bg: getComputedStyle(a).backgroundColor, bubble: getComputedStyle(bub).backgroundColor, ink: getComputedStyle(bub).color, border: getComputedStyle(a).borderTopWidth };
+      // what the label is read against: the answer's bubble, or the page where the answer stands on it (item 85f)
+      let ground = "rgb(255, 255, 255)";
+      for (let e: Element | null = bub; e; e = e.parentElement) {
+        const c = getComputedStyle(e).backgroundColor;
+        if (!/^(transparent|rgba\(0, 0, 0, 0\))$/.test(c)) {
+          ground = c;
+          break;
+        }
+      }
+      return { color: getComputedStyle(a).color, bg: getComputedStyle(a).backgroundColor, bubble: ground, ink: getComputedStyle(bub).color, border: getComputedStyle(a).borderTopWidth };
     });
     expect(rest.bg).toMatch(/^(transparent|rgba\(0, 0, 0, 0\))$/);
     expect(rest.border).toBe("0px");
@@ -200,8 +209,11 @@ test("chips do not change the bubble's line height", async ({ page }) => {
   await mock("mock.emit", { events: [{ event: "message", bot: "kami", id: "lk-h1", text: "one two three, a line with no links" }, { event: "message", bot: "kami", id: "lk-h2", text }] });
   const [plain, chipped] = [page.getByTestId("bubble-bot").filter({ hasText: "a line with no links" }), page.getByTestId("bubble-bot").filter({ has: page.getByTestId("link-chip") }).filter({ hasText: /^one / })];
   await expect(chipped.getByTestId("link-chip")).toHaveCount(3);
+  // the answer's serif line (item 85f) may wrap the chipped one onto two lines: each line keeps the plain line's height
   const h = (l: typeof plain) => l.locator(".b p").evaluate((p) => p.getBoundingClientRect().height);
-  expect(await h(chipped)).toBe(await h(plain));
+  const line = await h(plain);
+  const chippedH = await h(chipped);
+  expect(Math.abs(chippedH - Math.round(chippedH / line) * line)).toBeLessThan(0.5);
 });
 
 test("a long label ends in an ellipsis and keeps the whole URL in its tooltip", async ({ page }) => {

@@ -1,6 +1,6 @@
 /* Home (HomePage.tsx), as the design canvas draws it (Main.dc.html): the canvas's ask-box rules from
-   packages/ui-kit/app.css (.hero, .lockup, .ask, .askin, .askrow, .modes, .mode, .send, .wide, .chips, .chip, .btn,
-   .lk, .think, .dotst and the touch targets of .btn, .chip and .mode) copied and scoped under Home's root class,
+   packages/ui-kit/app.css (.hero, .lockup, .ask, .askin, .askrow, .send, .wide, .chips, .chip, .btn,
+   .lk, .think, .dotst and the touch targets of .btn and .chip) copied and scoped under Home's root class,
    .home, as menu.css scopes the menu's. menuPages.css already gives the page's frame, bands, rows, tags and empty
    state under .mpage. The canvas's short token names map onto the desktop's (src/theme/tokens.css): --bg is
    --aui-surface, --band is --aui-subtle, --mut is --aui-muted, --pri and --onpri are --aui-primary and
@@ -97,28 +97,7 @@
   align-items: center;
   gap: 6px;
 }
-.home .modes {
-  display: inline-flex;
-  gap: 2px;
-  padding: 2px;
-  border-radius: var(--rad-pill);
-  border: 1px solid var(--line);
-  background: var(--soft);
-}
-.home .mode {
-  position: relative;
-  min-height: 28px;
-  padding: 0 12px;
-  border-radius: var(--rad-pill);
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--aui-muted);
-}
-.home .mode[aria-pressed="true"] {
-  background: var(--aui-surface);
-  color: var(--ink);
-  box-shadow: 0 0 0 1px var(--line);
-}
+/* The modes are the one segmented switch, ui.css's .ui-modes (item 85h). */
 .home .send {
   display: inline-flex;
   align-items: center;
@@ -215,7 +194,6 @@
 /* The canvas's larger touch targets: each control reaches a few pixels past its top and bottom. */
 .mpage .btn::after,
 .home .chip::after,
-.home .mode::after,
 .home .lk::after {
   content: "";
   position: absolute;
@@ -223,9 +201,6 @@
 }
 .home .chip::after {
   inset: -6px 0;
-}
-.home .mode::after {
-  inset: -8px 0;
 }
 
 /* Needs you and Working now: a band over its rows. */

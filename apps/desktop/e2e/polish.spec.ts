@@ -144,14 +144,17 @@ test("a narrow chat column: a bubble may use the column, instead of a sentence i
   });
   // it fills the column beside the face; it used to stop at 80% of it
   expect(narrow).toBeGreaterThan(0.98);
-  // in a wide column the old proportion holds: the same bubble stops well short of the row's right edge
+  // in a wide window the column is the Chat board's (item 85f): 696px, so no line of the answer is wider than that,
+  // and the answer, on the page beside its face, fills the rest of it
   await page.setViewportSize({ width: 1440, height: 900 });
   const wide = await bubble.evaluate((row: HTMLElement) => {
     const b = row.querySelector<HTMLElement>(".b")!.getBoundingClientRect();
-    const r = row.getBoundingClientRect();
-    return (r.right - b.right) / r.width;
+    const r = row.closest<HTMLElement>(".row")!.getBoundingClientRect();
+    return { column: r.width, line: b.width, rest: r.right - b.right };
   });
-  expect(wide).toBeGreaterThan(0.12);
+  expect(wide.column).toBe(696);
+  expect(wide.line).toBeLessThanOrEqual(696);
+  expect(wide.rest).toBeLessThan(1);
 });
 
 test("a message of several lines: + and send stay level on the last line", async ({ page }) => {
@@ -320,7 +323,8 @@ test("the model search takes one calm focus: a 1px edge in --muted", async ({ pa
     await page.addInitScript((t) => localStorage.setItem("manut.theme", t), theme);
     await open(page);
     const muted = await token(page, "--muted");
-    await page.getByTestId("head-right").locator("button").first().click();
+    // the model is in the chat box since item 85f, no longer in the header
+    await page.locator(".cw").getByTestId("model-pill").click();
     const search = page.locator(".mp-search");
     await expect(page.getByTestId("model-search")).toBeFocused();
     const pick = await search.evaluate((e) => ({ edge: getComputedStyle(e).borderTopColor, width: getComputedStyle(e).borderTopWidth, outline: getComputedStyle(e).outlineStyle }));

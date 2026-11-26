@@ -157,12 +157,13 @@ test.beforeEach(async () => {
 
 // ---- the tab and the list ----
 
-test("Plans is the sixth tab; the header holds the model control and the panel button; the panel is 460px, up to 560px beyond a 480px chat", async ({ page }) => {
+test("Plans is the sixth tab; the header holds the panel button; the panel is 460px, up to 560px beyond a 480px chat", async ({ page }) => {
   await openRuns(page);
   const tabs = page.getByRole("tablist", { name: "Panel" }).getByRole("tab");
   expect(await tabs.evaluateAll((els) => els.map((e) => e.getAttribute("title")))).toEqual(["Details", "Terminal", "Schedule", "Worktrees", "Diff", "Plans"]);
   await expect(page.getByTestId("panel-tab-runs")).toHaveAttribute("aria-selected", "true");
-  await expect(page.getByTestId("head-right").locator(":scope > *")).toHaveCount(2);
+  // the header right holds the panel button alone: the model is in the chat box since item 85f
+  await expect(page.getByTestId("head-right").locator(":scope > *")).toHaveCount(1);
   // what the window has beyond the 248px sidebar and a 480px chat, between 460 and 560
   const width = async () => Math.round((await page.getByTestId("details").boundingBox())?.width ?? 0);
   await expect.poll(width).toBe(552);
@@ -642,7 +643,8 @@ test("a node is its title, one mark with what ran it, and a status icon with a w
     expect(l.padding).toBe("10px 12px");
     expect(l.cursor).toBe("pointer");
     expect(l.transition[0]).toBe("border-color, box-shadow, transform");
-    expect(l.transition[1]).toBe("0.12s, 0.12s, 0.12s");
+    // the named moves (docs/motion.md): edge and shadow fade by Hover (0.15s), a lifted box answers by Press (0.2s)
+    expect(l.transition[1]).toBe("0.15s, 0.15s, 0.2s");
     expect(l.anim).toBe("none");
     expect(l.after).toBe("none");
     expect(l.rail[0]).toBe("2px");
@@ -1263,6 +1265,8 @@ test("88 sub-runs: the first 8 rows, running then failed first; 'Show all 88' op
   const long = await box.locator('[data-testid="run-node"][data-node="sub-0"] [data-testid="node-title"]').evaluate((e) => [e.getAttribute("data-lines"), getComputedStyle(e).webkitLineClamp, getComputedStyle(e).overflow, e.scrollHeight > e.clientHeight + 1, Math.round(e.getBoundingClientRect().height)]);
   expect(long).toEqual(["2", "2", "hidden", true, 36]);
   expect(await box.locator('[data-testid="run-node"][data-node="sub-1"] [data-testid="node-title"]').evaluate((e) => [e.getAttribute("data-lines"), Math.round(e.getBoundingClientRect().height)])).toEqual(["1", 18]);
+  // the boxes rise in one by one (Rise, docs/motion.md): read their tops once the last has landed
+  await settled(page);
   const rows = await cards.evaluateAll((els) => els.map((e) => [e.getAttribute("data-row"), Math.round(e.getBoundingClientRect().height), Math.round(e.getBoundingClientRect().top)]));
   for (const row of new Set(rows.map((r) => r[0]))) {
     expect(new Set(rows.filter((r) => r[0] === row).map((r) => r[1])).size, `row ${row}: one height`).toBe(1);
@@ -1344,7 +1348,8 @@ test("⌘⇧G and 'Full view' maximise the panel in place; Esc and the button re
   await expect.poll(async () => Math.round((await page.getByTestId("details").boundingBox())!.x)).toBe(Math.round(side));
   await expect(page.getByTestId("details")).toBeVisible();
   await expect(page.locator("[role=dialog]")).toHaveCount(0);
-  await expect(page.getByTestId("head-right").locator(":scope > *")).toHaveCount(2);
+  // the header right holds the panel button alone: the model is in the chat box since item 85f
+  await expect(page.getByTestId("head-right").locator(":scope > *")).toHaveCount(1);
   await expect(full(page).getByTestId("run-node")).toHaveCount(6);
   // the same plain header, and the drawing at the text's own size from the top
   await expect(full(page).getByTestId("run-plan-title")).toHaveText("Codex coexistence (live)");
@@ -1500,18 +1505,21 @@ test("motion: the boxes appear one by one in frontier order, then nothing moves 
   expect(order.map((n) => n.frontier)).toEqual([...order.map((n) => n.frontier)].sort((a, b) => a - b));
   for (let i = 1; i < order.length; i++) expect(order[i].delay).toBeGreaterThan(order[i - 1].delay);
   expect(Math.max(...order.map((n) => n.delay))).toBeLessThan(1);
-  expect(new Set(first.map((n) => n.anim))).toEqual(new Set(["bv-in"]));
+  expect(new Set(first.map((n) => n.anim))).toEqual(new Set(["rise"]));
   await settled(page);
-  const moving = await f.locator(".bv *").evaluateAll((els) => els.filter((e) => getComputedStyle(e).animationName !== "none").map((e) => [e.getAttribute("class"), getComputedStyle(e).animationName]));
+  // what is moving now: an animation still playing (a finished entrance keeps its name, but has stopped)
+  const moving = await f.locator(".bv *").evaluateAll((els) =>
+    els.flatMap((e) => e.getAnimations().filter((a) => a.playState === "running").map((a) => [e.getAttribute("class"), (a as CSSAnimation).animationName])),
+  );
   expect(moving.length).toBeGreaterThan(0);
   // the dash into a running node, and the ring turning around a running node's status dot: nothing else
   for (const [cls, name] of moving) expect([cls, name]).toEqual(expect.arrayContaining([/\bbx-spin\b/.test(cls ?? "") ? "spin" : "bv-flow"]));
   for (const [cls] of moving) expect(cls).toMatch(/\b(flow|bx-spin)\b/);
   expect(moving.filter(([cls]) => /\bbx-spin\b/.test(cls ?? "")).length).toBe(await f.locator('.bx-ic[data-icon="dot"]').count());
-  // a box only answers the pointer (its outline, shadow and lift ease in 120ms): nothing shimmers, pulses or glows
+  // a box only answers the pointer (its outline and shadow fade by Hover, its lift answers by Press): nothing shimmers, pulses or glows
   expect(
     await f.getByTestId("run-node").evaluateAll(
-      (els) => els.filter((e) => getComputedStyle(e).transitionProperty !== "border-color, box-shadow, transform" || getComputedStyle(e).transitionDuration !== "0.12s, 0.12s, 0.12s" || getComputedStyle(e, "::before").animationName !== "none").length,
+      (els) => els.filter((e) => getComputedStyle(e).transitionProperty !== "border-color, box-shadow, transform" || getComputedStyle(e).transitionDuration !== "0.15s, 0.15s, 0.2s" || getComputedStyle(e, "::before").animationName !== "none").length,
     ),
   ).toBe(0);
 });
@@ -1522,7 +1530,19 @@ test("reduced motion: no entrance and no dash", async ({ browser }) => {
   await openRuns(page);
   await page.getByTestId("graph-expand").click();
   await expect(full(page).getByTestId("run-node")).toHaveCount(6);
-  expect(await full(page).locator(".bv *").evaluateAll((els) => els.filter((e) => getComputedStyle(e).animationName !== "none").length)).toBe(0);
+  // Reduced motion ends a move at once rather than removing it (docs/motion.md): nothing is still playing, every
+  // animation named is over within a millisecond and never repeats, and no dash is drawn
+  await page.waitForTimeout(300);
+  expect(await full(page).locator(".bv *").evaluateAll((els) => els.flatMap((e) => e.getAnimations()).filter((a) => a.playState === "running").length)).toBe(0);
+  expect(
+    await full(page).locator(".bv *").evaluateAll((els) =>
+      els.filter((e) => {
+        const cs = getComputedStyle(e);
+        return cs.animationName !== "none" && (parseFloat(cs.animationDuration) >= 0.001 || cs.animationIterationCount !== "1");
+      }).length,
+    ),
+  ).toBe(0);
+  expect(await full(page).locator(".bv-flow").evaluateAll((els) => els.filter((e) => getComputedStyle(e).display !== "none").length)).toBe(0);
   // and a box does not ease either
   expect(await full(page).getByTestId("run-node").evaluateAll((els) => els.filter((e) => !/^0s(, 0s)*$/.test(getComputedStyle(e).transitionDuration)).length)).toBe(0);
   await ctx.close();

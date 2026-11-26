@@ -12,8 +12,14 @@
 //
 // On this Mac the person is the owner of the shop whose links they manage: the runtime refuses a shop they only help at before
 // anything is asked.
+//
+// A bundle of skills (item 84) is asked the same way, as a `public_post` whose detail is the exact bundle, every file's text in it.
+// Its Yes is refused here (`not_reviewed`, and the ask stays waiting) until every file it shows was opened or the person ticked
+// that they looked at every file (fileReview.ts), so an unreviewed bundle cannot reach a yes whatever the page draws.
 import { InMemoryApprovalStore, type ApprovalOption, type ApprovalRecord } from "@manut/approval-core";
 import type { RemovePlan, SharePlan } from "./artifacts";
+import { FileReview } from "./fileReview";
+import { fileKeys, type SkillsPlan } from "./skillBundle";
 
 /** What every ask offers: yes, this once, or no. approval-core has no standing yes, so neither does the ask. */
 export const ARTIFACT_OPTIONS: readonly ApprovalOption[] = [
@@ -27,12 +33,14 @@ export const DECIDED_BY = "this-mac";
 /** How long an ask waits for its answer. One left open longer is refused as expired and asked again. */
 export const ASK_WAITS_MS = 15 * 60 * 1000;
 
-type Detail = { what: "publish"; plan: SharePlan } | { what: "remove"; plan: RemovePlan };
+type Detail = { what: "publish"; plan: SharePlan } | { what: "remove"; plan: RemovePlan } | { what: "skills"; plan: SkillsPlan };
 
 let clock: () => number = () => Date.now();
 let store = new InMemoryApprovalStore({ now: () => clock() });
 /** The asks a runtime has already acted on. An ask is used once, whatever came of the request it allowed. */
 let spent = new Set<string>();
+/** Each bundle ask's record of the files looked at. */
+let reviews = new Map<string, FileReview>();
 let seq = 0;
 
 /** Tests: start from no asks, with a clock of their own. */
@@ -40,6 +48,7 @@ export function resetArtifactAsks(now: () => number = () => Date.now()): void {
   clock = now;
   store = new InMemoryApprovalStore({ now: () => clock() });
   spent = new Set();
+  reviews = new Map();
 }
 
 async function open(kind: "public_post" | "command", detail: Detail): Promise<string> {
@@ -52,6 +61,19 @@ async function open(kind: "public_post" | "command", detail: Detail): Promise<st
 /** Opens the ask to publish `plan`, and answers its id. Nothing is sent. */
 export const askToShare = (plan: SharePlan): Promise<string> => open("public_post", { what: "publish", plan: { ...plan } });
 
+/** Opens the ask to publish the bundle of skills `plan`, and answers its id. Nothing is sent, and its Yes waits for every file to be
+ *  looked at (`reviewOf`). */
+export async function askToShareSkills(plan: SkillsPlan): Promise<string> {
+  const copy: SkillsPlan = { ...plan, skills: plan.skills.map((s) => ({ name: s.name, files: s.files.map((f) => ({ ...f })) })), scripts: [...plan.scripts] };
+  const id = await open("public_post", { what: "skills", plan: copy });
+  reviews.set(id, new FileReview(fileKeys(copy.skills)));
+  return id;
+}
+
+/** The record of what was looked at for bundle ask `id`, which the page marks as files are opened or the tick is set; null for any
+ *  other ask. */
+export const reviewOf = (id: string): FileReview | null => reviews.get(id) ?? null;
+
 /** Opens the ask to remove the link `plan` names, and answers its id. Nothing is sent. */
 export const askToRemove = (plan: RemovePlan): Promise<string> => open("command", { what: "remove", plan: { ...plan } });
 
@@ -62,6 +84,9 @@ export type ArtifactAnswer = { ok: true; yes: boolean } | { ok: false; refused: 
 /** The person's Yes or No to ask `id`, settled by approval-core's rules. Sends nothing: on a yes, the page then asks the runtime to
  *  act on the ask by its id. */
 export async function answerArtifactAsk(id: string, yes: boolean): Promise<ArtifactAnswer> {
+  // A bundle not yet looked over cannot be said yes to: nothing is decided, and the ask keeps waiting for the review.
+  const review = reviews.get(id);
+  if (yes && review && !review.done) return { ok: false, refused: "not_reviewed" };
   const decided = await store.decide({ requestId: id, optionId: yes ? "yes" : "no", seenRevision: 1, decidedBy: DECIDED_BY, role: "owner" },
     { running: {} });
   return decided.ok ? { ok: true, yes } : { ok: false, refused: decided.refused };
@@ -81,7 +106,8 @@ export function artifactAskRecord(id: string): Promise<ApprovalRecord | undefine
  *  ask of this kind, and it was not used before. It is then used, so a second call answers null whatever the first one did. */
 export async function takeSettled(id: unknown, what: "publish"): Promise<SharePlan | null>;
 export async function takeSettled(id: unknown, what: "remove"): Promise<RemovePlan | null>;
-export async function takeSettled(id: unknown, what: "publish" | "remove"): Promise<SharePlan | RemovePlan | null> {
+export async function takeSettled(id: unknown, what: "skills"): Promise<SkillsPlan | null>;
+export async function takeSettled(id: unknown, what: "publish" | "remove" | "skills"): Promise<SharePlan | RemovePlan | SkillsPlan | null> {
   if (typeof id !== "string") return null;
   const record = await store.get(id);
   // From here to the end nothing waits, so two calls for one ask cannot both find it unused.
@@ -89,7 +115,8 @@ export async function takeSettled(id: unknown, what: "publish" | "remove"): Prom
   const chosen = record.request.options.find((option) => option.id === record.decision.optionId);
   const detail = record.request.detail as Detail | undefined;
   if (chosen?.effect !== "approve" || detail?.what !== what) return null;
-  if (record.request.kind !== (what === "publish" ? "public_post" : "command")) return null;
+  if (record.request.kind !== (what === "remove" ? "command" : "public_post")) return null;
+  if (what === "skills" && !reviews.get(id)?.done) return null;
   spent.add(id);
   return detail.plan;
 }

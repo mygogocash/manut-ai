@@ -1,38 +1,27 @@
 /* Elsewhere: header places chip, read-only away line + peek, Details panel lists. Ported from the sketch. */
 
-/* header chip */
+/* header chip: words only, as the board's header line is (13px, muted); no app marks since item 85f. In a narrow
+   header it gives way first and ends in an ellipsis; its tooltip names the apps. */
 .ew-places {
   display: flex;
   align-items: center;
-  gap: 6px;
+  min-width: 0;
   padding: 3px 7px;
   border-radius: var(--r);
   border: 1px solid transparent;
-  font-size: 11.5px;
+  font-size: 13px;
   color: var(--muted);
   white-space: nowrap;
-  flex: none;
+  flex: 0 1 auto;
 }
-/* A narrow chat header (the Plans panel open at 1100 to 1240px; a long name in Korean or Japanese) cannot hold the
-   bot, the chip's words, the model name and the panel button: the chip gives way first and shows only its app marks
-   (its tooltip still says where the bot is), so the model name stays whole. A wider header shows the words again. */
-.head[data-testid="header"] {
-  container: chathead / inline-size;
-}
-@container chathead (max-width: 470px) {
-  .ew-places > [data-testid="places-label"] {
-    display: none;
-  }
+.ew-places > [data-testid="places-label"] {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .ew-places:hover,
 .ew-places.on {
   background: var(--raise);
   border-color: var(--line);
-}
-.ew-pd {
-  display: flex;
-  align-items: center;
-  gap: 4px;
 }
 
 /* source label: square + name */

@@ -130,7 +130,7 @@ export function NeedsStrip({ asks }: { asks: Ask[] }) {
                 void s.jumpToAsk(a.bot, a.item.id);
               }}
             >
-              {isSessionChat(a.bot) ? <SessionFace chatKey={a.bot} size={20} /> : <Avatar bot={a.bot} size={20} />}
+              {isSessionChat(a.bot) ? <SessionFace chatKey={a.bot} size={20} /> : <Avatar bot={a.bot} size={20} live />}
               <span className="needs-m">
                 <span className="needs-r1">
                   <span className="needs-b">{name(a.bot)}</span>

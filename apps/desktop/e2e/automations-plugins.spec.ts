@@ -322,7 +322,8 @@ test("toggle, update and remove (after confirm) go through plugins.manage", asyn
   await page.getByTestId("plug-update").click();
   await expect(page.getByTestId("page-note")).toHaveText("Home Assistant updated.");
   await page.getByTestId("plug-menu-herdr").click();
-  await page.getByTestId("plug-remove").click();
+  // the menu just used on Home Assistant stays drawn, inert, for its 0.15s Leave (docs/motion.md): ask Herdr's own
+  await page.getByTestId("plug-card-herdr").getByTestId("plug-remove").click();
   expect((await calls("plugins.remove")).length).toBe(0);
   await page.getByTestId("plug-confirm-remove").click();
   await expect(page.getByTestId("plug-card-herdr")).toHaveCount(0);
