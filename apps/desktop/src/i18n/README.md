@@ -36,9 +36,6 @@ file.
 - `literals.test.ts`: no English typed into a component.
 - `areas.test.ts`: each key is in the file named after its prefix, every area file is taken into its language, and the
   four languages have the same areas.
-- `snapshot.test.ts`: each language's whole dictionary against `snapshot/<lang>.json`, written before the split to prove
-  it moved every key and changed none. A deliberate change of words writes it again:
-  `UPDATE_I18N_SNAPSHOT=1 pnpm --filter @manut/desktop exec vitest run src/i18n/snapshot.test.ts`.
 - `e2e/i18n-zh.spec.ts`: every Settings page reads fully in Chinese.
 
 ## Merging
