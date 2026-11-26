@@ -98,11 +98,7 @@ export function ModelMenu(p: ModelMenuProps) {
   const many = (p.options?.length ?? 0) > 6;
   const draft = useBoxDraft();
   useEffect(() => {
-    if (open) {
-      setView("effort");
-      setQuery("");
-      setActive(0);
-    } else setHeld(null);
+    if (!open) setHeld(null);
   }, [open]);
   // the agent says the level it picked is in force: the card shows the agent's word from here. A word about an earlier
   // pick, arriving after a later one, leaves the later one shown (its own word follows, or HOLD_MS lets it go)
@@ -115,6 +111,17 @@ export function ModelMenu(p: ModelMenuProps) {
   // the card takes the keys at once (the slider, or the title when there is none to move); back from the list, the
   // title the person left it by. The list's search field, or Back, takes them in the list
   const fromList = useRef(false);
+  /** Opens on the card, with the list's search cleared for its next visit; closes. The view is set before the popover
+   *  draws, so it never shows the list it was left on for a frame. */
+  const toggle = () => {
+    if (!open) {
+      setView("effort");
+      setQuery("");
+      setActive(0);
+      fromList.current = false;
+    }
+    setOpen(!open);
+  };
   useEffect(() => {
     if (!open || view !== "effort") return;
     const back = fromList.current;
@@ -164,7 +171,7 @@ export function ModelMenu(p: ModelMenuProps) {
         ref={pillRef}
         type="button"
         className={`mp bx-pick${open ? " on" : ""}`}
-        onClick={() => setOpen((v) => !v)}
+        onClick={toggle}
         aria-haspopup="dialog"
         aria-expanded={open}
         title={t("mp.title")}
