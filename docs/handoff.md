@@ -304,8 +304,8 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    that night) 101d (Grok and pi accounts), 101c (the ACP registry) and 104 (a snapshot of any app; the owner's steps to try it
    are 11 to 18 in `docs/computer-use.md`). Then the design of 102
    (`docs/several-agents.md`; its eight open questions answered provisionally by the lead with the design's own
-   recommendations, in `docs/decisions/102-several-agents.md`, for the owner) and 102d (its pure rules). Running: 102a
-   (ask several agents) and 133 (the flaky browser specs, and whether four workers a shard is too many). Needs the owner from 101b: Grok signed in and `permission_mode = "ask"`
+   recommendations, in `docs/decisions/102-several-agents.md`, for the owner) and 102d (its pure rules). Then 102a
+   (ask several agents). Running: 102e (helper blocks) and 133 (the flaky browser specs; three workers a shard). Needs the owner from 101b: Grok signed in and `permission_mode = "ask"`
    under `[ui]` in `~/.grok/config.toml` (it says always-approve, so Grok chats are refused), and Muse Code's CLI. From 101e: all 325 Codex sessions on the owner's Mac are compressed, so
    only Claude Code's conversations are offered until 106b. Needs the owner from 101a: Cursor's Approval mode set to Allowlist (it is Run Everything, so Cursor
    chats are refused), and a Cursor plan with messages left to record a real tool call. GitHub reported 7 Dependabot alerts on `main` (2 critical) at that push, for the owner to look at.
@@ -691,6 +691,9 @@ Every switch that turns a built part on, and what each needs from the owner, is 
 
 ## Known flaky tests (they fail only under heavy load)
 
+- `apps/web` `test/JoinPage.test.tsx`, "counts down to a new code from when the answer arrived": could not find "You
+  can ask for a new code in 0:42." in item 133's run 45882648481 (attempt 1), a branch that changes no web code;
+  passed on the re-run. A countdown read against the clock: if it fails again, give it fake time.
 - `apps/api` `test/task-companies.test.ts` ("non-members cannot wait on company tasks...", "deleting a company
   releases its tasks...") and `test/auth-email.test.ts` ("gives Apple's session in every way..."): timed out at 5 s in
   item 104's run 45873764860 (with a `rows.filter is not a function` uncaught in workerd), a branch that changes no API
