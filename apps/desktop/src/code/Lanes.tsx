@@ -66,7 +66,7 @@ export interface LaneRow {
 }
 
 export interface LaneRowInput {
-  rec: Pick<SessionRec, "id" | "agent" | "cwd" | "status"> & Partial<Pick<SessionRec, "title" | "agentTitle" | "promptTitle" | "error" | "lane">>;
+  rec: Pick<SessionRec, "id" | "agent" | "cwd" | "status"> & Partial<Pick<SessionRec, "title" | "modelTitle" | "agentTitle" | "promptTitle" | "error" | "lane">>;
   agent: string;
   live?: Pick<AgentLive, "branch">;
   lane: LaneRecord;

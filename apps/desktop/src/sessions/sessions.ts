@@ -41,6 +41,8 @@ import { isLinkId, LINK_COPIED_EVENT, newLinkId, termLinkUrl } from "./termLink"
 import { acpRow, agentDef, agentLabel, continues, draftAgent, draftFolder, draftOpen, hermesOnly, idInUse, installLine, isBuiltin, isGone, isShell, isTerminalRec, LAST_LINE_MAX, refusedResume, SHELL, termEnd, termMarkAgent, lastPrintedLine, OPEN_KEY, setsUpScreen, UI_BYTES, opensAs, parseOpens, parseRecent, pushRecent, RECENT_KEY, registerAcp, sessionMode, termGroups, type AgentId, type AgentInfo, type OpenAs, type Unseen, type Opens, type Recent, type SessionRec } from "./agents";
 import { clearSuggestion, noteSuggestion } from "../chat/suggestion";
 import { suggestOn, suggestWorks } from "../lib/suggest";
+import { acceptTitle, chatMaterial, titleRequest, wantsTitle, whyKey } from "./titleWords";
+import { titleModel } from "../lib/titleModel";
 import { NAME_MAX, parseTitles, promptTitle, putTitle, TITLES_KEY } from "./titles";
 import { getDraft, setDraft as setUnsent } from "../app/drafts";
 import { getHost, type ChatEvent, type ChatInput, type ConvState, type PastChat, type SessionHost } from "./host";
@@ -744,6 +746,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
           if (ev.outcome === "done") flag(id, "end");
           void readAgentTitle(id);
           void readBranch(id);
+          if (ev.outcome === "done") void writeTitle(id);
         }
     }
   };
@@ -2310,7 +2313,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
       if (isGone(s.agent)) {
         // an agent manut no longer offers (Kilo Code): ended, with its chat as it was, one plain line and no Restart
         // (SessionView's Ended); nothing is started, now or on Resume
-        list.push({ id: s.id, agent: s.agent, cwd: s.cwd, startedAt: s.startedAt, view: "chat", status: "exited", exitCode: null, ...(s.title ? { title: s.title } : {}), ...(s.agentTitle ? { agentTitle: s.agentTitle } : {}), ...(s.promptTitle ? { promptTitle: s.promptTitle } : {}) });
+        list.push({ id: s.id, agent: s.agent, cwd: s.cwd, startedAt: s.startedAt, view: "chat", status: "exited", exitCode: null, ...(s.title ? { title: s.title } : {}), ...(s.modelTitle ? { modelTitle: s.modelTitle } : {}), ...(s.agentTitle ? { agentTitle: s.agentTitle } : {}), ...(s.promptTitle ? { promptTitle: s.promptTitle } : {}) });
         seq = Math.max(seq, Number(s.id.slice(1)) || 0);
         keys.set(s.id, `agent:${s.id}`);
         openChat(s.id, s.model ?? "", (s.messages ?? []).map((m) => ({ id: `r-${m.id}`, role: m.role, text: m.text, ts: m.ts })));
@@ -2362,7 +2365,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
         ...(s.model ? { model: s.model } : {}),
         // its name comes back with it
         ...(s.title ? { title: s.title } : {}),
-        ...(s.agentTitle ? { agentTitle: s.agentTitle } : {}),
+        ...(s.modelTitle ? { modelTitle: s.modelTitle } : {}), ...(s.agentTitle ? { agentTitle: s.agentTitle } : {}),
         ...(s.promptTitle ? { promptTitle: s.promptTitle } : {}),
         ...(s.mode ? { mode: s.mode } : {}),
         ...(s.effort ? { effort: s.effort } : {}),
@@ -2638,6 +2641,35 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     if (k) saveTitles(putTitle(titles, k, t || null));
   };
 
+  /** Chats whose title a model is writing now: one run at a time for a chat. */
+  const writingTitle = new Set<string>();
+  /** The title the person's chosen model writes for chat session `id` (item 96): off unless Settings › Titles and words is on. It is
+   *  asked after a first answer, from the first message and that answer. The words go in as `modelTitle`, which ranks below a name
+   *  the person gave; a name given while it ran is kept and the words dropped. `again` is "Write the title again". Quietly nothing
+   *  when the host cannot, and `note`s why when the person asked and it failed. */
+  const writeTitle = async (id: string, again = false) => {
+    const r = rec(id);
+    const settings = titleModel();
+    const host = getHost();
+    const key = keys.get(id);
+    if (!r || !key || !host.titleRun || writingTitle.has(id) || !wantsTitle(r, settings, again)) return;
+    const material = chatMaterial(chatOf(key)?.messages ?? []);
+    if (!material) return;
+    writingTitle.add(id);
+    try {
+      const words = await host.titleRun(titleRequest(r.agent, settings, key, material));
+      const patch = acceptTitle(rec(id), words);
+      if (patch) patchRec(id, patch);
+    } catch (e) {
+      // an automatic run fails quietly (the title stays what it was); the person's own ask says why
+      if (again) note(id, tr(`titles.why.${whyKey(e)}` as Key));
+    } finally {
+      writingTitle.delete(id);
+    }
+  };
+  /** "Write the title again": for a chat the person has not named. */
+  const rewriteTitle = (id: string) => writeTitle(id, true);
+
   /** Change a chat session's model (Claude Code `set_model`, Codex per turn, pi `set_model`, Hermes). */
   const setModel = async (id: string, option: ModelOption) => {
     const p = procs.get(id);
@@ -2761,6 +2793,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     setMode,
     setEffort,
     rename,
+    rewriteTitle,
     moveRow,
     restart,
     startFresh,
