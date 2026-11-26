@@ -71,12 +71,14 @@ function aheadLine(ahead: number | null, base: string): string {
 /** The first few of a folder's ignored files, as the line names them. */
 const fewFiles = (files: readonly string[]) => (files.length > 5 ? [...files.slice(0, 5), "…"] : files).join(", ");
 
-/** What a kept folder says of the clean-up: the reason it left it, that its branch has commits on no remote, or that it holds
- *  files git ignores that may be the developer's (a `.env.local`, a local database), which a clean-up never takes unasked. */
+/** What a kept folder says of the clean-up: the reason it left it, that its branch has commits on no remote, that it holds
+ *  files git ignores that may be the developer's (a `.env.local`, a local database), which a clean-up never takes unasked, or
+ *  that it has submodules, whose changes are not in its count (item 90). */
 function cleanLine(k: KeptLane, why: string | undefined): string | null {
   const ignored = k.exists && k.ignored?.length ? t("lane.kept.ignored", { files: fewFiles(k.ignored) }) : null;
   if (why === "ignored" && ignored) return ignored;
-  if (why && why !== "open") return t(`lane.kept.why.${why}` as Key);
+  if (why && why !== "open" && why !== "submodules") return t(`lane.kept.why.${why}` as Key);
+  if (why === "submodules" || (k.exists && k.submodules)) return t("lane.kept.submodules");
   if (k.exists && k.changed === 0 && k.unpushed) return k.unpushed === 1 ? t("lane.kept.unpushedOne") : t("lane.kept.unpushedMany", { n: k.unpushed });
   if (k.changed === 0 && ignored) return ignored;
   if (why === "open") return t("lane.kept.why.open");
