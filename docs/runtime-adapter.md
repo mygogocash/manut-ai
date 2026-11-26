@@ -969,7 +969,9 @@ The rules a bundle keeps are in three places that say the same thing: `apps/api/
 - **What an agent would act on by itself** (item 113). `src/runtime/skillBundle.ts` `fileActsAlone` and its twin
   `src-tauri/src/skill_links.rs` `file_acts_alone` read every markdown file's settings at its top against an allow-list (`name`,
   `description`, `when_to_use`, `argument-hint`, `disable-model-invocation`, `user-invocable`, `license`, `compatibility`,
-  `metadata`), look for a command run as the skill loads, and allow only `interface` in a Codex `agents/*.yaml`. Anything else,
+  `metadata`), look for a command run as the skill loads (since item 118 in every file that is not a script, and `!` or a
+  fence's word followed by a `$`, an argument or a variable, counts as one), and allow only `interface` in a Codex
+  `agents/*.yaml`. Anything else,
   or a top they cannot read as plain settings, refuses the skill by file and setting: the publish lists it, the install page
   names it and cannot choose it, and the shell refuses `acts_alone:...` at the ask and before writing. Both run
   `src/runtime/skillActs.cases.json`. The review marks the top SKILL.md as the instructions the agent follows and any file in a
