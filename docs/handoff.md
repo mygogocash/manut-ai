@@ -687,9 +687,6 @@ Every switch that turns a built part on, and what each needs from the owner, is 
 
 ## Known flaky tests (they fail only under heavy load)
 
-- `apps/desktop/e2e/motion-lists.spec.ts`, its Home test: failed on its test and its retry in item 132's run
-  45859860218 (four workers a shard), passed 8 of 8 alone and in every run since. With the resilience spec above, the
-  second spec to fail twice in one run since item 129; if either fails twice again, fix it rather than re-run.
 - `apps/desktop/e2e/resilience.spec.ts` ("bridge lost mid-turn"): failed on its test and its retry in shard 2 of
   item 101a's first CI run (45851189647), the first runs with four Playwright workers a shard (item 129); passed alone
   and on the re-run. If it fails twice again, fix it rather than re-run: it may be the four workers' load.
