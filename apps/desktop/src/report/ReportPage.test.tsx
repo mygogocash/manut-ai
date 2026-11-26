@@ -81,7 +81,7 @@ describe("Settings › Report a problem", () => {
   it("has every word in every language, with no em-dash", () => {
     for (const lang of LANGS) {
       setLang(lang);
-      for (const k of ["set.report", "rp.lead", "rp.what", "rp.reading", "rp.never", "rp.copy.title", "rp.copy.hint", "rp.copied", "rp.agent.title", "rp.agent.hint", "rp.agent.none", "rp.agent.which", "rp.agent.go", "rp.folder.choose", "rp.issue.title", "rp.issue.hint", "rp.issue.none", "rp.issue.ask", "rp.issue.open", "rp.issue.cancel", "rp.refresh"] as const) {
+      for (const k of ["set.report", "rp.lead", "rp.what", "rp.reading", "rp.never", "rp.copy.title", "rp.copy.hint", "rp.copied", "rp.agent.title", "rp.agent.hint", "rp.agent.none", "rp.agent.which", "rp.agent.go", "rp.folder.choose", "rp.folder.in", "rp.issue.title", "rp.issue.hint", "rp.issue.none", "rp.issue.ask", "rp.issue.open", "rp.issue.cancel", "rp.refresh"] as const) {
         const v = t(k, { address: "ADDR" });
         expect(v, `${lang} ${k}`).not.toBe(k);
         expect(v, `${lang} ${k}`).not.toMatch(/—/);

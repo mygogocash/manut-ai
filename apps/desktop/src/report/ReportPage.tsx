@@ -55,13 +55,13 @@ export function ReportView(p: ReportViewProps) {
       <div className="st-gh st-gh0">{t("set.report")}</div>
       <p className="rp-lead">{t("rp.lead")}</p>
       <div className="st-gh">{t("rp.what")}</div>
-      <pre className="rp-text" tabIndex={0} aria-label={t("rp.what")} data-testid="report-text" data-ready={String(p.report !== null)}>
+      <pre className="rp-text" tabIndex={0} aria-label={t("rp.what")} aria-busy={p.report === null} data-testid="report-text" data-ready={String(p.report !== null)}>
         {p.report ?? t("rp.reading")}
       </pre>
       <div className="st-note">{t("rp.never")}</div>
       <div className="st-grp rp-acts">
         <Row title={t("rp.copy.title")} hint={t("rp.copy.hint")}>
-          <button type="button" className="st-btn" onClick={p.onCopy} disabled={p.report === null} data-testid="report-copy">
+          <button type="button" className="st-btn" onClick={p.onCopy} disabled={p.report === null} aria-live="polite" data-testid="report-copy">
             {p.copied ? t("rp.copied") : t("rp.copy.title")}
           </button>
         </Row>
@@ -75,8 +75,8 @@ export function ReportView(p: ReportViewProps) {
                   </option>
                 ))}
               </select>
-              <button type="button" className="st-btn" onClick={p.onChoose} title={p.folder} aria-label={t("rp.folder.choose")} data-testid="report-folder">
-                {p.folder || t("rp.folder.choose")}
+              <button type="button" className="st-btn" onClick={p.onChoose} title={p.folder} aria-label={p.folder ? `${t("rp.folder.choose")}: ${p.folder}` : t("rp.folder.choose")} data-testid="report-folder">
+                {p.folder ? t("rp.folder.in", { path: p.folder }) : t("rp.folder.choose")}
               </button>
               <button type="button" className="st-btn dark" onClick={p.onAsk} disabled={p.report === null || !p.agent} data-testid="report-ask">
                 {t("rp.agent.go")}
