@@ -621,6 +621,135 @@ describe("C1: the folder an earlier `cd` left the shell in (item 116)", () => {
   });
 });
 
+describe("C2: a check or a read with an option its own list does not hold (item 116)", () => {
+  it("is never a check or a read: it asks, or it is the change it makes", () => {
+    counted += holds([
+      // pip and uv: a log file it appends to, an interpreter it runs
+      ["pip list --python scripts/deploy.sh", "pip list", "read"],
+      ["pip3 show requests --python=./bin/release", "pip3 show requests", "read"],
+      ["python3 -m pip list --python scripts/deploy.sh", "python3 -m pip list", "read"],
+      ["pip list --log .git/hooks/pre-commit", "pip list --outdated", "read"],
+      ["pip show 'x\nany text' --log CLAUDE.md", "pip show -f requests", "read"],
+      ["pip freeze --log .husky/pre-commit", "pip freeze --all", "read"],
+      ["pip list --log=notes.txt", "pip list --format=json", "read"],
+      ["pip freeze -r requirements.txt", "pip freeze -l", "read"],
+      ["pip list --cache-dir=.claude", "pip list --not-required", "read"],
+      ["uv pip list --python scripts/deploy.sh", "uv pip list --outdated", "read"],
+      ["uv pip list --directory sub", "uv pip list --format=json", "read"],
+      ["uv pip show --python ./x requests", "uv pip show requests", "read"],
+      // mypy: reports it writes, an interpreter it runs, stubs it installs, a cache it writes
+      ["mypy --python-executable scripts/deploy.sh src", "mypy src", "check"],
+      ["mypy --html-report public src", "mypy --strict src", "check"],
+      ["mypy --txt-report .claude src", "mypy --ignore-missing-imports src", "check"],
+      ["mypy --install-types --non-interactive src", "mypy --pretty src", "check"],
+      ["python3 -m mypy --python-executable=./x src", "python3 -m mypy src", "check"],
+      ["mypy --linecount-report out src", "mypy --python-version 3.12 src", "check"],
+      ["mypy --cache-dir .claude src", "mypy --no-incremental src", "check"],
+      ["mypy --shadow-file a.py b.py src", "mypy -p app", "check"],
+      ["mypy --custom-typeshed-dir x src", "mypy --exclude build src", "check"],
+      // ruff: fixes it writes, a cache, a subcommand that is no check
+      ["ruff check --fix-only src", "ruff check src", "check"],
+      ["ruff check --add-noqa src", "ruff check --select E501 src", "check"],
+      ["ruff check --unsafe-fixes --fix-only src", "ruff check --statistics src", "check"],
+      ["ruff check --cache-dir .claude src", "ruff check --no-cache src", "check"],
+      ["ruff clean", "ruff format --check src", "check"],
+      ["ruff server", "ruff check --output-format=json src", "check"],
+      // pytest: a debug log, a cache it clears, a debugger, modules by name
+      ["pytest --debug=.husky/pre-commit", "pytest -x -q", "check"],
+      ["pytest --debug .claude/settings.local.json", "pytest -k checkout", "check"],
+      ["pytest --cache-clear", "pytest --lf", "check"],
+      ["pytest --pyargs requests", "pytest -m slow", "check"],
+      ["pytest --pdb", "pytest --tb=short", "check"],
+      ["pytest --log-file=notes.log", "pytest --log-level=INFO", "check"],
+      ["pytest --rootdir=tests", "pytest --durations=5", "check"],
+      ["pytest --confcutdir=tests", "pytest --collect-only", "check"],
+      // pyright and pylint: no list of pyright's options was read; pylint's output format can name a file
+      ["pyright --pythonpath scripts/deploy.sh", "pyright", "check"],
+      ["pyright --writebaseline", "pyright src", "check"],
+      ["pylint --output-format=text:.husky/pre-commit src", "pylint --disable=C src", "check"],
+      ["pylint --output-format=json:CLAUDE.md src", "pylint -d C0114 src", "check"],
+      ["pylint --rcfile=x src", "pylint -j 0 src", "check"],
+      // vitest and mocha: a debugger on an address, a program it runs, a file it writes, a server it opens
+      ["npx vitest run --inspect=0.0.0.0:9229", "npx vitest run --coverage", "check"],
+      ["npx vitest run --inspect-brk=0.0.0.0:9229", "npx vitest run --silent", "check"],
+      ["npx vitest run --inspectBrk=127.0.0.1:9339", "npx vitest run --passWithNoTests", "check"],
+      ["npx mocha --inspect=0.0.0.0:9229", "npx mocha --exit test", "check"],
+      ["npx vitest run --typecheck --typecheck.checker=scripts/deploy.sh", "npx vitest run --typecheck", "check"],
+      ["npx vitest list --json=.husky/pre-commit", "npx vitest list --filesOnly", "check"],
+      ["npx vitest init browser", "npx vitest related src/a.ts", "check"],
+      ["npx vitest run --browser.enabled", "npx vitest run --project=unit", "check"],
+      ["npx vitest run --ui", "npx vitest run --maxWorkers=2", "check"],
+      ["npx vitest run --attachmentsDir=.claude", "npx vitest run --retry=2", "check"],
+      ["npx vitest run --mergeReports", "npx vitest run --bail=1", "check"],
+      ["npx mocha --reporter xunit --reporter-option output=.husky/pre-commit", "npx mocha --grep checkout test", "check"],
+      ["npx mocha --reporter xunit -O output=CLAUDE.md", "npx mocha -g checkout", "check"],
+      ["npx mocha --file ./x.js", "npx mocha --forbid-only test", "check"],
+      ["npx tap --node-arg=--require=./x.js", "npx tap", "check"],
+      // jest and eslint
+      ["npx jest --coverageReporters=./x.js", "npx jest --ci", "check"],
+      ["npx jest --filter=./x.js", "npx jest --onlyChanged", "check"],
+      ["npx jest --clearCache", "npx jest --listTests", "check"],
+      ["npx jest --projects ./x", "npx jest -i", "check"],
+      ["eslint --init", "eslint --max-warnings 0 src", "check"],
+      ["eslint --inspect-config", "eslint --quiet src", "check"],
+      ["npx eslint --parser ./x.js src", "npx eslint --ext .ts src", "check"],
+      ["npx eslint --suppress-all src", "npx eslint --no-warn-ignored src", "check"],
+      ["npx eslint --mcp", "npx eslint --stats src", "check"],
+      ["npx eslint --cache-location=.claude src", "npx eslint --cache src", "check"],
+      // tsc: a build info file it writes
+      ["tsc --noEmit --incremental", "tsc --noEmit --skipLibCheck", "check"],
+      ["tsc --noEmit --composite", "tsc --noEmit --noUnusedLocals", "check"],
+      ["tsc --noEmit --plugins x", "tsc --noEmit --target es2022", "check"],
+      // biome and cspell: no list was read, so any option asks; a subcommand that is no check asks
+      ["npx biome init", "npx biome check src", "check"],
+      ["npx biome migrate", "npx biome lint src", "check"],
+      ["npx cspell --file-list stdin", "npx cspell src/a.ts", "check"],
+      ["echo /Users/fon/.aws/credentials | npx cspell --file-list stdin --show-context", "npx cspell lint src", "check"],
+      // a framework's lint, turbo and nx: options handed on to a linter
+      ["next lint --fix", "next lint", "check"],
+      ["next lint --output-file=.husky/pre-commit", "pnpm exec next lint", "check"],
+      ["pnpm exec next lint --fix", "npx next lint", "check"],
+      ["turbo run lint -- --fix", "turbo run lint", "check"],
+      ["turbo lint --fix", "turbo lint", "check"],
+      ["turbo run test --graph=x.html", "turbo run test -F web", "check"],
+      ["nx run web:lint --fix", "nx run web:lint", "check"],
+      ["nx lint web --fix", "nx lint web", "check"],
+      // bun's test runner and the words a package manager hands to a test script
+      ["bun test --reporter=junit --reporter-outfile=.husky/pre-commit", "bun test --coverage", "check"],
+      ["bun test --coverage --coverage-dir=.claude", "bun test -t checkout", "check"],
+      ["bun test -r ./x.js", "bun test --silent", "check"],
+      ["pnpm test -- --inspect=0.0.0.0:9229", "pnpm test -- --coverage", "check"],
+      ["pnpm test -- --outputFile=x.json", "pnpm test -- --run", "check"],
+      ["npm test -- --json --outputFile=x", "npm test -- -t checkout", "check"],
+      // go, cargo, shellcheck, actionlint, playwright, prettier
+      ["go test -fuzzcachedir=x ./...", "go test -short ./...", "check"],
+      ["go test -outputdir=.claude ./...", "go test -failfast ./...", "check"],
+      ["go test -args -test.cpuprofile=x ./...", "go test -timeout=30s ./...", "check"],
+      ["go vet -json ./...", "go vet ./pkg", "check"],
+      ["cargo test --target-dir .claude", "cargo test --workspace", "check"],
+      ["cargo check --timings", "cargo check --message-format=json", "check"],
+      ["cargo clippy -m x/Cargo.toml", "cargo clippy --all-targets", "check"],
+      ["shellcheck --rcfile=x scripts/a.sh", "shellcheck -S warning scripts/a.sh", "check"],
+      ["shellcheck -x scripts/a.sh", "shellcheck -f gcc scripts/a.sh", "check"],
+      ["actionlint -pyflakes=./x", "actionlint -oneline", "check"],
+      ["actionlint -config-file x.yaml", "actionlint -color", "check"],
+      ["npx playwright test --ui-host=0.0.0.0", "npx playwright test --headed", "check"],
+      ["npx playwright test --output=.claude", "npx playwright test -x", "check"],
+      ["npx playwright test --trace on", "npx playwright test --workers=2", "check"],
+      ["npx playwright test --tsconfig ./x.json", "npx playwright test --project chromium", "check"],
+      ["npx prettier --check --cache-location=x .", "npx prettier --check --cache .", "check"],
+      // an option's value that is a file a change to which always asks, on a program with no list
+      ["cat --x=.husky/pre-commit a.txt", "cat -n a.txt", "read"],
+      ["diff --to-file=CLAUDE.md a.txt", "diff --to-file=b.txt a.txt", "read"],
+      ["sort --random-source=.claude/settings.local.json a.txt", "sort --random-source=seed.txt a.txt", "read"],
+    ]);
+    // a fix is the change it makes, which a level may let go alone, never a check
+    for (const line of ["ruff check --fix-only src", "ruff check --add-noqa src", "npx eslint --fix src", "cargo clippy --fix"]) expect([line, read(line).action]).toEqual([line, "change"]);
+    // an option that only leaves a folder out is not a file it writes
+    expect(read("grep -rn --exclude-dir=.git foo src").action).toBe("read");
+  });
+});
+
 describe("everyday commands", () => {
   /** What a developer and an agent run all day, each as it read before item 112 (only `cdk synth`, now a build, moved).
    *  None of these may start to ask because a hostile line beside it does. */

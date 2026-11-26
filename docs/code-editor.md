@@ -268,6 +268,35 @@ program or reaches the network. What it does not understand is `unknown`, and as
   retractions. A kubeconfig or kuberc named on the line asks (it can name a program kubectl runs), and `turbo.json`,
   which can name where turbo sends its cache, is a file a change to which always asks.
 
+#### A check's options, from a list (item 116)
+
+Four reviews each found an option a deny-list did not know that makes a check or a read write a file, run a program the
+line names, open a debugger on an address, or fetch and install. So a check is now read from a list of the options its
+program is known to take harmlessly (`KNOWN` in `src/code/command.ts`), and any other option makes the line ask:
+
+- **Every checker.** vitest, jest, mocha, playwright, tsc and vue-tsc, eslint, prettier, pytest, mypy, ruff, pylint,
+  black, isort, shellcheck, actionlint, `go test` and `go vet`, `cargo test`, `check`, `bench` and `clippy`. Each list
+  was read from the program's own `--help` on this Mac or, for one not installed here, from its own documentation
+  (jest, eslint, prettier, mocha, pylint, go test). A checker whose options were not read (ava, tap, pyright, flake8,
+  knip, depcheck, cspell, stylelint, markdownlint, hadolint, cypress, biome, a framework's `lint`, nx,
+  `python -m unittest`) takes none: with any option it asks. An option that fixes or updates (`--fix`, `--fix-only`,
+  `--add-noqa`, `-u`) makes the line the change it is.
+- **Subcommands too.** `ruff` is a check only as `check` or `format`, `biome` as `check`, `lint`, `format` or `ci`, and
+  `vitest init` is none.
+- **Words handed on.** What a package manager hands to a test script (`pnpm test -- …`, `bun test …`) and what turbo
+  hands to a task after `--` are read from a short list harmless in every common runner. turbo's own options are
+  `--filter` alone.
+- **pip and uv.** `pip list`, `show`, `freeze` and `check`, and the same under `uv pip`, are reads only with their own
+  listed options: `--log` appends to a file and `--python` names a program to run.
+- **A guarded file as an option's value.** On any read or check, an option's value that is a file a change to which
+  always asks (`--log CLAUDE.md`, `--x=.husky/pre-commit`) asks; one that only leaves something out
+  (`--exclude-dir=.git`) does not, and a file named as an operand (`cat package.json`) stays a read.
+
+None of the 221 everyday commands changed. Not yet on a list: the reads that item 112 checked against their manuals
+(cat, ls, head, diff and the like), git's, gh's, docker's, kubectl's, terraform's and helm's reads, the words
+`cargo test` hands its test binary after `--`, and jq and yq; their deny-lists and the option-value check above still
+apply.
+
 #### The folder a session's commands run in (item 116)
 
 An ask names the folder a command runs in as the session's own, but an agent's shell may keep a `cd` for its next

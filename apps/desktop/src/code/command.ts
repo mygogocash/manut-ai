@@ -571,7 +571,12 @@ function packageManager(words: string[], where: Where): Verdict {
   const head = at + 1;
   const rest = ops.slice(1).map((i) => words[i]);
   // what a script is handed after its name goes to whatever the script runs
-  const handed = (from: number, s: Verdict): Verdict => (s.action === "check" ? (checkOptions("", words.slice(from)) ?? s) : s);
+  const handed = (from: number, s: Verdict): Verdict => {
+    if (s.action !== "check") return s;
+    const known = knownOptions("", words.slice(from), true);
+    if (known === "unknown") return unknownProgram(pm);
+    return checkOptions("", words.slice(from)) ?? (known === "change" ? v("change", say("kit.say.format"), head) : s);
+  };
   if (pm === "yarn" && sub === "global") return thisMac();
   if (["add", "install", "i", "in", "ci"].includes(sub)) {
     if (sub === "ci" || !rest.length) return v("install", say("kit.say.installAll"), head);
@@ -1090,6 +1095,160 @@ const looksLikeSettings = (value: string) =>
   /(^|[._-])(config|workspace)([._-]|$)|rc(\.[a-z]+)?$|^\.[a-z0-9_-]*rc|^(pyproject\.toml|setup\.cfg|tox\.ini|pytest\.ini|mypy\.ini|ruff\.toml|biome\.jsonc?|t?sconfig.*\.json|jsconfig.*\.json)$/i.test(value.split(/[\\/]/).pop() ?? "");
 const namesAFile = (value: string) => /[\\/]/.test(value) || value.startsWith(".") || /\.(c|m)?[jt]sx?$|\.py$/i.test(value);
 
+// ---- the options a check or a read may have (item 116) ------------------------------------------------------------
+//
+// Four reviews each found an option the deny-lists above did not know that makes a check or a read write a file, run a
+// program the line names, open a debugger on an address, or fetch and install. So a check, and a read of the programs
+// below, is now read from a list of the options each program is known to take harmlessly: any other option makes the
+// line `unknown`, which asks. Each list was read from the program's own `--help` on the Mac that built it (vitest 3.2.7,
+// tsc 5.9.3, playwright, pytest 9.0.2, mypy 1.19.1, ruff 0.15.8, pip 21.2.4, uv 0.11.6, cargo, shellcheck, actionlint) or,
+// for one not installed there, from its own documentation (jest, eslint, prettier, mocha, pylint, go test, turbo). A
+// program with no list here, or one whose documentation was not read, takes no option at all. An option that is only
+// harmless for most values (`--reporter`, `--config`) is still checked by `checkOptions`, and every value is checked as a
+// path is.
+
+/** A program's options: `flags` take no value, `values` take one (joined by `=`, joined to a short one, or the next word),
+ *  and `changes` make the step a change. A long one is written `--name`, compared without letter case, `-` and `_`, and
+ *  taken back with `--no-name` when it is a flag; a short one is `-x`, bundled with others. `long1` reads `-name` as a
+ *  long option, as Go's flags do. */
+interface Known {
+  flags?: string;
+  values?: string;
+  changes?: string;
+  long1?: true;
+}
+
+const optKey = (w: string) => (w.startsWith("--") ? `--${w.slice(2).toLowerCase().replace(/[-_]/g, "")}` : w);
+const setOf = (list = "", long1 = false) => new Set(list.split(/\s+/).filter(Boolean).map((w) => optKey(long1 && !w.startsWith("--") ? `-${w}` : w)));
+
+const PIP_COMMON = "-h --help --isolated -v --verbose -q --quiet --no-input --no-cache-dir --disable-pip-version-check --no-color --no-python-version-warning";
+const UV_COMMON = "-h --help -q --quiet -v --verbose -n --no-cache --color --offline --no-progress --no-config";
+const VITEST =
+  "-w --watch --silent --hideSkippedTests --coverage --isolate --globals --fileParallelism --passWithNoTests --logHeapUsage --allowOnly --expandSnapshotDiff --disableConsoleIntercept --typecheck --printConsoleTrace --includeTaskLocation --run --color --clearScreen -h --help -v --version";
+const VITEST_VALUES = "-r --root -c --config -t --testNamePattern --dir --reporter --mode --workspace --pool --maxWorkers --minWorkers --environment --shard --changed --testTimeout --hookTimeout --bail --retry --exclude --project --slowTestThreshold --teardownTimeout --maxConcurrency";
+const TSC_FLAGS =
+  "--noEmit --pretty --strict --skipLibCheck --skipDefaultLibCheck --listFiles --listFilesOnly --explainFiles --diagnostics --extendedDiagnostics --traceResolution --noErrorTruncation --showConfig --version --help --all " +
+  "--allowJs --checkJs --resolveJsonModule --esModuleInterop --allowSyntheticDefaultImports --forceConsistentCasingInFileNames --isolatedModules --isolatedDeclarations --verbatimModuleSyntax --erasableSyntaxOnly " +
+  "--allowUnreachableCode --allowUnusedLabels --alwaysStrict --exactOptionalPropertyTypes --noFallthroughCasesInSwitch --noImplicitAny --noImplicitOverride --noImplicitReturns --noImplicitThis " +
+  "--noPropertyAccessFromIndexSignature --noUncheckedIndexedAccess --noUnusedLocals --noUnusedParameters --strictBindCallApply --strictBuiltinIteratorReturn --strictFunctionTypes --strictNullChecks " +
+  "--strictPropertyInitialization --useUnknownInCatchVariables --noUncheckedSideEffectImports --experimentalDecorators --emitDecoratorMetadata --useDefineForClassFields --noLib --noResolve";
+const TSC_VALUES = "-p --project --target --module --moduleResolution --lib --jsx --types --moduleDetection --locale";
+const CARGO_CHECK =
+  "--future-incompat-report -v --verbose -q --quiet -h --help --workspace --all --lib --bins --examples --tests --benches --all-targets --all-features --no-default-features -r --release --ignore-rust-version --locked --offline --frozen --keep-going";
+const CARGO_VALUES = "--message-format --color -p --package --exclude --bin --example --test --bench -F --features -j --jobs --profile --target";
+
+const KNOWN: Record<string, Known> = {
+  vitest: { flags: VITEST, values: VITEST_VALUES, changes: "-u --update" },
+  "vitest list": { flags: `${VITEST} --filesOnly`, values: VITEST_VALUES },
+  tsc: { flags: TSC_FLAGS, values: TSC_VALUES },
+  "vue-tsc": { flags: TSC_FLAGS, values: TSC_VALUES },
+  "playwright test": { flags: "--fail-on-flaky-tests --forbid-only --fully-parallel --headed --last-failed --list --no-deps --pass-with-no-tests --quiet --shuffle -x -h --help", values: "-c --config --browser -g --grep -G --grep-invert --global-timeout -j --workers --max-failures --project --repeat-each --reporter --retries --shard --timeout", changes: "-u --update-snapshots" },
+  pytest: {
+    flags: "--markers -x --exitfirst --strict-config --strict-markers --strict --fixtures --fixtures-per-test --runxfail --lf --last-failed --ff --failed-first --nf --new-first --sw --stepwise --sw-skip --cache-show -v --verbose --no-header --no-summary --no-fold-skipped --force-short-summary -q --quiet -l --showlocals --no-showlocals --xfail-tb --full-trace --collect-only --co --noconftest --keep-duplicates --collect-in-virtualenv --continue-on-collection-errors --doctest-modules --doctest-ignore-import-errors --doctest-continue-on-failure --setup-only --setup-show --setup-plan --disable-plugin-autoload --disable-warnings -s -V --version -h --help",
+    values: "-k -m --maxfail --durations --durations-min --verbosity -r --tb --show-capture --color --code-highlight -W --ignore --ignore-glob --deselect --doctest-glob --import-mode --capture --assert --log-level --log-cli-level --log-format --log-date-format",
+  },
+  mypy: {
+    flags:
+      "-h --help -v --verbose -V --version --warn-unused-configs --no-namespace-packages --ignore-missing-imports --follow-untyped-imports --no-site-packages --no-silence-site-packages --disallow-any-expr --disallow-any-decorated --disallow-any-explicit --disallow-any-generics --disallow-any-unimported --disallow-subclassing-any --disallow-untyped-calls --disallow-untyped-defs --disallow-incomplete-defs --check-untyped-defs --disallow-untyped-decorators --implicit-optional --no-strict-optional --warn-redundant-casts --warn-unused-ignores --no-warn-no-return --warn-return-any --warn-unreachable --report-deprecated-as-note --allow-untyped-globals --allow-redefinition --allow-redefinition-new --no-implicit-reexport --strict-equality --strict-equality-for-none --strict-bytes --extra-checks --strict --show-error-context --show-column-numbers --show-error-end --hide-error-codes --show-error-code-links --pretty --no-color-output --no-error-summary --show-absolute-path --no-incremental --show-traceback --scripts-are-modules --explicit-package-bases --exclude-gitignore",
+    values: "-O --follow-imports --python-version --platform --always-true --always-false --untyped-calls-exclude --deprecated-calls-exclude --disable-error-code --enable-error-code --exclude -m -p",
+  },
+  "ruff check": {
+    flags: "--show-fixes --diff --ignore-noqa --preview --statistics --show-files --show-settings -h --help --respect-gitignore --force-exclude -n --no-cache -e --exit-zero --exit-non-zero-on-fix -v --verbose -q --quiet -s --silent --isolated",
+    values: "--output-format --target-version --extension --select --ignore --extend-select --per-file-ignores --extend-per-file-ignores --fixable --unfixable --extend-fixable --exclude --extend-exclude --color",
+    changes: "--fix --unsafe-fixes --fix-only --add-noqa",
+  },
+  "ruff format": { flags: "--check --diff --preview -h --help -n --no-cache --exit-non-zero-on-format --respect-gitignore --force-exclude -v --verbose -q --quiet -s --silent --isolated", values: "--extension --target-version --output-format --exclude --line-length --range --color" },
+  "ruff version": {},
+  jest: {
+    flags: "--ci --clearMocks --collectTests --colors --coverage --collectCoverage --detectOpenHandles --errorOnDeprecated -e --expand --forceExit --help --injectGlobals --listTests --logHeapUsage --noStackTrace -o --onlyChanged -f --onlyFailures --passWithNoTests --randomize --resetMocks --restoreMocks -i --runInBand --runTestsByPath --showSeed --silent --testLocationInResults --useStderr --verbose -v --version --watch --watchAll --workerThreads",
+    values: "-b --bail --changedSince --collectCoverageFrom --coverageProvider --maxConcurrency -w --maxWorkers --seed --selectProjects --shard --testMatch -t --testNamePattern --testPathIgnorePatterns --testPathPatterns --testTimeout",
+    changes: "-u --updateSnapshot",
+  },
+  mocha: {
+    flags: "--allow-uncaught -A --async-only -b --bail --check-leaks --color -c --colors --delay --diff --dry-run --exit --fail-zero --forbid-only --forbid-pending --full-trace --inline-diffs -i --invert --list-interfaces --list-reporters -C --no-colors -p --parallel --posix-exit-codes --recursive --sort -S -h --help -V --version",
+    values: "--global --globals -j --jobs --retries -s --slow -t --timeout --timeouts -u --ui --extension --ignore --exclude -f --fgrep -g --grep",
+  },
+  eslint: {
+    flags: "--no-config-lookup --no-ignore --quiet --color --no-color --no-inline-config --report-unused-disable-directives --report-unused-inline-configs --cache --no-error-on-unmatched-pattern --exit-on-fatal-error --no-warn-ignored --pass-on-no-patterns --debug -h --help -v --version --stats --fix-dry-run",
+    values: "--ext --global --rule --ignore-pattern --max-warnings -f --format --report-unused-disable-directives-severity --cache-strategy --fix-type --concurrency",
+    changes: "--fix",
+  },
+  prettier: { flags: "--check -c --list-different -l --no-config --no-editorconfig --with-node-modules --ignore-unknown -u --no-error-on-unmatched-pattern --cache --debug-check", values: "--ignore-path --config-precedence --log-level --find-config-path", changes: "--write -w" },
+  pylint: { flags: "-h --help --version --list-msgs --list-msgs-enabled", values: "--disable -d --enable -j --ignore --msg-template --recursive --source-roots" },
+  black: { flags: "--check --diff -q --quiet" },
+  isort: { flags: "--check --check-only -c --diff -q --quiet" },
+  // documentation not read for these: they take no option, and any asks
+  ava: {}, tap: {}, pyright: {}, flake8: {}, knip: {}, depcheck: {}, cspell: {}, stylelint: {}, markdownlint: {}, hadolint: {}, cypress: {}, "cypress run": {},
+  "biome check": {}, "biome lint": {}, "biome format": {}, "biome ci": {}, shellcheck: { flags: "-a --check-sourced -C --color --list-optional --norc -V --version --help", values: "-i --include -e --exclude --extended-analysis -f --format -o --enable -s --shell -S --severity -W --wiki-link-count" },
+  actionlint: { long1: true, flags: "-color -no-color -oneline -verbose -version -debug", values: "-ignore -format" },
+  "go test": { long1: true, flags: "-json -cover -failfast -fullpath -short -v -benchmem", values: "-bench -benchtime -count -covermode -coverpkg -cpu -list -parallel -run -shuffle -skip -timeout -vet" },
+  "go vet": { long1: true },
+  "cargo test": { flags: `${CARGO_CHECK} --no-run --no-fail-fast --doc`, values: CARGO_VALUES },
+  "cargo check": { flags: CARGO_CHECK, values: CARGO_VALUES },
+  "cargo bench": { flags: CARGO_CHECK, values: CARGO_VALUES },
+  "cargo clippy": { flags: `${CARGO_CHECK} --no-deps`, values: CARGO_VALUES, changes: "--fix" },
+  "pip list": { flags: `${PIP_COMMON} -o --outdated -u --uptodate -e --editable -l --local --user --pre --not-required --exclude-editable --include-editable --no-index`, values: "--format --exclude" },
+  "pip show": { flags: `${PIP_COMMON} -f --files` },
+  "pip freeze": { flags: `${PIP_COMMON} -l --local --user --all --exclude-editable`, values: "--exclude" },
+  "pip check": { flags: PIP_COMMON },
+  "uv pip list": { flags: `${UV_COMMON} -e --editable --exclude-editable --outdated --strict`, values: "--exclude --format" },
+  "uv pip show": { flags: UV_COMMON },
+  "uv pip freeze": { flags: UV_COMMON },
+  "uv pip tree": { flags: UV_COMMON },
+  "uv pip check": { flags: UV_COMMON },
+  // the words a package manager hands to a script nobody has read: options harmless in every runner a test script is
+  // likely to run (vitest, jest, mocha, playwright, bun's own), and the ones that update snapshots
+  "": { flags: "--run --coverage --silent --verbose --passWithNoTests --runInBand", values: "-t --testNamePattern --reporter --pool --project --shard --testTimeout --maxWorkers --environment --config --mode", changes: "-u --update --updateSnapshot" },
+  // turbo hands the words after `--` to the task, read as a script's are
+  turbo: { values: "--filter -F" },
+};
+
+/** What a program's own options make of a check or a read, by its list in `KNOWN`: null when each is one it takes
+ *  harmlessly, `change` when one changes files, `unknown` for any other (a program with no list knows none). With
+ *  `handed`, words after `--` are read too, as the options of whatever the script runs. */
+function knownOptions(key: string, args: readonly string[], handed = false): "change" | "unknown" | null {
+  const k = KNOWN[key] ?? {};
+  const flags = setOf(k.flags, k.long1);
+  const values = setOf(k.values, k.long1);
+  const changes = setOf(k.changes, k.long1);
+  let change = false;
+  for (let i = 0; i < args.length; i++) {
+    const w = args[i];
+    if (w === "--") {
+      if (handed) continue;
+      break;
+    }
+    if (!w.startsWith("-") || w === "-") continue;
+    if (w.startsWith("--") || k.long1) {
+      const n = optKey(`--${w.replace(/^--?/, "").split("=")[0]}`);
+      if (flags.has(n) || (n.startsWith("--no") && flags.has(`--${n.slice(4)}`))) continue;
+      if (values.has(n)) {
+        if (!w.includes("=")) i++;
+        continue;
+      }
+      if (changes.has(n)) {
+        change = true;
+        continue;
+      }
+      return "unknown";
+    }
+    for (let j = 1; j < w.length; j++) {
+      const c = `-${w[j]}`;
+      if (flags.has(c)) continue;
+      if (changes.has(c)) {
+        change = true;
+        continue;
+      }
+      if (values.has(c)) {
+        if (j === w.length - 1) i++;
+        break;
+      }
+      return "unknown";
+    }
+  }
+  return change ? "change" : null;
+}
+
 /** What a check's own options make of it, or null when they leave it a check: an option that loads a program, a settings
  *  file that is not one, a file it writes, or a service it sends to. `runner` names the runner (`""` when the words go to a
  *  script nobody has read, as `pnpm test --…` does), for its short options. */
@@ -1161,10 +1320,29 @@ function tool(words: string[], where: Where, flags: ReadonlySet<string> = new Se
 /** tsc's options that write a file, by name in lower case: tsc takes either letter case, and one dash or two. */
 const TSC_WRITES = new Set(["outdir", "outfile", "out", "declarationdir", "tsbuildinfofile", "generatetrace", "generatecpuprofile", "build", "b", "init", "watch", "w"]);
 
+/** The subcommands each checker is read with as a check (item 116): any other (`vitest init`, `ruff clean`, `biome
+ *  init`) is not one. A runner with none here takes filters and files after its options. */
+const CHECK_SUBS: Record<string, readonly string[]> = {
+  ruff: ["check", "format", "version"],
+  biome: ["check", "lint", "format", "ci"],
+};
+
 function checker(name: string, words: string[]): Verdict {
   const args = words.slice(1);
+  const sub = args.find((w) => !w.startsWith("-"));
+  if (CHECK_SUBS[name] && !CHECK_SUBS[name].includes(sub ?? "")) return unknownProgram(name);
+  if (name === "vitest" && sub === "init") return unknownProgram(name);
+  // the options of its subcommand when it has a list of its own, else the program's
+  const key = sub !== undefined && KNOWN[`${name} ${sub}`] ? `${name} ${sub}` : CHECK_SUBS[name] ? `${name} ${sub}` : name;
+  const known = knownOptions(key, args);
+  if (known === "unknown") return unknownProgram(name);
   const opts = checkOptions(name, args);
   if (opts) return opts;
+  const r = checkerOf(name, args);
+  return known === "change" && RANK[r.action] < RANK.change ? v("change", say("kit.say.format"), 2) : r;
+}
+
+function checkerOf(name: string, args: string[]): Verdict {
   if (name === "playwright") return args[0] === "test" ? v("check", say("kit.say.test")) : args[0] === "install" ? thisMac() : unknownProgram(name);
   if (name === "cypress") return args[0] === "run" ? v("check", say("kit.say.test")) : unknownProgram(name);
   if (name === "tsc" || name === "vue-tsc") {
@@ -1186,6 +1364,7 @@ function lang(name: string, words: string[]): Verdict {
   const [, sub, third] = words;
   if (name === "go") {
     // a test or a vet built with another program (`-exec`, `-toolexec`, `-vettool`), or writing a file, is not a check
+    if (["test", "vet"].includes(sub) && knownOptions(`go ${sub}`, words.slice(2))) return unknownProgram(name);
     if (["test", "vet", "list"].includes(sub)) {
       const opts = checkOptions("go", words.slice(2));
       if (opts) return opts;
@@ -1205,6 +1384,8 @@ function lang(name: string, words: string[]): Verdict {
   // cargo: `--config` sets what runs a test binary (`target.<triple>.runner`), and `-Z` turns on what is not settled yet
   if (["test", "check", "bench", "clippy"].includes(sub)) {
     if (has(words.slice(2), "--config", "-Z")) return unknownProgram(name);
+    const known = knownOptions(`cargo ${sub}`, words.slice(2));
+    if (known === "unknown") return unknownProgram(name);
     const opts = checkOptions("cargo", words.slice(2));
     if (opts) return opts;
   }
@@ -1228,7 +1409,8 @@ function python(words: string[]): Verdict {
   if (flag === "--version" || flag === "-V") return v("read", say("kit.say.read"));
   if (flag !== "-m" || !mod) return unknownProgram(words[0]);
   if (mod === "pytest") return checker("pytest", words.slice(2));
-  if (mod === "unittest") return checkOptions("", words.slice(3)) ?? v("check", say("kit.say.test"));
+  // no list of unittest's options was read: with any, it asks
+  if (mod === "unittest") return words.slice(3).some((w) => w.startsWith("-")) ? unknownProgram(words[0]) : v("check", say("kit.say.test"));
   if (["mypy", "black", "isort", "ruff", "flake8", "pylint"].includes(mod)) return checker(mod, words.slice(2));
   if (mod === "pip") return pip(words.slice(2));
   if (mod === "venv") return v("change", say("kit.say.change"), 3);
@@ -1237,7 +1419,9 @@ function python(words: string[]): Verdict {
 
 function pip(words: string[]): Verdict {
   const sub = words[1];
-  if (["list", "show", "freeze", "check", "--version"].includes(sub)) return v("read", say("kit.say.read"));
+  if (words.length === 2 && ["--version", "-V"].includes(sub)) return v("read", say("kit.say.read"));
+  // read only with its own options known to change nothing: `--log` appends to a file, `--python` names a program
+  if (["list", "show", "freeze", "check"].includes(sub)) return knownOptions(`pip ${sub}`, words.slice(2)) ? unknownProgram(words[0]) : v("read", say("kit.say.read"));
   if (["install", "uninstall"].includes(sub)) return thisMac();
   return unknownProgram(words[0]);
 }
@@ -1400,7 +1584,8 @@ function classify(words: string[], where: Where): Verdict {
       // `sync` installs and removes packages to match a list, and `compile` writes one
       if (["install", "uninstall", "sync"].includes(words[2] ?? "")) return v("install", say("kit.say.update"), 3);
       if (words[2] === "compile") return v("change", say("kit.say.change"), 3);
-      return ["list", "show", "freeze", "tree", "check"].includes(words[2] ?? "") ? v("read", say("kit.say.read")) : unknownProgram(name);
+      // read only with its own options known to change nothing (`--python` runs the program it names)
+      return ["list", "show", "freeze", "tree", "check"].includes(words[2] ?? "") && !knownOptions(`uv pip ${words[2]}`, words.slice(3)) ? v("read", say("kit.say.read")) : unknownProgram(name);
     }
     if (name === "uv" && sub === "tool") return thisMac();
     if (["add", "remove", "sync", "lock", "install", "update"].includes(sub ?? "")) return v("install", say("kit.say.update"), 2);
@@ -1576,9 +1761,23 @@ function classify(words: string[], where: Where): Verdict {
   }
   if (FRAMEWORKS.has(name)) {
     const sub = words[1] && !words[1].startsWith("-") ? words[1] : "";
-    if (name === "turbo" || name === "nx") return sub === "run" && words[2] ? (script(words[2], 3)) : sub ? (script(sub, 2)) : unknownProgram(name);
+    if (name === "turbo" || name === "nx") {
+      const task = sub === "run" ? 2 : 1;
+      if (!sub || !words[task] || words[task].startsWith("-")) return unknownProgram(name);
+      const s = script(words[task], task + 1);
+      if (s.action !== "check") return s;
+      // its own options are read from its list (nx's from none), and the words after `--` as a script's
+      const rest = words.slice(task + 1);
+      const dash = rest.indexOf("--");
+      const own = dash >= 0 ? rest.slice(0, dash) : rest;
+      if (knownOptions(name, own)) return unknownProgram(name);
+      if (dash < 0) return s;
+      const handed = knownOptions("", rest.slice(dash + 1), true);
+      return handed === "unknown" ? unknownProgram(name) : (checkOptions("", rest.slice(dash + 1)) ?? (handed === "change" ? v("change", say("kit.say.format"), task + 1) : s));
+    }
     if (sub === "build" || ["webpack", "rollup", "esbuild", "tsup", "parcel"].includes(name)) return (v("change", say("kit.say.build"), sub ? 2 : 1));
-    if (sub === "lint") return v("check", say("kit.say.check"));
+    // a framework's lint hands its options to the linter, and no list of them was read: with any, it asks
+    if (sub === "lint") return words.slice(2).some((w) => w.startsWith("-")) ? unknownProgram(name) : v("check", say("kit.say.check"));
     if (sub === "deploy") return live();
     return (v("change", say("kit.say.run"), sub ? 2 : 1));
   }
@@ -1868,6 +2067,12 @@ function readFrom({ cmds, opaque }: Lexed, where: Where, start: string | null): 
     const here = { cwd, root: where.root, home: where.home };
     const named = (w: string) => [...valuesIn(w), ...(/^-[^-]./.test(w) ? Array.from({ length: w.length - 2 }, (_, k) => w.slice(k + 2)) : [])];
     if (c.writes.some((w) => IN_GIT_DIR.test(w) || guardedPath(w, here))) gitOwn = true;
+    // An option's value that is such a file asks even on a read or a check (item 116): an option this reading does not
+    // know may write it (`--log CLAUDE.md`). An option that only leaves something out (`--exclude-dir=.git`) is not one.
+    // A file named as an operand (`cat package.json`) stays a read.
+    const leavesOut = (w: string) => /^-+(exclude|ignore|skip|prune)/i.test(w);
+    if (reads && words.some((w, i) => i > 0 && w.startsWith("-") && !leavesOut(w) && !verdict.text?.has(i) && named(w).some((x) => x !== "" && (IN_GIT_DIR.test(x) || guardedPath(x, here)))))
+      gitOwn = true;
     if (!reads && (guardedPath(cwd, here) || words.some((w, i) => i > 0 && !verdict.text?.has(i) && (IN_GIT_DIR.test(w) || named(w).some((x) => x !== "" && guardedPath(x, here)))))) gitOwn = true;
 
     if (verdict.cd !== undefined) {
