@@ -1093,7 +1093,25 @@ still goes through the asks (How an ask is read, Kit's dial, Buddy's card).
   lane's `.mcp.json` is the lane's own file, which its agent can change, so another command, argument, variable, address,
   header or kind under an approved name, or a name the developer's folder does not have, starts nothing, and the chat says
   "Not started in this lane: <names>" with why (`session.note` `mcp_differs`, names only). A session in the developer's own
-  folder is held to the entries there, as Claude Code is. This one source because `.mcp.json` lives in the folder the agent already works in, so its
+  folder is held to the entries there, as Claude Code is. Item 114: an entry that is the approved one can still run the
+  LANE's files, since the agent starts its servers in the lane's folder: `node ./mcp/server.js` named the developer's script
+  where the person approved it and names the lane's copy here, which the lane's agent can change. Resolving such a path
+  against the developer's folder was not chosen: the server would still start in the lane's folder, and what a program
+  finds there by itself (a local package, a project file, a module path) would still be the lane's. So in a lane a stdio
+  server is not started (`acp_mcp::runs_the_lane`) when its program is named by a path from the working folder or inside the
+  lane, or found through a `PATH` with a relative or empty entry; when its program runs what the working folder's own files
+  name (package managers and runners: `npm`, `npx`, `pnpm`, `yarn`, `bun`, `deno`, `tsx`, `uv`, `uvx`, `poetry`, `pipenv`,
+  `make`, `just`, `cargo`, `go`, `mvn`, `gradle`, `dotnet`, `bundle`, `composer`, `git`; shells and wrappers such as `sh`,
+  `env` and `xargs`; `python` with `-m` or `-c`; `node` loading a module or inline code; `docker` or `podman` with `compose` or
+  `build`); when an argument, a part of one (an option's value after `=`, a bind mount's `.:/app`), or a variable's value names
+  something of the lane's (an absolute path inside it, a path from `.` or `..`, or a relative name whose first part is in
+  the lane, such as `mcp/server.js` or `server.py`); when `NODE_OPTIONS` loads a module; or when a variable ending in `PATH` or
+  `LIB` has an empty entry. The chat says "Not started in this lane: <names>. It runs files from the lane's own folder, which
+  the lane's agent can change. It starts in a chat in your project folder." (`mcp_lane_files`, names only). What a person
+  loses: in a lane, a project server started through `npx` or `uvx` (the usual way to name one) no longer starts, nor one
+  whose argument happens to name a file the lane has; in their own folder every approved server starts as before. Not
+  ruled out: a program named alone that reads its working folder by itself, with no word naming it (a server that loads
+  `./config.js` on its own). This one source because `.mcp.json` lives in the folder the agent already works in, so its
   literal values are ones the agent can read anyway, and its `${VAR}` and `${VAR:-default}` are filled in from the environment
   the agent already runs with (a server with a variable that is not set is left out). The servers the person added to Claude
   Code or Codex themselves are not handed on: their secrets were given to those agents. Shapes from the protocol's Session

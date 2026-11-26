@@ -1281,6 +1281,7 @@ export const zh: Record<Key, string> = {
   "ss.noChatMode": "{agent} 没有以聊天模式响应，可能是旧版本：{install}",
   "ss.newConversation": "没有找到之前的对话，已在这里开始新对话。",
   "ss.mcpDiffers": "未在此泳道中启动：{names}。泳道的 .mcp.json 条目与你在项目文件夹中批准的不同。",
+  "ss.mcpLaneFiles": "未在此泳道中启动：{names}。它会运行泳道自己文件夹中的文件，而泳道的智能体可以修改这些文件。在你项目文件夹的聊天中它会启动。",
   "ss.modelNext": "下一轮：{model}",
   "ss.modelNextTip": "当前这一轮继续使用 {model}，所选模型从下一轮开始生效",
 

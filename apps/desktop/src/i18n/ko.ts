@@ -1281,6 +1281,7 @@ export const ko: Record<Key, string> = {
   "ss.noChatMode": "{agent}가 채팅 모드로 답하지 않았어요. 오래된 버전일 수 있어요: {install}",
   "ss.newConversation": "이전 대화를 찾지 못해 여기서 새 대화를 시작했어요.",
   "ss.mcpDiffers": "이 레인에서는 시작하지 않았어요: {names}. 레인의 .mcp.json 항목이 프로젝트 폴더에서 승인한 것과 달라요.",
+  "ss.mcpLaneFiles": "이 레인에서는 시작하지 않았어요: {names}. 레인 자체 폴더의 파일을 실행하는데, 그 파일은 레인의 에이전트가 바꿀 수 있어요. 프로젝트 폴더의 채팅에서는 시작돼요.",
   "ss.modelNext": "다음 턴: {model}",
   "ss.modelNextTip": "지금 턴은 {model}로 계속하고, 고른 모델은 다음 턴부터 써요",
 

@@ -944,6 +944,10 @@ impl Adapter for Acp {
         if !self.mcp.differs().is_empty() {
             emit(&mut st, ev("session.note", json!({"kind": "mcp_differs", "names": self.mcp.differs()})));
         }
+        // and those that would run the lane's own files, which its agent can change (item 114): said once, by name
+        if !self.mcp.lane_files().is_empty() {
+            emit(&mut st, ev("session.note", json!({"kind": "mcp_lane_files", "names": self.mcp.lane_files()})));
+        }
         self.call(
             &mut st,
             Call::Initialize,
@@ -1617,6 +1621,11 @@ fn decide_on(rules: &[(String, String, String)], tool: &str, input: &str, fold: 
         // nothing differs, nothing is said
         let mut a = Acp::new(opencode(), "/w/lane", None);
         assert!(a.start().events.iter().all(|e| e["event"] != "session.note"));
+        // item 114: an approved server that would run the lane's own files is named the same way, under its own kind
+        let mut a = Acp::new(opencode(), "/w/lane", None).with_mcp(crate::acp_mcp::Approved::lane_files_of(&["local-tools"]));
+        let st = a.start();
+        let notes: Vec<&Value> = st.events.iter().filter(|e| e["event"] == "session.note").collect();
+        assert_eq!(notes, [&json!({"event": "session.note", "kind": "mcp_lane_files", "names": ["local-tools"]})]);
     }
 
     #[test]
