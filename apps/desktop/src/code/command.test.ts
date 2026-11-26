@@ -226,7 +226,9 @@ describe("what a step does", () => {
   it("asks for a change to a tool's own settings, and reads them otherwise", () => {
     for (const line of ["npm config set script-shell=./x", "pnpm config set registry https://example.com", "yarn config set npmRegistryServer x", "pnpm config delete registry", "npm config edit", "go env -w GOFLAGS=-x", "go env -u GOPROXY"])
       expect([line, action(line)]).toEqual([line, "unknown"]);
-    for (const line of ["npm config get registry", "pnpm config list", "yarn config", "go env GOPATH", "go env"]) expect([line, action(line)]).toEqual([line, "read"]);
+    for (const line of ["npm config get registry", "go env GOPATH", "go env"]) expect([line, action(line)]).toEqual([line, "read"]);
+    // a listing of every setting can print a token kept there, as printenv does (item 116)
+    for (const line of ["pnpm config list", "yarn config"]) expect([line, action(line)]).toEqual([line, "unknown"]);
   });
 
   it("calls a command that writes its output into a file a change", () => {

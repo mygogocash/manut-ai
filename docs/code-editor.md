@@ -268,6 +268,19 @@ program or reaches the network. What it does not understand is `unknown`, and as
   retractions. A kubeconfig or kuberc named on the line asks (it can name a program kubectl runs), and `turbo.json`,
   which can name where turbo sends its cache, is a file a change to which always asks.
 
+#### Secrets a read prints from outside the project (item 116)
+
+Some reads print a key kept outside the project without naming a path. They are read as `printenv` is, and ask:
+`kubectl get` or `describe` of a secret (`secret`, `secrets`, `secret/name`, in a list too), `terraform output` (and
+`tofu output`), `docker inspect` (and `container inspect`, `image inspect`), `docker compose config` but for its
+`--services`, `--volumes`, `--profiles`, `--images` and `--networks` listings, `git config --list`, `--get-regexp`,
+`--get-urlmatch` and a setting whose name says it holds a key, from every scope but the project's own (`--local`,
+`--worktree`, `--file`), `git var -l`, `ps` with `-E` or BSD's `e` (`ps eww`, `ps aeux`; `-e` alone is every process),
+yq's `load` and its kinds and its `env` read after `eval` or `eval-all` too, and a package manager's `config` but a
+`get` of a setting whose name says nothing of a key (a listing, a `get` of a token, any option after `config`). Each
+plain twin (`kubectl get pods`, `terraform plan`, `docker ps`, `git config --get user.name`, `ps aux`) stays a read.
+`pnpm config list` and a bare `yarn config` now ask.
+
 #### What a kept rule covers (item 116)
 
 "Always allow in this project" keeps a command's first words and, since item 116, the step it was kept for (a change,

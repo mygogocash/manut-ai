@@ -242,7 +242,7 @@ describe("A3: git, which takes any start of a long option's name", () => {
       ["git tag -n -a v1 -m x", "git tag -n", "read"],
       ["git tag -l -f v1", "git tag -l", "read"],
       ["git config --unset core.hooksPath", "git config --get core.hooksPath", "read"],
-      ["git config --edit", "git config --list", "read"],
+      ["git config --edit", "git config --local --list", "read"],
       ["git config --remove-section remote.origin", "git config --get remote.origin.url", "read"],
       ["git config --unset-all core.pager", "git config user.name", "read"],
       ["git config --file=../x/config --list", "git config --local --list", "read"],
@@ -328,7 +328,7 @@ describe("B1: a command with several actions, or a word read as the first of its
       ["docker compose -p ps up -d", "docker compose ps", "read"],
       ["docker compose --env-file logs up", "docker compose logs", "read"],
       ["docker compose --project-directory ls up", "docker compose ls", "read"],
-      ["docker compose config -o out.yml", "docker compose config", "read"],
+      ["docker compose config -o out.yml", "docker compose config --services", "read"],
     ]);
   });
 });
@@ -805,6 +805,46 @@ describe("C3: a kept rule covers only the step it was kept for (item 116)", () =
     expect(decide("pnpm add -r dayjs", [old("pnpm", "add")])).toBe("ask");
     // a new rule names the step it was kept for
     expect(readCommand("git push origin kit/x", at).rule).toEqual({ words: ["git", "push"], action: "push" });
+  });
+});
+
+describe("C4: a read that prints a secret from outside the project without naming a path (item 116)", () => {
+  it("is read as printenv is: it asks", () => {
+    counted += holds([
+      ["kubectl get secret -o yaml", "kubectl get pods -o yaml", "read"],
+      ["kubectl get secrets -A -o json", "kubectl get pods -A", "read"],
+      ["kubectl describe secret web-tls", "kubectl describe pod web", "read"],
+      ["kubectl get secret/web-tls -o jsonpath='{.data}'", "kubectl get configmap/web -o yaml", "read"],
+      ["kubectl get configmap,secret -n web", "kubectl get configmap,service -n web", "read"],
+      ["terraform output -json", "terraform validate", "read"],
+      ["terraform output db_password", "terraform plan", "read"],
+      ["tofu output -raw token", "tofu validate", "read"],
+      ["docker inspect web", "docker ps", "read"],
+      ["docker inspect --format '{{.Config.Env}}' web", "docker images", "read"],
+      ["docker container inspect web", "docker logs web", "read"],
+      ["docker compose config", "docker compose config --services", "read"],
+      ["git config --list", "git config --local --list", "read"],
+      ["git config -l --show-origin", "git config --get user.name", "read"],
+      ["git config list", "git config get user.email", "read"],
+      ["git var -l", "git var GIT_AUTHOR_IDENT", "read"],
+      ["git config --get-regexp '.*'", "git config --local --get-regexp remote", "read"],
+      ["git config --get github.token", "git config --get core.editor", "read"],
+      ["git config --get-urlmatch http.extraheader https://github.com", "git config --get init.defaultBranch", "read"],
+      ["ps -E -ax", "ps -ax", "read"],
+      ["ps eww -ax", "ps aux", "read"],
+      ["ps -Eww", "ps -ef", "read"],
+      ["ps aeux", "ps -o pid,command -p 1", "read"],
+      ["yq -n 'load(\"/Users/fon/.ssh/id_rsa\")'", "yq -n '.a'", "read"],
+      ["yq -n 'load_str(\"/Users/fon/.aws/credentials\")'", "yq '.a' a.yaml", "read"],
+      ["yq e -n 'env(HOME)'", "yq e '.a' a.yaml", "read"],
+      ["yq eval -n 'load_xml(\"x.xml\")'", "yq eval '.b' a.yaml", "read"],
+      ["yq ea 'strenv(AWS_SECRET_ACCESS_KEY)' a.yaml", "yq ea '.' a.yaml b.yaml", "read"],
+      ["pnpm config get //registry.npmjs.org/:_authToken", "pnpm config get registry", "read"],
+      ["yarn config get npmAuthToken", "yarn config get npmRegistryServer", "read"],
+      ["yarn config get npmRegistryServer --no-redacted", "npm config get save-exact", "read"],
+      ["npm config get _auth", "npm config get registry", "read"],
+      ["pnpm config list", "pnpm config get store-dir", "read"],
+    ]);
   });
 });
 

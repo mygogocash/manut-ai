@@ -602,7 +602,13 @@ function packageManager(words: string[], where: Where): Verdict {
   if (["publish", "deploy"].includes(sub)) return live();
   if (sub === "pack") return v("change", say("kit.say.build"), head);
   // its settings can name the shell every script runs in, so only reading them is a read
-  if (sub === "config") return !rest.length || ["get", "list", "ls"].includes(rest[0]) ? v("read", say("kit.say.read")) : thisMac();
+  // A key, a token or a password in its settings is printed by `get` of it, and by a listing; an option after the
+  // subcommand (yarn's `--no-redacted`) is not read here.
+  if (sub === "config") {
+    const after = words.slice(at + 1);
+    if (rest[0] !== "get" || after.some((w) => w.startsWith("-")) || rest.slice(1).some((w) => /auth|token|passw|secret|cert|key/i.test(w))) return thisMac();
+    return v("read", say("kit.say.read"));
+  }
   if (["ls", "list", "why", "outdated", "view", "info", "show", "root", "bin", "help", "doctor", "explain", "licenses", "--version", "-v"].includes(sub)) {
     // asking a registry the agent named, or about a package by its address, reaches that computer
     if (has(words, "--registry") || words.some((w) => /^--@[^=\s]*:registry/.test(w)) || rest.some((w) => PKG_ADDRESS.test(w))) return sends();
@@ -784,8 +790,10 @@ function git(words: string[], where: Where): Verdict {
     case "name-rev":
     case "check-ignore":
     case "count-objects":
-    case "var":
       return history();
+    case "var":
+      // `-l` lists every setting from every scope, as `git config --list` does
+      return has(args, "-l") ? thisMac() : history();
     case "grep":
       // with `-f` the patterns come from a file, which is checked as any path is, and only the words after `-e` are patterns
       if (hasIn(GIT_GREP_VALUES, args, "-f")) return { ...history(), text: textAfter(words, ["-e"]) };
@@ -862,10 +870,16 @@ function git(words: string[], where: Where): Verdict {
     case "remote":
       if (["remove", "rm"].includes(rest[0] ?? "")) return del();
       return !rest.length || ["show", "get-url"].includes(rest[0] ?? "") ? history() : change();
-    case "config":
+    case "config": {
       if (has(args, "--global", "--system")) return thisMac();
+      // Every setting, or a pattern of them, or one whose name says it holds a key, read from every scope but the
+      // project's own: the person's own settings can hold a token (in a link, a header, a helper's setting).
+      const scoped = args.some((w) => ["--local", "--worktree", "-f", "--blob"].includes(w) || isOpt(w, "--file") || isOpt(w, "--blob"));
+      const lists = args.some((w) => ["--list", "-l", "--get-regexp", "--get-urlmatch"].includes(w)) || ["list", "get-regexp"].includes(rest[0] ?? "");
+      if (!scoped && (lists || rest.some((w) => /token|passw|secret|auth|credential|cookie|private|extraheader/i.test(w)))) return thisMac();
       // a setting can name a program git runs later (an alias, a pager, a hook folder), so changing one is never a safe step
       return configReads(args, rest) ? history() : unknownProgram("git");
+    }
     case "push":
       return push(words, head, where);
     default:
@@ -1465,13 +1479,17 @@ function deployer(name: string, words: string[]): Verdict | null {
       if (hasNamed(words, "kubeconfig", "kuberc")) return unknownProgram(name);
       // its cache and a profile are files it writes (a profile lands in the folder it runs in)
       if (hasNamed(words, "cache-dir", "profile-output") || words.some((w, i) => optName(w) === "profile" && (w.split("=")[1] ?? words[i + 1]) !== "none")) return v("change", say("kit.say.change"), "exact");
+      // a secret's data is printed by `get` and its keys by `describe`: a key of a computer elsewhere, read as printenv is
+      if (["get", "describe"].includes(sub) && words.slice(2).some((w) => !w.startsWith("-") && /(^|,)secrets?($|[,/.])/i.test(w))) return thisMac();
       if (["get", "describe", "logs", "explain", "version", "diff"].includes(sub)) return look();
       return ["apply", "create", "delete", "replace", "patch", "rollout", "scale", "set", "edit", "run"].includes(sub) ? live() : unknownProgram(name);
     case "terraform":
     case "tofu":
       // a plan saved to a file, and configuration it writes for what it imports, are files it writes
       if (sub === "plan" && hasNamed(words, "out", "generate-config-out", "state-out")) return v("change", say("kit.say.change"), "exact");
-      if (["plan", "validate", "show", "output"].includes(sub)) return look();
+      // its outputs, sensitive ones among them, are printed in plain text with `-json` or `-raw`
+      if (sub === "output") return thisMac();
+      if (["plan", "validate", "show"].includes(sub)) return look();
       if (["apply", "destroy", "import"].includes(sub)) return live();
       return sub === "init" ? v("install", say("kit.say.update"), 2) : sub === "fmt" ? v("change", say("kit.say.format"), 2) : unknownProgram(name);
     case "pulumi":
@@ -1510,11 +1528,15 @@ function docker(words: string[]): Verdict {
     if (act.startsWith("-")) return unknownProgram("docker");
     // `config -o` saves what it prints into a file
     if (act === "config" && hasIn("", words.slice(3), "-o", "--output")) return v("change", say("kit.say.change"), "exact");
+    // config prints the settings with every variable filled in from the person's environment, unless it only lists names
+    if (act === "config" && !hasExactly(words.slice(3), "--services", "--volumes", "--profiles", "--images", "--networks")) return thisMac();
     if (["ps", "logs", "config", "ls"].includes(act)) return v("read", say("kit.say.read"));
     if (["up", "down", "build", "start", "stop", "restart"].includes(act)) return v("change", say("kit.say.run"), 3);
     return unknownProgram("docker");
   }
-  if (["ps", "images", "logs", "inspect", "version", "info"].includes(sub)) return v("read", say("kit.say.read"));
+  // inspect prints a container's environment, keys among them, as printenv does
+  if (sub === "inspect" || (["container", "image"].includes(sub) && words[2] === "inspect")) return thisMac();
+  if (["ps", "images", "logs", "version", "info"].includes(sub)) return v("read", say("kit.say.read"));
   if (["rm", "rmi", "prune"].includes(sub) || (["system", "volume", "image", "container"].includes(sub) && ["prune", "rm"].includes(words[2] ?? ""))) return v("delete", say("kit.say.delete"), "exact");
   return unknownProgram("docker");
 }
@@ -1699,13 +1721,17 @@ function classify(words: string[], where: Where): Verdict {
     // With `-f` the filter comes from a file: jq takes the first file it is given as the filter wherever `-f` stands, and
     // every word is a file it reads, so none is text and each is checked as any path is.
     if (hasIn("L", words.slice(1), "-f", "--from-file")) return v("read", say("kit.say.read"));
-    const ops = jqOperands(words);
+    const all = jqOperands(words);
+    // yq takes its expression after `eval` or `eval-all` (`e`, `ea`) when one is written
+    const ops = name === "yq" && ["eval", "e", "eval-all", "ea"].includes(words[all[0]] ?? "") ? all.slice(1) : all;
     // a module a filter imports or includes is read from a folder of jq's own, `~/.jq` among them, or one `-L` names
     if (name === "jq" && ops.length && /\b(import|include)\b/.test(words[ops[0]])) return unknownProgram(name);
     // `env` and `$ENV` (jq), `env(NAME)` and `strenv(NAME)` (yq) print the variables set for this program, keys among them,
     // as printenv does, so they are read as it is. A field or a key called env (`.env`, `{env: 1}`) and jq's own `$env`
-    // variable are only names.
+    // variable are only names. yq's `load` and its kinds (`load_str`, `load_xml`) read any file the expression names,
+    // which no word shows as a path (item 116).
     if (ops.length && /(?<![.\w$])(?:env|strenv|envsubst)\b(?!\s*:)|\$ENV\b|\$__prog_args\b/.test(words[ops[0]])) return thisMac();
+    if (name === "yq" && ops.length && /(?<![.\w$])load(_\w+)?\s*\(/.test(words[ops[0]])) return thisMac();
     return (v("read", say("kit.say.read"), undefined, { text: new Set(ops.slice(0, 1)) }));
   }
   if (name === "sort") return (hasIn("ktST", words.slice(1), "-o", "--output") ? v("change", say("kit.say.change"), 1) : v("read", say("kit.say.read")));
@@ -1716,6 +1742,9 @@ function classify(words: string[], where: Where): Verdict {
   // bash's and zsh's printf take one option, `-v NAME`, which puts its text into a variable instead of printing it: into
   // PATH, it decides which program every later word of the line runs
   if (name === "printf" && /^-./.test(words[1] ?? "") && words[1] !== "--") return v("unknown", say("kit.say.opaque"));
+  // ps prints every program's environment, keys among them, with `-E`, or with `e` in BSD's form without a dash (ps(1));
+  // `-e` alone is every process, outside legacy mode
+  if (name === "ps" && words.slice(1).some((w, i) => (w.startsWith("-") ? w.slice(1).includes("E") : i === 0 && /^[a-zA-Z]*e[a-zA-Z]*$/.test(w)))) return thisMac();
   if (ONLY_TEXT.has(name)) return v("read", say("kit.say.read"), undefined, { text: new Set(words.map((_, i) => i).slice(1)) });
   if (READS.has(name)) return v("read", say("kit.say.read"));
   if (DELETES.has(name)) return v("delete", say("kit.say.delete"), "exact");
