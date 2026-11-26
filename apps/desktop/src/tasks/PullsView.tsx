@@ -9,6 +9,9 @@
 // while the Code page shows one project, as an everyday page with no host's name on it.
 //
 // Reading costs little: once when shown, then at most once a minute while shown and in front, never while hidden (board.ts).
+//
+// A project on Azure DevOps, Gitea or Forgejo (item 100b) is listed too, read only, in the same bands: its row names its host and
+// offers only Open on <host>, and nothing opens in the app or merges from here.
 // `PullsListView` and `PullDetailView` draw given data so a test can draw each state; `PullsView` reads the hosts it is given.
 import { useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
 import { t, type Key } from "../i18n";
@@ -25,7 +28,7 @@ import { useLaneProjects } from "../code/KeptLanes";
 import { PullMerge, type MergeHost } from "../code/PullMerge";
 import { MERGE_METHODS, type MergeMethod } from "../code/source";
 import type { TaskHost } from "./host";
-import { BoardWatch, readiness, READINESS, REFRESH_MS, repoKey, rowOf, type BoardRow, type BoardState } from "./board";
+import { BoardWatch, readiness, READINESS, REFRESH_MS, repoKey, rowOf, type BoardRow, type BoardState, type OtherRow } from "./board";
 import { clearPick, useTasks } from "./state";
 import { ago } from "./TasksPage";
 import { SOURCE_NAME } from "./TasksBar";
@@ -50,7 +53,7 @@ export const reviewWord = (p: Pick<PullRow, "review">): string => (p.review ? t(
 export const methodsOf = (m: MergeMethods | null): MergeMethod[] => (m ? MERGE_METHODS.filter((x) => m[x]) : [...MERGE_METHODS]);
 
 export interface PullsListViewProps {
-  state: Pick<BoardState, "rows" | "errors" | "repos" | "at">;
+  state: Pick<BoardState, "rows" | "errors" | "repos" | "at"> & Partial<Pick<BoardState, "others" | "otherRepos">>;
   /** No project is open on the Code page. */
   noProjects: boolean;
   /** The selected request's key (`rowKey`). */
@@ -60,20 +63,25 @@ export interface PullsListViewProps {
   /** The title of the chat that opened a row's request itself (code/chatPull.ts), or null. */
   chatOf?: (row: BoardRow) => string | null;
   onOpen: (row: BoardRow) => void;
+  /** An other host's row's Open on <host> (item 100b): its address in the person's browser. */
+  onOpenUrl?: (url: string) => void;
   onRetry: () => void;
   now?: number;
 }
 
-export function PullsListView({ state, noProjects, selected, isLane, chatOf, onOpen, onRetry, now }: PullsListViewProps) {
+const noOpen = () => {};
+
+export function PullsListView({ state, noProjects, selected, isLane, chatOf, onOpen, onOpenUrl, onRetry, now }: PullsListViewProps) {
   if (noProjects) return <p className="prs-none" data-testid="prs-noprojects">{t("prs.noProjects")}</p>;
-  if (state.repos !== null && state.repos.length === 0) return <p className="prs-none" data-testid="prs-norepos">{t("prs.noRepos")}</p>;
+  const others = state.others ?? [];
+  if (state.repos !== null && state.repos.length === 0 && (state.otherRepos ?? []).length === 0) return <p className="prs-none" data-testid="prs-norepos">{t("prs.noRepos")}</p>;
   if (state.at === null)
     return (
       <div className="prs-wait">
         <Spinner />
       </div>
     );
-  const groups = READINESS.map((r) => ({ r, rows: state.rows.filter((x) => readiness(x.pull) === r) })).filter((g) => g.rows.length > 0);
+  const groups = READINESS.map((r) => ({ r, rows: state.rows.filter((x) => readiness(x.pull) === r), others: others.filter((x) => readiness(x.pull) === r) })).filter((g) => g.rows.length + g.others.length > 0);
   return (
     <>
       {state.errors.map((e) => (
@@ -93,10 +101,13 @@ export function PullsListView({ state, noProjects, selected, isLane, chatOf, onO
         <section key={g.r} className="prs-group" aria-labelledby={`prs-band-${g.r}`} data-testid={`prs-group-${g.r}`}>
           <div className="band" id={`prs-band-${g.r}`}>
             <span>{t(`prs.band.${g.r}` as Key)}</span>
-            <span className="prs-count">{g.rows.length}</span>
+            <span className="prs-count">{g.rows.length + g.others.length}</span>
           </div>
           {g.rows.map((row) => (
             <PullRowView key={rowKey(row)} row={row} on={selected === rowKey(row)} lane={isLane(row)} chat={chatOf?.(row) ?? null} onOpen={onOpen} now={now} />
+          ))}
+          {g.others.map((row) => (
+            <OtherRowView key={`${row.host}:${row.name}:${row.repo}:${row.pull.number}`} row={row} onOpenUrl={onOpenUrl ?? noOpen} now={now} />
           ))}
         </section>
       ))}
@@ -142,6 +153,37 @@ function PullRowView({ row, on, lane, chat, onOpen, now }: { row: BoardRow; on: 
         </span>
       </span>
     </button>
+  );
+}
+
+/** A request on Azure DevOps, Gitea or Forgejo (item 100b): read only, so the row opens nothing in the app and offers no Merge. It
+ *  names the request as a row does, its host, and Open on <host>. */
+function OtherRowView({ row, onOpenUrl, now }: { row: OtherRow; onOpenUrl: (url: string) => void; now?: number }) {
+  const p = row.pull;
+  const review = reviewWord(p);
+  return (
+    <div className="rowl prs-row prs-other" data-testid="prs-other-row" data-host={row.host} data-pull={`${row.repo}#${p.number}`} data-readiness={readiness(p)}>
+      <span className="prs-mark">
+        <PrIcon state={p.state === "draft" ? "draft" : "open"} size={14} />
+      </span>
+      <span className="grow">
+        <span className="l1">{p.title}</span>
+        <span className="l2">
+          {t("prs.line", { repo: row.repo, n: p.number, author: p.author || "?", age: ago(p.updated || p.created, now) })}
+          {" · "}
+          <span data-testid="prs-other-host">{row.name}</span>
+          {review && (
+            <>
+              {" · "}
+              <span data-testid="prs-review">{review}</span>
+            </>
+          )}
+        </span>
+      </span>
+      <button type="button" className="lk" disabled={!p.url} onClick={() => onOpenUrl(p.url)} title={t("prs.otherTip", { host: row.name })} data-testid="prs-other-open">
+        {t("prs.openOn", { host: row.name })}
+      </button>
+    </div>
   );
 }
 
@@ -351,7 +393,16 @@ export function PullsView({ host, merge }: { host: TaskHost; merge: MergeHost })
   return (
     <div className={`prs${open ? " has-detail" : ""}`} data-testid="prs">
       <div className="prs-main" role="region" aria-label={t("prs.list")} data-testid="prs-list" aria-busy={state.loading}>
-        <PullsListView state={state} noProjects={projects.length === 0} selected={open ? sel : null} isLane={(r) => laneOf(r) !== null} chatOf={(r) => chatOf(r)?.title ?? null} onOpen={(r) => setSel(rowKey(r))} onRetry={() => void watch.read()} />
+        <PullsListView
+          state={state}
+          noProjects={projects.length === 0}
+          selected={open ? sel : null}
+          isLane={(r) => laneOf(r) !== null}
+          chatOf={(r) => chatOf(r)?.title ?? null}
+          onOpen={(r) => setSel(rowKey(r))}
+          onOpenUrl={(url) => void openExternal(url).catch(() => undefined)}
+          onRetry={() => void watch.read()}
+        />
       </div>
       {open && <PullDetailPane host={host} merge={merge} row={open} worktree={laneOf(open)} chat={chatOf(open)} onClose={() => setSel(null)} onMerged={() => void watch.read()} />}
     </div>

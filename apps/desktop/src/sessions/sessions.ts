@@ -70,6 +70,7 @@ import { busyMate, continuedDraft, laneFree, type ContinuePick } from "./continu
 import { parseCommands, type AgentCommand } from "../chat/parts/commands";
 import { noteMcpSeen } from "../settings/mcp/agentConfig";
 import { t as tr, type Key } from "../i18n";
+import { sandboxSaid } from "../appStore";
 import { notesSaid } from "./projectNotes";
 import { windowWatched, type SessionNote } from "../lib/notify";
 import { createCloseGrace, graceMs, restoreSplitIn, type SplitWas } from "./closeGrace";
@@ -292,13 +293,17 @@ export const signedOutSaid = (text: string): string => {
 
 const errText = (e: unknown) =>
   signedOutSaid(
-    typeof e === "string"
-      ? e
-      : e instanceof Error
-        ? e.message
-        : typeof e === "object" && e && "message" in e
-          ? String((e as { message: unknown }).message)
-          : String(e),
+    // (a terminal the App Store edition's sandbox refused is said in plain words, src/appStore.ts)
+    sandboxSaid(
+      typeof e === "string"
+        ? e
+        : e instanceof Error
+          ? e.message
+          : typeof e === "object" && e && "message" in e
+            ? String((e as { message: unknown }).message)
+            : String(e),
+      tr,
+    ),
   );
 
 const readOpens = () => {
@@ -712,7 +717,9 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
         if (ev.kind === "no_chat_mode") {
           // the shell ends this session: say why in the person's words, with the line that updates the agent
           const agent = rec(id)?.agent ?? "claude";
-          proc.noChat = tr("ss.noChatMode", { agent: agentDef(agent).label, install: installLine(agent) });
+          // (the App Store edition has no line to give, so it asks the person to update it themselves)
+          const install = installLine(agent);
+          proc.noChat = install ? tr("ss.noChatMode", { agent: agentDef(agent).label, install }) : tr("ss.noChatModeUpdate", { agent: agentDef(agent).label });
           return;
         }
         note(id, signedOutSaid(String(ev.message ?? "")));

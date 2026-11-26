@@ -106,9 +106,9 @@ keeps them:
 | A PR tab to review and merge, by merge readiness | has (item 100): Tasks › Pull requests lists every project's open requests under bands by readiness; Merge is the lane's own ask, for a lane's request or any other of the project's | 100 |
 | A thread settles when its PR merges | has, for a lane, when the host said it merged (item 94) | 94 |
 | Frugal PR monitoring | has (item 100): a GitHub list is read again only after `If-None-Match` says it changed (a 304 costs no rate limit), a check still ran, or ten minutes passed; the page reads at most once a minute while shown, never hidden | 100 |
-| GitHub, GitLab, Bitbucket, Azure DevOps, Forgejo | part: GitHub and GitLab; the others are item 100's part 4, left for a later run | 100 |
-| Control worktrees; no-project threads; new project with GitHub | part: where and how; no new project (item 100's part 5, left for a later run) | 100 |
-| Project icons | no (item 100's part 6, left for a later run) | 100 |
+| GitHub, GitLab, Bitbucket, Azure DevOps, Forgejo | part: GitHub and GitLab to merge; Azure DevOps (`az`) and Gitea or Forgejo (`gt`) listed read only when their CLI is here (item 100b); Bitbucket not offered, as no Atlassian CLI documents a list to read | 100, 100b |
+| Control worktrees; no-project threads; new project with GitHub | part: where and how; New project on the Code page makes a folder in home with git, and Make it on GitHub too runs `gh repo create` through its ask, pushing nothing (item 100b) | 100, 100b |
+| Project icons | has (item 100b): a project's folder header and Kit's band show the favicon or logo its folder keeps, read by the shell only, drawn only as an image | 100b |
 
 ## In the chat, use, look and trouble
 

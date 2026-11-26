@@ -102,7 +102,7 @@ impl Filter {
     }
 }
 
-fn segment_ok(s: &str) -> bool {
+pub(crate) fn segment_ok(s: &str) -> bool {
     !s.is_empty()
         && s.len() <= 100
         && !s.starts_with('-')
@@ -1037,6 +1037,12 @@ pub fn config_remote_url(cfg: &str) -> Option<String> {
 /// The repository folder `cwd` is in, as a remote this page can list. Reads `.git/config` (for a worktree, the
 /// main repository's, through `commondir`); runs nothing.
 pub fn folder_remote(cwd: &Path) -> Option<Remote> {
+    parse_remote(&folder_remote_url(cwd)?)
+}
+
+/// The address of remote `origin` (else the first remote) of the repository folder `cwd` is in, as its git config file says it,
+/// whatever host it names (pulls_other.rs reads the hosts this page does not). Reads `.git/config`; runs nothing.
+pub fn folder_remote_url(cwd: &Path) -> Option<String> {
     if !cwd.is_absolute() || !cwd.is_dir() {
         return None;
     }
@@ -1046,7 +1052,7 @@ pub fn folder_remote(cwd: &Path) -> Option<Remote> {
         if p.is_absolute() { p } else { git.join(p) }
     });
     let cfg = read_small(&common.unwrap_or(git).join("config"))?;
-    parse_remote(&config_remote_url(&cfg)?)
+    config_remote_url(&cfg)
 }
 
 // ---- running the CLI ----------------------------------------------------------------------------

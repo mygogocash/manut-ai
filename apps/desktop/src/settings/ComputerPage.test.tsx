@@ -16,6 +16,17 @@ function draw(over: Partial<ComputerViewProps> = {}) {
 afterEach(() => setLang("en"));
 
 describe("Settings › Computer", () => {
+  it("in the Mac App Store edition says first that the sandbox refuses computer use, and not that it is unsigned", () => {
+    setLang("en");
+    const store = draw({ appStore: true });
+    expect(store).toContain('data-testid="computer-store"');
+    expect(words(store)).toContain("Apple’s sandbox, which this edition of Manut AI runs in, does not let it see or use other apps, so computer use does not work here.");
+    expect(store).not.toContain('data-testid="computer-unsigned"');
+    // the GitHub build: no such note, and the unsigned note as before
+    expect(draw()).not.toContain('data-testid="computer-store"');
+    expect(draw()).toContain('data-testid="computer-unsigned"');
+  });
+
   it("says what is missing, and ready only when both are on", () => {
     setLang("en");
     expect(words(draw())).toContain("Not ready: turn on Accessibility and Screen capture.");

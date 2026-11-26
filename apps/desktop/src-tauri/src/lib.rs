@@ -6,6 +6,7 @@ mod acp_mcp;
 mod agent_chat;
 mod agent_config;
 mod app_menu;
+mod app_store;
 mod appimage;
 mod ask_tool;
 mod buddy_chat;
@@ -27,6 +28,8 @@ mod lane_config;
 mod lane_diff;
 mod outside_use;
 mod past_chats;
+mod new_project;
+mod project_icon;
 mod project_notes;
 mod platform;
 mod outpost;
@@ -34,6 +37,7 @@ mod power;
 mod review;
 mod preview;
 mod pulls;
+mod pulls_other;
 mod providers;
 mod remote_keys;
 #[cfg(all(test, unix))]
@@ -184,11 +188,12 @@ pub(crate) fn web_link(url: &str) -> bool {
     !host.is_empty() && !host.contains('@') && !host.contains('\\')
 }
 
+/// The person's home folder. In the Mac App Store edition it is the password database's, never the sandbox's container
+/// (app_store.rs, which also points `HOME` there for every other reader and every child before the app starts).
 fn user_home() -> Result<PathBuf, String> {
-    std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
-        .filter(|v| !v.is_empty())
-        .map(PathBuf::from)
-        .ok_or_else(|| "no home folder".to_string())
+    let env = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" });
+    let passwd = if app_store::APP_STORE { app_store::passwd_home() } else { None };
+    app_store::resolve_home(app_store::APP_STORE, env.as_deref(), passwd).ok_or_else(|| "no home folder".to_string())
 }
 
 /// The env a new session of `cli` starts with to use manut account `id` (`default` = the CLI's own home).
@@ -918,6 +923,30 @@ async fn pulls_methods(boards: State<'_, Arc<pulls::Boards>>, source: String, re
     tauri::async_runtime::spawn_blocking(move || b.methods(src, &repo)).await.map_err(|e| e.to_string())?
 }
 
+/// Pull requests on other hosts (item 100b, pulls_other.rs): the Azure DevOps, Gitea or Forgejo repository the project at `cwd` is
+/// in, read from its git config, when that host's CLI is installed (and, for Gitea, signed in to the server); null otherwise.
+#[tauri::command]
+async fn pulls_other_remote(others: State<'_, Arc<pulls_other::Others>>, cwd: String) -> Result<Option<pulls_other::OtherRemote>, String> {
+    let o = Arc::clone(&others);
+    tauri::async_runtime::spawn_blocking(move || o.found(&cwd).map(|f| f.remote())).await.map_err(|e| e.to_string())
+}
+
+/// Pull requests on other hosts: the project at `cwd`'s open requests there, through that host's own CLI; null when it is on none
+/// of them or the CLI is not here. Only reads: no merge, no write.
+#[tauri::command]
+async fn pulls_other_board(others: State<'_, Arc<pulls_other::Others>>, cwd: String) -> Result<Option<pulls_other::OtherBoard>, String> {
+    let o = Arc::clone(&others);
+    tauri::async_runtime::spawn_blocking(move || o.board(&cwd)).await.map_err(|e| e.to_string())?
+}
+
+/// A project's own icon (item 100b, project_icon.rs): the picture its folder keeps in one of a few known places, as a `data:`
+/// address of an image's type, or null. Only reads; never through a link, never outside the folder, at most 64 KiB.
+#[tauri::command]
+async fn project_icon(icons: State<'_, Arc<project_icon::Icons>>, cwd: String) -> Result<Option<String>, String> {
+    let i = Arc::clone(&icons);
+    tauri::async_runtime::spawn_blocking(move || i.icon(&cwd)).await.map_err(|e| e.to_string())
+}
+
 /// The git branch of a session's folder, from its `.git/HEAD` only (no program runs); "" outside a repository.
 #[tauri::command]
 async fn session_branch(cwd: String) -> Result<String, String> {
@@ -1131,6 +1160,23 @@ async fn review_ask_merge_pull(asks: State<'_, Arc<review::Ledger>>, folder: Str
     let home = user_home()?;
     let l = Arc::clone(&asks);
     tauri::async_runtime::spawn_blocking(move || l.ask_merge_pull(&home, &folder, &source, &repo, number, &method, credits.unwrap_or(false))).await.map_err(|e| e.to_string())?
+}
+
+/// A new project (item 100b, new_project.rs): the folder at `path` in the person's home, made when it is not there (refused when it
+/// is there with anything in it), with git started in it by the app's own git (no hook, no template). Writes only on this Mac.
+#[tauri::command]
+async fn project_new(path: String) -> Result<new_project::Made, String> {
+    let home = user_home()?;
+    tauri::async_runtime::spawn_blocking(move || new_project::make(&home, &path)).await.map_err(|e| e.to_string())?
+}
+
+/// The ask to make the GitHub repository `name` from the new project at `folder`, private unless `public` (review.rs `ask_repo`):
+/// the exact `gh repo create` line, or why it cannot be made. Writes nothing; pushes nothing, ever.
+#[tauri::command]
+async fn review_ask_repo(asks: State<'_, Arc<review::Ledger>>, folder: String, name: String, public: bool) -> Result<review::Ask, String> {
+    let home = user_home()?;
+    let l = Arc::clone(&asks);
+    tauri::async_runtime::spawn_blocking(move || l.ask_repo(&home, &folder, &name, public)).await.map_err(|e| e.to_string())?
 }
 
 /// The person's answer to ask `id`, once approval-core settled it on the page (review.rs `settle`): a No runs nothing, a Yes runs
@@ -1596,6 +1642,11 @@ pub fn computer_relay(args: &[std::ffi::OsString]) -> Option<i32> {
     Some(computer::mcp::relay_main())
 }
 
+/// The Mac App Store edition's real home, set before anything else runs (app_store.rs); nothing in the GitHub build.
+pub fn adopt_real_home() {
+    app_store::adopt_real_home();
+}
+
 pub fn statusline_relay(args: &[std::ffi::OsString]) -> Option<i32> {
     if args.get(1)?.to_str()? != claude_usage::RELAY_FLAG {
         return None;
@@ -1618,15 +1669,19 @@ pub fn run() {
             let _ = w.set_focus();
         }
     }));
-    let app = builder
+    let builder = builder
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_dialog::init())
-        // In-app updates: the page checks the one endpoint in tauri.conf.json, which moves only when the owner publishes
-        // a release, and installs only a build signed with the key whose public half is pinned there (docs/releasing.md).
+        .plugin(tauri_plugin_dialog::init());
+    // In-app updates: the page checks the one endpoint in tauri.conf.json, which moves only when the owner publishes
+    // a release, and installs only a build signed with the key whose public half is pinned there (docs/releasing.md).
+    // The Mac App Store edition leaves it out: the App Store updates that edition, and an app that updates itself is
+    // refused there (Guideline 2.4.5(vii), app_store.rs). Its page asks nothing either (src/sidebar/updater.ts).
+    #[cfg(not(app_store))]
+    let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    let app = builder
         // The process plugin does the restart that follows an update.
-        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         // The app's window keeps to the app's own pages and this computer's addresses, frames included (preview.rs)
         .plugin(app_window_guard())
@@ -1657,6 +1712,10 @@ pub fn run() {
             // the asks that push a lane and open or merge its pull request, each settled once (review.rs)
             app.manage(Arc::new(review::Ledger::default()));
             app.manage(Arc::new(pulls::Boards::default()));
+            // pull requests on Azure DevOps, Gitea and Forgejo, read only (pulls_other.rs)
+            app.manage(Arc::new(pulls_other::Others::default()));
+            // the projects' own icons, kept by size and modified time (project_icon.rs)
+            app.manage(Arc::new(project_icon::Icons::default()));
             app.manage(Arc::new(skill_links::Installs::default()));
             // free space on the home folder's volume, read once a minute (disk.rs)
             app.manage(disk::Disk::start(app.handle().clone(), user_home().ok()));
@@ -1821,6 +1880,8 @@ fn commands(invoke: tauri::ipc::Invoke) -> bool {
         review_ask_open,
         review_ask_merge,
         review_ask_merge_pull,
+        review_ask_repo,
+        project_new,
         review_settle,
         review_withdraw,
         session_main_moved,
@@ -1857,6 +1918,9 @@ fn commands(invoke: tauri::ipc::Invoke) -> bool {
         pulls_board,
         pulls_view,
         pulls_methods,
+        pulls_other_remote,
+        pulls_other_board,
+        project_icon,
         gh_accounts,
         source_tools,
         tasks_me,

@@ -25,6 +25,7 @@ import { DISK_WARN_CHOICES, diskWarn, setDiskWarn } from "../lib/disk";
 import { hideDetails, quietHours, setHideDetails, setQuietHours } from "../lib/outside";
 import { Toggle } from "../pages/kit";
 import { awakeEnabled, closeHides, isMacPlatform, setAwakeEnabled, setCloseHides } from "../lib/power";
+import { isAppStore } from "../appStore";
 import { ProvidersPage } from "./providers/ProvidersPage";
 import { AvatarEditor, BotFacts, NameEditor, PictureActions, placeName, useBotInfo, usePictureEditor } from "./BotIdentity";
 import { ShopSettings } from "../onboarding/ShopSettings";
@@ -847,6 +848,13 @@ function GeneralPage() {
         <Row title={t("awake.title")} hint={t("awake.hint")}>
           <AwakeToggle />
         </Row>
+        {/* the App Store edition's updates come from the store, so it says so where a person looks for updates
+            (docs/app-store.md); the GitHub build's own updater shows itself in the side menu when one is found */}
+        {isAppStore() && (
+          <Row title={t("set.updates")} hint={t("set.updatesHint")}>
+            <Value>{t("set.updatesValue")}</Value>
+          </Row>
+        )}
       </div>
       <div className="st-gh">{t("set.keyboard")}</div>
       <div className="st-grp" data-testid="shortcuts">

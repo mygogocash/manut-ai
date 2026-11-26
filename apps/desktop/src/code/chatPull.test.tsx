@@ -43,6 +43,44 @@ describe("reading what the command printed", () => {
   });
 });
 
+// what `glab mr create` prints, recorded from glab's source (gitlab-org/cli `mrutils.DisplayMR`): off a terminal only the web
+// address; on one, the request's reference, title and branch, then the address
+const GL_CREATED = "!12 Pre-order page (kit/preorder)\n https://gitlab.com/baanmali/shop/app/-/merge_requests/12\n";
+const glEnd = (over: Record<string, unknown> = {}) => end({ command: 'glab mr create --title "Pre-order page" --description "For the new menu" --yes', output: GL_CREATED, ...over });
+
+describe("a GitLab merge request a chat opened (item 100b)", () => {
+  it("reads the last merge request address on a GitLab host", () => {
+    expect(pullAddress(GL_CREATED)).toEqual({ source: "gitlab", repo: "baanmali/shop/app", number: 12, url: "https://gitlab.com/baanmali/shop/app/-/merge_requests/12" });
+    expect(pullAddress("https://gitlab.example.co.th/g/p/-/merge_requests/3")).toEqual({ source: "gitlab", repo: "g/p", number: 3, url: "https://gitlab.example.co.th/g/p/-/merge_requests/3" });
+    // the last address printed wins, whichever host
+    expect(pullAddress("https://github.com/a/b/pull/1\nhttps://gitlab.com/g/p/-/merge_requests/2")?.source).toBe("gitlab");
+    for (const none of ["https://mygitlab.com/g/p/-/merge_requests/3", "https://gitlab.com/p/-/merge_requests/3", "https://gitlab.com/g/p/merge_requests/3", "https://gitlab.com/g/p/-/merge_requests/3/diffs", "https://gitlab.com/.g/p/-/merge_requests/3", "http://gitlab.com/g/p/-/merge_requests/3"])
+      expect(pullAddress(none), none).toBeNull();
+  });
+
+  it("is a merge request only when the dial reads glab mr create as a push", () => {
+    expect(opensPull("glab mr create --fill --yes", WHERE)).toBe(true);
+    expect(opensPull("git push -u origin kit/preorder && glab mr create --fill", WHERE)).toBe(true);
+    for (const no of ["glab mr list", "glab mr view 12", "glab api projects/1/merge_requests -X POST", "glab mr create --repo https://gitlab.example.com/g/p --fill", "echo glab mr create"]) expect(opensPull(no, WHERE), no).toBe(false);
+  });
+
+  it("links the chat once one view says the request is the project's own, and not for a fork or another project", async () => {
+    const remote = { source: "gitlab" as const, repo: "baanmali/shop/app" };
+    const mr = item({ number: 12, title: "Pre-order page", url: "https://gitlab.com/baanmali/shop/app/-/merge_requests/12", head: "kit/preorder", from: "" });
+    const h = host(mr, remote);
+    expect(await noteChatPull(h, "agent:g1", glEnd(), WHERE)).toEqual({ linked: { source: "gitlab", repo: "baanmali/shop/app", number: 12, url: mr.url, title: "Pre-order page", state: "open", head: "kit/preorder" } });
+    expect(h.view).toHaveBeenCalledWith("gitlab", "baanmali/shop/app", "prs", 12);
+    expect(chatOfPull("gitlab", "baanmali/shop/app", 12)).toBe("agent:g1");
+    expect(await noteChatPull(host(item({ ...mr, same: false }), remote), "agent:g2", glEnd(), WHERE)).toEqual({ why: "fork" });
+    // each in a folder of its own: a folder's remote is read once
+    const other = host(mr, { source: "gitlab", repo: "baanmali/other" });
+    expect(await noteChatPull(other, "agent:g3", glEnd(), { ...WHERE, cwd: "/code/other", root: "/code/other" })).toEqual({ why: "other_repo" });
+    expect(other.view).not.toHaveBeenCalled();
+    // a GitHub project's chat is never linked to a GitLab address
+    expect(await noteChatPull(host(mr), "agent:g4", glEnd(), { ...WHERE, cwd: "/code/hub", root: "/code/hub" })).toEqual({ why: "other_repo" });
+  });
+});
+
 describe("linking a chat to the request it opened", () => {
   it("links both ways once one view says the request is the chat's own repository's", async () => {
     const h = host();

@@ -1,0 +1,43 @@
+[
+  {
+    "number": 7,
+    "title": "Make the QR code bigger",
+    "state": "open",
+    "draft": false,
+    "author": "noi",
+    "url": "https://gitea.example.com/baanmali/site/pulls/7",
+    "head": "fix/qr",
+    "base": "main",
+    "created_at": "2026-11-24T08:15:02Z",
+    "updated_at": "2026-11-25T09:00:00+07:00",
+    "mergeable": true,
+    "review_decision": "APPROVED"
+  },
+  {
+    "number": 8,
+    "title": "New delivery zones",
+    "state": "open",
+    "draft": false,
+    "author": { "login": "fon", "full_name": "Fon" },
+    "url": "https://gitea.example.com/baanmali/site/pulls/8",
+    "head": { "ref": "feat/zones", "label": "feat/zones" },
+    "base": { "ref": "main" },
+    "created_at": "2026-11-23T02:00:00Z",
+    "updated_at": "2026-11-23T05:00:00Z",
+    "mergeable": false,
+    "review_decision": "changes_requested"
+  },
+  {
+    "number": 9,
+    "title": "Try a darker header",
+    "state": "open",
+    "draft": true,
+    "author": { "username": "fon" },
+    "url": "https://gitea.example.com/baanmali/site/pulls/9",
+    "head": "try/header",
+    "base": "main",
+    "created_at": "2026-11-22T02:00:00Z",
+    "updated_at": "",
+    "review_decision": ""
+  }
+]

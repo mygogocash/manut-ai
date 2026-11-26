@@ -15,6 +15,7 @@
 // Line 1 is the session's name (the person's, the agent's own title, a summary of the first message, else the
 // folder) and line 2 the folder and the agent. Double-click the name, or right-click › Rename, to name it. A TERMINALS
 // row dragged onto the open terminal splits it there (splitDrag.ts).
+import { ProjectIcon } from "../code/ProjectIcon";
 import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
 import { getStore, useStore } from "../state/store";
 import { CloseIcon, LiveRing, PlusIcon, Popover, TypingDots } from "../ui";
@@ -75,12 +76,19 @@ export async function addTermFolder(): Promise<void> {
   const before = sx.getState();
   const picked = await sx.pickFolder(draftFolder(before.recent, before.home));
   if (!picked || isTildePath(picked)) return;
+  listFolder(picked);
+}
+
+/** Lists folder `folder` as a group on the Code page, with or without a session (one already listed stays as it is), and brings
+ *  it into view: "New folder…", and a new project once the shell made it (code/NewProject.tsx). */
+export function listFolder(folder: string): void {
+  const sx = getSessions();
   // the folder as the list names it: another spelling of a listed folder (`…/web-app/`) is that folder
-  const got = pathKey(picked);
+  const got = pathKey(folder);
   const now = sx.getState();
   const listed = folderGroups(now.list.filter((r) => isTerminalRec(now.agents, r))).map((g) => g.cwd);
   const prefs = getFolderPrefs();
-  // picked in the dialog just now, so it is on disk (again)
+  // picked in the dialog or made just now, so it is on disk (again)
   setFolderGone(got, false);
   setFolderPrefs(addFolder(prefs, got, [...listed, ...addedFolders(prefs)]));
   // the group comes into view (a long list may hold it below the fold)
@@ -353,7 +361,8 @@ function NewSessionMenu({ onClose, trigger, start }: { onClose: () => void; trig
         className={`ss-item${missing ? " off" : ""}`}
         aria-disabled={missing || undefined}
         title={signedOut ? signedOutTip(a.id, label) : (a.path ?? missingNote(a.id))}
-        onClick={() => (missing ? copyInstall(a.id) : pick(a.id))}
+        // a missing agent copies its install line; with none (a person's own agent, the App Store edition) its tooltip says why
+        onClick={() => (missing ? installLine(a.id) && copyInstall(a.id) : pick(a.id))}
         data-testid={`session-agent-${a.id}`}
       >
         <span className="ss-ic">
@@ -381,8 +390,9 @@ function NewSessionMenu({ onClose, trigger, start }: { onClose: () => void; trig
               {account}
             </span>
           )}
-          {missing && (
-            // whole, on as many lines as it needs; it breaks between its words before it breaks inside one
+          {missing && !!installLine(a.id) && (
+            // whole, on as many lines as it needs; it breaks between its words before it breaks inside one (none in the
+            // App Store edition, whose tooltip says why)
             <span className="ss-as ss-install" data-testid={`session-install-${a.id}`}>
               {installLine(a.id).split(" ").map((word, i) => (
                 <Fragment key={i}>
@@ -1042,7 +1052,8 @@ function FolderHead({ cwd, home, shut, index, all, added, summary: base, flowIds
       <button type="button" className="tg-open" aria-expanded={!shut} aria-label={t(shut ? "term.folderOpen" : "term.folderClose", { name })} onClick={toggle} data-testid="term-group-toggle">
         <span className="tg-chev" aria-hidden="true">{shut ? <ChevronRight /> : <ChevronDown />}</span>
         <span className="tg-ic">
-          <FolderGlyph />
+          {/* the project's own icon when its folder keeps one (item 100b), else the folder glyph as before */}
+          <ProjectIcon host={getHost()} cwd={cwd} fallback={<FolderGlyph />} />
         </span>
         <span className="tg-n">{name}</span>
         {shut && (

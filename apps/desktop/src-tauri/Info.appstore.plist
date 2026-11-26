@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- The Mac App Store edition only (tauri.appstore.conf.json, docs/app-store.md), merged after Info.plist, so App Store
+     Connect asks no export question for each build. Manut AI's connections use the system's HTTPS and TLS. Beyond that
+     it encrypts only through the system's own WebCrypto in WebKit (AES-256-GCM for the paired phone's end-to-end channel,
+     packages/remote-channel, and for the sealed shop cache, shop_cache_key.rs): standard algorithms, Apple's own
+     implementation, nothing of its own. The owner declared it exempt on that basis (26 Nov 2026; docs/app-store.md, "Export compliance"). -->
+<plist version="1.0">
+<dict>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+</dict>
+</plist>

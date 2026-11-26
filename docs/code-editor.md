@@ -1440,11 +1440,73 @@ chat's own (a lane's own branch, else the one its folder had when it was read), 
 `echo` beside the command could name a colleague's request, and a `gh pr create --dry-run`, which makes none, links nothing.
 The chat's header then names the request, the request's row names the chat, and the chat's Lanes row shows it as a lane's
 row does. Of this run; nothing is written.
+Since item
+100b the dial reads `glab mr create` as a push too (`kit.say.mr`, "Opens a merge request."; with an address among its words, and
+for every other glab command, it is a program the dial has not read), and a merge request address on a host with `gitlab` among
+its names (`https://gitlab.com/<group>/<project>/-/merge_requests/<n>`; glab prints it last, alone off a terminal) is linked by
+the same checks, the view being `glab mr view`.
+
+**GitLab's merge methods** (item 100b, `pulls.rs` `gl_methods_argv`, `parse_gl_methods`). The list's Merge step and
+`ask_merge_pull` read the project with `glab api --method GET projects/<group%2Fproject>` and offer: a merge unless its
+`squash_option` is `always`; a squash unless it is `never`; a rebase only when its `merge_method` is `rebase_merge` or `ff`, the two
+GitLab's merge methods page offers a rebase for. Anything else is not read and all three are offered, for GitLab to refuse. glab is
+not on this Mac (26 Nov 2026), so the flags are from GitLab's pages for `glab api` and `glab mr merge`, and the answer is read as
+the Projects API's object. A lane's own Merge step is unchanged and still offers all three, as for GitHub.
+
+**Other hosts, read only** (item 100b, `src-tauri/src/pulls_other.rs`, `tasks/board.ts`). A project whose remote is on neither
+GitHub nor GitLab is asked of the other hosts' reader, which reads the folder's remote from its git config and answers only when
+that host's CLI is installed; the page sends only the folder. Its open requests join the same bands, each row naming its host and
+offering only Open on <host> (no detail, no Merge, nothing written):
+
+- Azure DevOps (`https://dev.azure.com/<org>/<project>/_git/<repo>`, its `ssh.dev.azure.com:v3/...` form, and the older
+  `<org>.visualstudio.com`) through `az repos pr list --organization ... --project ... --repository ... --status active --top 51
+  --output json --detect false`, with `AZURE_EXTENSION_USE_DYNAMIC_INSTALL=no` so the CLI installs no extension by itself. The
+  review is read from the reviewers' votes, a conflict from `mergeStatus`; the list carries no checks, so none are shown, and a
+  request's address is made from the organisation, project, repository and id.
+- Gitea and Forgejo through Gitea's own CLI, `gt` (it replaced the archived `tea`): `gt auth status --json=host --no-input` names
+  the servers it is signed in to, at most once a minute, and a remote on one of them (https with the server's base path, or ssh
+  to its host) is listed with `gt pr list --host <server> --repo <owner>/<name> --state open --limit 51 --json=<fields>
+  --no-input`. Whether `gt` serves a Forgejo server is not confirmed; one it is signed in to is listed when its answer reads.
+- Bitbucket is not offered: Atlassian's own CLIs are `acli`, which has no Bitbucket commands, and `twg` (Teamwork Graph), whose
+  documented pages name a pull request query but no output a reader here could rely on; the other Bitbucket CLIs are not
+  Atlassian's.
+
+`az` and `gt` were not on this Mac on 26 Nov 2026: the flags are from Azure CLI's reference and configuration pages and `gt`'s
+manual pages, and the tests read made-up answers in the documented shapes (`tasks_fixtures/az-pr-list.json`, `gt-pr-list.json`).
+A host whose CLI is not here shows nothing and runs nothing; GitHub's and GitLab's projects are never asked of these CLIs.
 
 **Watching costs little.** The page reads the lists once when shown, then at most once a minute while shown and in front, never
 while hidden. The shell gives a list read within 55 seconds again, and before reading a GitHub list again asks `gh api --method
 GET --include -H 'If-None-Match: <ETag>' repos/<r>/pulls?state=open&per_page=51`: a 304 gives the last list again and costs no
 rate limit. The GraphQL list is read only when GitHub says the list changed, a check was still running, or ten minutes passed.
+
+**A project's own icon** (item 100b, `code/ProjectIcon.tsx`, `src-tauri/src/project_icon.rs`). A project's folder header on the
+Code page (TERMINALS) and Kit's band show the picture the folder keeps at the first of `public/favicon.svg`, `favicon.svg`,
+`public/favicon.ico`, `favicon.ico`, `app/icon.png`, `app/favicon.ico`, `src/app/icon.png`, `assets/icon.png`,
+`.github/logo.png`. Only the shell reads it: the folder must be absolute with no `.` or `..` part, every folder on the way and the
+file itself are read with `symlink_metadata` and must not be a link (the file is opened with `O_NOFOLLOW` and its real path must
+be inside the folder's), at most 64 KiB, and only a picture (an SVG with an `<svg` element, a PNG or an ICO by their first
+bytes). It answers a `data:` address of that type, kept by path, size and modified time. The page draws it only as an `<img>`
+(an SVG drawn as an image runs no script and loads no link) and draws nothing for any other address. Without one a folder
+header keeps its folder glyph and Kit's band its name alone, as before. The side menu and the palette list no projects today, so
+neither has a row to draw it on.
+
+**A new project** (item 100b, `code/NewProject.tsx`, `src-tauri/src/new_project.rs`). New project in the Code page's top bar opens
+a panel at the top of the column: a folder path (starting at `~/`, with Choose to pick one in the system's dialog) and Make the
+project. The shell takes only an absolute path with no `.` or `..` part whose nearest existing folder's real path is inside the
+person's home folder (not the home folder itself), refuses a path that is a link, a file, or a folder with anything in it (hidden
+files count), makes the folder, checks its real path once more, and runs `git init --quiet --template=` through `lane::Git` (no
+hook can run; an empty template copies no sample hook and no exclude file, whatever `init.templateDir` says). The page lists the
+folder at once (`listFolder`, what New folder… does). That writes only on this computer.
+
+**Make it on GitHub too** is offered beside what was made, and is the third write behind review.rs's one ask (`ask_repo`): the
+shell checks the folder (in home, a repository's own top whose `.git` is a real folder, no `origin` yet), the name (`name` or
+`owner/name`, letters, digits, `.`, `_`, `-`) and that gh is here and signed in, writes down `gh repo create <name> --private
+--source <folder> --remote origin` (`--public` only when the person picked "Public: anyone on the internet can see it and copy
+it.") and answers the ask with that line (`plan`), which the page shows whole. The page opens it in approval-core; a Yes reaches
+`review_settle` by its id alone, the folder is read again (still a repository with no `origin`, else `changed`), and the line runs
+once. Nothing is pushed: the argv has no `--push`, no step here pushes, and none is offered; the project's first push is the
+person's, and a lane's Put up for review asks for it as always.
 
 ### MCP servers and skills
 
