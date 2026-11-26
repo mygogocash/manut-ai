@@ -1,5 +1,6 @@
 // The whole app view model: one reducer, one store, one React hook. UI nodes only read this and call
 // its actions; they never edit this file.
+import { bareText } from "../chat/box/carry";
 import { SESSIONS_ENTRY } from "../sessions/entry";
 import { useSyncExternalStore } from "react";
 import type { BridgeStatus } from "../lib/bridge";
@@ -3467,7 +3468,7 @@ export function createStore(bridge: BridgeLike, opts: StoreOptions = {}): Store 
       dispatch({ type: "local.user", bot: key, id, text: t, now: now() });
       const row = (state.threads[bot] ?? []).find((r) => r.thread === thread);
       // the row reads the first words at once; Hermes' own title replaces them when it lands
-      if (row && !row.title) dispatch({ type: "thread.upsert", bot, row: { ...row, title: firstWords(text), last: now() / 1000 } });
+      if (row && !row.title) dispatch({ type: "thread.upsert", bot, row: { ...row, title: firstWords(bareText(text)), last: now() / 1000 } });
       try {
         await bridge.request("chat.send", { bot, session: thread, text: text.trim() });
         dispatch({ type: "send.ok", bot: key, id, now: now() });
@@ -3494,7 +3495,7 @@ export function createStore(bridge: BridgeLike, opts: StoreOptions = {}): Store 
       const sent = promptText(text, results);
       dispatch({ type: "local.user", bot: key, id, text: t, now: now(), files: shown, sent });
       const row = (state.threads[bot] ?? []).find((r) => r.thread === thread);
-      if (row && !row.title) dispatch({ type: "thread.upsert", bot, row: { ...row, title: firstWords(t || files[0].name), last: now() / 1000 } });
+      if (row && !row.title) dispatch({ type: "thread.upsert", bot, row: { ...row, title: firstWords(bareText(t) || files[0].name), last: now() / 1000 } });
       try {
         await bridge.request("chat.send", { bot, session: thread, text: sent });
         dispatch({ type: "send.ok", bot: key, id, now: now() });

@@ -61,6 +61,7 @@ import { accountGroups } from "../settings/accounts/useAccounts";
 import { ASK_MODE, modesOf, steersOf } from "./controls";
 import { followUp as savedFollowUp, type FollowUp } from "../chat/box/keys";
 import { draftFolders } from "../app/stash";
+import { bareText } from "../chat/box/carry";
 import { parseCommands, type AgentCommand } from "../chat/parts/commands";
 import { noteMcpSeen } from "../settings/mcp/agentConfig";
 import { t as tr, type Key } from "../i18n";
@@ -1073,7 +1074,8 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     // the first message that says something names the session until the agent or the person does
     const r = rec(id);
     if (r && !r.promptTitle) {
-      const pt = promptTitle(t);
+      // what was typed names it, never the notes or another chat's context in front (item 97)
+      const pt = promptTitle(bareText(t));
       if (pt) patchRec(id, { promptTitle: pt });
     }
     try {
@@ -1139,7 +1141,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     store().dispatch({ type: "local.user", bot: key, id: lid, text: t, now, files: p.shown });
     saveSentFiles(putSentFiles(sentFiles, id, String(now), { ts: now / 1000, text: t, files: p.saved }));
     const r = rec(id);
-    const pt = t ? promptTitle(t) : "";
+    const pt = t ? promptTitle(bareText(t)) : "";
     if (r && !r.promptTitle && pt) patchRec(id, { promptTitle: pt });
     return lid;
   };
@@ -1565,7 +1567,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     // (a terminal starts without the text and files the draft held)
     if (text || files.length || mode === "terminal") setUnsent(`agent:${id}`, "");
     // the first message names the session (as a later one would in send) until the agent or the person does
-    const pt = text ? promptTitle(text) : "";
+    const pt = text ? promptTitle(bareText(text)) : "";
     if (pt) patchRec(id, { promptTitle: pt });
     if (mode === "chat") {
       keys.set(id, `agent:${id}`);

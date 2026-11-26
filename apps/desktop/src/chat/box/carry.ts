@@ -190,15 +190,21 @@ const isScope = (v: unknown): v is Scope => {
 
 /** One saved chip, or null when it cannot be read (a field missing or of the wrong kind). */
 function readChip(v: unknown): Carried | null {
-  const c = v as Partial<NoteChip & ThreadChip> | null;
-  if (!c || typeof c.id !== "string" || !isScope(c.scope)) return null;
-  if (c.kind === "note" && typeof c.quote === "string" && c.quote.trim() && typeof c.note === "string") {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+  const c = v as Record<string, unknown>;
+  const str = (k: string): string | null => (typeof c[k] === "string" ? (c[k] as string) : null);
+  const id = str("id");
+  if (!id || !isScope(c.scope)) return null;
+  const quote = str("quote");
+  const note = str("note");
+  if (c.kind === "note" && quote?.trim() && note !== null) {
     const more = typeof c.more === "number" && Number.isInteger(c.more) && c.more > 0 ? c.more : 0;
-    return { kind: "note", id: c.id, quote: c.quote.slice(0, QUOTE_MAX), more, note: c.note.slice(0, NOTE_MAX), scope: c.scope };
+    return { kind: "note", id, quote: quote.slice(0, QUOTE_MAX), more, note: note.slice(0, NOTE_MAX), scope: c.scope };
   }
-  if (c.kind === "thread" && typeof c.ref === "string" && typeof c.title === "string" && typeof c.text === "string" && c.text) {
-    return { kind: "thread", id: c.id, ref: c.ref, title: c.title, text: c.text, scope: c.scope };
-  }
+  const ref = str("ref");
+  const title = str("title");
+  const text = str("text");
+  if (c.kind === "thread" && ref && title !== null && text) return { kind: "thread", id, ref, title, text, scope: c.scope };
   return null;
 }
 

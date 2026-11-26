@@ -54,6 +54,7 @@ import { LanePane } from "../code/LanePane";
 import { LaneReview } from "../code/Review";
 import { isLaneChat } from "../code/laneStore";
 import { Icon } from "../ui/icons";
+import { chatScope } from "../chat/box/scope";
 
 const STATUS: Record<string, Key> = { starting: "ss.starting", running: "ss.running", exited: "ss.ended", failed: "ss.couldNotStart" };
 
@@ -234,6 +235,8 @@ function ChatPane({ rec, chatKey }: { rec: SessionRec; chatKey: string }) {
           </>
         }
         foot={<Context rec={rec} />}
+        // a note or another chat's context made under another account of this agent is not sent here (item 97)
+        scope={chatScope(chatKey, null, rec, null)}
       />
     </div>
   );
@@ -556,6 +559,7 @@ function DraftPane({ rec }: { rec: SessionRec }) {
           ) : undefined
         }
         foot={<Context rec={rec} account={account} />}
+        scope={chatScope(key, null, rec, accounts.groups)}
       />
     </div>
   );

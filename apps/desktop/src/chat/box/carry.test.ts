@@ -1,6 +1,11 @@
 // The chat box's notes and carried context (item 97): the selection's caps and the form a note goes out in, the scope
 // rule, reading a sent message back into its parts, and the chips kept across a restart and cleared by a send.
+import { createElement } from "react";
+import { renderToString } from "react-dom/server";
 import { beforeEach, describe, expect, it } from "vitest";
+import { Bubble } from "../parts/Bubble";
+import { CarriedChips } from "./BoxParts";
+import { isNoteKey } from "./SelectionNote";
 import {
   addCarried,
   bareText,
@@ -194,5 +199,41 @@ describe("kept by chat", () => {
     for (let i = 0; i < NOTES_MAX; i++) carry("buddy", noteChip(`q${i}`, "", SHOP, `n${i}`)!);
     expect(carry("buddy", noteChip("ninth", "", SHOP)!)).toBe("notes");
     expect(getCarried("buddy")).toHaveLength(NOTES_MAX);
+  });
+});
+
+describe("drawn", () => {
+  const key = (over: Partial<{ key: string; code: string; metaKey: boolean; ctrlKey: boolean; altKey: boolean; shiftKey: boolean }>) => ({ key: "N", code: "KeyN", metaKey: false, ctrlKey: false, altKey: false, shiftKey: true, ...over });
+
+  it("opens a note from the keyboard with Cmd+Shift+N on a Mac and Ctrl+Shift+N elsewhere, by where the key stands", () => {
+    expect(isNoteKey(key({ metaKey: true }), true)).toBe(true);
+    expect(isNoteKey(key({ ctrlKey: true }), false)).toBe(true);
+    expect(isNoteKey(key({ ctrlKey: true }), true)).toBe(false);
+    expect(isNoteKey(key({ metaKey: true, shiftKey: false }), true)).toBe(false);
+    // a Korean layout prints another letter on the same key
+    expect(isNoteKey(key({ metaKey: true, key: "ㅜ" }), true)).toBe(true);
+  });
+
+  it("draws a chip for each note and chat, a refused one red with why, each with its x", () => {
+    const html = renderToString(createElement(CarriedChips, { chatKey: "buddy", scope: SHOP, list: [noteChip("Pay by QR", "ask", SHOP, "n1")!, noteChip("Elsewhere", "", { shop: "other" }, "n2")!, thread("x")] }));
+    expect(html.match(/data-testid="carry-chip"/g)).toHaveLength(3);
+    expect(html).toContain("“Pay by QR” · ask");
+    expect(html).toContain('data-refused="true"');
+    expect(html).toContain("Made in another shop, so it will not be sent here");
+    expect(html.match(/data-testid="carry-remove"/g)).toHaveLength(3);
+    // a chat's context opens to show its text; nothing is open at first
+    expect(html).toContain('data-testid="carry-open"');
+    expect(html).not.toContain('data-testid="carry-panel"');
+  });
+
+  it("draws a sent note in the person's own bubble as their quote, with their note under it", () => {
+    const text = withCarried("Is this right?", [noteChip("The fee is 2%", "check the fee", SHOP)!], SHOP);
+    const html = renderToString(createElement(Bubble, { item: { kind: "user", text } }));
+    expect(html).toContain('data-testid="bubble-user"');
+    expect(html).toContain('data-testid="bubble-carry"');
+    expect(html).toContain("The fee is 2%");
+    expect(html).toContain("check the fee");
+    expect(html).toContain("Is this right?");
+    expect(html).not.toContain("&gt; The fee");
   });
 });
