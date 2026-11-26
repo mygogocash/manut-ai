@@ -133,7 +133,7 @@ jobs:
       # values are set. The two TAURI_SIGNING_ values sign the updater's bundle, which is a different key from Apple's.
       - name: Build, sign, notarize and draft the release
         if: steps.apple.outputs.signed == 'true'
-        uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # action-v1.0.0
+        uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # action-v1.1.0.0.1.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
@@ -156,7 +156,7 @@ jobs:
       # identity from APPLE_SIGNING_IDENTITY alone.
       - name: Build unsigned and draft the release
         if: steps.apple.outputs.signed != 'true'
-        uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # action-v1.0.0
+        uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # action-v1.1.0.0.1.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
