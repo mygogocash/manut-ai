@@ -48,7 +48,7 @@ describe("the page's own check of extra arguments (the shell's, run sooner)", ()
       ["gemini", ["-y", "--yolo", "--approval-mode=yolo", "--no-sandbox", "--skip-trust"]],
       ["cursor-agent", ["-f", "--force", "--yolo", "--sandbox=disabled", "--approve-mcps", "--trust"]],
       ["agy", ["--dangerously-skip-permissions", "--mode=auto", "--settings={}"]],
-      ["grok", ["--always-approve", "--permission-mode=dontAsk"]],
+      ["grok", ["--always-approve", "--yolo", "--permission-mode=dontAsk"]],
       ["omp", ["--auto-approve", "--approval-mode=yolo"]],
       ["opencode", ["--auto"]],
     ];

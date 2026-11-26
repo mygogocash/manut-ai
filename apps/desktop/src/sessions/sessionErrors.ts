@@ -16,6 +16,10 @@ const SIGNED_OUT = /^(.+) is not signed in\. Run `([^`]+)` in a terminal and sig
 export const NO_ASKS = /^(.+) did not start because its own settings let it run commands and change files without asking first\.$/;
 export const MODE_KEPT = /^(.+) stayed in its (.+) mode, which does not ask before it acts, so Manut AI sends it nothing more\. Close this chat and start a new one\.$/;
 
+/** The shell's sentence for a message that starts with an agent's own command that turns its asks off (`no_asks_command`
+ *  in acp_chat.rs: Grok's `/always-approve`, item 101b), which it never sends. A test keeps it equal to the shell's. */
+export const NO_ASKS_COMMAND = /^(.+)'s \/(\S+) turns off its asks, so Manut AI does not send it\. Write your message without it\.$/;
+
 /** `text` as a person reads it: the shell's not-signed-in sentence is said in their language with the command as
  *  plain words (no backticks), and so are its two sentences about an agent that would not ask first; anything else is
  *  returned as it is. */
@@ -24,7 +28,10 @@ export const signedOutSaid = (text: string): string => {
   const m = SIGNED_OUT.exec(t);
   if (m) return tr("ss.signedOut", { agent: m[1], cmd: m[2] });
   const n = NO_ASKS.exec(t);
-  if (n) return tr("ss.noAsks", { agent: n[1] });
+  // the setting to change is the agent's own: Cursor's Approval mode, Grok's permission_mode (item 101b)
+  if (n) return tr(n[1] === "Grok" ? "ss.noAsksGrok" : "ss.noAsks", { agent: n[1] });
+  const c = NO_ASKS_COMMAND.exec(t);
+  if (c) return tr("ss.noAsksCommand", { agent: c[1], cmd: c[2] });
   const k = MODE_KEPT.exec(t);
   return k ? tr("ss.asksModeKept", { agent: k[1], mode: k[2] }) : text;
 };

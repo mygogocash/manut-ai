@@ -23,7 +23,9 @@ describe("sessionMode", () => {
     expect(sessionMode(agents, { agent: "claude", open: "terminal" })).toBe("terminal");
     expect(sessionMode(agents, { agent: "omh" })).toBe("hermes");
     expect(sessionMode(agents, { agent: "omh", open: "terminal" })).toBe("terminal");
-    expect(sessionMode(agents, { agent: "grok" })).toBe("terminal");
+    // Grok is a chat since item 101b, and a terminal when opened as one
+    expect(sessionMode(agents, { agent: "grok" })).toBe("chat");
+    expect(sessionMode(agents, { agent: "grok", open: "terminal" })).toBe("terminal");
     // before the look-up answers, this app's own list stands
     expect(sessionMode(null, { agent: "codex" })).toBe("chat");
     expect(sessionMode(null, { agent: "codex", open: "terminal" })).toBe("terminal");
@@ -41,7 +43,7 @@ describe("opensAs", () => {
       omh: { chat: true, terminal: true },
       pi: { chat: true, terminal: true },
       omp: { chat: true, terminal: true },
-      grok: { chat: false, terminal: true },
+      grok: { chat: true, terminal: true },
       opencode: { chat: true, terminal: true },
     });
     expect(opensAs("claude")).toEqual({ chat: true, terminal: true });
@@ -61,10 +63,10 @@ describe("the remembered pick", () => {
     const agents = info(["claude", "dsh", "grok", "omh"]);
     expect(draftOpen("claude", agents, {})).toBe("chat");
     expect(draftOpen("claude", agents, { claude: "terminal" })).toBe("terminal");
-    // a remembered Terminal for DSH (no terminal here) is ignored; Grok has no chat, so it is its terminal
+    // a remembered Terminal for DSH (no terminal here) is ignored; Grok opens as a chat unless its terminal is remembered
     expect(draftOpen("dsh", agents, { dsh: "terminal" })).toBe("chat");
-    expect(draftOpen("grok", agents, {})).toBe("terminal");
-    expect(draftOpen("grok", agents, { grok: "chat" })).toBe("terminal");
+    expect(draftOpen("grok", agents, {})).toBe("chat");
+    expect(draftOpen("grok", agents, { grok: "terminal" })).toBe("terminal");
     // oh-my-hermes remembered as Terminal, then omh went away and only Hermes is left
     expect(draftOpen("omh", info([], "hermes"), { omh: "terminal" })).toBe("chat");
   });

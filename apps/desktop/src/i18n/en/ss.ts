@@ -137,4 +137,7 @@ export const ss = {
   "ss.noAsks": "{agent} did not start because its own settings let it run commands and change files without asking first. Set Approval mode to Allowlist in {agent}'s own settings, then start the chat again.",
   "ss.asksModeSet": "{agent} was in its {mode} mode, which does not ask before it acts, so Manut AI switched it to {to}.",
   "ss.asksModeKept": "{agent} stayed in its {mode} mode, which does not ask before it acts, so Manut AI sends it nothing more. Close this chat and start a new one.",
+  // Grok as a chat (item 101b): its own settings that skip asks, and its command that turns them off
+  "ss.noAsksGrok": "{agent} did not start because its own settings let it run commands and change files without asking first. Set permission_mode to ask in the [ui] section of {agent}'s config.toml, check that no Claude settings file sets a defaultMode other than default or plan, then start the chat again.",
+  "ss.noAsksCommand": "{agent}'s /{cmd} turns off its asks, so Manut AI does not send it. Write your message without it.",
 };

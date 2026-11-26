@@ -14,7 +14,7 @@
 
 use serde::{Serialize, Serializer};
 
-use crate::acp_chat::{AcpAgent, SettingCheck};
+use crate::acp_chat::{AcpAgent, Format, Place, SettingCheck};
 use crate::sessions::{Agent, Mode};
 
 /// One generic ACP agent. Built by [`generic`], so the id, the program and the adapter's name never disagree.
@@ -45,12 +45,12 @@ const fn generic(
     mark: &'static str,
     continues: bool,
     asks_in: &'static [&'static str],
-    settings: Option<SettingCheck>,
+    settings: &'static [SettingCheck],
 ) -> AcpEntry {
     AcpEntry {
         agent: Agent { id, program: id, label, mode: Mode::Chat },
         args,
-        acp: AcpAgent { id, label, login, skill_tool: None, rules: None, asks_in, settings },
+        acp: AcpAgent { id, label, login, skill_tool: None, rules: None, asks_in, settings, ask_switches: &[] },
         install,
         mark,
         continues,
@@ -77,13 +77,13 @@ const fn generic(
 /// only `default` is taken (its default mode is a setting of its own). Cursor's own settings file is read before its chat
 /// starts ([`CURSOR_SETTINGS`]).
 pub const ACP_LIST: [AcpEntry; 7] = [
-    generic("gemini", "Gemini CLI", &["--acp"], "gemini", "npm install -g @google/gemini-cli", "geminicli-color.svg", true, &[], None),
-    generic("qwen", "Qwen Code", &["--acp"], "qwen", "npm install -g @qwen-code/qwen-code@latest", "qwen-color.svg", true, &[], None),
-    generic("kimi", "Kimi Code", &["acp"], "kimi login", "npm install -g @moonshot-ai/kimi-code", "kimi-code.png", true, &[], None),
-    generic("copilot", "Copilot CLI", &["--acp"], "copilot login", "npm install -g @github/copilot", "githubcopilot.svg", true, &[], None),
-    generic("cline", "Cline", &["--acp"], "cline auth", "npm install -g cline", "cline.svg", true, &[], None),
-    generic("cursor-agent", "Cursor", &["acp"], "cursor-agent login", "curl https://cursor.com/install -fsS | bash", "cursor.svg", true, &["agent", "plan", "ask"], Some(CURSOR_SETTINGS)),
-    generic("agy", "Antigravity", &["acp"], "agy acp --login", "curl -fsSL https://antigravity.google/cli/install.sh | bash", "antigravity.svg", true, &["default"], None),
+    generic("gemini", "Gemini CLI", &["--acp"], "gemini", "npm install -g @google/gemini-cli", "geminicli-color.svg", true, &[], &[]),
+    generic("qwen", "Qwen Code", &["--acp"], "qwen", "npm install -g @qwen-code/qwen-code@latest", "qwen-color.svg", true, &[], &[]),
+    generic("kimi", "Kimi Code", &["acp"], "kimi login", "npm install -g @moonshot-ai/kimi-code", "kimi-code.png", true, &[], &[]),
+    generic("copilot", "Copilot CLI", &["--acp"], "copilot login", "npm install -g @github/copilot", "githubcopilot.svg", true, &[], &[]),
+    generic("cline", "Cline", &["--acp"], "cline auth", "npm install -g cline", "cline.svg", true, &[], &[]),
+    generic("cursor-agent", "Cursor", &["acp"], "cursor-agent login", "curl https://cursor.com/install -fsS | bash", "cursor.svg", true, &["agent", "plan", "ask"], &[CURSOR_SETTINGS]),
+    generic("agy", "Antigravity", &["acp"], "agy acp --login", "curl -fsSL https://antigravity.google/cli/install.sh | bash", "antigravity.svg", true, &["default"], &[]),
 ];
 
 /// Cursor's own settings file, where Cursor itself reads it (Cursor Agent 2026.11.22, `cursor-config/dist/paths.js`:
@@ -94,11 +94,9 @@ pub const ACP_LIST: [AcpEntry; 7] = [
 /// only value taken: `auto-review` (a classifier that runs some calls unasked) and any other are refused. Read on this Mac
 /// from the CLI's own bundle; the person's `permissions.allow` rules are theirs and apply as in Cursor itself.
 pub const CURSOR_SETTINGS: SettingCheck = SettingCheck {
-    dir_vars: &[("CURSOR_CONFIG_DIR", ""), ("XDG_CONFIG_HOME", "cursor")],
-    home_dir: ".cursor",
-    file: "cli-config.json",
-    key: "approvalMode",
-    allowed: &["allowlist"],
+    place: Place::Home { vars: &[("CURSOR_CONFIG_DIR", ""), ("XDG_CONFIG_HOME", "cursor")], dir: ".cursor", file: "cli-config.json" },
+    format: Format::Json,
+    keys: &[("approvalMode", &["allowlist"])],
 };
 
 /// The row of generic ACP agent `id`, or `None` for anything else (a built-in, a removed agent, any other text).
@@ -172,7 +170,7 @@ mod tests {
         assert_eq!(seen, ["gemini", "qwen", "kimi", "copilot", "cline", "cursor-agent", "agy"]);
         // item 101a: Cursor and Antigravity, which ran here as chats, are held to their asking modes; Antigravity's
         // `accept-edits` and `auto` are never among them, and only Cursor's settings file is read
-        let held: Vec<(&str, &[&str], bool)> = ACP_LIST.iter().map(|e| (e.agent.id, e.acp.asks_in, e.acp.settings.is_some())).collect();
+        let held: Vec<(&str, &[&str], bool)> = ACP_LIST.iter().map(|e| (e.agent.id, e.acp.asks_in, !e.acp.settings.is_empty())).collect();
         assert_eq!(
             held,
             [

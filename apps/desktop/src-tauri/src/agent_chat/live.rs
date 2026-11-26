@@ -388,11 +388,12 @@ impl ChatSessions {
         // configuration out, so a variable of the person's with the same name never wins
         let mut env = crate::providers::session_env(agent_id, mine, account_env, true);
         env.extend(project_config_off(agent_id).iter().map(|(k, v)| (k.to_string(), v.to_string())));
-        // an agent whose own settings can turn its asks off (Cursor's Run Everything) starts only when they do not: its
-        // settings file is read where it will read it, with the variables it will run with, then the app's own
-        if let Some(check) = acp.and_then(|a| a.settings.as_ref()) {
+        // an agent whose own settings can turn its asks off (Cursor's Run Everything, Grok's always-approve) starts only when
+        // they do not: each settings file is read where it will read it, with the variables it will run with, then the
+        // app's own, and the chat's folder for a project's own
+        if let Some(checks) = acp.map(|a| a.settings).filter(|c| !c.is_empty()) {
             let var = |k: &str| env.iter().rev().find(|(n, _)| n == k).map(|(_, v)| v.clone()).or_else(|| std::env::var(k).ok());
-            crate::acp_chat::settings_allow(check, a.label, &var)?;
+            crate::acp_chat::settings_allow(checks, a.label, &var, cwd)?;
         }
         // an agent whose own default runs tools unasked (OpenCode) gets ask rules built from its own
         // resolved rules, so nothing the person allows runs unasked and nothing they deny becomes askable; or it does
@@ -1069,17 +1070,17 @@ mod tests {
     #[test]
     fn only_chat_agents_have_adapters() {
         let generic = crate::acp_agents::ACP_LIST.iter().map(|e| e.agent.id);
-        for id in ["claude", "codex", "omo", "pi", "omp", "opencode"].into_iter().chain(generic) {
+        for id in ["claude", "codex", "omo", "pi", "omp", "opencode", "grok"].into_iter().chain(generic) {
             assert!(adapter_for(id, "/w", None).is_some(), "{id}");
         }
         // DSH has no adapter: its chat is a run per message (dsh_chat); Kilo Code is no longer offered
-        for id in ["omh", "grok", "dsh", "sh", "", "kilo"] {
+        for id in ["omh", "dsh", "sh", "", "kilo"] {
             assert!(adapter_for(id, "/w", None).is_none(), "{id}");
         }
         let c = ChatSessions::default();
         let tmp = std::env::temp_dir();
         assert!(c.start_agent("dsh", &tmp, Some("eee5079a-c52e-4526-b633-f3d8cb7d6394"), &[], None, |_| {}).is_err());
-        for bad in ["omh", "grok", "/bin/sh", "claude -p"] {
+        for bad in ["omh", "/bin/sh", "claude -p"] {
             assert!(c.start_agent(bad, &tmp, None, &[], None, |_| {}).is_err(), "{bad}");
         }
         // Kilo Code and any other id are refused as unknown, before a program is looked up
@@ -1198,6 +1199,36 @@ mod tests {
         std::fs::write(dir.join("cfg/cli-config.json"), r#"{"approvalMode":"allowlist"}"#).unwrap();
         c.start_agent_mine("cursor-agent", &dir, None, &env, None, false, &mine, |_| {}).unwrap();
         assert_eq!(seen_lines(&seen).first().map(String::as_str), Some("acp"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Item 101b: a Grok chat does not start while Grok's own settings (here in the home an account gives it, `GROK_HOME`)
+    /// or a project's own Claude settings start it without asks, and once they ask it starts as `grok --permission-mode
+    /// default agent stdio`, its ACP server.
+    #[cfg(unix)]
+    #[test]
+    fn a_grok_chat_starts_only_while_its_own_settings_ask() {
+        use crate::providers::Stored;
+        let base = std::env::temp_dir().join(format!("manut-101b-grok-live-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(base.join("acct")).unwrap();
+        std::fs::create_dir_all(base.join("proj/.claude")).unwrap();
+        let dir = base.canonicalize().unwrap();
+        let proj = dir.join("proj");
+        let (prog, seen) = recorder(&dir, "fake-grok");
+        let mine = Stored { path: prog.to_string_lossy().into_owned(), ..Stored::default() };
+        let env = vec![("HOME".to_string(), dir.to_string_lossy().into_owned()), ("GROK_HOME".to_string(), dir.join("acct").to_string_lossy().into_owned())];
+        let c = ChatSessions::default();
+        std::fs::write(dir.join("acct/config.toml"), "[ui]\npermission_mode = \"always-approve\"\n").unwrap();
+        assert_eq!(c.start_agent_mine("grok", &proj, None, &env, None, false, &mine, |_| {}).unwrap_err(), crate::acp_chat::no_asks("Grok"));
+        std::fs::write(dir.join("acct/config.toml"), "[ui]\npermission_mode = \"ask\"\n").unwrap();
+        std::fs::write(proj.join(".claude/settings.json"), r#"{"permissions":{"defaultMode":"bypassPermissions"}}"#).unwrap();
+        assert_eq!(c.start_agent_mine("grok", &proj, None, &env, None, false, &mine, |_| {}).unwrap_err(), crate::acp_chat::no_asks("Grok"));
+        thread::sleep(Duration::from_millis(200));
+        assert!(!seen.exists() && c.count() == 0, "Grok started while it would not ask");
+        std::fs::remove_file(proj.join(".claude/settings.json")).unwrap();
+        c.start_agent_mine("grok", &proj, None, &env, None, false, &mine, |_| {}).unwrap();
+        assert_eq!(seen_lines(&seen)[..4], ["--permission-mode", "default", "agent", "stdio"]);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
