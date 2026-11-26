@@ -3345,7 +3345,7 @@ export const ja: Record<Key, string> = {
   "titles.model.haiku": "Haiku",
   "titles.model.sonnet": "Sonnet",
   "titles.model.opus": "Opus",
-  "titles.effort": "Effort",
+  "titles.effort": "推論の強さ",
   "titles.effort.default": "Claude Code の既定",
   "titles.effort.low": "低",
   "titles.effort.medium": "中",

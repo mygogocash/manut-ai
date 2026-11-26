@@ -72,7 +72,8 @@ test("asks on bots you are not looking at: the menu counts them, Needs you lists
   // the ask in its card's words, with the exact action under it set as code, not with raw backticks
   await expect(friren.locator(".l1")).toHaveText("Run shell command");
   await expect(friren.locator("code.act")).toHaveText("rm -rf build/");
-  await expect(friren.locator(".tag")).toHaveText("Approve");
+  // the tag names what waits, a noun, since item 85i: "Approval", where the button beside it says "Approve"
+  await expect(friren.locator(".tag")).toHaveText("Approval");
   await expect(hermes.locator(".l1")).toHaveText("Which environment should I deploy to?");
   await expect(hermes.locator(".tag")).toHaveText("Question");
   await page.screenshot({ path: join(SHOTS, "T12-needs-dark.png"), animations: "disabled" });

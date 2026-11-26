@@ -3345,7 +3345,7 @@ export const ko: Record<Key, string> = {
   "titles.model.haiku": "Haiku",
   "titles.model.sonnet": "Sonnet",
   "titles.model.opus": "Opus",
-  "titles.effort": "Effort",
+  "titles.effort": "추론 강도",
   "titles.effort.default": "Claude Code 기본값",
   "titles.effort.low": "낮음",
   "titles.effort.medium": "보통",

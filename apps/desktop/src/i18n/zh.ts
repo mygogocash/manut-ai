@@ -3345,7 +3345,7 @@ export const zh: Record<Key, string> = {
   "titles.model.haiku": "Haiku",
   "titles.model.sonnet": "Sonnet",
   "titles.model.opus": "Opus",
-  "titles.effort": "Effort",
+  "titles.effort": "推理强度",
   "titles.effort.default": "Claude Code 的默认值",
   "titles.effort.low": "低",
   "titles.effort.medium": "中",
