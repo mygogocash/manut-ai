@@ -25,6 +25,7 @@ mod lane;
 mod lane_clean;
 mod lane_config;
 mod lane_diff;
+mod outside_use;
 mod past_chats;
 mod project_notes;
 mod platform;
@@ -1417,6 +1418,38 @@ async fn past_chats_list(agent: String, cwds: Vec<String>) -> Result<Vec<past_ch
     tauri::async_runtime::spawn_blocking(move || past_chats::list(&past_home(&agent, None)?, &agent, &cwds)).await.map_err(|e| e.to_string())?
 }
 
+/// What Claude Code or Codex used in sessions outside Manut AI, read from the tool's own files on this Mac (item 106,
+/// `outside_use.rs`): numbers, dates and a project folder's name, never a path above it or a word of a conversation. The
+/// page names the tool and the ids of the sessions it started (matched, never opened) and a number to cancel by; the folders
+/// read are the tool's own and the account homes Manut AI made, chosen here.
+#[tauri::command]
+async fn outside_use_scan(tool: String, exclude: Vec<String>, scan_id: u32) -> Result<outside_use::Report, String> {
+    if !outside_use::supported(&tool) {
+        return Err(format!("{tool} use is not read"));
+    }
+    let flag = outside_use::register(scan_id);
+    let r = tauri::async_runtime::spawn_blocking(move || {
+        let user = user_home()?;
+        let primary = past_home(&tool, None).ok();
+        let homes = outside_use::homes_for(&user, &tool, primary);
+        let exclude = outside_use::clean_ids(exclude);
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0);
+        let opts = outside_use::Opts { now, offset: &outside_use::system_offset, exclude: &exclude, limits: outside_use::Limits::default(), cancel: &*flag };
+        let mut cache = outside_use::shared_cache().lock().map_err(|_| "busy".to_string())?;
+        Ok::<_, String>(outside_use::scan(&tool, &homes, &opts, &mut cache))
+    })
+    .await
+    .map_err(|e| e.to_string());
+    outside_use::finish(scan_id);
+    r?
+}
+
+/// The page closed: stop its scan between files.
+#[tauri::command]
+fn outside_use_cancel(scan_id: u32) {
+    outside_use::cancel(scan_id);
+}
+
 /// The conversation the Codex in the foreground of TERMINALS session `id` holds open, for the session to continue
 /// after a restart (rule 11): only the id, checked as a UUID, from a rollout path inside the session's Codex home
 /// (rule 30's checks). The page sends only the session id.
@@ -1747,6 +1780,8 @@ fn commands(invoke: tauri::ipc::Invoke) -> bool {
         session_reveal,
         session_open_terminal,
         past_chats_list,
+        outside_use_scan,
+        outside_use_cancel,
         past_chat_messages,
         conversation_state,
         codex_conversation,
