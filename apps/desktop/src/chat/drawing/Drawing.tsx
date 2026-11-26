@@ -89,6 +89,7 @@ export function DrawingCard({ code, by }: { code: string; by: string }) {
   const [larger, setLarger] = useState(false);
   const closeLarger = useCallback(() => setLarger(false), []);
   const ref = useRef<HTMLElement>(null);
+  const largerButton = useRef<HTMLButtonElement>(null);
 
   // pressed Show: live at once; the card going (Hide, the answer leaving, the chat closing) gives its place back
   useEffect(() => {
@@ -113,7 +114,7 @@ export function DrawingCard({ code, by }: { code: string; by: string }) {
       <div className="dw-band">
         <span className="dw-by">{t("dw.by", { name: by })}</span>
         {doc && (
-          <button type="button" className="dw-lk" onClick={() => setLarger(true)} data-testid="drawing-larger">
+          <button ref={largerButton} type="button" className="dw-lk" onClick={() => setLarger(true)} data-testid="drawing-larger">
             {t("dw.larger")}
           </button>
         )}
@@ -142,17 +143,18 @@ export function DrawingCard({ code, by }: { code: string; by: string }) {
           {t("dw.noScripts")}
         </div>
       )}
-      {larger && doc && <DrawingSheet doc={doc} by={by} onClose={closeLarger} />}
+      {larger && doc && <DrawingSheet doc={doc} by={by} onClose={closeLarger} back={largerButton} />}
     </section>
   );
 }
 
 /** Open larger: the same closed box in a sheet of the app's own over the window, with the same band and line. Escape,
- *  Close or a press outside closes it, and the focus goes back to where it was. */
-function DrawingSheet({ doc, by, onClose }: { doc: string; by: string; onClose: () => void }) {
+ *  Close or a press outside closes it, and the focus goes back to Open larger (WebKit does not focus a button a mouse
+ *  pressed, so the element focused before the sheet is not always it). */
+function DrawingSheet({ doc, by, onClose, back: opener }: { doc: string; by: string; onClose: () => void; back: { current: HTMLElement | null } }) {
   const close = useRef<HTMLButtonElement>(null);
   useEffect(() => {
-    const back = document.activeElement as HTMLElement | null;
+    const back = opener.current ?? (document.activeElement as HTMLElement | null);
     close.current?.focus();
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
@@ -165,7 +167,7 @@ function DrawingSheet({ doc, by, onClose }: { doc: string; by: string; onClose: 
       window.removeEventListener("keydown", onKey, true);
       if (back && document.contains(back)) back.focus();
     };
-  }, [onClose]);
+  }, [onClose, opener]);
   const title = t("dw.title", { name: by });
   // on <body>: the thread scrolls and is masked, which would clip a fixed overlay inside it
   return createPortal(

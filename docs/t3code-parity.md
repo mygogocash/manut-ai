@@ -114,7 +114,7 @@ keeps them:
 
 | Feature | Today | Plan |
 | --- | --- | --- |
-| HTML an agent draws, with scripts | no (a lane's Preview and shared pages only) | 98 |
+| HTML an agent draws, with scripts | part (item 98): an html or svg block of an answer shows as a drawing on Show drawing, in a closed box, without its scripts: in WebKit a sandboxed script can reach the network in ways no policy covers (`docs/security/chat-drawings.md`) | 98 |
 | Files land where the agent can use them | has | |
 | Use across accounts and machines, outside sessions too | part: what Manut AI starts, this Mac | 106 |
 | Limits left for each account | has | |
