@@ -12,14 +12,21 @@
 //!   session.commands).
 //! - `session/request_permission` -> an approval card offering only what the request offers. `allow_always`
 //!   is never offered: OpenCode saves it as a permanent project rule, which is not manut's "for this session".
-//!   A Stop while a card is open answers `cancelled` and expires the card.
+//!   A Stop while a card is open answers `cancelled` and expires the card. A request that offers several `allow_once`
+//!   answers is a question (Cursor asks its own questions this way): it becomes a question card whose choices are those
+//!   answers, and skipping it picks the request's `reject_once`.
+//! - A row with [`AcpAgent::asks_in`] (Cursor, Antigravity) is held to the session modes in which its agent asks before
+//!   acting: when the agent reports any other mode (Antigravity's `accept-edits` or `auto`, set as its default in its own
+//!   settings, or a switch of its own), manut sets the row's first mode back before any message is sent, stops a running
+//!   turn, and sends nothing until the agent confirms it.
 //! - An agent that is not signed in (`-32000` on `session/new`) ends in one `session.error` of kind `signed_out`
 //!   with the sign-in line from its row; manut never calls `authenticate` (Cline's opens a browser by itself).
 //! - An unknown request from the agent gets a JSON-RPC error answer so the agent never waits on manut; unknown
 //!   notifications, fields and lines are ignored and nothing raw reaches the chat.
 //!
-//! Checked against OpenCode 1.19.5 (`tests/fixtures/acp/opencode-*.jsonl`, recorded from real runs); the generic
-//! agents up to their signed-out `session/new` (`<agent>-signed-out.jsonl`).
+//! Checked against OpenCode 1.19.5 (`tests/fixtures/acp/opencode-*.jsonl`, recorded from real runs); Antigravity 1.5.18
+//! and Cursor Agent 2026.11.22 through real turns (`agy-*.jsonl`, `cursor-*.jsonl`, item 101a); the other generic agents
+//! up to their signed-out `session/new` (`<agent>-signed-out.jsonl`).
 
 use std::collections::HashMap;
 use std::time::Instant;
@@ -86,6 +93,78 @@ pub struct AcpAgent {
     /// How the agent is made to ask before edits and shell commands without loosening a rule of the person's own
     /// (see [`RuleProbe`]); `None` adds nothing.
     pub rules: Option<RuleProbe>,
+    /// The session modes in which the agent asks the client before it acts (the ids its `session/new` lists under
+    /// `modes`, or as its `mode` configuration option), the first being the one manut sets whenever the agent reports
+    /// another. Empty: the agent is not held to a mode here.
+    pub asks_in: &'static [&'static str],
+    /// A value in the agent's own settings file that makes it act without asking (Cursor's Run Everything): a chat of an
+    /// agent whose file holds it does not start ([`SettingCheck`]). `None`: nothing is read.
+    pub settings: Option<SettingCheck>,
+}
+
+/// One value of an agent's own settings file that turns its asks off, read before its chat starts. The file is where the
+/// agent itself looks: the folder named by the first of `dir_vars` that is set to something other than blanks (joined
+/// with its subfolder), else `home_dir` under the home folder; then `file` in it. The chat starts only when the file is
+/// not there, or is a JSON object whose `key` is absent or one of `allowed`. Anything else (another value, a file that is
+/// not a JSON object, one that cannot be read) refuses the start with [`no_asks`]: a file the agent itself might read
+/// differently is not taken as safe.
+#[derive(Debug)]
+pub struct SettingCheck {
+    pub dir_vars: &'static [(&'static str, &'static str)],
+    pub home_dir: &'static str,
+    pub file: &'static str,
+    pub key: &'static str,
+    pub allowed: &'static [&'static str],
+}
+
+impl SettingCheck {
+    /// The settings file the agent reads with the variables `var` gives (the chat's own, then the app's) and home `home`.
+    pub fn path(&self, var: &dyn Fn(&str) -> Option<String>, home: &std::path::Path) -> std::path::PathBuf {
+        for (name, sub) in self.dir_vars {
+            if let Some(v) = var(name).filter(|v| !v.trim().is_empty()) {
+                let dir = std::path::PathBuf::from(v);
+                return if sub.is_empty() { dir.join(self.file) } else { dir.join(sub).join(self.file) };
+            }
+        }
+        home.join(self.home_dir).join(self.file)
+    }
+
+    /// Whether the file's text `text` (`None`: there is no such file) leaves the agent asking.
+    pub fn keeps_asking(&self, text: Option<&str>) -> bool {
+        let Some(text) = text else { return true };
+        let Ok(Value::Object(m)) = serde_json::from_str::<Value>(text) else { return false };
+        match m.get(self.key) {
+            None => true,
+            Some(Value::String(v)) => self.allowed.contains(&v.as_str()),
+            Some(_) => false,
+        }
+    }
+}
+
+/// Why an agent with a [`SettingCheck`] did not start (the UI shows it translated, `ss.noAsks`).
+pub fn no_asks(label: &str) -> String {
+    format!("{label} did not start because its own settings let it run commands and change files without asking first.")
+}
+
+/// The largest settings file read for a [`SettingCheck`]; a bigger one refuses.
+const SETTINGS_MAX: u64 = 4 << 20;
+
+/// Whether agent `label` may start as far as its own settings file says ([`SettingCheck`]): read where the agent reads
+/// it, with `var` giving the variables its chat runs with (the chat's own, then the app's) and the home folder from them.
+/// No home, a file that is not a plain file, is larger than [`SETTINGS_MAX`] or cannot be read refuses with [`no_asks`].
+pub fn settings_allow(check: &SettingCheck, label: &str, var: &dyn Fn(&str) -> Option<String>) -> Result<(), String> {
+    let home = var(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).filter(|h| !h.trim().is_empty()).ok_or_else(|| no_asks(label))?;
+    let path = check.path(var, std::path::Path::new(&home));
+    let text = match std::fs::metadata(&path) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Ok(m) if m.is_file() && m.len() <= SETTINGS_MAX => Some(std::fs::read_to_string(&path).map_err(|_| no_asks(label))?),
+        _ => return Err(no_asks(label)),
+    };
+    if check.keeps_asking(text.as_deref()) {
+        Ok(())
+    } else {
+        Err(no_asks(label))
+    }
 }
 
 /// An agent whose own default runs tools without asking. Before the chat starts, the shell runs the agent's fixed
@@ -168,6 +247,8 @@ pub const ACP_AGENTS: [AcpAgent; 1] = [AcpAgent {
         forms: &[ProbeForm { args: &["debug", "agents", "--standalone"], build: opencode2_ask, kept: opencode2_kept }, ProbeForm { args: &["agent", "list"], build: opencode_ask, kept: opencode_kept }],
         var: "OPENCODE_CONFIG_CONTENT",
     }),
+    asks_in: &[],
+    settings: None,
 }];
 
 /// One UTF-16 unit as the agents' matcher compares it. On Windows (`fold`) the agents match without case, as a
@@ -483,6 +564,36 @@ pub fn is_acp_session_id(id: &str) -> bool {
     (1..=128).contains(&id.len()) && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
 }
 
+/// The card key of a request with JSON-RPC id `rpc_id`: `acp-` and the id as it was given, a number or the text of a
+/// string (Antigravity's are strings, `"1"`), never its JSON quotes.
+fn request_key(rpc_id: &Value) -> String {
+    match rpc_id {
+        Value::String(x) => format!("acp-{x}"),
+        other => format!("acp-{other}"),
+    }
+}
+
+/// A command written as Cursor titles one: the whole title between one pair of backticks, each backtick inside escaped
+/// with a backslash. The command, unescaped; `None` for any other title.
+fn unticked(title: &str) -> Option<String> {
+    let t = title.trim();
+    let inner = t.strip_prefix('`')?.strip_suffix('`')?;
+    let cmd = inner.replace("\\`", "`");
+    (!cmd.trim().is_empty()).then_some(cmd)
+}
+
+/// The paths of the diffs a tool call carries (ACP's `content` entries of `type: "diff"`), in order.
+fn diff_paths(tc: &Value) -> Vec<String> {
+    tc.get("content")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|c| s(c, "type") == "diff")
+        .map(|c| s(c, "path"))
+        .filter(|p| !p.trim().is_empty())
+        .collect()
+}
+
 /// The objects in one line of output: a leading BOM dropped, and two objects printed on one line (`}{`) split.
 /// Anything that does not parse is dropped.
 pub fn json_objects(line: &str) -> Vec<Value> {
@@ -503,13 +614,17 @@ enum Call {
     Open,
     Prompt,
     Config,
+    /// a switch back to a mode in which the agent asks ([`AcpAgent::asks_in`])
+    Mode,
 }
 
-/// An open permission request: its JSON-RPC id and the option id for each answer manut offers.
+/// An open permission request: its JSON-RPC id and the option id for each answer manut offers. A question (a request
+/// offering several `allow_once` answers) keeps each answer's words and option id in `answers`.
 struct Ask {
     rpc_id: Value,
     once: Option<String>,
     deny: Option<String>,
+    answers: Vec<(String, String)>,
 }
 
 struct Tool {
@@ -549,6 +664,16 @@ pub struct Acp {
     /// whether the agent takes HTTP and SSE servers (`agentCapabilities.mcpCapabilities`); stdio it always takes
     mcp_http: bool,
     mcp_sse: bool,
+    /// The agent's session mode as it last reported it, and the id of its `mode` configuration option when it has one
+    /// (else a switch is `session/set_mode`). Only read for a row with [`AcpAgent::asks_in`].
+    mode: String,
+    mode_option: Option<String>,
+    /// A switch back to an asking mode is on its way: nothing is sent to the agent until it is confirmed.
+    mode_pending: bool,
+    /// The agent would not go back to a mode in which it asks: nothing more is sent to it.
+    mode_refused: bool,
+    /// The mode the agent was in when manut set it back, for the chat's note and the refusal.
+    mode_from: String,
 }
 
 impl Acp {
@@ -576,6 +701,11 @@ impl Acp {
             mcp: crate::acp_mcp::Approved::default(),
             mcp_http: false,
             mcp_sse: false,
+            mode: String::new(),
+            mode_option: None,
+            mode_pending: false,
+            mode_refused: false,
+            mode_from: String::new(),
         }
     }
 
@@ -661,9 +791,15 @@ impl Acp {
         emit(st, ev("turn.end", f));
     }
 
-    /// `configOptions` from new/load/resume/set_config_option or a `config_option_update`: the model list and the
-    /// current model.
+    /// `configOptions` from new/load/resume/set_config_option or a `config_option_update`: the session's mode (for a
+    /// row held to its asking modes, [`Self::mode_seen`]), the model list and the current model.
     fn config(&mut self, st: &mut Step, opts: &Value) {
+        if let Some(m) = opts.as_array().into_iter().flatten().find(|o| s(o, "category") == "mode" || s(o, "id") == "mode") {
+            if !s(m, "id").is_empty() {
+                self.mode_option = Some(s(m, "id"));
+            }
+            self.mode_seen(st, &s(m, "currentValue"));
+        }
         let Some(model) = opts.as_array().into_iter().flatten().find(|o| s(o, "category") == "model" || s(o, "id") == "model") else { return };
         let mut options = Vec::new();
         for o in model.get("options").and_then(Value::as_array).into_iter().flatten() {
@@ -693,25 +829,100 @@ impl Acp {
         }
     }
 
-    fn tool_detail(&self, kind: &str, title: &str, raw: &Value) -> String {
-        clip(&self.whole_detail(kind, title, raw), 160)
+    /// The session's mode `mode`, as the agent reported it. For a row held to the modes in which its agent asks
+    /// ([`AcpAgent::asks_in`]), any other mode is switched back at once: the row's first mode is set (through the agent's
+    /// `mode` configuration option, else `session/set_mode`), a running turn is stopped and its open cards expire, and
+    /// nothing is sent to the agent until it confirms the switch ([`Self::mode_settled`]). The agent can only report a
+    /// mode for a conversation that is open, so the switch always names it.
+    fn mode_seen(&mut self, st: &mut Step, mode: &str) {
+        let asks = self.agent.asks_in;
+        if asks.is_empty() || mode.is_empty() {
+            return;
+        }
+        self.mode = mode.to_string();
+        if asks.contains(&mode) || self.mode_pending || self.mode_refused {
+            return;
+        }
+        let Some(sid) = self.session.clone() else { return };
+        self.mode_pending = true;
+        self.mode_from = mode.to_string();
+        let to = asks[0];
+        match self.mode_option.clone() {
+            Some(id) => self.call(st, Call::Mode, "session/set_config_option", json!({"sessionId": sid, "configId": id, "value": to})),
+            None => self.call(st, Call::Mode, "session/set_mode", json!({"sessionId": sid, "modeId": to})),
+        };
+        if self.turn && self.prompt_id.is_some() {
+            for (rid, a) in self.pending.drain() {
+                out(st, json!({"jsonrpc": "2.0", "id": a.rpc_id, "result": {"outcome": {"outcome": "cancelled"}}}));
+                emit(st, ev("prompt.expired", json!({"request_id": rid, "reason": "cancelled"})));
+            }
+            out(st, json!({"jsonrpc": "2.0", "method": "session/cancel", "params": {"sessionId": sid}}));
+        }
+    }
+
+    /// The agent's answer to a switch back to an asking mode: `ok` when it confirmed one of the row's modes. Said once in
+    /// the chat either way (`session.note` `asks_mode`). Confirmed, a message that waited is sent; refused, the waiting
+    /// turn ends with [`Self::mode_refusal`] and nothing more is ever sent to this agent process.
+    fn mode_settled(&mut self, st: &mut Step, ok: bool) {
+        self.mode_pending = false;
+        let from = std::mem::take(&mut self.mode_from);
+        let to = self.agent.asks_in.first().copied().unwrap_or("");
+        emit(st, ev("session.note", json!({"kind": "asks_mode", "agent": self.agent.label, "mode": from, "to": to, "ok": ok})));
+        if ok {
+            if let Some(text) = (!self.queued.is_empty() && self.turn).then(|| std::mem::take(&mut self.queued).join("\n\n")) {
+                self.prompt(st, text);
+            }
+            return;
+        }
+        self.mode_refused = true;
+        self.mode_from = from;
+        if self.turn && self.prompt_id.is_none() {
+            self.queued.clear();
+            let why = self.mode_refusal();
+            self.end(st, "error", Some(why));
+        }
+    }
+
+    /// Why nothing is sent to an agent that would not go back to a mode in which it asks.
+    fn mode_refusal(&self) -> String {
+        format!("{} stayed in its {} mode, which does not ask before it acts, so Manut AI sends it nothing more. Close this chat and start a new one.", self.agent.label, self.mode_from)
+    }
+
+    fn tool_detail(&self, kind: &str, tc: &Value) -> String {
+        clip(&self.whole_detail(kind, tc), 160)
+    }
+
+    /// What call `tc` is about, read from its own input (`rawInput`) and, for a file it changes, the diff it carries: the
+    /// command, the file (relative to the session's folder), the search, the address. `None` when it names none.
+    ///
+    /// Antigravity names a command `CommandLine` and a file `TargetFile` or `AbsolutePath` (its `run_command`, file and
+    /// view tools, as GoSpark's Antigravity adapter reads them, and seen in a real run here); Cursor's permission requests
+    /// carry no input at all, and title a command as the command between backticks (`` `npm test` ``, its backticks
+    /// escaped with a backslash), which is read back whole for the card only.
+    fn subject(&self, kind: &str, tc: &Value) -> Option<String> {
+        let raw = tc.get("rawInput").unwrap_or(&Value::Null);
+        let pick = |k: &str| raw.get(k).and_then(Value::as_str).map(str::trim).filter(|x| !x.is_empty()).map(String::from);
+        match kind {
+            "terminal" => pick("command").or_else(|| pick("CommandLine")).or_else(|| unticked(&s(tc, "title"))),
+            // some agents' permission requests name it `filepath`
+            "patch" | "read_file" => ["filePath", "path", "file_path", "filepath", "TargetFile", "AbsolutePath"]
+                .into_iter()
+                .find_map(pick)
+                .or_else(|| diff_paths(tc).into_iter().next())
+                .map(|p| rel(&p, &self.cwd)),
+            "search_files" => pick("pattern").or_else(|| pick("query")).or_else(|| pick("Query")),
+            "web_extract" => pick("url").or_else(|| pick("Url")),
+            "web_search" => pick("query").or_else(|| pick("Query")),
+            _ => pick("description"),
+        }
     }
 
     /// What a call is about, for its approval card: as [`Self::tool_detail`], but whole, its line breaks kept, since what
     /// a person approves is what runs (item 117); the card and the phone scroll a long one.
-    fn whole_detail(&self, kind: &str, title: &str, raw: &Value) -> String {
-        let pick = |k: &str| raw.get(k).and_then(Value::as_str).map(str::trim).filter(|x| !x.is_empty()).map(String::from);
-        let d = match kind {
-            "terminal" => pick("command"),
-            // some agents' permission requests name it `filepath`
-            "patch" | "read_file" => pick("filePath").or_else(|| pick("path")).or_else(|| pick("file_path")).or_else(|| pick("filepath")).map(|p| rel(&p, &self.cwd)),
-            "search_files" => pick("pattern").or_else(|| pick("query")),
-            "web_extract" => pick("url"),
-            "web_search" => pick("query"),
-            _ => pick("description"),
-        };
+    fn whole_detail(&self, kind: &str, tc: &Value) -> String {
+        let title = s(tc, "title");
         // the title stands in only when it says more than the tool's name (`Reply with kiwi`, not `bash`)
-        d.unwrap_or_else(|| if title.trim().contains(' ') { title.to_string() } else { String::new() })
+        self.subject(kind, tc).unwrap_or_else(|| if title.trim().contains(' ') { title } else { String::new() })
     }
 
     /// The manut tool name for an ACP tool call: from its `kind`, else its title (OpenCode titles a call by the
@@ -742,12 +953,11 @@ impl Acp {
     /// folder, then its input with the first update), and the skill a skill tool loads.
     fn show(&mut self, st: &mut Step, id: &str, u: &Value) {
         let raw = u.get("rawInput").cloned().unwrap_or(Value::Null);
-        let title = s(u, "title");
         let Some(tool) = self.tools.get(id) else { return };
         let (name, shown, skill) = (tool.name.clone(), tool.shown, tool.skill);
         let known = raw.as_object().is_some_and(|m| m.keys().any(|k| k != "cwd"));
         if !shown && known {
-            let detail = self.tool_detail(&name, &title, &raw);
+            let detail = self.tool_detail(&name, u);
             emit(st, ev("tool.start", json!({"tool_id": id, "name": name, "detail": detail})));
             self.tools.get_mut(id).unwrap().shown = true;
         }
@@ -769,13 +979,14 @@ impl Acp {
                 if !id.is_empty() {
                     self.text_id = id;
                 }
-                if !t.is_empty() && self.turn {
+                // (a conversation being loaded replays its history before it is open: none of that is this turn's)
+                if !t.is_empty() && self.turn && self.session.is_some() {
                     self.text.push_str(&t);
                     emit(st, ev("delta", json!({"text": t})));
                 }
             }
-            "agent_thought_chunk" if self.turn => emit(st, crate::agent_chat::thinking_event(&u.get("content").map(|c| s(c, "text")).unwrap_or_default())),
-            "tool_call" if self.turn => {
+            "agent_thought_chunk" if self.turn && self.session.is_some() => emit(st, crate::agent_chat::thinking_event(&u.get("content").map(|c| s(c, "text")).unwrap_or_default())),
+            "tool_call" if self.turn && self.session.is_some() => {
                 let id = s(u, "toolCallId");
                 if id.is_empty() || self.tools.contains_key(&id) {
                     return;
@@ -807,6 +1018,10 @@ impl Acp {
                 let opts = u.get("configOptions").cloned().unwrap_or(Value::Null);
                 self.config(st, &opts);
             }
+            "current_mode_update" => {
+                let m = s(u, "currentModeId");
+                self.mode_seen(st, &m);
+            }
             "session_info_update" => {
                 let t = clip(&s(u, "title").replace(|c: char| c.is_control(), " "), 80);
                 if !t.is_empty() {
@@ -837,9 +1052,28 @@ impl Acp {
             out(st, json!({"jsonrpc": "2.0", "id": rpc_id, "error": {"code": -32601, "message": "not supported by Manut AI"}}));
             return;
         }
+        // a turn being stopped because the agent left its asking mode takes no new card
+        if self.mode_pending || self.mode_refused {
+            out(st, json!({"jsonrpc": "2.0", "id": rpc_id, "result": {"outcome": {"outcome": "cancelled"}}}));
+            return;
+        }
         let options: Vec<&Value> = p.get("options").and_then(Value::as_array).into_iter().flatten().collect();
         let opt = |kind: &str| options.iter().find(|o| s(o, "kind") == kind).map(|o| s(o, "optionId")).filter(|x| !x.is_empty());
         let (once, deny) = (opt("allow_once"), opt("reject_once").or_else(|| opt("reject_always")));
+        let tc = p.get("toolCall").cloned().unwrap_or(Value::Null);
+        let key = request_key(&rpc_id);
+        // several `allow_once` answers are a question, not an approval (Cursor asks its questions so, each answer an
+        // option and "Skip" its `reject_once`): a question card with those answers, never "Allow once" for the first
+        let answers: Vec<(String, String)> =
+            options.iter().filter(|o| s(o, "kind") == "allow_once").map(|o| (s(o, "name").trim().to_string(), s(o, "optionId"))).filter(|(n, i)| !n.is_empty() && !i.is_empty()).collect();
+        if answers.len() > 1 {
+            let said = tc.get("content").and_then(Value::as_array).into_iter().flatten().filter_map(|c| c.get("content")).map(|c| s(c, "text")).find(|x| !x.trim().is_empty());
+            let question = said.unwrap_or_else(|| s(&tc, "title"));
+            let choices: Vec<&str> = answers.iter().map(|(n, _)| n.as_str()).collect();
+            emit(st, ev("clarify.request", json!({"request_id": key, "question": question.trim(), "choices": choices})));
+            self.pending.insert(key, Ask { rpc_id, once: None, deny, answers });
+            return;
+        }
         let mut choices = Vec::new();
         if deny.is_some() {
             choices.push("deny");
@@ -852,14 +1086,17 @@ impl Acp {
             out(st, json!({"jsonrpc": "2.0", "id": rpc_id, "result": {"outcome": {"outcome": "cancelled"}}}));
             return;
         }
-        let tc = p.get("toolCall").cloned().unwrap_or(Value::Null);
-        let raw = tc.get("rawInput").cloned().unwrap_or(Value::Null);
         let title = s(&tc, "title");
         let kind = Acp::kind_of(&s(&tc, "kind"), &title);
-        let detail = self.whole_detail(&kind, &title, &raw);
+        let detail = self.whole_detail(&kind, &tc);
         let (title, command) = match kind.as_str() {
             "terminal" => ("Run this command?".to_string(), detail),
-            "patch" => (if detail.is_empty() { format!("Allow {} to change files?", self.agent.label) } else { format!("Allow {} to change {detail}?", self.agent.label) }, String::new()),
+            // the file it names, else the call's own words (Cursor: "Delete `a.txt`"), else files in general
+            "patch" => match self.subject(&kind, &tc) {
+                Some(f) => (format!("Allow {} to change {f}?", self.agent.label), String::new()),
+                None if !title.trim().is_empty() => (title.trim().to_string(), String::new()),
+                None => (format!("Allow {} to change files?", self.agent.label), String::new()),
+            },
             // any other call: its own title, whole, and what it names (the address, the search, its description) under it,
             // so nothing it was given is left off the card (item 117)
             _ => {
@@ -868,8 +1105,7 @@ impl Acp {
                 (shown, command)
             }
         };
-        let key = format!("acp-{}", rpc_id);
-        self.pending.insert(key.clone(), Ask { rpc_id, once, deny });
+        self.pending.insert(key.clone(), Ask { rpc_id, once, deny, answers: Vec::new() });
         // the card's command is whole, for the person (the page masks its keys); Kit's dial reads the call's own kind and
         // input
         let tool = acp_tool(&tc, &self.cwd);
@@ -914,6 +1150,7 @@ impl Acp {
                 Call::Prompt => self.end(st, "error", Some(msg)),
                 Call::Config => emit(st, ev("session.error", json!({"message": msg}))),
                 Call::Initialize => emit(st, ev("session.error", json!({"message": msg}))),
+                Call::Mode => self.mode_settled(st, false),
             }
             return;
         }
@@ -950,8 +1187,15 @@ impl Acp {
                 emit(st, ev("session.info", json!({"agent_session": sid})));
                 let opts = r.get("configOptions").cloned().unwrap_or(Value::Null);
                 self.config(st, &opts);
-                if let Some(text) = (!self.queued.is_empty()).then(|| std::mem::take(&mut self.queued).join("\n\n")) {
-                    self.prompt(st, text);
+                if self.mode_option.is_none() {
+                    let m = r.get("modes").map(|m| s(m, "currentModeId")).unwrap_or_default();
+                    self.mode_seen(st, &m);
+                }
+                // a message that waited for the conversation waits on for a switch back to an asking mode
+                if !self.mode_pending && !self.mode_refused {
+                    if let Some(text) = (!self.queued.is_empty()).then(|| std::mem::take(&mut self.queued).join("\n\n")) {
+                        self.prompt(st, text);
+                    }
                 }
             }
             Call::Prompt => {
@@ -969,6 +1213,19 @@ impl Acp {
             Call::Config => {
                 let opts = r.get("configOptions").cloned().unwrap_or(Value::Null);
                 self.config(st, &opts);
+            }
+            // `session/set_config_option` answers with the options as they now are; `session/set_mode` answers nothing,
+            // and its success is the switch
+            Call::Mode => {
+                match r.get("configOptions").filter(|o| o.is_array()) {
+                    Some(opts) => {
+                        let opts = opts.clone();
+                        self.config(st, &opts);
+                    }
+                    None => self.mode = self.agent.asks_in.first().copied().unwrap_or("").to_string(),
+                }
+                let ok = self.agent.asks_in.contains(&self.mode.as_str());
+                self.mode_settled(st, ok);
             }
         }
     }
@@ -1052,9 +1309,12 @@ impl Adapter for Acp {
                 if self.signed_out {
                     return Err(self.signed_out());
                 }
+                if self.mode_refused {
+                    return Err(self.mode_refusal());
+                }
                 self.turn = true;
                 emit(&mut st, ev("turn.start", json!({})));
-                if self.session.is_none() {
+                if self.session.is_none() || self.mode_pending {
                     self.queued.push(text);
                 } else {
                     self.prompt(&mut st, text);
@@ -1089,7 +1349,31 @@ impl Adapter for Acp {
                 let a = self.pending.remove(&request_id).unwrap();
                 out(&mut st, json!({"jsonrpc": "2.0", "id": a.rpc_id, "result": {"outcome": {"outcome": "selected", "optionId": option}}}));
             }
-            Input::Clarify { .. } => return Err("no such question".into()),
+            // a question the agent asked as a permission request: the answer's words pick its option, and a skipped
+            // question (no answer) picks the request's own "skip"; words that are none of its answers are refused, since
+            // the agent takes only its own (the card stays open)
+            Input::Clarify { request_id, answer } => {
+                let Some(a) = self.pending.get(&request_id).filter(|a| !a.answers.is_empty()) else { return Err("no such question".into()) };
+                let said = match &answer {
+                    Value::Object(m) => m.get("q1").or_else(|| m.values().next()).cloned().unwrap_or(Value::Null),
+                    other => other.clone(),
+                };
+                let said = said.as_str().map(str::trim).unwrap_or("").to_string();
+                let option = if said.is_empty() {
+                    a.deny.clone()
+                } else {
+                    match a.answers.iter().find(|(n, _)| *n == said) {
+                        Some((_, id)) => Some(id.clone()),
+                        None => return Err(format!("{} takes one of its own answers here", self.agent.label)),
+                    }
+                };
+                let a = self.pending.remove(&request_id).unwrap();
+                let outcome = match option {
+                    Some(id) => json!({"outcome": "selected", "optionId": id}),
+                    None => json!({"outcome": "cancelled"}),
+                };
+                out(&mut st, json!({"jsonrpc": "2.0", "id": a.rpc_id, "result": {"outcome": outcome}}));
+            }
             // the agent picks its own permission mode and effort; manut offers no switch for them here
             Input::Mode { .. } | Input::Effort { .. } => return Err(format!("{} has no mode or effort switch here", self.agent.label)),
             Input::Rewind | Input::RewindTo { .. } => return Err(format!("{} cannot take a message back here", self.agent.label)),
@@ -2301,5 +2585,339 @@ fn decide_on(rules: &[(String, String, String)], tool: &str, input: &str, fold: 
         for bad in ["", "../x", "ses x", "--yolo ", "a;b", "ses_é", &"a".repeat(129)] {
             assert!(!is_acp_session_id(bad), "{bad}");
         }
+    }
+
+    // ---- item 101a: Antigravity and Cursor as chats ---------------------------------------------------------------
+
+    fn row(id: &str) -> &'static AcpAgent {
+        acp_agent(id).unwrap()
+    }
+
+    /// Antigravity 1.5.18, a real turn (`agy-1-plain.jsonl`: "Reply with the word ok and nothing else."), its session
+    /// id, folder and the account's plan tier replaced, its 300 commands cut to two, and its prompt's id numbered as
+    /// manut numbers it). It starts in `default`, the mode in which it asks, so nothing but the message is sent.
+    #[test]
+    fn real_antigravity_1_plain_answer() {
+        let mut a = Acp::new(row("agy"), "/w/proj", None);
+        let st = replay(&mut a, "agy-1-plain.jsonl", Some("Reply with the word ok and nothing else."), &[]);
+        one_clean_turn(&st.events);
+        let w = written(&st);
+        assert_eq!(w.iter().map(|x| s(x, "method")).collect::<Vec<_>>(), ["initialize", "session/new", "session/prompt"]);
+        assert_eq!(w[1]["params"], json!({"cwd": "/w/proj", "mcpServers": []}));
+        let msgs: Vec<String> = of(&st.events, "message").iter().map(|e| s(e, "text")).collect();
+        assert_eq!(msgs, ["ok"]);
+        assert_eq!(s(of(&st.events, "turn.end")[0], "outcome"), "done");
+        let info = of(&st.events, "session.info");
+        assert_eq!(s(info[0], "agent_session"), "0b8f2c1e-5d6a-4c3b-9e7f-1a2b3c4d5e6f");
+        assert_eq!(s(info[1], "model"), "Gemini 4 Hydrogen");
+        assert!(info.iter().any(|e| s(e, "title") == "Testing AI Output Instructions"));
+        let models: Vec<String> = of(&st.events, "session.models")[0]["options"].as_array().unwrap().iter().map(|m| s(m, "id")).collect();
+        assert_eq!(models, ["gemini-4-hydrogen", "gemini-3.8-flash", "claude-sonnet-4-6", "claude-opus-4-6-thinking", "gpt-oss-120b-medium"]);
+        assert!(of(&st.events, "session.note").is_empty(), "no mode was switched");
+    }
+
+    /// Antigravity runs `pwd` only after the person allows it (`agy-2-allow-once.jsonl`, the same session's second real
+    /// turn). Its request's id is a string, its command is `CommandLine` (its `run_command`), and it ran in the folder the
+    /// conversation was opened with, which it printed.
+    #[test]
+    fn real_antigravity_2_asks_before_its_command_and_runs_it_once_allowed() {
+        let mut a = Acp::new(row("agy"), "/w/proj", None);
+        let st = replay(&mut a, "agy-2-allow-once.jsonl", Some("Run the shell command `pwd` and reply with only its output."), &["once"]);
+        one_clean_turn(&st.events);
+        let card = of(&st.events, "approval.request")[0];
+        assert_eq!(s(card, "request_id"), "acp-1");
+        assert_eq!(s(card, "title"), "Run this command?");
+        assert_eq!(s(card, "command"), "pwd");
+        assert_eq!(card["choices"], json!(["deny", "once"]));
+        assert_eq!(card["tool"], json!({"kind": "command", "line": "pwd", "cwd": "/w/proj"}));
+        // the answer goes back under the request's own id, a string, and names the option it offered
+        let answer = written(&st).into_iter().find(|w| w.get("result").is_some()).unwrap();
+        assert_eq!(answer, json!({"jsonrpc": "2.0", "id": "1", "result": {"outcome": {"outcome": "selected", "optionId": "allow"}}}));
+        let tools: Vec<(String, String)> = of(&st.events, "tool.start").iter().map(|e| (s(e, "name"), s(e, "detail"))).collect();
+        assert_eq!(tools, [("terminal".to_string(), "pwd".to_string())]);
+        assert_eq!(of(&st.events, "tool.end")[0]["ok"], true);
+        let msgs: Vec<String> = of(&st.events, "message").iter().map(|e| s(e, "text")).collect();
+        assert_eq!(msgs, ["/w/proj"]);
+    }
+
+    /// Cursor Agent 2026.11.22, a real turn on an account whose plan had run out (`cursor-1-plan-limit.jsonl`, the
+    /// session id and folder replaced, its models and commands cut short): Cursor says so in its own reply and ends the
+    /// turn, which the chat shows as it is. It starts in `agent`, which asks, so no mode is set.
+    #[test]
+    fn real_cursor_1_a_plan_limit_is_its_own_reply() {
+        let mut a = Acp::new(row("cursor-agent"), "/w/proj", None);
+        let st = replay(&mut a, "cursor-1-plan-limit.jsonl", Some("Reply with the word ok and nothing else."), &[]);
+        one_clean_turn(&st.events);
+        let w = written(&st);
+        assert_eq!(w.iter().map(|x| s(x, "method")).collect::<Vec<_>>(), ["initialize", "session/new", "session/prompt"]);
+        let msgs: Vec<String> = of(&st.events, "message").iter().map(|e| s(e, "text")).collect();
+        assert_eq!(msgs, ["\n\nUpgrade your plan to continue"]);
+        assert_eq!(s(of(&st.events, "turn.end")[0], "outcome"), "done");
+        let models: Vec<String> = of(&st.events, "session.models")[0]["options"].as_array().unwrap().iter().map(|m| s(m, "label")).collect();
+        assert_eq!(models, ["Auto", "grok-4.7", "grok-4.6", "composer-2.5"]);
+        assert!(of(&st.events, "session.note").is_empty());
+    }
+
+    /// The first two lines of a real recording with its session's mode changed to `mode` (Antigravity's configuration
+    /// option and `modes`, as its own default would set them).
+    fn opened_in(file: &str, mode: &str) -> (String, String) {
+        let lines = real(file);
+        let mut new: Value = serde_json::from_str(&lines[1]).unwrap();
+        new["result"]["modes"]["currentModeId"] = json!(mode);
+        for o in new["result"]["configOptions"].as_array_mut().unwrap() {
+            if o["id"] == "mode" {
+                o["currentValue"] = json!(mode);
+            }
+        }
+        (lines[0].clone(), new.to_string())
+    }
+
+    /// Antigravity's own settings can make `auto` or `accept-edits` its default: the message waits, `default` is set
+    /// first, and the message goes only once Antigravity says it is in `default`. The chat says what was changed.
+    #[test]
+    fn antigravity_opened_in_a_mode_that_skips_asks_is_set_back_before_anything_is_sent() {
+        for skip in ["auto", "accept-edits"] {
+            let (init, new) = opened_in("agy-1-plain.jsonl", skip);
+            let mut a = Acp::new(row("agy"), "/w/proj", None);
+            a.start();
+            a.on_line(&init);
+            let st = a.on_input(Input::send("hi")).unwrap();
+            assert!(st.write.is_empty());
+            let st = a.on_line(&new);
+            let w = written(&st);
+            assert_eq!(w.len(), 1, "{skip}: only the switch, never the message");
+            assert_eq!(w[0]["method"], "session/set_config_option");
+            assert_eq!(w[0]["params"], json!({"sessionId": "0b8f2c1e-5d6a-4c3b-9e7f-1a2b3c4d5e6f", "configId": "mode", "value": "default"}));
+            // a send meanwhile waits with the first
+            assert!(a.on_input(Input::send("more")).is_err(), "one turn at a time");
+            // the real answer to a switch: the options as they now are
+            let id = w[0]["id"].as_u64().unwrap();
+            let real_opts: Value = serde_json::from_str::<Value>(&real("agy-1-plain.jsonl")[1]).unwrap()["result"]["configOptions"].clone();
+            let st = a.on_line(&json!({"jsonrpc": "2.0", "id": id, "result": {"configOptions": real_opts}}).to_string());
+            let note = of(&st.events, "session.note")[0];
+            assert_eq!(*note, json!({"event": "session.note", "kind": "asks_mode", "agent": "Antigravity", "mode": skip, "to": "default", "ok": true}));
+            let w = written(&st);
+            assert_eq!(w.iter().map(|x| s(x, "method")).collect::<Vec<_>>(), ["session/prompt"]);
+            assert_eq!(w[0]["params"]["prompt"], json!([{"type": "text", "text": "hi"}]));
+        }
+    }
+
+    /// An agent that stays in a mode without asks gets nothing more: the waiting message is never sent, the turn ends
+    /// saying why, and every later message is refused. An error answer to the switch is the same.
+    #[test]
+    fn an_agent_that_will_not_go_back_to_asking_is_sent_nothing() {
+        for answer in [json!({"result": {"configOptions": [{"id": "mode", "category": "mode", "currentValue": "auto", "options": []}]}}), json!({"error": {"code": -32603, "message": "no"}})] {
+            let (init, new) = opened_in("agy-1-plain.jsonl", "auto");
+            let mut a = Acp::new(row("agy"), "/w/proj", None);
+            a.start();
+            a.on_line(&init);
+            a.on_input(Input::send("hi")).unwrap();
+            let id = written(&a.on_line(&new))[0]["id"].clone();
+            let mut reply = answer.clone();
+            reply["jsonrpc"] = json!("2.0");
+            reply["id"] = id;
+            let st = a.on_line(&reply.to_string());
+            assert!(written(&st).is_empty(), "{answer}");
+            assert_eq!(of(&st.events, "session.note")[0]["ok"], false);
+            let end = of(&st.events, "turn.end")[0];
+            assert_eq!(s(end, "outcome"), "error");
+            assert!(s(end, "error").starts_with("Antigravity stayed in its auto mode, which does not ask before it acts"), "{end}");
+            let refused = a.on_input(Input::send("again")).unwrap_err();
+            assert!(refused.starts_with("Antigravity stayed in its auto mode"));
+        }
+    }
+
+    /// An agent that reports a mode without asks while it works (its own switch, or a setting changed meanwhile): the
+    /// turn is stopped at once, its open card expires, the mode is set back, and the agent gets no card while it stops.
+    #[test]
+    fn a_switch_to_a_mode_without_asks_mid_turn_stops_the_turn_and_sets_it_back() {
+        let lines = real("agy-2-allow-once.jsonl");
+        let mut a = Acp::new(row("agy"), "/w/proj", None);
+        a.start();
+        a.on_line(&lines[0]);
+        a.on_line(&lines[1]);
+        a.on_input(Input::send("run pwd")).unwrap();
+        // up to the real permission request: a card is open
+        let mut events = Vec::new();
+        for l in &lines[2..8] {
+            events.extend(a.on_line(l).events);
+        }
+        let card = s(of(&events, "approval.request")[0], "request_id");
+        let update = json!({"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "0b8f2c1e-5d6a-4c3b-9e7f-1a2b3c4d5e6f", "update": {"sessionUpdate": "current_mode_update", "currentModeId": "accept-edits"}}});
+        let st = a.on_line(&update.to_string());
+        let w = written(&st);
+        // through its `mode` option, which its conversation named when it opened
+        assert_eq!(w[0]["method"], "session/set_config_option");
+        assert_eq!(w[0]["params"], json!({"sessionId": "0b8f2c1e-5d6a-4c3b-9e7f-1a2b3c4d5e6f", "configId": "mode", "value": "default"}));
+        assert_eq!(w[1], json!({"jsonrpc": "2.0", "id": "1", "result": {"outcome": {"outcome": "cancelled"}}}));
+        assert_eq!(w[2]["method"], "session/cancel");
+        assert_eq!(s(of(&st.events, "prompt.expired")[0], "request_id"), card);
+        // a request that comes while it stops is cancelled, not shown
+        let ask = json!({"jsonrpc": "2.0", "id": "2", "method": "session/request_permission", "params": {"sessionId": "0b8f2c1e-5d6a-4c3b-9e7f-1a2b3c4d5e6f", "toolCall": {"toolCallId": "c2", "kind": "edit", "title": "write", "rawInput": {"TargetFile": "/w/proj/a.txt"}}, "options": [{"optionId": "allow", "kind": "allow_once", "name": "Allow"}, {"optionId": "deny", "kind": "reject_once", "name": "Deny"}]}});
+        let st = a.on_line(&ask.to_string());
+        assert!(of(&st.events, "approval.request").is_empty());
+        assert_eq!(written(&st)[0]["result"]["outcome"]["outcome"], "cancelled");
+    }
+
+    /// A `session/set_mode` switch (an agent that lists modes but has no `mode` option) answers nothing: its success is
+    /// the switch.
+    #[test]
+    fn a_set_mode_switch_is_confirmed_by_its_answer() {
+        let init = json!({"jsonrpc": "2.0", "id": 1, "result": {"protocolVersion": 1, "agentCapabilities": {}}}).to_string();
+        let new = json!({"jsonrpc": "2.0", "id": 2, "result": {"sessionId": "s1", "modes": {"currentModeId": "auto", "availableModes": [{"id": "default"}, {"id": "auto"}]}}}).to_string();
+        let mut a = Acp::new(row("agy"), "/w", None);
+        a.start();
+        a.on_line(&init);
+        a.on_input(Input::send("hi")).unwrap();
+        let w = written(&a.on_line(&new));
+        assert_eq!((s(&w[0], "method"), w.len()), ("session/set_mode".to_string(), 1));
+        let st = a.on_line(&json!({"jsonrpc": "2.0", "id": w[0]["id"], "result": {}}).to_string());
+        assert_eq!(of(&st.events, "session.note")[0]["ok"], true);
+        assert_eq!(written(&st)[0]["method"], "session/prompt");
+    }
+
+    /// Agents not held to a mode (OpenCode, Gemini CLI) are never switched, whatever they report.
+    #[test]
+    fn an_agent_with_no_asking_modes_is_never_switched() {
+        for id in ["opencode", "gemini"] {
+            let init = json!({"jsonrpc": "2.0", "id": 1, "result": {"protocolVersion": 1, "agentCapabilities": {}}}).to_string();
+            let new = json!({"jsonrpc": "2.0", "id": 2, "result": {"sessionId": "s1", "modes": {"currentModeId": "yolo"}, "configOptions": [{"id": "mode", "category": "mode", "currentValue": "yolo"}]}}).to_string();
+            let mut a = Acp::new(row(id), "/w", None);
+            a.start();
+            a.on_line(&init);
+            a.on_input(Input::send("hi")).unwrap();
+            assert_eq!(written(&a.on_line(&new)).iter().map(|x| s(x, "method")).collect::<Vec<_>>(), ["session/prompt"], "{id}");
+        }
+    }
+
+    /// Cursor's own asks, in the shapes its 2026.11.22 bundle builds them (`acp/…` `formatOperation` and its question
+    /// tool), since its account could not run a tool here: a command is its title between backticks and carries no
+    /// input, a change carries its diff, a delete only its title, and a question offers each answer as an `allow_once`
+    /// with "Skip" its `reject_once`. Not a recording.
+    fn cursor_ask(id: u64, tool: Value, options: Value) -> String {
+        json!({"jsonrpc": "2.0", "id": id, "method": "session/request_permission", "params": {"sessionId": "6c1d9a7e-2f4b-4e8a-b3c5-7d9e0f1a2b3c", "toolCall": tool, "options": options}}).to_string()
+    }
+
+    fn cursor_in_a_turn() -> Acp {
+        let lines = real("cursor-1-plan-limit.jsonl");
+        let mut a = Acp::new(row("cursor-agent"), "/w/proj", None);
+        a.start();
+        a.on_line(&lines[0]);
+        a.on_line(&lines[1]);
+        a.on_input(Input::send("go")).unwrap();
+        a
+    }
+
+    #[test]
+    fn cursors_asks_show_the_command_and_the_file_it_names() {
+        let allow = json!([{"optionId": "allow-once", "name": "Allow once", "kind": "allow_once"}, {"optionId": "allow-always", "name": "Allow always", "kind": "allow_always"}, {"optionId": "reject-once", "name": "Reject", "kind": "reject_once"}]);
+        let mut a = cursor_in_a_turn();
+        let shell = json!({"toolCallId": "t1", "title": "`git commit -m \\`wip\\``", "kind": "execute", "status": "pending", "content": [{"type": "content", "content": {"type": "text", "text": "Save the work"}}]});
+        let st = a.on_line(&cursor_ask(7, shell, allow.clone()));
+        let card = of(&st.events, "approval.request")[0];
+        assert_eq!((s(card, "title"), s(card, "command")), ("Run this command?".to_string(), "git commit -m `wip`".to_string()));
+        // "Allow always" would become a rule in Cursor's own settings: never offered
+        assert_eq!(card["choices"], json!(["deny", "once"]));
+        // the title is for the person: the dial gets no line from it and asks
+        assert_eq!(card["tool"], json!({"kind": "command", "cwd": "/w/proj"}));
+        let st = a.on_input(Input::Approve { request_id: "acp-7".into(), choice: "deny".into() }).unwrap();
+        assert_eq!(written(&st)[0]["result"], json!({"outcome": {"outcome": "selected", "optionId": "reject-once"}}));
+
+        let write = json!({"toolCallId": "t2", "title": "Edit `src/a.ts`", "kind": "edit", "status": "pending", "content": [{"type": "diff", "path": "/w/proj/src/a.ts", "oldText": "a", "newText": "b"}]});
+        let card = a.on_line(&cursor_ask(8, write, allow.clone())).events.remove(0);
+        assert_eq!(s(&card, "title"), "Allow Cursor to change src/a.ts?");
+        assert_eq!(card["tool"]["paths"], json!(["/w/proj/src/a.ts"]));
+        let delete = json!({"toolCallId": "t3", "title": "Delete `old.ts`", "kind": "edit", "status": "pending"});
+        let card = a.on_line(&cursor_ask(9, delete, allow)).events.remove(0);
+        assert_eq!(s(&card, "title"), "Delete `old.ts`");
+    }
+
+    #[test]
+    fn a_question_asked_as_a_permission_request_is_a_question_card() {
+        let mut a = cursor_in_a_turn();
+        let q = json!({"toolCallId": "ask_1_q0", "title": "Which file?", "kind": "other", "status": "pending", "content": [{"type": "content", "content": {"type": "text", "text": "Which greeting file should I change?"}}]});
+        let options = json!([{"optionId": "a", "name": "hello.txt", "kind": "allow_once"}, {"optionId": "b", "name": "hi.txt", "kind": "allow_once"}, {"optionId": "__ask_question_skip__", "name": "Skip", "kind": "reject_once"}]);
+        let st = a.on_line(&cursor_ask(11, q.clone(), options.clone()));
+        assert!(of(&st.events, "approval.request").is_empty(), "never \"Allow once\" for its first answer");
+        let card = of(&st.events, "clarify.request")[0];
+        assert_eq!(*card, json!({"event": "clarify.request", "request_id": "acp-11", "question": "Which greeting file should I change?", "choices": ["hello.txt", "hi.txt"]}));
+        // words that are none of its answers are refused and the card stays
+        assert!(a.on_input(Input::Clarify { request_id: "acp-11".into(), answer: json!("both") }).is_err());
+        assert!(a.on_input(Input::Approve { request_id: "acp-11".into(), choice: "once".into() }).is_err(), "a question has no Allow");
+        let st = a.on_input(Input::Clarify { request_id: "acp-11".into(), answer: json!("hi.txt") }).unwrap();
+        assert_eq!(written(&st)[0], json!({"jsonrpc": "2.0", "id": 11, "result": {"outcome": {"outcome": "selected", "optionId": "b"}}}));
+        // skipped (no answer): its own "Skip"
+        a.on_line(&cursor_ask(12, q, options));
+        let st = a.on_input(Input::Clarify { request_id: "acp-12".into(), answer: json!({"q1": null}) }).unwrap();
+        assert_eq!(written(&st)[0]["result"], json!({"outcome": {"outcome": "selected", "optionId": "__ask_question_skip__"}}));
+    }
+
+    /// A conversation being loaded replays its history before `session/load` answers (Cursor continues with it): a
+    /// message the person sent meanwhile waits, and none of the replay reaches the chat as that turn's reply.
+    #[test]
+    fn a_loaded_conversations_replay_is_not_the_waiting_turns_reply() {
+        let mut a = Acp::new(row("cursor-agent"), "/w/proj", Some("6c1d9a7e-2f4b-4e8a-b3c5-7d9e0f1a2b3c"));
+        a.start();
+        let w = written(&a.on_line(&real("cursor-1-plan-limit.jsonl")[0]));
+        assert_eq!(w[0]["method"], "session/load");
+        a.on_input(Input::send("next")).unwrap();
+        let replay = |u: Value| json!({"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "6c1d9a7e-2f4b-4e8a-b3c5-7d9e0f1a2b3c", "update": u}}).to_string();
+        let mut events = Vec::new();
+        events.extend(a.on_line(&replay(json!({"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "an old answer"}}))).events);
+        events.extend(a.on_line(&replay(json!({"sessionUpdate": "tool_call", "toolCallId": "old", "kind": "execute", "title": "`ls`", "rawInput": {"command": "ls"}}))).events);
+        assert!(events.is_empty(), "{events:?}");
+        let loaded = json!({"jsonrpc": "2.0", "id": w[0]["id"], "result": {"modes": {"currentModeId": "agent"}}}).to_string();
+        let st = a.on_line(&loaded);
+        assert_eq!(written(&st).iter().map(|x| s(x, "method")).collect::<Vec<_>>(), ["session/prompt"]);
+    }
+
+    /// Cursor's settings file, where Cursor reads it: `CURSOR_CONFIG_DIR`, else `$XDG_CONFIG_HOME/cursor`, else `~/.cursor`.
+    #[test]
+    fn cursors_settings_file_is_where_cursor_reads_it() {
+        let check = crate::acp_agents::CURSOR_SETTINGS;
+        let home = std::path::Path::new("/h");
+        let vars = |pairs: &'static [(&'static str, &'static str)]| move |k: &str| pairs.iter().find(|(n, _)| *n == k).map(|(_, v)| v.to_string());
+        assert_eq!(check.path(&vars(&[]), home), std::path::PathBuf::from("/h/.cursor/cli-config.json"));
+        assert_eq!(check.path(&vars(&[("XDG_CONFIG_HOME", "/x")]), home), std::path::PathBuf::from("/x/cursor/cli-config.json"));
+        assert_eq!(check.path(&vars(&[("XDG_CONFIG_HOME", "/x"), ("CURSOR_CONFIG_DIR", "/c")]), home), std::path::PathBuf::from("/c/cli-config.json"));
+        // a variable set to blanks is not set, as Cursor reads it
+        assert_eq!(check.path(&vars(&[("CURSOR_CONFIG_DIR", "  ")]), home), std::path::PathBuf::from("/h/.cursor/cli-config.json"));
+    }
+
+    /// Only Allowlist (or no file, or no `approvalMode`, which is Cursor's own default) starts a Cursor chat; Run
+    /// Everything, Auto-review, any other value, and a file manut cannot read as Cursor's settings refuse it.
+    #[test]
+    fn only_cursors_allowlist_starts_its_chat() {
+        let check = crate::acp_agents::CURSOR_SETTINGS;
+        for ok in [None, Some("{}"), Some(r#"{"approvalMode":"allowlist","permissions":{"allow":["Shell(ls)"],"deny":[]}}"#), Some(r#"{"version":1}"#)] {
+            assert!(check.keeps_asking(ok), "{ok:?}");
+        }
+        for bad in [r#"{"approvalMode":"unrestricted"}"#, r#"{"approvalMode":"auto-review"}"#, r#"{"approvalMode":"yolo"}"#, r#"{"approvalMode":true}"#, r#"{"approvalMode":null}"#, "[]", "not json", ""] {
+            assert!(!check.keeps_asking(Some(bad)), "{bad}");
+        }
+    }
+
+    #[test]
+    fn a_cursor_chat_does_not_start_when_its_settings_run_everything() {
+        let check = crate::acp_agents::CURSOR_SETTINGS;
+        let home = std::env::temp_dir().join(format!("manut-101a-settings-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(home.join(".cursor")).unwrap();
+        let h = home.to_string_lossy().into_owned();
+        let var = |k: &str| (k == "HOME" || k == "USERPROFILE").then(|| h.clone());
+        // no file yet: Cursor writes its default, Allowlist
+        assert_eq!(settings_allow(&check, "Cursor", &var), Ok(()));
+        std::fs::write(home.join(".cursor/cli-config.json"), r#"{"approvalMode":"unrestricted"}"#).unwrap();
+        assert_eq!(settings_allow(&check, "Cursor", &var), Err(no_asks("Cursor")));
+        std::fs::write(home.join(".cursor/cli-config.json"), r#"{"approvalMode":"allowlist"}"#).unwrap();
+        assert_eq!(settings_allow(&check, "Cursor", &var), Ok(()));
+        // a folder where the file should be cannot be read as settings
+        std::fs::remove_file(home.join(".cursor/cli-config.json")).unwrap();
+        std::fs::create_dir(home.join(".cursor/cli-config.json")).unwrap();
+        assert_eq!(settings_allow(&check, "Cursor", &var), Err(no_asks("Cursor")));
+        // no home folder at all
+        assert_eq!(settings_allow(&check, "Cursor", &|_: &str| None), Err(no_asks("Cursor")));
+        let _ = std::fs::remove_dir_all(&home);
+        assert_eq!(no_asks("Cursor"), "Cursor did not start because its own settings let it run commands and change files without asking first.");
     }
 }

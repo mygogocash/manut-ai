@@ -388,6 +388,12 @@ impl ChatSessions {
         // configuration out, so a variable of the person's with the same name never wins
         let mut env = crate::providers::session_env(agent_id, mine, account_env, true);
         env.extend(project_config_off(agent_id).iter().map(|(k, v)| (k.to_string(), v.to_string())));
+        // an agent whose own settings can turn its asks off (Cursor's Run Everything) starts only when they do not: its
+        // settings file is read where it will read it, with the variables it will run with, then the app's own
+        if let Some(check) = acp.and_then(|a| a.settings.as_ref()) {
+            let var = |k: &str| env.iter().rev().find(|(n, _)| n == k).map(|(_, v)| v.clone()).or_else(|| std::env::var(k).ok());
+            crate::acp_chat::settings_allow(check, a.label, &var)?;
+        }
         // an agent whose own default runs tools unasked (OpenCode) gets ask rules built from its own
         // resolved rules, so nothing the person allows runs unasked and nothing they deny becomes askable; or it does
         // not start. Its rules are read with the variables it will run with, so one of the person's that changes them is
@@ -1168,6 +1174,30 @@ mod tests {
         want.push("VAR=".into());
         want.push(format!("HOME_VAR={}", home.display()));
         assert_eq!(seen_lines(&seen), want);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Item 101a: a Cursor chat does not start while Cursor's own settings say Run Everything, read where Cursor reads them
+    /// with the variables the chat gets (here the folder an account would name), and starts once they say Allowlist.
+    #[cfg(unix)]
+    #[test]
+    fn a_cursor_chat_starts_only_while_its_own_settings_ask() {
+        use crate::providers::Stored;
+        let base = std::env::temp_dir().join(format!("manut-101a-cursor-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(base.join("cfg")).unwrap();
+        let dir = base.canonicalize().unwrap();
+        let (prog, seen) = recorder(&dir, "fake-cursor");
+        let mine = Stored { path: prog.to_string_lossy().into_owned(), ..Stored::default() };
+        let env = vec![("CURSOR_CONFIG_DIR".to_string(), dir.join("cfg").to_string_lossy().into_owned())];
+        let c = ChatSessions::default();
+        std::fs::write(dir.join("cfg/cli-config.json"), r#"{"approvalMode":"unrestricted"}"#).unwrap();
+        assert_eq!(c.start_agent_mine("cursor-agent", &dir, None, &env, None, false, &mine, |_| {}).unwrap_err(), crate::acp_chat::no_asks("Cursor"));
+        thread::sleep(Duration::from_millis(200));
+        assert!(!seen.exists() && c.count() == 0, "Cursor started while it would not ask");
+        std::fs::write(dir.join("cfg/cli-config.json"), r#"{"approvalMode":"allowlist"}"#).unwrap();
+        c.start_agent_mine("cursor-agent", &dir, None, &env, None, false, &mine, |_| {}).unwrap();
+        assert_eq!(seen_lines(&seen).first().map(String::as_str), Some("acp"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
