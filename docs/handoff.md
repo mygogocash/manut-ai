@@ -687,6 +687,8 @@ Every switch that turns a built part on, and what each needs from the owner, is 
   `src/lib/notify.device.test.ts`, `src/lib/notify.ask.test.ts`; `apps/web` `test/macRemote.test.ts`,
   `test/MakeRoutineForm.test.tsx`, `test/JoinPage.test.tsx` ("counts down to a new code"). Each is a 5 second limit
   reached at a load of 30, not yet read further.
+- `apps/desktop` `src/i18n/literals.test.ts`: its scan of every `.tsx` file timed out at five seconds in item 122's
+  loaded gate on 26 Nov and passed alone. Once more and it gets a longer timeout of its own.
 - `apps/desktop` `src/runtime/http/feed.test.ts`: failed in three loaded gates on 26 Nov (seven tests at once) and
   passed alone each time. Fixed at 15:50: its backoff test stepped half a second at a time through hours of fake
   waits, passed five seconds under load, and its loop ran on under the next tests' clock. It now jumps to each next
