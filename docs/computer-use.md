@@ -144,7 +144,14 @@ Reads (`room.rs` tests unless named):
     page (`manut_ais_own_windows_and_pages_are_refused_wherever_they_show`, `manut_ais_own_pages_are_known_by_their_address`,
     `every_title_manut_ais_own_pages_set_is_known`).
   - A link that answers an ask by itself approves for whoever opens it, so its token is taken out of every name, value
-    and title an agent reads, in any app (`/approve/…`, `an_approval_link_is_never_read_out`).
+    and title an agent reads, in any app (`/approve/…`, `an_approval_link_is_never_read_out`). Since the third review
+    (26 Nov 2026) each word is read decoded first, since an agent decodes as easily as a browser: percent-encoding in
+    either case and nested up to eight times (a redirect's or a tracking link's address), HTML character references
+    (`&#47;`, `&#x2F;`, `&sol;`), JSON and script escapes (`\/`, `\u002F`, `\x2f`), a backslash for a slash, a doubled
+    slash before the token, and the token itself encoded. A word still encoded after eight rounds is hidden whole. A
+    window's address is read decoded the same way (`%61pprove`, `d%65v.manut.xyz`), and one still encoded after eight
+    rounds counts as Manut AI's own (`an_encoded_approval_link_is_never_read_out`). Not covered: a link split by
+    a line break or spaces, spelled out in words, or shown as a picture.
   - What remains: a browser that gives neither the page's address nor its title; a picture of a window can still show a
     link; and Chromium's `AXURL` on its web areas is read but was not checked against a real Chrome here (a step for
     the owner below).

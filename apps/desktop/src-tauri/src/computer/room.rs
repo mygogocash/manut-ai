@@ -262,9 +262,86 @@ const OWN_HOST: &str = "manut.xyz";
 /// shop's data, join a shop. On any host, since a page can be served from a preview or from this Mac while developing.
 const LINK_PATHS: [&str; 3] = ["/approve/", "/delete/", "/join/"];
 
-/// Whether `address` is one of Manut AI's own web pages: any page of its host, or a link page on any host.
+/// How many times encoded text is decoded before the room stops: text still encoded past this is not ordinary, so a word
+/// of it is hidden whole and an address of it counts as Manut AI's own.
+const DECODE_ROUNDS: usize = 8;
+
+fn hex_value(b: u8) -> Option<u8> {
+    (b as char).to_digit(16).map(|v| v as u8)
+}
+
+/// The ASCII character an escape at the start of `s` names, and how many bytes the escape takes: `%XX` (an address),
+/// `&#NN;`, `&#xHH;`, `&sol;` and `&bsol;` (a page's source; a number's `;` may be left out, as browsers allow), and
+/// `\uXXXX`, `\xHH` and `\/` (JSON and script). Only ASCII counts: the link paths are ASCII.
+fn escape_at(s: &[u8]) -> Option<(u8, usize)> {
+    match s {
+        [b'%', a, b, ..] => Some((hex_value(*a)? << 4 | hex_value(*b)?, 3)),
+        [b'\\', b'/', ..] => Some((b'/', 2)),
+        [b'\\', b'x' | b'X', a, b, ..] => {
+            let v = hex_value(*a)? << 4 | hex_value(*b)?;
+            (v < 0x80).then_some((v, 4))
+        }
+        [b'\\', b'u' | b'U', a, b, c, d, ..] => {
+            let v = [a, b, c, d].iter().try_fold(0u32, |acc, x| Some(acc << 4 | u32::from(hex_value(**x)?)))?;
+            (v < 0x80).then_some((v as u8, 6))
+        }
+        [b'&', b's', b'o', b'l', b';', ..] => Some((b'/', 5)),
+        [b'&', b'b', b's', b'o', b'l', b';', ..] => Some((b'\\', 6)),
+        [b'&', b'#', rest @ ..] => {
+            let (hex, digits) = match rest {
+                [b'x' | b'X', d @ ..] => (true, d),
+                d => (false, d),
+            };
+            let n = digits.iter().take_while(|c| if hex { c.is_ascii_hexdigit() } else { c.is_ascii_digit() }).count();
+            if n == 0 || n > 7 {
+                return None;
+            }
+            let v = u32::from_str_radix(std::str::from_utf8(&digits[..n]).ok()?, if hex { 16 } else { 10 }).ok()?;
+            let semicolon = usize::from(digits.get(n) == Some(&b';'));
+            (v < 0x80).then_some((v as u8, 2 + usize::from(hex) + n + semicolon))
+        }
+        _ => None,
+    }
+}
+
+/// One round of decoding `bytes`, each output byte with the index in the original text where its encoding began (`from`
+/// gives that for `bytes`); and whether anything was decoded.
+fn decode_once(bytes: &[u8], from: &[usize]) -> (Vec<u8>, Vec<usize>, bool) {
+    let (mut out, mut at, mut changed, mut i) = (Vec::with_capacity(bytes.len()), Vec::with_capacity(bytes.len()), false, 0);
+    while i < bytes.len() {
+        let (byte, taken) = escape_at(&bytes[i..]).inspect(|_| changed = true).unwrap_or((bytes[i], 1));
+        out.push(byte);
+        at.push(from[i]);
+        i += taken;
+    }
+    (out, at, changed)
+}
+
+/// `raw` decoded until nothing changes, with where each byte began in `raw`; `None` when it is still encoded after
+/// `DECODE_ROUNDS` rounds.
+fn decode_all(raw: &[u8]) -> Option<(Vec<u8>, Vec<usize>)> {
+    let (mut bytes, mut from) = (raw.to_vec(), (0..raw.len()).collect::<Vec<_>>());
+    for _ in 0..DECODE_ROUNDS {
+        let (next, at, changed) = decode_once(&bytes, &from);
+        if !changed {
+            return Some((bytes, from));
+        }
+        (bytes, from) = (next, at);
+    }
+    (!decode_once(&bytes, &from).2).then_some((bytes, from))
+}
+
+/// Decoded text as a browser reads an address: lower case, and a backslash read as a slash.
+fn normalized(bytes: &[u8]) -> Vec<u8> {
+    bytes.iter().map(|b| if *b == b'\\' { b'/' } else { b.to_ascii_lowercase() }).collect()
+}
+
+/// Whether `address` is one of Manut AI's own web pages: any page of its host, or a link page on any host. It is read
+/// decoded, as a browser reads it (`%61pprove`, `d%65v.manut.xyz`, a backslash for a slash); one still encoded after
+/// `DECODE_ROUNDS` counts as Manut AI's own.
 pub fn own_address(address: &str) -> bool {
-    let a = clean(address).trim().to_ascii_lowercase();
+    let Some((decoded, _)) = decode_all(clean(address).as_bytes()) else { return true };
+    let a = String::from_utf8_lossy(&normalized(&decoded)).trim().to_string();
     let rest = a.split_once("://").map_or(a.as_str(), |(_, r)| r);
     let end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
     let (authority, path) = rest.split_at(end);
@@ -283,19 +360,76 @@ pub fn own_window(title: &str, addresses: &[String]) -> bool {
     OWN_TITLES.iter().any(|o| t.contains(o)) || addresses.iter().any(|a| own_address(a))
 }
 
+/// The byte ranges of `word` that are the secret part of a link to a page that answers an ask by itself, found in the
+/// word decoded (`decode_all`), however the link was written; the whole word when it is still encoded after
+/// `DECODE_ROUNDS`. A range runs from the secret's first character to the end of the token, as decoded or as written,
+/// whichever is longer.
+fn secret_spans(word: &str) -> Vec<(usize, usize)> {
+    let raw = word.as_bytes();
+    let Some((decoded, from)) = decode_all(raw) else { return vec![(0, raw.len())] };
+    let norm = normalized(&decoded);
+    let token = |b: u8| b.is_ascii_alphanumeric() || b"-._~%".contains(&b);
+    let find = |at: usize, path: &str| norm[at..].windows(path.len()).position(|w| w == path.as_bytes()).map(|i| at + i);
+    let mut spans = Vec::new();
+    let mut at = 0;
+    while let Some((p, path)) = LINK_PATHS.iter().filter_map(|path| find(at, path).map(|p| (p, path))).min_by_key(|(p, _)| *p) {
+        // A doubled slash before the token is still the same link.
+        let mut start = p + path.len();
+        while norm.get(start) == Some(&b'/') {
+            start += 1;
+        }
+        let mut end = start;
+        while end < norm.len() && token(norm[end]) {
+            end += 1;
+        }
+        if end > start {
+            let first = from[start];
+            let mut written = first;
+            while written < raw.len() && token(raw[written]) {
+                written += 1;
+            }
+            spans.push((first, from.get(end).copied().unwrap_or(raw.len()).max(written)));
+        }
+        at = end.max(p + 1);
+    }
+    spans
+}
+
 /// `t` with the secret part of any link to a page that answers an ask by itself taken out (`/approve/<token>` reads
-/// `/approve/…`): such a link approves, deletes or joins for whoever opens it, so an agent never reads one.
+/// `/approve/…`): such a link approves, deletes or joins for whoever opens it, so an agent never reads one. Each word is
+/// read decoded first, since an agent decodes a redirect's address, a page's source or a JSON document as easily as a
+/// browser does: percent-encoding at any depth up to `DECODE_ROUNDS` and in either case, HTML character references,
+/// JSON and script escapes, and a backslash for a slash.
 pub fn hide_links(t: &str) -> String {
-    let lower = t.to_ascii_lowercase();
+    let mut spans = Vec::new();
+    let mut word: Option<usize> = None;
+    for (i, c) in t.char_indices().chain(std::iter::once((t.len(), ' '))) {
+        if c.is_whitespace() {
+            if let Some(s) = word.take() {
+                spans.extend(secret_spans(&t[s..i]).into_iter().map(|(a, b)| (s + a, s + b)));
+            }
+        } else if word.is_none() {
+            word = Some(i);
+        }
+    }
     let mut out = String::with_capacity(t.len());
     let mut at = 0;
-    while let Some(start) = LINK_PATHS.iter().filter_map(|p| lower[at..].find(p).map(|i| at + i + p.len())).min() {
-        out.push_str(&t[at..start]);
-        let end = t[start..].find(|c: char| !(c.is_ascii_alphanumeric() || "-._~%".contains(c))).map_or(t.len(), |e| start + e);
-        if end > start {
-            out.push('…');
+    for (a, b) in spans {
+        let mut a = a;
+        while a > 0 && !t.is_char_boundary(a) {
+            a -= 1;
         }
-        at = end;
+        let a = a.max(at);
+        let mut b = b.min(t.len());
+        while !t.is_char_boundary(b) {
+            b += 1;
+        }
+        if b <= a {
+            continue;
+        }
+        out.push_str(&t[at..a]);
+        out.push('…');
+        at = b;
     }
     out.push_str(&t[at..]);
     out
@@ -1713,6 +1847,62 @@ mod tests {
         let seen = look(&r, "TextEdit").text;
         assert!(seen.contains("[3] text area: Approve: https://manut.xyz/approve/…"), "{seen}");
         assert!(!seen.contains("S3cr3t"));
+    }
+
+    /// A link that answers an ask by itself is hidden however it is written: an agent reading a redirect's address, a
+    /// page's source or a JSON document can decode it as easily as a browser does, so the room decodes first.
+    #[test]
+    fn an_encoded_approval_link_is_never_read_out() {
+        let hidden = [
+            // Percent-encoded, as a redirect or a tracking link carries it: once, twice, three times, either case.
+            "https%3A%2F%2Fdev.manut.xyz%2Fapprove%2FS3cr3t",
+            "https://example.com/?next=%2fapprove%2fS3cr3t&x=1",
+            "next=https%253A%252F%252Fmanut.xyz%252Fapprove%252FS3cr3t",
+            "%25252Fdelete%25252FS3cr3t",
+            "HTTPS%3A%2F%2FMANUT.XYZ%2FAPPROVE%2FS3cr3t",
+            "%2FApPrOvE%2fS3cr3t",
+            // The path's own letters, or the escape's digits, encoded.
+            "https://pages-preview.example/%61pprove/S3cr3t",
+            "%2F%6A%6F%69%6E%2FS3cr3t",
+            "%%32%46approve%%32%46S3cr3t",
+            // A backslash, which a browser reads as a slash, plain or encoded.
+            "https://manut.xyz\\approve\\S3cr3t",
+            "%5Cjoin%5CS3cr3t",
+            // JSON and script escapes.
+            r"https:\/\/manut.xyz\/approve\/S3cr3t",
+            r"/approve/S3cr3t",
+            r"\x2fdelete\x2FS3cr3t",
+            // HTML character references.
+            "https:&#47;&#47;manut.xyz&#47;approve&#47;S3cr3t",
+            "&#x2F;delete&#x2f;S3cr3t",
+            "&sol;join&sol;S3cr3t",
+            // A doubled slash before the token.
+            "https://manut.xyz/approve//S3cr3t",
+            // The token itself encoded.
+            "https://manut.xyz/approve/%53%33cr3t",
+        ];
+        for text in hidden {
+            let out = hide_links(&format!("Open {text} now"));
+            assert!(!out.to_ascii_lowercase().contains("s3cr3t") && !out.contains("%53%33"), "{text} -> {out}");
+            assert!(out.contains('…') && out.starts_with("Open ") && out.ends_with(" now"), "{text} -> {out}");
+        }
+        // Near misses stay as they are.
+        for text in ["/approve/ ok", "/approved/S3cr3t", "%2Fapproved%2FS3cr3t", "approve S3cr3t", "%2Fapprove%2F and more", "100%25 sure"] {
+            assert_eq!(hide_links(text), text, "{text}");
+        }
+        // A window showing an encoded address of such a page is Manut AI's own, as a browser would read it.
+        for own in [
+            "https://pages-preview.example/%61pprove/tok",
+            "https://pages-preview.example/approve%2Ftok",
+            "https://pages-preview.example\\delete\\tok",
+            "https://d%65v.manut.xyz/x",
+            "HTTPS://MANUT%2EXYZ/",
+        ] {
+            assert!(own_address(own), "{own}");
+        }
+        for other in ["https://pages-preview.example/%61pproved/tok", "https://example.com/?next=%2Fapprove%2Fx"] {
+            assert!(!own_address(other), "{other}");
+        }
     }
 
     /// The titles the room knows are the ones Manut AI's own pages set, read from their sources, so a renamed page is not
