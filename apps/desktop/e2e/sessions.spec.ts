@@ -169,9 +169,15 @@ test("the menu says which account a new session uses; This computer says nothing
   await mock("mock.accounts", { cli: "claude", signed_in: { id: "account-2", email: "work@example.com" } });
   await mock("accounts.set_active", { cli: "claude", account: "account-2" });
   await mock("accounts.set_active", { cli: "codex", account: "work" });
-  await open(page);
+  // Grok and pi take an account too (item 101d): an added account of each, chosen for new sessions
+  await mock("accounts.add", { cli: "grok", label: "Team" });
+  await mock("accounts.set_active", { cli: "grok", account: "team" });
+  await mock("accounts.add", { cli: "pi", label: "Play" });
+  await mock("accounts.set_active", { cli: "pi", account: "play" });
+  await open(page, undefined, ["claude", "codex", "omh", "grok", "pi"]);
   await page.getByTestId("session-new").click();
   const menu = page.getByTestId("session-menu");
+  await menu.getByTestId("session-more").click();
   // the masked email when the account has no name, else its name
   await expect(menu.getByTestId("session-account-claude")).toHaveText("as work@…");
   await expect(menu.getByTestId("session-agent-claude")).toContainText(/Claude Code\s*as work@…/);
@@ -202,8 +208,10 @@ test("the menu says which account a new session uses; This computer says nothing
     expect(fits.inRow, `${a} account inside its row`).toBe(true);
   }
   await expect(menu.getByTestId("session-agent-claude").locator(".ss-n")).toHaveAttribute("title", "Claude Code as work@…");
-  // omh has no login; pi has one but its sessions do not take an account yet
-  for (const a of ["omh", "pi", "omp", "grok"]) await expect(menu.getByTestId(`session-account-${a}`)).toHaveCount(0);
+  // Grok and pi name theirs the same way; omh has no login and oh-my-pi takes no account
+  await expect(menu.getByTestId("session-account-grok")).toHaveText("as Team");
+  await expect(menu.getByTestId("session-account-pi")).toHaveText("as Play");
+  for (const a of ["omh", "omp"]) await expect(menu.getByTestId(`session-account-${a}`)).toHaveCount(0);
   if (SHOTS) {
     mkdirSync(SHOTS, { recursive: true });
     await page.mouse.move(900, 780);

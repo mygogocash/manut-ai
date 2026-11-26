@@ -315,29 +315,32 @@ function CliGroup({ g, status, version, note }: { g: AccountGroup; status: Recor
         })}
         {piSignIn && (
           <div className="acc-signin" role="status" data-testid="pi-signin-panel">
+            <span aria-hidden="true" />
             <span className="acc-signin-t">
               <b>{t("acc.piTitle", { name: piSignIn.name })}</b>
-              <span className="acc-sub">{t("acc.piLine")}</span>
+              <span className="acc-sub acc-wrap">{t("acc.piLine")}</span>
             </span>
-            <button
-              type="button"
-              className="st-btn primary"
-              onClick={() => getSessions().startTerminal(g.cli, getSessions().getState().home ?? undefined, undefined, piSignIn.id)}
-              data-testid="pi-signin-open"
-            >
-              {t("acc.piOpen")}
-            </button>
-            <button
-              type="button"
-              className="st-btn"
-              onClick={() => {
-                setPiSignIn(null);
-                void reloadAccounts();
-              }}
-              data-testid="pi-signin-done"
-            >
-              {t("acc.piDone")}
-            </button>
+            <span className="acc-pibtns">
+              <button
+                type="button"
+                className="st-btn primary"
+                onClick={() => getSessions().startTerminal(g.cli, getSessions().getState().home ?? undefined, undefined, piSignIn.id)}
+                data-testid="pi-signin-open"
+              >
+                {t("acc.piOpen")}
+              </button>
+              <button
+                type="button"
+                className="st-btn"
+                onClick={() => {
+                  setPiSignIn(null);
+                  void reloadAccounts();
+                }}
+                data-testid="pi-signin-done"
+              >
+                {t("acc.piDone")}
+              </button>
+            </span>
           </div>
         )}
         {signIn && (
