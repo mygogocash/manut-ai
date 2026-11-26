@@ -107,7 +107,7 @@
   font-size: 12px;
 }
 .wf-facts dt {
-  color: var(--quiet);
+  color: var(--muted);
 }
 .wf-facts dd {
   margin: 0;

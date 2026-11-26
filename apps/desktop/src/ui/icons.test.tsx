@@ -13,6 +13,7 @@ const SRC = join(__dirname, "..");
 /** The files that draw an svg that is not a line icon of the set, and why. */
 const NOT_ICONS: Record<string, string> = {
   "ui/icons.tsx": "the set itself",
+  "remote/QrCode.tsx": "a pairing code's squares, a picture to scan rather than an icon",
   "sidebar/menuIcons.tsx": "the brand mark, in its own two colours",
   "ui/Avatar.tsx": "a team member's face (KitFaces)",
   "ui/AgentIcon.tsx": "a coding agent's mark, or its letter (Under the hood)",
