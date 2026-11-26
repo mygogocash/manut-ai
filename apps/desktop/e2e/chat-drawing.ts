@@ -604,8 +604,11 @@ export function chatDrawingUiCases({ engine, layout }: { engine: "chromium" | "w
       await lastAnswer(page).getByTestId("drawing-show").click();
       const card = page.getByTestId("drawing-card");
       await expect(card).toBeVisible();
-      // the Rise ends at once in its end state
-      const moving = await card.evaluate((el) => el.getAnimations().filter((a) => a.playState === "running").length);
+      // the Rise ends at once in its end state: motion.css turns every animation into 0.01 ms under reduced motion, which
+      // can still read as running in the instant before its first frame, so what is checked is that nothing lasts longer
+      const moving = await card.evaluate((el) =>
+        el.getAnimations({ subtree: true }).filter((a) => Number(a.effect?.getComputedTiming().duration ?? 0) > 1).length,
+      );
       expect(moving).toBe(0);
       const inner = card.frameLocator("iframe").frameLocator("iframe");
       await expect(inner.locator("text.t")).toHaveText("Pre-orders this week");
