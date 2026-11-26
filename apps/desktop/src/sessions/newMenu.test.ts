@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import { onOpenNewSessionMenu, openNewSessionMenu, type NewMenuStart } from "./newMenu";
 import { AGENTS, chatAgents, offeredAgents, registerAcp, terminalAgents, type AcpRow, type AgentInfo } from "./agents";
 import shellList from "./mockAcpAgents.json";
+import { offersAskSeveral, type AgentChoices } from "../jobs/ask";
 
 describe("the + menu's opener", () => {
   it("opens every + menu on screen", () => {
@@ -102,5 +103,23 @@ describe("the + menu's two ways", () => {
   it("puts the last agent used at the top of its own tier in the chat part too, never above the main tier", () => {
     const recent = [{ agent: "pi", cwd: "/a", at: 2 }];
     expect(both(info(["claude", "omp", "pi"]), recent).chat).toEqual(["claude", "pi", "omp"]);
+  });
+});
+
+describe("the + menu's Ask several agents row (item 102a)", () => {
+  const shows = (installed: string[], choices: AgentChoices = {}) => offersAskSeveral(info(installed), [], choices, null);
+  it("shows when two chat agents are installed, after the Chat with Kit rows' agents are known", () => {
+    expect(shows(["claude", "codex"])).toBe(true);
+    expect(shows(["claude", "codex", "opencode"])).toBe(true);
+  });
+  it("shows for one agent only when it listed two models", () => {
+    expect(shows(["claude"])).toBe(false);
+    expect(shows(["claude"], { claude: { models: [{ id: "a", label: "A" }, { id: "b", label: "B" }], efforts: [] } })).toBe(true);
+  });
+  it("does not count an agent that has no chat here, or one that is not installed", () => {
+    // oh-my-hermes' chat is a Hermes folder chat, and an agent not installed cannot start
+    expect(shows(["claude", "omh"])).toBe(false);
+    expect(shows(["omh"])).toBe(false);
+    expect(shows([])).toBe(false);
   });
 });

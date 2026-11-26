@@ -114,6 +114,7 @@ import { rw } from "./en/rw";
 import { sched } from "./en/sched";
 import { sessions } from "./en/sessions";
 import { set } from "./en/set";
+import { several } from "./en/several";
 import { shops } from "./en/shops";
 import { side } from "./en/side";
 import { skills } from "./en/skills";
@@ -270,6 +271,7 @@ export const en = {
   ...sched,
   ...sessions,
   ...set,
+  ...several,
   ...shops,
   ...side,
   ...skills,

@@ -63,6 +63,8 @@ import { forgetPreview } from "../code/previewStore";
 import { continuesItself, type SavedSession } from "../app/resume";
 import { accountGroups } from "../settings/accounts/useAccounts";
 import { ASK_MODE, modesOf, steersOf } from "./controls";
+import { askRefusal, type AskPick, type AskRefusal } from "../jobs/ask";
+import { noteChoices } from "../jobs/choices";
 import { followUp as savedFollowUp, type FollowUp } from "../chat/box/keys";
 import { draftFolders } from "../app/stash";
 import { bareText, carry, type Scope } from "../chat/box/carry";
@@ -333,7 +335,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
   const refreshDrafts = () => {
     for (const r of state.list) {
       // a workflow's lane is a draft only while it starts, on the agent and folder its file names
-      if (r.status !== "draft" || r.workflow || r.continuedFrom) continue;
+      if (r.status !== "draft" || r.workflow || r.job || r.continuedFrom) continue;
       const p = picked.get(r.id) ?? {};
       const patch: Partial<SessionRec> = {};
       if (!p.agent) {
@@ -464,12 +466,21 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
         }
         return;
       }
-      case "session.models":
-        set({ models: { ...state.models, [id]: Array.isArray(ev.options) ? (ev.options as ModelOption[]) : [] } });
+      case "session.models": {
+        const options = Array.isArray(ev.options) ? (ev.options as ModelOption[]) : [];
+        set({ models: { ...state.models, [id]: options } });
+        // what the agent listed is kept for the Ask several panel, which offers it before any lane of the agent runs (item 102a)
+        const who = rec(id)?.agent;
+        if (who && options.length) noteChoices(who, { models: options.map((o) => ({ id: o.id, label: o.label })) });
         return;
-      case "session.efforts":
-        patchLive(id, { efforts: Array.isArray(ev.levels) ? ev.levels.filter((x): x is string => typeof x === "string" && !!x) : [] });
+      }
+      case "session.efforts": {
+        const levels = Array.isArray(ev.levels) ? ev.levels.filter((x): x is string => typeof x === "string" && !!x) : [];
+        patchLive(id, { efforts: levels });
+        const who = rec(id)?.agent;
+        if (who && levels.length) noteChoices(who, { efforts: levels });
         return;
+      }
       case "session.commands": {
         // an agent may send its list in parts (Codex: skills after start-up): keep each entry once
         const next = parseCommands(ev.commands);
@@ -1122,7 +1133,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
   const draft = (agent?: AgentId): string => {
     // a workflow's lane, a draft only while it starts, is never the person's
     // nor a chat Continue with made (item 97): it is tied to its lane and the chat it continues
-    const open = state.list.find((r) => r.status === "draft" && !r.workflow && !r.continuedFrom);
+    const open = state.list.find((r) => r.status === "draft" && !r.workflow && !r.job && !r.continuedFrom);
     if (open) {
       if (agent) setDraft(open.id, { agent });
       store().actions.openSession(open.id);
@@ -1202,6 +1213,63 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     const key = keys.get(id);
     if (started && key) store().dispatch({ type: "system.note", bot: key, text: tr("wf.lane.note", { name: p.workflow }), now: Date.now() });
     return started ? "started" : "failed";
+  };
+
+
+  // ---- Ask several agents (item 102a) ---------------------------------------------------------------------------------------
+
+  /**
+   * Ask several agents: one message sent to up to three agents, each as an ordinary lane (`start`: a branch and a folder of its own,
+   * listed in the Lanes band) started in its agent's Ask mode and grouped as one job (`SessionRec.job`). Nothing is sent until the
+   * person pressed Send in the panel, which is the only caller, and nothing here starts an agent for another agent: every lane's
+   * own asks are its own cards. The send is refused whole, with nothing started, when any row is refused (`askRefusal`: a limited
+   * account's row cannot be sent). The lanes start one after the other, so two lanes never ask the shell for the same branch name
+   * at once; a lane that fails to start leaves the others as they are. A folder that is not a repository makes no lane, and no
+   * agent starts in it (rule R1): the answer then says `no_lane`.
+   */
+  const startJob = async (p: {
+    cwd: string;
+    text: string;
+    files?: OutFile[];
+    picks: readonly AskPick[];
+  }): Promise<{ ok: true; job: string; ids: string[]; failed: number } | { ok: false; refused: AskRefusal; ids: string[] } | { ok: false; refused: { why: "no_lane" }; ids: string[] }> => {
+    if (state.agents === null) await loadAgents();
+    const text = p.text.trim();
+    const files = p.files ?? [];
+    const refused = askRefusal({ cwd: p.cwd, hasMessage: !!text || files.length > 0, picks: p.picks, agents: state.agents ?? [], groups: accounts() });
+    if (refused) return { ok: false, refused, ids: [] };
+    const job = `j${freshLinkId()}`;
+    const ids: string[] = [];
+    let failed = 0;
+    for (const pick of p.picks) {
+      const id = `s${++seq}`;
+      const ask = ASK_MODE[pick.agent];
+      const r: SessionRec = {
+        id,
+        linkId: freshLinkId(),
+        agent: pick.agent,
+        cwd: p.cwd,
+        startedAt: Date.now(),
+        status: "draft",
+        view: "chat",
+        job,
+        // the agent's own Ask mode, named on its command line whatever mode the person last used (item 89)
+        ...(ask && modesOf(pick.agent).includes(ask) ? { mode: ask } : {}),
+        ...(pick.model ? { modelWant: pick.model } : {}),
+        ...(pick.effort ? { effort: pick.effort } : {}),
+      };
+      set({ list: [r, ...state.list] });
+      const started = await start(id, text, undefined, files).catch(() => false);
+      if (laneless.delete(id)) return { ok: false, refused: { why: "no_lane" }, ids };
+      if (!started) {
+        failed++;
+        continue;
+      }
+      ids.push(id);
+      const key = keys.get(id);
+      if (key) store().dispatch({ type: "system.note", bot: key, text: tr("several.lane.note", { n: p.picks.length }), now: Date.now() });
+    }
+    return { ok: true, job, ids, failed };
   };
 
   // ---- Continue with (item 97) ----------------------------------------------------------------------------------------
@@ -1465,11 +1533,13 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     await ready();
     const r = rec(id);
     if (!r || r.status !== "draft") return false; // closed or started meanwhile
-    // a workflow's lane is a chat whatever way the person last opened its agent
-    const open = r.workflow ? "chat" : draftOpen(r.agent, state.agents, state.opens);
+    // a workflow's lane and a job's lane (Ask several, item 102a) are chats whatever way the person last opened the agent, and run
+    // only in a lane of their own: a folder that is not a repository gets no agent (rule R1 of docs/several-agents.md)
+    const own = !!(r.workflow || r.job);
+    const open = own ? "chat" : draftOpen(r.agent, state.agents, state.opens);
     const mode = sessionMode(state.agents, { agent: r.agent, open });
-    // a workflow runs only in a lane of its own, which only a chat has
-    if (r.workflow && mode !== "chat") return refuseLaneless(id);
+    // such a lane runs only in a lane of its own, which only a chat has
+    if (own && mode !== "chat") return refuseLaneless(id);
     const text = first?.trim() ?? "";
     // the first message's files are saved before anything starts: one that cannot be leaves the draft as it was
     // (its chips stay)
@@ -1489,8 +1559,9 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     // the account it runs as is the one picked for new sessions now (recorded so a restart continues as it)
     // a chat continued on the same agent keeps the account it ran as (item 97)
     const account = r.account ?? accountFor(accounts(), r.agent);
-    // a workflow's folder is not the person's last one: their next New session opens where they last worked
-    if (!r.workflow) {
+    // a workflow's folder is not the person's last one: their next New session opens where they last worked, and a job's
+    // lanes leave the last agent used as it was
+    if (!own) {
       const recent = pushRecent(state.recent, { agent: r.agent, cwd: r.cwd, at: startedAt });
       try {
         localStorage.setItem(RECENT_KEY, JSON.stringify(recent));
@@ -1522,7 +1593,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
       registerRoute(id);
       openChat(id);
       if (!text && !withFiles) {
-        if (!r.lane && !(await startLane(id)) && r.workflow) return refuseLaneless(id);
+        if (!r.lane && !(await startLane(id)) && own) return refuseLaneless(id);
         await startAgentChat(id);
         await setWanted(id);
         return true;
@@ -1534,7 +1605,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
       if (!withFiles) st.dispatch({ type: "local.user", bot: key, id: lid, text, now: Date.now() });
       // the lane's own branch is there before the agent has a chance to change a file; a workflow's agent starts only in one. A
       // chat made by Continue with already has the lane it shares (item 97): no second folder or branch is made
-      if (!r.lane && !(await startLane(id)) && r.workflow) return refuseLaneless(id);
+      if (!r.lane && !(await startLane(id)) && own) return refuseLaneless(id);
       await startAgentChat(id);
       await setWanted(id);
       try {
@@ -2289,6 +2360,11 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
         openChat(s.id, s.model ?? "", (s.messages ?? []).map((m) => ({ id: `r-${m.id}`, role: m.role, text: m.text, ts: m.ts })));
         continue;
       }
+      // a job's lane that was still starting when the app closed: it never ran, and a draft of the person's it is not
+      if (s.draft && s.job) {
+        seq = Math.max(seq, Number(s.id.slice(1)) || 0);
+        continue;
+      }
       if (s.draft) {
         // a New session chat that never started: a draft again, with its agent and folder fixed by the person
         list.push({
@@ -2354,6 +2430,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
         ...(s.workflow ? { workflow: s.workflow } : {}),
         ...(s.continuedFrom ? { continuedFrom: s.continuedFrom } : {}),
         ...(s.continuedIn ? { continuedIn: s.continuedIn } : {}),
+        ...(s.job ? { job: s.job } : {}),
         ...(s.running && !auto && !termAuto && !folderAuto ? { paused: true } : {}),
       };
       list.push(r);
@@ -2740,6 +2817,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     draft,
     draftChat,
     startWorkflowLane,
+    startJob,
     /** Hear every chat's events after the session handled them (a workflow's run); the returned function stops it. */
     onChatEvent(fn: (id: string, ev: ChatEvent) => void) {
       chatWatchers.add(fn);

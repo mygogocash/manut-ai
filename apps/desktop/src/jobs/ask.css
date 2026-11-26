@@ -1,0 +1,174 @@
+/* The Ask several agents panel (AskSeveralPanel.tsx) and a job's row in the Lanes band (code/JobRow.tsx), item 102a. */
+.ask-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 2px;
+  font-size: 12.5px;
+  color: var(--ink);
+}
+/* the heading and Back stay in view while the rows and the box scroll under them */
+.ask-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 2px 0 4px;
+  background: var(--pop);
+}
+.ask-back {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--r-sm);
+  color: var(--muted);
+}
+.ask-back:hover {
+  background: var(--raise2);
+  color: var(--ink);
+}
+.ask-title {
+  font-weight: 500;
+  flex: 1;
+}
+.ask-folder {
+  color: var(--muted);
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ask-lead,
+.ask-foot,
+.ask-cap {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.ask-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ask-row {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 7px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+}
+.ask-row.limited {
+  border-style: dashed;
+}
+.ask-r1,
+.ask-r2,
+.ask-r3 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.ask-r3 {
+  font-size: 12px;
+  flex-wrap: wrap;
+}
+.ask-mark {
+  display: inline-flex;
+  flex: none;
+}
+.ask-sel {
+  flex: 1;
+  min-width: 0;
+  height: 26px;
+  padding: 0 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--pop);
+  color: var(--ink);
+  font: inherit;
+}
+.ask-sel:disabled {
+  opacity: 0.55;
+}
+.ask-effort {
+  flex: 0 0 38%;
+}
+.ask-x {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  flex: none;
+  border-radius: var(--r-sm);
+  color: var(--muted);
+}
+.ask-x:hover {
+  background: var(--raise2);
+  color: var(--ink);
+}
+.ask-state {
+  color: var(--muted);
+}
+.ask-limit {
+  color: var(--ink);
+  font-weight: 500;
+}
+.ask-add {
+  align-self: flex-start;
+}
+.ask-err {
+  margin: 0;
+  font-size: 12px;
+  color: var(--ink);
+}
+.ask-box {
+  min-width: 0;
+}
+
+/* A job's row in the Lanes band: "3 agents: <the message>", each agent's mark with its state, and its lanes under it once opened. */
+.kitp .lane-job {
+  display: flex;
+  flex-direction: column;
+}
+.kitp .lane-job .job-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+}
+.kitp .lane-job .job-chev {
+  flex: none;
+  color: var(--aui-muted);
+  transition: transform var(--tr-hover);
+}
+.kitp .lane-job .job-head[aria-expanded="true"] .job-chev {
+  transform: rotate(90deg);
+}
+.kitp .lane-job .job-who {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.kitp .lane-job .job-one {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.kitp .lane-job .job-lanes {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-left: 18px;
+  padding-left: 8px;
+  border-left: 1px solid var(--line);
+}

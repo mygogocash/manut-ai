@@ -113,6 +113,7 @@ import { rw } from "./ko/rw";
 import { sched } from "./ko/sched";
 import { sessions } from "./ko/sessions";
 import { set } from "./ko/set";
+import { several } from "./ko/several";
 import { shops } from "./ko/shops";
 import { side } from "./ko/side";
 import { skills } from "./ko/skills";
@@ -269,6 +270,7 @@ export const ko: Record<Key, string> = {
   ...sched,
   ...sessions,
   ...set,
+  ...several,
   ...shops,
   ...side,
   ...skills,
