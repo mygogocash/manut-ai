@@ -114,6 +114,16 @@ GoSpark again (at `a7537c80`, the same checkout, 27 Nov 2026) for the helper blo
 `BuddyStreamingDelegationTests` and the `delegatingReply` cases of `BuddyHeldBackTests`), ported case by case as tables in
 `helperBlocks.test.ts`; and its `fallbackPolicy`, adapted as the lead's note (`apps/desktop/src/jobs/helperPolicy.ts`).
 
+GoSpark again (at `a7537c80`, the same checkout, 27 Nov 2026) for landing a helper lane's work in its lead's folder (item 102g,
+`apps/desktop/src-tauri/src/lane_land.rs`): `BuddyLand.applyHeadWork`, `foreignTarget`, `pathsOutside`, `excludingBuildOutput`
+and the kept patch written owner-read-only (`GoGoCode/Models/BuddyLandingApply.swift`), `TouchedPaths.isBuildOutput`'s cache
+names (`GoGoCode/Git/TouchedPaths.swift`), `Git.apply` (a three-way apply against a throwaway copy of the index, its conflicts
+read from it) and `captureTree` (`GoGoCode/Git/Git.swift`), and one writer per checkout with a copy never taken mid-patch
+(`BuddyCheckoutGate`, `CheckoutCoordinator` in `GoGoCode/Git/CheckoutCoordinator.swift`, `AppModel.landBuddyHead` in
+`GoGoCode/App/AppModel+Buddy.swift`), rewritten in Rust; their tests (`BuddyLandingTests`, `BuddyCheckoutGateTests` and
+`pathsOutsideTheCheckout` in `BuddyForeignPatchTests`), ported against temporary repositories in `lane_land.rs`. Here the cut
+is made in the index before the patch, a landing is kept so it can be taken back, and the kept patch is under `~/.manut/patches`.
+
 GoSpark again (at `a7537c80`, the same checkout, 27 Nov 2026) for running helper lanes (item 102h,
 `apps/desktop/src/jobs/helperRuns.ts` and `helperBrief.ts`): a helper lane's brief is `delegatedHeadPrompt` with the own-copy
 case of `workplaceRules`, `howToWork` and `howToReport` (`GoGoCode/Models/Buddy.swift`), and the budget's three notes are

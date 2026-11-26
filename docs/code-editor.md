@@ -1189,6 +1189,15 @@ another's files or the developer's folder.
   `jobs/helperRuns.ts`), in its agent's Ask mode, as many at once as the shell's memory read allows (`machine_memory`); its row in
   the Lanes band is indented under its lead's and offers no main-moved merge and no Put up for review, since its work goes back
   by landing.
+- **Landing a helper lane's work** (item 102g, `src-tauri/src/lane_land.rs`; [several agents](several-agents.md), R8):
+  `lane_land` with the helper lane's folder only. One landing at a time per lead folder (a helper lane's snapshot and a
+  lane's removal wait for it too). The helper lane's change since its snapshot, committed or not, with build output cut and
+  any key the masker finds named, is applied with `git apply --3way` into the lead's working tree, against a throwaway copy
+  of the lead's index, so the lead's index, HEAD, branch and stash never change and nothing is committed or pushed. The files
+  it writes are kept first, byte for byte, under `refs/manut/landings/<job>/<folder>`, and `lane_take_back` puts them back
+  while nothing in the lead's folder changed since. A patch that will not apply, comes from another repository or names a
+  file outside the lead's project is kept at `~/.manut/patches/<job>/<folder>.patch` (0600) and the lead is not written. A
+  repository whose own config names a clean filter or a merge driver is not landed in.
 - **When a folder goes.** When its session is closed (the chat is deleted), once its agent stopped, and Settings › Worktrees'
   "Remove the folder when its chat is deleted" is on (it is, by default), `lane_release` removes it only if nothing in it is
   changed or new, git is not partway through a rebase, merge, cherry-pick, revert or bisect there, every commit on its branch

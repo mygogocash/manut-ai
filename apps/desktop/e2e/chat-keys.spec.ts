@@ -286,11 +286,12 @@ test.describe("send when the limit resets", () => {
     await limited(page);
     await box(page).fill("run the tests");
     const offer = page.getByTestId("composer-limit");
-    await expect(offer).toContainText(/This account is at its limit until \d\d:\d\d\. Enter sends now anyway\./);
+    // a reset after midnight carries its day ("Fri 00:12"), as on runs started after 21:00 UTC
+    await expect(offer).toContainText(/This account is at its limit until (?:[A-Z][a-z]{2} )?\d\d:\d\d\. Enter sends now anyway\./);
     await offer.getByTestId("composer-wait").click();
     await expect(box(page)).toHaveValue("");
     const row = page.getByTestId("later-row");
-    await expect(row).toContainText(/Waiting to send at \d\d:\d\d: run the tests/);
+    await expect(row).toContainText(/Waiting to send at (?:[A-Z][a-z]{2} )?\d\d:\d\d: run the tests/);
     expect(await sessionSends(page)).not.toContain("run the tests");
     // kept on this computer: a reload brings it back
     await page.reload();
