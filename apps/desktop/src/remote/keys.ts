@@ -265,14 +265,17 @@ export class RemoteVault {
     }
   }
 
-  /** Forgets a phone: its K and its passkey go from the keychain, then from the page. */
+  /** Told, at once and before the keychain is written, whenever a phone is forgotten, so whoever holds its sessions ends
+   *  them (host.ts). */
+  onRemoved: ((id: string) => void) | null = null;
+
+  /** Forgets a phone: its K and its passkey go from the page at once, before anything awaits, and then from the keychain.
+   *  While the keychain write waits, the phone can no longer open a session or be served, whatever a relay lets through;
+   *  and it is gone from the page even when the keychain refused. */
   async remove(id: string): Promise<void> {
-    try {
-      await this.#keyring.removeDevice(id);
-    } finally {
-      // Gone from the page even when the keychain refused, so an Unpair never leaves the phone able to open a session.
-      this.#devices.delete(id);
-    }
+    const held = this.#devices.delete(id);
+    if (held) this.onRemoved?.(id);
+    await this.#keyring.removeDevice(id);
   }
 
   /** The phone was seen now, and its passkey's counter moved to `signCount` when one is given. */

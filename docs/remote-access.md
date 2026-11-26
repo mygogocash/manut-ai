@@ -95,7 +95,10 @@ needs a QR reader, which the repository does not have: the browser's own is used
 - K is drawn by the Mac once the code is typed, so the code's secret, photographed or not, never opens a session.
 - Unpair ends what is open on the Mac's own side: it closes that phone's sessions and drops its waiting decision
   challenges, since the relay's `revoke` is not trusted to end anything and a phone that comes another way has no
-  relay.
+  relay. Since the third review (26 Nov 2026) it forgets the phone's K in the page before anything awaits, so while the
+  keychain write waits a relay that ignores the revoke gets that phone no new session, and nothing is sent to a phone
+  no longer paired, checked at the moment each message is sealed. A pairing cancelled while the keychain wrote ends
+  the new phone's streams the same way.
 - The Mac cannot tell that the grant reached the phone, so 78b counts a phone as paired only once its passkey
   registration has come back over the pairing channel. The passkey's key is read from the authenticator's own data
   (WebAuthn Level 3, section 7.1), and every answer is also refused from another site's frame or with a counter that

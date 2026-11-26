@@ -62,6 +62,31 @@ describe("the remote keys as the page holds them", () => {
     expect(vault.secretFor(PHONE)).toBeUndefined();
   });
 
+  it("forgets a phone in the page, and says so, before the keychain write is awaited", async () => {
+    const keyring = memoryKeyring();
+    const vault = await RemoteVault.open(keyring, true);
+    await vault.add({ id: PHONE, name: "Pixel", pairedAt: 1, k: new Uint8Array(32).fill(1), tokenHash: vectors.deviceToken.tokenHash, passkey });
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    const remove = keyring.removeDevice;
+    keyring.removeDevice = async (id) => {
+      await held;
+      return remove(id);
+    };
+    const told: string[] = [];
+    vault.onRemoved = (id) => told.push(id);
+    const removing = vault.remove(PHONE);
+    // At once, with the keychain still writing: no K, no passkey, not paired, and whoever holds its sessions was told.
+    expect([vault.has(PHONE), vault.secretFor(PHONE), vault.passkey(PHONE), told]).toEqual([false, undefined, undefined, [PHONE]]);
+    expect(keyring.doc()?.devices).toHaveLength(1);
+    release();
+    await removing;
+    expect(keyring.doc()?.devices).toEqual([]);
+    // Forgetting one that is not held tells no one.
+    await vault.remove(PHONE);
+    expect(told).toEqual([PHONE]);
+  });
+
   it("cleans a phone's name and checks a record as the shell does", () => {
     expect(cleanName("  iPhone  \tSafari  ")).toBe("iPhone Safari");
     expect(cleanName("x".repeat(80))).toHaveLength(64);

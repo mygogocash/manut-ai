@@ -137,6 +137,36 @@ describe("Unpair", () => {
     await waitFor(() => !h.relay.devices.has(phone.deviceId!));
     expect(session.inbox.closed).not.toBeNull();
   });
+  it("ends the phone's sessions before the keychain write, so a relay that ignores the revoke gets it no new session and no event", async () => {
+    const h = macHarness();
+    await turnOn(h);
+    const { phone } = await pairPhone(h);
+    const first = await phone.connect();
+    await first.request({ t: "open", chat: "buddy" });
+    h.relay.hostile = true;
+    // The keychain takes its time to forget the phone.
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    const remove = h.keyring.removeDevice;
+    h.keyring.removeDevice = async (id) => {
+      await held;
+      return remove(id);
+    };
+    const unpairing = h.remote.unpair(phone.deviceId!);
+    // While the keychain write waits, the phone dials again through the relay that ignored the revoke, and asks.
+    const again = await phone.connect().catch(() => null);
+    const asked = again ? await again.request({ t: "open", chat: "buddy" }, 500).catch(() => null) : null;
+    release();
+    await unpairing;
+    // The store changes and the Mac tells the phones watching: nothing reaches the unpaired phone.
+    h.chats.update("buddy", (items) => [...items, { kind: "message", id: "m9", role: "assistant", text: "After the unpair", ts: 1_800_000_900 }]);
+    h.remote.publish();
+    await settle();
+    const heard = again ? await again.pushed(1, 300).catch(() => []) : [];
+    expect({ session: again !== null, asked: asked?.t ?? null, heard: heard.length }).toEqual({ session: false, asked: null, heard: 0 });
+    expect(h.remote.snapshot().phones).toEqual([]);
+    expect(h.relay.openPhones).toBe(0);
+  });
 });
 
 describe("turning the switch off", () => {
