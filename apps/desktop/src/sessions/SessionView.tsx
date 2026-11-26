@@ -725,7 +725,8 @@ function SplitPane({ rec }: { rec: SessionRec }) {
 export { groupModels } from "../chat/box/ModelMenu";
 
 /** The session's model in the chat box (item 80): the shared model menu (chat/box/ModelMenu.tsx) with what the agent
- *  itself offers and its own reasoning levels. A pick made while a turn runs waits for the next turn, which says so. */
+ *  itself offers and its own reasoning levels, on the effort card (item 132). A pick made while a turn runs waits for the
+ *  next turn, which says so. */
 function SessionModel({ rec, options, note }: { rec: SessionRec; options: ModelOption[] | undefined; note: string | undefined }) {
   const agentLive = useSessions().live[rec.id];
   const efforts = agentLive?.efforts ?? [];
@@ -745,7 +746,9 @@ function SessionModel({ rec, options, note }: { rec: SessionRec; options: ModelO
       canPick={live}
       efforts={efforts}
       effort={effort}
-      onEffort={(v) => void getSessions().setEffort(rec.id, v)}
+      onEffort={(v) => getSessions().setEffort(rec.id, v)}
+      // the effort card's one-click Ultrathink row is Claude Code's keyword, so only its chats offer it (item 132)
+      ultrathink={rec.agent === "claude"}
       empty={live ? tr("ss.loadingModels") : tr("ss.agentNotRunning", { agent: label })}
       badge={
         // a pick made while a turn ran: the agent takes it from the next turn, whose start confirms it

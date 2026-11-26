@@ -46,10 +46,8 @@ export const ASK_MODE: Partial<Record<AgentId, string>> = { claude: "default", c
 export const modeLabel = (mode: string | undefined): string => (mode && MODE_LABEL[mode] ? t(MODE_LABEL[mode]) : t("ctl.mode.own"));
 export const modeHint = (mode: string): string => (MODE_HINT[mode] ? t(MODE_HINT[mode]) : "");
 
-/** A reasoning level by the agent's own name (low, high, xhigh, max…), untranslated in every language. */
-export const levelLabel = (level: string, _levels: readonly string[] = []): string => level;
-
-export const levelOptions = (levels: readonly string[]) => levels.map((value) => ({ value, label: levelLabel(value, levels) }));
+// A reasoning level is named by chat/box/effort.ts's `effortTitle` (item 132): the agent's own word with a capital, in
+// English in every language, on the chat box's effort card and its chip.
 
 /** How full the context is, as the agent counted it: "38k / 200k · 19%". Null when it said nothing usable. */
 export function usageText(u: { used: number; max: number } | undefined): { text: string; pct: number } | null {
