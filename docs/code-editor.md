@@ -1434,8 +1434,11 @@ the head commit shown and the request read again before it runs. Same `Plan::Mer
 
 **A chat's own pull request** (`code/chatPull.ts`). When a Claude Code or Codex chat ends a command the dial reads as a push with
 `gh pr create` in it, the last github.com pull request address in its output is read, the chat's folder's remote must name that
-repository, and one `gh pr view` must say the branch is that repository's own. The chat's header then names the request, the
-request's row names the chat, and the chat's Lanes row shows it as a lane's row does. Of this run; nothing is written.
+repository, and one `gh pr view` must say the branch is that repository's own. Since item 120 that branch must also be the
+chat's own (a lane's own branch, else the one its folder had when it was read), since the agent writes the output and an
+`echo` beside the command could name a colleague's request, and a `gh pr create --dry-run`, which makes none, links nothing.
+The chat's header then names the request, the request's row names the chat, and the chat's Lanes row shows it as a lane's
+row does. Of this run; nothing is written.
 
 **Watching costs little.** The page reads the lists once when shown, then at most once a minute while shown and in front, never
 while hidden. The shell gives a list read within 55 seconds again, and before reading a GitHub list again asks `gh api --method

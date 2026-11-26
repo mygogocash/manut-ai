@@ -10,7 +10,8 @@ import type { TaskItem } from "../tasks/types";
 import { ChatPullView } from "../sessions/SessionView";
 import { t } from "../i18n";
 
-const WHERE = { cwd: "/code/site", root: "/code/site", home: "/home/you" };
+// the chat's own branch: a lane's, or the one its folder had when it was read
+const WHERE = { cwd: "/code/site", root: "/code/site", home: "/home/you", branch: "fix/qr" };
 // what `gh pr create` prints (recorded shape: the progress lines on stderr are not in a step's output; the address last)
 const CREATED = "\u001b[0;32mhttps://github.com/baanmali/site/pull/41\u001b[0m\n";
 const end = (over: Record<string, unknown> = {}) => ({ event: "tool.end", tool_id: "t1", name: "", ok: true, ms: 900, command: 'gh pr create --title "Make the QR bigger" --body "On phones"', output: CREATED, ...over });
@@ -79,6 +80,33 @@ describe("linking a chat to the request it opened", () => {
     for (const ev of [end({ command: "gh pr view 41" }), end({ ok: false }), end({ declined: true }), { event: "tool.start", command: "gh pr create" }, end({ command: "" })]) expect(await noteChatPull(h, "agent:s1", ev, WHERE)).toEqual({ why: "not_a_pull" });
     expect(await noteChatPull(h, "agent:s1", end({ output: "Creating pull request for fix/qr into main\n" }), WHERE)).toEqual({ why: "no_address" });
     expect(h.remote).not.toHaveBeenCalled();
+    expect(h.view).not.toHaveBeenCalled();
+  });
+});
+
+// Item 120 (fifth security review): the address was the last one in the output, which the agent writes, so `gh pr create
+// --dry-run … && echo <address>` linked the chat to another person's request of the same repository.
+describe("a request the chat did not open (item 120)", () => {
+  it("links only a request made from the chat's own branch", async () => {
+    // a colleague's open request of the same repository, from a branch of its own
+    const theirs = host(item({ number: 7, head: "noi/menu", url: "https://github.com/baanmali/site/pull/7" }));
+    const got = await noteChatPull(theirs, "agent:s1", end({ command: "gh pr create -t x -b y; echo https://github.com/baanmali/site/pull/7", output: "https://github.com/baanmali/site/pull/7\n" }), WHERE);
+    expect(got).toEqual({ why: "other_branch" });
+    expect(chatPullOf("agent:s1")).toBeNull();
+    expect(chatOfPull("github", "baanmali/site", 7)).toBeNull();
+    // a chat whose branch is not known links nothing
+    expect(await noteChatPull(host(), "agent:s2", end(), { ...WHERE, branch: undefined })).toEqual({ why: "other_branch" });
+    expect(await noteChatPull(host(), "agent:s3", end(), { ...WHERE, branch: "" })).toEqual({ why: "other_branch" });
+    // the plain twin: its own request links
+    expect(await noteChatPull(host(), "agent:s4", end(), WHERE)).toMatchObject({ linked: { number: 41 } });
+  });
+
+  it("reads a `--dry-run`, which makes no request, as no pull request at all", async () => {
+    const h = host();
+    for (const command of ["gh pr create --dry-run -t x -b y && echo https://github.com/baanmali/site/pull/41", "gh pr create -t x --dry-run -b y", "gh pr create --dry-run=true -t x -b y"]) {
+      expect([command, opensPull(command, WHERE)]).toEqual([command, false]);
+      expect(await noteChatPull(h, "agent:s1", end({ command }), WHERE)).toEqual({ why: "not_a_pull" });
+    }
     expect(h.view).not.toHaveBeenCalled();
   });
 });

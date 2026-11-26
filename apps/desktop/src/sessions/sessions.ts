@@ -789,7 +789,9 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
         if (ev.event === "tool.end" && typeof ev.command === "string") {
           const tasks = pulls();
           const w = laneWhere(id);
-          if (tasks && w) void noteChatPull(tasks, keys.get(id) ?? "", ev, { cwd: w.root, root: w.root, ...(w.home ? { home: w.home } : {}) }).catch(() => undefined);
+          // the chat's own branch: a lane's own, else the one its folder had when it was read (item 120)
+          const own = rec(id)?.lane?.name ?? state.live[id]?.branch;
+          if (tasks && w) void noteChatPull(tasks, keys.get(id) ?? "", ev, { cwd: w.root, root: w.root, ...(w.home ? { home: w.home } : {}), ...(own ? { branch: own } : {}) }).catch(() => undefined);
         }
         if (ev.event === "turn.end") afterTurn(id, ev.outcome === "interrupted");
         // the files as the turn left them: what changes before the next turn reads as changed by hand (rewind.ts)
