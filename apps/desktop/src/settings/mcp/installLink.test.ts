@@ -42,4 +42,14 @@ describe("a link to install from", () => {
     expect(installWords("link_root")).toContain("nothing is written through a link");
     expect(installWords("something new")).toBe(t("skl.in.unavailable"));
   });
+
+  it("names the file and the setting when the shell refuses a skill that would act by itself", () => {
+    expect(installWords("acts_alone:field:promptpay/SKILL.md:allowed-tools"))
+      .toBe("Cannot be installed: “promptpay/SKILL.md” sets “allowed-tools”, which a coding agent acts on without asking first.");
+    expect(installWords("acts_alone:command:promptpay/references/more.md"))
+      .toBe("Cannot be installed: “promptpay/references/more.md” runs a command when the skill loads, without asking first.");
+    expect(installWords("acts_alone:unreadable:promptpay/SKILL.md")).toBe(t("skl.in.actsUnreadable", { file: "promptpay/SKILL.md" }));
+    // a code this page does not know is never read as installable
+    expect(installWords("acts_alone:new_kind:promptpay/SKILL.md")).toBe(t("skl.in.actsUnreadable", { file: "promptpay/SKILL.md" }));
+  });
 });

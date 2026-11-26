@@ -256,17 +256,28 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    On 26 Nov the owner pasted T3 Code's features and asked which are here and for a plan for the rest:
    `docs/t3code-parity.md` has each of the 71 (12 here, 1 built and off, 26 in part, 32 missing) and the plan's items
    94 to 111.
-   Running on 26 Nov at 09:20, each a subagent of the lead's session in its own worktree:
-   - items 112 to 115, the third read's fixes (`fix/dial-reading-3`, `fix/skill-links-run`, `fix/git-auto-3`,
-     `fix/remote-3`, all Opus, worktrees `cc-item112-…` to `cc-item115-…`);
-   - item 78c, the phone's side of reaching the Mac (`feat/remote-phone`, Opus, `cc-item78c-remote-phone`); item 115
-     changes how a phone answers a question, and the two must be joined at merge;
-   - items 94 (the sidebar as an inbox, `feat/inbox`, Opus), 95 (the chat box's keys, drafts and send-on-reset,
-     `feat/chat-box-keys`, Opus) and 96 (titles by a model the person picks, `feat/titles-by-model`, Sonnet).
-   Next: items 97, 98, 100 and 101 of the T3 Code list, a fourth read once 112 to 115 merge, 78f part 2 (it needs a
-   tailnet and phones to try), and a redeploy of dev for the API routes of items 83, 84 and 78b's health answer (all
-   behind flags that are off). The briefs the helpers were given are not kept in the repository; each item's row in
-   `docs/plan.md` says what it is.
+   By 10:20 on 26 Nov: items 94, 95 and 96 of the T3 Code list and items 112, 113 and 115 of the third security read
+   are merged, with item 78c before them. The lead reviewed each before gating and changed most: item 95 had made
+   waiting the default for a message typed to a team member mid-answer and now keeps each chat's own way until the
+   person picks; item 96's setting said less than Suggest sends, and its report named a test that had not been
+   written; item 113's check read an indented line under a one-line value differently from a forgiving YAML reader;
+   item 112 let jq print the environment. Read a helper's branch, not its report.
+   Item 114 merged at 10:25 on 26 Nov, so every finding of the third security read is fixed on the branch (items 112 to
+   115). A fourth read, read-only, started then over the day's merges; its findings are not in yet.
+   Running on 26 Nov at 10:25, each a subagent of the lead's session in its own worktree:
+   - item 98, a drawing in the chat (`feat/chat-drawing`, Opus, `cc-item98-chat-drawing`): an agent's HTML in a closed
+     frame, the safety model first; a no with evidence is an accepted result;
+   - item 107, open a lane or a project in the person's editor (`feat/open-in-editor`, Sonnet,
+     `cc-item107-open-in-editor`);
+   - item 97, context from one thread to another (`feat/thread-context`, Opus, `cc-item97-thread-context`);
+   - item 106, use everywhere (`feat/usage-everywhere`, Sonnet, `cc-item106-usage-everywhere`);
+   - the fourth security read (Opus, read-only, in `cc-review4`).
+   Next: items 100 and 101; the fourth read's fixes; 78f part 2 (it needs a tailnet and phones to try); and a redeploy
+   of dev for the API routes of items 83, 84 and 78b's health answer (all behind flags that are off). The briefs the
+   helpers were given are not kept in the repository; each item's row in `docs/plan.md` says what it is.
+   At a load of 30 (five helpers and a gate on this 8 GB Mac) browser tests time out: `e2e/settings-column.spec.ts` "a
+   deep link to a developer page" failed at three different lines in four runs on the lead branch and passed in two.
+   Keep to four helpers.
    On 26 Nov at 08:20 the Mac's disk was full (159 MB free) and a helper stopped: the shared Rust build cache had
    grown to 57 GB, because each worktree's build of the app's own crate is kept. The lead removed that crate's builds
    and the incremental cache (third-party crates' builds stay, so a rebuild is minutes); if the disk fills again,
@@ -649,10 +660,14 @@ Every switch that turns a built part on, and what each needs from the owner, is 
   `apps/web` files: timed out only when the whole Mac stalled for half a minute with four helpers running; each passes
   alone.
 - `apps/web` `test/ShopDataTab.test.tsx`, "says when the API could not be reached": failed once in a loaded full run.
+- Failed once each in a loaded gate on 26 Nov and passed alone: `apps/desktop` `src/i18n/literals.test.ts`,
+  `src/lib/notify.device.test.ts`, `src/lib/notify.ask.test.ts`; `apps/web` `test/macRemote.test.ts`,
+  `test/MakeRoutineForm.test.tsx`, `test/JoinPage.test.tsx` ("counts down to a new code"). Each is a 5 second limit
+  reached at a load of 30, not yet read further.
 - `apps/desktop` `src/runtime/http/feed.test.ts`: failed in two loaded gates on 26 Nov (seven tests at once) and
   passed alone each time. `apps/desktop/src-tauri`
-  `agent_chat::tests::a_claude_chat_is_handed_the_projects_own_instructions_as_text` (item 93) failed a gate's first
-  Rust run and passed its second: not yet read for a race.
+  `agent_chat::tests::a_claude_chat_is_handed_the_projects_own_instructions_as_text` (item 93) raced and is fixed: its
+  stand-in ended at the app's first line of input, and now waits for its input to close.
 - `apps/desktop/src-tauri` `shop_cache_key::tests::keychain::*` and
   `outpost::item::tests::keeps_this_macs_outpost_in_its_own_keychain_item_beside_the_session`: six failed once on 25
   Nov with `Err("keychain")` in a suite that took ten minutes, while the Mac slept between dark wakes; alone the same

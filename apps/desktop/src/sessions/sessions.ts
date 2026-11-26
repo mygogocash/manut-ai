@@ -438,7 +438,8 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
       const ws = worktreeSettings();
       const plan = planLaneBranch({ title: r.title || r.promptTitle || "", current, prefix: ws.prefix });
       if (plan.kind === "none") return false;
-      const made = await host.laneWorktree(r.cwd, plan.names, startOf(ws));
+      // a workflow's lane made with nobody there is the app's own doing (item 114): the shell reads the repository's config first
+      const made = await host.laneWorktree(r.cwd, plan.names, unattended.has(id) ? { ...startOf(ws), unattended: true } : startOf(ws));
       if (!rec(id)) {
         // closed while its folder was made: the folder goes as a close takes it (nothing is in it yet)
         void letLaneGo({ name: made.branch, base: made.base, dir: made.dir, worktree: made.worktree });
@@ -463,6 +464,8 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
       /* no folder of its own. A folder the person chose that cannot be used now is said: the lane then works in the session's
          folder, not where they asked, and nothing is made anywhere else. */
       const code = e instanceof Error ? e.message : String(e);
+      // the repository's own config names a program or another address, and nobody is there (item 114): the run says which
+      if (unattended.has(id) && code.startsWith("config:")) laneConfig.set(id, code.slice("config:".length));
       const key = keys.get(id);
       if (key && /^root_|^bad_root$/.test(code)) {
         store().dispatch({ type: "system.note", bot: key, text: `${tr("worktrees.root.chat")} ${tr(`worktrees.root.${code}` as Key)}`, now: Date.now() });
@@ -683,10 +686,12 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
           if (key) store().dispatch({ type: "system.note", bot: key, text: tr("ss.newConversation"), now: Date.now() });
         }
         // a lane's MCP server whose entry is not the one the person approved was not started (acp_mcp.rs, item 89): its names
-        if (ev.kind === "mcp_differs" && Array.isArray(ev.names)) {
+        // and one that would run the lane's own files, which the lane's agent can change (acp_mcp.rs, item 114)
+        if ((ev.kind === "mcp_differs" || ev.kind === "mcp_lane_files") && Array.isArray(ev.names)) {
           const key = keys.get(id);
           const names = ev.names.filter((n): n is string => typeof n === "string").join(", ");
-          if (key && names) store().dispatch({ type: "system.note", bot: key, text: tr("ss.mcpDiffers", { names }), now: Date.now() });
+          const said = ev.kind === "mcp_differs" ? tr("ss.mcpDiffers", { names }) : tr("ss.mcpLaneFiles", { names });
+          if (key && names) store().dispatch({ type: "system.note", bot: key, text: said, now: Date.now() });
         }
         // the project's own instructions the shell read and handed to the agent as text (item 93, projectNotes.ts): said
         // once in the chat, so a restart that hands over the same files adds nothing
@@ -1308,10 +1313,19 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
    * project's dial says) and starts in its agent's Ask mode. `made` hears its id before anything runs, so no event of its first
    * turn is missed. `failed` when it did not start; `no_lane` when no branch and folder of its own could be made (item 91): then
    * no agent was started and the session is gone, since a lane working in the project's own folder is not one a workflow may
-   * have.
+   * have. `unattended` (item 114): nobody is there, so the shell reads the repository's own config before it makes anything;
+   * when that names a program or another address the answer is `{ why: "config", setting }`, with nothing started either.
    */
-  const startWorkflowLane = async (p: { agent: AgentId; cwd: string; workflow: string; first: string; made?: (id: string) => void }): Promise<"started" | "failed" | "no_lane"> => {
+  const startWorkflowLane = async (p: {
+    agent: AgentId;
+    cwd: string;
+    workflow: string;
+    first: string;
+    unattended?: boolean;
+    made?: (id: string) => void;
+  }): Promise<"started" | "failed" | "no_lane" | { why: "config"; setting: string }> => {
     const id = `s${++seq}`;
+    if (p.unattended) unattended.add(id);
     const ask = ASK_MODE[p.agent];
     const r: SessionRec = {
       id,
@@ -1327,8 +1341,10 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     };
     set({ list: [r, ...state.list] });
     p.made?.(id);
-    const started = await start(id, p.first);
-    if (laneless.delete(id)) return "no_lane";
+    const started = await start(id, p.first).finally(() => unattended.delete(id));
+    const setting = laneConfig.get(id);
+    laneConfig.delete(id);
+    if (laneless.delete(id)) return setting !== undefined ? { why: "config", setting } : "no_lane";
     const key = keys.get(id);
     if (started && key) store().dispatch({ type: "system.note", bot: key, text: tr("wf.lane.note", { name: p.workflow }), now: Date.now() });
     return started ? "started" : "failed";
@@ -1520,6 +1536,9 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
    */
   /** Workflow lanes `start` closed before their agent started, because no lane of their own could be made (item 91). */
   const laneless = new Set<string>();
+  /** Workflow lanes being made with nobody there (item 114), and, for those the shell refused, the setting it named. */
+  const unattended = new Set<string>();
+  const laneConfig = new Map<string, string>();
   /** A workflow's lane with no branch and folder of its own: it never starts its agent, and goes (`close`, nothing is in it). */
   const refuseLaneless = (id: string): false => {
     laneless.add(id);

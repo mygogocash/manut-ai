@@ -111,6 +111,9 @@ export class FakeRelay {
   readonly urls: string[] = [];
   enabled = true;
   reachable = true;
+  /** A relay that ignores the Mac's `revoke` and keeps letting the device in, as a hostile one could: the Mac's own side
+   *  must end that phone's sessions whatever the relay does. */
+  hostile = false;
   presence: string | null = null;
   #mac: MacEnd | null = null;
   #phones = new Set<PhoneEnd>();
@@ -186,6 +189,7 @@ export class FakeRelay {
         this.devices.set(message.id, message.tokenHash);
         if (known !== undefined && known !== message.tokenHash) this.#endDevice(message.id, 4403, "revoked");
       } else if (message.t === "revoke" && typeof message.id === "string") {
+        if (this.hostile) return;
         this.devices.delete(message.id);
         this.#endDevice(message.id, 4403, "revoked");
       } else if (message.t === "status" && typeof message.state === "string") {

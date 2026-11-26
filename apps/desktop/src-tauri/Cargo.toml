@@ -67,6 +67,10 @@ objc2-av-foundation = { version = "0.3", default-features = false, features = ["
 # (NSRunningApplication's `bundleIdentifier`), for any kind of bundle, so macOS's own prompts that are not `.app`s are
 # recognised. The objc2 project's AppKit bindings, already in the tree through objc2-web-kit; only this class is named.
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "libc", "NSRunningApplication"] }
+# Reaching this Mac from a phone (remote_keys.rs): the relay key is made and signs in the shell, through Security's
+# `SecKeyCreateWithData`, which security-framework does not wrap. Already in the tree (security-framework builds on it,
+# and api_link.rs's tests used it), so nothing new is built and Cargo.lock does not change.
+security-framework-sys = "2"
 
 # In-app updates (docs/releasing.md): reads the endpoint and the pinned public key in tauri.conf.json and installs only
 # a build signed with the matching private key. Desktop only, as Tauri's own guide says; lib.rs registers it.
@@ -79,8 +83,8 @@ tauri-plugin-updater = "2"
 tauri = { version = "2", features = ["test"] }
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]
-# Only api_link.rs's tests: they make a throwaway keychain and must take it off the search list again.
-security-framework-sys = "2"
+# Only api_link.rs's tests: they make a throwaway keychain and must take it off the search list again (the sys crate is a
+# dependency of the app's own above).
 core-foundation = "0.10"
 
 # Windows and Linux: a link opened while manut runs starts a second manut; this hands its link to the first one.

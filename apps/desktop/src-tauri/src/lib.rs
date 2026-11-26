@@ -600,36 +600,57 @@ async fn shop_cache_seal_key_clear() -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(shop_cache_key::clear).await.map_err(|_| "keychain".to_string())?
 }
 
-/// What the keychain keeps for reaching this Mac from a phone (remote_keys.rs): the relay key and the paired phones, as
-/// the JSON document the page reads once and imports at once as keys script cannot read back; null when none is kept.
-/// `unavailable` on a computer with no keychain support, where the page keeps nothing. Reading makes nothing.
+/// What the keychain keeps for reaching this Mac from a phone (remote_keys.rs), as the page is given it: the relay key's
+/// public half (never its private half) and the paired phones, each with K only while the shell's switch is on; null when
+/// none is kept. `unavailable` on a computer with no keychain support, where the page keeps nothing. Reading makes nothing.
 #[tauri::command]
 async fn remote_keys_read() -> Result<Option<String>, String> {
     let text = tauri::async_runtime::spawn_blocking(remote_keys::read).await.map_err(|_| "keychain".to_string())??;
     Ok(text.map(|t| t.as_str().to_owned()))
 }
 
-/// Keeps the Mac's relay key, made by the page once the person turned the switch on. Refused (`exists`) when one is kept.
+/// The shell's own record of "Reach this Mac from your phone": the page turns it on after the person's consent and off
+/// with the switch. Off, the shell gives no K, signs nothing and adds no phone.
 #[tauri::command]
-async fn remote_keys_set_host(host: remote_keys::HostKey) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || remote_keys::change(|doc| remote_keys::with_host(doc, host)))
-        .await
-        .map_err(|_| "keychain".to_string())?
+fn remote_switch(on: bool) {
+    remote_keys::gate().set_switch(on);
 }
 
-/// Keeps a newly paired phone. Refused for a malformed record (`invalid`), an id or a passkey already kept (`exists`,
-/// `credential_taken`), and past seven phones (`full`).
+/// Opens (for at most five minutes, only while the switch is on) or closes the shell's window for adding one phone, while
+/// the page shows a pairing code.
+#[tauri::command]
+fn remote_pairing(open: bool) -> Result<(), String> {
+    remote_keys::gate().set_pairing(open, std::time::Instant::now()).map_err(String::from)
+}
+
+/// Makes the Mac's relay key in the shell and keeps it, once the person turned the switch on; its private half never
+/// leaves the shell. Refused (`exists`) when one is kept, and (`off`) with the switch off.
+#[tauri::command]
+async fn remote_host_make() -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(remote_keys::make_host).await.map_err(|_| "keychain".to_string())?
+}
+
+/// The relay's challenge signed with the relay key (a raw P-256 signature, base64url). Refused for any other message
+/// (`not_a_challenge`) and with the switch off.
+#[tauri::command]
+async fn remote_host_sign(message: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || remote_keys::sign_host(&message)).await.map_err(|_| "keychain".to_string())?
+}
+
+/// Keeps a newly paired phone, spending the shell's open pairing. Refused without one (`no_pairing`), for a malformed
+/// record (`invalid`), an id or a passkey already kept (`exists`, `credential_taken`), and past seven phones (`full`).
 #[tauri::command]
 async fn remote_keys_add_device(device: remote_keys::Device) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || remote_keys::change(|doc| remote_keys::with_device(doc, device)))
+    tauri::async_runtime::spawn_blocking(move || remote_keys::add_device(device))
         .await
         .map_err(|_| "keychain".to_string())?
 }
 
-/// Notes when a phone was last seen and its passkey's counter, which may not go down (`counter`).
+/// Notes when a phone was last seen and its passkey's counter, which may not go down (`counter`); only while the switch
+/// is on (`off`).
 #[tauri::command]
 async fn remote_keys_touch_device(id: String, last_seen: u64, sign_count: u32) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || remote_keys::change(|doc| remote_keys::with_touch(doc, &id, last_seen, sign_count)))
+    tauri::async_runtime::spawn_blocking(move || remote_keys::touch_device(&id, last_seen, sign_count))
         .await
         .map_err(|_| "keychain".to_string())?
 }
@@ -937,7 +958,8 @@ async fn skill_link_read(installs: State<'_, Arc<skill_links::Installs>>, link: 
 }
 
 /// The ask to install skills `names` of kept bundle `read` for `agent`, into that agent's own skills folder. Writes nothing;
-/// rejects `exists:<name>` for a skill it has, `link_root`, `bad_bundle:<why>`, `not_found` or `expired`.
+/// rejects `exists:<name>` for a skill it has, `link_root`, `bad_bundle:<why>`, `acts_alone:<why>:<skill>/<path>[:<field>]` for a
+/// skill an agent would act on by itself (skill_links.rs `file_acts_alone`), `not_found` or `expired`.
 #[tauri::command]
 async fn skill_install_ask(installs: State<'_, Arc<skill_links::Installs>>, read: String, names: Vec<String>, agent: String) -> Result<skill_links::InstallAsk, String> {
     let home = user_home()?;
@@ -1773,7 +1795,10 @@ fn commands(invoke: tauri::ipc::Invoke) -> bool {
         shop_cache_seal_key,
         shop_cache_seal_key_clear,
         remote_keys_read,
-        remote_keys_set_host,
+        remote_switch,
+        remote_pairing,
+        remote_host_make,
+        remote_host_sign,
         remote_keys_add_device,
         remote_keys_touch_device,
         remote_keys_remove_device,
