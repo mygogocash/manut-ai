@@ -21,8 +21,8 @@
 //! yes is bound to more than the name: the control's window, its place in that window's tree and its position and size
 //! on screen at the moment of the ask ([`Place`]), checked again just before acting.
 //!
-//! Never, for a look or an action: Manut AI's own windows (an agent must not read or answer its own asks), System
-//! Settings, the places macOS keeps passwords (Keychain Access, Passwords) and the prompts where macOS asks for a
+//! Never, for a look or an action: Manut AI's own windows and web pages, in any app (an agent must not read or answer
+//! its own asks: [`own_window`]), System Settings, the places macOS keeps passwords (Keychain Access, Passwords) and the prompts where macOS asks for a
 //! password, a fingerprint or a permission ([`REFUSED`]); what a password field holds; anything while the screen is
 //! locked or another person's session is in front.
 
@@ -64,6 +64,8 @@ pub struct Node {
     /// What it holds. Never read for a password field, by the desk, and dropped here again if one ever came.
     pub value: Option<String>,
     pub enabled: bool,
+    /// The address it shows, as the app gives it: a web area's page (`AXURL`), a window's document (`AXDocument`).
+    pub address: Option<String>,
     pub handle: Handle,
 }
 
@@ -95,6 +97,9 @@ pub struct Win {
     /// does not say it.
     pub number: Option<u32>,
     pub title: String,
+    /// The addresses it shows where the control is: the window's document (`AXDocument`) and the page of each web area
+    /// that holds the control (`AXURL`), as the app gives them.
+    pub addresses: Vec<String>,
 }
 
 /// Where an app's key presses go now, as the Mac says: the window that has the keyboard, and the control focused in
@@ -168,6 +173,8 @@ pub trait Desk: Send + Sync {
     /// Where the control is now (its window's number, its place in the window's tree, its frame), or None when that
     /// cannot be told.
     fn place(&self, handle: &Handle) -> Option<Place>;
+    /// The window the control is in now, its title and the addresses it shows there, or None when that cannot be told.
+    fn window_of(&self, handle: &Handle) -> Option<Win>;
     /// A PNG picture of the part of window `place.window` that `place.frame` covers: the control as it looks.
     fn snapshot(&self, place: &Place) -> Result<Vec<u8>, String>;
     /// Where the app's key presses go now: the window that has the keyboard and the control focused in it, or None when
@@ -228,6 +235,69 @@ pub const REFUSED: [(&str, &str); 15] = [
     ("com.apple.coreservices.uiagent", "a prompt about opening an app or file"),
 ];
 
+/// Why Manut AI's own windows and pages are never looked at or worked.
+const OWN: &str = "Manut AI's own windows and pages, where you are asked before anything acts";
+
+/// Another copy of Manut AI, which shows asks as this one does: a bundle identifier of Manut AI's (`xyz.manut.`), a
+/// name that is Manut AI's, or its program (`manut`, as a build that is not a bundle runs it).
+fn own_program(app: &App) -> bool {
+    let bundle = app.bundle.to_ascii_lowercase();
+    let name = clean(&app.name).trim().to_lowercase();
+    let program = app.path.rsplit('/').next().unwrap_or("").to_ascii_lowercase();
+    bundle == OWN_BUNDLE || bundle.starts_with("xyz.manut.") || name == "manut" || name.contains("manut ai") || program == "manut"
+}
+
+/// The titles Manut AI's own windows and web pages set (`apps/desktop/index.html`, and each page's `documentTitle` in
+/// `apps/web/src/{approve,delete,join,app}/strings.ts`, the web being English only), lowercased: a window whose title
+/// holds any of them shows where the person answers an ask.
+const OWN_TITLES: [&str; 4] = ["manut ai", "approve a reply", "delete your shop's data", "join a shop"];
+
+/// The host Manut AI's web pages are served from (`WEB_ORIGIN`, `apps/api/wrangler.jsonc`), and its subdomains.
+const OWN_HOST: &str = "manut.xyz";
+
+/// The paths of the pages that answer an ask with a link alone (`apps/web/src/router.tsx`): approve a reply, delete the
+/// shop's data, join a shop. On any host, since a page can be served from a preview or from this Mac while developing.
+const LINK_PATHS: [&str; 3] = ["/approve/", "/delete/", "/join/"];
+
+/// Whether `address` is one of Manut AI's own web pages: any page of its host, or a link page on any host.
+pub fn own_address(address: &str) -> bool {
+    let a = clean(address).trim().to_ascii_lowercase();
+    let rest = a.split_once("://").map_or(a.as_str(), |(_, r)| r);
+    let end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    let (authority, path) = rest.split_at(end);
+    let host = authority.rsplit('@').next().unwrap_or("").split(':').next().unwrap_or("").trim_end_matches('.');
+    if host == OWN_HOST || host.ends_with(&format!(".{OWN_HOST}")) {
+        return true;
+    }
+    let path = path.split(['?', '#']).next().unwrap_or("");
+    LINK_PATHS.iter().any(|p| path.starts_with(p) && path.len() > p.len())
+}
+
+/// Whether a window shows one of Manut AI's own windows or pages, where the person answers what agents ask: by a page
+/// address it shows, or, for a browser that gives no address, by the title those pages set.
+pub fn own_window(title: &str, addresses: &[String]) -> bool {
+    let t = clean(title).to_lowercase().replace('\u{2019}', "'");
+    OWN_TITLES.iter().any(|o| t.contains(o)) || addresses.iter().any(|a| own_address(a))
+}
+
+/// `t` with the secret part of any link to a page that answers an ask by itself taken out (`/approve/<token>` reads
+/// `/approve/…`): such a link approves, deletes or joins for whoever opens it, so an agent never reads one.
+pub fn hide_links(t: &str) -> String {
+    let lower = t.to_ascii_lowercase();
+    let mut out = String::with_capacity(t.len());
+    let mut at = 0;
+    while let Some(start) = LINK_PATHS.iter().filter_map(|p| lower[at..].find(p).map(|i| at + i + p.len())).min() {
+        out.push_str(&t[at..start]);
+        let end = t[start..].find(|c: char| !(c.is_ascii_alphanumeric() || "-._~%".contains(c))).map_or(t.len(), |e| start + e);
+        if end > start {
+            out.push('…');
+        }
+        at = end;
+    }
+    out.push_str(&t[at..]);
+    out
+}
+
 /// Where macOS keeps its own programs: its sealed system volume and the folders under it that the person cannot change.
 /// `/usr/local/` is the person's.
 fn of_macos(path: &str) -> bool {
@@ -267,8 +337,8 @@ fn macos_app(path: &str) -> bool {
 /// LocalAuthenticationRemoteService, which draw the password and Touch ID sheets, run as the person from XPC services
 /// with bundle identifiers, which is why the rule is where a program runs and not what it lacks.
 pub fn refused(app: &App, own_pid: i32) -> Option<String> {
-    if app.pid == own_pid || app.bundle.eq_ignore_ascii_case(OWN_BUNDLE) {
-        return Some("Manut AI's own windows, where you are asked before anything acts".into());
+    if app.pid == own_pid || own_program(app) {
+        return Some(OWN.into());
     }
     if let Some((_, why)) = REFUSED.iter().find(|(b, _)| app.bundle.eq_ignore_ascii_case(b)) {
         return Some((*why).to_string());
@@ -445,6 +515,10 @@ pub struct Room {
 pub const NO_YES: &str = "Manut AI has no yes from the person for this action. Each action runs only right after the person allows it once on its card in the chat, and that yes is used once. If they said no, do not try again unless they ask.";
 /// Why a key press is not asked about or sent when the window that has the keyboard cannot be told.
 const NO_FOCUS: &str = "Computer use cannot tell which window of the app has the keyboard now, so it does not press a key there. Ask the person to click into the window, or use a control's own action instead.";
+/// Why a window that shows one of Manut AI's own windows or pages is never looked at or worked.
+const OWN_PAGE: &str = "That window shows one of Manut AI's own windows or pages, where the person answers what agents ask, so computer use never looks at or works it, whatever the person allowed. Ask the person to answer it themselves.";
+/// Why a control whose window cannot be told is not touched.
+const NO_WINDOW: &str = "Computer use cannot tell which window that control is in now, so it does not touch it. Look again.";
 const LOCKED: &str = "The Mac's screen is locked or asleep, or someone else's session is in front, so computer use does nothing now. Ask the person to unlock the Mac and say when.";
 const NO_ACCESSIBILITY: &str = "macOS has not given Manut AI Accessibility, so computer use cannot read or work any window. The person turns it on in Manut AI's Settings › Computer.";
 /// Why typing into a field whose content cannot be read is not asked about: it would replace what it holds, unseen.
@@ -459,7 +533,7 @@ fn app_key(app: &App) -> String {
 
 /// `t` cut to `n` characters on one line, without invisible format characters, for a card or a tree.
 fn short(t: &str, n: usize) -> String {
-    let one = clean(t).split_whitespace().collect::<Vec<_>>().join(" ");
+    let one = hide_links(&clean(t)).split_whitespace().collect::<Vec<_>>().join(" ");
     if one.chars().count() <= n { one } else { format!("{}…", one.chars().take(n - 1).collect::<String>()) }
 }
 
@@ -537,17 +611,38 @@ impl Room {
     fn focus(&self, pid: i32) -> Option<Focus> {
         let f = self.desk.focus(pid)?;
         f.window.number?;
-        Some(Focus { window: Win { title: clean(&f.window.title), ..f.window }, control: f.control.map(|(n, p)| (Room::tidy(n), p)) })
+        let window = Win { title: clean(&f.window.title), addresses: f.window.addresses.iter().map(|a| clean(a)).collect(), ..f.window };
+        Some(Focus { window, control: f.control.map(|(n, p)| (Room::tidy(n), p)) })
     }
 
     /// A control as the Mac reads it, its name and value without invisible format characters.
     fn tidy(n: Node) -> Node {
-        Node { label: clean(&n.label), value: n.value.map(|v| clean(&v)), role: clean(&n.role), subrole: clean(&n.subrole), ..n }
+        Node { label: clean(&n.label), value: n.value.map(|v| clean(&v)), role: clean(&n.role), subrole: clean(&n.subrole), address: n.address.map(|a| clean(&a)), ..n }
     }
 
     /// The control read again now, tidied.
     fn again(&self, handle: &Handle) -> Option<Node> {
         self.desk.again(handle).map(Room::tidy)
+    }
+
+    /// The window a control is in now, its title and addresses without invisible format characters; an error when it
+    /// cannot be told or it shows one of Manut AI's own windows or pages.
+    fn window_of(&self, handle: &Handle) -> Result<Win, String> {
+        let w = self.desk.window_of(handle).ok_or(NO_WINDOW)?;
+        let w = Win { title: clean(&w.title), addresses: w.addresses.iter().map(|a| clean(a)).collect(), ..w };
+        if own_window(&w.title, &w.addresses) {
+            return Err(OWN_PAGE.into());
+        }
+        Ok(w)
+    }
+
+    /// An error when the window that has the app's keyboard, as far as the Mac can tell, shows one of Manut AI's own
+    /// windows or pages: a menu item acts there.
+    fn front_not_own(&self, pid: i32) -> Result<(), String> {
+        match self.desk.focus(pid) {
+            Some(f) if own_window(&f.window.title, &f.window.addresses) => Err(OWN_PAGE.into()),
+            _ => Ok(()),
+        }
     }
 
     /// A small picture of the control at `place` for its card, in base64, when Screen capture is on and the control is
@@ -632,6 +727,8 @@ impl Room {
                     return Err("Computer use never touches a password field.".into());
                 }
                 let place = self.desk.place(&handle).ok_or("Computer use cannot tell where that control is on the screen, so it does not ask about it. Look again.")?;
+                // the window it is in now, which must not show one of Manut AI's own windows or pages
+                self.window_of(&handle)?;
                 let mut s = Shown { window: Some(title), control: Some(control_name(&n)), ..shown(if tool == CLICK { "click" } else { "set" }) };
                 let mut held = None;
                 if tool == SET {
@@ -661,6 +758,9 @@ impl Room {
                 // the key goes to the window that has the keyboard and the control focused there: the card names both,
                 // and the yes is bound to them, not to a title another window can share
                 let focus = self.focus(app.pid).ok_or(NO_FOCUS)?;
+                if own_window(&focus.window.title, &focus.window.addresses) {
+                    return Err(OWN_PAGE.into());
+                }
                 if focus.control.as_ref().is_some_and(|(n, _)| n.secure()) {
                     return Err("The keyboard is in a password field, and computer use never types into one.".into());
                 }
@@ -684,6 +784,7 @@ impl Room {
                 if apple_menu(&path[0]) {
                     return Err("Computer use never chooses from the Apple menu, which reaches System Settings, logging out and shutting down.".into());
                 }
+                self.front_not_own(app.pid)?;
                 let s = Shown { menu: Some(path.clone()), ..shown("menu") };
                 Ok(Decision::Card(Ask { shown: s, target: Target::Menu { pid: app.pid, path } }))
             }
@@ -780,6 +881,11 @@ impl Room {
         }
         let mut nodes: Vec<Node> = self.desk.tree(app.pid, w - 1)?.into_iter().map(Room::tidy).collect();
         nodes.truncate(MAX_NODES);
+        // a window that shows one of Manut AI's own windows or pages is never read out, by its title or any page in it
+        let addresses: Vec<String> = nodes.iter().filter_map(|n| n.address.clone()).collect();
+        if own_window(&titles[w - 1], &addresses) {
+            return Err(OWN_PAGE.into());
+        }
         for n in nodes.iter_mut().filter(|n| n.secure()) {
             n.value = None;
         }
@@ -826,6 +932,7 @@ impl Room {
                 if self.desk.place(&handle).as_ref() != Some(&place) {
                     return Err("The control moved or changed its place in the window since the person said yes, so nothing was done. Look again and ask again.".into());
                 }
+                self.window_of(&handle)?;
                 let name = control_name(&now);
                 match value {
                     None => {
@@ -853,6 +960,9 @@ impl Room {
                     return Err("Computer use never sends that shortcut.".into());
                 }
                 let now = self.focus(pid).ok_or(NO_FOCUS)?;
+                if own_window(&now.window.title, &now.window.addresses) {
+                    return Err(OWN_PAGE.into());
+                }
                 if now.control.as_ref().is_some_and(|(n, _)| n.secure()) {
                     return Err("The keyboard is in a password field, and computer use never types into one.".into());
                 }
@@ -864,6 +974,7 @@ impl Room {
             }
             Target::Menu { pid, path } => {
                 let app = self.still_app(pid)?;
+                self.front_not_own(pid)?;
                 self.desk.menu(pid, &path)?;
                 Ok(Reply::ok(format!("Chose {} in {}. Call `get_app_state` to see what changed.", path.join(" › "), app.name)))
             }
@@ -1493,6 +1604,126 @@ mod tests {
         r.answered(KEY, &args, &a);
         assert!(!r.run(KEY, &args).error);
         assert_eq!(s.acts(), [format!("key {TEXTEDIT} Return")]);
+    }
+
+    /// Manut AI's own asks are answered in its own windows and on its web pages (approve a reply, delete the shop's
+    /// data, join a shop, the owner's web app): an agent must never press Allow on its own ask, whatever the person
+    /// allowed. So any window that shows one of them is never looked at or worked, in any app, and another copy of
+    /// Manut AI is its own windows too.
+    #[test]
+    fn manut_ais_own_windows_and_pages_are_refused_wherever_they_show() {
+        use crate::computer::stand::{f, SAFARI, SAFARI_PATH};
+        let (s, r) = room();
+        s.add_app(App { pid: SAFARI, name: "Safari".into(), bundle: "com.apple.Safari".into(), path: SAFARI_PATH.into(), mine: true });
+        s.add_window(SAFARI, "Shopee Seller Centre", vec![f("AXWindow", "Shopee Seller Centre"), f("AXButton", "Approve")]);
+        assert!(!look(&r, "Safari").error);
+        let click = json!({"app": "Safari", "element_index": 2});
+        let key = json!({"app": "Safari", "key": "Return"});
+        let menu = json!({"app": "Safari", "menu": ["File", "Close Window"]});
+        for title in ["Approve a reply", "Delete your shop's data", "Join a shop", "Manut AI", "Approve a reply - Google Chrome", "approve A REPLY", "Approve a\u{200B} reply"] {
+            s.set_title(SAFARI, 0, title);
+            assert!(r.run(LOOK, &json!({"app": "Safari"})).error, "look {title}");
+            for (tool, args) in [(CLICK, &click), (KEY, &key), (MENU, &menu)] {
+                assert!(matches!(r.ask(tool, args), Decision::Refuse(_)), "{tool} {title}");
+            }
+        }
+        // a yes given while the window showed a shop is not used once it shows an approval page
+        s.set_title(SAFARI, 0, "Shopee Seller Centre");
+        look(&r, "Safari");
+        for (tool, args) in [(CLICK, &click), (KEY, &key), (MENU, &menu)] {
+            let a = card(&r, tool, args);
+            r.answered(tool, args, &a);
+        }
+        s.set_title(SAFARI, 0, "Approve a reply");
+        for (tool, args) in [(CLICK, &click), (KEY, &key), (MENU, &menu)] {
+            assert!(r.run(tool, args).error, "{tool}");
+        }
+        assert!(s.acts().is_empty());
+        // another copy of Manut AI is its own windows, by its name, its bundle or its program
+        let app = |name: &str, bundle: &str, path: &str| App { pid: 9, name: name.into(), bundle: bundle.into(), path: path.into(), mine: true };
+        for other in [
+            app("Manut AI", "xyz.manut.desktop.dev", "/Users/k/Downloads/Manut AI.app/Contents/MacOS/manut"),
+            app("manut", "", "/Users/k/manut-ai/apps/desktop/src-tauri/target/debug/manut"),
+            app("Manut\u{200B} AI", "com.example.other", "/Applications/Other.app/Contents/MacOS/Other"),
+            app("Helper", "xyz.manut.helper", "/Applications/Helper.app/Contents/MacOS/Helper"),
+        ] {
+            assert!(super::refused(&other, 1).is_some_and(|w| w.contains("Manut AI")), "{other:?}");
+        }
+    }
+
+    /// A browser that says which page a window shows is read by that page's address, whatever its title: any page of
+    /// Manut AI's host, and a link page (approve, delete, join) on any host. The near misses stay ordinary pages.
+    #[test]
+    fn manut_ais_own_pages_are_known_by_their_address() {
+        use crate::computer::stand::{f, SAFARI, SAFARI_PATH};
+        for own in [
+            "https://dev.manut.xyz/approve/Abc-123_x",
+            "https://manut.xyz/app/",
+            "https://staging.manut.xyz/",
+            "HTTPS://MANUT.XYZ./delete/t0k3n",
+            "https://user@dev.manut.xyz:443/join/x?y=1",
+            "http://localhost:5173/approve/tok",
+            "https://pages-preview.example/delete/tok#top",
+            "https://dev.manut.xyz\u{200B}/approve/x",
+        ] {
+            assert!(own_address(own), "{own}");
+        }
+        for other in ["https://evilmanut.xyz/", "https://manut.xyz.example.com/", "https://shopee.co.th/approve", "https://github.com/x/approve/y", "file:///Users/k/approve/x.txt", "https://example.com/?next=/approve/x", ""] {
+            assert!(!own_address(other), "{other}");
+        }
+        // a window whose web area shows an approval page, titled as anything, is never read or worked
+        let (s, r) = room();
+        s.add_app(App { pid: SAFARI, name: "Safari".into(), bundle: "com.apple.Safari".into(), path: SAFARI_PATH.into(), mine: true });
+        let mut page = f("AXWebArea", "Shop");
+        page.address = Some("https://shopee.co.th/".into());
+        s.add_window(SAFARI, "Shop", vec![f("AXWindow", "Shop"), page, f("AXButton", "Approve")]);
+        assert!(!look(&r, "Safari").error);
+        let click = json!({"app": "Safari", "element_index": 3});
+        let key = json!({"app": "Safari", "key": "Return"});
+        let a = card(&r, CLICK, &click);
+        r.answered(CLICK, &click, &a);
+        s.change(SAFARI, 0, 1, |x| x.address = Some("https://dev.manut.xyz/approve/Abc".into()));
+        assert!(r.run(CLICK, &click).text.contains("Manut AI's own"));
+        assert!(r.run(LOOK, &json!({"app": "Safari"})).text.contains("Manut AI's own"));
+        assert!(matches!(r.ask(CLICK, &click), Decision::Refuse(_)));
+        assert!(matches!(r.ask(KEY, &key), Decision::Refuse(_)));
+        assert!(s.acts().is_empty());
+    }
+
+    /// A link that answers an ask by itself (approve, delete, join) is never read out of any window: its secret part is
+    /// taken out of every name, value and title an agent reads.
+    #[test]
+    fn an_approval_link_is_never_read_out() {
+        assert_eq!(hide_links("Open https://dev.manut.xyz/approve/Abc-123_x.y~z%20 now"), "Open https://dev.manut.xyz/approve/… now");
+        assert_eq!(hide_links("/DELETE/abc and /join/xyz/"), "/DELETE/… and /join/…/");
+        assert_eq!(hide_links("ร้าน /approve/ ok"), "ร้าน /approve/ ok");
+        let (s, r) = room();
+        s.change(TEXTEDIT, 0, 2, |x| x.value = Some("Approve: https://manut.xyz/approve/S3cr3t-token".into()));
+        let seen = look(&r, "TextEdit").text;
+        assert!(seen.contains("[3] text area: Approve: https://manut.xyz/approve/…"), "{seen}");
+        assert!(!seen.contains("S3cr3t"));
+    }
+
+    /// The titles the room knows are the ones Manut AI's own pages set, read from their sources, so a renamed page is not
+    /// missed.
+    #[test]
+    fn every_title_manut_ais_own_pages_set_is_known() {
+        let mut titles = Vec::new();
+        for src in [
+            include_str!("../../../../web/src/approve/strings.ts"),
+            include_str!("../../../../web/src/delete/strings.ts"),
+            include_str!("../../../../web/src/join/strings.ts"),
+            include_str!("../../../../web/src/app/strings.ts"),
+        ] {
+            titles.extend(src.lines().filter(|l| l.trim_start().starts_with("documentTitle: \"")).map(|l| l.split('"').nth(1).unwrap().to_string()));
+        }
+        let index = include_str!("../../../index.html");
+        titles.push(index.split("<title>").nth(1).and_then(|t| t.split("</title>").next()).unwrap().to_string());
+        assert!(titles.len() >= 5, "{titles:?}");
+        for t in &titles {
+            assert!(own_window(t, &[]), "{t}");
+        }
+        assert!(!own_window("Shopee Seller Centre", &[]));
     }
 
     #[test]

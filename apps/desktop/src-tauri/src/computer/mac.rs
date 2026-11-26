@@ -26,6 +26,7 @@ use core_foundation::data::CFData;
 use core_foundation::dictionary::{CFDictionary, CFDictionaryRef};
 use core_foundation::number::CFNumber;
 use core_foundation::string::{CFString, CFStringRef};
+use core_foundation::url::CFURL;
 
 use super::keys::Chord;
 use super::room::{clean, App, Desk, Focus, Handle, Node, Place, Win, MAX_DEPTH, MAX_NODES, SECURE};
@@ -175,6 +176,34 @@ impl Ax {
         Some([p.x.round() as i64, p.y.round() as i64, s.width.round() as i64, s.height.round() as i64])
     }
 
+    /// An address attribute (`AXURL`, `AXDocument`) as text, whether the app gives a URL or a string.
+    fn address(&self, name: &str) -> Option<String> {
+        let v = self.attr(name)?;
+        if let Some(u) = v.downcast::<CFURL>() {
+            return Some(u.get_string().to_string());
+        }
+        v.downcast::<CFString>().map(|s| s.to_string())
+    }
+
+    /// The window this element is in, its title, and the addresses it shows there: the window's document and the page
+    /// of every web area the element is in, read up its parents to the window.
+    fn window_facts(&self) -> Option<Win> {
+        let win = if self.string("AXRole")? == "AXWindow" { Ax(self.0.clone()) } else { self.element("AXWindow")? };
+        let mut addresses: Vec<String> = win.address("AXDocument").into_iter().collect();
+        let mut here = Ax(self.0.clone());
+        for _ in 0..=MAX_DEPTH + 1 {
+            if here.0 == win.0 {
+                break;
+            }
+            if here.string("AXRole").as_deref() == Some("AXWebArea") {
+                addresses.extend(here.address("AXURL"));
+            }
+            let Some(parent) = here.element("AXParent") else { break };
+            here = parent;
+        }
+        Some(Win { number: window_number(&win), title: win.string("AXTitle").unwrap_or_default(), addresses })
+    }
+
     /// What the element holds, as text, when it is text, a number or a check box's state. Never called for a
     /// password field.
     fn value_text(&self) -> Option<String> {
@@ -200,7 +229,13 @@ impl Ax {
             .unwrap_or_default();
         let value = if secure { None } else { self.value_text() };
         let enabled = self.boolean("AXEnabled").unwrap_or(true);
-        Some(Node { depth, role, subrole, label, value, enabled, handle: Arc::new(self) as Handle })
+        // the page a web area shows, and the document a window shows: what tells one of Manut AI's own pages
+        let address = match role.as_str() {
+            "AXWebArea" => self.address("AXURL"),
+            "AXWindow" => self.address("AXDocument"),
+            _ => None,
+        };
+        Some(Node { depth, role, subrole, label, value, enabled, address, handle: Arc::new(self) as Handle })
     }
 }
 
@@ -502,6 +537,10 @@ impl Desk for Mac {
         None
     }
 
+    fn window_of(&self, handle: &Handle) -> Option<Win> {
+        ax(handle)?.window_facts()
+    }
+
     fn snapshot(&self, place: &Place) -> Result<Vec<u8>, String> {
         let id = place.window.ok_or("the window has no number")?;
         let [x, y, w, h] = place.frame.ok_or("the control has no frame")?;
@@ -521,11 +560,10 @@ impl Desk for Mac {
         // the control that has the keyboard, unless the window itself (or nothing in it) does
         let el = app.element("AXFocusedUIElement").filter(|e| e.string("AXRole").is_some_and(|r| r != "AXWindow" && r != "AXApplication"));
         let Some(el) = el else {
-            let win = front?;
-            return Some(Focus { window: Win { number: window_number(&win), title: win.string("AXTitle").unwrap_or_default() }, control: None });
+            return Some(Focus { window: front?.window_facts()?, control: None });
         };
-        let win = el.element("AXWindow")?;
-        let number = window_number(&win);
+        let window = el.window_facts()?;
+        let number = window.number;
         // the control's window must be the one macOS says has the keyboard; when the two disagree, where the key
         // would go cannot be told
         if front.is_some_and(|f| window_number(&f) != number) {
@@ -533,7 +571,7 @@ impl Desk for Mac {
         }
         let node = Ax(el.0.clone()).node(0)?;
         let place = self.place(&node.handle)?;
-        Some(Focus { window: Win { number, title: win.string("AXTitle").unwrap_or_default() }, control: Some((node, place)) })
+        Some(Focus { window, control: Some((node, place)) })
     }
 
     fn press(&self, handle: &Handle) -> Result<(), String> {

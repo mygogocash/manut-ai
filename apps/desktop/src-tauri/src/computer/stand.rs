@@ -15,13 +15,15 @@ pub struct Facts {
     pub label: String,
     pub value: Option<String>,
     pub enabled: bool,
+    /// The address it shows (a web area's page, a window's document).
+    pub address: Option<String>,
     /// Where it is: its index among its siblings from the window down, and its frame on screen.
     pub path: Vec<usize>,
     pub frame: [i64; 4],
 }
 
 pub fn f(role: &'static str, label: &str) -> Facts {
-    Facts { role, subrole: "", label: label.into(), value: None, enabled: true, path: Vec::new(), frame: [0, 0, 80, 24] }
+    Facts { role, subrole: "", label: label.into(), value: None, enabled: true, address: None, path: Vec::new(), frame: [0, 0, 80, 24] }
 }
 
 /// The stand-in window numbers: app `pid`'s window `w` is `pid * 10 + w`.
@@ -275,7 +277,15 @@ impl Stand {
     fn node(&self, pid: i32, window: usize, i: usize) -> Option<Node> {
         let nodes = self.nodes.lock().unwrap();
         let x = nodes.get(&(pid, window))?.get(i)?.clone();
-        Some(Node { depth: usize::from(i > 0), role: x.role.into(), subrole: x.subrole.into(), label: x.label, value: x.value, enabled: x.enabled, handle: Arc::new((pid, window, i)) as Handle })
+        Some(Node { depth: usize::from(i > 0), role: x.role.into(), subrole: x.subrole.into(), label: x.label, value: x.value, enabled: x.enabled, address: x.address, handle: Arc::new((pid, window, i)) as Handle })
+    }
+
+    /// Window `w` of app `pid` as the Mac says it is: the stand-in's windows are flat, so every address any of its
+    /// controls shows counts as one the control is in.
+    fn win(&self, pid: i32, w: usize) -> Option<Win> {
+        let title = self.windows.lock().unwrap().get(&pid)?.get(w).cloned()?;
+        let addresses = self.nodes.lock().unwrap().get(&(pid, w)).map(|l| l.iter().filter_map(|x| x.address.clone()).collect()).unwrap_or_default();
+        Some(Win { number: Some(window_number(pid, w)), title, addresses })
     }
 
     fn at(handle: &Handle) -> (i32, usize, usize) {
@@ -322,13 +332,18 @@ impl Desk for Stand {
         let x = nodes.get(&(pid, w))?.get(i)?;
         Some(Place { window: Some(window_number(pid, w)), path: x.path.clone(), frame: Some(x.frame) })
     }
+    fn window_of(&self, handle: &Handle) -> Option<Win> {
+        let (pid, w, i) = Stand::at(handle);
+        self.nodes.lock().unwrap().get(&(pid, w))?.get(i)?;
+        self.win(pid, w)
+    }
     fn snapshot(&self, place: &Place) -> Result<Vec<u8>, String> {
         self.note(format!("snapshot {} {:?}", place.window.unwrap_or(0), place.frame.unwrap_or_default()));
         Ok(b"\x89PNG control".to_vec())
     }
     fn focus(&self, pid: i32) -> Option<Focus> {
         let w = self.focused.lock().unwrap().get(&pid).copied().unwrap_or(Some(0))?;
-        let title = self.windows.lock().unwrap().get(&pid)?.get(w).cloned()?;
+        let window = self.win(pid, w)?;
         let i = self.focused_control.lock().unwrap().get(&(pid, w)).copied();
         let control = match i {
             Some(i) => {
@@ -338,7 +353,7 @@ impl Desk for Stand {
             }
             None => None,
         };
-        Some(Focus { window: Win { number: Some(window_number(pid, w)), title }, control })
+        Some(Focus { window, control })
     }
     fn press(&self, handle: &Handle) -> Result<(), String> {
         let (pid, w, i) = Stand::at(handle);

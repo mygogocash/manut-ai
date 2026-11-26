@@ -47,6 +47,7 @@ headers and the Mac's own files. Nothing was read from another app's window, no 
 | Sensitive apps | Bundle identifiers read from this Mac's own `Info.plist` files: System Settings `com.apple.systempreferences`, Keychain Access `com.apple.keychainaccess`, Passwords `com.apple.Passwords`, the login window, SecurityAgent, Touch ID's prompt, TCC's prompt service, the Accessibility prompt and the others in `room.rs` `REFUSED` | `/System/...` |
 | A program's bundle identifier | `NSRunningApplication`'s `runningApplicationWithProcessIdentifier:` and `bundleIdentifier` ("the `CFBundleIdentifier` of the application, or nil if the application does not have an `Info.plist`"); it tracks "only user applications", so the `Info.plist` of the bundle a program runs from (`<name>.<kind>/Contents/MacOS/`) is read when it has none. SecurityAgent runs from `SecurityAgent.bundle` (`com.apple.SecurityAgent`) and the Touch ID and password prompt from `coreautha.bundle` (`com.apple.LocalAuthentication.UIAgent`) | AppKit's `NSRunningApplication.h`, the two bundles' `Info.plist` on this Mac |
 | Who a program runs as | `proc_pidinfo` with `PROC_PIDTBSDINFO`: `pbi_uid` and `pbi_ruid` | `sys/proc_info.h`, `libproc.h` |
+| Where keys go, what a page is | `AXFocusedUIElement` and `AXFocusedWindow`; `AXURL` ("A CFURLRef ... Required for elements that represent a disk or network item") and `AXDocument` | `HIServices/AXAttributeConstants.h` |
 
 ## What was lifted from Orca
 
@@ -113,6 +114,29 @@ Reads (`room.rs` tests unless named):
 - Never Manut AI's own windows (so an agent cannot read or press its own asks), System Settings, Keychain Access,
   Passwords or the prompts (`manut_ai_system_settings_and_the_keychain_are_refused_before_any_card`; in the chat,
   `tap.rs` `a_refused_target_is_denied_with_its_reason_and_never_shown_as_a_card`).
+- Manut AI's own asks wherever they show (second security review, 26 Nov 2026). Only this process and its bundle
+  identifier were refused, so the web pages that answer an ask (approve a reply, delete the shop's data, join a shop,
+  the owner's web app) could be looked at and pressed in an allowed browser, and so could another copy of Manut AI.
+  Now (`own_window`, `own_address`, `own_program` in `room.rs`):
+  - Another copy of Manut AI is its own windows: a bundle identifier under `xyz.manut.`, a name that is Manut AI's, or
+    the program `manut`, as a build that is not a bundle runs it.
+  - A window is refused, for a look and for every action, when a page it shows is one of Manut AI's: any page of its
+    host (`manut.xyz` and its subdomains, `WEB_ORIGIN`), or a link page (`/approve/`, `/delete/`, `/join/` with a token)
+    on any host, read from the window's document (`AXDocument`) and the page of each web area the control is in
+    (`AXURL`, read up its parents). The pages forbid framing (`frame-ancestors 'none'`), so a page inside another
+    site's page is not a way in.
+  - For a browser that gives no address, by the titles those pages set (`apps/web/src/*/strings.ts` `documentTitle`
+    and the desktop's `index.html`, which a test reads, so a renamed page is not missed): any window whose title holds
+    "Manut AI", "Approve a reply", "Delete your shop's data" or "Join a shop" is refused.
+  - A click or typing is checked in the control's window at the ask and again at the run, a key press and a menu item
+    in the window that has the keyboard, so a yes given while a tab showed a shop is not used once it shows an approval
+    page (`manut_ais_own_windows_and_pages_are_refused_wherever_they_show`, `manut_ais_own_pages_are_known_by_their_address`,
+    `every_title_manut_ais_own_pages_set_is_known`).
+  - A link that answers an ask by itself approves for whoever opens it, so its token is taken out of every name, value
+    and title an agent reads, in any app (`/approve/…`, `an_approval_link_is_never_read_out`).
+  - What remains: a browser that gives neither the page's address nor its title; a picture of a window can still show a
+    link; and Chromium's `AXURL` on its web areas is read but was not checked against a real Chrome here (a step for
+    the owner below).
 - The prompts that are not `.app`s (security review, 25 Nov 2026). The bundle identifier used to be read only for a
   program under `.app/Contents/MacOS/`, so SecurityAgent (`SecurityAgent.bundle`) and the Touch ID and password prompt
   (`coreautha.bundle`) read as having none and missed the list. Now it is the system's own (`NSRunningApplication`),
@@ -227,7 +251,10 @@ On the Mac app built from this branch:
    card shows a small picture of that button. Move the window after the card shows and before Allow once: the click is
    refused as moved, and the agent asks again.
 6. Ask for Cmd+S in TextEdit: a card says "Press Cmd+S in TextEdit?"; Allow once saves. Ask for Cmd+Q: refused, no card.
-7. Ask it to look at System Settings, Keychain Access, or Manut AI itself: refused, no card.
+7. Ask it to look at System Settings, Keychain Access, or Manut AI itself: refused, no card. Open an approval link from
+   the pilot in Safari and in Chrome, allow the agent to look at each browser, and ask it to look at that tab or press
+   Approve: refused, no card, in both. Ask it to read a LINE or Mail message that holds such a link: the link reads
+   `/approve/…`.
 8. With a login form open in Safari, ask it to read the password field: the tree says the field's content is never read.
 9. Lock the Mac (Ctrl+Cmd+Q) while the agent works on a request in an app, and unlock: whatever it tried meanwhile says
    the screen was locked and nothing was done.
