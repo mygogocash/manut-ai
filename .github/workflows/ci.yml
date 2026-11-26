@@ -1,0 +1,309 @@
+# Every check a change has to pass, run on GitHub's machines so a developer's Mac stays free. The repository is
+# public, so GitHub-hosted standard runners (Linux, Windows and macOS) cost nothing. The jobs run side by side and
+# fail separately, so a red check names the part that broke.
+#
+# A run does only what its change needs (the owner, 25 Nov 2026: skip what is not used, so CI is faster). The first job
+# works out which parts changed since the last commit CI passed on, and each other job runs only when its part did: a
+# change to the docs runs two short jobs, and only a change to the shell's Rust runs the Rust jobs. A pull request
+# whose branch already runs CI on its pushes skips every job, since that run checks the same commit. A skipped job
+# counts as passed. Whenever what changed is not certain, every job runs (.github/scripts/changed-areas.mjs).
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main, "pilot/**", "cloud/**"]
+  workflow_dispatch:
+
+# A newer push to the same branch or pull request makes the run in progress pointless, so it is cancelled.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Read-only: no job here writes to the repository, its issues or its pull requests.
+permissions:
+  contents: read
+
+jobs:
+  changes:
+    # Which jobs this run needs. It also runs the tests of the script that decides, on every run, because a wrong
+    # answer there would skip a check without anyone seeing. If this job fails, nothing else runs and the run is red.
+    name: What changed
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read # reads this workflow's earlier runs, to find the last commit CI passed on
+    outputs:
+      typecheck: ${{ steps.areas.outputs.typecheck }}
+      api: ${{ steps.areas.outputs.api }}
+      web: ${{ steps.areas.outputs.web }}
+      phones: ${{ steps.areas.outputs.phones }}
+      desktop: ${{ steps.areas.outputs.desktop }}
+      e2e: ${{ steps.areas.outputs.e2e }}
+      rust: ${{ steps.areas.outputs.rust }}
+      packages: ${{ steps.areas.outputs.packages }}
+    steps:
+      # Only the scripts and the workflows: the decision needs nothing else, and the job stays a few seconds long.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            .github/scripts
+            .github/workflows
+      - name: Check the script that decides
+        run: node --test .github/scripts/changed-areas.test.mjs
+      # The answer goes to the job's outputs, and why goes to the log and the run's summary.
+      - name: Decide which jobs run
+        id: areas
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node .github/scripts/changed-areas.mjs > "$RUNNER_TEMP/areas" 2> "$RUNNER_TEMP/why"
+          cat "$RUNNER_TEMP/areas" >> "$GITHUB_OUTPUT"
+          cat "$RUNNER_TEMP/why" "$RUNNER_TEMP/areas"
+          { echo "### What this run checks"; echo; cat "$RUNNER_TEMP/why"; } >> "$GITHUB_STEP_SUMMARY"
+
+  typecheck:
+    name: Typecheck
+    needs: changes
+    if: needs.changes.outputs.typecheck == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-workspace
+      - run: pnpm typecheck
+
+  api:
+    # vitest in real workerd, then the admin Access contract and the one-origin contract on a local Worker that
+    # wrangler starts (apps/api/package.json). Nothing reaches Cloudflare: both contracts refuse every outbound
+    # call, and no account or secret is used.
+    name: API tests
+    needs: changes
+    if: needs.changes.outputs.api == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-workspace
+      - run: pnpm --filter @manut/api test
+        env:
+          WRANGLER_SEND_METRICS: "false"
+      # The Deploy dev workflow's config check refuses a non-dev Worker and any TEST_ var; its test runs it on this
+      # repository's configs and on refused ones, with apps/api's Wrangler, reading files only.
+      - run: node --test .github/scripts/check-dev-deploys.test.mjs
+        env:
+          WRANGLER_SEND_METRICS: "false"
+
+  web:
+    name: Web tests
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-workspace
+      - run: pnpm --filter @manut/web test
+
+  web-phones:
+    # The owner opens the approval page, and sometimes the deletion page, from a LINE message on a phone. This opens every
+    # demo state of both, in practice mode (no API, the in-memory fake), in WebKit on an iPhone 17 and a 375-wide iPhone SE
+    # and in Chromium on a Pixel 8 and a 360 by 740 Android, in light and dark and at 100%, 125% and 150% text, and checks
+    # that nothing scrolls sideways, is cut off or overlaps, and that every button is 44px tall and can be pressed
+    # (apps/web/e2e). Unlike the desktop's Playwright jobs it is a check: a state that does not fit a phone fails the run.
+    # docs/phone-pass.md says what it covers, and what only a real phone and LINE's own browser can.
+    name: Web on phones
+    needs: changes
+    if: needs.changes.outputs.phones == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-workspace
+      # Both engines, with the system libraries and fonts they need: Thai among them, which the long Thai messages use.
+      # It takes under a minute, but it downloads from Ubuntu's mirror: one run saw it crawl (an 8 MB package took 90
+      # seconds) and use up the job's whole 25 minutes. A limit of its own fails that fast, and the job can be run again.
+      - name: Install Chromium and WebKit
+        timeout-minutes: 10
+        working-directory: apps/web
+        run: pnpm exec playwright install --with-deps chromium webkit
+      # Playwright starts the vite dev server itself (apps/web/playwright.config.ts). --retries=1 lets one slow start
+      # through as "flaky" in the summary, and a state that really does not fit fails twice. --global-timeout ends the run
+      # after 20 minutes with its report still written.
+      - name: Run the specs
+        working-directory: apps/web
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_FILE: ${{ runner.temp }}/playwright-results-web-phones.json
+        run: pnpm exec playwright test --forbid-only --workers=2 --retries=1 --reporter=list,json --global-timeout=1200000
+      - name: Write the counts to the job summary
+        if: ${{ !cancelled() }}
+        run: node .github/scripts/playwright-summary.mjs --title "Web on phones" --note "Every demo state of the owner's two pages on four phone sizes, in light and dark and at larger text. A failing test fails the run. docs/phone-pass.md says what this covers and what only a real phone can." "$RUNNER_TEMP/playwright-results-web-phones.json"
+      # The JSON report, alone so that it sits at the top of its artifact as the desktop's do.
+      - name: Keep the report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: web-phones-results
+          path: ${{ runner.temp }}/playwright-results-web-phones.json
+          if-no-files-found: ignore
+          retention-days: 7
+      # The screenshot Playwright takes of each failing test, when there is one.
+      - name: Keep the screenshots of the failures
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: web-phones-failures
+          path: apps/web/test-results
+          if-no-files-found: ignore
+          retention-days: 7
+
+  desktop:
+    name: Desktop tests
+    needs: changes
+    if: needs.changes.outputs.desktop == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-workspace
+      - run: pnpm --filter @manut/desktop test
+      # The release workflow's rules (it never publishes, and the app's updater is tied to it) and the Playwright
+      # summary's counts: they read the workflows and the desktop's config, so they run where a change to either does.
+      - run: node --test .github/scripts/release-desktop.test.mjs .github/scripts/playwright-summary.test.mjs
+
+  packages:
+    name: Package tests
+    needs: changes
+    if: needs.changes.outputs.packages == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-workspace
+      # Every package under packages/ that has tests; ui-kit has none, and --if-present skips it.
+      - run: pnpm --filter "./packages/*" --if-present test
+
+  rust:
+    # The desktop app's Rust side, on Linux and on macOS. Linux needs Tauri's system libraries; macOS has what
+    # it needs. Neither needs the front end built: without the custom-protocol feature, Tauri compiles in dev
+    # mode and points at devUrl instead of embedding ../dist.
+    name: Desktop Rust (${{ matrix.os }})
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - if: runner.os == 'Linux'
+        uses: ./.github/actions/tauri-linux-deps
+      # Both images ship rustup. No rust-toolchain file pins a version, so this takes the newest stable, which
+      # is usually the one already installed.
+      - name: Install stable Rust
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
+      # Caches ~/.cargo and src-tauri/target. Only pushes save it: a pull request's cache is visible to that pull
+      # request alone, and Tauri's build cache is big enough to push the useful branch caches out.
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: apps/desktop/src-tauri -> target
+          save-if: ${{ github.event_name == 'push' }}
+      # --locked fails when Cargo.lock no longer matches Cargo.toml, instead of quietly rewriting it.
+      - name: cargo check
+        working-directory: apps/desktop/src-tauri
+        run: cargo check --locked
+      - name: cargo test
+        working-directory: apps/desktop/src-tauri
+        run: cargo test --locked
+
+  e2e:
+    # The Playwright suite inherited from Oh My Hermes (156 spec files), run as six shards side by side. One job
+    # stopped at its 35 minutes with a fifth of the suite never started, so each shard takes what `--shard` gives it
+    # (whole spec files, the same number of tests each) and finishes in a quarter of an hour or less. Some specs may
+    # still fail (apps/desktop/README.md), so these jobs may fail without failing the run. Each shard writes its counts
+    # and failing tests to its job summary, and the job below adds them up. None of them is one of the checks main
+    # will require.
+    name: Desktop Playwright (shard ${{ matrix.shard }} of ${{ strategy.job-total }})
+    needs: changes
+    if: needs.changes.outputs.e2e == 'true'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 45
+    strategy:
+      # A shard that fails says nothing about the others, so none of them is cancelled for it. Adding a shard is one
+      # more number here: the divisor below is the matrix's own size.
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-workspace
+      # Chromium only: the one WebKit spec runs on macOS alone and skips itself here.
+      - name: Install Chromium
+        working-directory: apps/desktop
+        run: pnpm exec playwright install --with-deps chromium
+      # --global-timeout ends a shard after 35 minutes with its report still written, so a hung run still leaves
+      # counts behind instead of being killed by the job's timeout.
+      - name: Run the shard
+        working-directory: apps/desktop
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_FILE: ${{ runner.temp }}/playwright-results-${{ matrix.shard }}.json
+        run: pnpm exec playwright test --shard=${{ matrix.shard }}/${{ strategy.job-total }} --reporter=list,json --global-timeout=2100000
+      - name: Write the counts to the job summary
+        if: ${{ !cancelled() }}
+        run: node .github/scripts/playwright-summary.mjs --title "Desktop Playwright, shard ${{ matrix.shard }} of ${{ strategy.job-total }}" "$RUNNER_TEMP/playwright-results-${{ matrix.shard }}.json"
+      # The shard's JSON report, for the job below. A shard that left none is named there.
+      - name: Keep the report for the all-shards summary
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: playwright-results-${{ matrix.shard }}
+          path: ${{ runner.temp }}/playwright-results-${{ matrix.shard }}.json
+          if-no-files-found: ignore
+          retention-days: 7
+
+  e2e-summary:
+    # The shards' counts added up in one summary, with the failing tests of every shard in one list. It does not run
+    # the suite, so it needs no workspace: only the script and Node, which the runner has.
+    name: Desktop Playwright (all shards)
+    needs: [changes, e2e]
+    if: ${{ !cancelled() && needs.changes.outputs.e2e == 'true' }}
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # A run whose shards all left nothing finds no artifact; the summary then says it has no report.
+      - name: Fetch the shards' reports
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: playwright-results-*
+          path: ${{ runner.temp }}/playwright-results
+          merge-multiple: true
+      - name: Write the counts of all shards to the job summary
+        run: node .github/scripts/playwright-summary.mjs --title "Desktop Playwright, all shards" "$RUNNER_TEMP/playwright-results"

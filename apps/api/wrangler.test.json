@@ -14,12 +14,33 @@
     "OFFICE_EXTERNAL_WRITES": "1",
     "LINEAR_WEBHOOK_SECRET": "test-linear-webhook-secret",
     "RELAY_ENABLED": "1",
+    "WEB_ORIGIN": "https://web.manut.test",
+    "PUBLIC_API_ORIGIN": "https://api.manut.test",
+    "APPROVAL_LINK_SECRET": "test-approval-link-secret-0123456789abcdef",
+    "EMAIL_SIGN_IN": "on",
+    "SELF_SERVE_SHOPS": "on",
+    "EMAIL_FROM_ADDRESS": "codes@manut.test",
+    "EMAIL_FROM_NAME": "Manut AI",
+    "TEST_EMAIL_OUTBOX": "on",
+    "TEST_GOOGLE_ORIGIN": "https://google.test",
+    "APPLE_TEAM_ID": "TESTTEAM01",
+    "APPLE_KEY_ID": "TESTKEY001",
+    "TEST_APPLE_PRIVATE_KEY": "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgbpnUi5KhRbpkEXDeYAcGSYdMB7GbfOE44EiBQxgPQ+KhRANCAATpeYG2BOaccJ/bw3I4x6xBmH0jXnkoE6lgzJlRZPKhk/PWg5rERj7+ltBe3QMhmV72Wk6nmYI4/Bkgg7oM+tRp",
+    "TEST_APPLE_ORIGIN": "https://apple.test",
     "TEST_JWKS_JSON": "{\"keys\":[{\"kty\":\"EC\",\"crv\":\"P-256\",\"kid\":\"test-key-1\",\"alg\":\"ES256\",\"x\":\"XkiBzVCEinLxSV5HTHlIk_dP5ebqKbf50G0GUVfMdIQ\",\"y\":\"RZYriukHp_ncrsqWDuh0NRFJZR4vQ2ZP7JlWgYLlH_I\"}]}"
   },
   "ratelimits": [
     {
       "name": "AUTH_EXCHANGE_LIMITER",
       "namespace_id": "2026100491",
+      "simple": {
+        "limit": 10,
+        "period": 60
+      }
+    },
+    {
+      "name": "AUTH_CODE_LIMITER",
+      "namespace_id": "2026100499",
       "simple": {
         "limit": 10,
         "period": 60
@@ -54,6 +75,70 @@
       "namespace_id": "2026100495",
       "simple": {
         "limit": 60,
+        "period": 60
+      }
+    },
+    {
+      "name": "LINE_INBOUND_LIMITER",
+      "namespace_id": "2026100496",
+      "simple": {
+        "limit": 300,
+        "period": 60
+      }
+    },
+    {
+      "name": "PILOT_APPROVAL_LIMITER",
+      "namespace_id": "2026100497",
+      "simple": {
+        "limit": 120,
+        "period": 60
+      }
+    },
+    {
+      "name": "OUTPOST_LIMITER",
+      "namespace_id": "2026100498",
+      "simple": {
+        "limit": 300,
+        "period": 60
+      }
+    },
+    {
+      "name": "GOOGLE_CALLBACK_LIMITER",
+      "namespace_id": "2026100437",
+      "simple": {
+        "limit": 30,
+        "period": 60
+      }
+    },
+    {
+      "name": "SELF_SERVE_SHOP_LIMITER",
+      "namespace_id": "2026100441",
+      "simple": {
+        "limit": 10,
+        "period": 60
+      }
+    },
+    {
+      "name": "TENANT_DELETE_LIMITER",
+      "namespace_id": "2026100445",
+      "simple": {
+        "limit": 10,
+        "period": 60
+      }
+    },
+    {
+      "name": "SHOP_SESSION_LIMITER",
+      "namespace_id": "2026100449",
+      "simple": {
+        "limit": 20,
+        "period": 60
+      }
+    },
+    {
+      "name": "ARTIFACT_READ_LIMITER",
+      "namespace_id": "2026100453",
+      "simple": {
+        "limit": 120,
         "period": 60
       }
     }

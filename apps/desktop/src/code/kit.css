@@ -1,0 +1,330 @@
+/* Kit on the Code page (KitPanel.tsx) and on a coding session's asks (KitCardParts.tsx): the design canvas's
+   StatesCodeDev board. The canvas's rules from packages/ui-kit/app.css (.dial, .banner, .lk, .mono) are copied and
+   scoped under the panel's root class, as mission.css scopes the job page's; menuPages.css gives the bands, rows and
+   tags under .mpage. The canvas's short token names map onto the desktop's (src/theme/tokens.css): --bg is
+   --aui-surface, --mut is --aui-muted. Lines that are the desktop's own rather than the canvas's say so. */
+
+.kitp {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  /* The desktop's own: the panel stands apart from the sessions under it. */
+  margin-bottom: 18px;
+}
+.kitp .mut {
+  margin: 0;
+  color: var(--aui-muted);
+  font-size: 13px;
+}
+/* The desktop's own: the level's line and the line under it start where the rows' words do. */
+.kitp .lv,
+.kitp > .mut {
+  margin: 0;
+  padding: 0 10px;
+  font-size: 13px;
+}
+.kitp .mono {
+  font-family: var(--aui-font-mono);
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+.kitp .lk {
+  position: relative;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--aui-muted);
+  text-decoration: underline;
+}
+.kitp .lk:hover {
+  color: var(--ink);
+}
+
+/* How much Kit does alone: one stop pressed. */
+.kitp .dial {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--rad-lg);
+  background: var(--soft);
+}
+.kitp .dial button {
+  flex: 1 1 110px;
+  min-height: 44px;
+  padding: 6px 10px;
+  border-radius: var(--rad);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--aui-muted);
+  text-align: center;
+}
+.kitp .dial button[aria-pressed="true"] {
+  background: var(--aui-surface);
+  color: var(--ink);
+  box-shadow: 0 0 0 1px var(--line);
+}
+.kitp .dial button:focus-visible {
+  outline: 2px solid var(--aui-border-strong);
+  outline-offset: 1px;
+}
+
+.kitp .banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--rad-lg);
+  background: var(--aui-subtle);
+  font-size: 13.5px;
+}
+.kitp .banner.warn {
+  border-color: transparent;
+  background: var(--warnbg);
+}
+
+/* The project's name or picker, with its own icon before it when its folder keeps one (item 100b). */
+.kit-proj {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+/* the picker keeps the half of the band it had */
+.kit-proj:has(select) {
+  max-width: 50%;
+}
+.kit-proj .proj-ic {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+  border-radius: 3px;
+}
+/* The desktop's own: the project picker beside the dial's band, as quiet as the band's words. */
+.kitp .band select {
+  max-width: 100%;
+  padding: 2px 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--rad);
+  background: var(--aui-surface);
+  color: var(--ink);
+  font-family: var(--aui-font-mono);
+  font-size: 12.5px;
+}
+
+/* Kit's lanes (Lanes.tsx): the canvas's Lanes band. A row is one lane: its title, who works on it, the branch Kit made for
+   it as a mono tag, and its state as a tag, with a line under it for what the state means. The desktop's own: a row is a
+   button, and the working tag carries the time its turn has run. */
+.kitp .lanes {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  /* The desktop's own: the lanes stand apart from the dial's band under them. */
+  margin-bottom: 10px;
+}
+.kitp .lane .who {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+.kitp .lane .tag.mono {
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.kitp .lane .tag .when {
+  font-weight: 400;
+}
+.kitp .lane .lline {
+  padding: 0 10px 2px;
+}
+/* The failing tests the line names: a few, in mono, each on its own line. */
+.kitp .lane .lnames {
+  margin: 0;
+  padding: 0 10px 4px 28px;
+  list-style: disc;
+  font-family: var(--aui-font-mono);
+  font-size: 12.5px;
+  color: var(--aui-muted);
+}
+
+/* A coding session's ask: what the step does in words, under the command, in the card's reading size (the canvas's
+   StatesCodeDev card sets it under the command), and a key in the change, in the red of what cannot be undone, on the
+   scale of the card's other lines (chat/cards/cards.css). */
+.card-kit-say {
+  margin: 0;
+  font-size: 14px;
+  color: var(--ink);
+}
+.card-kit-key {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--danger);
+}
+
+/* The main branch moving while Kit worked (MainMoved.tsx, the canvas's "The main branch moved"): the line, the files in
+   mono, the two buttons, then both sides of each file. The desktop's own: the canvas draws the card on a stage; here it is
+   the panel's banner stood up as a column. */
+.kitp .banner.kitm {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+.kitp .kitm p {
+  margin: 0;
+}
+.kitp .kitm-files {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.kitp .chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.kitp .kitm-both {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 4px;
+}
+.kitp .kitm-pair {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.kitp .kitm-pair h4,
+.kitp .kitm-pair h5 {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.kitp .kitm-pair h5 {
+  margin-bottom: 4px;
+  color: var(--aui-muted);
+  font-weight: 500;
+}
+/* two columns while each has room, one under the other when it does not */
+.kitp .kitm-cols {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 10px;
+}
+.kitp .kitm-cols > div {
+  min-width: 0;
+}
+/* the pair's own heading names the file, so each side's diff header keeps only its counts */
+.kitp .kitm-cols .dv-path {
+  display: none;
+}
+
+/* Bring it back (BringBack.tsx, the canvas's StatesCode "Reverted"): the panel under a Reverted lane's row. The desktop's own:
+   the canvas draws only the link, and the panel is where the person sees which files come back and which they changed by hand,
+   as Rewind's panel shows them. The words, ticks and notes are Rewind's (rewind.css's rw-* classes); this is the box that holds
+   them, as the main-moved note's banner is stood up as a column. It starts where the row's line does. */
+.kitp .bb {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 4px 10px 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--rad-lg);
+  background: var(--aui-subtle);
+  font-size: 13.5px;
+}
+.kitp .bb p {
+  margin: 0;
+}
+/* The main-moved note on a lane's row (MainMoved.tsx): the same banner as under the dial, indented to where the row's line
+   starts, as Bring it back's panel is. */
+.kitp .lane .banner.kitm {
+  margin: 4px 10px 8px;
+}
+
+/* Kit's folders kept (KeptLanes.tsx): a lane's folder that outlived its session, as a row under the lanes, with Remove's panel
+   under it stood up as a column like the main-moved note, indented to where a row's line starts. The desktop's own: the canvas
+   draws no kept folder. */
+.kitp .kept .rowl {
+  cursor: default;
+}
+.kitp .banner.kept-confirm {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  margin: 4px 10px 8px;
+}
+.kitp .kept-confirm p {
+  margin: 0;
+}
+.kitp .kept-tick {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* The desktop's own (item 76): a lane's quiet "more" button, its pin mark, a settled lane's small and quiet type, and the line that
+   opens the snoozed and archived lanes. The button shows on hover, on focus and while its menu is open. */
+.kitp .lane {
+  position: relative;
+}
+.kitp .lane .lane-more {
+  position: absolute;
+  top: 8px;
+  right: 6px;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--r-sm);
+  color: var(--aui-muted);
+  opacity: 0;
+}
+.kitp .lane:hover .lane-more,
+.kitp .lane .lane-more:focus-visible,
+.kitp .lane.menu-open .lane-more {
+  opacity: 1;
+}
+.kitp .lane .lane-pin {
+  color: var(--aui-muted);
+  font-size: 9px;
+}
+.kitp .lane.settled {
+  opacity: 0.7;
+}
+.kitp .lane.settled .rowl {
+  min-height: 32px;
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+.kitp .lane-away {
+  align-self: flex-start;
+  margin: 4px 10px;
+}
+.kitp .lane-away-word {
+  display: block;
+  padding: 4px 10px 0;
+  font-size: 12px;
+}
+
+/* Why Open in <editor> failed (item 107): one quiet line in the app's own words, under the lane or at the top of the page. */
+.kitp .lane .lane-editor-why {
+  display: block;
+  padding: 6px 10px 2px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.kitp .kit-editor-why {
+  margin: 0;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--muted);
+}

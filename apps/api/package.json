@@ -6,17 +6,30 @@
     "node": ">=22.0.0"
   },
   "scripts": {
-    "dev": "wrangler dev",
+    "dev": "wrangler dev -c wrangler.jsonc -c wrangler.web.jsonc",
     "check": "wrangler deploy --dry-run --outdir=.wrangler/dry-run",
-    "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "test:access": "node scripts/admin-access-contract.mjs"
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.remote-mac.json",
+    "test": "vitest run && node scripts/admin-access-contract.mjs && node scripts/one-origin-contract.mjs",
+    "test:access": "node scripts/admin-access-contract.mjs",
+    "test:origin": "node scripts/one-origin-contract.mjs"
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "1.6.0",
     "@cloudflare/workers-types": "5.20261108.1",
+    "@manut/remote-channel": "workspace:*",
     "typescript": "7.0.2",
     "vitest": "5.1.0",
     "wrangler": "^4.158.0"
+  },
+  "dependencies": {
+    "@manut/agent-prompts": "workspace:*",
+    "@manut/approval-core": "workspace:*",
+    "@manut/books": "workspace:*",
+    "@manut/member-grants": "workspace:*",
+    "@manut/people-rules": "workspace:*",
+    "@manut/routine-rules": "workspace:*",
+    "@manut/shop-memory": "workspace:*",
+    "@manut/sheets-rows": "workspace:*",
+    "@manut/shop-templates": "workspace:*"
   }
 }

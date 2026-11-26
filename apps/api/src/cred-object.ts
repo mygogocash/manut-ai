@@ -1,15 +1,27 @@
 import { DurableObject } from "cloudflare:workers";
 import { readJsonBody } from "./body";
 import { keyTag, openSecret, sealSecret, type SealedSecret } from "./cred-crypto";
+import { GOOGLE_PROVIDER, googleFlowKeys, googleVaultRoute, isGoogleVaultPath, type GoogleFields } from "./google-vault";
+import { resealStore, sameSeal, type ResealStore } from "./reseal";
+import { isSignInVaultPath, signInVaultRoute, wipeSignInVault } from "./sign-in-vault";
 
 type CredEnv = {
   CRED_KEY?: string;
   CRED_KEY_PREVIOUS?: string;
 };
 
-export type ConnectionProviders = "gmail" | "gcal" | "linear";
+/// `line` is a Manut AI pilot shop's LINE Official Account. Its sealed secret
+/// is one envelope holding both the channel access token and the channel
+/// secret (connectors/line.ts), so both stay encrypted at rest and neither is
+/// returned by any route; its account is the channel id and its one granted
+/// resource the bot's user id.
+///
+/// `gsheets` is the shop owner's own Google account, connected with the `drive.file` scope only, for the Google Sheet
+/// Ton appends each month's books to (google-vault.ts, docs/connectors.md 4b). Its sealed secret is the refresh token
+/// Google gave the sign-in, its one granted resource the spreadsheet the app made, and it is made only by that sign-in.
+export type ConnectionProviders = "gmail" | "gcal" | "linear" | "line" | "gsheets";
 
-type ConnectionRec = {
+type ConnectionRec = GoogleFields & {
   id: string;
   tenant: string;
   provider: string;
@@ -36,17 +48,37 @@ type ConnectionRec = {
 
 /// What the vault may actually hold: records sealed before granted scope
 /// existed carry none of the grant fields, and read with safe defaults.
-type StoredConnectionRec = Omit<ConnectionRec, "resourceIds" | "allowsActions" | "grantRevision"> & {
+export type StoredConnectionRec = Omit<ConnectionRec, "resourceIds" | "allowsActions" | "grantRevision"> & {
   resourceIds?: string[];
   allowsActions?: boolean;
   grantRevision?: number;
 };
 
-const KNOWN_PROVIDERS = new Set(["gmail", "gcal", "linear"]);
+/// `gsheets` is known so it is listed, read for the broker, revoked, re-keyed and wiped like every connection, and so
+/// the practice clock can read when the shop first connected it (`/first-connection`).
+const KNOWN_PROVIDERS = new Set(["gmail", "gcal", "linear", "line", GOOGLE_PROVIDER]);
+/// Providers whose connections only their own sign-in makes. The generic store refuses them, so no session or operator
+/// route can put a token in by another way: a Google connection always comes from Google's answer to a sign-in the
+/// owner started, with its state and PKCE checked, and replaces the shop's earlier one (google-vault.ts).
+const SIGN_IN_ONLY_PROVIDERS: ReadonlySet<string> = new Set([GOOGLE_PROVIDER]);
 const REFRESH_LEASE_SECONDS = 60;
 const MAX_BODY_BYTES = 256 * 1024;
 const MAX_RESOURCE_IDS = 100;
 const MAX_RESOURCE_ID_LENGTH = 256;
+
+/// The shop's live connections as re-sealing reaches them (reseal.ts). A revoked connection keeps no secret, so it is
+/// never one of them, and one revoked while its secret was being sealed again is read back as gone and left revoked.
+export function connectionResealStore(storage: DurableObjectStorage, tenant: string):
+  ResealStore<StoredConnectionRec> {
+  const live = (record: StoredConnectionRec | undefined) =>
+    record && record.tenant === tenant && !record.revokedAt ? record : undefined;
+  return {
+    live: async () => [...(await storage.list<StoredConnectionRec>({ prefix: "conn:" })).values()]
+      .filter((record) => live(record) !== undefined),
+    reread: async (id) => live(await storage.get<StoredConnectionRec>(`conn:${id}`)),
+    write: (record) => storage.put(`conn:${record.id}`, record),
+  };
+}
 
 /// Broker-only credential store. Provider secrets enter sealed and leave
 /// only through the broker's internal read: listing and revocation expose
@@ -59,11 +91,18 @@ export class CredObject extends DurableObject {
 
   override async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
+    // The shop's site sign-ins for browser control (sign-in-vault.ts), sealed with the same keys as connections.
+    if (isSignInVaultPath(url.pathname)) return signInVaultRoute(this.ctx.storage, this.credEnv, request, url);
+    // The owner's Google connection and its sign-in in flight (google-vault.ts), sealed with the same keys.
+    if (isGoogleVaultPath(url.pathname)) return googleVaultRoute(this.ctx.storage, this.credEnv, request, url);
     if (request.method === "POST" && url.pathname === "/connections") {
       return this.store(request);
     }
     if (request.method === "GET" && url.pathname === "/connections") {
       return this.list(url, request);
+    }
+    if (request.method === "GET" && url.pathname === "/first-connection") {
+      return this.firstConnection(url, request);
     }
     const connectionRead = url.pathname.match(/^\/connections\/([^/]+)$/);
     if (request.method === "GET" && connectionRead) {
@@ -85,6 +124,9 @@ export class CredObject extends DurableObject {
     }
     if (request.method === "POST" && url.pathname === "/use") {
       return this.use(request);
+    }
+    if (request.method === "POST" && url.pathname === "/connections/reseal") {
+      return this.reseal(request);
     }
     if (request.method === "POST" && url.pathname === "/rekey") {
       return this.rekey(request);
@@ -139,6 +181,7 @@ export class CredObject extends DurableObject {
       (headerTenant && body.tenant !== headerTenant) ||
       typeof body.provider !== "string" ||
       !KNOWN_PROVIDERS.has(body.provider) ||
+      SIGN_IN_ONLY_PROVIDERS.has(body.provider) ||
       typeof body.accountId !== "string" ||
       body.accountId.length === 0 ||
       body.accountId.length > 256 ||
@@ -193,10 +236,36 @@ export class CredObject extends DurableObject {
     return Response.json({ connections });
   }
 
+  /// When the tenant first connected one provider: the earliest creation time
+  /// among its connections to it, revoked ones included, since revocation keeps
+  /// the record (without its secret). Only that time leaves, nothing else about
+  /// any connection. The Manut AI pilot gate reads it as the trial start of a
+  /// shop that was connected before trial starts were recorded on the shop.
+  private async firstConnection(url: URL, request: Request): Promise<Response> {
+    const tenant = url.searchParams.get("tenant") ?? "";
+    const provider = url.searchParams.get("provider") ?? "";
+    if (!tenant || tenant !== this.tenantOf(request) || !KNOWN_PROVIDERS.has(provider)) {
+      return Response.json({ error: "not_found" }, { status: 404 });
+    }
+    let first: { createdAt: string; ms: number } | null = null;
+    for (const [, record] of await this.ctx.storage.list<StoredConnectionRec>({ prefix: "conn:" })) {
+      if (record.tenant !== tenant || record.provider !== provider) continue;
+      const ms = Date.parse(record.createdAt);
+      if (Number.isFinite(ms) && (first === null || ms < first.ms)) first = { createdAt: record.createdAt, ms };
+    }
+    return Response.json({ createdAt: first?.createdAt ?? null });
+  }
+
   private async revoke(url: URL, request: Request): Promise<Response> {
     const id = url.pathname.split("/")[2] ?? "";
     const record = await this.load(id, request);
     if (record instanceof Response) return record;
+    // A connection only its sign-in makes is removed only by its own disconnect, which revokes it at the provider first
+    // and writes it to the log (google-connect.ts sends the Worker's `x-google` header). The generic route would forget
+    // the token while the owner's Google account still lists Manut AI as having access.
+    if (SIGN_IN_ONLY_PROVIDERS.has(record.provider) && request.headers.get("x-google") !== "1") {
+      return Response.json({ error: "disconnect_required" }, { status: 409 });
+    }
     // Revocation wipes secret material but keeps the tombstone, so a
     // restored backup cannot quietly resurrect a live credential.
     const tombstone: ConnectionRec = {
@@ -278,8 +347,36 @@ export class CredObject extends DurableObject {
       return Response.json({ error: "unseal_failed" }, { status: 500 });
     }
     const sealed = await sealSecret(plaintext, key);
-    await this.ctx.storage.put(`conn:${record.id}`, { ...record, sealed });
+    // Unsealing and sealing let other requests in. A connection revoked, refreshed or replaced meanwhile is left as it
+    // now is: writing the record read before would bring a revoked secret back, or undo a new one.
+    const now = await this.ctx.storage.get<StoredConnectionRec>(`conn:${record.id}`);
+    if (!now || now.revokedAt || now.tenant !== record.tenant || !sameSeal(now.sealed, record.sealed)) {
+      return Response.json({ error: "changed" }, { status: 409 });
+    }
+    await this.ctx.storage.put(`conn:${record.id}`, { ...now, sealed });
     return Response.json({ rekeyed: true, keyTag: sealed.keyTag });
+  }
+
+  /// `POST /connections/reseal` with exactly `{}`: after an operator rotates the vault's key, every live connection of
+  /// the shop whose secret is sealed under another key is sealed again under the current one, so the previous key can
+  /// be retired (reseal.ts). It answers how many it sealed, how many already were, any it could not open, and how many
+  /// still need the previous key.
+  private async reseal(request: Request): Promise<Response> {
+    const key = this.keyOrVaultError();
+    if (typeof key !== "string") return key;
+    const tenant = this.tenantOf(request);
+    if (!tenant) return Response.json({ error: "not_found" }, { status: 404 });
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return Response.json({ error: "invalid_json" }, { status: 400 });
+    }
+    if (body === null || typeof body !== "object" || Array.isArray(body) || Object.keys(body).length > 0) {
+      return Response.json({ error: "invalid_request" }, { status: 400 });
+    }
+    return Response.json(await resealStore(connectionResealStore(this.ctx.storage, tenant),
+      { CRED_KEY: key, CRED_KEY_PREVIOUS: this.credEnv.CRED_KEY_PREVIOUS }));
   }
 
   private async tenantWipe(request: Request): Promise<Response> {
@@ -295,13 +392,18 @@ export class CredObject extends DurableObject {
     if (typeof body.tenant !== "string" || !body.tenant) {
       return Response.json({ error: "invalid_request" }, { status: 400 });
     }
-    // The vault is per-tenant, so wiping is deleting every connection record.
+    // The vault is per-tenant, so wiping is deleting every connection record, and every site sign-in, outpost and
+    // sign-in grant (sign-in-vault.ts).
     const keys: string[] = [];
     for (const [key] of await this.ctx.storage.list({ prefix: "conn:" })) {
       keys.push(key);
     }
-    await this.ctx.storage.delete(keys);
-    return Response.json({ connectionsWiped: keys.length });
+    // A Google sign-in still in flight holds a sealed PKCE verifier, so it goes too. Storage deletes at most 128 keys
+    // a call.
+    const doomed = [...keys, ...(await googleFlowKeys(this.ctx.storage))];
+    for (let i = 0; i < doomed.length; i += 128) await this.ctx.storage.delete(doomed.slice(i, i + 128));
+    const signIns = await wipeSignInVault(this.ctx.storage);
+    return Response.json({ connectionsWiped: keys.length, ...signIns });
   }
 
   private public(record: ConnectionRec): object {
@@ -314,6 +416,11 @@ export class CredObject extends DurableObject {
       allowsActions: record.allowsActions ?? false,
       grantRevision: record.grantRevision ?? 1,
       createdAt: record.createdAt,
+      // A Google connection's sheet (its id, title and tab, never what is in it) and, once Google refused it, when and
+      // why it broke. The listing is what the broker and the job flow read, and a broken connection is sent through
+      // by neither.
+      ...(record.sheet ? { sheet: record.sheet } : {}),
+      ...(record.brokenAt ? { brokenAt: record.brokenAt, brokenReason: record.brokenReason ?? "refused" } : {}),
     };
   }
 }

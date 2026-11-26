@@ -1,0 +1,93 @@
+import { describe, expect, it } from "vitest";
+import { maskCommand, maskSecrets, revealHidden, sameShape, shellWords, showCommand } from "./secrets";
+import table from "./secrets.cases.json";
+
+const X = (n: number) => "X".repeat(n);
+
+describe("maskSecrets (the one masker; patterns in secrets.json)", () => {
+  it("masks every token family whole", () => {
+    for (const tok of [`ghp_${X(36)}`, `gho_${X(36)}`, `ghu_${X(36)}`, `ghs_${X(36)}`, `ghr_${X(36)}`, `github_pat_${X(40)}`, `glpat-${X(20)}`, `sk-ant-${X(30)}`, `xoxb-${X(20)}`, `xoxp-${X(20)}`, `AKIA${X(16)}`]) {
+      expect(maskSecrets(`before ${tok} after`)).toBe("before •••• after");
+    }
+  });
+
+  it("masks the value of credential=, token=, password= and keeps the text around it readable", () => {
+    expect(maskSecrets(`failure credential=ghp_${X(36)}`)).toBe("failure credential=••••");
+    expect(maskSecrets("see [the docs](https://example.com/a?token=abc123&x=1) now")).toBe("see [the docs](https://example.com/a?token=••••&x=1) now");
+    expect(maskSecrets("```sh\nexport GH_TOKEN=abc123def\nPASSWORD=hunter2 make\n```")).toBe("```sh\nexport GH_TOKEN=••••\nPASSWORD=•••• make\n```");
+    expect(maskSecrets("x-api-key=k1 api_key=k2 secret=s")).toBe("x-api-key=•••• api_key=•••• secret=••••");
+  });
+
+  it("runs the shared table (secrets.cases.json, also run by tasks.rs and the bridge)", () => {
+    expect(table.cases.length).toBeGreaterThan(120);
+    for (const [text, want] of table.cases) expect(maskSecrets(text), text).toBe(want);
+  });
+
+  it("runs the shared command table: what an approval shows (secrets.cases.json `command`, also run by tasks.rs)", () => {
+    expect(table.command.length).toBeGreaterThan(25);
+    for (const [text, want, notes = ""] of table.command) {
+      const shown = showCommand(text);
+      expect(shown.text, text).toBe(want);
+      // a row's third field names the notes the card adds: `unmasked` when the line is shown as it is, `hidden` when it
+      // holds characters that do not show, each replaced by a mark (item 121)
+      expect(shown.unmasked, text).toBe(notes.split(" ").includes("unmasked"));
+      expect(shown.hidden, text).toBe(notes.split(" ").includes("hidden"));
+      expect(maskCommand(text), text).toBe(want);
+    }
+  });
+
+  it("splits a shown command into the same shell words as the command, on every row of both tables (item 121)", () => {
+    // a mask stands for part of one word and never for a blank, a quote, `#` or a second word, so the line a person
+    // reads splits where the line that runs does
+    for (const [text] of [...table.command, ...table.cases]) {
+      expect(shellWords(maskCommand(text)).length, text).toBe(shellWords(text).length);
+    }
+  });
+
+  it("shows every direction and format character in an ask's text as a visible mark (item 121, secrets.cases.json `reveal`)", () => {
+    expect(table.reveal.length).toBeGreaterThan(3);
+    for (const [text, want] of table.reveal) expect(revealHidden(text), JSON.stringify(text)).toBe(want);
+  });
+
+  it("accepts a masked line only when its words are the command's, each with only a key's part replaced (item 121)", () => {
+    expect(table.shape.length).toBeGreaterThan(8);
+    for (const [before, after, same] of table.shape) expect(sameShape(before as string, after as string), `${before} -> ${after}`).toBe(same);
+  });
+
+  it("never hides a character the shell acts on, nor a line, in a command (item 117)", () => {
+    // what the shell reads as structure must survive the masker exactly, in order, on every row of both tables. A value
+    // also stops at a backslash; a key block on one line (a JSON string's `\n`) keeps its own, which escape only its own
+    // masked characters, since the block starts and ends with its dashes.
+    const shell = (s: string) => s.replace(/[^`$()|;&<>{}\n]/g, "");
+    const block = /-{4,5} ?BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY/;
+    for (const [text] of [...table.command, ...table.cases]) {
+      // a private key block keeps its BEGIN and END lines and shows its body as one line: only its body's line breaks go
+      const out = maskCommand(text);
+      const lines = (s: string) => (block.test(text) ? s.replace(/\n/g, "") : s);
+      expect(lines(shell(out)), text).toBe(lines(shell(text)));
+    }
+  });
+
+  it("masks an sk- key of 32 lowercase hex, built here so no scanner reads the table as a live key (item 117)", () => {
+    const key = `sk-${"0a1b2c3d".repeat(4)}`;
+    expect(maskSecrets(`deepseek ${key} done`)).toBe("deepseek •••• done");
+    expect(maskCommand(`DEEPSEEK=${key} pnpm test`)).toBe("DEEPSEEK=•••• pnpm test");
+  });
+
+  it("masks a Slack refresh token, built here so no scanner reads the table as a live one (item 117)", () => {
+    const token = ["xoxe", "1", "X".repeat(20)].join("-");
+    expect(maskSecrets(`refresh ${token} done`)).toBe("refresh •••• done");
+    expect(maskCommand(`SLACK_REFRESH=${token} node sync.js`)).toBe("SLACK_REFRESH=•••• node sync.js");
+  });
+
+  it("masks a token broken by a line break and keeps the prose after it", () => {
+    expect(maskSecrets(`before ghp_XXXX\n${X(32)} after`)).toBe("before •••• after");
+    expect(maskSecrets(`ghp_${X(36)}\nThe next line`)).toBe("••••\nThe next line");
+  });
+
+  it("leaves ordinary words alone", () => {
+    for (const s of ["task-management works", "a risk-assessment", "ghp_ short", "the token is in the vault", "password: see wiki", "desk-lamp-shopping-list"]) {
+      expect(maskSecrets(s)).toBe(s);
+    }
+  });
+});

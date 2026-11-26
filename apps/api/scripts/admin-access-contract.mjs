@@ -3,8 +3,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { createRequire } from "node:module";
-import { fileURLToPath } from "node:url";
-import { Miniflare, Log, LogLevel, convertV4MiniflareOptions } from "miniflare";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 // All input is the committed synthetic local test configuration. This exercises
 // the entry HTTP router, which populates actual workerd ctx.access; SELF service
@@ -13,8 +12,13 @@ const config = JSON.parse(await readFile(new URL("../wrangler.test.json", import
 assert.equal(config.name, "manut-api-test");
 // Reuse Wrangler's pinned build dependency directly, avoiding CLI user
 // preference/metadata resolution. This runner needs no provider configuration.
+// Miniflare is Wrangler's dependency too, not this package's, so pnpm's strict layout only finds it from
+// Wrangler's folder; importing it by name here failed with ERR_MODULE_NOT_FOUND.
 const require = createRequire(import.meta.url);
-const { build, stop } = createRequire(require.resolve("wrangler/package.json"))("esbuild");
+const fromWrangler = createRequire(require.resolve("wrangler/package.json"));
+const { build, stop } = fromWrangler("esbuild");
+const { Miniflare, Log, LogLevel, convertV4MiniflareOptions } =
+  await import(pathToFileURL(fromWrangler.resolve("miniflare")).href);
 const audience = config.vars.ADMIN_ACCESS_AUD;
 const durableObjects = Object.fromEntries(config.durable_objects.bindings.map(({ name, class_name }) =>
   [name, { className: class_name, useSQLite: true }]));

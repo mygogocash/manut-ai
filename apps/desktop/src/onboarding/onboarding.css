@@ -1,0 +1,431 @@
+/* The first-run setup (Onboarding.tsx), as the design canvas draws it in Welcome.dc.html and Onboarding.dc.html: the
+   rules of packages/ui-kit/app.css it uses (.hero, .top, .acts, .stepper, .stp, .col, .field, .lab, .input, .help,
+   .fchip, .band, .rowl, .grow, .tag, .hint, .btn, .lk, .rad, .mut and the touch targets of .btn and .fchip), and the
+   canvas's inline styles on those two boards, copied and scoped under the setup's root class, .frun, as menu.css scopes
+   the menu's, so none of them reaches the rest of the app. The canvas's .hint is .fnote here: the chat's own .hint
+   (chat.css) is global, and it would lift these lines out of the page as a popover. The canvas's short token names map
+   onto the desktop's
+   (src/theme/tokens.css): --mut is --aui-muted, --band is --aui-subtle, the canvas's surface --bg is --aui-surface,
+   --pri and --onpri are --aui-primary and --aui-on-primary, and --erri is --aui-danger. Lines that are the desktop's own
+   rather than the canvas's say so. */
+
+/* The window while the setup fills it: the canvas's screen root (.r and .app), with no side menu. */
+.frun {
+  height: 100%;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  background: var(--main);
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.5;
+}
+/* Welcome sits in the middle of the window (the board's `align-content:center`). Auto margins centre it rather than
+   justify-content, so a window shorter than Welcome scrolls from its top instead of cutting the top off. */
+.frun.welcome > .hero {
+  margin-block: auto;
+}
+/* The desktop's own: a heading that takes the keyboard when its screen opens shows no ring, as it is not a control. */
+.frun [tabindex="-1"]:focus {
+  outline: none;
+}
+.frun .mut {
+  color: var(--aui-muted);
+}
+.frun .fnote {
+  margin: 0;
+  color: var(--aui-muted);
+  font-size: 12.5px;
+}
+
+/* Welcome: the brand, the line under it, the one way in, the languages and the promise. */
+.frun .hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  padding: 32px 20px;
+}
+.frun .wlock {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-size: 40px;
+  line-height: 1;
+  font-weight: 600;
+  letter-spacing: -0.04em;
+}
+.frun .wlock svg {
+  display: block;
+  border-radius: 14px;
+}
+.frun .tagline {
+  margin: 0;
+  max-width: 44ch;
+  font-size: 17px;
+  line-height: 1.4;
+  text-align: center;
+}
+.frun .ways {
+  width: 100%;
+  max-width: 360px;
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.frun .hero .fnote {
+  text-align: center;
+}
+.frun .langs {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+/* The steps' top bar: the brand on the left, the stepper in the middle, how far along on the right. */
+.frun .top {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  min-height: 52px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--line);
+}
+.frun .fbrand {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+.frun .fbrand svg {
+  display: block;
+  border-radius: 7px;
+}
+.frun .acts {
+  flex: 1 1 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.frun .count {
+  color: var(--aui-muted);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.frun .stepper {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+  color: var(--aui-muted);
+}
+.frun .stp {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.frun .stp i {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--rad-pill);
+  border: 1.5px solid var(--aui-border-strong);
+  font-style: normal;
+  font-size: 12px;
+  font-weight: 600;
+}
+.frun .stp.done i {
+  border-color: var(--aui-primary);
+  background: var(--aui-primary);
+  color: var(--aui-on-primary);
+}
+.frun .stp.now {
+  color: var(--ink);
+  font-weight: 500;
+}
+.frun .stp.now i {
+  border-color: var(--ink);
+  color: var(--ink);
+}
+
+/* A step: the reading column, 600px wide, with the room the canvas leaves above it. */
+.frun .col {
+  width: 100%;
+  max-width: 600px;
+  margin: 0 auto;
+  padding: 96px 20px 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.frun .col h1 {
+  margin: 0;
+  font-size: 28px;
+  line-height: 1.15;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+}
+.frun .lead {
+  margin: 8px 0 0;
+  color: var(--aui-muted);
+}
+
+/* Fields: a label, the control and its help, which turns into the error when a Next was refused. */
+.frun .field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.frun .field > label,
+.frun .lab {
+  font-size: 13px;
+  font-weight: 500;
+}
+/* The desktop's own: the quiet Optional after a label is not bold. */
+.frun .field > label .mut {
+  font-weight: 400;
+}
+.frun .input {
+  width: 100%;
+  min-height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--aui-border-strong);
+  border-radius: var(--rad);
+  background: var(--aui-surface);
+  font-size: 14px;
+  /* The desktop's own: the field takes the page's ink. */
+  color: var(--ink);
+}
+.frun .input::placeholder {
+  color: var(--aui-placeholder);
+}
+.frun .input:hover {
+  border-color: var(--ink);
+}
+.frun .input[aria-invalid="true"] {
+  border-color: var(--aui-danger);
+}
+.frun .help {
+  font-size: 12.5px;
+  color: var(--aui-muted);
+}
+.frun .help.err {
+  color: var(--aui-danger);
+}
+/* The places, as the canvas's filter pills: pressed ones are filled. */
+.frun .fchips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.frun .fchip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: var(--rad-pill);
+  border: 1px solid var(--line);
+  font-size: 13px;
+  color: var(--aui-muted);
+}
+.frun .fchip[aria-pressed="true"] {
+  background: var(--aui-subtle);
+  color: var(--ink);
+  font-weight: 500;
+}
+
+/* One channel and Your team: a band over its rows. */
+.frun .part {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.frun .band {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 32px;
+  padding: 0 10px;
+  border-radius: var(--rad);
+  background: var(--aui-subtle);
+  color: var(--aui-muted);
+  font-size: 13px;
+}
+/* The canvas's radio option: a round mark, then the place and, under it, what the team would read there. */
+.frun .rads {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.frun .rad {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  min-height: 36px;
+  padding: 7px 8px;
+  border-radius: var(--rad);
+  font-size: 14px;
+  text-align: left;
+}
+.frun .rad:hover {
+  background: var(--hov);
+}
+.frun .rad::before {
+  content: "";
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin-top: 1.5px;
+  border-radius: var(--rad-pill);
+  border: 1.5px solid var(--aui-border-strong);
+  background: var(--aui-surface);
+  /* the kit's radio: its dot answers a press on the curve */
+  transition: box-shadow var(--tr-press);
+}
+.frun .rad[aria-checked="true"]::before {
+  border-color: var(--aui-primary);
+  background: var(--aui-primary);
+  box-shadow: inset 0 0 0 3.5px var(--aui-surface);
+}
+.frun .rad small {
+  display: block;
+  margin-top: 1px;
+  color: var(--aui-muted);
+  font-size: 12.5px;
+}
+.frun .rows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.frun .rowl {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  min-height: 44px;
+  padding: 8px 10px;
+  border-radius: var(--rad);
+}
+.frun .grow {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+/* The desktop's own, as on the menu's pages: a row's two lines. The canvas sets the second in 13px muted text. */
+.frun .l1 {
+  display: block;
+  font-weight: 500;
+}
+.frun .l1 .mut {
+  font-weight: 400;
+}
+.frun .l2 {
+  display: block;
+  color: var(--aui-muted);
+  font-size: 13px;
+}
+.frun .none {
+  margin: 0;
+  padding: 8px 10px;
+  color: var(--aui-muted);
+  font-size: 13px;
+}
+.frun .tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border-radius: var(--rad-pill);
+  background: var(--aui-subtle);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+/* The row of buttons under a step, and Welcome's way in. */
+.frun .foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-top: 6px;
+}
+.frun .sp {
+  flex: 1;
+}
+.frun .btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 12px;
+  border-radius: var(--rad);
+  border: 1px solid var(--line);
+  background: var(--aui-surface);
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.frun .btn:hover {
+  background: var(--hov);
+}
+.frun .btn.dark {
+  border-color: var(--aui-primary);
+  background: var(--aui-primary);
+  color: var(--aui-on-primary);
+}
+.frun .btn.dark:hover {
+  opacity: 0.88;
+}
+/* Welcome's buttons are the canvas's taller ones (`min-height:44px;font-size:14px`). */
+.frun .btn.big {
+  min-height: 44px;
+  font-size: 14px;
+}
+.frun .lk {
+  position: relative;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--aui-muted);
+  text-decoration: underline;
+}
+/* The canvas's larger touch targets: each control reaches a few pixels past its top and bottom. */
+.frun .btn::after,
+.frun .lk::after,
+.frun .fchip::after {
+  content: "";
+  position: absolute;
+  inset: -5px 0;
+}
+.frun .fchip::after {
+  inset: -8px 0;
+}

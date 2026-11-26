@@ -1,0 +1,29 @@
+[
+  {
+    "kind": "pty",
+    "session": 7,
+    "folder": "/home/you/code/baanmali-preorder",
+    "pid": 4242,
+    "started": 1795491078871,
+    "argv": ["node", "/opt/homebrew/lib/node_modules/pnpm/bin/pnpm.cjs", "dev"],
+    "ports": [3000, 24678]
+  },
+  {
+    "kind": "chat",
+    "session": 2,
+    "folder": "/home/you/code/baanmali-preorder",
+    "pid": 4400,
+    "started": null,
+    "argv": ["/bin/zsh", "-c", "vitest --watch"],
+    "ports": []
+  },
+  {
+    "kind": "preview",
+    "session": 1,
+    "folder": "/home/you/.manut/lanes/baanmali-preorder/promptpay-qr",
+    "pid": 4500,
+    "started": 1795491090000,
+    "argv": ["node", "/opt/homebrew/lib/node_modules/pnpm/bin/pnpm.cjs", "run", "dev"],
+    "ports": [5173]
+  }
+]

@@ -1,0 +1,128 @@
+/* Voice in the chat box (item 81): the microphone and voice mode before Send, quiet at rest like the box's other
+   controls, filled while they listen; the line over the box that says what they are doing; and the card that asks
+   before a language goes to Apple's servers. */
+.bx-voice {
+  width: 30px;
+  height: 30px;
+  border-radius: var(--r);
+  display: grid;
+  place-items: center;
+  flex: none;
+  align-self: center;
+  color: var(--muted);
+  background: transparent;
+  transition: var(--tr-control);
+}
+.bx-voice:not(:disabled):hover {
+  background: var(--raise2);
+  color: var(--ink);
+}
+.bx-voice.on {
+  background: var(--danger);
+  color: #fff;
+}
+.bx-voice.on:hover {
+  filter: brightness(1.08);
+}
+.bx-voice:disabled {
+  opacity: 0.4;
+}
+.vc-line,
+.vc-note,
+.vc-card {
+  margin: 0 0 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--pop);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.vc-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  color: var(--ink);
+}
+.vc-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--quiet);
+}
+/* listening: a red dot that pulses (the board's Pulse, the working dot), so it is plain the microphone is on */
+.vc-line[data-state="listening"] .vc-dot,
+.vc-mode.vc-listening .vc-dot,
+.vc-mode.vc-finishing .vc-dot {
+  background: var(--danger);
+  animation: var(--anim-pulse);
+}
+.vc-mode.vc-speaking .vc-dot {
+  background: var(--accent);
+  animation: var(--anim-pulse);
+}
+.vc-mode.vc-paused {
+  border-color: var(--danger);
+}
+.vc-mode.vc-paused .vc-dot {
+  background: var(--danger);
+}
+.vc-t {
+  flex: 1;
+  min-width: 0;
+}
+.vc-heard {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.vc-stop {
+  flex: none;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: var(--r);
+  background: var(--raise2);
+  color: var(--ink);
+  font-size: 12px;
+}
+.vc-stop:hover {
+  background: var(--line-strong);
+}
+.vc-note {
+  padding: 6px 8px;
+  color: var(--muted);
+}
+.vc-card {
+  padding: 10px 12px;
+  color: var(--ink);
+}
+.vc-card-h {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.vc-card-p {
+  margin: 0 0 8px;
+  color: var(--muted);
+}
+.vc-card-acts {
+  display: flex;
+  gap: 8px;
+}
+.vc-yes,
+.vc-no {
+  height: 26px;
+  padding: 0 12px;
+  border-radius: var(--r);
+  font-size: 12px;
+}
+.vc-yes {
+  background: var(--ink);
+  color: var(--side);
+}
+.vc-no {
+  background: var(--raise2);
+  color: var(--ink);
+}

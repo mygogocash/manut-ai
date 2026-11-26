@@ -1,13 +1,33 @@
+import { appendAudit } from "./audit-log";
+import { SHEETS_APPEND } from "./books-detail";
+import { sendBooks } from "./books-sheet";
 import { readConnectionSecret } from "./cred-broker";
+import type { GoogleEnv } from "./google";
+import { GOOGLE_PROVIDER } from "./google-vault";
+import { LINE_PUSH_OPERATION, lineReplyText, openLineCredentials, pushLineMessage } from "./connectors/line";
 import { checkGrant, ConnectorError } from "./connectors/types";
+import { readReplyBinding } from "./pilot-store";
 import type { ActionProposalJSON } from "./task-object";
 
-type ActionEnv = {
+type ActionEnv = GoogleEnv & {
   TASK: DurableObjectNamespace;
   CRED: DurableObjectNamespace;
+  /// Holds the pilot's reply records, which a LINE push is checked against.
+  /// Without it no LINE push is ever sent. It also holds the shop's audit log, and an append of Ton's books
+  /// (books-sheet.ts) needs it to mark a refused Google connection broken there; without it none is sent.
+  TENANT?: DurableObjectNamespace;
 };
 
 export type FetchImpl = (url: string, init?: RequestInit) => Promise<Response>;
+
+/// The provider each operation the broker sends is for. An action goes out only through a connection of that provider,
+/// so a connection's secret is only ever sent to the service it was given for: a Google token never reaches Linear,
+/// whatever connection id a proposal names. An operation not listed here is sent through no connection.
+const OPERATION_PROVIDERS: Readonly<Record<string, string>> = {
+  "linear.issue.create": "linear",
+  [LINE_PUSH_OPERATION]: "line",
+  [SHEETS_APPEND]: GOOGLE_PROVIDER,
+};
 
 /// A provider fault the broker classifies: permanent failures settle the
 /// action as failed, ambiguous ones as unknown. Unknown never retries
@@ -28,7 +48,8 @@ export type LinearIssueReceipt = {
   url: string;
 };
 
-/// The pilot's first and only writable operation: creating a reviewed issue
+/// The first writable operation (the second, `line.message.push`, lives in
+/// connectors/line.ts): creating a reviewed issue
 /// in an approved test project. Title and description come from the approved
 /// proposal alone; the project is the proposal's target, already checked
 /// against its declared scope at propose time.
@@ -99,6 +120,23 @@ export type BeginDispatchResult =
   | { ok: true; proposal: ActionProposalJSON }
   | { ok: false; response: Response };
 
+/// Writes a dispatch's start or settlement to the owning shop's audit log, best effort and after the fact: the
+/// action's own record in its task object is the authority, and an entry that cannot be written is counted there
+/// rather than holding up the send (audit-log.ts). An environment without the tenant namespace, or an action with no
+/// tenant (the operator's own path), has no shop log to write to.
+async function auditDispatch(
+  env: ActionEnv,
+  proposal: Pick<ActionProposalJSON, "tenant">,
+  taskId: string,
+  actionId: string,
+  action: "dispatch.started" | "dispatch.settled",
+  outcome: "ok" | "confirmed" | "failed" | "unknown",
+): Promise<void> {
+  if (!env.TENANT || !proposal.tenant) return;
+  await appendAudit({ TENANT: env.TENANT }, proposal.tenant, { actor: { kind: "system" }, action,
+    subject: { taskId, actionId }, outcome });
+}
+
 /// Synchronous half of a dispatch: re-reads the authoritative proposal,
 /// checks approval freshness, grant revision, tenant, connection health, and
 /// task state through the object's begin gate, and consumes the one-use
@@ -164,7 +202,9 @@ export async function beginDispatchAction(
     }
     return { ok: false, response: taskStubBegin };
   }
-  return { ok: true, proposal: (await taskStubBegin.json()) as ActionProposalJSON };
+  const proposal = (await taskStubBegin.json()) as ActionProposalJSON;
+  await auditDispatch(env, proposal, taskId, actionId, "dispatch.started", "ok");
+  return { ok: true, proposal };
 }
 
 /// Background half of a dispatch: runs in `ctx.waitUntil` after the Worker
@@ -180,8 +220,10 @@ export async function finishDispatchAction(
   const taskStub = env.TASK.get(env.TASK.idFromName(taskId));
   const { proposal } = opts;
 
-  const settle = (outcome: string, extra: Record<string, unknown> = {}) =>
-    taskStub.fetch(
+  // Every way a dispatch ends goes through here, so each settlement is written to the shop's audit log once, with
+  // its outcome, after the task object has recorded it.
+  const settle = async (outcome: "confirmed" | "failed" | "unknown", extra: Record<string, unknown> = {}) => {
+    const settled = await taskStub.fetch(
       new Request(`https://task/actions/${actionId}/settle`, {
         method: "POST",
         headers: (() => {
@@ -195,6 +237,9 @@ export async function finishDispatchAction(
         body: JSON.stringify({ outcome, ...extra }),
       }),
     );
+    if (settled.ok) await auditDispatch(env, proposal, taskId, actionId, "dispatch.settled", outcome);
+    return settled;
+  };
 
   // The connection must be live and ours: per-tenant vault, tenant match
   // plus no revocation. The secret itself travels only from the vault to
@@ -210,14 +255,24 @@ export async function finishDispatchAction(
   ).json()) as {
     connections?: {
       id?: string;
+      provider?: string;
       accountId?: string;
       resourceIds?: string[];
       allowsActions?: boolean;
       grantRevision?: number;
+      brokenAt?: string;
     }[];
   };
   const connection = (listing.connections ?? []).find((entry) => entry.id === proposal.connectionId);
   if (!connection) {
+    return settle("failed");
+  }
+  if (!Object.hasOwn(OPERATION_PROVIDERS, proposal.operationType) ||
+      connection.provider !== OPERATION_PROVIDERS[proposal.operationType]) {
+    return settle("failed");
+  }
+  // A connection its provider refused (google-vault.ts) sends nothing until the owner connects again.
+  if (connection.brokenAt !== undefined) {
     return settle("failed");
   }
   // The stored grant is authoritative: the approved account and target must
@@ -246,6 +301,24 @@ export async function finishDispatchAction(
     if (error instanceof ConnectorError) return settle("failed");
     throw error;
   }
+
+  if (proposal.operationType === SHEETS_APPEND) {
+    // A month of Ton's books into the owner's Google Sheet (books-sheet.ts). The refresh token goes from the vault to
+    // Google's token endpoint inside `sendBooks`; the access token it gets lives for this one append. The rows are the
+    // approved payload's, sent once. The shop's log gets `google.appended` with how it settled, ids only.
+    if (!env.TENANT) return settle("failed");
+    const sent = await sendBooks({ ...env, TENANT: env.TENANT }, proposal, opts.fetchImpl ?? fetch);
+    const settled = sent.outcome === "confirmed"
+      ? await settle("confirmed", { providerOperationId: sent.providerOperationId, receipt: sent.receipt })
+      : await settle(sent.outcome);
+    if (settled.ok && proposal.tenant) {
+      await appendAudit({ TENANT: env.TENANT }, proposal.tenant, { actor: { kind: "system" }, action: "google.appended",
+        subject: { taskId, actionId, connectionId: proposal.connectionId }, outcome: sent.outcome,
+        ...(sent.outcome === "confirmed" ? {} : { reason: sent.reason }) });
+    }
+    return settled;
+  }
+
   let secret: string;
   try {
     secret = await readConnectionSecret(
@@ -257,6 +330,33 @@ export async function finishDispatchAction(
     return settle("failed");
   }
 
+  if (proposal.operationType === LINE_PUSH_OPERATION) {
+    // One approved reply to one customer (docs/pilot-api.md). Beyond the
+    // checks above, the reply must still be what its record binds: the
+    // record, written from the stored message when the reply was proposed,
+    // names this task, this connection, and the message's author as the one
+    // recipient. A proposal with no record (made through any other route) or
+    // one aimed at anybody else fails here without LINE traffic. The action
+    // id is LINE's retry key; see pushLineMessage for how each answer
+    // settles.
+    const credentials = openLineCredentials(secret);
+    const text = lineReplyText(proposal.payload);
+    const to = proposal.recipients?.length === 1 ? proposal.recipients[0] : undefined;
+    if (!credentials || text === null || !to || !env.TENANT) return settle("failed");
+    const binding = await readReplyBinding({ TENANT: env.TENANT }, proposal.tenant, actionId).catch(() => null);
+    if (!binding || binding.taskId !== taskId || binding.connectionId !== proposal.connectionId || binding.lineUserId !== to) {
+      return settle("failed");
+    }
+    const pushed = await pushLineMessage(opts.fetchImpl ?? fetch, credentials.channelAccessToken, {
+      to,
+      text,
+      retryKey: actionId,
+    });
+    if (pushed.outcome === "confirmed") {
+      return settle("confirmed", { providerOperationId: pushed.receipt.providerOperationId, receipt: pushed.receipt });
+    }
+    return settle(pushed.outcome);
+  }
   if (proposal.operationType !== "linear.issue.create") {
     return settle("failed");
   }

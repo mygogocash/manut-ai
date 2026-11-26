@@ -1,0 +1,153 @@
+// Notifications ring only for what needs the person: a bot turn that ends with an error marks its chat (the row and
+// the chat say it failed) but raises no system notification unless Settings > General "Also notify on errors" is on.
+// Notifications are recorded into window.__manutNotes by a stand-in Web Notification API.
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
+import { expect, test, type Page } from "@playwright/test";
+import { chatOpen, openChat, startDone } from "./start";
+
+const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
+const SHOTS = process.env.MANUT_SHOTS || "";
+
+async function mock(op: string, params: Record<string, unknown> = {}): Promise<unknown> {
+  const ws = new WebSocket(`ws://127.0.0.1:${MOCK}/?token=e2e`);
+  await new Promise<void>((res, rej) => {
+    ws.onopen = () => res();
+    ws.onerror = () => rej(new Error("mock websocket error"));
+  });
+  const reply = await new Promise<{ result: unknown }>((res) => {
+    ws.onmessage = (m) => {
+      const msg = JSON.parse(String(m.data));
+      if (msg.id === "n1") res(msg);
+    };
+    ws.send(JSON.stringify({ id: "n1", op, ...params }));
+  });
+  ws.close();
+  return reply.result;
+}
+
+/** kami is open; friren is listed. Notifications go to __manutNotes; the test says whether the window is watched. */
+async function open(page: Page, theme: "dark" | "light" = "dark") {
+  await page.addInitScript((th) => {
+    const w = window as unknown as { __manutNotes: { title: string; body?: string }[]; __watched: boolean; Notification: unknown };
+    w.__manutNotes = [];
+    w.__watched = true;
+    w.Notification = class {
+      static permission = "granted";
+      static requestPermission = async () => "granted";
+      onclick: null | (() => void) = null;
+      constructor(title: string, opts: { body?: string } = {}) {
+        w.__manutNotes.push({ title, body: opts.body });
+      }
+      close() {}
+    };
+    Object.defineProperty(document, "visibilityState", { get: () => (w.__watched ? "visible" : "hidden") });
+    document.hasFocus = () => w.__watched;
+    localStorage.setItem("manut.roster", JSON.stringify(["kami", "friren"]));
+    localStorage.setItem("manut.theme", th);
+  }, theme);
+  await page.goto("/");
+  await chatOpen(page);
+  // Friren's chat is read too, so its turns are followed (the sidebar listed it before)
+  await startDone(page);
+}
+
+const notes = (page: Page) => page.evaluate(() => (window as unknown as { __manutNotes: unknown[] }).__manutNotes.slice());
+const watched = (page: Page, v: boolean) => page.evaluate((x) => ((window as unknown as { __watched: boolean }).__watched = x), v);
+
+/** A friren turn ends with an error while the person looks elsewhere. */
+async function frirenFails(page: Page) {
+  await mock("mock.emit", { events: [{ event: "turn.start", bot: "friren" }] });
+  await page.waitForTimeout(200);
+  await mock("mock.emit", { events: [{ event: "turn.end", bot: "friren", outcome: "error", error: "provider 500" }] });
+}
+
+test.beforeEach(async () => {
+  await mock("mock.reset");
+});
+
+test("a bot error marks its chat but raises no notification by default", async ({ page }) => {
+  await open(page);
+  await watched(page, false);
+  await frirenFails(page);
+  // the chat says the turn failed
+  await openChat(page, "friren");
+  await expect(page.getByText("Failed").first()).toBeVisible({ timeout: 10_000 });
+  await page.waitForTimeout(300);
+  expect(await notes(page)).toEqual([]);
+});
+
+test("Also notify on errors brings the error notification back", async ({ page }) => {
+  await open(page);
+  await page.getByTestId("nav-settings").click();
+  const seg = page.getByTestId("notify-errors-seg");
+  await expect(seg.getByRole("radio", { name: "Off" })).toHaveAttribute("aria-checked", "true");
+  await seg.getByRole("radio", { name: "On" }).click();
+  await page.getByRole("button", { name: "Close settings" }).click();
+  await watched(page, false);
+  await frirenFails(page);
+  await expect.poll(() => notes(page), { timeout: 10_000 }).toEqual([expect.objectContaining({ title: "Friren stopped with an error" })]);
+});
+
+test("an empty question followed by a texted one within 8 s rings once", async ({ page }) => {
+  await open(page);
+  await watched(page, false);
+  await mock("mock.emit", { events: [{ event: "clarify.request", bot: "friren", request_id: "q0", question: "" }] });
+  await page.waitForTimeout(1500);
+  await mock("mock.emit", { events: [{ event: "clarify.request", bot: "friren", request_id: "q1", question: "Which branch should I deploy? main or next." }] });
+  await expect.poll(() => notes(page), { timeout: 10_000 }).toEqual([{ title: "Friren needs you", body: "Which branch should I deploy?" }]);
+  await page.waitForTimeout(8000);
+  expect(await notes(page)).toHaveLength(1);
+});
+
+/** "HH:MM" in Bangkok, the clock quiet hours follow, `plusMin` minutes from now. */
+function bangkokClock(plusMin = 0): string {
+  const at = new Date(Date.now() + plusMin * 60_000);
+  const parts = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Bangkok", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(at);
+  const part = (t: string) => parts.find((p) => p.type === t)?.value ?? "00";
+  return `${part("hour")}:${part("minute")}`;
+}
+
+test("Hide details and Quiet hours are in Settings, kept, and a notification follows them", async ({ page }) => {
+  await open(page);
+  await page.getByTestId("nav-settings").click();
+  // the suite starts with quiet hours off (playwright.config.ts: the same start and end), and details shown
+  await expect(page.getByTestId("set-hide-details")).toHaveAttribute("aria-checked", "false");
+  await expect(page.getByTestId("set-quiet-start")).toHaveValue("00:00");
+  await expect(page.getByTestId("set-quiet-end")).toHaveValue("00:00");
+  await expect(page.getByTestId("settings-page-general")).toContainText("Nothing makes a sound. Requests wait in Needs you.");
+  await expect(page.getByTestId("settings-page-general")).toContainText("A live page that stops working and a sign-in from a new device still alert you.");
+  await expect(page.getByTestId("settings-page-general")).toContainText("When Unlocked");
+
+  // Hide details: a question waiting for the owner says only how many requests wait
+  await page.getByTestId("set-hide-details").click();
+  expect(await page.evaluate(() => localStorage.getItem("manut.notify.hide"))).toBe("on");
+  await watched(page, false);
+  await mock("mock.emit", { events: [{ event: "clarify.request", bot: "friren", request_id: "q-hide", question: "Which branch should I deploy?" }] });
+  await expect.poll(() => notes(page), { timeout: 10_000 }).toEqual([{ title: "Manut AI", body: "1 request needs you." }]);
+
+  // Quiet hours around now: the next request is not shown, and waits in the app
+  const from = bangkokClock(-60);
+  const to = bangkokClock(60);
+  await page.getByTestId("set-quiet-start").fill(from);
+  await page.getByTestId("set-quiet-end").fill(to);
+  expect(await page.evaluate(() => localStorage.getItem("manut.notify.quiet"))).toBe(`${from}-${to}`);
+  await mock("mock.emit", { events: [{ event: "clarify.request", bot: "friren", request_id: "q-quiet", question: "Which size should I order?" }] });
+  await page.waitForTimeout(1500);
+  expect(await notes(page)).toHaveLength(1);
+});
+
+for (const theme of ["dark", "light"] as const) {
+  test(`shot: Settings notifications, ${theme}`, async ({ page }) => {
+    test.skip(!SHOTS, "MANUT_SHOTS not set");
+    await page.setViewportSize({ width: 1200, height: 800 });
+    await open(page, theme);
+    await page.getByTestId("nav-settings").click();
+    const row = page.getByTestId("notify-errors-seg");
+    await row.evaluate((el) => el.scrollIntoView({ block: "center" }));
+    await expect(row).toBeVisible();
+    mkdirSync(SHOTS, { recursive: true });
+    await page.waitForTimeout(300);
+    await page.screenshot({ path: join(SHOTS, `knotify-settings-${theme}.png`), animations: "disabled", caret: "initial" });
+  });
+}

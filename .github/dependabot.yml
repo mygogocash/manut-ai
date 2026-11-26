@@ -1,0 +1,58 @@
+# Weekly dependency updates for the three ecosystems in this repository. Minor and patch updates arrive grouped,
+# one pull request per ecosystem; a major update arrives on its own, because it can need code changes.
+#
+# Pull requests target main, the default branch, on purpose. Dependabot reads this file from main only; the active
+# pilot/* branch changes name every week, so a fixed target-branch would soon point at a finished branch; and
+# security updates always target main whatever this file says. Merging main into the next pilot branch carries
+# the updates into daily work.
+#
+# A version is only offered once it is seven days old, so a hijacked release has time to be noticed and pulled
+# before it reaches a pull request here. Security updates are never delayed by this. Seven days also clears pnpm's
+# own one-day minimumReleaseAge, which every frozen install re-checks, so an update does not trip it in CI.
+version: 2
+
+updates:
+  # The pnpm workspace: the root package.json, every apps/* and packages/* manifest, and pnpm-lock.yaml.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "07:00"
+      timezone: Asia/Bangkok
+    cooldown:
+      default-days: 7
+    groups:
+      npm-minor-and-patch:
+        update-types: [minor, patch]
+
+  # The desktop app's Rust crates.
+  - package-ecosystem: cargo
+    directory: /apps/desktop/src-tauri
+    schedule:
+      interval: weekly
+      day: monday
+      time: "07:00"
+      timezone: Asia/Bangkok
+    cooldown:
+      default-days: 7
+    groups:
+      cargo-minor-and-patch:
+        update-types: [minor, patch]
+
+  # The actions the workflows use, pinned to commit SHAs; Dependabot updates the SHA and the version comment
+  # together. "/" covers .github/workflows, and the glob covers the local actions under .github/actions.
+  - package-ecosystem: github-actions
+    directories:
+      - /
+      - /.github/actions/*
+    schedule:
+      interval: weekly
+      day: monday
+      time: "07:00"
+      timezone: Asia/Bangkok
+    cooldown:
+      default-days: 7
+    groups:
+      actions-minor-and-patch:
+        update-types: [minor, patch]

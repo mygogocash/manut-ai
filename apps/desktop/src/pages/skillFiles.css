@@ -1,0 +1,85 @@
+/* Every file of a bundle of skills (SkillFiles.tsx), on the Artifacts page and in Settings › MCP and Skills. Grey bands and space
+   group the files under their skill; rows are 44px; a file's text opens in a plain block in the mono face. No motion of its own. */
+
+.skl-files {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.skl-skill {
+  padding: 6px 12px;
+  border-radius: var(--rad);
+  background: var(--aui-subtle);
+  font-size: 13px;
+  font-weight: 600;
+}
+.skl-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.skl-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  padding: 0 12px;
+}
+.skl-path {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.skl-tag {
+  font-size: 12px;
+  font-weight: 600;
+}
+.skl-size {
+  color: var(--aui-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.skl-text {
+  margin: 0 12px 8px;
+  padding: 12px;
+  max-height: 320px;
+  overflow: auto;
+  border-radius: var(--rad);
+  background: var(--aui-subtle);
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.skl-tick {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+.skl-wait {
+  margin: 0;
+  color: var(--aui-muted);
+  font-size: 13px;
+}
+/* The skills to choose from on the Artifacts page, one 44px row each, and why the chosen ones cannot be shared. */
+.skl-pick-row {
+  min-height: 44px;
+  padding: 0 12px;
+}
+.skl-lines {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+/* Settings › MCP and Skills › Install skills from a link: the files and the ask sit under the link field with the page's own space. */
+.skl-install-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 12px;
+}
+.skl-err {
+  color: var(--aui-danger);
+}

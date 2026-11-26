@@ -12,11 +12,71 @@
   // unreachable until the operator turns officeInbound on (OFFICE_INBOUND is
   // deliberately unset here). OFFICE_SHARING is unset for the same reason:
   // every OFC-21 sharing route refuses until officeSharing is turned on.
+  // SHOP_FEED is unset too: GET /v1/feed, a shop's live feed, answers 403
+  // feature_disabled until the operator turns shopFeed on (docs/turning-on.md).
   // RELAY_ENABLED is deliberately unset in every environment: until the owner
   // turns the relay on at gate G3, every /relay/ route answers 503
   // relay_disabled (docs/relay-protocol-v1.md, the kill switch).
+  // Manut AI pilot (docs/pilot-api.md): three settings, none of them in this
+  // file. APPROVAL_LINK_SECRET signs the owner's approval links and is a
+  // Wrangler secret (`wrangler secret put APPROVAL_LINK_SECRET`, at least 32
+  // random characters); without it no link is minted and every link is
+  // invalid. WEB_ORIGIN (the approval page's origin, e.g. https://<web host>)
+  // and PUBLIC_API_ORIGIN (this Worker's public origin, used in each LINE
+  // webhook URL) are plain Worker vars the owner sets per environment under
+  // "vars"; until they are set, minting a reply link or connecting a LINE
+  // account answers 503 not_configured. LINE channel secrets and access
+  // tokens never appear here: operators enter them per shop, and they go
+  // straight into the encrypted credential vault. The LINE webhook stays
+  // unreachable while officeInbound is off, like the Linear one.
+  // The model gateway (docs/model-gateway.md): ANTHROPIC_API_KEY is a Wrangler
+  // secret the owner adds (`wrangler secret put ANTHROPIC_API_KEY`); until then
+  // every model call answers 503 not_configured and nothing is sent. Two
+  // optional vars, both the owner's decision: MODEL_SATANG_PER_USD (whole
+  // satang per US dollar, 3500 when unset) and MODEL_DEFAULT_CAP_SATANG (each
+  // shop's monthly cap in satang, 20000 when unset). None is set here yet.
+  // Signing in by email (docs/pilot-api.md, "Signing in by email") is built
+  // and off: both of its routes answer email_not_configured until the var
+  // EMAIL_SIGN_IN is "on", a sender is bound and APPROVAL_LINK_SECRET is set.
+  // The sender is Cloudflare Email Service's binding, "send_email" with the
+  // name EMAIL, and the vars EMAIL_FROM_ADDRESS and EMAIL_FROM_NAME, which
+  // owners see. None of them is set in any environment: turning it on needs
+  // the owner's yes, the Workers Paid plan and a sending domain the owner
+  // controls. Its limiter, AUTH_CODE_LIMITER, is bound everywhere already, so
+  // the route is limited before it answers even while it is off.
+  // TEST_EMAIL_OUTBOX, like TEST_JWKS_JSON, belongs in wrangler.test.json
+  // only: the dev deploy check refuses any config that sets a TEST_ var.
+  // Google Sheets for Ton's books (docs/connectors.md, 4b): the owner's own
+  // OAuth client, GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET, two Wrangler
+  // secrets (`wrangler secret put GOOGLE_CLIENT_ID`, then the secret). No
+  // environment sets them yet, so every /v1/google route answers 503
+  // google_not_configured and nothing reaches Google. The client's redirect
+  // URI is PUBLIC_API_ORIGIN followed by /v1/google/callback.
+  // Making a shop of one's own (docs/pilot-api.md, "Making a shop of your
+  // own") is built and off: POST /v1/shops/new answers sign_ups_closed, and
+  // reads nothing, until the var SELF_SERVE_SHOPS is "on". No environment sets
+  // it: opening sign-ups is the owner's call. Its limiter,
+  // SELF_SERVE_SHOP_LIMITER, is bound everywhere and counts only while it is on.
+  // Artifact links (docs/pilot-api.md, "Artifact links") are built and off:
+  // POST /v1/artifacts answers feature_disabled until the operator turns
+  // artifactLinks on, and no page is served anywhere until the var
+  // ARTIFACT_ORIGIN names a host of the links' own, never this one. No
+  // environment sets ARTIFACT_LINKS or ARTIFACT_ORIGIN (docs/turning-on.md).
+  // Skill links (item 84) are the same links for bundles of skills, behind
+  // skillLinks as well (default the var SKILL_LINKS, which no environment
+  // sets), so pages can be allowed and skills not.
   "main": "src/index.ts",
   "compatibility_date": "2026-09-16",
+  // One origin for the pilot (docs/pilot-api.md): this Worker is the front
+  // door. It answers /v1/* and /relay/* and hands every other path to the
+  // pages Worker (wrangler.web.jsonc) over the WEB service binding, so the
+  // console needs no CORS and one Cloudflare Access application covers the
+  // console and the operator routes. This Worker must never get "assets":
+  // Cloudflare runs a Worker with static assets behind an internal router that
+  // does not pass ctx.access, and the admin gate needs it
+  // (scripts/one-origin-contract.mjs refuses this file if "assets" appears).
+  // Each environment names its own pages Worker; deploy that one first.
+  "services": [{"binding": "WEB", "service": "manut-web"}],
   "workers_dev": false,
   "preview_urls": false,
   // Metadata-only logs (task id, state, duration, status) — never bodies.
@@ -29,6 +89,20 @@
   "env": {
     "dev": {
       "name": "manut-api-dev",
+      "services": [{"binding": "WEB", "service": "manut-web-dev"}],
+      // The owner's manut.xyz zone on Cloudflare (docs/decisions.md). The API
+      // Worker owns the whole host as its custom domain and hands every page
+      // to the pages Worker, so the links it mints point here too.
+      "routes": [{"pattern": "dev.manut.xyz", "custom_domain": true}],
+      "vars": {
+        "WEB_ORIGIN": "https://dev.manut.xyz",
+        "PUBLIC_API_ORIGIN": "https://dev.manut.xyz",
+        // The audience of the Access application "Manut AI dev console"
+        // (dev.manut.xyz/ops and dev.manut.xyz/v1/admin, allowing only the
+        // owner's email). An audience tag identifies the application and is
+        // not a secret.
+        "ADMIN_ACCESS_AUD": "a7a8f9a7030979190c2a1dc2f2a5f518ae5530f9450dc8ad3f7dcaa1aa4a7cdf"
+      },
       "durable_objects": {
         "bindings": [
           {"name": "TASK", "class_name": "TaskObject"},
@@ -44,6 +118,15 @@
         {
           "name": "AUTH_EXCHANGE_LIMITER",
           "namespace_id": "2026112306",
+          "simple": {
+            "limit": 10,
+            "period": 60
+          }
+        },
+        // Asking for a sign-in code by email (email-code.ts), keyed and configured as the exchange's.
+        {
+          "name": "AUTH_CODE_LIMITER",
+          "namespace_id": "2026112334",
           "simple": {
             "limit": 10,
             "period": 60
@@ -82,11 +165,86 @@
             "limit": 60,
             "period": 60
           }
+        },
+        // Manut AI pilot ingress (pilot.ts): LINE webhooks, keyed per source
+        // address like the Linear webhook, and the owner's approval routes,
+        // which the page polls while a send settles. Proposed ids, unverified
+        // against the account like the rest.
+        {
+          "name": "LINE_INBOUND_LIMITER",
+          "namespace_id": "2026112323",
+          "simple": {
+            "limit": 300,
+            "period": 60
+          }
+        },
+        {
+          "name": "PILOT_APPROVAL_LIMITER",
+          "namespace_id": "2026112324",
+          "simple": {
+            "limit": 120,
+            "period": 60
+          }
+        },
+        {
+          "name": "OUTPOST_LIMITER",
+          "namespace_id": "2026112330",
+          "simple": {
+            "limit": 300,
+            "period": 60
+          }
+        },
+        {
+          "name": "GOOGLE_CALLBACK_LIMITER",
+          "namespace_id": "2026112338",
+          "simple": {
+            "limit": 30,
+            "period": 60
+          }
+        },
+        // Making a shop of one's own (self-serve.ts), per source address, counted only while sign-ups are open: the route
+        // answers sign_ups_closed, and touches nothing, until SELF_SERVE_SHOPS is "on", which no environment sets.
+        {
+          "name": "SELF_SERVE_SHOP_LIMITER",
+          "namespace_id": "2026112342",
+          "simple": {
+            "limit": 10,
+            "period": 60
+          }
+        },
+        // A person's deletion of their own data (DELETE /v1/tenant/data), per source address, before the session is read.
+        {
+          "name": "TENANT_DELETE_LIMITER",
+          "namespace_id": "2026112346",
+          "simple": {
+            "limit": 10,
+            "period": 60
+          }
+        },
+        // Opening a shop session (POST /v1/shops/session, POST /v1/people/session), per signed-in person (session-limits.ts).
+        {
+          "name": "SHOP_SESSION_LIMITER",
+          "namespace_id": "2026112350",
+          "simple": {
+            "limit": 20,
+            "period": 60
+          }
+        },
+        // Artifact links' public read (artifacts.ts), every request on the artifact origin's host, per source address. The
+        // host exists only once ARTIFACT_ORIGIN is set, which no environment does yet.
+        {
+          "name": "ARTIFACT_READ_LIMITER",
+          "namespace_id": "2026112354",
+          "simple": {
+            "limit": 120,
+            "period": 60
+          }
         }
       ]
     },
     "staging": {
       "name": "manut-api-staging",
+      "services": [{"binding": "WEB", "service": "manut-web-staging"}],
       "durable_objects": {
         "bindings": [
           {"name": "TASK", "class_name": "TaskObject"},
@@ -102,6 +260,15 @@
         {
           "name": "AUTH_EXCHANGE_LIMITER",
           "namespace_id": "2026112311",
+          "simple": {
+            "limit": 10,
+            "period": 60
+          }
+        },
+        // Asking for a sign-in code by email (email-code.ts), keyed and configured as the exchange's.
+        {
+          "name": "AUTH_CODE_LIMITER",
+          "namespace_id": "2026112335",
           "simple": {
             "limit": 10,
             "period": 60
@@ -140,11 +307,86 @@
             "limit": 60,
             "period": 60
           }
+        },
+        // Manut AI pilot ingress (pilot.ts): LINE webhooks, keyed per source
+        // address like the Linear webhook, and the owner's approval routes,
+        // which the page polls while a send settles. Proposed ids, unverified
+        // against the account like the rest.
+        {
+          "name": "LINE_INBOUND_LIMITER",
+          "namespace_id": "2026112325",
+          "simple": {
+            "limit": 300,
+            "period": 60
+          }
+        },
+        {
+          "name": "PILOT_APPROVAL_LIMITER",
+          "namespace_id": "2026112326",
+          "simple": {
+            "limit": 120,
+            "period": 60
+          }
+        },
+        {
+          "name": "OUTPOST_LIMITER",
+          "namespace_id": "2026112331",
+          "simple": {
+            "limit": 300,
+            "period": 60
+          }
+        },
+        {
+          "name": "GOOGLE_CALLBACK_LIMITER",
+          "namespace_id": "2026112339",
+          "simple": {
+            "limit": 30,
+            "period": 60
+          }
+        },
+        // Making a shop of one's own (self-serve.ts), per source address, counted only while sign-ups are open: the route
+        // answers sign_ups_closed, and touches nothing, until SELF_SERVE_SHOPS is "on", which no environment sets.
+        {
+          "name": "SELF_SERVE_SHOP_LIMITER",
+          "namespace_id": "2026112343",
+          "simple": {
+            "limit": 10,
+            "period": 60
+          }
+        },
+        // A person's deletion of their own data (DELETE /v1/tenant/data), per source address, before the session is read.
+        {
+          "name": "TENANT_DELETE_LIMITER",
+          "namespace_id": "2026112347",
+          "simple": {
+            "limit": 10,
+            "period": 60
+          }
+        },
+        // Opening a shop session (POST /v1/shops/session, POST /v1/people/session), per signed-in person (session-limits.ts).
+        {
+          "name": "SHOP_SESSION_LIMITER",
+          "namespace_id": "2026112351",
+          "simple": {
+            "limit": 20,
+            "period": 60
+          }
+        },
+        // Artifact links' public read (artifacts.ts), every request on the artifact origin's host, per source address. The
+        // host exists only once ARTIFACT_ORIGIN is set, which no environment does yet.
+        {
+          "name": "ARTIFACT_READ_LIMITER",
+          "namespace_id": "2026112355",
+          "simple": {
+            "limit": 120,
+            "period": 60
+          }
         }
       ]
     },
     "prod": {
       "name": "manut-api-prod",
+      "services": [{"binding": "WEB", "service": "manut-web-prod"}],
       "durable_objects": {
         "bindings": [
           {"name": "TASK", "class_name": "TaskObject"},
@@ -160,6 +402,15 @@
         {
           "name": "AUTH_EXCHANGE_LIMITER",
           "namespace_id": "2026112316",
+          "simple": {
+            "limit": 10,
+            "period": 60
+          }
+        },
+        // Asking for a sign-in code by email (email-code.ts), keyed and configured as the exchange's.
+        {
+          "name": "AUTH_CODE_LIMITER",
+          "namespace_id": "2026112336",
           "simple": {
             "limit": 10,
             "period": 60
@@ -198,6 +449,80 @@
             "limit": 60,
             "period": 60
           }
+        },
+        // Manut AI pilot ingress (pilot.ts): LINE webhooks, keyed per source
+        // address like the Linear webhook, and the owner's approval routes,
+        // which the page polls while a send settles. Proposed ids, unverified
+        // against the account like the rest.
+        {
+          "name": "LINE_INBOUND_LIMITER",
+          "namespace_id": "2026112327",
+          "simple": {
+            "limit": 300,
+            "period": 60
+          }
+        },
+        {
+          "name": "PILOT_APPROVAL_LIMITER",
+          "namespace_id": "2026112328",
+          "simple": {
+            "limit": 120,
+            "period": 60
+          }
+        },
+        {
+          "name": "OUTPOST_LIMITER",
+          "namespace_id": "2026112332",
+          "simple": {
+            "limit": 300,
+            "period": 60
+          }
+        },
+        {
+          "name": "GOOGLE_CALLBACK_LIMITER",
+          "namespace_id": "2026112340",
+          "simple": {
+            "limit": 30,
+            "period": 60
+          }
+        },
+        // Making a shop of one's own (self-serve.ts), per source address, counted only while sign-ups are open: the route
+        // answers sign_ups_closed, and touches nothing, until SELF_SERVE_SHOPS is "on", which no environment sets.
+        {
+          "name": "SELF_SERVE_SHOP_LIMITER",
+          "namespace_id": "2026112344",
+          "simple": {
+            "limit": 10,
+            "period": 60
+          }
+        },
+        // A person's deletion of their own data (DELETE /v1/tenant/data), per source address, before the session is read.
+        {
+          "name": "TENANT_DELETE_LIMITER",
+          "namespace_id": "2026112348",
+          "simple": {
+            "limit": 10,
+            "period": 60
+          }
+        },
+        // Opening a shop session (POST /v1/shops/session, POST /v1/people/session), per signed-in person (session-limits.ts).
+        {
+          "name": "SHOP_SESSION_LIMITER",
+          "namespace_id": "2026112352",
+          "simple": {
+            "limit": 20,
+            "period": 60
+          }
+        },
+        // Artifact links' public read (artifacts.ts), every request on the artifact origin's host, per source address. The
+        // host exists only once ARTIFACT_ORIGIN is set, which no environment does yet.
+        {
+          "name": "ARTIFACT_READ_LIMITER",
+          "namespace_id": "2026112356",
+          "simple": {
+            "limit": 120,
+            "period": 60
+          }
         }
       ]
     }
@@ -207,10 +532,42 @@
   // in every environment. This patch has not queried a Cloudflare account.
   // The relay limiters (2026100404/05, and 14/15, 24/25 and 34/35 in dev,
   // staging and prod) are proposed the same way and are equally unverified.
+  // So are the pilot limiters (2026112321/22 here, 23/24, 25/26 and 27/28
+  // in dev, staging and prod), and the outposts' limiter (2026112329 here,
+  // 30, 31 and 32 in dev, staging and prod), which covers an outpost's
+  // heartbeat, redeem and browser steps (browser-control.ts), keyed per
+  // source address. The email sign-in code limiter follows them (2026112333
+  // here, 34, 35 and 36 in dev, staging and prod): on 24 Nov 2026 the ids
+  // 2026112301 to 32 clashed with nothing in the account, whose other
+  // limiters use only 1001 and 1002 (docs/handoff.md).
+  // The Google callback's limiter comes next (2026112337 here, 38, 39 and 40
+  // in dev, staging and prod; google-connect.ts), keyed per source address;
+  // its ids have not been checked against the account's limiters yet.
+  // Making a shop of one's own comes after it (2026112341 here, 42, 43 and 44
+  // in dev, staging and prod; self-serve.ts), keyed per source address and
+  // counted only while sign-ups are open; its ids have not been checked
+  // against the account's limiters yet either. The security review's two
+  // follow (docs/decisions.md, 24 Nov 2026): a person's deletion of their own
+  // data, per source address (2026112345 here, 46, 47 and 48 in dev, staging
+  // and prod), and opening a shop session, per signed-in person (2026112349
+  // here, 50, 51 and 52; session-limits.ts). Neither is checked against the
+  // account's limiters yet. Artifact links' public read comes next
+  // (2026112353 here, 54, 55 and 56 in dev, staging and prod; artifacts.ts),
+  // per source address on the artifact origin's host; not checked against the
+  // account's limiters either.
   "ratelimits": [
     {
       "name": "AUTH_EXCHANGE_LIMITER",
       "namespace_id": "2026112301",
+      "simple": {
+        "limit": 10,
+        "period": 60
+      }
+    },
+    // Asking for a sign-in code by email (email-code.ts), keyed and configured as the exchange's.
+    {
+      "name": "AUTH_CODE_LIMITER",
+      "namespace_id": "2026112333",
       "simple": {
         "limit": 10,
         "period": 60
@@ -247,6 +604,79 @@
       "namespace_id": "2026112305",
       "simple": {
         "limit": 60,
+        "period": 60
+      }
+    },
+    // Manut AI pilot ingress (pilot.ts): LINE webhooks, keyed per source
+    // address like the Linear webhook, and the owner's approval routes,
+    // which the page polls while a send settles. Proposed ids, unverified
+    // against the account like the rest.
+    {
+      "name": "LINE_INBOUND_LIMITER",
+      "namespace_id": "2026112321",
+      "simple": {
+        "limit": 300,
+        "period": 60
+      }
+    },
+    {
+      "name": "PILOT_APPROVAL_LIMITER",
+      "namespace_id": "2026112322",
+      "simple": {
+        "limit": 120,
+        "period": 60
+      }
+    },
+    {
+      "name": "OUTPOST_LIMITER",
+      "namespace_id": "2026112329",
+      "simple": {
+        "limit": 300,
+        "period": 60
+      }
+    },
+    {
+      "name": "GOOGLE_CALLBACK_LIMITER",
+      "namespace_id": "2026112337",
+      "simple": {
+        "limit": 30,
+        "period": 60
+      }
+    },
+    // Making a shop of one's own (self-serve.ts), per source address, counted only while sign-ups are open.
+    {
+      "name": "SELF_SERVE_SHOP_LIMITER",
+      "namespace_id": "2026112341",
+      "simple": {
+        "limit": 10,
+        "period": 60
+      }
+    },
+    // A person's deletion of their own data (DELETE /v1/tenant/data), per source address, before the session is read.
+    {
+      "name": "TENANT_DELETE_LIMITER",
+      "namespace_id": "2026112345",
+      "simple": {
+        "limit": 10,
+        "period": 60
+      }
+    },
+    // Opening a shop session (POST /v1/shops/session, POST /v1/people/session), per signed-in person (session-limits.ts).
+    {
+      "name": "SHOP_SESSION_LIMITER",
+      "namespace_id": "2026112349",
+      "simple": {
+        "limit": 20,
+        "period": 60
+      }
+    },
+    // Artifact links' public read (artifacts.ts), every request on the artifact origin's host, per source address. The
+    // host exists only once ARTIFACT_ORIGIN is set, which no environment does yet.
+    {
+      "name": "ARTIFACT_READ_LIMITER",
+      "namespace_id": "2026112353",
+      "simple": {
+        "limit": 120,
         "period": 60
       }
     }

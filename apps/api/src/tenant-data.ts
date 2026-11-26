@@ -4,6 +4,10 @@
 /// Durable Object classes, and so tests can drive export and deletion against
 /// a stubbed environment where any one fan-out call fails.
 
+import { readConnectionSecret } from "./cred-broker";
+import { googleConfig, revokeToken, type FetchImpl, type GoogleEnv } from "./google";
+import { GOOGLE_PROVIDER } from "./google-vault";
+
 /// The namespaces export and deletion reach. The Worker's `Env` satisfies
 /// this, and a test can too without standing up the whole Worker.
 export type TenantDataEnv = {
@@ -51,10 +55,10 @@ export async function tenantCall(
 }
 
 /// Assembles a tenant's task documents with their histories, connection
-/// metadata, schedules, consent, inbound attention items and deletion
-/// tombstone. Each task answers with its document, event log, action
-/// proposals and attempts, so the export no longer leaves the history behind
-/// (the old "task record only" gap is closed below).
+/// metadata, site sign-ins and outposts (no secret), schedules, consent, inbound attention items, pilot records,
+/// routines, model meter, audit log, memory, people, artifact links and deletion tombstone. Each task answers with its document, event
+/// log, action proposals and attempts, so the export no longer leaves the
+/// history behind (the old "task record only" gap is closed below).
 ///
 /// For the parts it does assemble, a part that cannot be read answers 500
 /// export_incomplete naming it, instead of a 200 that quietly leaves those
@@ -62,6 +66,14 @@ export async function tenantCall(
 /// indexes before creating, so the index can hold ids of tasks that never
 /// came to exist.
 export async function tenantExport(env: TenantDataEnv, tenant: string): Promise<Response> {
+  const response = await assembleExport(env, tenant);
+  // The export holds customers' words, their LINE display names, what the team knows and its drafts, so no
+  // browser or proxy may keep a copy of it, whatever it answers: the whole export, an incomplete one or a deletion.
+  response.headers.set("cache-control", "no-store");
+  return response;
+}
+
+async function assembleExport(env: TenantDataEnv, tenant: string): Promise<Response> {
   const headers = new Headers();
   headers.set("x-tenant", tenant);
   const query = `tenant=${encodeURIComponent(tenant)}`;
@@ -81,12 +93,55 @@ export async function tenantExport(env: TenantDataEnv, tenant: string): Promise<
   );
   if (!credResp.ok) failed.push("connections");
   const connections = (credResp.ok ? await credResp.json() : {}) as { connections?: unknown[] };
+  // The vault's site sign-ins and the outposts that type them (sign-in-vault.ts), as the operator lists them: never a
+  // password, a credential or its digest.
+  const signInsResp = await credStub(env, tenant).fetch(new Request("https://cred/sign-ins", { headers }));
+  if (!signInsResp.ok) failed.push("signIns");
+  const signIns = (signInsResp.ok ? await signInsResp.json() : {}) as { signIns?: unknown[] };
+  const outpostsResp = await credStub(env, tenant).fetch(new Request("https://cred/outposts", { headers }));
+  if (!outpostsResp.ok) failed.push("outposts");
+  const outposts = (outpostsResp.ok ? await outpostsResp.json() : {}) as { outposts?: unknown[] };
   const consentResp = await tenantCall(env, tenant, `/consent?${query}`);
   if (!consentResp.ok) failed.push("consent");
   const consent: unknown = consentResp.ok ? await consentResp.json() : null;
   const attentionResp = await tenantCall(env, tenant, `/attention?${query}`);
   if (!attentionResp.ok) failed.push("attention");
   const attention = (attentionResp.ok ? await attentionResp.json() : {}) as { items?: unknown[] };
+  // Manut AI pilot records: the shop, its customers' messages, replies and
+  // payments. Empty for every tenant that is not a pilot shop.
+  const pilotResp = await tenantCall(env, tenant, `/pilot/export?${query}`);
+  if (!pilotResp.ok) failed.push("pilot");
+  const pilot: unknown = pilotResp.ok ? await pilotResp.json() : null;
+  // The team's routines, whether it is paused, a shop template's first-week questions (an answer is a memory fact,
+  // below), and every run kept (routine-store.ts).
+  const routinesResp = await tenantCall(env, tenant, `/routines/export?${query}`);
+  if (!routinesResp.ok) failed.push("routines");
+  const routines: unknown = routinesResp.ok ? await routinesResp.json() : null;
+  // The model gateway's meter: the cap override, monthly totals, open
+  // reservations and one metadata record per model call (model-meter.ts).
+  const modelResp = await tenantCall(env, tenant, `/model/export?${query}`);
+  if (!modelResp.ok) failed.push("model");
+  const model: unknown = modelResp.ok ? await modelResp.json() : null;
+  // The shop's audit log: every entry, oldest first, and how many entries it
+  // could not write (audit-log.ts).
+  const auditResp = await tenantCall(env, tenant, `/audit/export?${query}`);
+  if (!auditResp.ok) failed.push("audit");
+  const audit: unknown = auditResp.ok ? await auditResp.json() : null;
+  // What the team knows about the shop: every fact, waiting ones included, and only how many texts it was told to
+  // forget, never their fingerprints (memory-store.ts).
+  const memoryResp = await tenantCall(env, tenant, `/memory/export?${query}`);
+  if (!memoryResp.ok) failed.push("memory");
+  const memory: unknown = memoryResp.ok ? await memoryResp.json() : null;
+  // The people around the shop: helpers, invites, cover, the notes helpers passed on and the names the owner gave,
+  // never a helper session's hash (people-store.ts).
+  const peopleResp = await tenantCall(env, tenant, `/people/export?${query}`);
+  if (!peopleResp.ok) failed.push("people");
+  const people: unknown = peopleResp.ok ? await peopleResp.json() : null;
+  // The shop's artifact links: every page published as a link, with its text, and never the link itself
+  // (artifact-store.ts).
+  const artifactsResp = await tenantCall(env, tenant, `/artifacts/export?${query}`, { headers: { "x-artifacts": "1" } });
+  if (!artifactsResp.ok) failed.push("artifacts");
+  const artifacts = (artifactsResp.ok ? await artifactsResp.json() : {}) as { artifacts?: unknown[] };
   const schedResp = await scheduleStub(env, tenant).fetch(new Request("https://schedules/schedules", { headers }));
   if (!schedResp.ok) failed.push("schedules");
   const schedules = (schedResp.ok ? await schedResp.json() : {}) as { schedules?: unknown[] };
@@ -106,9 +161,18 @@ export async function tenantExport(env: TenantDataEnv, tenant: string): Promise<
     exportedAt: new Date().toISOString(),
     tasks,
     connections: connections.connections ?? [],
+    signIns: signIns.signIns ?? [],
+    outposts: outposts.outposts ?? [],
     schedules: schedules.schedules ?? [],
     consent,
     attention: attention.items ?? [],
+    pilot,
+    routines,
+    model,
+    audit,
+    memory,
+    people,
+    artifacts: artifacts.artifacts ?? [],
     ...(tomb.tombstone ? { deletedAt: tomb.tombstone.deletedAt } : {}),
   });
 }
@@ -133,6 +197,7 @@ export async function tenantPrune(env: TenantDataEnv, tenant: string, nowMs: num
   let tasksPruned = 0;
   let attemptsPruned = 0;
   let actionsPruned = 0;
+  let lookupLeft = false;
   const failed: string[] = [];
   for (const id of index.taskIds ?? []) {
     const stub = env.TASK.get(env.TASK.idFromName(id));
@@ -149,12 +214,16 @@ export async function tenantPrune(env: TenantDataEnv, tenant: string, nowMs: num
       const counts = (await response.json()) as {
         attemptsPruned?: number;
         actionsPruned?: number;
+        lookupPending?: number;
         notOwned?: unknown;
       };
       if (!counts.notOwned) {
         tasksPruned++;
         attemptsPruned += typeof counts.attemptsPruned === "number" ? counts.attemptsPruned : 0;
         actionsPruned += typeof counts.actionsPruned === "number" ? counts.actionsPruned : 0;
+        // The task removed requests its shop's approval lookup has not heard of yet. The task keeps them and the next
+        // prune sends them, so the prune says it is not done rather than leave the lookup's entries unsaid.
+        if (typeof counts.lookupPending === "number" && counts.lookupPending > 0) lookupLeft = true;
       }
     } else if (response.status !== 404) {
       // A 404 is the indexed-but-never-created task the export already
@@ -162,23 +231,66 @@ export async function tenantPrune(env: TenantDataEnv, tenant: string, nowMs: num
       failed.push(id);
     }
   }
-  void nowMs;
+  // Pilot customer messages age out on the source-snapshot window
+  // (pilot-store.ts). Nothing to prune for a tenant that is not a pilot shop.
+  let messagesPruned = 0;
+  const pilotResp = await tenantCall(env, tenant, "/pilot/prune", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-pilot": "1" },
+    body: JSON.stringify({ tenant, nowMs }),
+  });
+  if (pilotResp.ok) {
+    const counts = (await pilotResp.json()) as { messagesPruned?: unknown };
+    messagesPruned = typeof counts.messagesPruned === "number" ? counts.messagesPruned : 0;
+  } else {
+    failed.push("pilot");
+  }
+  if (lookupLeft) failed.push("approval-lookup");
   if (failed.length > 0) {
     return json({ error: "prune_incomplete", tasksPruned, failed }, 500);
   }
-  return json({ tenant, tasksPruned, attemptsPruned, actionsPruned, prunedAt: new Date(nowMs).toISOString() });
+  return json({
+    tenant,
+    tasksPruned,
+    attemptsPruned,
+    actionsPruned,
+    messagesPruned,
+    prunedAt: new Date(nowMs).toISOString(),
+  });
 }
 ///
 /// The order is the safety property. Tasks, connections and schedules go
-/// first; the tenant's sessions go next; the task index and consent go last,
-/// replaced by the tombstone. Any failure stops the run before the sessions
-/// and the index are touched, answering 500 wipe_incomplete with the parts
-/// that failed. The surviving session lets the user run the delete again and
-/// the surviving index lets that run find every remaining task. A tombstone
-/// written over surviving credentials or schedules would tell the user their
-/// data was gone while sealed connector secrets, or alarms that keep minting
-/// tasks, lived on.
-export async function tenantDelete(env: TenantDataEnv, tenant: string): Promise<Response> {
+/// first; the tenant's sessions go next; the task index and consent go last
+/// of the data, replaced by the tombstone. Any failure stops the run before
+/// the sessions and the index are touched, answering 500 wipe_incomplete with
+/// the parts that failed. The surviving session lets the user run the delete
+/// again and the surviving index lets that run find every remaining task. A
+/// tombstone written over surviving credentials or schedules would tell the
+/// user their data was gone while sealed connector secrets, or alarms that
+/// keep minting tasks, lived on.
+///
+/// Before the vault is wiped, the shop's Google connection is revoked at Google, as `POST /v1/google/disconnect` does it
+/// (google-connect.ts): the vault's wipe forgets the sealed token, and a token forgotten without being revoked would leave
+/// Manut AI listed in the owner's Google account with access to the sheet it made. Google being unreachable, or the
+/// connection's secret unreadable, never stops the deletion: the answer says how many connections were revoked
+/// (`googleRevoked`) and how many were not (`googleNotRevoked`), so the operator can tell the owner to remove Manut AI in
+/// their Google account's settings. The counts are there only for a shop that had a Google connection, and never hold a
+/// token. A vault that cannot be listed is a vault that cannot be wiped, so it stops the deletion at the vault step like
+/// any failure of it, before anything is forgotten that was not looked at. A run that stops later and is asked again finds
+/// no connection left to revoke, so the answer of the run that stops carries the counts too.
+///
+/// After the tombstone, and only once it is written, a pilot shop's row in
+/// the operator console's registry goes, as the very last step. The registry
+/// is how an operator finds a shop, and so how they find a deletion that
+/// stopped part way to send it again: it indexes shops as the task index
+/// indexes tasks, and goes last for the same reason. A run that stops before
+/// it leaves the shop listed as deleting until the same request finishes it.
+/// Every step answers again after its own wipe (the index reads as empty, the
+/// wipes find nothing more to remove), so a second run after any stop,
+/// including one after the tombstone, runs to the end. Other tenants have no
+/// registry row, and removing none changes nothing.
+export async function tenantDelete(env: TenantDataEnv & GoogleEnv, tenant: string, options: TenantDeleteOptions = {}):
+  Promise<Response> {
   const indexResp = await tenantCall(env, tenant, `/index?tenant=${encodeURIComponent(tenant)}`);
   // An unreadable index is not an empty one: wiping nothing and then the
   // index would orphan every task it listed.
@@ -209,14 +321,21 @@ export async function tenantDelete(env: TenantDataEnv, tenant: string): Promise<
   if (failed.length > 0) {
     return json({ error: "wipe_incomplete", tasksWiped, failed }, 500);
   }
-  const credResp = await credStub(env, tenant).fetch(
-    new Request("https://cred/tenant-wipe", {
-      method: "POST",
-      headers: { "content-type": "application/json", "x-wipe": "1" },
-      body: JSON.stringify({ tenant }),
-    }),
-  );
-  if (!credResp.ok) failed.push("connections");
+  const google = await revokeGoogle(env, tenant, options.fetchImpl ?? fetch);
+  // What the answer says of Google, kept on every answer from here on: it is only true of this run.
+  const googleCounts = google.revoked + google.notRevoked > 0
+    ? { googleRevoked: google.revoked, googleNotRevoked: google.notRevoked } : {};
+  // A vault that could not be looked at is not wiped: its Google token might still be there to revoke.
+  const credResp = google.listed
+    ? await credStub(env, tenant).fetch(
+      new Request("https://cred/tenant-wipe", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-wipe": "1" },
+        body: JSON.stringify({ tenant }),
+      }),
+    )
+    : null;
+  if (!credResp?.ok) failed.push("connections");
   const schedResp = await scheduleStub(env, tenant).fetch(
     new Request("https://schedules/tenant-wipe", {
       method: "POST",
@@ -227,22 +346,22 @@ export async function tenantDelete(env: TenantDataEnv, tenant: string): Promise<
   if (!schedResp.ok) failed.push("schedules");
   // Same ordering rule as the task wipes above: stop before the sessions
   // and the tombstone so the delete stays retryable.
-  if (failed.length > 0) {
-    return json({ error: "wipe_incomplete", tasksWiped, failed }, 500);
+  if (failed.length > 0 || !credResp) {
+    return json({ error: "wipe_incomplete", tasksWiped, failed, ...googleCounts }, 500);
   }
   const connections = (await credResp.json()) as { connectionsWiped?: number };
   const sched = (await schedResp.json()) as { schedulesWiped?: number; occurrencesWiped?: number };
   // Sessions before the tombstone: a live session must never survive its
-  // tenant's deletion. The tombstone goes last (TenantObject below); if it
-  // fails, the surviving index keeps every remaining task retryable and the
-  // delete can run again.
+  // tenant's deletion. The tombstone goes last of the data (TenantObject
+  // below); if it fails, the surviving index keeps every remaining task
+  // retryable and the delete can run again.
   const authResp = await authCall(env, "/tenant-wipe", {
     method: "POST",
     headers: { "content-type": "application/json", "x-wipe": "1" },
     body: JSON.stringify({ tenant }),
   });
   if (!authResp.ok) {
-    return json({ error: "wipe_incomplete", tasksWiped, failed: ["sessions"] }, 500);
+    return json({ error: "wipe_incomplete", tasksWiped, failed: ["sessions"], ...googleCounts }, 500);
   }
   const auth = (await authResp.json()) as { sessionsWiped?: number };
   const tenantResp = await tenantCall(env, tenant, "/tenant-wipe", {
@@ -251,15 +370,69 @@ export async function tenantDelete(env: TenantDataEnv, tenant: string): Promise<
     body: JSON.stringify({ tenant }),
   });
   if (!tenantResp.ok) {
-    return json({ error: "wipe_incomplete", tasksWiped, failed: ["index"] }, 500);
+    return json({ error: "wipe_incomplete", tasksWiped, failed: ["index"], ...googleCounts }, 500);
   }
   const wiped = (await tenantResp.json()) as { deletedAt?: string };
+  // Last of all, the shop leaves the operator's list (the order above says why). If this fails, the data is gone
+  // but the shop stays listed as deleting, and the same request removes it.
+  const registryResp = await authCall(env, `/pilot-shops?tenant=${encodeURIComponent(tenant)}`, {
+    method: "DELETE",
+    headers: { "x-wipe": "1" },
+  });
+  if (!registryResp.ok) {
+    return json({ error: "wipe_incomplete", tasksWiped, failed: ["registry"], ...googleCounts }, 500);
+  }
   return json({
     tasksWiped,
     connectionsWiped: connections.connectionsWiped ?? 0,
     schedulesWiped: sched.schedulesWiped ?? 0,
     occurrencesWiped: sched.occurrencesWiped ?? 0,
     sessionsWiped: auth.sessionsWiped ?? 0,
+    ...googleCounts,
     deletedAt: wiped.deletedAt,
   });
+}
+
+export type TenantDeleteOptions = {
+  /// Google's fetch for the revoke. Production leaves it unset and uses the global fetch; a test hands in a fake.
+  fetchImpl?: FetchImpl;
+};
+
+/// Ends the shop's live Google connections at Google before the vault forgets their tokens. The listing is the vault's own
+/// (never a secret); each token is read back from the vault only to be sent to Google's revoke endpoint, in the body, and is
+/// kept nowhere. Nothing here throws: a connection that could not be revoked (Google did not answer or refused, the secret
+/// would not open, or Google is not set up on this Worker, so there is nothing to ask it with) is counted as such, and
+/// `listed` is false only when the vault itself could not be read.
+async function revokeGoogle(env: TenantDataEnv & GoogleEnv, tenant: string, fetchImpl: FetchImpl):
+  Promise<{ listed: boolean; revoked: number; notRevoked: number }> {
+  let ids: string[];
+  try {
+    const response = await credStub(env, tenant).fetch(new Request(
+      `https://cred/connections?tenant=${encodeURIComponent(tenant)}`, { headers: { "x-tenant": tenant } }));
+    if (!response.ok) {
+      await response.body?.cancel();
+      return { listed: false, revoked: 0, notRevoked: 0 };
+    }
+    const { connections } = (await response.json()) as { connections?: { id?: unknown; provider?: unknown }[] };
+    ids = (connections ?? []).filter((one) => one.provider === GOOGLE_PROVIDER && typeof one.id === "string")
+      .map((one) => one.id as string);
+  } catch {
+    return { listed: false, revoked: 0, notRevoked: 0 };
+  }
+  const config = googleConfig(env);
+  let revoked = 0;
+  let notRevoked = 0;
+  for (const id of ids) {
+    let done = false;
+    if (config) {
+      try {
+        done = await revokeToken(fetchImpl, config, await readConnectionSecret(env, id, tenant));
+      } catch {
+        done = false;
+      }
+    }
+    if (done) revoked++;
+    else notRevoked++;
+  }
+  return { listed: true, revoked, notRevoked };
 }

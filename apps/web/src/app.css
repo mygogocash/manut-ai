@@ -1,0 +1,4 @@
+body{margin:0}
+/* Your Mac: a long command's lower edge fades while more of it is below, as the Mac's approval card does (item 117), so the
+   box reads as one that scrolls; gone once it is scrolled to its end (MacTab.tsx CommandBox). It adds no text. */
+.mac-cmd.more::after{content:"";position:sticky;bottom:-12px;display:block;height:28px;margin:-28px -14px -12px;background:linear-gradient(to bottom,transparent,var(--soft));pointer-events:none}

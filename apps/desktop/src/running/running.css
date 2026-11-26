@@ -1,0 +1,49 @@
+/* What keeps running on the Code page (RunningPanel.tsx): the design canvas's StatesCodeDev board, "Something that keeps
+   running". The row is the canvas's .rowl with its .tag.run and its Stop (.btn), which menuPages.css and home.css give
+   under .mpage; the rules here are the panel's own, scoped under its root class as kit.css scopes Kit's. */
+
+.runp {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  /* The desktop's own: the panel stands apart from the sessions under it, as Kit's panel does. */
+  margin-bottom: 18px;
+}
+/* The desktop's own: the line that says nothing runs starts where the rows' words do. */
+.runp > .mut {
+  margin: 0;
+  padding: 0 10px;
+  color: var(--aui-muted);
+  font-size: 13px;
+}
+.runp .mono {
+  font-family: var(--aui-font-mono);
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+/* The desktop's own: the command is one line of code, so its row's first line is not the bold of a name. */
+.runp .l1 {
+  font-weight: 400;
+}
+.runp .l2 {
+  font-variant-numeric: tabular-nums;
+}
+.runp .l2.err {
+  color: var(--aui-danger);
+}
+.runp .lk {
+  position: relative;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--aui-muted);
+  text-decoration: underline;
+}
+.runp .lk:hover {
+  color: var(--ink);
+}
+/* The desktop's own: a Stop that was pressed stays where it is, so a key press does not lose its place, and says so in
+   the muted words of a button that waits. */
+.runp .btn[aria-busy="true"] {
+  color: var(--aui-muted);
+  cursor: progress;
+}

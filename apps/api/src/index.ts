@@ -1,20 +1,47 @@
+import { auditAdminRoute } from "./audit-log";
+import { approvalsRoute } from "./approvals";
+import {
+  artifactPublicRoute,
+  artifactsRoute,
+  isArtifactHost,
+  isPublicArtifactPath,
+  publicFromJson,
+  publicNotFound,
+} from "./artifacts";
+import { feedRoute } from "./feed";
 import { AuthObject } from "./auth-object";
 import { hasAppleTokenShape } from "./auth";
+import { codeRequestAddress, emailExchange, emailSignIn } from "./email-code";
 import { peekJsonBody, readJsonBody } from "./body";
 import { beginDispatchAction, finishDispatchAction } from "./broker-actions";
+import { isOutpostRoute, outpostRoute, ownerOutpostRoute, ownerVaultRoute, vaultAdminRoute } from "./browser-control";
+import { vaultResealRoute } from "./vault-reseal";
 import { CompanyObject } from "./company-object";
 import { ConnectorError } from "./connectors/types";
 import { readConnectionSecret } from "./cred-broker";
 import { readLinear } from "./connectors/linear";
 import { CredObject } from "./cred-object";
+import { googleRoute } from "./google-connect";
 import { receiveLinearWebhook } from "./inbound";
-import { relayPath, relayRoute, relaySourceGroup } from "./relay";
+import { memoryRoute } from "./memory";
+import { modelAdminRoute } from "./model-gateway";
+import { ACCOUNT_DELETION_PATH, accountRoute } from "./account-deletion";
+import { peopleRoute, queryNamesSession } from "./people";
+import { pilotRoute } from "./pilot";
+import { routinesRoute } from "./routines";
+import { relayEnabled, relayPath, relayRoute, relaySourceGroup } from "./relay";
 import { RelayObject } from "./relay-object";
 import { ScheduleObject } from "./schedule-object";
+import { signUpsOpen } from "./self-serve";
+import { shopsRoute } from "./shops";
+import { listTasks } from "./task-list";
 import { TaskObject, type TaskRecordJSON } from "./task-object";
 import { authCall, credStub, scheduleStub, tenantCall, tenantDelete, tenantExport, tenantPrune } from "./tenant-data";
 import { TenantObject } from "./tenant-object";
+import { testWorker } from "./test-origin";
 import { isValidCompanyId, isValidSharedItemId, isValidTenant, GRANTS } from "./companies";
+import { workersAdminRoute } from "./workers";
+import { webSessionRoute } from "./web-session";
 
 export { AuthObject, CompanyObject, CredObject, RelayObject, ScheduleObject, TaskObject, TenantObject };
 
@@ -29,6 +56,8 @@ export interface Env {
   RELAY: DurableObjectNamespace;
   /// Public ingress limits. Missing bindings fail closed before body or object work.
   AUTH_EXCHANGE_LIMITER?: RateLimit;
+  /// Asking for a sign-in code by email (email-code.ts), keyed and configured as the exchange's limit.
+  AUTH_CODE_LIMITER?: RateLimit;
   AUTH_SESSION_LIMITER?: RateLimit;
   LINEAR_INBOUND_LIMITER?: RateLimit;
   /// Relay upgrade gates, keyed per source group: an IPv4 address or an IPv6 /64.
@@ -41,8 +70,23 @@ export interface Env {
   CLOUD_API_KEY?: string;
   /// Expected protected admin Access application audience. Unset denies admin.
   ADMIN_ACCESS_AUD?: string;
-  /// Explicit local test key source; production leaves this unset.
+  /// TEST-ONLY: the test Apple key's public half. Only wrangler.test.json sets it, the deploy check refuses every config
+  /// with a `TEST_` var, and it is honoured only on a test Worker, whose PUBLIC_API_ORIGIN is under `.test`
+  /// (test-origin.ts): its private half is committed.
   TEST_JWKS_JSON?: string;
+  /// Signing in by a code sent by email (email-code.ts; docs/pilot-api.md, "Signing in by email"). Built and off: both
+  /// of its routes answer `email_not_configured` until EMAIL_SIGN_IN is exactly "on", a sender is bound and
+  /// APPROVAL_LINK_SECRET can sign. EMAIL is Cloudflare Email Service's `send_email` binding, and EMAIL_FROM_ADDRESS
+  /// and EMAIL_FROM_NAME the sender owners see (email-sender.ts). No environment sets any of them yet: turning it on
+  /// waits for the owner, the Workers Paid plan and a sending domain.
+  EMAIL_SIGN_IN?: string;
+  EMAIL?: SendEmail;
+  EMAIL_FROM_ADDRESS?: string;
+  EMAIL_FROM_NAME?: string;
+  /// TEST-ONLY: "on" sends codes to an in-memory outbox the workerd tests read (email-sender.ts). Only
+  /// wrangler.test.json sets it, the deploy check refuses every config with a `TEST_` var, and it is honoured only on a
+  /// test Worker (test-origin.ts).
+  TEST_EMAIL_OUTBOX?: string;
   /// Capability defaults. New capabilities ship off; an environment opts in
   /// explicitly. Dynamic flags (below) override these without a redeploy.
   OFFICE_CLOUD?: string;
@@ -50,10 +94,77 @@ export interface Env {
   OFFICE_EXTERNAL_WRITES?: string;
   OFFICE_INBOUND?: string;
   OFFICE_SHARING?: string;
+  /// The shop's live feed (feed.ts; docs/turning-on.md). Like the others, the operator's dynamic record wins over it, and
+  /// no environment sets it: the feed stays off until the owner says.
+  SHOP_FEED?: string;
   /// Linear webhook signing secret (`wrangler secret put
   /// LINEAR_WEBHOOK_SECRET`). Never in config; without it every delivery is
   /// refused as unsigned.
   LINEAR_WEBHOOK_SECRET?: string;
+  /// Manut AI pilot (docs/pilot-api.md, pilot.ts). The owner's approval page
+  /// origin (`approvalUrl` is `${WEB_ORIGIN}/approve/{token}`) and this
+  /// Worker's public origin (for each LINE `webhookUrl`): Worker vars, set
+  /// per environment. Without them the routes that build those URLs refuse.
+  WEB_ORIGIN?: string;
+  PUBLIC_API_ORIGIN?: string;
+  /// Signs the owner's approval links (`wrangler secret put
+  /// APPROVAL_LINK_SECRET`, at least 32 characters). Never in config; without
+  /// it no link is minted and every link is invalid.
+  APPROVAL_LINK_SECRET?: string;
+  /// Public pilot ingress: LINE webhooks, and the owner's approval routes,
+  /// which the page polls while a send settles.
+  LINE_INBOUND_LIMITER?: RateLimit;
+  PILOT_APPROVAL_LIMITER?: RateLimit;
+  /// The outposts' own routes (browser-control.ts), which take an outpost's credential: one bucket per address.
+  OUTPOST_LIMITER?: RateLimit;
+  /// Artifact links (artifacts.ts; docs/pilot-api.md, "Artifact links"; docs/turning-on.md). Built and off: ARTIFACT_LINKS is
+  /// the switch's default, which the operator's dynamic record overrides, and ARTIFACT_ORIGIN the links' own web address,
+  /// which must be a host of its own, never the app's. No environment sets either, so publishing answers feature_disabled
+  /// and no page is served anywhere. ARTIFACT_READ_LIMITER counts every request on the artifact host, per source address.
+  ARTIFACT_LINKS?: string;
+  /// Skill links (item 84): the default of `skillLinks`, which no environment sets either. A bundle of skills is published and
+  /// read only while both switches are on.
+  SKILL_LINKS?: string;
+  ARTIFACT_ORIGIN?: string;
+  ARTIFACT_READ_LIMITER?: RateLimit;
+  /// Making a shop of one's own (self-serve.ts; docs/pilot-api.md, "Making a shop of your own"). Built and off: the route
+  /// answers `sign_ups_closed` until SELF_SERVE_SHOPS is exactly "on", which no environment sets: opening sign-ups is the
+  /// owner's call. While it is on, every try counts against SELF_SERVE_SHOP_LIMITER, per source address.
+  SELF_SERVE_SHOPS?: string;
+  SELF_SERVE_SHOP_LIMITER?: RateLimit;
+  /// A person's deletion of their own data (`DELETE /v1/tenant/data`), counted per source address in the ingress gate.
+  TENANT_DELETE_LIMITER?: RateLimit;
+  /// Opening a shop session (`POST /v1/shops/session`, `POST /v1/people/session`), counted per signed-in person
+  /// (session-limits.ts).
+  SHOP_SESSION_LIMITER?: RateLimit;
+  /// The pages Worker (pages.ts, wrangler.web.jsonc), which serves the web app for every path outside the API.
+  /// Unbound, those paths answer this Worker's own 404.
+  WEB?: Fetcher;
+  /// The model gateway (model-gateway.ts, docs/model-gateway.md). Anthropic's
+  /// API key is a Worker secret the owner adds (`wrangler secret put
+  /// ANTHROPIC_API_KEY`); never in config, and without it every model call is
+  /// refused with 503 not_configured. The exchange rate (satang per US dollar)
+  /// and the default monthly cap per shop (satang) are Worker vars with
+  /// documented defaults in model-price.ts; both are the owner's decision.
+  /// MODEL_PROVIDER is `stand-in` only for local runs.
+  ANTHROPIC_API_KEY?: string;
+  MODEL_SATANG_PER_USD?: string;
+  MODEL_DEFAULT_CAP_SATANG?: string;
+  MODEL_PROVIDER?: string;
+  /// Google Sheets for Ton's books (google-connect.ts, docs/connectors.md 4b): the owner's own OAuth client, two
+  /// Wrangler secrets (`wrangler secret put GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`). Never in config; until both
+  /// are set every Google route answers 503 google_not_configured and nothing reaches Google. No environment sets them
+  /// yet. TEST_GOOGLE_ORIGIN is test-only, set in wrangler.test.json alone (google.ts).
+  GOOGLE_CLIENT_ID?: string;
+  GOOGLE_CLIENT_SECRET?: string;
+  TEST_GOOGLE_ORIGIN?: string;
+  /// The Google callback, which the owner's browser reaches with no session: one bucket per address.
+  GOOGLE_CALLBACK_LIMITER?: RateLimit;
+}
+
+/// The paths this Worker answers itself. Everything else is a page of the web app.
+function isApiPath(pathname: string): boolean {
+  return pathname.startsWith("/v1/") || pathname.startsWith("/relay/");
 }
 
 const MAX_BODY_BYTES = 256 * 1024;
@@ -62,23 +173,78 @@ function json(data: unknown, status = 200): Response {
   return Response.json(data, { status });
 }
 
+/// The methods whose bodies the API reads as JSON.
+const BODY_METHODS = new Set(["POST", "PUT", "PATCH"]);
+
+/// A body the API reads is JSON, and it must say so: every POST, PUT and PATCH under /v1/ that carries a body takes only
+/// `application/json` (a `charset` or other parameter is fine), or answers 415 `json_required` before anything is
+/// counted, read or woken. A page on another site can make a visitor's browser send a POST without asking first only
+/// as `text/plain`, a form or a multipart upload (a CORS "simple" request, with `mode: "no-cors"`), so with this no
+/// other site can make a browser ask for a sign-in code, spend a code's tries or send anything else here; a JSON body
+/// from another origin needs a CORS preflight, which this API answers only on the owner's link routes (pilot.ts). The
+/// webhooks under /v1/inbound/ are left to their senders, who sign the exact body and choose its type, and no browser
+/// can sign one. A request with no body has nothing to read and passes. The desktop's shell and page and apps/web send
+/// `application/json` with every body.
+function jsonBodyRefusal(request: Request, pathname: string): Response | null {
+  if (!BODY_METHODS.has(request.method) || pathname.startsWith("/v1/inbound/")) return null;
+  if (request.body === null || request.headers.get("content-length") === "0") return null;
+  const media = (request.headers.get("content-type") ?? "").split(";", 1)[0]!.trim().toLowerCase();
+  return media === "application/json" ? null : json({ error: "json_required" }, 415);
+}
+
 /// These unauthenticated routes must be limited before parsing or waking AUTH.
 /// Cloudflare supplies this source IP; client forwarding headers and body fields
 /// never choose a bucket. Per-location limits are abuse control, not accounting.
-async function ingressRateGate(request: Request, pathname: string, env: Env): Promise<Response | null> {
+/// Every bucket is a source group, as the relay's always were: an IPv4 address, or
+/// an IPv6 /64 and never a whole IPv6 address, because one subscriber holds a whole
+/// /64 and rotating addresses inside it would otherwise give a fresh bucket each
+/// time. A source that cannot be read is refused, never given a bucket of its own.
+async function ingressRateGate(request: Request, pathname: string, env: Env, artifactHost = false):
+  Promise<Response | null> {
   let binding: RateLimit | undefined;
-  let key = request.headers.get("cf-connecting-ip")?.trim();
+  const key = relaySourceGroup(request.headers.get("cf-connecting-ip"));
   const relay = relayPath(pathname);
-  if (request.method === "POST" && pathname === "/v1/auth/exchange") binding = env.AUTH_EXCHANGE_LIMITER;
+  // The artifact origin's host serves other people's pages to anyone with a link, so every request there counts, any
+  // method and any path, before a switch or an object is read (artifacts.ts).
+  if (artifactHost) binding = env.ARTIFACT_READ_LIMITER;
+  else if (request.method === "POST" && pathname === "/v1/auth/exchange") binding = env.AUTH_EXCHANGE_LIMITER;
+  // Asking for a sign-in code sends an email, so it counts in a bucket of its own, keyed by the source group as the
+  // exchange's is. The limits per email address and per source are the auth object's (email-code.ts).
+  else if (request.method === "POST" && pathname === "/v1/auth/email/code") binding = env.AUTH_CODE_LIMITER;
   else if ((request.method === "POST" && pathname === "/v1/auth/refresh") ||
            (request.method === "DELETE" && pathname === "/v1/auth/session")) binding = env.AUTH_SESSION_LIMITER;
-  else if (request.method === "POST" && pathname === "/v1/inbound/linear") binding = env.LINEAR_INBOUND_LIMITER;
-  else if (relay) {
-    // Relay upgrades count per source group, an IPv4 address or an IPv6 /64, so
-    // rotating addresses inside one prefix gains nothing (RT-1). Any method counts.
-    binding = relay.role === "socket" ? env.RELAY_HOST_LIMITER : env.RELAY_PHONE_LIMITER;
-    key = relaySourceGroup(key) ?? undefined;
+  // The owner's web app (web-session.ts): signing in with a code counts in the exchange's bucket, and reading the
+  // person's shops and signing out, which may refresh and end the sign-in, in the refresh's.
+  else if (request.method === "POST" && pathname === "/v1/web/sign-in") binding = env.AUTH_EXCHANGE_LIMITER;
+  else if (request.method === "POST" && (pathname === "/v1/web/shops" || pathname === "/v1/web/sign-out")) {
+    binding = env.AUTH_SESSION_LIMITER;
   }
+  else if (request.method === "POST" && pathname === "/v1/inbound/linear") binding = env.LINEAR_INBOUND_LIMITER;
+  else if (request.method === "POST" && pathname.startsWith("/v1/inbound/line/")) binding = env.LINE_INBOUND_LIMITER;
+  // A person's deletion of their own data wakes AUTH to read the session and then wipes every one of their objects, so
+  // every try counts before the session is read. Per address, not per person: the deletion ends every session of theirs,
+  // so each try needs a sign-in of its own, and only an address is shared by tries from many accounts.
+  else if (request.method === "DELETE" && pathname === "/v1/tenant/data") binding = env.TENANT_DELETE_LIMITER;
+  // Deleting one's own account (account-deletion.ts) counts in the same bucket, any method, for the same reasons: it reads
+  // the session and then deletes the person's shops, places and sessions.
+  else if (pathname === ACCOUNT_DELETION_PATH) binding = env.TENANT_DELETE_LIMITER;
+  // Any method: the link is a bearer capability, so every probe counts. The
+  // owner's two kinds of link share one limit, so probing both doubles nothing.
+  else if (pathname.startsWith("/v1/pilot/approvals/") || pathname.startsWith("/v1/pilot/deletions/")) {
+    binding = env.PILOT_APPROVAL_LIMITER;
+  }
+  // An outpost's heartbeat, redeem and steps carry its credential, so every try counts, before the credential is read.
+  else if (isOutpostRoute(request.method, pathname)) binding = env.OUTPOST_LIMITER;
+  // Google's redirect back to the owner's browser carries no session, only a state: every try counts, any method, before
+  // the state is read.
+  else if (pathname === "/v1/google/callback") binding = env.GOOGLE_CALLBACK_LIMITER;
+  // Making a shop of one's own wakes AUTH to read the session and then makes a shop, so every try counts, any method, before
+  // anything is read; but only while sign-ups are open: while they are closed the route answers sign_ups_closed and
+  // touches nothing at all (self-serve.ts).
+  else if (pathname === "/v1/shops/new" && signUpsOpen(env)) binding = env.SELF_SERVE_SHOP_LIMITER;
+  // Relay upgrades count per source group like everything above, so rotating addresses inside one prefix gains nothing
+  // (RT-1). Any method counts.
+  else if (relay) binding = relay.role === "socket" ? env.RELAY_HOST_LIMITER : env.RELAY_PHONE_LIMITER;
   else return null;
 
   if (!binding || !key) return json({ error: "rate_limit_unavailable" }, 503);
@@ -109,9 +275,30 @@ type RequestContext =
   /// Only protected admin connection provisioning constructs this context.
   | { tenant: null; operator: true };
 
+/// The person's sign-ins the lifted routes refuse: an address's hash (`email:`, email-code.ts), since anyone can sign in
+/// by email once it is on. A shop's tenant (`pilot:`) is never a sign-in's. Apple's (`apple:`, auth.ts) keeps the lifted
+/// routes for now: Apple sign-in is on in no environment and needs the owner's Apple team, and the lifted routes' own tests
+/// sign in with it. docs/turning-on.md says to add it here before Apple is turned on.
+const REFUSED_PERSON = /^email:/;
+
+/// Who may use a lifted route: every session, or every session but a person's own email sign-in.
+type People = "allowed" | "refused";
+
 /// Tenant routes accept only revocable device sessions. The operator key is
 /// explicitly refused here, so it cannot bypass tenant or company checks.
-async function contextOf(request: Request, env: Env): Promise<RequestContext | null> {
+///
+/// A person's own email sign-in is refused too, as a shop session already is
+/// (people.ts), on every lifted route but the reads the desktop makes for a
+/// person in no shop: `GET /v1/tasks`, `GET /v1/schedules` and
+/// `GET /v1/inbound/attention`, and `GET /v1/tenant/export`, which it read
+/// before the task list (`people: "allowed"`). These routes act for a
+/// tenant's own cloud tasks, schedules, connections, consent, data and
+/// companies, and a person's tenant is no shop: nothing of a shop's is ever
+/// there. Since anyone can sign in by email once it is on, they would
+/// otherwise give every stranger cloud tasks, schedules that fire, a stored
+/// Linear token read through this API, and the tenant wipe. A shop's owner
+/// and helpers act for it with shop sessions, which these routes refuse.
+async function contextOf(request: Request, env: Env, people: People = "refused"): Promise<RequestContext | null> {
   const header = request.headers.get("authorization") ?? "";
   const prefix = "Bearer ";
   if (!header.startsWith(prefix)) return null;
@@ -129,6 +316,7 @@ async function contextOf(request: Request, env: Env): Promise<RequestContext | n
   if (!verify.ok) return null;
   const result = (await verify.json()) as { ok?: boolean; tenant?: string };
   if (!result.ok || !result.tenant) return null;
+  if (people === "refused" && REFUSED_PERSON.test(result.tenant)) return null;
   return { tenant: result.tenant, operator: false };
 }
 
@@ -140,6 +328,54 @@ function tenantHeaders(context: RequestContext, headers: Headers): void {
 const ADMIN_METHODS = new Set([
   "GET /v1/admin/flags", "PUT /v1/admin/flags", "POST /v1/admin/prune",
   "GET /v1/admin/entitlements", "PUT /v1/admin/entitlements", "POST /v1/admin/connections",
+  // Manut AI pilot operator console (docs/pilot-api.md). Ids travel in the
+  // query string or the body, never the path, so each entry is exact.
+  "POST /v1/admin/pilot/shops", "GET /v1/admin/pilot/shops", "POST /v1/admin/pilot/line-connections",
+  "GET /v1/admin/pilot/messages", "POST /v1/admin/pilot/replies", "GET /v1/admin/pilot/actions",
+  "POST /v1/admin/pilot/payments", "GET /v1/admin/pilot/payments",
+  "GET /v1/admin/pilot/export", "POST /v1/admin/pilot/deletions",
+  // The Phase 1 gate: the shop's own subscription payments, and the measurement.
+  "POST /v1/admin/pilot/subscription-payments", "GET /v1/admin/pilot/subscription-payments",
+  "GET /v1/admin/pilot/gate",
+  // An operator adds a shop its owner made to the gate's cohort, or leaves it out again (pilot.ts). The tenant is in the body.
+  "POST /v1/admin/pilot/gate/cohort",
+  // The model gateway (model-gateway.ts): read a shop's month of model spend,
+  // and set or clear its cap override. The tenant travels in the query or body.
+  // The shops near or at their caps this month, across all shops, name none.
+  "GET /v1/admin/model/usage", "PUT /v1/admin/model/cap", "GET /v1/admin/model/alerts",
+  // The shop's audit log (audit-log.ts), a page at a time. The tenant and the cursor travel in the query.
+  "GET /v1/admin/audit",
+  // What the team knows about the shop (memory.ts): read it, and the owner's say over each fact as an operator relays
+  // it. A worker's proposal is a function, not a route. The tenant travels in the query or the body.
+  "GET /v1/admin/memory", "POST /v1/admin/memory/remember", "POST /v1/admin/memory/confirm",
+  "POST /v1/admin/memory/correct", "POST /v1/admin/memory/forget",
+  // Nam, Pim and Ton (workers.ts): start one member's job for a shop, and read a shop's jobs back, newest first, a page
+  // at a time. Every result is a draft; the runner calls the model through the gateway, never a route. The tenant travels
+  // in the body (run) or the query (drafts).
+  "POST /v1/admin/workers/run", "GET /v1/admin/workers/drafts",
+  // The people around a shop (people.ts), on the owner's word: read them, invite a helper (a link to copy; nothing is
+  // sent), revoke an invite, remove a helper, and set or clear cover. The tenant travels in the query or the body.
+  "GET /v1/admin/people", "POST /v1/admin/people/invites", "POST /v1/admin/people/invites/revoke",
+  "POST /v1/admin/people/remove", "POST /v1/admin/people/away", "POST /v1/admin/people/away/clear",
+  // Several shops (shops.ts): link the account a code names to a shop as its owner, and unlink it. The tenant and the
+  // code travel in the body.
+  "POST /v1/admin/shops/owner", "POST /v1/admin/shops/owner/unlink",
+  // The vault's site sign-ins and the outposts that type them (browser-control.ts): list sign-ins without any secret,
+  // add one, replace a password, choose who may use one (on the owner's word, through the vault operation the owner's own
+  // route uses), remove one, seal the shop's vault again after a key rotation (vault-reseal.ts); register an outpost, list
+  // them. The tenant and the ids travel in the query or the body.
+  "GET /v1/admin/vault/sign-ins", "POST /v1/admin/vault/sign-ins", "POST /v1/admin/vault/sign-ins/password",
+  "POST /v1/admin/vault/sign-ins/members", "POST /v1/admin/vault/sign-ins/remove", "POST /v1/admin/vault/reseal",
+  "GET /v1/admin/outposts", "POST /v1/admin/outposts",
+  // Remove an outpost, refusing what waits for it, or replace its credential, the new one shown once. The tenant and the
+  // outpost's id travel in the body.
+  "POST /v1/admin/outposts/remove", "POST /v1/admin/outposts/credential",
+  // The team's routines (routines.ts): list a shop's with the team, make one, pause, resume or remove one, and pause or
+  // resume the whole team; the shop templates a new shop can start from, and a shop's first-week questions with the
+  // owner's answer relayed. The tenant and the ids travel in the query or the body.
+  "GET /v1/admin/routines", "POST /v1/admin/routines", "POST /v1/admin/routines/pause", "POST /v1/admin/routines/resume",
+  "POST /v1/admin/routines/remove", "POST /v1/admin/team/pause", "POST /v1/admin/team/resume",
+  "GET /v1/admin/templates", "GET /v1/admin/questions", "POST /v1/admin/questions/answer",
 ]);
 
 /// Only platform-authenticated Access context is trusted, never a JWT header
@@ -174,9 +410,19 @@ export type FeatureFlags = {
   /// owner opens Release 4 under D-R4-live-gate, so nobody can be scoped,
   /// invited or shown shared work before then.
   officeSharing: boolean;
+  /// The shop's live feed (feed.ts, docs/pilot-api.md "The shop's live feed"): `GET /v1/feed` answers 403
+  /// `feature_disabled` until it is on, and a TenantObject closes its feed's sockets once it reads off.
+  shopFeed: boolean;
+  /// Artifact links (artifacts.ts, docs/pilot-api.md "Artifact links"): `POST /v1/artifacts` answers 403
+  /// `feature_disabled` and every link answers 404 until it is on.
+  artifactLinks: boolean;
+  /// Skill links (artifacts.ts, docs/pilot-api.md "Skill links"): a bundle of skills is refused 403 `feature_disabled` and its
+  /// link answers 404 until this is on as well as `artifactLinks`, so pages can be allowed and skills not.
+  skillLinks: boolean;
 };
 
-const FLAG_KEYS = ["officeCloud", "officeRoutines", "officeExternalWrites", "officeInbound", "officeSharing"] as const;
+const FLAG_KEYS = ["officeCloud", "officeRoutines", "officeExternalWrites", "officeInbound", "officeSharing", "shopFeed",
+  "artifactLinks", "skillLinks"] as const;
 
 async function featureFlags(env: Env): Promise<FeatureFlags> {
   const defaults: FeatureFlags = {
@@ -185,6 +431,9 @@ async function featureFlags(env: Env): Promise<FeatureFlags> {
     officeExternalWrites: env.OFFICE_EXTERNAL_WRITES === "1",
     officeInbound: env.OFFICE_INBOUND === "1",
     officeSharing: env.OFFICE_SHARING === "1",
+    shopFeed: env.SHOP_FEED === "1",
+    artifactLinks: env.ARTIFACT_LINKS === "1",
+    skillLinks: env.SKILL_LINKS === "1",
   };
   try {
     const response = await authCall(env, "/flags");
@@ -202,6 +451,9 @@ async function featureFlags(env: Env): Promise<FeatureFlags> {
         typeof dynamic.officeInbound === "boolean" ? dynamic.officeInbound : defaults.officeInbound,
       officeSharing:
         typeof dynamic.officeSharing === "boolean" ? dynamic.officeSharing : defaults.officeSharing,
+      shopFeed: typeof dynamic.shopFeed === "boolean" ? dynamic.shopFeed : defaults.shopFeed,
+      artifactLinks: typeof dynamic.artifactLinks === "boolean" ? dynamic.artifactLinks : defaults.artifactLinks,
+      skillLinks: typeof dynamic.skillLinks === "boolean" ? dynamic.skillLinks : defaults.skillLinks,
     };
   } catch {
     return defaults;
@@ -449,16 +701,36 @@ async function taskWriteAssertions(
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
+    // Artifact links' public read (artifacts.ts): only on the artifact origin's host, where every request counts against its
+    // own limit first and every answer carries the page headers. A path under /a/ on any other host, the app's own above
+    // all, is the same 404 and reaches nothing, so another person's page never runs on Manut AI's origin.
+    const artifactHost = isArtifactHost(url, env);
+    if (artifactHost || isPublicArtifactPath(url.pathname)) {
+      if (!artifactHost) return publicNotFound();
+      const limited = await ingressRateGate(request, url.pathname, env, true);
+      if (limited) return publicFromJson(limited);
+      return artifactPublicRoute(request, url, env, () => featureFlags(env));
+    }
+    // One origin (docs/pilot-api.md): this Worker is the front door, and every path outside the API goes to the
+    // pages Worker. This Worker keeps no static assets of its own: Cloudflare runs a Worker with assets behind a
+    // router that does not pass ctx.access, and the admin gate below needs it (pages.ts).
+    if (!isApiPath(url.pathname)) return env.WEB ? env.WEB.fetch(request) : json({ error: "not_found" }, 404);
+    // Before the limits, so a request another site makes a browser send never spends that visitor's bucket.
+    const typeDenial = jsonBodyRefusal(request, url.pathname);
+    if (typeDenial) return typeDenial;
     const rateDenial = await ingressRateGate(request, url.pathname, env);
     if (rateDenial) return rateDenial;
     const adminDenial = adminGate(request, url.pathname, env, ctx);
     if (adminDenial) return adminDenial;
 
-    // Health carries no task data and stays public.
+    // Health carries no task data and stays public. It also says whether the relay is switched on, which anyone can
+    // already learn from a relay route's 503: the desktop's page cannot read that answer from a socket, and asks here
+    // before dialling again (apps/desktop/src/remote/link.ts).
     if (request.method === "GET" && url.pathname === "/v1/health") {
       return json({
         ok: true,
         service: "manut-api",
+        relay: relayEnabled(env) ? "on" : "off",
         families: [
           "tasks",
           "work",
@@ -486,8 +758,8 @@ export default {
 
     // Identity endpoints mint sessions, so they stand outside task auth.
     // Bound actual bytes before an object call, even when the declared length lies.
-    if (request.method === "POST" &&
-        (url.pathname === "/v1/auth/exchange" || url.pathname === "/v1/auth/refresh")) {
+    if (request.method === "POST" && (url.pathname === "/v1/auth/exchange" || url.pathname === "/v1/auth/refresh" ||
+        url.pathname === "/v1/auth/email/code")) {
       const length = request.headers.get("content-length");
       if (length === null) return json({ error: "length_required" }, 411);
       if (!/^\d+$/.test(length) || !Number.isSafeInteger(Number(length))) return json({ error: "invalid_request" }, 400);
@@ -499,17 +771,29 @@ export default {
       }
       if (url.pathname === "/v1/auth/exchange" && parsed.value.provider === "apple" &&
           typeof parsed.value.identityToken === "string" &&
-          !hasAppleTokenShape(parsed.value.identityToken, Boolean(env.TEST_JWKS_JSON))) {
+          !hasAppleTokenShape(parsed.value.identityToken, Boolean(env.TEST_JWKS_JSON) && testWorker(env))) {
         return json({ error: "invalid_identity" }, 401);
       }
+      // Signing in by email (email-code.ts): a body that is not exactly the route's, and any request while email sign-in
+      // is off, is answered here, so neither wakes AUTH. The object checks both again before it keeps or sends anything.
+      const codeRoute = url.pathname === "/v1/auth/email/code";
+      if (codeRoute || (url.pathname === "/v1/auth/exchange" && parsed.value.provider === "email")) {
+        if (!(codeRoute ? codeRequestAddress(parsed.value) : emailExchange(parsed.value))) {
+          return json({ error: "invalid_request" }, 400);
+        }
+        if (!emailSignIn(env)) return json({ error: "email_not_configured" }, 400);
+      }
+      const target = codeRoute ? "email-code" : url.pathname.endsWith("exchange") ? "exchange" : "refresh";
+      const headers = new Headers({ "content-type": "application/json" });
+      // A code is counted against where it was asked from as well as the address (email-code.ts): the object is told
+      // the source group the ingress limit counted, and nothing else about the request.
+      if (codeRoute) {
+        const source = relaySourceGroup(request.headers.get("cf-connecting-ip"));
+        if (!source) return json({ error: "rate_limit_unavailable" }, 503);
+        headers.set("x-code-source", source);
+      }
       const stub = env.AUTH.get(env.AUTH.idFromName("auth"));
-      return stub.fetch(
-        new Request(`https://auth/${url.pathname.endsWith("exchange") ? "exchange" : "refresh"}`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: parsed.raw,
-        }),
-      );
+      return stub.fetch(new Request(`https://auth/${target}`, { method: "POST", headers, body: parsed.raw }));
     }
     if (request.method === "DELETE" && url.pathname === "/v1/auth/session") {
       const authorization = request.headers.get("authorization");
@@ -523,6 +807,12 @@ export default {
       );
     }
 
+    // The owner's web app (web-session.ts): its session lives in cookies the page cannot read, and these routes are
+    // the only ones that read them. Each hands its request on to the route that does the work with the right bearer from
+    // the cookies; every other route takes a bearer and nothing else. Its ingress limits ran above.
+    const web = await webSessionRoute(request, url, env, ctx, () => featureFlags(env));
+    if (web) return web;
+
     // Inbound Linear webhooks (inbound.ts). Public, because Linear holds no
     // session: the signature is the credential. While officeInbound is off
     // the request falls through to the final not_found, byte for byte what
@@ -533,6 +823,74 @@ export default {
         return receiveLinearWebhook(request, env, Date.now());
       }
     }
+
+    // Manut AI pilot (pilot.ts): the LINE webhook, the owner's signed
+    // approval link, and the operator console. Its ingress limits and the
+    // admin gate already ran above; flags are read only by routes that need
+    // them.
+    const pilot = await pilotRoute(request, url, env, ctx, () => featureFlags(env));
+    if (pilot) return pilot;
+
+    // The model gateway's operator routes (model-gateway.ts). The admin gate
+    // above already required both credentials and an exact method.
+    const model = await modelAdminRoute(request, url, env, ctx);
+    if (model) return model;
+
+    // The shop's audit log (audit-log.ts), read-only. The admin gate above already required both credentials and
+    // the exact method.
+    const audit = await auditAdminRoute(request, url, env);
+    if (audit) return audit;
+
+    // What the team knows about the shop (memory.ts): the operator's routes, under the admin gate above, and the owner's
+    // own from the shop's session.
+    const memory = await memoryRoute(request, url, env, ctx);
+    if (memory) return memory;
+
+    // Nam, Pim and Ton (workers.ts). The admin gate above already required both credentials and the exact method; the
+    // runner reads the kill switches and the owner's consent before it creates anything.
+    const workers = await workersAdminRoute(request, url, env, ctx, () => featureFlags(env));
+    if (workers) return workers;
+
+    // A person deleting their own account (account-deletion.ts), with their own signed-in session. Its ingress limit ran
+    // above.
+    const account = await accountRoute(request, url, env);
+    if (account) return account;
+    // The people around a shop (people.ts): the operator's routes, under the admin gate above, the owner's own from the
+    // shop's session, and a helper's own joining and opening the shop on another device, which need a signed-in session.
+    const people = await peopleRoute(request, url, env, ctx);
+    if (people) return people;
+    // Several shops (shops.ts): a signed-in person's shops, a shop session for one of them and the owner's link code,
+    // which need the person's own session; a shop session's sign-out, and its consent and export on the lifted routes'
+    // paths below, which answer every other credential; and the operator's link and unlink of an owner's account, under
+    // the gate above.
+    const shops = await shopsRoute(request, url, env, ctx);
+    if (shops) return shops;
+    // The vault's site sign-ins and the outposts (browser-control.ts). The admin gate above already required both
+    // credentials and the exact method for the operator's routes; an outpost's own routes need its credential.
+    // Sealing one shop's vault again under the current key after a rotation (vault-reseal.ts), under the gate above.
+    const resealed = await vaultResealRoute(request, url, env, ctx);
+    if (resealed) return resealed;
+    const vault = await vaultAdminRoute(request, url, env, ctx);
+    if (vault) return vault;
+    const outpost = await outpostRoute(request, url, env, () => featureFlags(env));
+    if (outpost) return outpost;
+    // This Mac registering itself as an outpost through the desktop, with the owner's session (browser-control.ts).
+    const ownerOutpost = await ownerOutpostRoute(request, url, env);
+    if (ownerOutpost) return ownerOutpost;
+    // The owner's Connections: the shop's sign-ins and outposts, a sign-in added, changed or removed, a new password, who may
+    // use a sign-in, and renaming or removing an outpost, with the owner's session (browser-control.ts).
+    const ownerVault = await ownerVaultRoute(request, url, env);
+    if (ownerVault) return ownerVault;
+    // Google Sheets for Ton's books (google-connect.ts): the owner's own routes from their session, and Google's callback,
+    // whose ingress limit ran above. Off, every one answers google_not_configured.
+    const google = await googleRoute(request, url, env, { flags: () => featureFlags(env) });
+    if (google) return google;
+
+    // The team's routines, Pause everyone, shop templates and their first-week questions (routines.ts): the
+    // operator's routes, under the admin gate above, and the shop's own session's routes. Making or changing a routine
+    // runs nothing; each run reads the switches and the owner's consent again.
+    const routines = await routinesRoute(request, url, env, ctx);
+    if (routines) return routines;
 
     // Capability flags and kill switches. Operator only: sessions never
     // reach this, so a compromised device cannot re-enable cloud work.
@@ -735,7 +1093,8 @@ export default {
     // own verified tenant. Gated like
     // the webhook: with officeInbound off there is nothing to read.
     if (url.pathname === "/v1/inbound/attention" && request.method === "GET") {
-      const context = await contextOf(request, env);
+      // One of the desktop's reads for a person in no shop (contextOf): their own tenant has no feed, so it reads empty.
+      const context = await contextOf(request, env, "allowed");
       if (!context) return json({ error: "unauthorized" }, 401);
       if (!(await featureFlags(env)).officeInbound) {
         return json({ error: "feature_disabled", feature: "officeInbound" }, 403);
@@ -748,7 +1107,8 @@ export default {
 
     // Explicit cloud-work consent, per tenant. Sessions must opt in before
     // their tasks run anywhere off the Mac. Operator credentials cannot
-    // bypass this public session boundary.
+    // bypass this public session boundary. A shop session never gets here:
+    // shops.ts answers it above, for its shop's owner only.
     if (url.pathname === "/v1/consent/cloud") {
       const context = await contextOf(request, env);
       if (!context) return json({ error: "unauthorized" }, 401);
@@ -784,8 +1144,11 @@ export default {
     // through their owning objects, then consent, the task index, and
     // attention items, and leaves a tombstone. Either answers 500 naming the
     // parts that failed rather than reporting a partial result as complete.
+    // A shop session's export is answered above (shops.ts); no shop session
+    // deletes here, which stays with the owner's confirmation link.
     if (url.pathname === "/v1/tenant/export" && request.method === "GET") {
-      const context = await contextOf(request, env);
+      // One of the desktop's reads for a person in no shop (contextOf): their own tenant's export holds nothing of a shop's.
+      const context = await contextOf(request, env, "allowed");
       if (!context) return json({ error: "unauthorized" }, 401);
       const tenant = context.tenant ?? url.searchParams.get("tenant") ?? "";
       if (!tenant) return json({ error: "tenant_required" }, 400);
@@ -841,7 +1204,8 @@ export default {
     // its own alarm, so one tenant's sweep never touches another's, and
     // occurrence claims stay singular per schedule.
     if (url.pathname === "/v1/schedules") {
-      const context = await contextOf(request, env);
+      // Listing is one of the desktop's reads for a person in no shop (contextOf); making a schedule is not theirs.
+      const context = await contextOf(request, env, request.method === "GET" ? "allowed" : "refused");
       if (!context) return json({ error: "unauthorized" }, 401);
       if (request.method === "POST") {
         // Creating a schedule arms future cloud work, so both switches guard
@@ -899,6 +1263,25 @@ export default {
         );
       }
     }
+
+    // Approvals for a session (approvals.ts): the shop's approval-core records
+    // as approval-core's wire JSON, read like a task with neither a switch nor
+    // consent; a decision on one, with the switches and consent of the owner's
+    // link; and a helper passing one on. The shop's own session is its owner and
+    // a helper session a helper (people.ts); the role never comes from a body.
+    const approvals = await approvalsRoute(request, url, env, () => featureFlags(env));
+    if (approvals) return approvals;
+
+    // The shop's live feed (feed.ts): a one-use ticket a shop's session mints, taken as the approvals list takes it, and
+    // the WebSocket that ticket opens, handed to the shop's TenantObject and saying only that something changed. Off until
+    // `shopFeed` is turned on.
+    const feed = await feedRoute(request, url, env, () => featureFlags(env));
+    if (feed) return feed;
+
+    // Artifact links (artifacts.ts): the owner's list, a publish after the desktop's ask, and a removal, with the shop's
+    // session. Publishing is off until `artifactLinks` is on and ARTIFACT_ORIGIN is set.
+    const artifacts = await artifactsRoute(request, url, env, () => featureFlags(env));
+    if (artifacts) return artifacts;
 
     // Exact-action approvals. Proposals and decisions pass through to the
     // task's ledger; dispatch runs the broker, which re-verifies everything
@@ -1424,6 +1807,17 @@ export default {
         }
         return response;
       }
+    }
+
+    // The session's own tasks, newest first, a page at a time (task-list.ts). One of the desktop's reads for a person in
+    // no shop (contextOf), whose own tenant holds no shop's tasks, so it lists what the export would list for them. A shop
+    // session never gets here: shops.ts answers it above, for its shop's owner only. The tenant is the session's alone, so
+    // a query naming a shop, a tenant or a role is refused, as on the shop routes.
+    if (request.method === "GET" && url.pathname === "/v1/tasks") {
+      const context = await contextOf(request, env, "allowed");
+      if (!context?.tenant) return json({ error: "unauthorized" }, 401);
+      if (queryNamesSession(url)) return json({ error: "invalid_request" }, 400);
+      return listTasks(env, context.tenant, url);
     }
 
     if (request.method === "POST" && url.pathname === "/v1/tasks") {

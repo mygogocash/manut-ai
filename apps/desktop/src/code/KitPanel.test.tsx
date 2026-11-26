@@ -1,0 +1,225 @@
+// Kit on the Code page, drawn with react-dom/server from props, and its buttons read from the elements it returns (the
+// view uses no hooks). The project is the canvas's baanmali-preorder.
+import { createElement, isValidElement, type ReactElement, type ReactNode } from "react";
+import { renderToString } from "react-dom/server";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { setLang } from "../i18n";
+import { KitPanelView, LanesEmpty, codeProjects, onlyInOwnFolders, type KitPanelProps } from "./KitPanel";
+import { laneRowOf } from "./Lanes";
+import { emptyLane, noteLane } from "./lane";
+import { emptyProject } from "./project";
+
+const root = "/Users/fon/baanmali-preorder";
+
+function props(over: Partial<KitPanelProps> = {}): KitPanelProps {
+  return {
+    root,
+    projects: [root],
+    project: { ...emptyProject(), level: "edits_and_safe_commands" },
+    keys: [],
+    home: "/Users/fon",
+    onProject: vi.fn(),
+    onLevel: vi.fn(),
+    onAllow: vi.fn(),
+    onDropRule: vi.fn(),
+    onDropFolder: vi.fn(),
+    onOpenSession: vi.fn(),
+    ...over,
+  };
+}
+
+function drawn(node: ReactNode): ReactElement<Record<string, unknown>>[] {
+  if (Array.isArray(node)) return node.flatMap(drawn);
+  if (!isValidElement(node)) return [];
+  const el = node as ReactElement<Record<string, unknown>>;
+  // a lane's menu keeps state of its own (item 76: Pin, Snooze, Done for now, Archive), so it is drawn by its own test and not called here
+  if (typeof el.type === "function") return el.type.name === "LaneMore" ? [] : drawn((el.type as (props: unknown) => ReactNode)(el.props));
+  return [...(typeof el.type === "string" ? [el] : []), ...drawn(el.props.children as ReactNode)];
+}
+const byId = (p: KitPanelProps, id: string) => drawn(KitPanelView(p)).filter((e) => e.props["data-testid"] === id);
+const html = (p: KitPanelProps) => renderToString(createElement(KitPanelView, p));
+
+afterEach(() => setLang("en"));
+
+describe("how much Kit does alone", () => {
+  it("draws the canvas's four stops with one pressed, its line, and that going live always asks", () => {
+    const out = html(props());
+    for (const words of ["How much Kit does alone", "Asks every time", "Edits alone", "Edits and safe commands", "Everything in this project"]) expect(out).toContain(words);
+    expect(out).toContain("Kit edits files and runs tests alone. Anything that installs, deletes or pushes asks first.");
+    expect(out).toContain("Going live always asks, at every level.");
+    const pressed = byId(props(), "kit-dial")[0];
+    expect(drawn(pressed.props.children as ReactNode).map((b) => b.props["aria-pressed"])).toEqual([false, false, true, false]);
+  });
+
+  it("sets the level a stop names", () => {
+    const p = props();
+    (byId(p, "kit-level-everything_in_project")[0].props.onClick as () => void)();
+    expect(p.onLevel).toHaveBeenCalledWith("everything_in_project");
+  });
+
+  it("names the project, and offers the others when the page lists several", () => {
+    expect(html(props())).toContain("baanmali-preorder");
+    expect(byId(props(), "kit-project")).toHaveLength(0);
+    const p = props({ projects: [root, "/Users/fon/storefront"] });
+    expect(byId(p, "kit-project")).toHaveLength(1);
+    expect(html(p)).toContain("storefront");
+  });
+
+  it("is in all four languages", () => {
+    for (const [lang, words] of [
+      ["ko", "편집과 안전한 명령은 혼자"],
+      ["ja", "編集と安全なコマンドはひとりで"],
+      ["zh", "独自编辑和运行安全命令"],
+    ] as const) {
+      setLang(lang);
+      expect(html(props())).toContain(words);
+    }
+  });
+});
+
+describe("what was stopped, and what is allowed", () => {
+  it("shows a read stopped outside the project, with Allow this folder", () => {
+    const p = props({ project: { ...emptyProject(), blocked: [{ what: "read", path: "~/Documents/tax-2026.xlsx", folder: "/Users/fon/Documents", at: 1 }] } });
+    const out = html(p);
+    expect(out).toContain("Blocked");
+    expect(out).toContain("Kit tried to read a file outside baanmali-preorder. It was stopped.");
+    expect(out).toContain("~/Documents/tax-2026.xlsx");
+    (byId(p, "kit-allow-folder")[0].props.onClick as () => void)();
+    expect(p.onAllow).toHaveBeenCalledWith("/Users/fon/Documents");
+  });
+
+  it("offers no Allow this folder for a folder the project is in", () => {
+    const p = props({ project: { ...emptyProject(), blocked: [{ what: "command", path: "~", folder: "/Users/fon", at: 1 }] } });
+    expect(byId(p, "kit-allow-folder")).toHaveLength(0);
+    expect(html(p)).toContain("Kit tried to run a command outside baanmali-preorder. It was stopped.");
+  });
+
+  it("says a lane's stopped step was outside the lane's own folder", () => {
+    const p = props({ project: { ...emptyProject(), blocked: [{ what: "edit", path: `${root}/src/a.ts`, folder: `${root}/src`, at: 1, lane: true }] } });
+    expect(html(p)).toContain("Kit&#x27;s lane tried to change a file outside its own folder. It was stopped.");
+    // allowing a folder of the developer's lets a lane read there; a change still stays inside the lane's own folder
+    expect(byId(p, "kit-allow-folder")).toHaveLength(1);
+    // the developer's folder itself is the project: nothing to allow
+    expect(byId(props({ project: { ...emptyProject(), blocked: [{ what: "read", path: `${root}/a.ts`, folder: root, at: 1, lane: true }] } }), "kit-allow-folder")).toHaveLength(0);
+  });
+
+  it("lists the rules and folders kept, each of which can be taken back", () => {
+    const p = props({ project: { ...emptyProject(), rules: [{ words: ["pnpm", "add"] }], folders: ["/Users/fon/Documents"] } });
+    const out = html(p);
+    expect(out).toContain("Always allowed in this project");
+    expect(out).toContain("pnpm add …");
+    expect(out).toContain("Folders Kit may read");
+    expect(out).toContain("~/Documents");
+    const takeBack = drawn(KitPanelView(p)).filter((e) => e.props.children === "Take back");
+    expect(takeBack).toHaveLength(2);
+    (takeBack[0].props.onClick as () => void)();
+    expect(p.onDropRule).toHaveBeenCalledWith({ words: ["pnpm", "add"] });
+    (takeBack[1].props.onClick as () => void)();
+    expect(p.onDropFolder).toHaveBeenCalledWith("/Users/fon/Documents");
+  });
+
+  it("says nothing of rules, folders or stops while there are none", () => {
+    const out = html(props());
+    for (const words of ["Stopped outside the project", "Always allowed in this project", "Folders Kit may read"]) expect(out).not.toContain(words);
+  });
+});
+
+describe("a key typed into the code", () => {
+  it("says which file, and opens the session that holds the change", () => {
+    const p = props({ keys: [{ session: "s1", files: ["src/config.ts"] }] });
+    expect(html(p)).toContain("A key was typed into src/config.ts. Kit does not save it to the project&#x27;s history without asking.");
+    (drawn(KitPanelView(p)).find((e) => e.props.children === "See the change")!.props.onClick as () => void)();
+    expect(p.onOpenSession).toHaveBeenCalledWith("s1");
+    expect(html(props({ keys: [{ session: "s1", files: ["a.ts", "b.ts"] }] }))).toContain("Keys were typed into 2 files.");
+  });
+});
+
+describe("the projects the page lists", () => {
+  it("are the folders sessions run in, newest first, then the added ones, each once", () => {
+    expect(codeProjects([root, "/Users/fon/storefront", `${root}/`], ["/Users/fon/blog", root])).toEqual([root, "/Users/fon/storefront", "/Users/fon/blog"]);
+    expect(codeProjects([], [])).toEqual([]);
+  });
+
+  it("include the folders lanes were made from whose folders are kept, last and once", () => {
+    expect(codeProjects([root], [], [`${root}/`, "/Users/fon/storefront"])).toEqual([root, "/Users/fon/storefront"]);
+    // its last session closed: the project stays for its kept folder
+    expect(codeProjects([], [], [root])).toEqual([root]);
+  });
+});
+
+describe("the lanes", () => {
+  const lane = laneRowOf({ rec: { id: "s1", agent: "claude", cwd: root, status: "running", promptTitle: "PromptPay QR at checkout", lane: { name: "kit/promptpay-qr", base: "main" } }, agent: "Claude Code", lane: emptyLane(), turn: null, asks: [] });
+
+  it("open the panel, before how much Kit does alone, and open the lane's session", () => {
+    const p = props({ lanes: [lane], now: 1, onOpenLane: vi.fn() });
+    const out = html(p);
+    expect(out).toContain("PromptPay QR at checkout");
+    expect(out).toContain("kit/promptpay-qr");
+    expect(out.indexOf("Lanes")).toBeGreaterThan(-1);
+    expect(out.indexOf("Lanes")).toBeLessThan(out.indexOf("How much Kit does alone"));
+    const open = drawn(KitPanelView(p)).find((e) => e.type === "button" && e.props.title === "Open this lane");
+    (open!.props.onClick as () => void)();
+    expect(p.onOpenLane).toHaveBeenCalledWith("s1");
+  });
+
+  it("carry New lane on to the band, drawn even when the project has no lane", () => {
+    const onNewLane = vi.fn();
+    for (const lanes of [[lane], []]) {
+      const p = props({ lanes, onNewLane });
+      expect(byId(p, "lane-new")).toHaveLength(1);
+      expect(html(p).indexOf("New lane")).toBeLessThan(html(p).indexOf("How much Kit does alone"));
+    }
+    (byId(props({ lanes: [], onNewLane }), "lane-new")[0].props.onClick as () => void)();
+    expect(onNewLane).toHaveBeenCalledTimes(1);
+  });
+
+  it("are not drawn when the project has none, and the panel is as it was", () => {
+    for (const p of [props(), props({ lanes: [] })]) {
+      const out = html(p);
+      expect(out).not.toContain("Lanes");
+      expect(byId(p, "lanes")).toHaveLength(0);
+      expect(out).toContain("How much Kit does alone");
+    }
+  });
+
+  it("carry what the page puts under a row and the link that opens Bring it back, on to the band", () => {
+    const rewound = [{ event: "rewound", id: "m-1", text: "PromptPay QR at checkout" }].reduce((l, ev, i) => noteLane(l, ev, 1_000 + i), emptyLane());
+    const reverted = laneRowOf({ rec: { id: "s1", agent: "claude", cwd: root, status: "running", promptTitle: "PromptPay QR at checkout", lane: { name: "kit/promptpay-qr", base: "main" } }, agent: "Claude Code", lane: rewound, turn: null, asks: [], canBringBack: true });
+    const onBack = vi.fn();
+    const p = props({ lanes: [reverted], laneBack: { backOpen: "s1", onBack, below: (r) => createElement("p", { "data-testid": "under" }, `panel of ${r.id}`) } });
+    expect(byId(p, "under").map((e) => e.props.children)).toEqual(["panel of s1"]);
+    const link = byId(p, "lane-back")[0];
+    expect(link.props["aria-expanded"]).toBe(true);
+    (link.props.onClick as () => void)();
+    expect(onBack).toHaveBeenCalledWith("s1");
+    // the panel's own words come from the page: with none given, the band is as it was
+    expect(byId(props({ lanes: [reverted] }), "under")).toHaveLength(0);
+  });
+});
+
+describe("the main-moved note under the dial", () => {
+  const lane = (dir?: string) => ({ name: "kit/x", base: "main", ...(dir ? { dir, worktree: dir } : {}) });
+  it("stands down when every session of the project works in a lane's folder of its own", () => {
+    expect(onlyInOwnFolders([{ cwd: root, status: "running", lane: lane("/Users/fon/.manut/lanes/baanmali-preorder/x") }], root)).toBe(true);
+    // a session in the developer's folder: Kit works there, and the note reads it
+    expect(onlyInOwnFolders([{ cwd: root, status: "running", lane: lane("/l/x") }, { cwd: root, status: "running" }], root)).toBe(false);
+    expect(onlyInOwnFolders([{ cwd: root, status: "exited", lane: lane() }], root)).toBe(false);
+    // no session yet, or only a draft, or only another project's: as before
+    expect(onlyInOwnFolders([], root)).toBe(false);
+    expect(onlyInOwnFolders([{ cwd: root, status: "draft" }, { cwd: "/elsewhere", status: "running", lane: lane("/l/y") }], root)).toBe(false);
+  });
+});
+
+describe("the Code page with no project yet (item 85i)", () => {
+  it("opens on the canvas's grey Lanes band with New lane, over an empty state that says what a lane is", () => {
+    setLang("en");
+    const html = renderToString(<LanesEmpty onNew={() => {}} />);
+    expect(html).toMatch(/<div class="band" data-testid="lanes-band"><span id="lanes-empty-h">Lanes<\/span><button[^>]*data-testid="lane-new"[^>]*>New lane<\/button><\/div>/);
+    expect(html).toContain('data-testid="lanes-empty-state"');
+    expect(html).toContain("No lanes yet");
+    expect(html).toContain("nothing goes live until you approve");
+    // the empty state's drawing is the menu's Code icon, from the set: no maker's mark
+    expect(html).toMatch(/<span class="ico" aria-hidden="true"><svg class="ic"[^>]*><path d="M5.5 4.5L2 8l3.5 3.5M10.5 4.5L14 8l-3.5 3.5"/);
+    expect(html).not.toMatch(/<img|data-agent|data-brand/);
+  });
+});

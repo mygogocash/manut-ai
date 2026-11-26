@@ -109,16 +109,20 @@ export function base64UrlToText(input: string): string {
 }
 
 /// Strips markup for display. Display text is derived, never trusted structure.
+/// Script and style blocks go whole, whatever their closing tag carries
+/// (`</script >`, attributes, capitals), so their code never reaches the text.
+/// Entities are decoded once, `&amp;` last: decoding it first would turn the
+/// text `&amp;lt;` into `<`, unescaping twice.
 export function textFromHtml(html: string): string {
   return html
-    .replace(/<script[\s\S]*?<\/script>/gi, " ")
-    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script\b[^>]*>/gi, " ")
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style\b[^>]*>/gi, " ")
     .replace(/<[^>]*>/g, " ")
-    .replace(/&amp;/g, "&")
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, "&")
     .replace(/\s+/g, " ")
     .trim();
 }

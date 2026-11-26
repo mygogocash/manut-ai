@@ -1,0 +1,1344 @@
+/* Settings, as the design canvas's Settings board draws it (Settings.dc.html, item 85h): a quiet list of its pages
+   beside one reading column. The type is on the canvas's scale (packages/ui-kit/tokens.json "type": nothing under 12px,
+   body 14px, notes 12.5px, labels and buttons 13px), weight is the only emphasis, and grey bands and space group things,
+   never a box: rows are 44px, buttons 34px, fields 40px, text is never wider than 696px, and 24px sit between groups.
+   The canvas's short token names map onto the desktop's (src/theme/tokens.css) as in menuPages.css: --band is
+   --aui-subtle, --mut is --aui-muted, the canvas's surface --bg is --aui-surface. */
+
+/* The Settings view's own box is what decides whether the list sits beside the page or above it (see the end of this
+   block), so the main column's width counts, not the window's: the side menu can be hidden or narrower. */
+.settings-body {
+  container: settings / inline-size;
+}
+.st {
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 196px minmax(0, 1fr);
+  font-size: 14px;
+  line-height: 1.5;
+}
+/* the list: the side menu's rows (the canvas's .nav), quiet until pointed at or chosen */
+.st-nav {
+  padding: 16px 8px;
+  border-right: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+}
+.st-nav button {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  min-height: 34px;
+  padding: 0 10px;
+  border-radius: var(--rad);
+  text-align: left;
+  font-size: 14px;
+  color: var(--aui-muted);
+}
+.st-nav button:hover,
+.st-nav button.on {
+  color: var(--ink);
+  background: var(--hov);
+}
+.st-nav button.on {
+  font-weight: 500;
+}
+/* a group's name in the list and on a page: a grey band in sentence case (the canvas's .band), never capitals */
+.st-sh,
+.st-gh {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 32px;
+  padding: 0 10px;
+  border-radius: var(--rad);
+  background: var(--aui-subtle);
+  color: var(--aui-muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+.st-sh {
+  margin: 16px 0 4px;
+}
+/* "Under the hood": one entry for the developer pages. Its chevron turns with the Switch move, as the kit's accordion's
+   does; the list it opens sits under it, a step in. */
+.st-nav .st-hood {
+  margin-top: 16px;
+}
+.st-nav .st-hood .st-hood-ic {
+  margin-left: auto;
+}
+.st-nav .st-hood[aria-expanded="true"] {
+  color: var(--ink);
+}
+/* closed while one of its pages is shown: the entry holds the page, so it is marked as the list marks a chosen page */
+.st-nav .st-hood.holds {
+  color: var(--ink);
+  background: var(--hov);
+  font-weight: 500;
+}
+.st-ic {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.st-hood-ic {
+  color: var(--aui-muted);
+  transition: transform var(--tr-switch);
+}
+.st-hood[aria-expanded="true"] .st-hood-ic {
+  transform: rotate(180deg);
+}
+.st-hood-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+/* the hood's pages stand on the list's one column of icons and words (item 122); the open entry above and the space
+   after it say they are its own */
+
+/* the page: one reading column, 736 wide with 20px at its sides, so its text runs 696 at most (BrandLayout) */
+.st-body {
+  overflow-y: auto;
+  padding: 24px 20px 32px;
+  min-height: 0;
+}
+/* a page's content comes in quietly as it opens: the Rise, over the short distance an overlay rises (motion.css) */
+.st-body > * {
+  --rise-by: var(--arrive-by);
+  animation: var(--anim-rise);
+}
+.st-page {
+  max-width: 696px;
+  margin: 0 auto;
+}
+.st-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+  padding-left: 10px;
+}
+.st-title b {
+  display: block;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 600;
+}
+.st-title span {
+  font-size: 13px;
+  color: var(--aui-muted);
+}
+.st-gh {
+  margin: 24px 0 8px;
+}
+.st-gh0,
+.st-page > .st-gh:first-child {
+  margin-top: 0;
+}
+/* a note under a group, in the canvas's help text, on the rows' text edge */
+.st-note {
+  font-size: 12.5px;
+  color: var(--aui-muted);
+  margin: 4px 10px 8px;
+}
+/* a group of rows: space and the band above it hold them together, not a box */
+.st-grp {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.st-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 8px 10px;
+  min-height: 44px;
+  border-radius: var(--rad);
+}
+.st-k {
+  min-width: 0;
+}
+.st-k b {
+  display: block;
+  font-weight: 500;
+  color: var(--ink);
+  font-size: 14px;
+}
+.st-k span {
+  display: block;
+  font-size: 13px;
+  color: var(--aui-muted);
+}
+.st-v {
+  flex: none;
+  max-width: 60%;
+  display: flex;
+  justify-content: flex-end;
+}
+.st-val {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  color: var(--body);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.st-val.mono {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.st-val small {
+  font-family: var(--font);
+  font-size: 12.5px;
+  color: var(--aui-muted);
+}
+.st-tag {
+  border: 1px solid var(--line);
+  border-radius: var(--rad-sm);
+  padding: 0 6px;
+  font-size: 12px !important;
+}
+.st-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--quiet);
+  flex: none;
+}
+.st-dot.online {
+  background: var(--ok);
+}
+.st-dot.starting {
+  background: var(--w4);
+}
+/* a button: the canvas's quiet .btn, 34px */
+.st-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 12px;
+  border-radius: var(--rad);
+  border: 1px solid var(--line);
+  background: var(--aui-surface);
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.st-btn:hover:not(:disabled) {
+  background: var(--hov);
+}
+.st-btn:disabled {
+  opacity: 0.45;
+}
+/* a button beside a segmented switch (Sounds: Play, On/Off) */
+.st-pair {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* nav: bot rows carry their picture; "All bots" carries the count */
+.st-nav-n {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* an entry's icon (item 122): 16px in the entry's own colour, 10px before its words, as the side menu's rows; a member's
+   face keeps its 18px */
+.st-nav-i {
+  width: 16px;
+  height: 16px;
+  display: grid;
+  place-items: center;
+  flex: none;
+  color: inherit;
+}
+.st-nav-i svg {
+  /* The brand set's size (src/ui/icons.tsx). */
+  width: 16px;
+  height: 16px;
+}
+.st-dot.working {
+  background: var(--g-accent);
+  box-shadow: 0 0 0 2px rgba(211, 60, 141, 0.18);
+}
+.st-count {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--aui-muted);
+  font-variant-numeric: tabular-nums;
+}
+.st-page.st-wide {
+  max-width: 696px;
+}
+
+/* At a narrow main column (under the side menu's 196 and the 560 a page needs, BrandLayout's rule for a list beside a
+   page) the list stops being a column: it stacks above the page as rows that wrap, and the page takes the full width.
+   So at 900 wide Settings is two columns (the side menu and the page), not three with 485px left for the page. The
+   bands' words step aside there, since the rows wrap in one run, and the hood's pages join the run after its entry. */
+@container settings (max-width: 755px) {
+  .st {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+  .st-nav {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 12px 16px;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+    overflow: visible;
+  }
+  .st-sh {
+    display: none;
+  }
+  .st-nav .st-hood {
+    margin-top: 0;
+  }
+  .st-hood-list {
+    display: contents;
+  }
+  .st-body {
+    padding: 24px 16px 32px;
+  }
+}
+
+/* bot page head: big picture you can change, name you can rename */
+.be-head {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  margin-bottom: 16px;
+}
+.be-av-wrap {
+  flex: none;
+}
+/* The picture button is the face's own tile, a rounded square with the mark's corner (22.5%, face.css), not a circle
+   (item 85i: the faces of item 85e are square). */
+.be-av {
+  position: relative;
+  width: 64px;
+  height: 64px;
+  border-radius: 22.5%;
+  padding: 0;
+  outline-offset: 3px;
+}
+.be-av .ui-av {
+  object-fit: cover;
+}
+.be-av-cover {
+  position: absolute;
+  inset: 0;
+  border-radius: 22.5%;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: rgba(10, 8, 12, 0.55);
+  opacity: 0;
+  transition: opacity var(--tr-hover);
+}
+.be-av:hover .be-av-cover,
+.be-av:focus-visible .be-av-cover,
+.be-av:disabled .be-av-cover,
+.be-av.over .be-av-cover {
+  opacity: 1;
+}
+.be-av.over {
+  box-shadow: 0 0 0 2px var(--line-strong);
+}
+.be-link {
+  font-size: 13px;
+  color: var(--aui-muted);
+  padding: 0 12px;
+  border-radius: var(--rad);
+  min-height: 34px;
+}
+.be-link:hover:not(:disabled) {
+  color: var(--ink);
+  background: var(--hover);
+}
+.be-link.quiet {
+  color: var(--aui-muted);
+}
+.be-err {
+  font-size: 12.5px;
+  color: var(--danger);
+}
+.be-id {
+  min-width: 0;
+  flex: 1;
+  padding-top: 4px;
+}
+.be-name {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.be-name b {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--ink);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.be-pen {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--rad);
+  color: var(--aui-muted);
+  flex: none;
+}
+.be-pen svg {
+  width: 16px;
+  height: 16px;
+}
+.be-link:hover:not(:disabled) {
+  background: var(--raise2);
+}
+.be-pen:hover {
+  color: var(--ink);
+  background: var(--raise2);
+}
+.be-name-edit {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.be-name-edit input {
+  min-width: 0;
+  width: 220px;
+  padding: 0 12px;
+  border-radius: var(--rad);
+  border: 1px solid var(--aui-border-strong);
+  background: var(--aui-surface);
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 600;
+  min-height: 40px;
+}
+.be-name-edit input:focus {
+  outline: none;
+  border-color: var(--muted);
+}
+.be-hint {
+  flex-basis: 100%;
+  font-size: 12.5px;
+  color: var(--aui-muted);
+}
+.be-hint .be-err {
+  text-align: left;
+}
+.be-sub {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 3px;
+  font-size: 13px;
+  color: var(--aui-muted);
+}
+.be-sub code,
+.be-hint code,
+.bc-id code {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--muted);
+}
+/* a card's profile id is one token: never split at its hyphen ("omh-" / "tui") */
+.bc-id code {
+  white-space: nowrap;
+}
+.be-desc {
+  margin: 6px 0 0;
+  font-size: 14px;
+  color: var(--body);
+  line-height: 1.45;
+}
+.be-acts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-top: 10px;
+}
+
+/* what the bot has done */
+.be-facts {
+  border-radius: var(--r);
+  background: var(--aui-subtle);
+  padding: 10px;
+  min-height: 44px;
+}
+.be-facts.muted {
+  font-size: 13px;
+  color: var(--aui-muted);
+}
+.be-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+.be-stat b {
+  display: block;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.be-stat span {
+  font-size: 12.5px;
+  color: var(--aui-muted);
+}
+.be-places {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  margin-top: 10px;
+  padding-top: 9px;
+  border-top: 1px solid var(--line);
+  font-size: 13px;
+  color: var(--body);
+}
+.be-place {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.be-place b {
+  font-weight: 500;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.be-since {
+  margin-left: auto;
+  font-size: 12.5px;
+  color: var(--aui-muted);
+}
+
+/* All bots */
+.bots-h {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.bots-h b {
+  display: block;
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.bots-h span {
+  font-size: 13px;
+  color: var(--aui-muted);
+}
+/* Settings › Developer's fields (DeveloperPage.tsx): the API origin, an identity token and its nonce. */
+.dev-in {
+  width: 260px;
+  max-width: 100%;
+  padding: 0 12px;
+  border-radius: var(--rad);
+  border: 1px solid var(--aui-border-strong);
+  background: var(--aui-surface);
+  color: var(--ink);
+  font-size: 14px;
+  min-height: 40px;
+}
+.dev-in:focus {
+  outline: none;
+  border-color: var(--ink);
+}
+/* Settings › Developer › Sign in by email (EmailSignIn.tsx): the code box reads as six digits (the indent keeps them
+   centred, since the spacing after the last one is part of the line), a line about what went wrong is in the danger
+   colour where the rest of Settings keeps its notes quiet, and the box and its button wrap when the page is narrow. */
+.dev-code {
+  width: 118px;
+  font-family: var(--mono);
+  font-size: 14px;
+  letter-spacing: 0.28em;
+  text-indent: 0.28em;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+/* the address box leaves room for Send code beside it in a window of the usual width */
+.dev-addr {
+  width: 232px;
+}
+.st-k span.dev-err {
+  color: var(--danger);
+}
+.dev-mail .st-pair {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+/* an address is one long word, and it is said back in a row's note: it breaks anywhere rather than leave its row */
+.dev-mail .st-k span {
+  overflow-wrap: anywhere;
+}
+/* Settings › Developer › Make your shop (MakeShop.tsx): the kinds of shop are a list of radio buttons under their row, each
+   kind's name and the line saying which shops it fits, since four long names do not fit a segmented control. */
+.dev-kinds {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0 10px 10px;
+}
+.dev-kind {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 4px;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+}
+.dev-kind:hover {
+  background: var(--raise);
+}
+.dev-kind input {
+  margin: 2px 0 0;
+}
+.dev-kind > span {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.dev-kind b {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ink);
+}
+.dev-kind b + span {
+  font-size: 13px;
+  color: var(--aui-muted);
+}
+/* Settings › General › Notifications: the two quiet-hours time fields (Settings.slot.tsx `QuietHoursView`). Wide enough for
+   a 12-hour clock's "09:30 PM" and the field's own clock button. */
+.st-time {
+  width: 124px;
+  font-variant-numeric: tabular-nums;
+}
+/* the notes under a group of rows (Settings.slot.tsx `OutsideNotes`) sit a little below it */
+.st-grp + .st-note {
+  margin-top: 8px;
+}
+.bots-q {
+  width: 200px;
+  padding: 0 12px;
+  border-radius: var(--rad);
+  border: 1px solid var(--aui-border-strong);
+  background: var(--aui-surface);
+  color: var(--ink);
+  font-size: 14px;
+  min-height: 40px;
+}
+.bots-q:focus {
+  outline: none;
+  border-color: var(--ink);
+}
+.bots-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+}
+.bots-empty {
+  font-size: 13px;
+  color: var(--aui-muted);
+  padding: 8px 10px;
+}
+.bot-card-w {
+  position: relative;
+  min-width: 0;
+  display: flex;
+}
+.bot-card-w > .bot-card {
+  flex: 1;
+}
+/* "Add to list" / "In list": the sidebar roster state, a small line in the card's top-right corner */
+.bc-list {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  padding: 0 12px;
+  border-radius: var(--rad);
+  font-size: 13px;
+  color: var(--ink);
+  min-height: 34px;
+  font-weight: 500;
+  border: 1px solid var(--line);
+  background: var(--aui-surface);
+}
+.bc-list:hover {
+  background: var(--hov);
+}
+.bot-card-w .bc-top {
+  padding-right: 112px;
+}
+.bc-list.in {
+  display: inline-flex;
+  align-items: center;
+  color: var(--aui-muted);
+  box-shadow: none;
+  border-color: transparent;
+  background: none;
+  font-weight: 400;
+}
+.bot-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  text-align: left;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--grp-bg);
+  min-width: 0;
+}
+.bot-card:hover {
+  border-color: var(--line-strong);
+  background: var(--raise);
+}
+.bot-card:hover .bc-id b::after {
+  content: " \203A";
+  color: var(--aui-muted);
+  font-weight: 400;
+}
+.bc-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.bc-id {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.bc-id b {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bc-id > span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12.5px;
+  color: var(--aui-muted);
+}
+.bc-desc {
+  font-size: 13px;
+  color: var(--body);
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.bc-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: auto;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+  color: var(--aui-muted);
+}
+.bc-model {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-right: auto;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.bc-place {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Appearance: live preview + colour swatches */
+.ap {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.ap-preview {
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--bg);
+  padding: 14px 16px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+}
+.ap-pv-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
+}
+.ap-pv-chip {
+  height: 20px;
+  padding: 0 6px;
+  border-radius: var(--r-sm);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 20px;
+  color: var(--on-accent);
+  background: var(--g-accent);
+}
+.ap-pv-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--spin);
+}
+.ap-pv-send {
+  margin-left: auto;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--r);
+  display: grid;
+  place-items: center;
+  color: var(--on-accent);
+  background: var(--g-accent);
+  font-size: 13px;
+}
+/* "Soon" tag for features that are not in this version yet, and keyboard keys */
+.st-soon {
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--aui-muted);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.st-kbd {
+  font-family: var(--font);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--raise2);
+  box-shadow: inset 0 -1px 0 var(--line-strong);
+  color: var(--ink);
+}
+
+.st-kt {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+/* Providers: compact rows that open to a vendor-grouped model list */
+.pv-setup {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.pv-setup code {
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 20px;
+  color: var(--aui-muted);
+}
+.pv-copy {
+  padding: 0 10px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--line);
+  color: var(--aui-muted);
+  font-size: 12px;
+  min-height: 28px;
+}
+.pv-copy:hover {
+  color: var(--ink);
+  background: var(--hover);
+}
+.pv-list {
+  overflow: hidden;
+}
+.pv-empty {
+  padding: 10px;
+  font-size: 13px;
+  color: var(--aui-muted);
+}
+.pv-item + .pv-item {
+  border-top: 1px solid var(--line);
+}
+.pv-head {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+.pv-head:hover {
+  background: var(--hover);
+}
+.pv-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0 10px;
+  text-align: left;
+  font-size: 14px;
+  min-height: 44px;
+}
+.pv-mark {
+  flex: none;
+  display: inline-flex;
+  width: 14px;
+  justify-content: center;
+  color: var(--ink);
+}
+.pv-ic {
+  flex: none;
+}
+.pv-mono {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+  background: var(--raise2);
+  color: var(--muted);
+  font-weight: 600;
+  line-height: 1;
+}
+.pv-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+  color: var(--ink);
+}
+.pv-slug {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--aui-muted);
+}
+.pv-use {
+  flex: none;
+  color: var(--muted);
+}
+.pv-count {
+  flex: none;
+  margin-left: auto;
+  font-size: 12.5px;
+  color: var(--aui-muted);
+  white-space: nowrap;
+}
+.pv-chev {
+  flex: none;
+  display: inline-flex;
+  color: var(--muted);
+  transition: transform var(--tr-switch);
+}
+.pv-item.open .pv-chev {
+  transform: rotate(90deg);
+}
+.pv-body {
+  padding: 2px 10px 10px;
+  min-width: 0;
+}
+/* a long catalog scrolls in its own quiet box; the filter above it stays put */
+.pv-scroll {
+  max-height: 320px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 4px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar) transparent;
+}
+.pv-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+.pv-q {
+  display: block;
+  width: 100%;
+  margin: 2px 0 6px;
+  padding: 0 12px;
+  border: 1px solid var(--aui-border-strong);
+  border-radius: var(--rad);
+  background: transparent;
+  color: var(--ink);
+  font-size: 14px;
+  min-height: 40px;
+}
+.pv-q:focus {
+  border-color: var(--ink);
+  outline: none;
+}
+.pv-none {
+  padding: 4px 0;
+  font-size: 13px;
+  color: var(--aui-muted);
+}
+.pv-g {
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr);
+  gap: 8px;
+  padding: 5px 0;
+  font-size: 13px;
+  line-height: 20px;
+}
+/* models with no vendor prefix ("Opus 5.5"): no vendor cell, so the chips take the whole row instead of the 84px
+   vendor column, where they stacked one per line and the in-use one (with its check) was cut to "Sonnet …" */
+.pv-g:not(:has(> .pv-v)) {
+  grid-template-columns: minmax(0, 1fr);
+}
+.pv-g + .pv-g {
+  border-top: 1px solid var(--line);
+}
+.pv-v {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  height: 20px;
+  color: var(--aui-muted);
+  font-size: 12.5px;
+}
+.pv-v > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* vendor marks stay quiet: one grey treatment, whatever colours the brand mark carries */
+.pv-vi {
+  flex: none;
+  display: inline-flex;
+  justify-content: center;
+  width: 12px;
+}
+.pv-v .pv-ic,
+.pv-v .pv-mono {
+  color: var(--muted);
+  filter: grayscale(1);
+  opacity: 0.85;
+}
+.pv-ms {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
+  color: var(--body);
+}
+.pv-m {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  min-width: 0;
+  padding: 0 6px;
+  border-radius: var(--r-sm);
+  background: var(--raise);
+  white-space: nowrap;
+  min-height: 24px;
+}
+.pv-mn {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pv-m.on {
+  background: var(--raise2);
+  color: var(--ink);
+}
+.pv-on {
+  flex: none;
+  color: var(--ok);
+}
+.pv-sfx {
+  flex: none;
+  padding: 0 3px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--aui-muted);
+}
+/* "Add key": a quiet action on each row and one row under the list */
+.pv-key {
+  flex: none;
+  margin-right: 8px;
+  padding: 0 10px;
+  border-radius: var(--r-sm);
+  color: var(--aui-muted);
+  font-size: 12px;
+  white-space: nowrap;
+  opacity: 0;
+  min-height: 28px;
+}
+.pv-head:hover .pv-key,
+.pv-key:focus-visible {
+  opacity: 1;
+}
+.pv-key:hover {
+  color: var(--ink);
+  background: var(--raise2);
+}
+@media (hover: none) {
+  .pv-key {
+    opacity: 1;
+  }
+}
+.pv-add {
+  position: relative;
+  margin-top: 6px;
+}
+.pv-add-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  border-radius: var(--rad);
+  color: var(--aui-muted);
+  font-size: 13px;
+  min-height: 34px;
+  font-weight: 500;
+}
+.pv-add-btn:hover,
+.pv-add-btn[aria-expanded="true"] {
+  color: var(--ink);
+  background: var(--hover);
+}
+.pv-menu {
+  padding: 4px;
+}
+.pv-menu-h {
+  padding: 4px 8px 6px;
+  font-size: 12px;
+  color: var(--aui-muted);
+}
+.pv-menu-i {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 0 8px;
+  border-radius: var(--r-sm);
+  text-align: left;
+  color: var(--body);
+  min-height: 34px;
+}
+.pv-menu-i:hover,
+.pv-menu-i:focus-visible {
+  background: var(--raise2);
+  color: var(--ink);
+  outline: none;
+}
+.pv-menu-i code {
+  padding: 0;
+  background: none;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.pv-menu-i .pv-mark {
+  color: var(--ink);
+}
+.pv-keynote code {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--aui-muted);
+}
+.pv-keynote {
+  margin-top: 8px;
+}
+
+/* Settings › General › Language: its own group under Appearance; each language in its own words, never wrapped */
+.st-grp-lang {
+  margin-top: 4px;
+}
+/* Settings › Voice (VoicePage.tsx): the Mac voice that reads answers aloud */
+.vc-select {
+  max-width: 240px;
+  padding: 0 12px;
+  border-radius: var(--rad);
+  border: 1px solid var(--aui-border-strong);
+  background: var(--aui-surface);
+  color: var(--ink);
+  min-height: 40px;
+  font-size: 14px;
+}
+
+/* Settings › General › Delete account (DeleteAccount.tsx, item 124): the design canvas's danger pattern (Settings.dc.html,
+   "Delete this shop"; KitActions), lifted from packages/ui-kit/app.css: `.btn.danger` for the first press, `.btn.danger
+   .solid` for the last step only, `.btn.dark` for the one black button, which keeps the account; and the `.dialog` card for
+   the last step, which is the decision. The canvas's short names map onto the desktop's tokens: --erri is --aui-danger,
+   --pri and --onpri are --aui-primary and --aui-on-primary, --bg is --aui-surface, --sh is --aui-shadow-card. Its heading
+   leaves out the canvas's letter-spacing (docs/design-audit.md: no letter-spacing). Nothing here moves: an ask and an
+   error appear and stay still (docs/motion.md); the buttons press as every .st-btn does. */
+.st-btn.danger {
+  border-color: var(--aui-danger);
+  color: var(--aui-danger);
+}
+.st-btn.danger.solid,
+.st-btn.danger.solid:hover:not(:disabled) {
+  background: var(--aui-danger);
+  color: var(--aui-surface);
+}
+.st-btn.danger.solid:hover:not(:disabled),
+.st-btn.dark:hover:not(:disabled) {
+  opacity: 0.88;
+}
+.st-btn.dark,
+.st-btn.dark:hover:not(:disabled) {
+  border-color: var(--aui-primary);
+  background: var(--aui-primary);
+  color: var(--aui-on-primary);
+}
+.st-btn[aria-busy="true"] {
+  cursor: progress;
+}
+.st-del {
+  max-width: 696px;
+}
+.st-del-head h2 {
+  margin: 0 0 16px;
+  padding-left: 10px;
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.st-del-list {
+  margin: 8px 0 0;
+  padding: 0 10px 0 30px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 14px;
+  color: var(--body);
+}
+.st-del-none {
+  margin: 0 10px;
+  font-size: 14px;
+  color: var(--body);
+}
+.st-del-spec {
+  font-size: 12px;
+  color: var(--aui-muted);
+  font-variant-numeric: tabular-nums;
+}
+.st-del-acts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.st-del-dialog,
+.st-del-done {
+  margin: 16px 0 0;
+  max-width: 440px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--rad-xl);
+  background: var(--aui-overlay);
+  box-shadow: var(--aui-shadow-card);
+  font-size: 14px;
+  color: var(--body);
+}
+/* What it came to is no decision, so it is no card: the page's own text, a step in, as the canvas's rows sit. */
+.st-del-done {
+  margin: 0;
+  max-width: 560px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+}
+.st-del-dialog h3,
+.st-del-done h3 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--ink);
+}
+/* Under the page's own heading the done line is the first line of text, in its weight, not a second heading's size. */
+.st-del-done h3 {
+  font-size: 14px;
+}
+.st-del-dialog p,
+.st-del-done p {
+  margin: 0;
+}
+.st-del-dialog .st-del-acts {
+  justify-content: flex-end;
+}
+.st-del-help {
+  font-size: 12.5px;
+  color: var(--aui-muted);
+}
+.st-del-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink);
+}
+.st-del-field .dev-in {
+  width: 100%;
+}
+.st-del-field .dev-in[aria-invalid="true"] {
+  border-color: var(--aui-danger);
+}
+.st-del-msg {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: var(--rad);
+  background: var(--errbg);
+  color: var(--aui-danger);
+  font-size: 13px;
+}

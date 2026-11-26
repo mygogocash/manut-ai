@@ -1,0 +1,381 @@
+/* The side menu (Sidebar.tsx), as the design canvas draws it: the shell rules of packages/ui-kit/app.css, lines 43 to
+   59 (.sb, .brand, .nav, .rec, .cnt, .acct, .planp), with the canvas's .ic, .ib and .av,
+   copied and scoped under the menu's root class, .sb. The scope matters: the desktop already has global .brand and .nav
+   rules (sidebar.css, still loaded for the disk chip, the usage meters and .vh), so the copied rules also set back what
+   those would otherwise lend the menu; each such line says so. The canvas's short token names map onto the desktop's
+   (src/theme/tokens.css): --mut is --aui-muted. Lines that are the desktop's own rather than the canvas's say so. */
+
+.sb {
+  /* The canvas's root type (.r): the desktop's body text is 13px, and the canvas's screens are 14px. */
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--ink);
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 8px;
+  background: var(--side);
+  border-right: 1px solid var(--line);
+  /* The desktop's own: a short window scrolls the menu instead of cutting off the account row. */
+  overflow-y: auto;
+}
+.sb .ic {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  /* This sets back sidebar.css's .nav svg, which greys every icon in a .nav. */
+  color: inherit;
+}
+
+/* The brand mark and Search. */
+.sb .brand {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 6px 10px;
+  /* This sets back sidebar.css's .brand. */
+  gap: 0;
+  flex: none;
+}
+.sb .sb-home,
+.sb .sb-mark {
+  display: block;
+  border-radius: 7px;
+}
+.sb .ib {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  margin-left: auto;
+  border-radius: var(--rad);
+  color: var(--aui-muted);
+}
+.sb .ib:hover {
+  background: var(--hov);
+  color: var(--ink);
+}
+
+/* A menu row. New is always lit, as the canvas's first row is. */
+.sb .nav {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 34px;
+  padding: 0 10px;
+  border-radius: var(--rad);
+  color: var(--aui-muted);
+  /* This sets back sidebar.css's .nav (12px type, its own padding) and makes the row a full-width button. */
+  flex: none;
+  width: 100%;
+  font-size: inherit;
+  text-align: left;
+}
+.sb .nav:hover,
+.sb .nav[aria-current="page"],
+.sb .nav.new {
+  background: var(--hov);
+  color: var(--ink);
+}
+.sb .nav[aria-current="page"] {
+  font-weight: 500;
+}
+/* The count of open asks beside Needs you. */
+.sb .cnt {
+  margin-left: auto;
+  min-width: 20px;
+  padding: 0 6px;
+  border-radius: var(--rad-pill);
+  background: var(--warnbg);
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 20px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Recent: the heading the canvas writes in quiet 12px, then one line per thread. */
+.sb .sb-h {
+  flex: none;
+  padding: 12px 10px 4px;
+  font-size: 12px;
+  color: var(--aui-muted);
+}
+.sb .sb-recent {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.sb .rec {
+  position: relative;
+  display: block;
+  padding: 6px 10px;
+  border-radius: var(--rad);
+  font-size: 13px;
+  color: var(--aui-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  /* The desktop's own: a full-width button, not the canvas's link. */
+  width: 100%;
+  text-align: left;
+}
+.sb .rec:hover {
+  background: var(--hov);
+  color: var(--ink);
+}
+/* The canvas's larger touch targets: each row and button reaches 5px past its top and bottom. */
+.sb .nav::after,
+.sb .rec::after,
+.sb .ib::after {
+  content: "";
+  position: absolute;
+  inset: -5px 0;
+}
+
+/* The foot: what the runtime and this computer add, then the budget pill and the account row. */
+.sb .sb-foot {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-top: 6px;
+}
+/* Which runtime the app runs on (ModeLine.tsx): quiet, small and muted, so it reads as a fact, not a control. */
+.sb .sb-mode {
+  align-self: flex-start;
+  max-width: 100%;
+  padding: 2px 10px;
+  border-radius: var(--rad);
+  font-size: 11px;
+  color: var(--aui-muted);
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sb .sb-mode:hover {
+  background: var(--hov);
+  color: var(--ink);
+}
+.sb .sb-foot .disk-chip {
+  /* The desktop's own: the chip keeps its own width in a column, as it did in the old foot's grid. */
+  align-self: flex-start;
+}
+/* The canvas's plan pill (.planp, and .sb .planp inside the menu): the AI budget this month, on the surface with a hairline. */
+.sb .planp {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  min-height: 28px;
+  margin: 0 6px 6px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--rad-pill);
+  background: var(--aui-surface);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.sb .acct {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 8px;
+  border-radius: var(--rad);
+  font-size: 13px;
+  /* The desktop's own: a full-width button, not the canvas's link. */
+  width: 100%;
+  text-align: left;
+}
+.sb .acct:hover,
+.sb .acct[aria-current="page"] {
+  background: var(--hov);
+}
+.sb .acct-n {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* A person's round initial, in the owner's pastel fill from the canvas's sample world (one of the literal colours
+   the canvas allows), with its fixed dark ink. */
+.sb .av {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  flex: none;
+  border-radius: var(--rad-pill);
+  background: #efd3cc;
+  color: #111110;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* The desktop's own (the canvas draws no switcher; docs/several-shops.md): the account row with the shop switcher at its
+   end, the list of shops that opens above it, and the notice that a shop's place ended. The row keeps the canvas's look;
+   the switcher is a quiet icon button like Search, and the list a small menu on the overlay ground. */
+.sb .acct-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.sb .acct-row .acct {
+  flex: 1;
+  min-width: 0;
+}
+/* A shop the person only helps at, said after its name as the switcher's list says it: a quiet word, never cut, which the
+   name gives way to. */
+.sb .acct-role {
+  flex: none;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--rad-pill);
+  color: var(--aui-muted);
+  font-size: 11px;
+}
+.sb .acct-switch {
+  flex: none;
+  margin-left: 0;
+}
+.sb .shop-menu {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px;
+  border-radius: var(--rad-lg);
+  background: var(--pop);
+  box-shadow: var(--pop-shadow);
+  --rise-by: var(--arrive-by);
+  animation: var(--anim-arrive);
+}
+.sb .shop-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 0 10px;
+  border-radius: var(--rad);
+  font-size: 13px;
+  color: var(--ink);
+  text-align: left;
+}
+.sb .shop-item:hover,
+.sb .shop-item:focus-visible {
+  background: var(--hov);
+}
+.sb .shop-item[aria-checked="true"] {
+  font-weight: 600;
+}
+.sb .shop-n {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sb .shop-r {
+  flex: none;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--aui-muted);
+}
+.sb .shop-tick {
+  flex: none;
+  width: 12px;
+  text-align: center;
+}
+.sb .sb-shop-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 6px 4px 6px 10px;
+  border-radius: var(--rad);
+  background: var(--warnbg);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.sb .sb-shop-note-t {
+  flex: 1;
+  min-width: 0;
+}
+.sb .sb-shop-note .ib {
+  width: 24px;
+  height: 24px;
+}
+
+/* The desktop's own (item 76): a Recent row's quiet "more" button, a pinned row's mark and a settled row's small, quiet type. The
+   button shows on hover, on focus and while its menu is open, so no row carries a button it does not need. */
+.sb .rec-li {
+  position: relative;
+}
+.sb .rec-more {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  transform: translateY(-50%);
+  width: 22px;
+  height: 22px;
+  border-radius: var(--r-sm);
+  color: var(--aui-muted);
+  opacity: 0;
+}
+.sb .rec-li:hover .rec-more,
+.sb .rec-more:focus-visible,
+.sb .rec-li.menu-open .rec-more {
+  opacity: 1;
+}
+.sb .rec-more:hover {
+  background: var(--hov);
+  color: var(--ink);
+}
+.sb .rec-pin {
+  display: inline-block;
+  margin-right: 6px;
+  color: var(--aui-muted);
+  vertical-align: -3px;
+}
+.sb .rec-li.settled .rec {
+  padding-top: 3px;
+  padding-bottom: 3px;
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+/* Several rows selected (item 94): the kit's selected row (KitLists, data-sel and its blue band) */
+.sb .rec-li[data-sel="true"] > .rec {
+  background: var(--bluebg);
+  color: var(--ink);
+}
+/* Why a chat settled by itself (item 94): its quiet second line */
+.sb .rec .rec-why {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 12px;
+  color: var(--muted);
+}

@@ -1,7 +1,36 @@
 import { DurableObject } from "cloudflare:workers";
+import {
+  decideTransition,
+  openTransition,
+  requestStanding,
+  ROLES,
+  type ApprovalKind,
+  type ApprovalOption,
+  type ApprovalRecord,
+  type DecideResult,
+  type Decision,
+  type NewApprovalRequest,
+  type Role,
+  type Standing,
+} from "@manut/approval-core";
+import { indexRequest, isReportableRequestId, OPEN_WINDOW_MS, reportGone } from "./approval-index";
 import { readJsonBody } from "./body";
+import { FEED_QUIET_MS, touchFeed } from "./feed-touch";
+import { BOOKS_KIND, booksDetail, booksPayloadOf, SHEETS_APPEND, type BooksDetail } from "./books-detail";
+import {
+  BROWSER_SUBMIT,
+  SUBMIT_GRANT_REVISION,
+  SUBMIT_KINDS,
+  submitText,
+  submitWriteOf,
+  type SubmitDetail,
+  type SubmitPayload,
+} from "./browser-writes";
 import { isValidCompanyId } from "./companies";
+import { isValidLinePushProposal, LINE_PUSH_OPERATION, lineReplyText } from "./connectors/line";
 import { isPrunableAction, isPrunableAttempt } from "./retention";
+import { listingOf, MAX_LISTED_ATTEMPTS } from "./task-listing";
+import type { TenantDataEnv } from "./tenant-data";
 
 export type TaskCriterionJSON = {
   id: string;
@@ -35,7 +64,9 @@ export type TaskRecordJSON = {
 /// forward, so a cursor below the floor means the client must resync.
 export type TaskEventJSON = {
   seq: number;
-  kind: "created" | "migrated" | "state" | "updated";
+  /// `agent` is what a worker reported (job-flow.ts): `event` holds it exactly
+  /// as it arrived and `attemptId` names the attempt that reported it.
+  kind: "created" | "migrated" | "state" | "updated" | "agent";
   at: string;
   from?: string;
   to?: string;
@@ -43,6 +74,11 @@ export type TaskEventJSON = {
   /// Which write produced the entry: "put", "command:<type>",
   /// "attempt:<action>:<id>", or "action:<step>:<id>".
   via?: string;
+  attemptId?: string;
+  /// An agent event in the wire shape of packages/agent-events: one object
+  /// with a `type`. Kept whole whatever its kind, a kind no reader knows yet
+  /// included, because readers decode tolerantly and the log is the record.
+  event?: unknown;
 };
 
 /// Versioned task document. Carries the prototype record's fields unchanged so
@@ -70,6 +106,17 @@ const MAX_REPLAY_LIMIT = 1000;
 /// Most attempts a single export carries. Claims can grow without bound, so
 /// an unbounded read would let one hot task swell the whole export.
 const MAX_EXPORT_ATTEMPTS = 200;
+/// The most requests one read of named requests may name (`GET /requests?id=`). The approvals list asks a task for at
+/// most this many at a time (approvals.ts), so the read stays bounded by what it asks for, however much the task holds.
+export const MAX_NAMED_REQUESTS = 100;
+/// The longest request id that read takes: every request shares its action's id, a UUID.
+const MAX_REQUEST_ID = 128;
+/// The ids of the requests the retention prune removed that the shop's approval lookup has not yet heard of
+/// (`pruneExpired`), kept until a report lands.
+const LOOKUP_GONE = "lookup-gone";
+/// The most ids that note keeps, newest last. It grows only while reports fail, prune after prune; 2,000 UUIDs stay far
+/// inside what one stored value may hold. An id it drops is the old case: its entry stays until a read reaches it.
+const MAX_LOOKUP_GONE = 2_000;
 
 /// One execution of a task by one executor. The fencing token plus the lease
 /// decide who may publish: a stale or fenced-out executor's steps and finish
@@ -93,7 +140,15 @@ export type AttemptJSON = {
   /// recovery and audit can tell a clean finish from a failure instead of
   /// trusting every closed attempt. Records finished before this field
   /// existed have none; a reader must take that as unknown, never as success.
-  outcome?: "done" | "failed";
+  /// `cancelled` is the control plane stopping the attempt (job-flow.ts).
+  /// `awaiting_owner` is a worker that asked and stopped until the owner
+  /// answers: its attempt can do nothing more, and while it is the newest
+  /// claim its open requests stay open until their own expiry, not its
+  /// deadline (`runningAttemptSync`).
+  outcome?: "done" | "failed" | "cancelled" | "awaiting_owner";
+  /// Why it failed or was cancelled, as a code: `budget`, `silent` (it stopped
+  /// reporting), `deadline`, or one the worker gave.
+  reason?: string;
   /// Epoch seconds when the attempt finished. Stamped at finish; absent on
   /// older records, whose age is unknown and which the retention sweep
   /// therefore never prunes.
@@ -135,7 +190,8 @@ const TRANSITIONS: Record<string, string[]> = {
   cancelled: ["cancelled"],
 };
 
-const KNOWN_STATES = new Set(Object.keys(TRANSITIONS));
+/// Every state a task can be in. The task list (task-list.ts) refuses a filter on any other.
+export const KNOWN_STATES: ReadonlySet<string> = new Set(Object.keys(TRANSITIONS));
 const KNOWN_FUNDING = new Set(["localProvider", "cloudBYOK", "managedAI"]);
 
 function canTransition(from: string, to: string): boolean {
@@ -147,6 +203,13 @@ function canTransition(from: string, to: string): boolean {
 /// dispatch share this one rule.
 function isSettled(doc: TaskDocJSON): boolean {
   return doc.state === "completed" || doc.state === "cancelled";
+}
+
+/// Why the begin gate will not move an action in `state` (anything but approved or dispatching): settled already,
+/// waiting for its decision, or decided against.
+function notBeginReason(state: ActionProposalJSON["state"]): string {
+  if (state === "confirmed" || state === "failed" || state === "unknown") return "already_settled";
+  return state === "proposed" ? "not_approved" : "already_decided";
 }
 
 /// Client-submittable lifecycle commands. Every edge is legal in the base
@@ -217,8 +280,9 @@ async function requestHash(method: string, route: string, raw: string): Promise<
 
 /// External operations the pilot may perform after exact approval. Anything
 /// else is rejected at propose time; adding a type is a deliberate,
-/// separately reviewed change.
-const ACTION_ALLOWLIST = new Set(["linear.issue.create"]);
+/// separately reviewed change. `line.message.push` is the Manut AI pilot's
+/// owner-approved LINE reply (docs/pilot-api.md).
+const ACTION_ALLOWLIST = new Set(["linear.issue.create", LINE_PUSH_OPERATION]);
 
 /// An immutable external-action proposal with its approval and dispatch
 /// history. The id is the stable logical operation id: retries and recovery
@@ -254,6 +318,14 @@ export type ActionProposalJSON = {
     | "unknown";
   approval?: { by: string; at: string };
   dispatch?: { at: string; providerOperationId?: string; receipt?: unknown };
+  /// Set on an action an approval-core request alone decides: one a worker
+  /// asked for (job-flow.ts), and every reply. It is the id of that request,
+  /// which is the action's own id. The older decision route refuses a
+  /// worker's action, and decides a reply only through its request, so the
+  /// request's rules (who may decide, once, while its attempt runs, before it
+  /// expires) have no way round. A reply stored before replies carried
+  /// requests has none until its first decision stores one.
+  requestId?: string;
 };
 
 /// Deterministic serialization for hashing: object keys sorted recursively,
@@ -309,11 +381,323 @@ function actionHashable(fields: HashedActionFields): Record<string, unknown> {
   };
 }
 
+/// Everything a proposal carries about the action itself, checked, with its hash.
+type ProposalFields = HashedActionFields & { payloadHash: string };
+
+/// Checks an exact-action proposal as written by its proposer, and hashes what a human will approve. Shared by the
+/// propose route and a worker's ask (job-flow.ts), so an action is held to the same rules whichever way it comes.
+async function proposalFields(
+  value: unknown,
+): Promise<{ ok: true; fields: ProposalFields } | { ok: false; error: "invalid_request" | "unknown_operation" }> {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return { ok: false, error: "invalid_request" };
+  const body = value as Record<string, unknown>;
+  const text = (item: unknown, max: number): string | null =>
+    typeof item === "string" && item.length > 0 && item.length <= max ? item : null;
+  const connectionId = text(body.connectionId, 256);
+  const providerAccountId = text(body.providerAccountId, 256);
+  const operationType = text(body.operationType, 128);
+  const targetResourceId = text(body.targetResourceId, 512);
+  const resourceScope = Array.isArray(body.resourceScope)
+    ? body.resourceScope.filter((entry): entry is string => typeof entry === "string" && entry.length > 0)
+    : [];
+  const payload =
+    body.payload && typeof body.payload === "object" && !Array.isArray(body.payload)
+      ? (body.payload as Record<string, unknown>)
+      : null;
+  const recipients = body.recipients === undefined ? [] : body.recipients;
+  const attachmentHashes = body.attachmentHashes === undefined ? [] : body.attachmentHashes;
+  const expectedTargetRevision =
+    body.expectedTargetRevision === undefined ? undefined : text(body.expectedTargetRevision, 128);
+  if (
+    !connectionId ||
+    !providerAccountId ||
+    !operationType ||
+    !targetResourceId ||
+    !payload ||
+    resourceScope.length === 0 ||
+    resourceScope.length > 100 ||
+    !resourceScope.includes(targetResourceId) ||
+    !Array.isArray(recipients) ||
+    recipients.length > 50 ||
+    !recipients.every((entry): entry is string => typeof entry === "string" && entry.length <= 256) ||
+    !Array.isArray(attachmentHashes) ||
+    attachmentHashes.length > 20 ||
+    !attachmentHashes.every((entry): entry is string => typeof entry === "string" && entry.length <= 128) ||
+    (body.expectedTargetRevision !== undefined && expectedTargetRevision === null) ||
+    !Number.isInteger(body.grantRevision) ||
+    (body.grantRevision as number) < 1 ||
+    typeof body.expiresAt !== "string"
+  ) {
+    return { ok: false, error: "invalid_request" };
+  }
+  if (!ACTION_ALLOWLIST.has(operationType)) return { ok: false, error: "unknown_operation" };
+  // A LINE reply is exactly one text of 1 to 5,000 characters to exactly
+  // one LINE user, so the owner approves nothing that LINE would refuse or
+  // that reaches more than the one customer.
+  if (operationType === LINE_PUSH_OPERATION &&
+      !isValidLinePushProposal({ payload, recipients: recipients as unknown[], targetResourceId })) {
+    return { ok: false, error: "invalid_request" };
+  }
+  const expiresAt = Date.parse(body.expiresAt as string);
+  const now = Date.now();
+  if (!Number.isFinite(expiresAt) || expiresAt <= now || expiresAt > now + 30 * 24 * 3600 * 1000) {
+    return { ok: false, error: "invalid_request" };
+  }
+  const fields: HashedActionFields = {
+    connectionId,
+    providerAccountId,
+    operationType,
+    targetResourceId,
+    resourceScope,
+    payload,
+    ...(recipients.length > 0 ? { recipients: recipients as string[] } : {}),
+    ...(attachmentHashes.length > 0 ? { attachmentHashes: attachmentHashes as string[] } : {}),
+    ...(expectedTargetRevision ? { expectedTargetRevision } : {}),
+    grantRevision: body.grantRevision as number,
+    expiresAt: body.expiresAt as string,
+  };
+  return { ok: true, fields: { ...fields, payloadHash: await payloadHash(actionHashable(fields)) } };
+}
+
+/// The stored proposal for checked fields, in one shape whichever route proposed it.
+function newProposal(
+  id: string,
+  tenant: string,
+  companyId: string | undefined,
+  fields: ProposalFields,
+  proposedAt: string,
+): ActionProposalJSON {
+  return {
+    id,
+    tenant,
+    ...(companyId ? { companyId } : {}),
+    connectionId: fields.connectionId,
+    providerAccountId: fields.providerAccountId,
+    operationType: fields.operationType,
+    targetResourceId: fields.targetResourceId,
+    resourceScope: fields.resourceScope,
+    payload: fields.payload,
+    payloadHash: fields.payloadHash,
+    ...(fields.recipients ? { recipients: fields.recipients } : {}),
+    ...(fields.attachmentHashes ? { attachmentHashes: fields.attachmentHashes } : {}),
+    ...(fields.expectedTargetRevision ? { expectedTargetRevision: fields.expectedTargetRevision } : {}),
+    grantRevision: fields.grantRevision,
+    proposedAt,
+    expiresAt: fields.expiresAt,
+    state: "proposed",
+  };
+}
+
+// ---------------------------------------------------------------------------
+// The worker adapter contract (job-flow.ts, docs/phase-0-spikes.md section 3)
+// ---------------------------------------------------------------------------
+
+/// What every request a worker or a reply opens offers. One approves the exact action and one declines it;
+/// approval-core keeps what the chosen option does apart from its label, so the decision says whether the action was
+/// approved without anyone reading a label.
+export const JOB_REQUEST_OPTIONS: readonly ApprovalOption[] = [
+  { id: "approve", label: "Approve", effect: "approve" },
+  { id: "decline", label: "Decline", effect: "decline" },
+];
+
+/// The approval kind of each operation an approval-core request decides, set here from the operation and never taken
+/// from whoever proposes it, so nobody can ask for a write to the shop's systems as if it were a reply a helper may
+/// decide. A LINE reply answers a customer who wrote first, privately: approval-core's `reply`. An issue in the shop's
+/// own tracker changes the shop's records: the owner-only `command`.
+const REQUEST_KINDS: Readonly<Record<string, ApprovalKind>> = {
+  [LINE_PUSH_OPERATION]: "reply",
+  "linear.issue.create": "command",
+  // A month of Ton's books into the owner's own Google Sheet changes the shop's records, and is owner-only
+  // (books-detail.ts).
+  [SHEETS_APPEND]: BOOKS_KIND,
+};
+
+/// The operations a worker may ask for (job-flow.ts). A LINE reply is not one: it needs the reply record binding it
+/// to the message it answers, which only the pilot's reply flow writes, so a worker's LINE reply would always fail at
+/// dispatch.
+const WORKER_OPERATIONS: ReadonlySet<string> = new Set(["linear.issue.create"]);
+
+/// Whether an action is a reply, which only its approval-core request decides, whichever route proposed it.
+function isReply(action: Pick<ActionProposalJSON, "operationType">): boolean {
+  return REQUEST_KINDS[action.operationType] === "reply";
+}
+
+/// Replies are never revised: a changed reply is a new proposal with a link of its own. So the one revision anyone
+/// deciding a reply can have seen is the first, and every decision on one names it. Were a revision ever added, the
+/// older decisions would be refused as changed, never applied to something nobody saw.
+export const REPLY_REVISION = 1;
+
+/// What a reply's approval-core request asks: approve or decline that exact reply, its draft and the one customer it
+/// goes to, until the reply's own expiry, which is its link's. It is built from the stored reply alone, so a reply
+/// stored before replies carried requests reads as the very request it would have opened (`decidingRecordSync`).
+function replyRequest(action: ActionProposalJSON): NewApprovalRequest {
+  return {
+    id: action.id,
+    kind: "reply",
+    options: JOB_REQUEST_OPTIONS,
+    expiresAt: Date.parse(action.expiresAt),
+    detail: {
+      actionId: action.id,
+      operationType: action.operationType,
+      targetResourceId: action.targetResourceId,
+      recipient: action.recipients?.[0] ?? null,
+      text: lineReplyText(action.payload),
+      payloadHash: action.payloadHash,
+    },
+  };
+}
+
+/// A reply's request as approval-core opens it: at revision 1, asked when the reply was proposed.
+function openReply(existing: ApprovalRecord | undefined, action: ActionProposalJSON) {
+  return openTransition(existing, replyRequest(action), Date.parse(action.proposedAt));
+}
+
+/// What settling a decision through a request came to: approval-core's result with the record and the action as they
+/// now stand, or a refusal from before approval-core was asked.
+type Settled =
+  | { asked: true; result: DecideResult; record: ApprovalRecord; action: ActionProposalJSON }
+  | { asked: false; status: 404 | 409; error: "not_found" | "action_not_open" };
+
+/// What the control plane reports to approval-core as the running attempt when no attempt holds the task.
+/// approval-core reads a missing attempt as unknown and lets a stamped request through, but here it is known that
+/// nothing runs, so a request asked in an attempt that has ended must be refused as `attempt_ended`. Attempt ids are
+/// UUIDs, so no attempt can ever be called this.
+export const NO_ATTEMPT = "none";
+
+/// The most one agent event may take, serialized. The task's log keeps its last MAX_EVENTS entries in one stored
+/// value, which may not pass 2 MB; at this size a full log stays well inside it.
+const MAX_AGENT_EVENT_BYTES = 8 * 1024;
+const MAX_EVENTS_PER_REPORT = 100;
+/// The most the control plane appends for an outpost at once: a browser step's outcome is two events.
+const MAX_OUTPOST_EVENTS = 10;
+/// Why an attempt ended, as a code a person never writes free text into.
+const REASON_CODE = /^[a-z][a-z0-9_]{0,63}$/;
+
+/// An agent event the log can keep: one object with a `type` naming its kind (packages/agent-events), small enough to
+/// store whole. The kind is not checked against any list, so a kind this build does not know is kept, as the
+/// contract asks; a reader decodes it as `unknown` and still shows that something arrived.
+function isAgentEvent(value: unknown): boolean {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  const type = (value as { type?: unknown }).type;
+  if (typeof type !== "string" || type.length === 0 || type.length > 64) return false;
+  return new TextEncoder().encode(JSON.stringify(value)).byteLength <= MAX_AGENT_EVENT_BYTES;
+}
+
+function isRole(value: unknown): value is Role {
+  return typeof value === "string" && (ROLES as readonly string[]).includes(value);
+}
+
+/// A worker's result for the owner to read (job-flow.ts, `draft`; workers.ts): what one attempt wrote, and for which
+/// job. A draft is not an action: it proposes nothing and opens no request, so nothing can ever be sent from it here.
+/// Anything that leaves the app still goes through an approval of its own.
+export type DraftJSON = {
+  /// The attempt that wrote it. One draft per attempt, so a retried write can never leave two.
+  attemptId: string;
+  /// Who wrote it and for what, as codes: `nam` and `reply`, `pim` and `post`, `ton` and `daily_summary`.
+  member: string;
+  job: string;
+  /// The words, for the owner to read.
+  text: string;
+  /// What it is about, as ids only: the message a reply answers, the day a summary covers.
+  about?: Record<string, string>;
+  /// What sending it would take, as the member's permissions answered (@manut/member-grants `decide`): `draft_only`
+  /// while the connection is in practice mode, `ask` with the approval kind after it. Absent for a draft that never
+  /// leaves the app.
+  send?: { answer: "draft_only" | "ask"; kind: string };
+  at: string;
+};
+
+/// The most one draft may take, serialized. A reply, a post or a day's summary is far shorter, and the bound keeps
+/// every draft one small stored value.
+const MAX_DRAFT_BYTES = 16 * 1024;
+const DRAFT_FIELDS: ReadonlySet<string> = new Set(["member", "job", "text", "about", "send"]);
+const ABOUT_KEY = /^[a-z][A-Za-z0-9]{0,31}$/;
+const ABOUT_ID = /^[A-Za-z0-9._:-]{1,128}$/;
+const MAX_ABOUT = 8;
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+/// A draft the task can keep as given: known fields only, codes for who wrote it and what for, and ids for what it is
+/// about, so nothing but the draft's own words can carry free text. A field the task does not know is refused, not
+/// dropped, so a caller's mistake shows.
+function isDraft(value: unknown): value is Omit<DraftJSON, "attemptId" | "at"> {
+  if (!isPlainObject(value) || !Object.keys(value).every((key) => DRAFT_FIELDS.has(key))) return false;
+  const { member, job, text, about, send } = value;
+  if (typeof member !== "string" || !REASON_CODE.test(member) || typeof job !== "string" || !REASON_CODE.test(job)) {
+    return false;
+  }
+  if (typeof text !== "string" || text.trim().length === 0) return false;
+  if (about !== undefined) {
+    if (!isPlainObject(about)) return false;
+    const entries = Object.entries(about);
+    if (entries.length > MAX_ABOUT ||
+        !entries.every(([key, id]) => ABOUT_KEY.test(key) && typeof id === "string" && ABOUT_ID.test(id))) {
+      return false;
+    }
+  }
+  if (send !== undefined) {
+    if (!isPlainObject(send) || Object.keys(send).some((key) => key !== "answer" && key !== "kind")) return false;
+    if ((send.answer !== "draft_only" && send.answer !== "ask") || typeof send.kind !== "string" ||
+        !REASON_CODE.test(send.kind)) {
+      return false;
+    }
+  }
+  return new TextEncoder().encode(JSON.stringify(value)).byteLength <= MAX_DRAFT_BYTES;
+}
+
+/// An answer worked out inside a synchronous storage transaction, sent once the transaction has committed.
+type SyncAnswer = { status: number; body: unknown };
+
+/// The routes whose writes change what the shop's task list shows (task-listing.ts), and so what its desktops show: the
+/// task itself, its commands, a run claimed, a run's asks, its draft and its end, a sweep of runs that ran out, an action
+/// proposed, decided, begun or settled, and a request decided. A run's progress (its heartbeats, steps and events) is left
+/// out: its start, its draft, its asks and its end are what the screens show, and progress would ping every few seconds
+/// while a job runs. Reads, the wipe and the prune are left out too: the wipe closes the shop's feed itself, and a prune
+/// only ages out what no screen shows.
+const FEED_ROUTES =
+  /^(PUT \/|POST \/commands|POST \/attempts|POST \/attempts\/sweep|POST \/attempts\/[^/]+\/(finish|end|ask|ask-submit|ask-books|draft)|POST \/actions|POST \/actions\/[^/]+\/(decision|begin|settle)|POST \/requests\/[^/]+\/decision)$/;
+
+/// Whether a write to this route, once it succeeded, tells the shop's live feed (`FEED_ROUTES`).
+export function touchesFeed(method: string, pathname: string): boolean {
+  return FEED_ROUTES.test(`${method} ${pathname}`);
+}
+
 /// Authoritative cloud copy of one SparkTaskRecord. SQLite-backed. Every caller is
 /// already authenticated in index.ts; this object validates shape, transitions,
 /// revisions, and write rate per record.
 export class TaskObject extends DurableObject {
+  /// Static so tests can shorten it, as the relay's are (feed-touch.ts `FEED_QUIET_MS`).
+  static feedQuietMs = FEED_QUIET_MS;
+
+  /// Until when this task tells its shop nothing: its shop said nobody follows it. Held in memory only, so a task object
+  /// that wakes again asks once more.
+  private feedQuietUntil = 0;
+
+  /// Every request goes to `route`, and a write that changed what the shop's screens read tells the shop's object, which
+  /// pings its live feed (feed.ts). The call is never waited on and can fail nothing: the task's caller has its answer
+  /// first, and the desktops' one-minute read stands whatever becomes of it. This is the one extra call the feed costs a
+  /// task, and none while the shop has nobody following it, beyond one a minute.
   override async fetch(request: Request): Promise<Response> {
+    const response = await this.route(request);
+    if (response.ok && touchesFeed(request.method, new URL(request.url).pathname)) this.touchFeed(request);
+    return response;
+  }
+
+  /// Tells the task's shop that the task changed, unless the shop said a moment ago that nobody follows it. The shop is
+  /// the task's own tenant, as for its approval requests (`ownerOf`).
+  private touchFeed(request: Request): void {
+    if (Date.now() < this.feedQuietUntil) return;
+    this.ctx.waitUntil((async () => {
+      const doc = await this.load();
+      if (!doc) return;
+      const listening = await touchFeed(this.tenantEnv, this.ownerOf(doc, request));
+      if (listening === 0) this.feedQuietUntil = Date.now() + TaskObject.feedQuietMs;
+    })().catch(() => undefined));
+  }
+
+  private async route(request: Request): Promise<Response> {
     const url = new URL(request.url);
     if (request.method === "GET" && url.pathname === "/") {
       const doc = await this.load();
@@ -339,6 +723,13 @@ export class TaskObject extends DurableObject {
       const attemptEntries = await this.ctx.storage.list({ prefix: "attempt:" });
       const allAttempts = [...attemptEntries.values()].map((value) => value as AttemptJSON);
       const truncated = allAttempts.length > MAX_EXPORT_ATTEMPTS;
+      // Each approval request a worker opened shares its action's id, so it
+      // goes out exactly when its action does.
+      const requests: ApprovalRecord[] = [];
+      for (const [, value] of await this.ctx.storage.list({ prefix: "request:" })) {
+        const record = value as ApprovalRecord;
+        if (actions.some((action) => action.id === record.request.id)) requests.push(record);
+      }
       return Response.json({
         task: doc,
         events,
@@ -346,10 +737,38 @@ export class TaskObject extends DurableObject {
         actions,
         attempts: allAttempts.slice(0, MAX_EXPORT_ATTEMPTS),
         attemptsTruncated: truncated,
+        requests,
+        drafts: await this.drafts(),
       });
+    }
+    if (request.method === "GET" && url.pathname === "/listing") {
+      // One task as the shop's task list gives it (task-listing.ts): what the lists show, built here so the rest of the
+      // log, the runs' steps and every older draft never leave the task. One tenancy check covers it, and proposals of
+      // another tenant are left out, as in the export. Runs are read no further than the list keeps, so a task claimed
+      // again and again costs a page no more than the export's cap; the ones kept are the export's, in the same order.
+      const doc = await this.load();
+      if (!doc || this.foreign(doc, request)) return Response.json({ error: "not_found" }, { status: 404 });
+      const actions: ActionProposalJSON[] = [];
+      for (const [, value] of await this.ctx.storage.list({ prefix: "action:" })) {
+        const action = value as ActionProposalJSON;
+        if (!this.foreignAction(action, request)) actions.push(action);
+      }
+      const attempts = await this.ctx.storage.list<AttemptJSON>({ prefix: "attempt:", limit: MAX_LISTED_ATTEMPTS + 1 });
+      return Response.json(listingOf({
+        task: doc,
+        events: (await this.ctx.storage.get<TaskEventJSON[]>("events")) ?? [],
+        actions,
+        attempts: [...attempts.values()],
+        drafts: await this.drafts(),
+      }));
     }
     if (request.method === "GET" && url.pathname === "/events") {
       return this.replay(request, url);
+    }
+    if (request.method === "GET" && url.pathname === "/drafts") {
+      const doc = await this.load();
+      if (!doc || this.foreign(doc, request)) return Response.json({ error: "not_found" }, { status: 404 });
+      return Response.json({ drafts: await this.drafts() });
     }
     if (request.method === "DELETE" && url.pathname === "/wipe") {
       // Tenant deletion, worker-orchestrated. The headers are set by the
@@ -395,7 +814,9 @@ export class TaskObject extends DurableObject {
       } catch {
         // No body on the worker-built call is fine; the server clock stands.
       }
-      return Response.json(await this.pruneExpired(nowMs));
+      // The shop whose lookup lists this task's requests, as `openingInLookup` wrote them. A task with no document holds
+      // no proposal, so it has nothing to tell a lookup.
+      return Response.json(await this.pruneExpired(nowMs, doc ? { tenant: this.ownerOf(doc, request), taskId: doc.id } : null));
     }
     if (request.method === "POST" && url.pathname === "/detach-company") {
       return this.detachCompany(request);
@@ -547,7 +968,662 @@ export class TaskObject extends DurableObject {
       if (!attemptId || !action) return Response.json({ error: "invalid_request" }, { status: 400 });
       return this.mutateAttempt(request, attemptId, action);
     }
+    // The worker adapter contract (job-flow.ts). No public route reaches these
+    // paths: the control plane calls them in code, with the attempt's fence
+    // for what the worker does, and with `x-control` for what the control
+    // plane does on its own.
+    if (request.method === "POST" && url.pathname === "/attempts/sweep") {
+      return this.sweepAttempts(request);
+    }
+    const attemptJob = url.pathname.match(
+      /^\/attempts\/([^/]+)\/(events|ask|ask-submit|ask-books|draft|end|outpost-events)$/);
+    if (request.method === "POST" && attemptJob) {
+      const attemptId = attemptJob[1];
+      if (!attemptId) return Response.json({ error: "invalid_request" }, { status: 400 });
+      if (attemptJob[2] === "events") return this.reportEvents(request, attemptId);
+      if (attemptJob[2] === "outpost-events") return this.outpostEvents(request, attemptId);
+      if (attemptJob[2] === "ask") return this.askApproval(request, attemptId);
+      if (attemptJob[2] === "ask-submit") return this.askSubmit(request, attemptId);
+      if (attemptJob[2] === "ask-books") return this.askBooks(request, attemptId);
+      if (attemptJob[2] === "draft") return this.storeDraft(request, attemptId);
+      return this.endAttempt(request, attemptId);
+    }
+    if (request.method === "GET" && url.pathname === "/requests") return this.listRequests(request, url);
+    const requestItem = url.pathname.match(/^\/requests\/([^/]+)(\/decision)?$/);
+    if (requestItem) {
+      const requestId = requestItem[1];
+      if (!requestId) return Response.json({ error: "invalid_request" }, { status: 400 });
+      if (request.method === "GET" && !requestItem[2]) return this.readRequest(request, requestId);
+      if (request.method === "POST" && requestItem[2]) return this.decideRequest(request, requestId);
+    }
     return new Response("Method Not Allowed", { status: 405 });
+  }
+
+  /// Every attempt route below works out its answer inside one synchronous
+  /// storage transaction (the synchronous KV API of a SQLite-backed object),
+  /// so its checks and writes see one state and commit together: no other
+  /// request runs in between, and a throw rolls all of it back. Bodies are
+  /// read first, because reading one is I/O that lets other requests in.
+  private respond(answer: SyncAnswer): Response {
+    return Response.json(answer.body, { status: answer.status });
+  }
+
+  /// The task document inside a transaction, with the same tenancy rules as
+  /// `foreignForWrite`. Load the document once beforehand (`load`) so a
+  /// prototype-era record is migrated before anything here reads it.
+  private writableDocSync(kv: SyncKvStorage, request: Request): TaskDocJSON | SyncAnswer {
+    const doc = kv.get<TaskDocJSON>("task");
+    if (!doc || this.foreign(doc, request)) return { status: 404, body: { error: "not_found" } };
+    if (doc.companyId && request.headers.get("x-tenant") && request.headers.get("x-company-writer") !== doc.companyId) {
+      return { status: 403, body: { error: "grant_required" } };
+    }
+    return doc;
+  }
+
+  /// The checks every fenced attempt call makes (`mutateAttempt`): the attempt is active, the fence is its holder's,
+  /// and neither the lease nor the deadline has lapsed. Ending an attempt stays open once its task is settled, as
+  /// finishing does; anything else is refused then.
+  private liveAttemptSync(
+    kv: SyncKvStorage,
+    doc: TaskDocJSON,
+    attemptId: string,
+    fence: unknown,
+    nowS: number,
+    ending = false,
+  ): { ok: true; attempt: AttemptJSON } | { ok: false; answer: SyncAnswer } {
+    const refuse = (status: number, error: string) => ({ ok: false as const, answer: { status, body: { error } } });
+    const attempt = kv.get<AttemptJSON>(`attempt:${attemptId}`);
+    if (!attempt) return refuse(404, "not_found");
+    if (attempt.status !== "active") return refuse(409, "stale_attempt");
+    if (typeof attempt.fence !== "string" || fence !== attempt.fence) return refuse(409, "fence_mismatch");
+    if (attempt.leaseUntil <= nowS || attempt.deadline <= nowS) return refuse(409, "lease_expired");
+    if (!ending && isSettled(doc)) return refuse(409, "task_settled");
+    return { ok: true, attempt };
+  }
+
+  /// The attempt that holds the task now, for approval-core's binding: the newest claim, while it is active and
+  /// neither its lease nor its deadline has lapsed. A worker that stopped reporting therefore stops holding the task
+  /// the moment its lease lapses, before anything sweeps it. When nothing holds it, `NO_ATTEMPT`.
+  ///
+  /// The one exception is a worker that asked and stopped until the owner answers (`awaiting_owner`): it did not go
+  /// silent, it handed the next step to a person, who may take longer than any attempt's deadline. It holds the task
+  /// until a newer claim, so its requests stay open until their own expiry. It can do nothing itself meanwhile, since
+  /// every fenced call needs an active attempt.
+  private runningAttemptSync(kv: SyncKvStorage, nowS: number): string {
+    const id = kv.get<string>("current-attempt");
+    if (!id) return NO_ATTEMPT;
+    const attempt = kv.get<AttemptJSON>(`attempt:${id}`);
+    if (attempt?.outcome === "awaiting_owner") return id;
+    if (!attempt || attempt.status !== "active" || attempt.leaseUntil <= nowS || attempt.deadline <= nowS) {
+      return NO_ATTEMPT;
+    }
+    return id;
+  }
+
+  /// `appendEvent` for a transaction: entries outside a document revision, in one write with the compaction floor.
+  /// Answers the log's new tip.
+  private appendEventsSync(
+    kv: SyncKvStorage,
+    doc: TaskDocJSON,
+    entries: { kind: "updated" | "agent"; via: string; attemptId?: string; event?: unknown }[],
+  ): number {
+    const prior = kv.get<TaskEventJSON[]>("events") ?? [];
+    const floor = kv.get<number>("eventFloor") ?? 0;
+    let seq = prior.length > 0 ? (prior[prior.length - 1]?.seq ?? floor) : floor;
+    const at = new Date().toISOString();
+    const grown: TaskEventJSON[] = [
+      ...prior,
+      ...entries.map((entry) => ({
+        seq: ++seq,
+        kind: entry.kind,
+        at,
+        from: doc.state,
+        to: doc.state,
+        rev: doc.rev,
+        via: entry.via,
+        ...(entry.attemptId !== undefined ? { attemptId: entry.attemptId } : {}),
+        ...(entry.event !== undefined ? { event: entry.event } : {}),
+      })),
+    ];
+    const dropped = grown.length - MAX_EVENTS;
+    const events = dropped > 0 ? grown.slice(dropped) : grown;
+    const first = events[0];
+    kv.put("events", events);
+    kv.put("eventFloor", dropped > 0 && first ? first.seq - 1 : floor);
+    return seq;
+  }
+
+  /// `takeWriteStamp` for a transaction.
+  private takeWriteStampSync(kv: SyncKvStorage): number[] | null {
+    const now = Date.now();
+    const recent = (kv.get<number[]>("writeStamps") ?? []).filter((t) => t > now - 60_000);
+    if (recent.length >= MAX_WRITES_PER_MINUTE) return null;
+    recent.push(now);
+    return recent;
+  }
+
+  /// `POST /attempts/:id/events` with `{ fence, events }`: what the worker did, as agent events, appended to the
+  /// task's log in the order given and kept exactly as they arrived. A report is a sign of life too, so it extends
+  /// the lease as a heartbeat does.
+  private async reportEvents(request: Request, attemptId: string): Promise<Response> {
+    const parsed = await readJsonBody<{ fence?: unknown; events?: unknown }>(request, MAX_BODY_BYTES);
+    if (!parsed.ok) return Response.json({ error: parsed.error }, { status: parsed.status });
+    const { fence, events } = parsed.value;
+    if (!Array.isArray(events) || events.length === 0 || events.length > MAX_EVENTS_PER_REPORT ||
+        !events.every(isAgentEvent)) {
+      return Response.json({ error: "invalid_request" }, { status: 400 });
+    }
+    if (!(await this.load())) return Response.json({ error: "not_found" }, { status: 404 });
+    return this.respond(this.ctx.storage.transactionSync((): SyncAnswer => {
+      const kv = this.ctx.storage.kv;
+      const doc = this.writableDocSync(kv, request);
+      if ("status" in doc) return doc;
+      const nowS = Date.now() / 1000;
+      const live = this.liveAttemptSync(kv, doc, attemptId, fence, nowS);
+      if (!live.ok) return live.answer;
+      const stamps = this.takeWriteStampSync(kv);
+      if (stamps === null) return { status: 429, body: { error: "rate_limited" } };
+      const leaseUntil = nowS + LEASE_SECONDS;
+      kv.put(`attempt:${attemptId}`, { ...live.attempt, leaseUntil } satisfies AttemptJSON);
+      kv.put("writeStamps", stamps);
+      const tip = this.appendEventsSync(kv, doc, events.map((event) => ({ kind: "agent" as const,
+        via: `attempt:events:${attemptId}`, attemptId, event })));
+      return { status: 200, body: { stored: events.length, leaseUntil, tip } };
+    }));
+  }
+
+  /// `POST /attempts/:id/outpost-events` with `{ events }` and `x-control`: what an outpost did for the attempt (a
+  /// browser step's outcome, browser-control.ts), as agent events the control plane appends to the task's log on the
+  /// outpost's behalf. Only while the attempt still runs: active, neither its lease nor its deadline passed, its task not
+  /// settled. It needs no fence, since an outpost never holds one, and unlike the worker's own report it never extends
+  /// the lease, so an outpost can never keep a silent worker's attempt alive.
+  private async outpostEvents(request: Request, attemptId: string): Promise<Response> {
+    if (request.headers.get("x-control") !== "1") return Response.json({ error: "forbidden" }, { status: 403 });
+    const parsed = await readJsonBody<{ events?: unknown }>(request, MAX_BODY_BYTES);
+    if (!parsed.ok) return Response.json({ error: parsed.error }, { status: parsed.status });
+    const { events } = parsed.value;
+    if (!Array.isArray(events) || events.length === 0 || events.length > MAX_OUTPOST_EVENTS ||
+        !events.every(isAgentEvent)) {
+      return Response.json({ error: "invalid_request" }, { status: 400 });
+    }
+    if (!(await this.load())) return Response.json({ error: "not_found" }, { status: 404 });
+    return this.respond(this.ctx.storage.transactionSync((): SyncAnswer => {
+      const kv = this.ctx.storage.kv;
+      const doc = this.writableDocSync(kv, request);
+      if ("status" in doc) return doc;
+      const nowS = Date.now() / 1000;
+      const attempt = kv.get<AttemptJSON>(`attempt:${attemptId}`);
+      if (!attempt) return { status: 404, body: { error: "not_found" } };
+      if (attempt.status !== "active") return { status: 409, body: { error: "stale_attempt" } };
+      if (attempt.leaseUntil <= nowS || attempt.deadline <= nowS) return { status: 409, body: { error: "lease_expired" } };
+      if (isSettled(doc)) return { status: 409, body: { error: "task_settled" } };
+      const stamps = this.takeWriteStampSync(kv);
+      if (stamps === null) return { status: 429, body: { error: "rate_limited" } };
+      kv.put("writeStamps", stamps);
+      const tip = this.appendEventsSync(kv, doc, events.map((event) => ({ kind: "agent" as const,
+        via: `attempt:outpost:${attemptId}`, attemptId, event })));
+      return { status: 200, body: { stored: events.length, tip } };
+    }));
+  }
+
+  /// `POST /attempts/:id/draft` with `{ fence, draft }`: what the worker wrote, kept on the task under its attempt for
+  /// the owner to read. One per attempt: a second is refused, so a retried write never leaves two. Like a report, it is
+  /// a sign of life and extends the lease. It proposes nothing and opens no request.
+  private async storeDraft(request: Request, attemptId: string): Promise<Response> {
+    const parsed = await readJsonBody<{ fence?: unknown; draft?: unknown }>(request, MAX_BODY_BYTES);
+    if (!parsed.ok) return Response.json({ error: parsed.error }, { status: parsed.status });
+    const { fence, draft } = parsed.value;
+    if (!isDraft(draft)) return Response.json({ error: "invalid_request" }, { status: 400 });
+    if (!(await this.load())) return Response.json({ error: "not_found" }, { status: 404 });
+    return this.respond(this.ctx.storage.transactionSync((): SyncAnswer => {
+      const kv = this.ctx.storage.kv;
+      const doc = this.writableDocSync(kv, request);
+      if ("status" in doc) return doc;
+      const nowMs = Date.now();
+      const nowS = nowMs / 1000;
+      const live = this.liveAttemptSync(kv, doc, attemptId, fence, nowS);
+      if (!live.ok) return live.answer;
+      if (kv.get(`draft:${attemptId}`) !== undefined) return { status: 409, body: { error: "draft_exists" } };
+      const stamps = this.takeWriteStampSync(kv);
+      if (stamps === null) return { status: 429, body: { error: "rate_limited" } };
+      const kept: DraftJSON = {
+        attemptId,
+        member: draft.member,
+        job: draft.job,
+        text: draft.text,
+        ...(draft.about !== undefined ? { about: draft.about } : {}),
+        ...(draft.send !== undefined ? { send: draft.send } : {}),
+        at: new Date(nowMs).toISOString(),
+      };
+      kv.put(`draft:${attemptId}`, kept);
+      kv.put(`attempt:${attemptId}`, { ...live.attempt, leaseUntil: nowS + LEASE_SECONDS } satisfies AttemptJSON);
+      kv.put("writeStamps", stamps);
+      this.appendEventsSync(kv, doc, [{ kind: "updated", via: `attempt:draft:${attemptId}` }]);
+      return { status: 200, body: kept };
+    }));
+  }
+
+  /// The task's drafts, oldest first.
+  private async drafts(): Promise<DraftJSON[]> {
+    const drafts = [...(await this.ctx.storage.list<DraftJSON>({ prefix: "draft:" })).values()];
+    return drafts.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
+  }
+
+  /// `POST /attempts/:id/ask` with `{ fence, action }`: the worker stops before an external write and proposes the
+  /// exact action. In one transaction the action is stored as a proposal bound to its request, and the request is
+  /// opened through approval-core: the kind set from the operation, the two options, an expiry with the action's,
+  /// and the stamp of the asking attempt. Only the attempt that holds the task may ask, since a request from any
+  /// other would be superseded the moment it opened.
+  private async askApproval(request: Request, attemptId: string): Promise<Response> {
+    const parsed = await readJsonBody<{ fence?: unknown; action?: unknown }>(request, MAX_BODY_BYTES);
+    if (!parsed.ok) return Response.json({ error: parsed.error }, { status: parsed.status });
+    const checked = await proposalFields(parsed.value.action);
+    if (!checked.ok) return Response.json({ error: checked.error }, { status: 400 });
+    const kind = WORKER_OPERATIONS.has(checked.fields.operationType)
+      ? REQUEST_KINDS[checked.fields.operationType]
+      : undefined;
+    if (!kind) return Response.json({ error: "unsupported_operation" }, { status: 400 });
+    if (!(await this.load())) return Response.json({ error: "not_found" }, { status: 404 });
+    return this.openAsked(request, attemptId, parsed.value.fence, checked.fields, (proposal) => ({
+      kind,
+      detail: {
+        actionId: proposal.id,
+        operationType: proposal.operationType,
+        targetResourceId: proposal.targetResourceId,
+        payloadHash: proposal.payloadHash,
+      },
+    }));
+  }
+
+  /// `POST /attempts/:id/ask-submit` with exactly `{ fence, write, site, expiresAt }`: a worker's browser write
+  /// (browser-writes.ts), after the control plane ran member-grants' `decide` and checked the write's sign-in. The write
+  /// is checked again here and stored as an immutable proposal whose payload is the write with the site's name, and its
+  /// request opened in the same transaction: of the kind the fixed table gives the write's action, never one the caller
+  /// names (a body naming a kind, or anything else, is refused), with a detail naming the site, the page, the form and
+  /// every value, and the control plane's own sentence saying so. Only the attempt that holds the task may ask.
+  private async askSubmit(request: Request, attemptId: string): Promise<Response> {
+    const parsed = await readJsonBody<Record<string, unknown>>(request, MAX_BODY_BYTES);
+    if (!parsed.ok) return Response.json({ error: parsed.error }, { status: parsed.status });
+    const body = parsed.value;
+    const keys = isPlainObject(body) ? Object.keys(body) : [];
+    const write = isPlainObject(body) ? submitWriteOf(body.write) : "invalid_write";
+    const site = isPlainObject(body) && typeof body.site === "string" ? body.site.trim() : "";
+    const expiresAt = isPlainObject(body) && typeof body.expiresAt === "string" ? Date.parse(body.expiresAt) : Number.NaN;
+    const nowMs = Date.now();
+    if (keys.length !== 4 || !["fence", "write", "site", "expiresAt"].every((key) => keys.includes(key)) ||
+        typeof write === "string" || site.length === 0 || [...site].length > 80 || /[\u0000-\u001f\u007f]/.test(site) ||
+        !Number.isFinite(expiresAt) || expiresAt <= nowMs || expiresAt > nowMs + 30 * 24 * 3600 * 1000) {
+      return Response.json({ error: "invalid_request" }, { status: 400 });
+    }
+    const origin = new URL(write.url).origin;
+    const payload: SubmitPayload = { ...write, site };
+    const fields: HashedActionFields = {
+      connectionId: write.signInId,
+      providerAccountId: write.signInId,
+      operationType: BROWSER_SUBMIT,
+      targetResourceId: origin,
+      resourceScope: [origin],
+      payload,
+      grantRevision: SUBMIT_GRANT_REVISION,
+      expiresAt: new Date(expiresAt).toISOString(),
+    };
+    const hashed: ProposalFields = { ...fields, payloadHash: await payloadHash(actionHashable(fields)) };
+    if (!(await this.load())) return Response.json({ error: "not_found" }, { status: 404 });
+    return this.openAsked(request, attemptId, body.fence, hashed, (proposal) => ({
+      kind: SUBMIT_KINDS[write.action],
+      detail: {
+        actionId: proposal.id,
+        operationType: BROWSER_SUBMIT,
+        action: write.action,
+        site,
+        signInId: write.signInId,
+        origin,
+        url: write.url,
+        form: write.form,
+        values: write.values,
+        text: submitText(write, site),
+        payloadHash: proposal.payloadHash,
+      } satisfies SubmitDetail,
+    }));
+  }
+
+  /// `POST /attempts/:id/ask-books` with exactly `{ fence, books, connection, expiresAt }`: Ton asks to append a month
+  /// of the shop's books to the owner's Google Sheet (books-sheet.ts), after the control plane ran member-grants'
+  /// `decide`, read the books from the shop's payments and made sure of the sheet. The books are checked again here
+  /// (books-detail.ts, `booksPayloadOf`) and stored as an immutable proposal whose payload is the month's exact rows and
+  /// the sheet, bound to the Google connection and grant revision the control plane named, and its request is opened in
+  /// the same transaction: of the owner-only kind this module's table gives an append, never one the caller names, with
+  /// a detail naming the sheet, the month, how many rows, the totals as text from integer satang, and the rows. Only the
+  /// attempt that holds the task may ask.
+  private async askBooks(request: Request, attemptId: string): Promise<Response> {
+    const parsed = await readJsonBody<Record<string, unknown>>(request, MAX_BODY_BYTES);
+    if (!parsed.ok) return Response.json({ error: parsed.error }, { status: parsed.status });
+    const body = parsed.value;
+    const keys = isPlainObject(body) ? Object.keys(body) : [];
+    const books = isPlainObject(body) ? booksPayloadOf(body.books) : null;
+    const connection = isPlainObject(body) && isPlainObject(body.connection) ? body.connection : null;
+    const expiresAt = isPlainObject(body) && typeof body.expiresAt === "string" ? Date.parse(body.expiresAt) : Number.NaN;
+    const nowMs = Date.now();
+    if (keys.length !== 4 || !["fence", "books", "connection", "expiresAt"].every((key) => keys.includes(key)) || !books ||
+        !connection || Object.keys(connection).length !== 3 || typeof connection.id !== "string" ||
+        connection.id.length === 0 || connection.id.length > 256 || typeof connection.accountId !== "string" ||
+        connection.accountId.length === 0 || connection.accountId.length > 256 ||
+        !Number.isSafeInteger(connection.grantRevision) || (connection.grantRevision as number) < 1 ||
+        !Number.isFinite(expiresAt) || expiresAt <= nowMs || expiresAt > nowMs + 30 * 24 * 3600 * 1000) {
+      return Response.json({ error: "invalid_request" }, { status: 400 });
+    }
+    const fields: HashedActionFields = {
+      connectionId: connection.id,
+      providerAccountId: connection.accountId,
+      operationType: SHEETS_APPEND,
+      targetResourceId: books.sheet.id,
+      resourceScope: [books.sheet.id],
+      payload: books,
+      grantRevision: connection.grantRevision as number,
+      expiresAt: new Date(expiresAt).toISOString(),
+    };
+    const hashed: ProposalFields = { ...fields, payloadHash: await payloadHash(actionHashable(fields)) };
+    if (!(await this.load())) return Response.json({ error: "not_found" }, { status: 404 });
+    return this.openAsked(request, attemptId, body.fence, hashed, (proposal) => ({
+      kind: REQUEST_KINDS[SHEETS_APPEND] ?? BOOKS_KIND,
+      detail: booksDetail(proposal.id, books, proposal.payloadHash) satisfies BooksDetail,
+    }));
+  }
+
+  /// A worker's ask, in one transaction: the exact action stored as a proposal bound to its request, and the request
+  /// opened through approval-core with the two options, an expiry with the action's, and the stamp of the asking
+  /// attempt. Only the attempt that holds the task may ask, since a request from any other would be superseded the
+  /// moment it opened. `asked` gives the request's kind and detail from the stored proposal.
+  ///
+  /// Before it, the shop's approval lookup is told which task holds the request (`openingInLookup`), as the task index is
+  /// told of a task before it is made. The checks run first, writing nothing, so an ask that would be refused leaves no
+  /// entry; the transaction runs them again, since awaiting the lookup let other requests in.
+  private async openAsked(request: Request, attemptId: string, fence: unknown, fields: ProposalFields,
+    asked: (proposal: ActionProposalJSON) => { kind: ApprovalKind; detail: unknown }): Promise<Response> {
+    const id = crypto.randomUUID();
+    const checks = (kv: SyncKvStorage): SyncAnswer | { doc: TaskDocJSON; live: AttemptJSON; stamps: number[] } => {
+      const doc = this.writableDocSync(kv, request);
+      if ("status" in doc) return doc;
+      const nowS = Date.now() / 1000;
+      const live = this.liveAttemptSync(kv, doc, attemptId, fence, nowS);
+      if (!live.ok) return live.answer;
+      if (this.runningAttemptSync(kv, nowS) !== attemptId) return { status: 409, body: { error: "stale_attempt" } };
+      const stamps = this.takeWriteStampSync(kv);
+      if (stamps === null) return { status: 429, body: { error: "rate_limited" } };
+      return { doc, live: live.attempt, stamps };
+    };
+    const first = this.ctx.storage.transactionSync(() => checks(this.ctx.storage.kv));
+    if ("status" in first) return this.respond(first);
+    const opening = await this.openingInLookup(request, first.doc, id);
+    if (opening instanceof Response) return opening;
+    return this.respond(this.ctx.storage.transactionSync((): SyncAnswer => {
+      const kv = this.ctx.storage.kv;
+      const checked = checks(kv);
+      if ("status" in checked) return checked;
+      const { doc, live, stamps } = checked;
+      const refused = opening.refusal(doc);
+      if (refused) return refused;
+      const nowMs = Date.now();
+      const nowS = nowMs / 1000;
+      const proposal: ActionProposalJSON = {
+        ...newProposal(id, this.ownerOf(doc, request), doc.companyId, fields, new Date(nowMs).toISOString()),
+        requestId: id,
+      };
+      const { kind, detail } = asked(proposal);
+      const opened = openTransition(kv.get<ApprovalRecord>(`request:${id}`), {
+        id,
+        kind,
+        options: JOB_REQUEST_OPTIONS,
+        attemptId,
+        expiresAt: Date.parse(proposal.expiresAt),
+        detail,
+      }, nowMs);
+      if (!opened.result.ok || !opened.next) return { status: 400, body: { error: "invalid_request" } };
+      kv.put(`action:${id}`, proposal);
+      kv.put(`request:${id}`, opened.next);
+      kv.put(`attempt:${attemptId}`, { ...live, leaseUntil: nowS + LEASE_SECONDS } satisfies AttemptJSON);
+      kv.put("writeStamps", stamps);
+      this.appendEventsSync(kv, doc, [{ kind: "updated", via: `action:propose:${id}` }]);
+      return { status: 200, body: { action: proposal, request: opened.result.request } };
+    }));
+  }
+
+  /// The tenant a proposal on this task carries, and so the shop whose approvals list its request: the task's own, or,
+  /// on a task from before tasks carried one, the caller's.
+  private ownerOf(doc: TaskDocJSON, request: Request): string {
+    return doc.tenantId ?? request.headers.get("x-tenant") ?? "";
+  }
+
+  /// Writes the entry of a request about to open into its shop's approval lookup (approval-index.ts), before the request
+  /// opens: a request whose entry could not be written is never opened, so the shop can always find it. Answers 503
+  /// `approvals_unavailable` when the lookup cannot be written, or the check the opening transaction must make: the
+  /// request still belongs to the shop whose lookup was written, and it opens within `OPEN_WINDOW_MS` of the write, so a
+  /// read that later finds no request behind an older entry may clear it without racing this open.
+  private async openingInLookup(request: Request, doc: TaskDocJSON, requestId: string):
+    Promise<Response | { refusal: (now: TaskDocJSON) => SyncAnswer | null }> {
+    const tenant = this.ownerOf(doc, request);
+    const startedAt = Date.now();
+    if (!(await indexRequest(this.tenantEnv, tenant, requestId, doc.id))) {
+      return Response.json({ error: "approvals_unavailable" }, { status: 503 });
+    }
+    return {
+      refusal: (now) => this.ownerOf(now, request) !== tenant || Date.now() - startedAt > OPEN_WINDOW_MS
+        ? { status: 503, body: { error: "approvals_unavailable" } } : null,
+    };
+  }
+
+  /// The shop's objects, which a request's lookup entry is written to before it opens.
+  private get tenantEnv(): Pick<TenantDataEnv, "TENANT"> {
+    return this.env as unknown as Pick<TenantDataEnv, "TENANT">;
+  }
+
+  /// The approval-core record that decides `action`: its stored request, or, for a reply stored before replies carried
+  /// requests and still waiting, the request it would have opened when it was proposed (`replyRequest`). Reading that
+  /// one writes nothing; the first decision that settles it stores it (`settleSync`). So every decision on an old reply
+  /// still goes through approval-core, and no task object has to be swept to give old replies their requests. An old
+  /// reply decided before then has no record: its decision stands as it was made, and nothing can settle it again.
+  private decidingRecordSync(kv: SyncKvStorage, action: ActionProposalJSON): ApprovalRecord | undefined {
+    const stored = kv.get<ApprovalRecord>(`request:${action.id}`);
+    if (stored !== undefined) return stored;
+    if (action.requestId !== undefined || !isReply(action) || action.state !== "proposed") return undefined;
+    return openReply(undefined, action).next;
+  }
+
+  /// Settles `decision` on the request that decides `action`, through approval-core's transition, in the caller's
+  /// transaction: who decided first, who may decide its kind (`mayDecide`), whether its attempt still holds the task
+  /// (`bindingHolds`), its expiry and revision, and the option. The action moves with the request: an approval to
+  /// approved, the only state the broker's begin gate dispatches from, and a decline to rejected. This is the only way
+  /// an action a request decides leaves `proposed` on a decision. A refusal writes nothing.
+  private settleSync(kv: SyncKvStorage, doc: TaskDocJSON, action: ActionProposalJSON, decision: Decision,
+    now: number): Settled {
+    const record = this.decidingRecordSync(kv, action);
+    if (record === undefined) return { asked: false, status: 404, error: "not_found" };
+    const { result, next } = decideTransition(record, decision,
+      { running: { attemptId: this.runningAttemptSync(kv, now / 1000) }, now });
+    if (!result.ok || next?.status !== "decided") return { asked: true, result, record, action };
+    // A pending request's action is always proposed: nothing else decides it. If that ever stops holding, nothing is
+    // written rather than settling a request whose action cannot follow.
+    if (action.state !== "proposed") return { asked: false, status: 409, error: "action_not_open" };
+    const approved = next.request.options.find((option) => option.id === next.decision.optionId)?.effect === "approve";
+    // An old reply carries its request's id from its first decision on, as every reply proposed since does.
+    const bound: ActionProposalJSON = { ...action, requestId: action.id };
+    const decided: ActionProposalJSON = approved
+      ? { ...bound, state: "approved", approval: { by: decision.decidedBy, at: new Date(now).toISOString() } }
+      : { ...bound, state: "rejected" };
+    kv.put(`request:${action.id}`, next);
+    kv.put(`action:${action.id}`, decided);
+    this.appendEventsSync(kv, doc, [{ kind: "updated", via: `action:decision:${action.id}` }]);
+    return { asked: true, result, record: next, action: decided };
+  }
+
+  /// `GET /requests/:id`: a request, its action, and where it stands for whoever shows it, at its current revision and
+  /// against the attempt holding the task now.
+  private async readRequest(request: Request, requestId: string): Promise<Response> {
+    if (!(await this.load())) return Response.json({ error: "not_found" }, { status: 404 });
+    return this.respond(this.ctx.storage.transactionSync((): SyncAnswer => {
+      const kv = this.ctx.storage.kv;
+      const action = kv.get<ActionProposalJSON>(`action:${requestId}`);
+      if (!action || this.foreignAction(action, request)) return { status: 404, body: { error: "not_found" } };
+      const record = this.decidingRecordSync(kv, action);
+      if (!record) return { status: 404, body: { error: "not_found" } };
+      const now = Date.now();
+      const standing = requestStanding(record, { seenRevision: record.request.revision,
+        running: { attemptId: this.runningAttemptSync(kv, now / 1000) }, now });
+      return { status: 200, body: { record, standing, action } };
+    }));
+  }
+
+  /// `GET /requests`: every approval-core record in this task the caller may read, each with where it stands now, at
+  /// its current revision and against the attempt holding the task, for a session's list of approvals (approvals.ts).
+  /// It walks the actions, because every request shares its action's id and an old reply's request exists only as the
+  /// one it would have opened. An action of another tenant is never listed, whatever task it sits in.
+  ///
+  /// `GET /requests?id=…&id=…` answers only the requests named, at most `MAX_NAMED_REQUESTS`, each read by its own key,
+  /// so the read costs what it asks for and not what the task has held: the approvals list asks for the ones the shop's
+  /// lookup names (approval-index.ts). A named request the task does not hold for the caller is simply not answered, which
+  /// the list reads as the lookup's entry being stale.
+  private async listRequests(request: Request, url: URL): Promise<Response> {
+    const named = url.searchParams.has("id") ? [...new Set(url.searchParams.getAll("id"))] : null;
+    if (named !== null && (named.length > MAX_NAMED_REQUESTS ||
+        named.some((id) => id.length === 0 || id.length > MAX_REQUEST_ID))) {
+      return Response.json({ error: "invalid_request" }, { status: 400 });
+    }
+    const doc = await this.load();
+    if (!doc || this.foreign(doc, request)) return Response.json({ error: "not_found" }, { status: 404 });
+    return this.respond(this.ctx.storage.transactionSync((): SyncAnswer => {
+      const kv = this.ctx.storage.kv;
+      const now = Date.now();
+      const running = { attemptId: this.runningAttemptSync(kv, now / 1000) };
+      const requests: { record: ApprovalRecord; standing: Standing }[] = [];
+      const actions = named === null ? [...kv.list<ActionProposalJSON>({ prefix: "action:" })].map(([, action]) => action)
+        : named.flatMap((id) => kv.get<ActionProposalJSON>(`action:${id}`) ?? []);
+      for (const action of actions) {
+        if (this.foreignAction(action, request)) continue;
+        const record = this.decidingRecordSync(kv, action);
+        if (record === undefined) continue;
+        requests.push({ record, standing: requestStanding(record, { seenRevision: record.request.revision, running,
+          now }) });
+      }
+      return { status: 200, body: { requests } };
+    }));
+  }
+
+  /// `POST /requests/:id/decision` with approval-core's `{ optionId, seenRevision, decidedBy, role }`, the role set
+  /// by the control plane from who is deciding, never by a client: the job flow's person deciding a worker's request,
+  /// or the owner's link deciding a reply (pilot.ts). approval-core settles the request once and the action moves with
+  /// it (`settleSync`). Every refusal answers 200 with approval-core's result and writes nothing.
+  private async decideRequest(request: Request, requestId: string): Promise<Response> {
+    const parsed = await readJsonBody<Record<string, unknown>>(request, MAX_BODY_BYTES);
+    if (!parsed.ok) return Response.json({ error: parsed.error }, { status: parsed.status });
+    const { optionId, seenRevision, decidedBy, role } = parsed.value;
+    if (typeof optionId !== "string" || !optionId || optionId.length > 64 || typeof seenRevision !== "number" ||
+        !Number.isSafeInteger(seenRevision) || seenRevision < 1 || typeof decidedBy !== "string" || !decidedBy ||
+        decidedBy.length > 128 || !isRole(role)) {
+      return Response.json({ error: "invalid_request" }, { status: 400 });
+    }
+    if (!(await this.load())) return Response.json({ error: "not_found" }, { status: 404 });
+    return this.respond(this.ctx.storage.transactionSync((): SyncAnswer => {
+      const kv = this.ctx.storage.kv;
+      const doc = kv.get<TaskDocJSON>("task");
+      const action = kv.get<ActionProposalJSON>(`action:${requestId}`);
+      if (!doc || !action || this.foreignAction(action, request)) {
+        return { status: 404, body: { error: "not_found" } };
+      }
+      const settled = this.settleSync(kv, doc, action, { requestId, optionId, seenRevision, decidedBy, role },
+        Date.now());
+      if (!settled.asked) return { status: settled.status, body: { error: settled.error } };
+      return { status: 200, body: { result: settled.result, record: settled.record, action: settled.action } };
+    }));
+  }
+
+  /// The requests an attempt asked that still wait for a decision.
+  private pendingRequestsSync(kv: SyncKvStorage, attemptId: string): string[] {
+    return [...kv.list<ApprovalRecord>({ prefix: "request:" })]
+      .filter(([, record]) => record.status === "pending" && record.request.attemptId === attemptId)
+      .map(([, record]) => record.request.id);
+  }
+
+  /// Closes an attempt with its outcome and answers the requests it leaves waiting, which approval-core's binding
+  /// now supersedes (`attempt_ended`): nothing is written to them, since where an attempt stands is what decides it.
+  /// An attempt that ends waiting for the owner supersedes nothing: its requests are what it waits on, and they stay
+  /// open (`runningAttemptSync`).
+  private closeAttemptSync(
+    kv: SyncKvStorage,
+    doc: TaskDocJSON,
+    attempt: AttemptJSON,
+    outcome: "done" | "failed" | "cancelled" | "awaiting_owner",
+    reason: string | undefined,
+    nowS: number,
+    via: string,
+  ): { attempt: AttemptJSON; superseded: string[] } {
+    const ended: AttemptJSON = { ...attempt, status: "done", outcome, ...(reason ? { reason } : {}), finishedAt: nowS };
+    kv.put(`attempt:${attempt.id}`, ended);
+    this.appendEventsSync(kv, doc, [{ kind: "updated", via }]);
+    const superseded = outcome === "awaiting_owner" ? [] : this.pendingRequestsSync(kv, attempt.id);
+    return { attempt: ended, superseded };
+  }
+
+  /// `POST /attempts/:id/end` with `{ fence?, outcome, reason? }` and `x-control`: the control plane ends an attempt.
+  /// With the fence it closes the attempt for its own worker (the worker's finish, through the control plane), under
+  /// the same checks as `finish`; without, the control plane stops it on its own (budget, cancellation), which needs
+  /// only that it is still active. Never rate limited: an attempt must always be able to end.
+  ///
+  /// `awaiting_owner` is the worker's own end only, with its fence, and only while a request it asked still waits:
+  /// otherwise there is nobody to wait for, and the attempt would hold the task for nothing.
+  private async endAttempt(request: Request, attemptId: string): Promise<Response> {
+    if (request.headers.get("x-control") !== "1") return Response.json({ error: "forbidden" }, { status: 403 });
+    const parsed = await readJsonBody<{ fence?: unknown; outcome?: unknown; reason?: unknown }>(request, MAX_BODY_BYTES);
+    if (!parsed.ok) return Response.json({ error: parsed.error }, { status: parsed.status });
+    const { fence, outcome, reason } = parsed.value;
+    const waits = outcome === "awaiting_owner";
+    if ((outcome !== "done" && outcome !== "failed" && outcome !== "cancelled" && !waits) ||
+        (reason !== undefined && (outcome === "done" || waits || typeof reason !== "string" ||
+          !REASON_CODE.test(reason))) ||
+        (fence !== undefined && typeof fence !== "string") || (waits && fence === undefined)) {
+      return Response.json({ error: "invalid_request" }, { status: 400 });
+    }
+    if (!(await this.load())) return Response.json({ error: "not_found" }, { status: 404 });
+    return this.respond(this.ctx.storage.transactionSync((): SyncAnswer => {
+      const kv = this.ctx.storage.kv;
+      const doc = kv.get<TaskDocJSON>("task");
+      if (!doc || this.foreign(doc, request)) return { status: 404, body: { error: "not_found" } };
+      const nowS = Date.now() / 1000;
+      let attempt = kv.get<AttemptJSON>(`attempt:${attemptId}`);
+      if (!attempt) return { status: 404, body: { error: "not_found" } };
+      if (fence !== undefined) {
+        const live = this.liveAttemptSync(kv, doc, attemptId, fence, nowS, true);
+        if (!live.ok) return live.answer;
+        attempt = live.attempt;
+      } else if (attempt.status !== "active") {
+        return { status: 409, body: { error: "stale_attempt" } };
+      }
+      if (waits && this.pendingRequestsSync(kv, attemptId).length === 0) {
+        return { status: 409, body: { error: "nothing_waiting" } };
+      }
+      return { status: 200, body: this.closeAttemptSync(kv, doc, attempt, outcome, reason, nowS,
+        `attempt:end:${attemptId}`) };
+    }));
+  }
+
+  /// `POST /attempts/sweep` with `x-control`: ends every active attempt that stopped reporting (its lease lapsed:
+  /// `silent`) or ran out of time (`deadline`), as failed, and answers each with the requests it superseded. The
+  /// clock is the server's only, so no caller can end a live attempt early.
+  private async sweepAttempts(request: Request): Promise<Response> {
+    if (request.headers.get("x-control") !== "1") return Response.json({ error: "forbidden" }, { status: 403 });
+    if (!(await this.load())) return Response.json({ error: "not_found" }, { status: 404 });
+    return this.respond(this.ctx.storage.transactionSync((): SyncAnswer => {
+      const kv = this.ctx.storage.kv;
+      const doc = kv.get<TaskDocJSON>("task");
+      if (!doc || this.foreign(doc, request)) return { status: 404, body: { error: "not_found" } };
+      const nowS = Date.now() / 1000;
+      const ended: { attempt: AttemptJSON; superseded: string[] }[] = [];
+      for (const [, attempt] of [...kv.list<AttemptJSON>({ prefix: "attempt:" })]) {
+        if (attempt.status !== "active") continue;
+        const reason = attempt.deadline <= nowS ? "deadline" : attempt.leaseUntil <= nowS ? "silent" : null;
+        if (reason) ended.push(this.closeAttemptSync(kv, doc, attempt, "failed", reason, nowS, `attempt:sweep:${attempt.id}`));
+      }
+      return { status: 200, body: { ended } };
+    }));
   }
 
   /// Releases a task from its company when the company is deleted. The
@@ -712,8 +1788,11 @@ export class TaskObject extends DurableObject {
       status: "active",
       steps: [],
     };
+    // The newest claim holds the task: a request asked in any other attempt is
+    // superseded (`runningAttemptSync`).
     await this.ctx.storage.put({
       [`attempt:${attempt.id}`]: attempt,
+      "current-attempt": attempt.id,
       writeStamps: stamps,
     });
     await this.appendEvent(doc, {
@@ -983,86 +2062,16 @@ export class TaskObject extends DurableObject {
     if (!doc || this.foreign(doc, request)) return Response.json({ error: "not_found" }, { status: 404 });
     const proposed = await readJsonBody<Record<string, unknown>>(request, MAX_BODY_BYTES);
     if (!proposed.ok) return Response.json({ error: proposed.error }, { status: proposed.status });
-    const body = proposed.value;
-    const text = (value: unknown, max: number): string | null =>
-      typeof value === "string" && value.length > 0 && value.length <= max ? value : null;
-    const connectionId = text(body.connectionId, 256);
-    const providerAccountId = text(body.providerAccountId, 256);
-    const operationType = text(body.operationType, 128);
-    const targetResourceId = text(body.targetResourceId, 512);
-    const resourceScope = Array.isArray(body.resourceScope)
-      ? body.resourceScope.filter((entry): entry is string => typeof entry === "string" && entry.length > 0)
-      : [];
-    const payload =
-      body.payload && typeof body.payload === "object" && !Array.isArray(body.payload)
-        ? (body.payload as Record<string, unknown>)
-        : null;
-    const recipients = body.recipients === undefined ? [] : body.recipients;
-    const attachmentHashes = body.attachmentHashes === undefined ? [] : body.attachmentHashes;
-    const expectedTargetRevision =
-      body.expectedTargetRevision === undefined ? undefined : text(body.expectedTargetRevision, 128);
-    if (
-      !connectionId ||
-      !providerAccountId ||
-      !operationType ||
-      !targetResourceId ||
-      !payload ||
-      resourceScope.length === 0 ||
-      resourceScope.length > 100 ||
-      !resourceScope.includes(targetResourceId) ||
-      !Array.isArray(recipients) ||
-      recipients.length > 50 ||
-      !recipients.every((entry): entry is string => typeof entry === "string" && entry.length <= 256) ||
-      !Array.isArray(attachmentHashes) ||
-      attachmentHashes.length > 20 ||
-      !attachmentHashes.every((entry): entry is string => typeof entry === "string" && entry.length <= 128) ||
-      (body.expectedTargetRevision !== undefined && expectedTargetRevision === null) ||
-      !Number.isInteger(body.grantRevision) ||
-      (body.grantRevision as number) < 1 ||
-      typeof body.expiresAt !== "string"
-    ) {
-      return Response.json({ error: "invalid_request" }, { status: 400 });
-    }
-    if (!ACTION_ALLOWLIST.has(operationType)) {
-      return Response.json({ error: "unknown_operation" }, { status: 400 });
-    }
-    const expiresAt = Date.parse(body.expiresAt as string);
-    const now = Date.now();
-    if (!Number.isFinite(expiresAt) || expiresAt <= now || expiresAt > now + 30 * 24 * 3600 * 1000) {
-      return Response.json({ error: "invalid_request" }, { status: 400 });
-    }
-    const hashable = actionHashable({
-      connectionId,
-      providerAccountId,
-      operationType,
-      targetResourceId,
-      resourceScope,
-      payload,
-      recipients: recipients as string[],
-      attachmentHashes: attachmentHashes as string[],
-      ...(expectedTargetRevision ? { expectedTargetRevision } : {}),
-      grantRevision: body.grantRevision as number,
-      expiresAt: body.expiresAt as string,
-    });
-    const proposal: ActionProposalJSON = {
-      id: crypto.randomUUID(),
-      tenant: doc.tenantId ?? request.headers.get("x-tenant") ?? "",
-      ...(doc.companyId ? { companyId: doc.companyId } : {}),
-      connectionId,
-      providerAccountId,
-      operationType,
-      targetResourceId,
-      resourceScope,
-      payload,
-      payloadHash: await payloadHash(hashable),
-      ...(recipients.length > 0 ? { recipients: recipients as string[] } : {}),
-      ...(attachmentHashes.length > 0 ? { attachmentHashes: attachmentHashes as string[] } : {}),
-      ...(expectedTargetRevision ? { expectedTargetRevision } : {}),
-      grantRevision: body.grantRevision as number,
-      proposedAt: new Date().toISOString(),
-      expiresAt: body.expiresAt as string,
-      state: "proposed",
-    };
+    const checked = await proposalFields(proposed.value);
+    if (!checked.ok) return Response.json({ error: checked.error }, { status: 400 });
+    const proposal = newProposal(
+      crypto.randomUUID(),
+      this.ownerOf(doc, request),
+      doc.companyId,
+      checked.fields,
+      new Date().toISOString(),
+    );
+    if (isReply(proposal)) return this.storeReply(request, doc, proposal);
     await this.ctx.storage.put(`action:${proposal.id}`, proposal);
     await this.appendEvent(doc, {
       kind: "updated",
@@ -1071,6 +2080,29 @@ export class TaskObject extends DurableObject {
       via: `action:propose:${proposal.id}`,
     });
     return Response.json(proposal);
+  }
+
+  /// Stores a reply with its approval-core request (`replyRequest`), opened in the same storage transaction, so no
+  /// reply ever waits without the request that alone decides it, whichever route proposed it: the pilot's reply flow
+  /// or a session's propose route. The request's entry goes into the shop's approval lookup first
+  /// (`openingInLookup`), as a worker's ask's does.
+  private async storeReply(request: Request, proposed: TaskDocJSON, proposal: ActionProposalJSON): Promise<Response> {
+    const opening = await this.openingInLookup(request, proposed, proposal.id);
+    if (opening instanceof Response) return opening;
+    return this.respond(this.ctx.storage.transactionSync((): SyncAnswer => {
+      const kv = this.ctx.storage.kv;
+      const doc = kv.get<TaskDocJSON>("task");
+      if (!doc || this.foreign(doc, request)) return { status: 404, body: { error: "not_found" } };
+      const refused = opening.refusal(doc);
+      if (refused) return refused;
+      const reply: ActionProposalJSON = { ...proposal, requestId: proposal.id };
+      const opened = openReply(kv.get<ApprovalRecord>(`request:${reply.id}`), reply);
+      if (!opened.result.ok || !opened.next) return { status: 400, body: { error: "invalid_request" } };
+      kv.put(`action:${reply.id}`, reply);
+      kv.put(`request:${reply.id}`, opened.next);
+      this.appendEventsSync(kv, doc, [{ kind: "updated", via: `action:propose:${reply.id}` }]);
+      return { status: 200, body: reply };
+    }));
   }
 
   private async readAction(request: Request, id: string): Promise<Response> {
@@ -1100,6 +2132,17 @@ export class TaskObject extends DurableObject {
   private async decideAction(request: Request, id: string): Promise<Response> {
     const action = await this.loadAction(request, id);
     if (action instanceof Response) return action;
+    // An action a worker asked for is decided only through its approval-core
+    // request (`/requests/:id/decision`), which checks who may decide and that
+    // the attempt that asked still runs. This route checks neither, so it
+    // refuses before touching the action, expiry included. A reply is decided
+    // through its request here too (`decideReplyByAction`): approval-core lets
+    // any role decide a reply, and a reply is never asked in an attempt, so
+    // nothing approval-core checks depends on what this route does not know.
+    const reply = isReply(action);
+    if (action.requestId !== undefined && !reply) {
+      return Response.json({ error: "decide_by_request" }, { status: 409 });
+    }
     if (action.state !== "proposed") {
       return Response.json({ error: "already_decided" }, { status: 409 });
     }
@@ -1120,6 +2163,7 @@ export class TaskObject extends DurableObject {
     // the client body: a self-attested "by" would let any device approve as
     // anyone. The operator path (empty header) keeps the supplied value.
     const approver = request.headers.get("x-tenant") || body.by;
+    if (reply) return this.decideReplyByAction(request, id, body.approve, approver);
     const decided: ActionProposalJSON = body.approve
       ? { ...action, state: "approved", approval: { by: approver, at: new Date().toISOString() } }
       : { ...action, state: "rejected" };
@@ -1133,15 +2177,57 @@ export class TaskObject extends DurableObject {
     return Response.json(decided);
   }
 
+  /// This route's `{ approve, by }` on a reply, settled through the reply's approval-core request (`settleSync`), so
+  /// this route never moves a reply's action on its own. It carries no role, so it claims no more than it knows: a
+  /// call stamped with the reply's own tenant is the shop deciding, which is its owner; any other caller is at most a
+  /// helper, whom approval-core lets decide a reply and nothing owner-only. The answers stay this route's own.
+  private decideReplyByAction(request: Request, id: string, approve: boolean, approver: string): Response {
+    return this.respond(this.ctx.storage.transactionSync((): SyncAnswer => {
+      const kv = this.ctx.storage.kv;
+      const doc = kv.get<TaskDocJSON>("task");
+      const action = kv.get<ActionProposalJSON>(`action:${id}`);
+      if (!doc || !action || this.foreignAction(action, request)) return { status: 404, body: { error: "not_found" } };
+      const tenant = request.headers.get("x-tenant") ?? "";
+      const role: Role = tenant !== "" && tenant === action.tenant ? "owner" : "helper";
+      const settled = this.settleSync(kv, doc, action, { requestId: id, optionId: approve ? "approve" : "decline",
+        seenRevision: REPLY_REVISION, decidedBy: approver, role }, Date.now());
+      // No request decides the reply any more (its record is gone), or its action moved on without one: nothing this
+      // route may settle.
+      if (!settled.asked) {
+        return settled.status === 404 ? { status: 404, body: { error: "not_found" } }
+          : { status: 409, body: { error: "already_decided" } };
+      }
+      const { result } = settled;
+      if (result.ok) return { status: 200, body: settled.action };
+      if (result.refused === "already_decided") return { status: 409, body: { error: "already_decided" } };
+      if (result.refused === "expired") {
+        // As this route has always marked a proposal it found past its expiry. The request needs no write: its
+        // expiry is the reply's, so approval-core already reads it as expired.
+        kv.put(`action:${id}`, { ...action, state: "expired" } satisfies ActionProposalJSON);
+        return { status: 409, body: { error: "action_expired" } };
+      }
+      return { status: 409, body: { error: result.refused === "superseded" ? result.reason : result.refused } };
+    }));
+  }
+
   /// Atomically moves an approved proposal to dispatching and hands the
   /// broker its immutable copy. At most one dispatch owns an action: a
   /// second begin finds it already moving, and a dispatch orphaned by a
   /// crash past five minutes is marked unknown rather than retried blindly.
   /// The copy handed over is only ever the content the human approved:
   /// begin recomputes payloadHash and answers payload_changed otherwise.
+  ///
+  /// A browser write (browser-writes.ts) is begun here too, and only by the control plane (`x-control`) as its step is
+  /// handed to an outpost, with the step's `{ revision, attemptId }`: no session's dispatch, no broker and no read begins
+  /// one. In the same step as the move it must still be approved at the revision the step names, and the step's attempt
+  /// must still hold the task, as a decision on its request would need.
   private async beginDispatch(request: Request, id: string): Promise<Response> {
     const action = await this.loadAction(request, id);
     if (action instanceof Response) return action;
+    const browserWrite = action.operationType === BROWSER_SUBMIT;
+    if (browserWrite && request.headers.get("x-control") !== "1") {
+      return Response.json({ error: "begin_by_step" }, { status: 409 });
+    }
     if (action.state === "dispatching") {
       const at = Date.parse(action.dispatch?.at ?? "");
       if (Number.isFinite(at) && Date.now() - at > 5 * 60 * 1000) {
@@ -1152,11 +2238,7 @@ export class TaskObject extends DurableObject {
       return Response.json({ error: "dispatch_in_flight" }, { status: 409 });
     }
     if (action.state !== "approved") {
-      const terminal = ["confirmed", "failed", "unknown"].includes(action.state);
-      return Response.json(
-        { error: terminal ? "already_settled" : action.state === "proposed" ? "not_approved" : "already_decided" },
-        { status: 409 },
-      );
+      return Response.json({ error: notBeginReason(action.state) }, { status: 409 });
     }
     if (Date.parse(action.expiresAt) <= Date.now()) {
       await this.ctx.storage.put(`action:${id}`, { ...action, state: "expired" });
@@ -1170,37 +2252,76 @@ export class TaskObject extends DurableObject {
     if ((await payloadHash(actionHashable(action))) !== action.payloadHash) {
       return Response.json({ error: "payload_changed" }, { status: 409 });
     }
-    let body: { grantRevision?: unknown };
+    let body: { grantRevision?: unknown; revision?: unknown; attemptId?: unknown };
     const begun = await readJsonBody<typeof body>(request, MAX_BODY_BYTES);
     if (!begun.ok) return Response.json({ error: begun.error }, { status: begun.status });
     body = begun.value;
     if (body.grantRevision !== action.grantRevision) {
       return Response.json({ error: "grant_changed", current: action.grantRevision }, { status: 409 });
     }
+    if (browserWrite && (typeof body.revision !== "number" || !Number.isSafeInteger(body.revision) ||
+        body.revision < 1 || typeof body.attemptId !== "string" || !body.attemptId)) {
+      return Response.json({ error: "invalid_request" }, { status: 400 });
+    }
     const doc = await this.load();
     if (!doc || this.foreign(doc, request)) return Response.json({ error: "not_found" }, { status: 404 });
     if (isSettled(doc)) return Response.json({ error: "task_settled" }, { status: 409 });
-    const moving: ActionProposalJSON = {
-      ...action,
-      state: "dispatching",
-      dispatch: { at: new Date().toISOString() },
-    };
-    await this.ctx.storage.put(`action:${id}`, moving);
-    await this.appendEvent(doc, {
-      kind: "updated",
-      to: doc.state,
-      rev: doc.rev,
-      via: `action:dispatch:${id}`,
-    });
-    return Response.json(moving);
+    // Hashing and reading the body above let other requests in, so a second begin may have moved the action meanwhile.
+    // It is read again and moved in one transaction: of any number of begins at once, one moves it and the others hear
+    // that it is already moving.
+    const step = browserWrite ? { revision: body.revision as number, attemptId: body.attemptId as string } : null;
+    return this.respond(this.ctx.storage.transactionSync((): SyncAnswer => {
+      const kv = this.ctx.storage.kv;
+      const current = kv.get<ActionProposalJSON>(`action:${id}`);
+      const now = kv.get<TaskDocJSON>("task");
+      if (!current || !now) return { status: 404, body: { error: "not_found" } };
+      if (current.state === "dispatching") return { status: 409, body: { error: "dispatch_in_flight" } };
+      if (current.state !== "approved") return { status: 409, body: { error: notBeginReason(current.state) } };
+      if (current.payloadHash !== action.payloadHash) return { status: 409, body: { error: "payload_changed" } };
+      if (isSettled(now)) return { status: 409, body: { error: "task_settled" } };
+      if (step) {
+        const refused = this.writeStepRefusalSync(kv, id, step, Date.now() / 1000);
+        if (refused) return { status: 409, body: { error: refused } };
+      }
+      const moving: ActionProposalJSON = { ...current, state: "dispatching", dispatch: { at: new Date().toISOString() } };
+      kv.put(`action:${id}`, moving);
+      this.appendEventsSync(kv, now, [{ kind: "updated", via: `action:dispatch:${id}` }]);
+      return { status: 200, body: moving };
+    }));
+  }
+
+  /// Why a browser write's step may not begin it now, or null: its request is no longer approved at the revision the
+  /// step was bound to (`request_changed`; approval-core never revises a decided request, so this guards against a
+  /// change from anywhere else), or the step's attempt no longer runs or no longer holds the task (`attempt_ended`).
+  private writeStepRefusalSync(kv: SyncKvStorage, id: string, step: { revision: number; attemptId: string },
+    nowS: number): string | null {
+    const record = kv.get<ApprovalRecord>(`request:${id}`);
+    if (record?.status !== "decided" ||
+        record.request.options.find((option) => option.id === record.decision.optionId)?.effect !== "approve") {
+      return "not_approved";
+    }
+    if (record.request.revision !== step.revision || record.decision.seenRevision !== step.revision) {
+      return "request_changed";
+    }
+    const attempt = kv.get<AttemptJSON>(`attempt:${step.attemptId}`);
+    if (!attempt || attempt.status !== "active" || attempt.leaseUntil <= nowS || attempt.deadline <= nowS ||
+        this.runningAttemptSync(kv, nowS) !== step.attemptId) {
+      return "attempt_ended";
+    }
+    return null;
   }
 
   /// Settles a dispatching action. Confirmed carries the provider's
   /// operation id and receipt; failed carries finality; unknown carries
   /// deliberate ambiguity — and stays unknown until a human re-proposes.
+  ///
+  /// A browser write is settled only by the control plane (`x-control`), from its step's report (browser-writes.ts).
   private async settleDispatch(request: Request, id: string): Promise<Response> {
     const action = await this.loadAction(request, id);
     if (action instanceof Response) return action;
+    if (action.operationType === BROWSER_SUBMIT && request.headers.get("x-control") !== "1") {
+      return Response.json({ error: "settle_by_report" }, { status: 409 });
+    }
     if (action.state !== "dispatching") {
       return Response.json({ error: "not_dispatching" }, { status: 409 });
     }
@@ -1248,7 +2369,11 @@ export class TaskObject extends DurableObject {
   /// time and dead (rejected/expired) action proposals past the ops-metadata
   /// window. Everything else stays. Storage keys are listed, not scanned by
   /// prefix, because the store holds no other per-record keys by construction.
-  private async pruneExpired(nowMs: number): Promise<{ attemptsPruned: number; actionsPruned: number }> {
+  /// The retention sweep's part in one task. `lookup` names the shop whose approval lookup lists this task's requests:
+  /// the requests that go are reported gone to it, so their entries go too, rather than staying until a read happens to
+  /// reach them. `lookupPending` is how many this prune could not report; they stay noted, and the next prune sends them.
+  private async pruneExpired(nowMs: number, lookup: { tenant: string; taskId: string } | null):
+    Promise<{ attemptsPruned: number; actionsPruned: number; lookupPending: number }> {
     const listed = await this.ctx.storage.list({ prefix: "attempt:" });
     let attemptsPruned = 0;
     for (const [key, value] of listed) {
@@ -1259,13 +2384,47 @@ export class TaskObject extends DurableObject {
     }
     const actions = await this.ctx.storage.list({ prefix: "action:" });
     let actionsPruned = 0;
+    const doomed: string[][] = [];
+    const gone: string[] = [];
     for (const [key, value] of actions) {
-      if (isPrunableAction(value as ActionProposalJSON, nowMs)) {
-        await this.ctx.storage.delete(key);
-        actionsPruned++;
-      }
+      const action = value as ActionProposalJSON;
+      if (!isPrunableAction(action, nowMs)) continue;
+      // An action a worker asked for goes with its approval request, which
+      // means nothing without it.
+      doomed.push(action.requestId ? [key, `request:${action.requestId}`] : [key]);
+      if (isReportableRequestId(action.requestId)) gone.push(action.requestId);
+      actionsPruned++;
     }
-    return { attemptsPruned, actionsPruned };
+    // Noted before they go, so a report that fails below, or an object that stops before it, leaves the ids for the next
+    // prune: no read may ever come back for an old settled entry. A request is dead and final before it is pruned, so
+    // telling the lookup it is gone a second time changes nothing.
+    if (gone.length > 0) {
+      const merged = [...new Set([...(await this.lookupGone()), ...gone])];
+      await this.ctx.storage.put(LOOKUP_GONE, merged.slice(-MAX_LOOKUP_GONE));
+    }
+    for (const keys of doomed) await this.ctx.storage.delete(keys);
+    return { attemptsPruned, actionsPruned, lookupPending: await this.tellLookupGone(lookup) };
+  }
+
+  /// The ids `pruneExpired` noted that the shop's lookup has not yet taken.
+  private async lookupGone(): Promise<string[]> {
+    const noted = await this.ctx.storage.get<unknown>(LOOKUP_GONE);
+    return Array.isArray(noted) ? noted.filter(isReportableRequestId) : [];
+  }
+
+  /// Reports the noted ids to the shop's lookup (approval-index.ts, `reportGone`), and takes off the note what it took.
+  /// Answers how many this call could not report: 0 once the lookup took them all.
+  private async tellLookupGone(lookup: { tenant: string; taskId: string } | null): Promise<number> {
+    const noted = await this.lookupGone();
+    if (noted.length === 0 || lookup === null) return noted.length;
+    if (!(await reportGone(this.tenantEnv, lookup.tenant, lookup.taskId, noted))) return noted.length;
+    // Read again before writing: a prune that ran while the report was on its way may have noted more, and those stay
+    // for that prune to report.
+    const told = new Set(noted);
+    const left = (await this.lookupGone()).filter((id) => !told.has(id));
+    if (left.length > 0) await this.ctx.storage.put(LOOKUP_GONE, left);
+    else await this.ctx.storage.delete(LOOKUP_GONE);
+    return 0;
   }
 
   private async load(): Promise<TaskDocJSON | null> {

@@ -1,0 +1,270 @@
+// Settings node: model + reasoning pill/popover, the settings view, and the add-bot popover.
+import { expect, test, type Page } from "@playwright/test";
+import { mkdirSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { chatOpen } from "./start";
+
+const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
+const SHOTS = join(dirname(fileURLToPath(import.meta.url)), "__shots__");
+
+test.use({ colorScheme: "dark" });
+
+/** One request to the mock bridge over its own websocket (mock.reset, mock.calls). */
+async function mock(op: string, params: Record<string, unknown> = {}): Promise<any> {
+  const ws = new WebSocket(`ws://127.0.0.1:${MOCK}/?token=e2e`);
+  await new Promise<void>((res, rej) => {
+    ws.onopen = () => res();
+    ws.onerror = () => rej(new Error("mock websocket error"));
+  });
+  const reply = await new Promise<any>((res) => {
+    ws.onmessage = (m) => {
+      const msg = JSON.parse(String(m.data));
+      if (msg.id === "x1") res(msg);
+    };
+    ws.send(JSON.stringify({ id: "x1", op, ...params }));
+  });
+  ws.close();
+  expect(reply.ok, JSON.stringify(reply)).toBe(true);
+  return reply.result;
+}
+
+const callsOf = async (op: string) =>
+  ((await mock("mock.calls")).calls as { op: string; params: Record<string, unknown> }[]).filter((c) => c.op === op);
+
+async function open(page: Page) {
+  await page.goto("/");
+  await chatOpen(page);
+  await expect(page.getByTestId("bubble-user").first()).toBeVisible();
+}
+
+test.beforeEach(async () => {
+  await mock("mock.reset");
+});
+
+test("model pill: in the chat box, popover lists providers and models with the current one checked", async ({ page }) => {
+  await open(page);
+  // the header holds the panel button alone; the model is in the chat box since item 85f (the Chat board's header
+  // names no model)
+  const right = page.getByTestId("head-right");
+  await expect(right.locator(":scope > *")).toHaveCount(1);
+  expect(await right.locator("button, a, [role=button], input, select").count()).toBe(1);
+  const pill = page.locator(".cw").getByTestId("model-pill");
+  // the model's company mark sits before the name (Opus -> Claude)
+  await expect(pill.locator('svg.model-ic[data-mark="claude"]')).toBeVisible();
+  await expect(pill).toContainText("Opus 5.5");
+  await expect(pill).toContainText("high");
+
+  await pill.click();
+  const pop = page.getByTestId("model-pop");
+  await expect(pop).toBeVisible();
+  await expect(pop.locator(".mp-g")).toHaveText(["Claude (proxy)", "OpenAI", "OpenRouter", "Ollama"]);
+  const opts = pop.getByTestId("model-opt");
+  await expect(opts).toHaveCount(12);
+  const on = pop.locator(".mp-opt.on");
+  await expect(on).toHaveCount(1);
+  await expect(on).toContainText("Opus 5.5");
+  // selection is gray, never the brand gradient
+  expect(await on.evaluate((el) => getComputedStyle(el).backgroundImage)).toBe("none");
+  await expect(pop.getByRole("radio", { name: "high", exact: true })).toHaveAttribute("aria-checked", "true");
+  for (const label of ["none", "low", "medium", "high", "xhigh"]) await expect(pop.getByRole("radio", { name: label, exact: true })).toBeVisible();
+
+  // Escape closes
+  await page.keyboard.press("Escape");
+  await expect(pop).toHaveCount(0);
+});
+
+test("changing reasoning and model calls chat.set_model and updates the pill", async ({ page }) => {
+  await open(page);
+  await page.getByTestId("model-pill").click();
+  const pop = page.getByTestId("model-pop");
+  await pop.getByRole("radio", { name: "xhigh", exact: true }).click();
+  await expect(page.getByTestId("reasoning-label")).toHaveText("xhigh");
+  await expect(pop.getByRole("radio", { name: "xhigh", exact: true })).toHaveAttribute("aria-checked", "true");
+  await expect.poll(async () => (await callsOf("chat.set_model")).map((c) => c.params)).toEqual([
+    { bot: "kami", reasoning: "xhigh" },
+  ]);
+
+  await pop.getByTestId("model-opt").filter({ hasText: "gpt-6.1-terra" }).click();
+  await expect(page.getByTestId("model-label")).toHaveText("gpt-6.1-terra");
+  await expect(pop.locator(".mp-opt.on")).toContainText("gpt-6.1-terra");
+  const calls = await callsOf("chat.set_model");
+  expect(calls[1].params).toEqual({ bot: "kami", model: "gpt-6.1-terra", provider: "openai" });
+  await expect(page.getByTestId("model-note")).toHaveCount(0);
+});
+
+test("unsupported: one gray note, the old value stays", async ({ page }) => {
+  // The mock always accepts chat.set_model; answer it `unsupported` in the page's socket instead.
+  await page.routeWebSocket(/127\.0\.0\.1/, (ws) => {
+    const server = ws.connectToServer();
+    ws.onMessage((raw) => {
+      const msg = JSON.parse(String(raw));
+      if (msg.op === "chat.set_model") {
+        ws.send(JSON.stringify({ id: msg.id, ok: false, error: { code: "unsupported", message: "Hermes cannot change this yet" } }));
+        return;
+      }
+      server.send(raw);
+    });
+  });
+  await open(page);
+  await page.getByTestId("model-pill").click();
+  const pop = page.getByTestId("model-pop");
+  await pop.getByRole("radio", { name: "Low" }).click();
+  const note = page.getByTestId("model-note");
+  await expect(note).toHaveText("This cannot be changed here yet");
+  await expect(page.getByTestId("reasoning-label")).toHaveText("high");
+  await expect(pop.getByRole("radio", { name: "high", exact: true })).toHaveAttribute("aria-checked", "true");
+  const color = await note.evaluate((el) => getComputedStyle(el).color);
+  const [r, g, b] = color.match(/\d+/g)!.map(Number);
+  expect(Math.max(r, g, b) - Math.min(r, g, b)).toBeLessThan(24); // gray, not a colour
+});
+
+test("settings opens and closes; theme Light sets data-theme; bot pages", async ({ page }) => {
+  await page.emulateMedia({ colorScheme: "dark" });
+  await page.addInitScript(() => localStorage.removeItem("manut.theme"));
+  await open(page);
+  await page.getByTestId("nav-settings").click();
+  const view = page.getByTestId("settings-view");
+  await expect(view).toBeVisible();
+  await expect(page.getByTestId("composer")).toHaveCount(0);
+  // (no Providers: the fork removed it with Hermes' sign-in)
+  for (const label of ["Kami", "Friren", "Hermes", "General", "Computer"])
+    await expect(view.locator(".st-nav").getByRole("button", { name: label, exact: true })).toBeVisible();
+
+  // General: theme
+  await expect(page.getByTestId("settings-nav-general")).toHaveAttribute("aria-current", "page");
+  const theme = page.getByTestId("theme-seg");
+  await expect(theme.getByRole("radio", { name: "System" })).toHaveAttribute("aria-checked", "true");
+  await theme.getByRole("radio", { name: "Light" }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  expect(await page.evaluate(() => localStorage.getItem("manut.theme"))).toBe("light");
+  await theme.getByRole("radio", { name: "Dark" }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+
+  // Bot page: Profile, Model, Work
+  await page.getByTestId("settings-nav-bot-friren").click();
+  const body = page.getByTestId("settings-page-bot-friren");
+  await expect(body.locator(".st-gh")).toHaveText(["Profile", "Model", "Work"]);
+  await expect(body).toContainText("Sonnet 5.5");
+  await expect(body).toContainText("medium");
+  await expect(body).toContainText("friren");
+
+  // in a browser, as on Windows and Linux, computer use is the Mac's only (item 82)
+  await page.getByTestId("settings-nav-computer").click();
+  await expect(page.getByTestId("computer-not-here")).toHaveText("Computer use is on the Mac only for now.");
+  await expect(page.getByTestId("computer-open-accessibility")).toHaveCount(0);
+
+  // close with the header button
+  await page.getByRole("button", { name: "Close settings" }).click();
+  await expect(view).toHaveCount(0);
+  await expect(page.getByTestId("composer")).toBeVisible();
+
+  // the popover's "Bot settings" link opens the bot's page
+  await page.getByTestId("model-pill").click();
+  await page.getByRole("button", { name: "Team member's settings" }).click();
+  await expect(page.getByTestId("settings-page-bot-kami")).toBeVisible();
+  // the menu's account row only opens Settings; ⌘, closes it again, as the sidebar's Settings button did
+  const mod = await page.evaluate(() => (/Mac/.test(navigator.platform) ? "Meta" : "Control"));
+  await page.keyboard.press(`${mod}+Comma`);
+  await expect(page.getByTestId("settings-view")).toHaveCount(0);
+});
+
+test("Settings › Computer reads both permissions, opens each pane by name, and reads again on Re-check", async ({ page }) => {
+  // the Mac app's shell stood in for (src/computer/computer.ts): Accessibility on, Screen capture off, an unsigned copy
+  await page.addInitScript(() => {
+    const w = window as unknown as { __manutComputerMock: boolean; __manutComputer: unknown };
+    w.__manutComputerMock = true;
+    w.__manutComputer = { status: { accessibility: true, screen: false, signed: false }, opened: [] };
+  });
+  await open(page);
+  await page.getByTestId("nav-settings").click();
+  await page.getByTestId("settings-nav-computer").click();
+  const body = page.getByTestId("settings-page-computer");
+  await expect(page.getByTestId("computer-status")).toHaveAttribute("data-ready", "false");
+  await expect(body).toContainText("Almost ready: your agent can read app windows.");
+  await expect(page.getByTestId("computer-accessibility")).toHaveText("Allowed");
+  await expect(page.getByTestId("computer-screen")).toHaveText("Off");
+  await expect(page.getByTestId("computer-unsigned")).toBeVisible();
+  await page.getByTestId("computer-open-screen").click();
+  await page.getByTestId("computer-open-accessibility").click();
+  expect(await page.evaluate(() => (window as unknown as { __manutComputer: { opened: string[] } }).__manutComputer.opened)).toEqual(["screen", "accessibility"]);
+  // the person turns Screen capture on in System Settings and comes back: Re-check reads it
+  await page.evaluate(() => {
+    (window as unknown as { __manutComputer: { status: { screen: boolean } } }).__manutComputer.status.screen = true;
+  });
+  await page.getByTestId("computer-recheck").click();
+  await expect(page.getByTestId("computer-status")).toHaveAttribute("data-ready", "true");
+  await expect(body).toContainText("Computer use is ready");
+  await expect(page.getByTestId("computer-screen")).toHaveText("Allowed");
+});
+
+test("add bot: lists the profiles not in the list; Add attaches one, re-reads bots.list and opens it", async ({ page }) => {
+  test.skip(true, "the sidebar's + Add a bot popover left with the sidebar; Settings › All bots adds a member to the team (bot-addlist-*) without opening its chat");
+  // Kami alone in the list; the default profile shows as not connected until something attaches it (models.options).
+  await page.addInitScript(() => {
+    if (sessionStorage.getItem("addbot-e2e")) return;
+    sessionStorage.setItem("addbot-e2e", "1");
+    localStorage.setItem("manut.roster", JSON.stringify(["kami"]));
+  });
+  let attached = false;
+  await page.routeWebSocket(/127\.0\.0\.1/, (ws) => {
+    const server = ws.connectToServer();
+    const ops = new Map<string, string>();
+    ws.onMessage((raw) => {
+      const msg = JSON.parse(String(raw));
+      ops.set(msg.id, msg.op);
+      if (msg.op === "models.options" && msg.bot === "default") attached = true;
+      server.send(raw);
+    });
+    server.onMessage((raw) => {
+      const msg = JSON.parse(String(raw));
+      if (ops.get(msg.id) === "bots.list" && msg.ok && !attached) {
+        for (const b of msg.result.bots) if (b.name === "default") b.status = "offline";
+        ws.send(JSON.stringify(msg));
+        return;
+      }
+      ws.send(raw);
+    });
+  });
+  await open(page);
+  const before = (await callsOf("bots.list")).length;
+  await page.getByRole("button", { name: "Add a bot" }).click();
+  const pop = page.getByTestId("addbot");
+  await expect(pop).toBeVisible();
+  await expect(pop.locator(".ab-h")).toHaveText("Add a bot");
+  for (const name of ["Friren", "Hermes", "OMH TUI"]) await expect(pop.getByText(name, { exact: true })).toBeVisible();
+  // Kami is in the list already: not offered; no "Create a new bot (soon)" row
+  await expect(page.getByTestId("addbot-kami")).toHaveCount(0);
+  await expect(page.getByTestId("addbot-create")).toHaveCount(0);
+  await expect(page.getByTestId("addbot-default")).toContainText("Haiku 5");
+
+  await page.getByTestId("addbot-default").getByRole("button", { name: "Add" }).click();
+  await expect(pop).toHaveCount(0);
+  await expect(page.getByTestId("bot-default")).toHaveAttribute("aria-current", "true");
+  await expect.poll(() => attached).toBe(true);
+  await expect.poll(async () => (await callsOf("bots.list")).length).toBeGreaterThan(before);
+  // no file copied, no chat written: only reads were sent
+  const ops = new Set(((await mock("mock.calls")).calls as { op: string }[]).map((c) => c.op));
+  for (const op of ["chat.send", "chat.set_model"]) expect(ops.has(op)).toBe(false);
+});
+
+test("screenshots: settings in dark and light", async ({ page }) => {
+  mkdirSync(SHOTS, { recursive: true });
+  await page.emulateMedia({ colorScheme: "dark" });
+  await page.addInitScript(() => localStorage.removeItem("manut.theme"));
+  await open(page);
+  await page.getByTestId("nav-settings").click();
+  await page.getByTestId("settings-nav-bot-kami").click();
+  await expect(page.getByTestId("settings-page-bot-kami")).toContainText("Opus 5.5");
+  await expect(page.getByTestId("settings-page-bot-kami")).toContainText("2 routines");
+  await page.mouse.move(700, 600);
+  await page.screenshot({ path: join(SHOTS, "settings-dark.png") });
+
+  await page.getByTestId("settings-nav-general").click();
+  await page.getByTestId("theme-seg").getByRole("radio", { name: "Light" }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  await page.getByTestId("settings-nav-bot-kami").click();
+  await page.mouse.move(700, 600);
+  await page.waitForTimeout(400); // let colour transitions settle
+  await page.screenshot({ path: join(SHOTS, "settings-light.png") });
+});

@@ -1,0 +1,149 @@
+/* Rewind to before a turn (RewindPanel.tsx): the design canvas's StatesCodeDev "Rewind". The canvas's .rad, .btn and
+   .banner.warn rules from packages/ui-kit/app.css are copied here under the panel's own class names, with the canvas's
+   short tokens mapped onto the desktop's (src/theme/tokens.css): --bg is --aui-surface, --mut is --aui-muted, and the
+   canvas's --pri is the desktop's --ink. */
+
+.rw-wrap {
+  position: relative;
+}
+.rw-pop {
+  padding: 12px;
+}
+.rw-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.rw-lab {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--aui-muted);
+}
+/* The desktop's own: a long session's turns scroll inside the panel instead of growing it past the window. */
+.rw-turns {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+.rw-turn {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  min-height: 36px;
+  padding: 7px 8px;
+  border-radius: var(--rad);
+  font-size: 14px;
+  text-align: left;
+  color: var(--ink);
+  background: none;
+}
+.rw-turn:hover {
+  background: var(--hov);
+}
+.rw-turn::before {
+  content: "";
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin-top: 1.5px;
+  border-radius: var(--rad-pill);
+  border: 1.5px solid var(--aui-border-strong);
+  background: var(--aui-surface);
+}
+.rw-turn[aria-checked="true"]::before {
+  border-color: var(--ink);
+  background: var(--ink);
+  box-shadow: inset 0 0 0 3.5px var(--aui-surface);
+}
+.rw-turn span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.rw-mut,
+.rw-count {
+  margin: 0;
+  font-size: 13px;
+  color: var(--aui-muted);
+}
+.rw-count {
+  color: var(--ink);
+}
+.rw-note {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: var(--rad-lg);
+  background: var(--warnbg);
+  font-size: 13px;
+  color: var(--ink);
+}
+.rw-err {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: var(--rad-lg);
+  background: var(--errbg);
+  font-size: 13px;
+  color: var(--danger);
+}
+.rw-hand {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.rw-file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+.rw-path {
+  min-width: 0;
+  font-family: var(--aui-font-mono);
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+.rw-go {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  padding: 0 12px;
+  border-radius: var(--rad);
+  border: 1px solid var(--line);
+  background: var(--aui-surface);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink);
+  white-space: nowrap;
+}
+.rw-go:hover {
+  background: var(--hov);
+}
+.rw-go:disabled {
+  opacity: 0.45;
+  pointer-events: none;
+}
+/* The chip on the line under the box, beside the branch: as quiet as the branch and the context beside it. */
+.rw-open {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 6px;
+  margin: -1px 0;
+  border-radius: var(--r-sm);
+  font: inherit;
+  white-space: nowrap;
+  color: var(--muted);
+  background: none;
+}
+.rw-open > svg {
+  flex: none;
+}
+.rw-open:hover,
+.rw-open.on {
+  color: var(--ink);
+  background: var(--raise);
+}

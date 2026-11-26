@@ -1,13 +1,29 @@
 import { DurableObject } from "cloudflare:workers";
+import { accountDeletionRoute, keepAppleGrant, nextRevokeAt, retryAppleRevokes } from "./account-store";
+import { appleRestConfig, exchangeCode, isAuthorizationCode, type AppleRestEnv } from "./apple-tokens";
+import { macCodeSource, macEmailCode } from "./approval-link";
 import { sha256Hex, verifyAppleToken } from "./auth";
 import { readJsonBody } from "./body";
+import {
+  CODE_DAY_KEY, CODE_KEY_PREFIX, CODE_TTL_SECONDS, codeEmail, codeKey, codeRequestAddress, codeSource, countCodeDay,
+  emailAccount, emailExchange, emailSignIn, emailTenant, EMAIL_TENANT_PREFIX, purgeAt, readCodeDay, readCodeRecord,
+  RESEND_SECONDS, sendCode, sixDigitCode, tryCode, type EmailSignInEnv,
+} from "./email-code";
+import { deliver } from "./email-sender";
+import { modelAlertsRoute } from "./model-alerts";
+import { timingSafeEqual } from "./people";
+import { pilotDeletionRoute, pilotRegistryKey, pilotRegistryRoute } from "./pilot-store";
+import { sessionIndexKey, sweepSessions, wipeGeneration, wipeTenantSessions, type SessionIndexRow } from "./session-index";
+import { shopsAuthRoute, wipeShopsTenant } from "./shops-store";
+import { testWorker } from "./test-origin";
 
-type AuthEnv = {
+type AuthEnv = EmailSignInEnv & AppleRestEnv & {
   APPLE_CLIENT_ID?: string;
   APPLE_JWKS_URL?: string;
-  /// Test-only JWKS. Production never sets it, so the Apple endpoint is the
-  /// only key source there.
+  /// Test-only JWKS, honoured only on a test Worker (test-origin.ts), so the Apple endpoint is the only key source
+  /// anywhere real.
   TEST_JWKS_JSON?: string;
+  PUBLIC_API_ORIGIN?: string;
 };
 
 type SessionRec = {
@@ -20,6 +36,10 @@ type SessionRec = {
   csrfHash?: string | undefined;
   /// Absent legacy records belong to generation zero. A tenant wipe advances it.
   wipeGeneration?: number | undefined;
+  /// The email this session's chain was signed in with, carried through every refresh: the one Apple verified (auth.ts),
+  /// or the address a sign-in code went to (email-code.ts). An email invite checks it (docs/people.md); nothing else
+  /// reads it, and it never names the tenant.
+  email?: string | undefined;
 };
 
 /// One row of the per-tenant membership index: which companies this tenant
@@ -55,6 +75,8 @@ type RefreshRec = {
   /// born at first rotation.
   born?: number | undefined;
   wipeGeneration?: number | undefined;
+  /// The chain's verified email (`SessionRec.email`), so a refresh hands it to the next session.
+  email?: string | undefined;
 };
 
 const ACCESS_TTL_SECONDS = 3600;
@@ -65,23 +87,64 @@ const REFRESH_TTL_SECONDS = 30 * 24 * 3600;
 const REFRESH_ABSOLUTE_TTL_SECONDS = 90 * 24 * 3600;
 const MAX_BODY_BYTES = 256 * 1024;
 
-function wipeGeneration(value: unknown): number {
-  if (value === undefined) return 0;
-  if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) return value;
-  throw new Error("invalid_wipe_generation");
-}
-
 function randomToken(): string {
   const bytes = new Uint8Array(32);
   crypto.getRandomValues(bytes);
   return [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-/// Device sessions for cloud identity. Sign in with Apple mints them;
+/// A new device session before it is stored: the tokens the device gets, and the records that keep only their hashes.
+/// Every sign-in mints through here, Apple's and a code's by email alike, so a session is the same whatever proved who
+/// the person is: the same tokens, lifetimes, refresh chain and answer.
+type Minted = { access: string; refresh: string; csrf: string; session: SessionRec; grant: RefreshRec };
+
+async function mintSession(tenant: string, deviceId: string, email: string | undefined): Promise<Minted> {
+  const now = Date.now() / 1000;
+  const access = randomToken();
+  const refresh = randomToken();
+  const csrf = randomToken();
+  const kept = email ? { email } : {};
+  return {
+    access, refresh, csrf,
+    session: { tenant, deviceId, exp: now + ACCESS_TTL_SECONDS, refreshHash: await sha256Hex(refresh),
+      csrfHash: await sha256Hex(csrf), ...kept },
+    grant: { accessHash: await sha256Hex(access), tenant, deviceId, exp: now + REFRESH_TTL_SECONDS, born: now, ...kept },
+  };
+}
+
+/// The storage writes that make a minted session real, at the tenant's wipe generation read in the same transaction: its
+/// two records, and its row in the tenant's index, so a wipe finds it without reading anyone else's (session-index.ts).
+function sessionWrites(minted: Minted, generation: number): Record<string, SessionRec | RefreshRec | SessionIndexRow> {
+  return {
+    [`sat:${minted.grant.accessHash}`]: { ...minted.session, wipeGeneration: generation },
+    [`srt:${minted.session.refreshHash}`]: { ...minted.grant, wipeGeneration: generation },
+    [sessionIndexKey(minted.session.tenant, minted.session.refreshHash)]: { accessHash: minted.grant.accessHash, generation },
+  };
+}
+
+function sessionAnswer(minted: Minted): Response {
+  return Response.json({
+    accessToken: minted.access,
+    refreshToken: minted.refresh,
+    csrf: minted.csrf,
+    expiresIn: ACCESS_TTL_SECONDS,
+    tenant: minted.session.tenant,
+  });
+}
+
+/// Brings the object's one alarm forward to `seconds` (since the epoch) when it is set later, or not at all.
+async function alarmBy(storage: DurableObjectTransaction, seconds: number): Promise<void> {
+  const alarm = await storage.getAlarm();
+  const at = Math.ceil(seconds * 1_000);
+  if (alarm === null || at < alarm) await storage.setAlarm(at);
+}
+
+/// Device sessions for cloud identity. Sign in with Apple mints them, and so
+/// does a code sent by email once the owner turns that on (email-code.ts);
 /// refresh rotates them; revoke ends them. Every method takes its inputs
 /// from the worker, which only forwards allowlisted fields, so a client can
 /// never declare its own tenant: the tenant always comes from a verified
-/// provider subject.
+/// provider subject, or from an address a code proved.
 export class AuthObject extends DurableObject {
   private get authEnv(): AuthEnv {
     return this.env as unknown as AuthEnv;
@@ -91,6 +154,10 @@ export class AuthObject extends DurableObject {
     const url = new URL(request.url);
     if (request.method === "POST" && url.pathname === "/exchange") {
       return this.exchange(request);
+    }
+    // Signing in by email: a code sent to an address (email-code.ts). Its exchange is `/exchange` above.
+    if (request.method === "POST" && url.pathname === "/email-code") {
+      return this.emailCode(request);
     }
     if (request.method === "POST" && url.pathname === "/refresh") {
       return this.refresh(request);
@@ -122,6 +189,34 @@ export class AuthObject extends DurableObject {
       if (request.method === "GET") return this.readInboundRoutes(url);
       if (request.method === "POST") return this.writeInboundRoute(request);
     }
+    // The Manut AI pilot's shop registry (pilot-store.ts).
+    if (url.pathname === "/pilot-shops") {
+      return pilotRegistryRoute(this.ctx.storage, request);
+    }
+    // Alerts near the cap (model-alerts.ts): the listed shops whose model spend reached 80% or 100% of their cap, kept
+    // beside the registry, which says in the same transaction whether a shop is listed.
+    if (url.pathname === "/model-alerts") {
+      return modelAlertsRoute(this.ctx.storage, request, url,
+        (kv, tenant) => kv.get(pilotRegistryKey(tenant)) !== undefined);
+    }
+    // A person's own account deletion (account-store.ts): its record, which outlives the account, and the Apple token a
+    // sign-in kept until the deletion revokes it.
+    if (url.pathname === "/account-deletion" || url.pathname.startsWith("/account-deletion/")) {
+      return accountDeletionRoute(this.ctx.storage, request, url, { env: this.authEnv,
+        alarmBy: (ms) => this.ctx.storage.transaction((storage) => alarmBy(storage, ms / 1_000)) });
+    }
+    // Pilot shop deletions and the owners' confirmations of them, kept here so
+    // both outlive the shop's own objects.
+    if (url.pathname === "/pilot-deletions" || url.pathname.startsWith("/pilot-deletions/")) {
+      return pilotDeletionRoute(this.ctx.storage, request);
+    }
+    // Several shops (shops-store.ts): which shops each signed-in person is in, owners' one-use link codes, the shops each
+    // person made themselves (self-serve.ts), and the journal of makes that have begun and are not yet listed.
+    if (url.pathname === "/identity-shops" || url.pathname.startsWith("/identity-shops/") ||
+        url.pathname === "/owner-codes" || url.pathname.startsWith("/owner-codes/") ||
+        url.pathname.startsWith("/shops-made/") || url.pathname.startsWith("/pilot-making/")) {
+      return shopsAuthRoute(this.ctx.storage, request, url);
+    }
     if (url.pathname === "/flags") {
       if (request.method === "GET") {
         const flags = (await this.ctx.storage.get<Record<string, boolean>>("flags")) ?? {};
@@ -135,7 +230,8 @@ export class AuthObject extends DurableObject {
           return Response.json({ error: "invalid_json" }, { status: 400 });
         }
         const next = (await this.ctx.storage.get<Record<string, boolean>>("flags")) ?? {};
-        for (const key of ["officeCloud", "officeRoutines", "officeExternalWrites", "officeInbound", "officeSharing"]) {
+        for (const key of ["officeCloud", "officeRoutines", "officeExternalWrites", "officeInbound", "officeSharing", "shopFeed",
+          "artifactLinks", "skillLinks"]) {
           if (body[key] === undefined) continue;
           if (typeof body[key] !== "boolean") {
             return Response.json({ error: "invalid_request" }, { status: 400 });
@@ -150,54 +246,46 @@ export class AuthObject extends DurableObject {
   }
 
   private async exchange(request: Request): Promise<Response> {
-    let body: { provider?: unknown; identityToken?: unknown; nonce?: unknown; deviceId?: unknown };
+    let body: { provider?: unknown; identityToken?: unknown; nonce?: unknown; deviceId?: unknown; authorizationCode?: unknown };
     const exchanged = await readJsonBody<typeof body>(request, MAX_BODY_BYTES);
     if (!exchanged.ok) return Response.json({ error: exchanged.error }, { status: exchanged.status });
     body = exchanged.value;
+    if (body !== null && typeof body === "object" && body.provider === "email") return this.exchangeEmail(body);
     if (
       body.provider !== "apple" ||
       typeof body.identityToken !== "string" ||
       typeof body.nonce !== "string" ||
       typeof body.deviceId !== "string" ||
       body.deviceId.length === 0 ||
-      body.deviceId.length > 128
+      body.deviceId.length > 128 ||
+      // The authorization code Apple gave the app with the identity token, when the app sends it (item 124): it is
+      // exchanged for the refresh token that deleting the account revokes (apple-tokens.ts). Any other value is refused
+      // rather than dropped.
+      (body.authorizationCode !== undefined && !isAuthorizationCode(body.authorizationCode))
     ) {
       return Response.json({ error: "invalid_request" }, { status: 400 });
     }
-    if (!this.authEnv.APPLE_CLIENT_ID && !this.authEnv.TEST_JWKS_JSON) {
+    // The test key's private half is committed, so it is honoured only on a test Worker (test-origin.ts).
+    const testKeys = testWorker(this.authEnv) ? this.authEnv.TEST_JWKS_JSON : undefined;
+    if (!this.authEnv.APPLE_CLIENT_ID && !testKeys) {
       return Response.json({ error: "identity_not_configured" }, { status: 400 });
     }
     let tenant: string;
     let identityExpiry: number;
+    let email: string | undefined;
     try {
       const identity = await verifyAppleToken(body.identityToken, body.nonce, {
         clientId: this.authEnv.APPLE_CLIENT_ID ?? "test-client",
-        jwksJson: this.authEnv.TEST_JWKS_JSON,
+        jwksJson: testKeys,
         jwksUrl: this.authEnv.APPLE_JWKS_URL,
       });
       tenant = identity.tenant;
       identityExpiry = identity.exp;
+      email = identity.email;
     } catch {
       return Response.json({ error: "invalid_identity" }, { status: 401 });
     }
-    const now = Date.now() / 1000;
-    const access = randomToken();
-    const refresh = randomToken();
-    const csrf = randomToken();
-    const session: SessionRec = {
-      tenant,
-      deviceId: body.deviceId,
-      exp: now + ACCESS_TTL_SECONDS,
-      refreshHash: await sha256Hex(refresh),
-      csrfHash: await sha256Hex(csrf),
-    };
-    const grant: RefreshRec = {
-      accessHash: await sha256Hex(access),
-      tenant,
-      deviceId: body.deviceId,
-      exp: now + REFRESH_TTL_SECONDS,
-      born: now,
-    };
+    const minted = await mintSession(tenant, body.deviceId, email);
     const usedKey = `used:${await sha256Hex(body.identityToken)}`;
     // Verification can suspend; consuming the token and issuing its session are one
     // transaction, so concurrent devices cannot both exchange the same signed identity.
@@ -205,29 +293,116 @@ export class AuthObject extends DurableObject {
       if (await storage.get(usedKey) !== undefined) return false;
       const generation = wipeGeneration(await storage.get(`wiped:${tenant}`));
       if (identityExpiry <= Date.now() / 1_000) return false;
-      await storage.put({
-        [`sat:${grant.accessHash}`]: { ...session, wipeGeneration: generation },
-        [`srt:${session.refreshHash}`]: { ...grant, wipeGeneration: generation },
-        [usedKey]: identityExpiry,
-      });
-      const alarm = await storage.getAlarm();
-      const expiry = Math.ceil(identityExpiry * 1_000);
-      if (alarm === null || expiry < alarm) await storage.setAlarm(expiry);
+      await storage.put({ ...sessionWrites(minted, generation), [usedKey]: identityExpiry });
+      await alarmBy(storage, identityExpiry);
       return true;
     });
     if (!issued) return Response.json({ error: "invalid_identity" }, { status: 401 });
-    return Response.json({
-      accessToken: access,
-      refreshToken: refresh,
-      csrf,
-      expiresIn: ACCESS_TTL_SECONDS,
-      tenant,
-    });
+    if (isAuthorizationCode(body.authorizationCode)) await this.keepAppleToken(tenant, body.authorizationCode);
+    return sessionAnswer(minted);
   }
 
-  /// One alarm covers consumed identities together; no token or claim body is stored.
-  /// Unknown records stay fail-closed rather than forgetting an unexpired consumption.
+  /// Exchanges the sign-in's authorization code for the person's Apple refresh token and keeps it sealed, so deleting the
+  /// account can revoke it (apple-tokens.ts, account-store.ts). The sign-in stands whatever happens here: without Apple's
+  /// REST settings, or if Apple refuses the code, does not answer, or answers for someone else, nothing is kept, and a
+  /// deletion then says the token could not be ended by us. Nothing of Apple's answer is logged or returned.
+  private async keepAppleToken(tenant: string, code: string): Promise<void> {
+    const config = appleRestConfig(this.authEnv);
+    if (!config) return;
+    try {
+      const token = await exchangeCode(config, code, tenant.slice("apple:".length));
+      if (token) await keepAppleGrant(this.ctx.storage, config, tenant, token);
+    } catch {
+      // Not kept: the sign-in is unaffected.
+    }
+  }
+
+  /// Sends a sign-in code to an address (email-code.ts; docs/pilot-api.md, "Signing in by email"). Only the code's HMAC
+  /// is kept, never the code, and the address names nothing stored: the record is keyed by its SHA-256. The answer is
+  /// the same for every address, whether or not Manut AI or any shop knows it, since nothing here looks the address up,
+  /// and it does not wait for the email: the object stays up while the send is pending, and whatever the email service
+  /// says goes to the log as an error code alone (email-sender.ts).
+  ///
+  /// Every ask is counted against where it came from: the Worker names the source group its ingress limit counted
+  /// (`x-code-source`), which is kept only as tags under the secret (approval-link.ts, `macCodeSource`), and an ask
+  /// without one is refused before anything is kept.
+  private async emailCode(request: Request): Promise<Response> {
+    const parsed = await readJsonBody<unknown>(request, MAX_BODY_BYTES);
+    if (!parsed.ok) return Response.json({ error: parsed.error }, { status: parsed.status });
+    const address = codeRequestAddress(parsed.value);
+    if (!address) return Response.json({ error: "invalid_request" }, { status: 400 });
+    const sender = emailSignIn(this.authEnv);
+    if (!sender) return Response.json({ error: "email_not_configured" }, { status: 400 });
+    const source = codeSource(request.headers.get("x-code-source"));
+    if (!source) return Response.json({ error: "invalid_request" }, { status: 400 });
+    const secret = this.authEnv.APPROVAL_LINK_SECRET;
+    const account = await emailAccount(address);
+    const code = sixDigitCode();
+    const mac = await macEmailCode(secret, account, code);
+    const [fromHere, fromAnywhere] = await Promise.all([
+      macCodeSource(secret, source, account), macCodeSource(secret, source)]);
+    const key = codeKey(account);
+    // The limits are read and the new code stored and counted in one transaction, so two requests for one address at
+    // once send one code, and the day's count never misses a send. The day's limits come first: they are the same for
+    // every address. A new code replaces the one before it.
+    const decided = await this.ctx.storage.transaction(async (storage) => {
+      const now = Date.now() / 1_000;
+      const today = countCodeDay(readCodeDay(await storage.get(CODE_DAY_KEY), now), fromAnywhere, now);
+      if (!today.ok) return today;
+      const decision = sendCode(readCodeRecord(await storage.get(key)), mac, now, fromHere);
+      if (!decision.ok) return { ...decision, status: 429, error: "too_many_codes" } as const;
+      await storage.put({ [key]: decision.record, [CODE_DAY_KEY]: today.today });
+      await alarmBy(storage, purgeAt(decision.record));
+      return decision;
+    });
+    if (!decided.ok) {
+      return Response.json({ error: decided.error, retryAfter: decided.retryAfter },
+        { status: decided.status, headers: { "retry-after": String(decided.retryAfter) } });
+    }
+    this.ctx.waitUntil(deliver(sender, codeEmail(address, code)));
+    return Response.json({ sent: true, expiresIn: CODE_TTL_SECONDS, resendIn: RESEND_SECONDS });
+  }
+
+  /// Signs in with a code sent by email (email-code.ts). The tenant is `email:` and the SHA-256 of the address, and the
+  /// session is minted, stored and answered by the same code as Apple's, with the address as its email, so an email
+  /// invite matches it (docs/people.md). The try's HMAC is made before the transaction, which compares it with the
+  /// stored one with no await between the read and the write: a right code is used up in the same transaction that
+  /// stores the session, so of two devices racing with one code, exactly one is signed in.
+  private async exchangeEmail(body: unknown): Promise<Response> {
+    const asked = emailExchange(body);
+    if (!asked) return Response.json({ error: "invalid_request" }, { status: 400 });
+    if (!emailSignIn(this.authEnv)) return Response.json({ error: "email_not_configured" }, { status: 400 });
+    const account = await emailAccount(asked.address);
+    const tenant = emailTenant(account);
+    const tried = await macEmailCode(this.authEnv.APPROVAL_LINK_SECRET, account, asked.code);
+    const minted = await mintSession(tenant, asked.deviceId, asked.address);
+    const key = codeKey(account);
+    const outcome = await this.ctx.storage.transaction(async (storage) => {
+      const result = tryCode(readCodeRecord(await storage.get(key)), (mac) => timingSafeEqual(mac, tried),
+        Date.now() / 1_000);
+      if (result.kind === "wrong") await storage.put(key, result.record);
+      if (result.kind !== "right") return result;
+      const generation = wipeGeneration(await storage.get(`wiped:${tenant}`));
+      await storage.put({ [key]: result.record, ...sessionWrites(minted, generation) });
+      // The alarm sweeps sessions too (session-index.ts), so one is due by the time this access record ends.
+      await alarmBy(storage, minted.session.exp);
+      return result;
+    });
+    if (outcome.kind === "right") return sessionAnswer(minted);
+    if (outcome.kind === "wrong") {
+      return Response.json({ error: "wrong_code", triesLeft: outcome.triesLeft }, { status: 401 });
+    }
+    return Response.json({ error: "code_ended" }, { status: 401 });
+  }
+
+  /// One alarm covers consumed identities and email sign-in records together; no token, code or claim body is stored.
+  /// Unknown consumption records stay fail-closed rather than forgetting an unexpired consumption. An email sign-in
+  /// record goes a day after its last send (email-code.ts, `purgeAt`); one this code did not write holds no code anyone
+  /// can use, so it goes at once. The same alarm sweeps ended sessions, a bounded page a run (session-index.ts).
   override async alarm(): Promise<void> {
+    // A deleted account's Apple token whose revoke failed is tried again first, outside the transaction below, since each
+    // try waits on Apple (account-store.ts). Its next try is counted with the rest of the alarm's work in that transaction.
+    await retryAppleRevokes(this.ctx.storage, this.authEnv);
     const now = Date.now() / 1_000;
     await this.ctx.storage.transaction(async (storage) => {
       let next = Infinity;
@@ -247,6 +422,23 @@ export class AuthObject extends DurableObject {
         if (expired.length) await storage.delete(expired);
         if (consumed.size < 128) break;
       }
+      startAfter = undefined;
+      while (true) {
+        const records: Map<string, unknown> = await storage.list({ prefix: CODE_KEY_PREFIX, limit: 128,
+          ...(startAfter === undefined ? {} : { startAfter }) });
+        const done: string[] = [];
+        for (const [key, value] of records) {
+          startAfter = key;
+          const record = readCodeRecord(value);
+          const until = record ? purgeAt(record) : -Infinity;
+          if (until <= now) done.push(key);
+          else next = Math.min(next, until);
+        }
+        if (done.length) await storage.delete(done);
+        if (records.size < 128) break;
+      }
+      // Sessions too, a bounded page a run from where the last run stopped (session-index.ts).
+      next = Math.min(next, await sweepSessions(storage, now), (await nextRevokeAt(storage)) / 1_000);
       if (Number.isFinite(next)) await storage.setAlarm(Math.ceil(next * 1_000));
       else await storage.deleteAlarm();
     });
@@ -277,7 +469,7 @@ export class AuthObject extends DurableObject {
       }
       const now = Date.now() / 1000;
       const generation = wipeGeneration(await storage.get(`wiped:${grant.tenant}`));
-      await storage.delete([`sat:${grant.accessHash}`, `srt:${presentedHash}`]);
+      await storage.delete([`sat:${grant.accessHash}`, `srt:${presentedHash}`, sessionIndexKey(grant.tenant, presentedHash)]);
       if (grant.exp <= now || wipeGeneration(grant.wipeGeneration) !== generation) {
         return Response.json({ error: "invalid_grant" }, { status: 401 });
       }
@@ -285,11 +477,15 @@ export class AuthObject extends DurableObject {
       if (now - born > REFRESH_ABSOLUTE_TTL_SECONDS) {
         return Response.json({ error: "session_expired" }, { status: 401 });
       }
+      const email = grant.email ? { email: grant.email } : {};
       const session: SessionRec = { tenant: grant.tenant, deviceId: grant.deviceId,
-        exp: now + ACCESS_TTL_SECONDS, refreshHash, csrfHash, wipeGeneration: generation };
+        exp: now + ACCESS_TTL_SECONDS, refreshHash, csrfHash, wipeGeneration: generation, ...email };
       const next: RefreshRec = { accessHash, tenant: grant.tenant, deviceId: grant.deviceId,
-        exp: now + REFRESH_TTL_SECONDS, born, wipeGeneration: generation };
-      await storage.put({ [`sat:${accessHash}`]: session, [`srt:${refreshHash}`]: next });
+        exp: now + REFRESH_TTL_SECONDS, born, wipeGeneration: generation, ...email };
+      const row: SessionIndexRow = { accessHash, generation };
+      await storage.put({ [`sat:${accessHash}`]: session, [`srt:${refreshHash}`]: next,
+        [sessionIndexKey(grant.tenant, refreshHash)]: row });
+      await alarmBy(storage, session.exp);
       return Response.json({ accessToken: access, refreshToken: refresh, csrf,
         expiresIn: ACCESS_TTL_SECONDS, tenant: grant.tenant });
     });
@@ -301,7 +497,7 @@ export class AuthObject extends DurableObject {
     const accessHash = await sha256Hex(header.slice("Bearer ".length));
     const session = await this.ctx.storage.get<SessionRec>(`sat:${accessHash}`);
     if (!session) return Response.json({ error: "invalid_session" }, { status: 401 });
-    await this.forget(accessHash, session.refreshHash);
+    await this.forget(accessHash, session.refreshHash, session.tenant);
     return Response.json({ revoked: true });
   }
 
@@ -319,16 +515,19 @@ export class AuthObject extends DurableObject {
       if (!session) return Response.json({ ok: false });
       const generation = wipeGeneration(await storage.get(`wiped:${session.tenant}`));
       if (session.exp <= Date.now() / 1000 || wipeGeneration(session.wipeGeneration) !== generation) {
-        await storage.delete([`sat:${accessHash}`, `srt:${session.refreshHash}`]);
+        await storage.delete([`sat:${accessHash}`, `srt:${session.refreshHash}`,
+          sessionIndexKey(session.tenant, session.refreshHash)]);
         return Response.json({ ok: false });
       }
-      return Response.json({ ok: true, tenant: session.tenant });
+      // The verified email rides along only for the routes that check who is signed in (people.ts); every other
+      // route reads the tenant alone.
+      return Response.json({ ok: true, tenant: session.tenant, ...(session.email ? { email: session.email } : {}) });
     });
   }
 
-  private async forget(accessHash: string, refreshHash: string | null): Promise<void> {
+  private async forget(accessHash: string, refreshHash: string | null, tenant: string): Promise<void> {
     await this.ctx.storage.delete(`sat:${accessHash}`);
-    if (refreshHash) await this.ctx.storage.delete(`srt:${refreshHash}`);
+    if (refreshHash) await this.ctx.storage.delete([`srt:${refreshHash}`, sessionIndexKey(tenant, refreshHash)]);
   }
 
   /// Verifies a session-bound CSRF token for company-console writes. The
@@ -470,10 +669,11 @@ export class AuthObject extends DurableObject {
     return Response.json({ routes: next.length });
   }
 
-  /// Wipes a tenant's sessions and the global index rows that name it.
-  /// Consent, the task index, attention items and the tombstone live in the
-  /// per-tenant TenantObject (M4 phase 1) and are wiped through the worker
-  /// alongside tasks, connections, and schedules.
+  /// Wipes a tenant's sessions and the global index rows that name it, all
+  /// but a pilot shop's registry row, which the tenant deletion removes last
+  /// of all (tenant-data.ts). Consent, the task index, attention items and
+  /// the tombstone live in the per-tenant TenantObject (M4 phase 1) and are
+  /// wiped through the worker alongside tasks, connections, and schedules.
   private async tenantWipe(request: Request): Promise<Response> {
     if (request.headers.get("x-wipe") !== "1") {
       return Response.json({ error: "forbidden" }, { status: 403 });
@@ -496,21 +696,20 @@ export class AuthObject extends DurableObject {
       await storage.put(`wiped:${tenant}`, next);
       return next;
     });
-    const sessionKeys: string[] = [];
-    // No secondary index: sessions are found by scanning the small session
-    // namespace for this tenant's records.
-    const sessions = await this.ctx.storage.list<SessionRec>({ prefix: "sat:" });
-    for (const [key, session] of sessions) {
-      if (session.tenant === tenant && wipeGeneration(session.wipeGeneration) < generation) {
-        sessionKeys.push(key);
-        await this.ctx.storage.delete(`srt:${session.refreshHash}`);
-      }
-    }
-    await this.ctx.storage.delete(sessionKeys);
+    // The tenant's own sessions, found through its own index rows: nobody else's session is read (session-index.ts).
+    const sessionsWiped = await wipeTenantSessions(this.ctx.storage, tenant, generation);
     // Company-console state for this tenant goes with the sessions: the
     // account entitlement and the membership index. Company records
     // themselves are owned by their companies, not by any one member.
+    // A pilot shop's registry row stays until the shop's own data is gone,
+    // so a deletion that stops part way never takes the shop off the
+    // operator console's list while data is left.
     await this.ctx.storage.delete([`entitlement:${body.tenant}`, `memberships:${body.tenant}`]);
+    // An email identity's sign-in record (email-code.ts) is keyed by the same hash its tenant carries, so it goes with
+    // the sessions: a live code, and when codes were sent.
+    if (tenant.startsWith(EMAIL_TENANT_PREFIX)) {
+      await this.ctx.storage.delete(codeKey(tenant.slice(EMAIL_TENANT_PREFIX.length)));
+    }
     // Inbound routes name the tenant, so they go too. The index is keyed by
     // provider account, not tenant, so this scans it; it holds one row per
     // connected workspace and stays small.
@@ -520,6 +719,8 @@ export class AuthObject extends DurableObject {
       if (kept.length === 0) await this.ctx.storage.delete(key);
       else await this.ctx.storage.put(key, kept);
     }
-    return Response.json({ sessionsWiped: sessionKeys.length });
+    // Every person's index rows that name a deleted shop go too, and a person's own waiting link code (shops-store.ts).
+    wipeShopsTenant(this.ctx.storage, body.tenant);
+    return Response.json({ sessionsWiped });
   }
 }

@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- The Mac App Store edition's entitlements (tauri.appstore.conf.json, scripts/appstore-mac.sh, docs/app-store.md). The
+     GitHub build keeps Entitlements.plist and no sandbox. Every program the app starts (an agent, git, the terminal's
+     shell) inherits this sandbox, so what an agent needs is listed here too, each place by name with what uses it. -->
+<plist version="1.0">
+<dict>
+	<!-- The App Store requires the App Sandbox. -->
+	<key>com.apple.security.app-sandbox</key>
+	<true/>
+	<!-- Who the app is: the listing's App ID and team, as the provisioning profile names them (Tauri's App Store guide). -->
+	<key>com.apple.application-identifier</key>
+	<string>N66J8AA6TA.co.gogocash.gogocode</string>
+	<key>com.apple.developer.team-identifier</key>
+	<string>N66J8AA6TA</string>
+	<!-- Outgoing connections only: Manut AI's API and the phone relay over HTTPS and WSS, the agents' own services, git
+	     remotes. Nothing listens: there is no network.server, so a project's dev server started from the app cannot take
+	     a port (docs/app-store.md, "What works in the sandbox"). -->
+	<key>com.apple.security.network.client</key>
+	<true/>
+	<!-- A project folder the person picks in the open panel, read and written while the app runs. -->
+	<key>com.apple.security.files.user-selected.read-write</key>
+	<true/>
+	<!-- Keeping that folder's grant across launches with a security-scoped bookmark. -->
+	<key>com.apple.security.files.bookmarks.app-scope</key>
+	<true/>
+	<!-- The chat box's microphone and voice mode (voice.rs, docs/voice.md). -->
+	<key>com.apple.security.device.audio-input</key>
+	<true/>
+	<!-- TEMPORARY EXCEPTIONS. App Review refused these three kinds for GoSpark under Guideline 2.4.5(i)
+	     (absolute-path.read-only on 2026-09-30; home-relative-path.read-write and .read-only on 2026-10-06, "will not be
+	     granted"). The owner chose on 26 Nov 2026 to submit the full Manut AI with them and hear Apple's answer. Without
+	     them the coding agents cannot run: an agent keeps its sign-in and settings in its own folder in the person's home,
+	     and its program lives in an install folder the sandbox cannot otherwise read. The shell points HOME at the real
+	     home in this edition (app_store.rs), so these paths are the person's own folders, not the container's. -->
+	<key>com.apple.security.temporary-exception.files.home-relative-path.read-write</key>
+	<array>
+		<!-- Manut AI's own folder: chats, lanes, accounts, turn snapshots, workflows, computer use, the shop cache, and
+		     Claude Code's scratch folder in this edition (CLAUDE_CODE_TMPDIR, app_store.rs). -->
+		<string>/.manut/</string>
+		<!-- Claude Code: its settings, sessions, skills and plugins (Manut AI adds its status line and computer use
+		     there), its main settings file and that file's backup, its cache and its state. -->
+		<string>/.claude/</string>
+		<string>/.claude.json</string>
+		<string>/.claude.json.backup</string>
+		<string>/.cache/claude/</string>
+		<string>/.local/state/claude/</string>
+		<!-- Codex: its sign-in, config and sessions, and the runtimes it downloads for itself. -->
+		<string>/.codex/</string>
+		<string>/.cache/codex-runtimes/</string>
+		<!-- The skills folder Codex reads, where Settings › MCP and Skills installs a shared skill (agent_config.rs). -->
+		<string>/.agents/</string>
+		<!-- OmO's own folder. -->
+		<string>/.omo/</string>
+		<!-- pi's own folder (its managed install and sessions). -->
+		<string>/.pi/</string>
+		<!-- oh-my-pi's own folder. -->
+		<string>/.omp/</string>
+		<!-- Grok's own folder (its program, under bin, and its sign-in). -->
+		<string>/.grok/</string>
+		<!-- oh-my-hermes: Hermes Agent's folder. -->
+		<string>/.hermes/</string>
+		<!-- OpenCode: its config, data, state and cache. -->
+		<string>/.config/opencode/</string>
+		<string>/.local/share/opencode/</string>
+		<string>/.local/state/opencode/</string>
+		<string>/.cache/opencode/</string>
+	</array>
+	<key>com.apple.security.temporary-exception.files.home-relative-path.read-only</key>
+	<array>
+		<!-- Where the agents' programs are installed in the home folder, read to find and run them (sessions.rs
+		     search_dirs and LAYOUTS): the native installers' bin and Claude Code's versions, OpenCode's installer, Bun,
+		     Cargo, npm's own prefix, Volta, nvm's Node, pnpm, and apps in ~/Applications that carry a CLI (Codex in the
+		     ChatGPT app, DeepSeek Harness). -->
+		<string>/.local/bin/</string>
+		<string>/.local/share/claude/</string>
+		<string>/.opencode/</string>
+		<string>/.bun/</string>
+		<string>/.cargo/bin/</string>
+		<string>/.npm-global/</string>
+		<string>/.volta/</string>
+		<string>/.nvm/</string>
+		<string>/Library/pnpm/</string>
+		<string>/.local/share/pnpm/</string>
+		<string>/Applications/</string>
+		<!-- git: the person's name and settings, and the keys for their remotes. -->
+		<string>/.gitconfig</string>
+		<string>/.config/git/</string>
+		<string>/.ssh/</string>
+		<!-- gh and glab, for pull requests (gh_me.rs, pulls.rs, review.rs): their sign-in and settings. -->
+		<string>/.config/gh/</string>
+		<string>/.config/glab-cli/</string>
+		<!-- The terminal's login shell reads these as Terminal's does, so a Shell terminal has the person's PATH and
+		     prompt. -->
+		<string>/.zshenv</string>
+		<string>/.zprofile</string>
+		<string>/.zshrc</string>
+		<string>/.zlogin</string>
+		<string>/.bash_profile</string>
+		<string>/.bashrc</string>
+		<string>/.profile</string>
+		<string>/.config/fish/</string>
+	</array>
+	<key>com.apple.security.temporary-exception.files.absolute-path.read-only</key>
+	<array>
+		<!-- Homebrew's programs on Apple silicon and on Intel: git, Node and the agents installed with it. -->
+		<string>/opt/homebrew/</string>
+		<string>/usr/local/</string>
+	</array>
+</dict>
+</plist>

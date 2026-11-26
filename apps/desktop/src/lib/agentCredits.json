@@ -1,0 +1,6 @@
+{
+  "emails": ["noreply@anthropic.com", "claude@anthropic.com", "noreply@openai.com", "codex@openai.com", "cursoragent@cursor.com", "copilot@github.com", "noreply@github.com"],
+  "githubNoreplyNames": ["Copilot", "GitHub Copilot"],
+  "agents": ["Claude Code", "Claude", "Codex", "Cursor", "GitHub Copilot", "Copilot", "OpenCode", "Grok", "Antigravity"],
+  "linkHosts": ["claude.ai", "claude.com", "www.anthropic.com", "chatgpt.com", "openai.com", "cursor.com", "github.com", "opencode.ai", "x.ai", "antigravity.google"]
+}

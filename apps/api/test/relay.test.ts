@@ -286,6 +286,20 @@ describe("relay routes", () => {
     }
   });
 
+  it("says in the public health answer whether the relay is on, and nothing else about it", async () => {
+    for (const [value, said] of [[undefined, "off"], ["0", "off"], ["1 ", "off"], ["1", "on"]] as const) {
+      const fixture = routeFixture();
+      if (value === undefined) delete fixture.target.RELAY_ENABLED;
+      else fixture.target.RELAY_ENABLED = value;
+      const health = await send(fixture.target, "/v1/health", { upgrade: false });
+      expect(health.status).toBe(200);
+      const body = (await health.json()) as Record<string, unknown>;
+      expect(body.relay).toBe(said);
+      expect(Object.keys(body).sort()).toEqual(["families", "ok", "relay", "service"]);
+      expect(fixture.forwarded).toEqual([]);
+    }
+  });
+
   it("rejects a malformed host id with 400", async () => {
     const fixture = routeFixture();
     // Too short, too long, outside base64url, the right length with a percent-escape, and empty.
@@ -405,12 +419,23 @@ describe("relay routes", () => {
   it.each([["socket", 10], ["phone", 60]] as const)(
     "the real workerd limiter for %s upgrades allows %i a minute from one /64", async (role, limit) => {
       const path = `/relay/v1/hosts/${HOST}/${role}`;
-      const group = randomGroup();
-      // Every address differs inside one /64. None asks to upgrade, so no socket opens.
-      for (let index = 1; index <= limit; index++) {
-        expect((await send(bindings, path, { ip: `${group}::${index.toString(16)}`, upgrade: false })).status).toBe(426);
+      // The real limiter counts in windows of its period, so a run that crosses into the next window starts
+      // counting again and lets one more through. A run whose last request is let through is therefore run once
+      // more from a fresh /64; two runs a second or so long cannot both cross a 60-second boundary.
+      for (let attempt = 1; ; attempt++) {
+        const group = randomGroup();
+        // Every address differs inside one /64. None asks to upgrade, so no socket opens.
+        for (let index = 1; index <= limit; index++) {
+          expect((await send(bindings, path, { ip: `${group}::${index.toString(16)}`, upgrade: false })).status).toBe(426);
+        }
+        const last = await send(bindings, path, { ip: `${group}::ffff`, upgrade: false });
+        if (last.status === 426 && attempt === 1) {
+          await last.arrayBuffer();
+          continue;
+        }
+        await expectAnswer(last, "rate_limited");
+        break;
       }
-      await expectAnswer(await send(bindings, path, { ip: `${group}::ffff`, upgrade: false }), "rate_limited");
       expect((await send(bindings, path, { ip: `${randomGroup()}::1`, upgrade: false })).status).toBe(426);
     });
 });

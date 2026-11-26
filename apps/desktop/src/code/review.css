@@ -1,0 +1,177 @@
+/* A lane put up for review, and its pull request merged (Review.tsx): a panel under the lane's row on the Code page and at the top
+   of the pane beside the lane. The ask is the same warm banner Kit's asks use; the texts that will be sent are shown in a mono box
+   exactly as they are, line ends kept. The desktop's own: the canvas draws a quiet Open pull request on a lane, this is what it
+   opens. */
+.review {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 4px 10px 8px;
+  font-size: 13.5px;
+}
+.review .rv-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--rad-lg);
+  background: var(--aui-subtle);
+}
+.review .rv-panel.warn {
+  border-color: transparent;
+  background: var(--warnbg);
+}
+.review p {
+  margin: 0;
+}
+.review .rv-h {
+  font-weight: 600;
+}
+.review dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 12px;
+  margin: 0;
+}
+.review dt {
+  color: var(--mut, inherit);
+}
+.review dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.review .rv-text {
+  margin: 0;
+  max-height: 220px;
+  overflow: auto;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--rad);
+  background: var(--aui-surface);
+  font-family: var(--aui-font-mono);
+  font-size: 12.5px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.review label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.review input[type="text"],
+.review textarea,
+.review select {
+  padding: 4px 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--rad);
+  background: var(--aui-surface);
+  color: var(--ink);
+  font: inherit;
+}
+.review textarea {
+  min-height: 90px;
+  font-family: var(--aui-font-mono);
+  font-size: 12.5px;
+}
+.review .rv-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.review .rv-why {
+  color: var(--err, inherit);
+}
+/* The canvas's .btn, .btn.dark and .lk, as lanepane.css and kit.css copy them, scoped here so the panel looks the same under a
+   lane's row and in the pane. */
+.review .btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  padding: 0 12px;
+  border-radius: var(--rad);
+  border: 1px solid var(--line);
+  background: var(--aui-surface);
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.review .btn:hover {
+  background: var(--hov);
+}
+.review .btn.dark {
+  border-color: var(--aui-primary);
+  background: var(--aui-primary);
+  color: var(--aui-on-primary);
+}
+.review .btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.review .btn:focus-visible {
+  outline: 2px solid var(--aui-border-strong);
+  outline-offset: 1px;
+}
+.review .lk {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--aui-muted);
+  text-decoration: underline;
+}
+.review .lk:hover {
+  color: var(--ink);
+}
+
+/* New project (NewProject.tsx, item 100b): the same panel and ask, at the top of the Code page's column. Its fields stand 40px as
+   the kit's fields do, the folder's with Choose beside it; who can see the repository is two plain lines to pick from. */
+.review.np {
+  margin: 0;
+}
+.review.np input[type="text"] {
+  min-height: 40px;
+  padding: 0 10px;
+}
+.review .np-pick {
+  display: flex;
+  gap: 8px;
+}
+.review .np-pick input {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--aui-font-mono);
+  font-size: 13px;
+}
+.review .np-pick .btn {
+  min-height: 40px;
+}
+.review .np-who {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.review .np-who legend {
+  margin-bottom: 4px;
+  padding: 0;
+}
+.review .np-opt {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+.review .np-opt input {
+  margin: 0;
+}/* second lines are grey, and a choice is drawn in ink: colour is kept for its four meanings */
+.review.np .mut,
+.review.np dt {
+  color: var(--muted);
+}
+.review .np-opt input {
+  accent-color: var(--aui-primary);
+}

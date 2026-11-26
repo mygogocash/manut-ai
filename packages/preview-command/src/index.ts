@@ -1,0 +1,107 @@
+/// Chooses the command that starts a JavaScript project's preview
+/// (docs/code-editor.md, "Left for later").
+///
+/// Text in, value out: this reads no file, runs nothing and never throws. The
+/// answer is a list of words, never one string for a shell, so nothing in the
+/// project's text can be read as shell syntax by the caller.
+
+export type Manager = "pnpm" | "yarn" | "bun" | "npm";
+
+export interface PreviewInput {
+  /// The text of the project's `package.json`, or null when it has none.
+  packageJson: string | null;
+  /// The names of the files at the project's root.
+  files: readonly string[];
+}
+
+export type NoneWhy = "no_package_json" | "unreadable" | "no_script" | "refused";
+
+export type PreviewCommand =
+  | { argv: [Manager, "run", string]; manager: Manager; script: string }
+  | { none: NoneWhy };
+
+/// In the order they are tried.
+const SCRIPTS = ["dev", "start", "preview", "serve"] as const;
+
+/// First match wins.
+const LOCKFILES: ReadonlyArray<readonly [string, Manager]> = [
+  ["pnpm-lock.yaml", "pnpm"],
+  ["yarn.lock", "yarn"],
+  ["bun.lock", "bun"],
+  ["bun.lockb", "bun"],
+  ["package-lock.json", "npm"],
+];
+
+const MANAGERS: readonly string[] = ["pnpm", "yarn", "bun", "npm"];
+
+/// Whether `table` has its own `key`. `Object.hasOwn` would say the same, but
+/// the desktop runs this in macOS 11's webview, whose Safari can be older than
+/// 15.4, the first that has it, and a call to it there would fail.
+function own(table: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(table, key);
+}
+
+/// A script that publishes would make the preview deploy something. The
+/// check is on the script's text, so a script that calls another script by
+/// name (`npm run deploy`) is caught by the word in it.
+function publishes(text: string): boolean {
+  const t = text.toLowerCase();
+  if (/deploy|publish|release|gh-pages/.test(t)) return true;
+  if (/\bvercel\b/.test(t) && /--prod\b/.test(t)) return true;
+  if (/\bnetlify\b/.test(t) && /--prod\b/.test(t)) return true;
+  return false;
+}
+
+/// The texts of the scripts that may run with `name` without being asked: npm,
+/// yarn 1 and bun run `predev` before `dev` and `postdev` after it, and pnpm
+/// does once a project turns pre and post scripts on. They are checked as the
+/// script itself is, whatever the manager, so no setting decides whether the
+/// preview can publish.
+function hooksOf(table: Record<string, unknown>, name: string): string[] {
+  return [`pre${name}`, `post${name}`].flatMap((hook) => {
+    const text = own(table, hook) ? table[hook] : undefined;
+    return typeof text === "string" ? [text] : [];
+  });
+}
+
+function managerOf(pkg: Record<string, unknown>, files: readonly string[]): Manager {
+  // The field wins over the lockfile. A manager this does not run (deno, an
+  // empty or odd value) is ignored so the lockfile decides.
+  const field = pkg["packageManager"];
+  if (typeof field === "string") {
+    const name = field.split("@")[0]?.trim().toLowerCase() ?? "";
+    if (MANAGERS.includes(name)) return name as Manager;
+  }
+  const have = new Set(files);
+  for (const [file, manager] of LOCKFILES) if (have.has(file)) return manager;
+  return "npm";
+}
+
+export function previewCommand(input: PreviewInput): PreviewCommand {
+  if (input.packageJson === null || input.packageJson === undefined) return { none: "no_package_json" };
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(input.packageJson);
+  } catch {
+    return { none: "unreadable" };
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return { none: "unreadable" };
+  const pkg = parsed as Record<string, unknown>;
+
+  const scripts = pkg["scripts"];
+  if (typeof scripts !== "object" || scripts === null || Array.isArray(scripts)) return { none: "no_script" };
+  const table = scripts as Record<string, unknown>;
+
+  let found = false;
+  for (const name of SCRIPTS) {
+    if (!own(table, name)) continue;
+    const text = table[name];
+    if (typeof text !== "string" || text.trim() === "") continue;
+    found = true;
+    if (publishes(text) || hooksOf(table, name).some(publishes)) continue;
+    const manager = managerOf(pkg, input.files);
+    return { argv: [manager, "run", name], manager, script: name };
+  }
+  return { none: found ? "refused" : "no_script" };
+}

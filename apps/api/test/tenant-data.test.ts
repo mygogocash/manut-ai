@@ -11,7 +11,7 @@ import { tenantDelete, tenantExport, tenantPrune, type TenantDataEnv } from "../
 const TENANT = "apple:tenant-data-sub";
 const TASK_IDS = ["task-a", "task-b"];
 
-type Call = { ns: string; name: string; method: string; path: string; tenant: string };
+type Call = { ns: string; name: string; method: string; path: string; tenant: string; url: string };
 
 /// Canned answers keyed "<NS> <METHOD> <path>", or "<NS>:<name> <METHOD>
 /// <path>" for one object (a single task). Anything unlisted is a test bug
@@ -22,6 +22,21 @@ function defaults(): Record<string, () => Response> {
     "TENANT GET /consent": () => Response.json({ cloudWork: true, updatedAt: "2026-09-24T00:00:00.000Z" }),
     "TENANT GET /tombstone": () => Response.json({ tombstone: null }),
     "TENANT GET /attention": () => Response.json({ items: [{ id: "item-1" }] }),
+    "TENANT GET /pilot/export": () => Response.json({ shop: null, messages: [], replies: [], payments: [], displayNames: [] }),
+    "TENANT GET /routines/export": () => Response.json({ team: { paused: false, since: null, members: null },
+      routines: [{ id: "rt-1", name: "Morning brief" }], questions: [], runs: [{ routineId: "rt-1", status: "done" }] }),
+    "TENANT GET /model/export": () =>
+      Response.json({ capOverride: null, months: [{ month: "2026-11", spentMillisatang: 4_200 }], calls: [], holds: [] }),
+    "TENANT GET /audit/export": () =>
+      Response.json({ entries: [{ id: "aud-entry-1", action: "shop.created" }], missed: null }),
+    "TENANT GET /memory/export": () =>
+      Response.json({ facts: [{ id: "f1", text: "Closed on Mondays", status: "confirmed" }], forgottenCount: 2 }),
+    "TENANT GET /people/export": () =>
+      Response.json({ state: { shop: TENANT, ownerId: "owner", helpers: [{ id: "helper-1" }], invites: [], away: null,
+        passedOn: [], removed: [] }, names: { "helper-1": "Mint" } }),
+    "TENANT GET /artifacts/export": () =>
+      Response.json({ artifacts: [{ id: "art-1", title: "Menu", kind: "html", bytes: 12, createdAt: 1, text: "<h1>Menu</h1>" }] }),
+    "TENANT POST /pilot/prune": () => Response.json({ messagesPruned: 0 }),
     "TENANT POST /tenant-wipe": () => Response.json({ deletedAt: "2026-09-24T00:00:00.000Z", tasksWiped: 2 }),
     "TASK GET /export": () => Response.json({ task: { id: "unnamed" }, events: [], actions: [], attempts: [] }),
     "TASK:task-a GET /export": () =>
@@ -30,10 +45,13 @@ function defaults(): Record<string, () => Response> {
       Response.json({ task: { id: "task-b" }, events: [], actions: [], attempts: [] }),
     "TASK DELETE /wipe": () => Response.json({ wiped: true }),
     "CRED GET /connections": () => Response.json({ connections: [{ id: "conn-1", provider: "linear" }] }),
+    "CRED GET /sign-ins": () => Response.json({ signIns: [{ id: "signin-1", site: "Shopee Seller Centre" }] }),
+    "CRED GET /outposts": () => Response.json({ outposts: [{ id: "outpost-1", kind: "this_mac" }] }),
     "CRED POST /tenant-wipe": () => Response.json({ connectionsWiped: 1 }),
     "SCHEDULES GET /schedules": () => Response.json({ schedules: [{ id: "sched-1" }] }),
     "SCHEDULES POST /tenant-wipe": () => Response.json({ schedulesWiped: 1, occurrencesWiped: 3 }),
     "AUTH POST /tenant-wipe": () => Response.json({ sessionsWiped: 1 }),
+    "AUTH DELETE /pilot-shops": () => Response.json({ removed: true }),
   };
 }
 
@@ -51,6 +69,7 @@ function stubEnv(overrides: Record<string, () => Response> = {}) {
           method: request.method,
           path,
           tenant: request.headers.get("x-tenant") ?? "",
+          url: request.url,
         });
         const answer = table[`${ns}:${name} ${request.method} ${path}`] ?? table[`${ns} ${request.method} ${path}`];
         return answer ? answer() : Response.json({ error: "unexpected_call" }, { status: 599 });
@@ -84,7 +103,7 @@ describe("tenant deletion fan-out", () => {
       sessionsWiped: 1,
       deletedAt: "2026-09-24T00:00:00.000Z",
     });
-    // Data first, sessions next, the index and tombstone last.
+    // Data first, sessions next, then the index and tombstone, and last of all the shop's row in the operator's list.
     expect(calls.filter((call) => call.method !== "GET").map((call) => `${call.ns} ${call.path}`)).toEqual([
       "TASK /wipe",
       "TASK /wipe",
@@ -92,7 +111,26 @@ describe("tenant deletion fan-out", () => {
       "SCHEDULES /tenant-wipe",
       "AUTH /tenant-wipe",
       "TENANT /tenant-wipe",
+      "AUTH /pilot-shops",
     ]);
+    // The row is the caller's own, named by the tenant the deletion runs for.
+    expect(calls.at(-1)?.url).toBe(`https://auth/pilot-shops?tenant=${encodeURIComponent(TENANT)}`);
+  });
+
+  it("keeps the shop on the operator's list when its own object's wipe fails", async () => {
+    const { env, reached } = stubEnv({ "TENANT POST /tenant-wipe": fail });
+    const response = await tenantDelete(env, TENANT);
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({ error: "wipe_incomplete", tasksWiped: 2, failed: ["index"] });
+    expect(reached("AUTH", "DELETE", "/pilot-shops")).toBe(false);
+  });
+
+  it("names the registry when only taking the shop off the list fails, after the tombstone", async () => {
+    const { env, reached } = stubEnv({ "AUTH DELETE /pilot-shops": fail });
+    const response = await tenantDelete(env, TENANT);
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({ error: "wipe_incomplete", tasksWiped: 2, failed: ["registry"] });
+    expect(reached("TENANT", "POST", "/tenant-wipe")).toBe(true);
   });
 
   it("fails loudly when the credential vault wipe fails, and keeps the session and index", async () => {
@@ -135,6 +173,7 @@ describe("tenant deletion fan-out", () => {
     expect(response.status).toBe(500);
     expect(((await response.json()) as { failed?: string[] }).failed).toEqual(["sessions"]);
     expect(reached("TENANT", "POST", "/tenant-wipe")).toBe(false);
+    expect(reached("AUTH", "DELETE", "/pilot-shops")).toBe(false);
   });
 });
 
@@ -147,25 +186,59 @@ describe("tenant export fan-out", () => {
       tenant?: string;
       tasks?: { task?: { id?: string }; events?: unknown[] }[];
       connections?: unknown[];
+      signIns?: unknown[];
+      outposts?: unknown[];
       schedules?: unknown[];
       consent?: { cloudWork?: boolean };
       attention?: unknown[];
+      model?: { months?: unknown[] };
+      audit?: { entries?: unknown[]; missed?: unknown };
+      memory?: { facts?: unknown[]; forgottenCount?: number };
+      people?: { state?: { helpers?: unknown[] }; names?: unknown };
+      routines?: { routines?: unknown[]; runs?: unknown[] };
+      artifacts?: unknown[];
     };
     expect(body.tenant).toBe(TENANT);
     expect((body.tasks ?? []).map((entry) => entry.task?.id)).toEqual(TASK_IDS);
     expect((body.tasks ?? []).map((entry) => entry.events)).toEqual([[{ seq: 1 }], []]);
     expect(body.connections).toHaveLength(1);
+    // The vault's site sign-ins and outposts, as the operator lists them.
+    expect(body.signIns).toEqual([{ id: "signin-1", site: "Shopee Seller Centre" }]);
+    expect(body.outposts).toEqual([{ id: "outpost-1", kind: "this_mac" }]);
     expect(body.schedules).toHaveLength(1);
     expect(body.consent?.cloudWork).toBe(true);
     expect(body.attention).toHaveLength(1);
+    // The model gateway's meter: what each model call cost the shop.
+    expect(body.model?.months).toEqual([{ month: "2026-11", spentMillisatang: 4_200 }]);
+    // The shop's audit log: who did what and when.
+    expect(body.audit).toEqual({ entries: [{ id: "aud-entry-1", action: "shop.created" }], missed: null });
+    // What the team knows about the shop: its facts, and only how many it was told to forget.
+    expect(body.memory).toEqual({ facts: [{ id: "f1", text: "Closed on Mondays", status: "confirmed" }], forgottenCount: 2 });
+    // The people around the shop: its helpers and the names the owner gave them.
+    expect(body.people?.state?.helpers).toEqual([{ id: "helper-1" }]);
+    expect(body.people?.names).toEqual({ "helper-1": "Mint" });
+    // The team's routines and how each run went.
+    expect(body.routines?.routines).toEqual([{ id: "rt-1", name: "Morning brief" }]);
+    expect(body.routines?.runs).toEqual([{ routineId: "rt-1", status: "done" }]);
+    // The shop's artifact links: each page with its text, never the link itself.
+    expect(body.artifacts).toEqual([{ id: "art-1", title: "Menu", kind: "html", bytes: 12, createdAt: 1, text: "<h1>Menu</h1>" }]);
   });
 
   for (const [route, part] of [
     ["CRED GET /connections", "connections"],
+    ["CRED GET /sign-ins", "signIns"],
+    ["CRED GET /outposts", "outposts"],
     ["SCHEDULES GET /schedules", "schedules"],
     ["TENANT GET /consent", "consent"],
     ["TENANT GET /tombstone", "tombstone"],
     ["TENANT GET /attention", "attention"],
+    ["TENANT GET /pilot/export", "pilot"],
+    ["TENANT GET /routines/export", "routines"],
+    ["TENANT GET /model/export", "model"],
+    ["TENANT GET /audit/export", "audit"],
+    ["TENANT GET /memory/export", "memory"],
+    ["TENANT GET /people/export", "people"],
+    ["TENANT GET /artifacts/export", "artifacts"],
     ["TENANT GET /index", "index"],
   ] as const) {
     it(`answers export_incomplete when the ${part} read fails`, async () => {
@@ -175,6 +248,17 @@ describe("tenant export fan-out", () => {
       expect(await response.json()).toEqual({ error: "export_incomplete", failed: [part] });
     });
   }
+
+  it("tells every cache not to keep the export, whole or incomplete", async () => {
+    // The export holds customers' words, their LINE display names, what the team knows and drafts, so a browser
+    // or a proxy must never keep a copy of it.
+    const whole = await tenantExport(stubEnv().env, TENANT);
+    expect(whole.status).toBe(200);
+    expect(whole.headers.get("cache-control")).toBe("no-store");
+    const incomplete = await tenantExport(stubEnv({ "TASK:task-b GET /export": fail }).env, TENANT);
+    expect(incomplete.status).toBe(500);
+    expect(incomplete.headers.get("cache-control")).toBe("no-store");
+  });
 
   it("skips a phantom task that answers 404", async () => {
     // The create route indexes before creating, so a failed create leaves an

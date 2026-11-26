@@ -1,0 +1,399 @@
+// A coding session's lane (src/code/): the branch of its own and the folder of its own that are made as the session starts,
+// and what its events teach the lane, against a fake shell. The lane's rules are tested in src/code/lane.test.ts and
+// laneBranch.test.ts; this is the sessions store keeping them: in what order the shell is asked, where the agent works, what
+// is kept on the row and in the lane, and the folder letting go when the session closes.
+import { beforeEach, expect, test } from "vitest";
+import { isLaneChat, laneOf, resetLanes } from "../code/laneStore";
+import { isTerminalRec } from "./agents";
+import { testState } from "../code/lane";
+import { kitProjects, resetKitProjects } from "../code/project";
+import { resetKitAsks } from "../code/kitAsks";
+import type { LaneMade, LaneRemoveAsk } from "../code/laneBranch";
+import { createStore, type BridgeLike } from "../state/store";
+import { createSessions } from "./sessions";
+import { chatOfPull, chatPullOf, resetChatPulls } from "../code/chatPull";
+import { resetPulls } from "../tasks/pulls";
+import type { TaskHost } from "../tasks/host";
+import type { ChatEvent, ChatInput, SessionHost } from "./host";
+
+const bridge: BridgeLike = { connect: async () => undefined, onAny: () => () => {}, onStatus: () => () => {}, request: (async () => ({})) as BridgeLike["request"] };
+
+const DEV = "/w/baanmali-preorder";
+
+interface Setup {
+  /** The branch each folder is on: the developer's never moves; a lane's folder is on its own branch. */
+  folders: Record<string, string>;
+  calls: string[];
+  made: { cwd: string; names: string[]; start?: unknown }[];
+  released: string[];
+  /** The folder each agent was started in. */
+  started: string[];
+  removed: { worktree: string; ask: LaneRemoveAsk }[];
+}
+
+/** The folder the fake shell makes for a lane, as lane.rs names it. */
+const laneDir = (branch: string, cwd = DEV) => `/w/.manut/lanes/${cwd.split("/").pop()}/${branch.slice(4)}`;
+
+async function setup(over: { branch?: string; left?: number; laneWorktree?: SessionHost["laneWorktree"] | null; settings?: Record<string, unknown>; release?: boolean; made?: Partial<LaneMade>; pulls?: Pick<TaskHost, "remote" | "view"> } = {}) {
+  // Settings › Worktrees are read from storage: `over.settings` is what the person saved
+  const saved = over.settings ? JSON.stringify(over.settings) : null;
+  (globalThis as { localStorage?: unknown }).localStorage = { getItem: (k: string) => (k === "manut.worktrees" ? saved : null), setItem: () => {}, removeItem: () => {} };
+  resetKitProjects();
+  resetKitAsks();
+  const s: Setup = { folders: { [DEV]: over.branch ?? "main", "/w/one": "main", "/w/two": "main" }, calls: [], made: [], started: [], removed: [], released: [] };
+  const sinks = new Map<string, (e: ChatEvent) => void>();
+  const sent: string[] = [];
+  const inputs: ChatInput[] = [];
+  const base = {
+    kind: "mock",
+    reset: async () => {},
+    agents: async () => [{ id: "claude", label: "Claude Code", mode: "chat", path: "/bin/claude" }],
+    home: async () => "/w",
+    pickFolder: async () => null,
+    branch: async (cwd: string) => {
+      s.calls.push("branch");
+      return s.folders[cwd] ?? "";
+    },
+    chatStart: async (_a: string, cwd: string, on: (e: ChatEvent) => void, _r?: string, _acc?: string, session?: string) => {
+      s.calls.push("chatStart");
+      s.started.push(cwd);
+      sinks.set(session ?? "", on);
+      return sinks.size;
+    },
+    chatInput: async (_id: number, i: ChatInput) => {
+      s.calls.push(`input:${i.kind}`);
+      inputs.push(i);
+      if (i.kind === "send") sent.push(i.text);
+    },
+    chatClose: async () => {
+      s.calls.push("chatClose");
+    },
+    removeFiles: async () => {},
+    pruneFiles: async () => {},
+    historyPrune: async () => {},
+    laneRemove: async (worktree: string, ask: LaneRemoveAsk) => {
+      s.calls.push("laneRemove");
+      s.removed.push({ worktree, ask });
+      return { removed: true, deleted: false, changed: null, ahead: null, error: null };
+    },
+  };
+  const lane: SessionHost["laneWorktree"] = async (cwd, names, start) => {
+    s.calls.push("laneWorktree");
+    s.made.push({ cwd, names, start });
+    const dir = laneDir(names[0], cwd);
+    // the lane's folder is on its own branch; the developer's stays where it was
+    s.folders[dir] = names[0];
+    return { branch: names[0], base: s.folders[cwd], dir, worktree: dir, left: over.left ?? 0, from: "", local: "", config: 0, stayed: 0, ...over.made } satisfies LaneMade;
+  };
+  const release = over.release
+    ? {
+        laneRelease: async (worktree: string) => {
+          s.calls.push("laneRelease");
+          s.released.push(worktree);
+          return { removed: true, kept: null, changed: null, unpushed: null };
+        },
+      }
+    : {};
+  const host = { ...base, ...release, ...(over.laneWorktree === null ? {} : { laneWorktree: over.laneWorktree ?? lane }) } as unknown as SessionHost;
+  const store = createStore(bridge);
+  const ss = createSessions(host, () => store, undefined, over.pulls ? () => over.pulls! : undefined);
+  await ss.loadAgents();
+  const startIn = async (text: string, cwd = DEV) => {
+    const id = ss.draft("claude" as never);
+    ss.setDraft(id, { cwd });
+    await ss.start(id, text);
+    return id;
+  };
+  const row = (id: string) => ss.getState().list.find((r) => r.id === id);
+  const notes = (id: string) => (store.getState().chats[ss.chatKey(id)!]?.items ?? []).flatMap((i) => (i.kind === "system" ? [i.text] : []));
+  return { ss, s, store, startIn, row, sinks, sent, inputs, notes, emit: (id: string, e: ChatEvent) => sinks.get(id)?.(e) };
+}
+
+beforeEach(() => resetLanes());
+
+test("makes a folder of its own as a session starts, named from the first message, and the agent works there", async () => {
+  const t = await setup();
+  const id = await t.startIn("Add a PromptPay QR to the checkout.");
+  // the shell is asked for the folder's branch, makes the lane's folder, starts the agent in it, reads the branch of the
+  // folder the agent works in for the composer's foot, and only then sends the first message
+  expect(t.s.calls).toEqual(["branch", "laneWorktree", "chatStart", "branch", "input:send"]);
+  expect(t.s.made).toEqual([{ cwd: DEV, names: expect.arrayContaining(["kit/add-promptpay-qr-checkout"]), start: { root: "", remote: false } }]);
+  const dir = laneDir("kit/add-promptpay-qr-checkout");
+  expect(t.row(id)?.lane).toEqual({ name: "kit/add-promptpay-qr-checkout", base: "main", dir, worktree: dir });
+  expect(t.s.started).toEqual([dir]);
+  // the session stays the project's: its folder is the developer's, which stays on its own branch
+  expect(t.row(id)?.cwd).toBe(DEV);
+  expect(t.s.folders[DEV]).toBe("main");
+  expect(t.ss.getState().live[id]?.branch).toBe("kit/add-promptpay-qr-checkout");
+  expect(t.sent).toEqual(["Add a PromptPay QR to the checkout."]);
+});
+
+test("the chat says where the lane works and what did not come along", async () => {
+  const t = await setup({ left: 3 });
+  const id = await t.startIn("Fix the totals");
+  const [said] = t.notes(id);
+  expect(said).toContain(`Kit works on kit/fix-totals in a folder of its own, made from main: ${laneDir("kit/fix-totals")}.`);
+  expect(said).toContain("3 changed files in your folder did not come along: Kit starts from the last commit on main.");
+  expect(said).toContain("Nothing is installed in it yet. Kit asks before it installs anything.");
+  const quiet = await setup();
+  expect(quiet.notes(await quiet.startIn("Fix the totals"))[0]).not.toContain("did not come along");
+});
+
+test("the chat says how many of the project's own agent settings came along, and which stayed and why", async () => {
+  const t = await setup({ made: { config: 3, stayed: 2 } });
+  const [said] = t.notes(await t.startIn("Fix the totals"));
+  expect(said).toContain("3 of your own agent settings files that git does not hold came along (MCP servers, skills and local settings), kept out of git in the lane.");
+  expect(said).toContain("2 agent settings files stayed in your folder: git would see them in the lane, so they could be committed.");
+  const one = await setup({ made: { config: 1, stayed: 1 } });
+  const [once] = one.notes(await one.startIn("Fix the totals"));
+  expect(once).toContain("1 of your own agent settings files");
+  expect(once).toContain("1 agent settings file stayed in your folder");
+  // nothing to say when none came and none stayed
+  const quiet = await setup();
+  expect(quiet.notes(await quiet.startIn("Fix the totals"))[0]).not.toContain("agent settings");
+});
+
+test("makes a lane from a detached commit, and a name for a first message with no words", async () => {
+  const t = await setup({ branch: "3e3f4c1" });
+  const id = await t.startIn("👍");
+  expect(t.row(id)?.lane).toMatchObject({ name: "kit/work", base: "3e3f4c1" });
+});
+
+test("makes none outside a repository, and the agent starts in the session's folder all the same", async () => {
+  const t = await setup({ branch: "" });
+  const id = await t.startIn("Fix the totals");
+  expect(t.s.calls).toEqual(["branch", "chatStart", "branch", "input:send"]);
+  expect(t.row(id)?.lane).toBeUndefined();
+  expect(t.s.started).toEqual([DEV]);
+  expect(t.sent).toEqual(["Fix the totals"]);
+});
+
+test("starts the agent in the session's folder when the shell cannot make the lane's", async () => {
+  const t = await setup({
+    laneWorktree: async () => {
+      throw new Error("no_commit");
+    },
+  });
+  const id = await t.startIn("Fix the totals");
+  expect(t.row(id)?.lane).toBeUndefined();
+  expect(t.row(id)?.status).toBe("running");
+  expect(t.s.started).toEqual([DEV]);
+  expect(t.sent).toEqual(["Fix the totals"]);
+});
+
+test("asks nothing of a shell that is older than lanes' folders", async () => {
+  const t = await setup({ laneWorktree: null });
+  const id = await t.startIn("Fix the totals");
+  expect(t.s.calls).toEqual(["chatStart", "branch", "input:send"]);
+  expect(t.row(id)?.lane).toBeUndefined();
+});
+
+test("two lanes work at once in one project, each in its own folder made from the developer's branch", async () => {
+  const t = await setup();
+  const a = await t.startIn("Thai date format");
+  t.emit(a, { event: "turn.start" });
+  const b = await t.startIn("Fix stock sync with Shopee");
+  expect(t.s.made).toHaveLength(2);
+  expect(t.row(a)?.lane).toMatchObject({ name: "kit/thai-date-format", base: "main", dir: laneDir("kit/thai-date-format") });
+  // never joined to the working lane, never stacked on it
+  expect(t.row(b)?.lane).toMatchObject({ name: "kit/fix-stock-sync-shopee", base: "main", dir: laneDir("kit/fix-stock-sync-shopee") });
+  expect(t.s.started).toEqual([laneDir("kit/thai-date-format"), laneDir("kit/fix-stock-sync-shopee")]);
+  t.emit(a, { event: "turn.end", outcome: "done" });
+  const c = await t.startIn("Rename the pre-order page");
+  expect(t.row(c)?.lane).toMatchObject({ base: "main" });
+  expect(t.s.folders[DEV]).toBe("main");
+});
+
+test("teaches the lane what its test runs said, and forgets the lane when the session closes", async () => {
+  const t = await setup();
+  const id = await t.startIn("Fix the totals");
+  const key = t.ss.chatKey(id)!;
+  t.emit(id, { event: "turn.start" });
+  t.emit(id, { event: "tool.start", tool_id: "t1", name: "terminal", detail: "pnpm test" });
+  expect(testState(laneOf(key))).toBe("running");
+  t.emit(id, { event: "tool.end", tool_id: "t1", name: "", ok: true, ms: 40, output: " Test Files  1 passed (1)\n      Tests  14 passed (14)\n" });
+  expect(laneOf(key).run?.read).toEqual({ kind: "passed", passed: 14 });
+  t.emit(id, { event: "rewound" });
+  expect(testState(laneOf(key))).toBe("none");
+  expect(laneOf(key).revertedAt).toBeTypeOf("number");
+  t.ss.close(id);
+  expect(laneOf(key)).toEqual({ steps: {}, changed: false });
+});
+
+test("a pull request the chat opened itself is linked once it is read in the lane's own repository, and goes when the session closes", async () => {
+  resetChatPulls();
+  resetPulls();
+  const asked: string[] = [];
+  const pulls: Pick<TaskHost, "remote" | "view"> = {
+    remote: async (cwd) => {
+      asked.push(`remote ${cwd}`);
+      return { source: "github", repo: "baanmali/preorder" };
+    },
+    view: async (source, repo, kind, number) => {
+      asked.push(`view ${source} ${repo} ${kind} ${number}`);
+      return { item: { number, title: "Fix the totals", state: "open", url: `https://github.com/${repo}/pull/${number}`, labels: [], author: "kit", created: 0, updated: 0, checks: null, head: "kit/fix-totals", same: true, from: repo }, body: "", comments: [], checks: [] };
+    },
+  };
+  const t = await setup({ pulls });
+  const id = await t.startIn("Fix the totals");
+  const key = t.ss.chatKey(id)!;
+  t.emit(id, { event: "turn.start" });
+  t.emit(id, { event: "tool.start", tool_id: "t1", name: "terminal", detail: "gh pr create --fill" });
+  t.emit(id, { event: "tool.end", tool_id: "t1", name: "", ok: true, ms: 900, command: "gh pr create --fill", output: "https://github.com/baanmali/preorder/pull/12\n" });
+  await new Promise((r) => setTimeout(r, 0));
+  await new Promise((r) => setTimeout(r, 0));
+  // read where the lane works, and one view of the address it printed
+  expect(asked).toEqual([`remote ${laneDir("kit/fix-totals")}`, "view github baanmali/preorder prs 12"]);
+  expect(chatPullOf(key)).toMatchObject({ repo: "baanmali/preorder", number: 12, state: "open" });
+  expect(chatOfPull("github", "baanmali/preorder", 12)).toBe(key);
+  t.ss.close(id);
+  expect(chatPullOf(key)).toBeNull();
+  // a store given no Tasks host reads nothing
+  const quiet = await setup();
+  const q = await quiet.startIn("Fix the totals");
+  quiet.emit(q, { event: "tool.end", tool_id: "t1", name: "", ok: true, ms: 900, command: "gh pr create --fill", output: "https://github.com/baanmali/preorder/pull/12\n" });
+  await new Promise((r) => setTimeout(r, 0));
+  expect(chatPullOf(quiet.ss.chatKey(q))).toBeNull();
+});
+
+test("a test run in the developer's folder is not the lane's", async () => {
+  const t = await setup();
+  const id = await t.startIn("Fix the totals");
+  const key = t.ss.chatKey(id)!;
+  t.emit(id, { event: "turn.start" });
+  t.emit(id, { event: "tool.start", tool_id: "t1", name: "terminal", detail: `cd ${DEV} && pnpm test` });
+  expect(testState(laneOf(key))).toBe("none");
+  t.emit(id, { event: "tool.end", tool_id: "t1", name: "", ok: true, ms: 40, command: `cd ${DEV} && pnpm test`, output: "      Tests  14 passed (14)\n" });
+  expect(laneOf(key).run).toBeUndefined();
+  // run in the lane's own folder, it is
+  t.emit(id, { event: "tool.start", tool_id: "t2", name: "terminal", detail: "cd src && pnpm test" });
+  t.emit(id, { event: "tool.end", tool_id: "t2", name: "", ok: true, ms: 40, output: "      Tests  14 passed (14)\n" });
+  expect(laneOf(key).run?.read).toEqual({ kind: "passed", passed: 14 });
+});
+
+test("closing a lane's session lets its folder go once the agent stopped, when nothing in it would be lost", async () => {
+  const t = await setup();
+  const id = await t.startIn("Fix the totals");
+  const lane = t.row(id)!.lane!;
+  t.ss.close(id);
+  await new Promise((r) => setTimeout(r, 0));
+  await new Promise((r) => setTimeout(r, 0));
+  // the shell is told nothing may be lost and the branch stays: a folder with changes in it is kept
+  expect(t.s.removed).toEqual([{ worktree: lane.worktree, ask: { changed: 0, branch: false, ahead: null } }]);
+  expect(t.s.calls.indexOf("laneRemove")).toBeGreaterThan(t.s.calls.indexOf("chatClose"));
+  // a session with no folder of its own asks nothing
+  const plain = await setup({ branch: "" });
+  plain.ss.close(await plain.startIn("Fix the totals"));
+  await new Promise((r) => setTimeout(r, 0));
+  expect(plain.s.removed).toEqual([]);
+});
+
+test("the dial reads a lane's asks inside its own folder, and the developer's folder is outside it", async () => {
+  const t = await setup();
+  const id = await t.startIn("Fix the totals");
+  const dir = t.row(id)!.lane!.dir!;
+  // a change in the developer's folder: stopped as it is asked, and noted under the project as a lane's
+  t.emit(id, { event: "approval.request", request_id: "r1", title: `Allow Edit to change ${DEV}/src/a.ts?`, command: "", choices: ["deny", "once"], tool: { kind: "edit", name: "Edit", paths: [`${DEV}/src/a.ts`], cwd: dir } });
+  await new Promise((r) => setTimeout(r, 0));
+  expect(t.inputs).toContainEqual({ kind: "approve", request_id: "r1", choice: "deny" });
+  expect(kitProjects()[DEV]?.blocked).toEqual([expect.objectContaining({ what: "edit", path: `${DEV}/src/a.ts`, lane: true })]);
+  // a change in its own folder is inside: at the lowest level it waits on the person, and nothing is noted
+  t.emit(id, { event: "approval.request", request_id: "r2", title: `Allow Edit to change ${dir}/src/a.ts?`, command: "", choices: ["deny", "once"], tool: { kind: "edit", name: "Edit", paths: [`${dir}/src/a.ts`], cwd: dir } });
+  await new Promise((r) => setTimeout(r, 0));
+  expect(t.inputs.filter((i) => i.kind === "approve")).toHaveLength(1);
+  expect(kitProjects()[DEV]?.blocked).toHaveLength(1);
+  expect(kitProjects()[dir]).toBeUndefined();
+});
+
+test("a lane that comes back after a restart works in its own folder again, never in the developer's", async () => {
+  const t = await setup();
+  const dir = laneDir("kit/fix-totals");
+  t.ss.restore([
+    { id: "s7", agent: "claude", cwd: DEV, startedAt: 1, view: "chat", running: true, agentSession: "c0ffee00-1111-4222-8333-444444444444", lane: { name: "kit/fix-totals", base: "main", dir, worktree: dir } },
+  ]);
+  expect(t.row("s7")?.lane).toEqual({ name: "kit/fix-totals", base: "main", dir, worktree: dir });
+  expect(t.row("s7")?.paused).toBe(true);
+  await t.ss.resume("s7");
+  expect(t.s.started).toEqual([dir]);
+});
+
+test("the + menu's Chat with Kit opens a New session chat in the menu's folder, and its first message starts a lane", async () => {
+  const t = await setup();
+  // a draft that was left open with Terminal picked for the agent (its own Chat or Terminal choice)
+  const before = t.ss.draft("claude" as never);
+  t.ss.setOpen(before, "terminal");
+  const id = t.ss.draftChat("claude" as never, "/w/one");
+  // the open draft is reused, in the folder the menu's chip named, and it opens as the app's chat, which is kept for the agent
+  expect(id).toBe(before);
+  expect(t.row(id)).toMatchObject({ agent: "claude", cwd: "/w/one", status: "draft", view: "chat" });
+  expect(t.ss.getState().opens.claude).toBe("chat");
+  expect(t.store.getState().ui).toMatchObject({ view: "session", session: id });
+  // nothing starts until the person says what Kit should do: the lane's branch is named from it
+  expect(t.s.calls).toEqual([]);
+  await t.ss.start(id, "Add a PromptPay QR to the checkout.");
+  const dir = laneDir("kit/add-promptpay-qr-checkout", "/w/one");
+  expect(t.row(id)?.lane).toEqual({ name: "kit/add-promptpay-qr-checkout", base: "main", dir, worktree: dir });
+  expect(t.s.started).toEqual([dir]);
+  expect(t.sent).toEqual(["Add a PromptPay QR to the checkout."]);
+  // a lane: the app's own chat, which the Lanes band lists, and not a terminal, which TERMINALS would list
+  expect(isLaneChat(t.ss.chatKey(id))).toBe(true);
+  expect(isTerminalRec(t.ss.getState().agents, t.row(id)!)).toBe(false);
+});
+
+test("Chat with Kit with no folder named starts where a New session chat does, the last folder used, else home", async () => {
+  const t = await setup();
+  const id = t.ss.draftChat("claude" as never);
+  expect(t.row(id)).toMatchObject({ cwd: "/w", status: "draft" });
+});
+
+test("makes the lane's branch under the prefix the person chose and tells the shell where and whether to start from the remote", async () => {
+  const t = await setup({ settings: { prefix: "team/ana/", root: "/w/lanes", remote: true } });
+  await t.startIn("Fix the totals");
+  expect(t.s.made[0].names[0]).toBe("team/ana/fix-totals");
+  expect(t.s.made[0].start).toEqual({ root: "/w/lanes", remote: true });
+  // a prefix that fails the check is the default
+  const bad = await setup({ settings: { prefix: "Bad Prefix" } });
+  await bad.startIn("Fix the totals");
+  expect(bad.s.made[0].names[0]).toBe("kit/fix-totals");
+  expect(bad.s.made[0].start).toEqual({ root: "", remote: false });
+});
+
+test("the lane's first line says where it started when the remote was asked for", async () => {
+  const from = await setup({ settings: { remote: true }, made: { from: "origin/main" } });
+  expect(from.notes(await from.startIn("Fix the totals"))[0]).toContain("It starts from origin/main as it is on the remote now.");
+  const behind = await setup({ settings: { remote: true }, made: { local: "fetch_failed" } });
+  expect(behind.notes(await behind.startIn("Fix the totals"))[0]).toContain("The remote did not answer in time, so it starts from your own main.");
+  const ahead = await setup({ settings: { remote: true }, made: { local: "ahead" } });
+  expect(ahead.notes(await ahead.startIn("Fix the totals"))[0]).toContain("Your own main has commits the remote does not, so it starts from your own main.");
+  // off: nothing is said about the remote, whatever the shell answered
+  const off = await setup({ made: { local: "no_remote" } });
+  expect(off.notes(await off.startIn("Fix the totals"))[0]).not.toContain("remote");
+});
+
+test("a chosen folder that cannot be used now says so and makes no lane anywhere else", async () => {
+  const t = await setup({
+    settings: { root: "/w/lanes" },
+    laneWorktree: async () => {
+      throw new Error("root_in_checkout");
+    },
+  });
+  const id = await t.startIn("Fix the totals");
+  expect(t.row(id)?.lane).toBeUndefined();
+  expect(t.notes(id).join(" ")).toContain("The folder chosen for lanes cannot be used now, so no lane was made");
+  expect(t.s.started).toEqual([DEV]);
+});
+
+test("a deleted chat's folder goes through the shell's clean-up when it is on, and stays when it is off", async () => {
+  const on = await setup({ release: true });
+  const a = await on.startIn("Fix the totals");
+  on.ss.close(a);
+  await new Promise((r) => setTimeout(r, 0));
+  expect(on.s.released).toEqual([laneDir("kit/fix-totals")]);
+  expect(on.s.removed).toEqual([]);
+  const off = await setup({ release: true, settings: { cleanDeleted: false } });
+  const b = await off.startIn("Fix the totals");
+  off.ss.close(b);
+  await new Promise((r) => setTimeout(r, 0));
+  expect(off.s.released).toEqual([]);
+  expect(off.s.removed).toEqual([]);
+});

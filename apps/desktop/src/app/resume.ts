@@ -1,0 +1,266 @@
+// Pick up where the person left off after manut restarts (an update, a quit and reopen, a crash): one snapshot
+// under `manut.resume` in this computer's storage, with a version and a time. It holds the selected bot, and the
+// session or Home when one of them filled the main column, the right panel, the Plans full view, the composers' unsent text, and the SESSIONS list (agent,
+// folder, account, view, the agent's own conversation id, whether it was running, and the last messages of its
+// chat, which manut draws itself). These functions are pure; resumeBoot.ts reads, writes and applies them.
+import type { PanelTabId, Ui } from "../state/store";
+import { continues, isAgentId, type AgentId } from "../sessions/agents";
+import { isLinkId } from "../sessions/termLink";
+import { cleanShellId } from "../sessions/term/settings";
+import { isObj } from "../lib/guards";
+
+export const RESUME_KEY = "manut.resume";
+export const RESUME_VERSION = 1;
+
+const PANEL_TABS: readonly PanelTabId[] = ["details", "terminal", "schedule", "worktrees", "diff", "runs"];
+/** Every session is kept, however many there are: a row left out of the snapshot would lose its history and
+ *  files at the next boot. Only the newest this many keep their chat's last messages, which is what takes room. */
+const MAX_CHATS = 20;
+const MAX_MESSAGES = 40;
+const MAX_TEXT = 4_000;
+const MAX_DRAFT = 20_000;
+const SESSION_ID = /^s\d{1,9}$/;
+
+export interface SavedMsg {
+  id: string;
+  role: "user" | "assistant";
+  text: string;
+  ts: number;
+}
+
+export interface SavedSession {
+  id: string;
+  /** Its link id (`manut://terminal/<linkId>`); a session saved before links existed has none and gets one back. */
+  linkId?: string;
+  agent: AgentId;
+  cwd: string;
+  startedAt: number;
+  view: "chat" | "terminal";
+  /** Opened as `terminal` (the agent's own terminal, no chat); none = as its agent opens. */
+  open?: "chat" | "terminal";
+  /** Its program ran (or was starting) when manut closed. */
+  running: boolean;
+  /** A New session chat that never started: it comes back as a draft and is never started by the restart. */
+  draft?: boolean;
+  /** Ended ones: how. */
+  failed?: boolean;
+  /** Its CLI could not continue its conversation: it also offers a new one (SessionRec `resumeFailed`). */
+  resumeFailed?: boolean;
+  /** Its conversation was used (SessionRec `used`). */
+  used?: boolean;
+  exitCode?: number | null;
+  error?: string;
+  /** The agent's own conversation id (Claude Code session, Codex thread). */
+  agentSession?: string;
+  /** The Settings › Accounts login it ran as. */
+  account?: string;
+  /** oh-my-hermes: the bot it ran on. */
+  bot?: string;
+  model?: string;
+  /** Its name: the person's (Rename), the agent's own title, a summary of the first message (SessionRec). */
+  title?: string;
+  agentTitle?: string;
+  modelTitle?: string;
+  promptTitle?: string;
+  /** The permission mode and reasoning effort the person picked: set again when it starts. */
+  mode?: string;
+  effort?: string;
+  /** The chat's last messages, text only. */
+  messages?: SavedMsg[];
+  /** A Shell row's shell id (`shells_available`). */
+  shell?: string;
+  /** A chat's lane: its branch, the branch it was made from, and its own working folder (src/code/laneBranch.ts), so a lane
+   *  that comes back works where it did, never in the developer's folder. */
+  lane?: SavedLane;
+  /** A lane a workflow started: the workflow's name (SessionRec `workflow`), so it keeps asking before every change. */
+  workflow?: string;
+  /** Continue with… (item 97, continueWith.ts): the link id of the chat this one continues, and of the chat that continues this
+   *  one, each shown as a quiet line linking the other. */
+  continuedFrom?: string;
+  continuedIn?: string;
+  /** A continued chat's model picked in Continue with: set as its agent starts, before the first message goes. */
+  modelWant?: string;
+}
+
+export interface SavedLane {
+  name: string;
+  base: string;
+  /** Where its agent works, and the worktree that holds it: both, or neither (a lane made before lanes had folders). */
+  dir?: string;
+  worktree?: string;
+}
+
+export interface ResumeSnap {
+  v: typeof RESUME_VERSION;
+  /** ms since epoch */
+  at: number;
+  bot: string | null;
+  /** What filled the main column: the selected member's chat, a terminal session, or Home. */
+  view: "chat" | "session" | "home";
+  session: string | null;
+  panelOpen: boolean;
+  panelTab: PanelTabId;
+  runsFull: boolean;
+  runId: string | null;
+  /** Unsent composer text by chat key (a bot's name, or a session chat's `agent:<id>`). */
+  drafts: Record<string, string>;
+  sessions: SavedSession[];
+}
+
+const str = (v: unknown, max = 4096): string | undefined => (typeof v === "string" && v && v.length <= max ? v : undefined);
+const cut = (s: string, max: number) => (s.length > max ? s.slice(0, max) : s);
+const withoutMessages = ({ messages: _, ...s }: SavedSession): SavedSession => s;
+
+function parseMsg(v: unknown): SavedMsg | null {
+  if (!isObj(v)) return null;
+  const id = str(v.id, 200);
+  if (!id || (v.role !== "user" && v.role !== "assistant") || typeof v.text !== "string" || typeof v.ts !== "number") return null;
+  return { id, role: v.role, text: cut(v.text, MAX_TEXT), ts: v.ts };
+}
+
+const absolute = (p: string | undefined): p is string => !!p && (p.startsWith("/") || /^[A-Za-z]:[\\/]/.test(p));
+
+function parseLane(v: unknown): SavedLane | null {
+  if (!isObj(v)) return null;
+  const name = str(v.name, 200);
+  const base = str(v.base, 200);
+  if (!name?.startsWith("kit/") || !base) return null;
+  const dir = str(v.dir);
+  const worktree = str(v.worktree);
+  return absolute(dir) && absolute(worktree) ? { name, base, dir, worktree } : { name, base };
+}
+
+function parseSession(v: unknown): SavedSession | null {
+  if (!isObj(v)) return null;
+  const id = str(v.id, 12);
+  const cwd = str(v.cwd);
+  if (!id || !SESSION_ID.test(id) || !isAgentId(v.agent) || !cwd || typeof v.startedAt !== "number") return null;
+  const out: SavedSession = {
+    id,
+    agent: v.agent,
+    cwd,
+    startedAt: v.startedAt,
+    view: v.view === "terminal" ? "terminal" : "chat",
+    running: v.running === true,
+  };
+  if (isLinkId(v.linkId)) out.linkId = v.linkId;
+  if (v.open === "chat" || v.open === "terminal") out.open = v.open;
+  if (v.failed === true) out.failed = true;
+  if (v.resumeFailed === true && v.running !== true) out.resumeFailed = true;
+  if (v.used === true) out.used = true;
+  if (v.draft === true) {
+    out.draft = true;
+    out.running = false;
+  }
+  if (typeof v.exitCode === "number" || v.exitCode === null) out.exitCode = v.exitCode;
+  const error = str(v.error, MAX_TEXT);
+  if (error) out.error = error;
+  for (const k of ["agentSession", "account", "bot", "model", "title", "modelTitle", "agentTitle", "promptTitle", "mode", "effort", "workflow", "continuedFrom", "continuedIn", "modelWant"] as const) {
+    const s = str(v[k], 200);
+    if (s) out[k] = s;
+  }
+  const shell = cleanShellId(v.shell);
+  if (shell) out.shell = shell;
+  const lane = parseLane(v.lane);
+  if (lane) out.lane = lane;
+  if (Array.isArray(v.messages)) {
+    const msgs = v.messages.map(parseMsg).filter((m): m is SavedMsg => !!m).slice(-MAX_MESSAGES);
+    if (msgs.length) out.messages = msgs;
+  }
+  return out;
+}
+
+/** The saved snapshot, or null when there is none, it is malformed, or it is from another version. */
+export function parseResume(raw: string | null | undefined): ResumeSnap | null {
+  if (!raw) return null;
+  let v: unknown;
+  try {
+    v = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!isObj(v) || v.v !== RESUME_VERSION || typeof v.at !== "number" || !Number.isFinite(v.at)) return null;
+  if (v.bot !== null && typeof v.bot !== "string") return null;
+  if (!Array.isArray(v.sessions) || !isObj(v.drafts)) return null;
+  const sessions: SavedSession[] = [];
+  for (const s of v.sessions.map(parseSession)) if (s && !sessions.some((x) => x.id === s.id)) sessions.push(s);
+  const drafts: Record<string, string> = {};
+  for (const [k, d] of Object.entries(v.drafts)) if (k && typeof d === "string" && d) drafts[k] = cut(d, MAX_DRAFT);
+  const session = typeof v.session === "string" && sessions.some((s) => s.id === v.session) ? v.session : null;
+  return {
+    v: RESUME_VERSION,
+    at: v.at,
+    bot: v.bot || null,
+    view: v.view === "session" && session ? "session" : v.view === "home" ? "home" : "chat",
+    session,
+    panelOpen: v.panelOpen === true,
+    panelTab: PANEL_TABS.includes(v.panelTab as PanelTabId) ? (v.panelTab as PanelTabId) : "details",
+    runsFull: v.runsFull === true,
+    runId: typeof v.runId === "string" && v.runId ? v.runId : null,
+    drafts,
+    sessions: sessions.map((s, n) => (n < MAX_CHATS ? s : withoutMessages(s))),
+  };
+}
+
+/** What the store restores once the bot list is known: a bot that is gone takes its panel, Plans view and
+ *  draft with it (the app then opens the first bot as on a fresh start). */
+export function forBots(snap: ResumeSnap, bots: readonly string[]): ResumeSnap {
+  const known = !!snap.bot && bots.includes(snap.bot);
+  const sessionKeys = new Set(snap.sessions.map((s) => `agent:${s.id}`));
+  const drafts = Object.fromEntries(Object.entries(snap.drafts).filter(([k]) => bots.includes(k) || sessionKeys.has(k)));
+  return known
+    ? { ...snap, drafts }
+    : { ...snap, bot: null, panelOpen: false, runsFull: false, runId: null, drafts };
+}
+
+/** What the snapshot is built from (resumeBoot.ts reads the app store, SESSIONS and the drafts). */
+export interface ResumeInput {
+  bot: string | null;
+  bots: readonly string[];
+  view: Ui["view"];
+  session: string | null;
+  panelOpen: boolean;
+  panelTab: PanelTabId;
+  runsFull: boolean;
+  runId: string | null;
+  drafts: Record<string, string>;
+  sessions: Omit<SavedSession, "messages">[];
+  /** A session chat's messages by session id. */
+  messages: (id: string) => SavedMsg[] | undefined;
+}
+
+export function buildResume(i: ResumeInput, now: number): ResumeSnap {
+  const sessions: SavedSession[] = i.sessions.map((s, n) => {
+    if (n >= MAX_CHATS) return { ...s };
+    const msgs = i
+      .messages(s.id)
+      ?.filter((m) => m.text)
+      .slice(-MAX_MESSAGES)
+      .map((m) => ({ id: m.id, role: m.role, text: cut(m.text, MAX_TEXT), ts: m.ts }));
+    return msgs?.length ? { ...s, messages: msgs } : { ...s };
+  });
+  const ids = new Set(sessions.map((s) => s.id));
+  const session = i.view === "session" && i.session && ids.has(i.session) ? i.session : null;
+  const keep = (k: string) => i.bots.includes(k) || (k.startsWith("agent:") && ids.has(k.slice(6)));
+  return {
+    v: RESUME_VERSION,
+    at: now,
+    bot: i.bot,
+    // Settings and the other menu pages are places you pass through: a restart opens the chat (or session) behind
+    // them. Home is where the app starts, so a restart that left it open comes back to it.
+    view: session ? "session" : i.view === "home" ? "home" : "chat",
+    session,
+    panelOpen: i.panelOpen,
+    panelTab: i.panelTab,
+    runsFull: i.runsFull,
+    runId: i.runId,
+    drafts: Object.fromEntries(Object.entries(i.drafts).filter(([k, d]) => d && keep(k)).map(([k, d]) => [k, cut(d, MAX_DRAFT)])),
+    sessions,
+  };
+}
+
+/** Chats whose agent continues a conversation (Claude Code, Codex, OmO: `CONTINUES`; a generic ACP agent whose row
+ *  says so) continue it by themselves after a restart; anything else waits for Resume. The caller checks the agent
+ *  runs as a chat on this machine. */
+export const continuesItself = (s: Pick<SavedSession, "agent" | "view" | "agentSession">): boolean =>
+  continues(s.agent) && !!s.agentSession;

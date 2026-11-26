@@ -1,0 +1,688 @@
+/* The side menu's pages (src/pages/*Page.tsx): the design canvas's screen frame and the component classes those pages
+   use, copied from the canvas's own sheet (packages/ui-kit/app.css: .top, .acts, .col, .pane, .band, .rowl, .grow,
+   .tag, .empty, .ic) and scoped under .mpage, so they cannot reach the rest of the app. The canvas's short token
+   names map onto the desktop's (src/theme/tokens.css): --mut is --aui-muted, --band is --aui-subtle, and the canvas's
+   surface --bg is --aui-surface, because the desktop's own --bg is the page ground. Lines that are the desktop's own
+   rather than the canvas's say so. */
+
+.mpage {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--main);
+  color: var(--ink);
+  /* The canvas's root type (.r): the desktop's body text is 13px, and the canvas's screens are 14px. */
+  font-size: 14px;
+  line-height: 1.5;
+}
+.mpage .ic {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* The top bar holds the page's name, then what acts on the page at its right. */
+.mpage .top {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  min-height: 52px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--line);
+}
+.mpage .top h1 {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  font-weight: 500;
+  letter-spacing: 0;
+}
+.mpage .acts {
+  margin-left: auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+/* The desktop's own: the page scrolls under its top bar, which stays. */
+.mpage-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* A page is laid out as a centred reading column or as a list across the page. */
+.mpage .col {
+  width: 100%;
+  max-width: 736px;
+  margin: 0 auto;
+  padding: 24px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.mpage .pane {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 12px 24px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The desktop's own: a list of rows inside either layout, as tight as the canvas's .pane. */
+.mpage .rows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* A grey section header, and a row: a whole row is one button that opens what it names. */
+.mpage .band {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 32px;
+  padding: 0 10px;
+  border-radius: var(--rad);
+  background: var(--aui-subtle);
+  color: var(--aui-muted);
+  font-size: 13px;
+}
+/* The desktop's own: History's days, each a band over its rows, 12px apart as the canvas spaces them. */
+.mpage .day {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.mpage .day + .day {
+  margin-top: 12px;
+}
+/* The desktop's own: one quiet line where a list has nothing to show for what was asked of it. */
+.mpage .none {
+  margin: 0;
+  padding: 8px 10px;
+  color: var(--aui-muted);
+  font-size: 13px;
+}
+/* The desktop's own: under a list of the shop's work, one quiet line that says there is older work than the list holds (or that
+   nothing older is left) and the button that reads it. */
+.mpage .older {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-top: 12px;
+  padding: 8px 10px;
+}
+.mpage .older p {
+  flex: 1 1 240px;
+  margin: 0;
+  color: var(--aui-muted);
+  font-size: 13px;
+}
+.mpage .older[data-state="failed"] p {
+  color: var(--aui-danger);
+}
+.mpage .rowl {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  min-height: 44px;
+  padding: 8px 10px;
+  border-radius: var(--rad);
+  /* The desktop's own: rows are buttons here, not the canvas's links. */
+  width: 100%;
+  text-align: left;
+}
+.mpage button.rowl:hover {
+  background: var(--hov);
+}
+.mpage .grow {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+/* The desktop's own: a row's two lines, its quiet trailing words, and the chevron of a row that opens a page. */
+.mpage .l1 {
+  display: block;
+  font-weight: 500;
+}
+.mpage .l2 {
+  display: block;
+  color: var(--aui-muted);
+  font-size: 13px;
+}
+.mpage .when {
+  color: var(--aui-muted);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.mpage .rowl > .ic:last-child {
+  color: var(--aui-muted);
+}
+.mpage .l1 code,
+.mpage .l2 code {
+  font-size: 12px;
+}
+
+/* The desktop's own: a member's row on the Team page. The row opens the member's chat, and a More button beside it opens
+   the member's menu (a new thread, Pin to top, Restart), which hangs under the row. */
+.mpage .tli {
+  position: relative;
+}
+.mpage .trow {
+  flex-wrap: nowrap;
+  gap: 0;
+  padding: 0 4px 0 0;
+}
+.mpage .trow:hover {
+  background: var(--hov);
+}
+.mpage .trow .rowmain {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  min-height: 44px;
+  padding: 8px 6px 8px 10px;
+  border-radius: var(--rad);
+  text-align: left;
+}
+.mpage .trow .more {
+  flex: none;
+  width: 28px;
+  height: 28px;
+}
+.mpage .trow .more[aria-expanded="true"] {
+  background: var(--hov);
+  color: var(--ink);
+}
+.mpage .tmenu {
+  position: absolute;
+  z-index: 20;
+  right: 8px;
+  top: calc(100% - 6px);
+  width: 208px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  background: var(--pop);
+  border: 1px solid var(--line);
+  border-radius: var(--rad);
+  box-shadow: var(--pop-shadow);
+  --rise-by: calc(var(--arrive-by) * -1);
+  animation: var(--anim-arrive);
+}
+.mpage .tmenu-i {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  padding: 0 8px;
+  border-radius: var(--rad-sm);
+  color: var(--body);
+  font-size: 13px;
+  text-align: left;
+}
+.mpage .tmenu-i:hover,
+.mpage .tmenu-i:focus-visible {
+  background: var(--hov);
+  color: var(--ink);
+  outline: 0;
+}
+.mpage .tmenu-i .nt-ic {
+  flex: none;
+  color: var(--aui-muted);
+}
+.mpage .tmenu-l {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The desktop's own: History's filter chips (the canvas's .fchip, scoped) beside the page's name, and a row's kind tag, a fixed
+   width so the titles line up. */
+.mpage .chipset {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.mpage .fchip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: var(--rad-pill);
+  border: 1px solid var(--line);
+  font-size: 13px;
+  color: var(--aui-muted);
+}
+.mpage .fchip:hover {
+  background: var(--hov);
+}
+.mpage .fchip[aria-pressed="true"] {
+  background: var(--aui-subtle);
+  color: var(--ink);
+  font-weight: 500;
+}
+.mpage .tag.kind {
+  flex: 0 0 52px;
+  justify-content: center;
+}
+/* A member's role sits beside their name on the first line, as the canvas sets it, and what they are doing is the second line,
+   with how long it has run or how many more asks wait quietly at its end. Look first sits between the row and its menu. */
+.mpage .l1 .role {
+  margin-left: 6px;
+  color: var(--aui-muted);
+  font-weight: 400;
+}
+.mpage .l2.doing {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.mpage .l2.doing .words {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mpage .l2.doing .when {
+  flex: none;
+}
+.mpage .trow .look {
+  flex: none;
+  margin: 0 6px;
+}
+/* A pinned member's small dot after their name, as the sidebar's rows had one. */
+.mpage .pinmark {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin: 0 0 2px 6px;
+  border-radius: 50%;
+  background: var(--aui-muted);
+  vertical-align: middle;
+}
+
+/* Status words, coloured as the canvas colours them. */
+.mpage .tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border-radius: var(--rad-pill);
+  background: var(--aui-subtle);
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.mpage .tag.ok {
+  background: var(--okbg);
+  color: var(--aui-success);
+}
+.mpage .tag.run {
+  background: var(--bluebg);
+  color: var(--aui-info);
+}
+.mpage .tag.run::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: var(--rad-pill);
+  background: currentColor;
+  animation: var(--anim-pulse);
+}
+.mpage .tag.warn {
+  background: var(--warnbg);
+}
+.mpage .tag.err {
+  background: var(--errbg);
+  color: var(--aui-danger);
+}
+
+/* An empty page shows its row's drawing, what will be here, and why it is empty. The heading is an h2 under the
+   page's h1, because the canvas's h3 would skip a level here. */
+.mpage .empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 32px 20px;
+  text-align: center;
+}
+.mpage .empty .ico {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--rad-lg);
+  background: var(--aui-subtle);
+  color: var(--aui-muted);
+}
+.mpage .empty h2 {
+  margin: 4px 0 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+.mpage .empty p {
+  margin: 0;
+  max-width: 40ch;
+  color: var(--aui-muted);
+  font-size: 13.5px;
+}
+
+/* History's search box, as the canvas's History board draws it: a bordered box holding the magnifier and the field.
+   The focus ring goes round the box, not the borderless field inside it */
+.mpage .find {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--rad);
+  background: var(--aui-surface);
+  color: var(--aui-muted);
+}
+.mpage .find:focus-within {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.mpage .find input {
+  width: 220px;
+  max-width: 100%;
+  min-height: 32px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--ink);
+  font-size: 13px;
+}
+.mpage .find input::placeholder {
+  color: var(--aui-placeholder);
+}
+
+/* The desktop's own: the Code page holds the terminal list the sidebar used to, as its own section. */
+.mpage .terms {
+  display: flex;
+  flex-direction: column;
+}
+
+/* The desktop's own (item 76): a History row's quiet "more" button and the rows' marks. The button shows on hover, on focus and
+   while its menu is open; a chat set aside as done for now is small and quiet, as it is in Recent. */
+.mpage .hist-li {
+  position: relative;
+}
+.mpage .hist-li .hist-more {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  transform: translateY(-50%);
+  width: 24px;
+  height: 24px;
+  border-radius: var(--r-sm);
+  color: var(--aui-muted);
+  opacity: 0;
+}
+.mpage .hist-li:hover .hist-more,
+.mpage .hist-li .hist-more:focus-visible {
+  opacity: 1;
+}
+.mpage .hist-li:hover .rowl,
+.mpage .hist-li:focus-within .rowl {
+  padding-right: 36px;
+}
+.mpage .hist-li[data-place="settled"] .rowl {
+  opacity: 0.7;
+}
+/* Several rows selected (item 94): the kit's selected row (KitLists, data-sel and its blue band) */
+.mpage .hist-li[data-sel="true"] .rowl {
+  background: var(--bluebg);
+}
+.mpage .archive .band .lk {
+  font: inherit;
+}
+
+/* Loading, in the shape of what is coming (StatesSystem.dc.html): the shimmer itself is the Motion board's, named in
+   markup as .mo-loading; here only its sizes. */
+.mpage .skels {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 8px 10px;
+}
+.mpage .skel.wide {
+  width: 100%;
+  height: 32px;
+}
+.mpage .skel-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.mpage .skel.dot {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--rad-pill);
+}
+.mpage .skel-lines {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.mpage .skel-lines .skel {
+  width: var(--w, 60%);
+  height: 12px;
+}
+
+/* A page's body comes in quietly the first time it opens in a session (the header stays still, an anchor for the eye):
+   a short fade where it stands, the Arrive of the Motion board with no distance. Its rows rise on top, each in turn. */
+.mpage-body.arriving {
+  --rise-by: 0px;
+  animation: var(--anim-arrive);
+}
+
+/* The Code page's coding plans (CodePage.tsx, item 85i): the usage marks the side menu's foot carried, under a grey band.
+   A ring near its limit is the colour of Needs you and a limited one the colour of failed, the two of the four meanings
+   it can have. The card opens over the marks at a reading width, not across the whole column. */
+.mpage .code-plans {
+  --usage-amber: var(--aui-warning);
+  --usage-red: var(--aui-danger);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.mpage .code-plans .usage {
+  margin: 0;
+  padding: 4px 6px;
+}
+.mpage .code-plans .usage-card {
+  left: 0;
+  right: auto;
+  width: 320px;
+}
+/* Each tool by its own mark inside its ring, then its name, a quiet pill (the owner's request of 26 Nov 2026: each provider
+   by its own logo). With no ring the mark stands alone in the ring's place, so every name starts on the same line. */
+.mpage .code-plans .usage-m.named {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: auto;
+  height: 30px;
+  padding: 0 10px 0 2px;
+  border-radius: var(--rad-pill);
+}
+.mpage .code-plans .usage-m.named > * {
+  grid-area: auto;
+}
+.mpage .code-plans .usage-disc {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  flex: none;
+}
+.mpage .code-plans .usage-disc > * {
+  grid-area: 1 / 1;
+}
+.mpage .code-plans .usage-name {
+  font-size: 13px;
+}
+
+/* The Code page (item 85i): Kit's lanes come first under their grey band, with the canvas's empty state while there are
+   none (StatesCode, Code), then the terminals' list under a grey band in sentence case, not the old capitals. */
+.mpage .lanes-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.mpage .terms .side-sh {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 32px;
+  padding: 0 4px 0 10px;
+  border-radius: var(--rad);
+  background: var(--aui-subtle);
+  color: var(--aui-muted);
+  font-size: 13px;
+  font-weight: 400;
+  letter-spacing: normal;
+  text-transform: none;
+  height: auto;
+}
+
+/* A read that failed in a way the app did not word for people (MenuPage.tsx `LoadFailed`, item 85i): the system-states
+   board's banner (StatesSystem, "Something went wrong"; packages/ui-kit app.css `.banner.err`), then the runtime's own
+   words under a small Details. */
+.mpage .failed {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.mpage .banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--rad-lg);
+  background: var(--aui-subtle);
+  font-size: 13.5px;
+}
+.mpage .banner.err {
+  border-color: transparent;
+  background: var(--errbg);
+  color: var(--aui-danger);
+}
+.mpage .banner.err .btn {
+  color: var(--ink);
+}
+.mpage .failed-d {
+  padding: 0 12px;
+  color: var(--aui-muted);
+  font-size: 12px;
+}
+.mpage .failed-d summary {
+  cursor: pointer;
+  width: max-content;
+}
+.mpage .failed-d code {
+  display: block;
+  margin-top: 4px;
+  font-family: var(--aui-font-mono);
+  overflow-wrap: anywhere;
+}
+
+/* The Code page's "Outside Manut AI" lines under the plans (src/usage/OutsideUse.tsx, item 106): quiet, second-line text in the
+   muted colour, a row per tool, and a plain table on a click. No colour: nothing here is one of the four meanings. */
+.mpage .code-plans .out,
+.mpage .code-plans .out-off {
+  margin: 4px 10px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.mpage .code-plans .out-off {
+  display: block;
+  line-height: 1.5;
+}
+.mpage .code-plans .out-note {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.mpage .code-plans .out-r1 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+}
+.mpage .code-plans .out-name {
+  color: var(--ink);
+  font-weight: 600;
+}
+.mpage .code-plans .out-n {
+  flex: 1;
+  color: var(--muted);
+}
+.mpage .code-plans .out-link {
+  font: inherit;
+  font-size: 13px;
+  color: var(--muted);
+  text-decoration: underline;
+  text-decoration-color: var(--line-strong);
+  text-underline-offset: 2px;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+.mpage .code-plans .out-link:hover {
+  color: var(--ink);
+}
+.mpage .code-plans .out-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0 0 8px;
+  font-size: 13px;
+}
+.mpage .code-plans .out-table th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--muted);
+  padding: 6px 8px;
+  background: var(--aui-subtle);
+}
+.mpage .code-plans .out-table td {
+  padding: 6px 8px;
+  color: var(--body);
+}
+.mpage .code-plans .out-table .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}

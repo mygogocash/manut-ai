@@ -1,0 +1,96 @@
+[package]
+name = "manut"
+version = "0.1.1"
+edition = "2021"
+
+[lib]
+name = "manut_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+serde = { version = "1", features = ["derive"] }
+# raw_value: the outpost reads a redeemed password as raw JSON borrowed from a buffer that is wiped, and writes it out
+# itself, so no copy is left that is not (outpost/api.rs). Tauri already builds serde_json with it.
+serde_json = { version = "1", features = ["raw_value"] }
+regex = "1"
+tauri-plugin-opener = "2"
+tauri-plugin-notification = "2"
+portable-pty = "0.9"
+tauri-plugin-dialog = "2"
+tauri-plugin-process = "2"
+# manut://terminal/<id> links: the OS hands them to manut (term_link.rs takes only that shape)
+tauri-plugin-deep-link = "2"
+# Settings › Terminal › Import from…: iTerm2 / Apple Terminal prefs (term_import.rs); already in the tree via tauri
+plist = "1"
+# Tasks › 나: a non-active GitHub account's token is wiped from memory when its one `gh` call ends (gh_me.rs); already in
+# the tree via tauri
+zeroize = "1"
+# A rewind's copy of a folder that is not a git repository keeps each content once, under its sha256
+# (turn_files.rs); already in the tree via tauri
+sha2 = "0.10"
+# Settings › MCP and Skills reads the names of the MCP servers in Codex's own `config.toml` (agent_config.rs); already in
+# the tree via tauri
+toml = "1"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+# macOS: the connected runtime keeps its API session in the login keychain, as one generic password item only this
+# app's commands name (api_link.rs). Other systems have no keychain support yet, so Connected cannot sign in there.
+[target.'cfg(target_os = "macos")'.dependencies]
+security-framework = "3"
+# Computer use (computer/mac.rs, docs/computer-use.md): the Core Foundation types its calls into the accessibility API,
+# CoreGraphics and ImageIO pass, and the windows' dictionaries they read. Already in the tree (security-framework builds
+# on it, and api_link.rs's tests use it), so nothing new is built.
+core-foundation = "0.10"
+# The outpost's browser reads its page through WKWebView's own callAsyncJavaScript, in a content world of its own,
+# through Tauri's with_webview (outpost/browser.rs). These are the crates wry already builds on, at the versions
+# Cargo.lock holds; they are named here only to reach that method and WKContentWorld (docs/decisions.md, 24 Nov 2026),
+# and the navigation delegate whose navigation action says whether the page or one of its frames is navigating (the
+# features wry itself turns on, so nothing new is built).
+objc2 = { version = "0.6", features = ["exception"] }
+block2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSDictionary", "NSError", "NSObject", "NSURL", "NSURLRequest", "NSLocale", "NSSet", "NSEnumerator", "NSOperation"] }
+objc2-web-kit = { version = "0.3", default-features = false, features = ["std", "block2", "objc2-app-kit", "WKWebView", "WKContentWorld", "WKFrameInfo", "WKNavigation", "WKNavigationAction", "WKNavigationDelegate", "WKNavigationResponse", "WKDownload"] }
+# Voice in the chat box (voice.rs, docs/voice.md): the Mac's own speech recognition (Speech), the microphone's audio
+# handed to it in memory (AVFAudio's AVAudioEngine) and the microphone's permission (AVFoundation's AVCaptureDevice).
+# The objc2 project's bindings to Apple's frameworks, as the crates above (Zlib OR Apache-2.0 OR MIT); only the classes
+# voice.rs names are built. objc2's `exception` (wry already turns it on) catches a tap the input device refuses.
+objc2-speech = { version = "0.3", default-features = false, features = ["std", "block2", "objc2-avf-audio", "SFSpeechRecognizer", "SFSpeechRecognitionRequest", "SFSpeechRecognitionResult", "SFSpeechRecognitionTask", "SFSpeechRecognitionTaskHint", "SFTranscription"] }
+objc2-avf-audio = { version = "0.3", default-features = false, features = ["std", "block2", "AVAudioEngine", "AVAudioNode", "AVAudioIONode", "AVAudioBuffer", "AVAudioFormat", "AVAudioTime", "AVAudioTypes"] }
+objc2-av-foundation = { version = "0.3", default-features = false, features = ["std", "block2", "AVCaptureDevice", "AVMediaFormat"] }
+# Computer use (computer/mac.rs): a running program's bundle identifier as the system knows it
+# (NSRunningApplication's `bundleIdentifier`), for any kind of bundle, so macOS's own prompts that are not `.app`s are
+# recognised. The objc2 project's AppKit bindings, already in the tree through objc2-web-kit; only this class is named.
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "libc", "NSRunningApplication"] }
+# Reaching this Mac from a phone (remote_keys.rs): the relay key is made and signs in the shell, through Security's
+# `SecKeyCreateWithData`, which security-framework does not wrap. Already in the tree (security-framework builds on it,
+# and api_link.rs's tests used it), so nothing new is built and Cargo.lock does not change.
+security-framework-sys = "2"
+
+# In-app updates (docs/releasing.md): reads the endpoint and the pinned public key in tauri.conf.json and installs only
+# a build signed with the matching private key. Desktop only, as Tauri's own guide says; lib.rs registers it.
+[target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
+tauri-plugin-updater = "2"
+
+[dev-dependencies]
+# Only lib.rs's tests: Tauri's mock runtime (`tauri::test`), so a command can be sent through Tauri's own check as a framed
+# page's call arrives, and seen refused. The feature adds no crate (Cargo.lock is unchanged).
+tauri = { version = "2", features = ["test"] }
+
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+# Only api_link.rs's tests: they make a throwaway keychain and must take it off the search list again (the sys crate is a
+# dependency of the app's own above).
+core-foundation = "0.10"
+
+# Windows and Linux: a link opened while manut runs starts a second manut; this hands its link to the first one.
+[target.'cfg(any(target_os = "windows", target_os = "linux"))'.dependencies]
+tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
+
+# Linux: the opener plugin's own launcher list, run with the AppImage environment taken out (src/appimage.rs).
+[target.'cfg(target_os = "linux")'.dependencies]
+open = "5"

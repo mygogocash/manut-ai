@@ -1,0 +1,66 @@
+/* The Artifacts page (ArtifactsPage.tsx), on the menu pages' frame (menuPages.css) and their buttons (home.css, mission.css). What is
+   here is the page's own: the line that says why Share cannot be used, the ask, and a link's address. */
+
+.mpage .art-why {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  padding: 10px 12px;
+  border-radius: var(--rad);
+  background: var(--aui-subtle);
+  color: var(--aui-muted);
+  font-size: 13px;
+}
+
+/* The ask: what will be published and the yes or no, framed so it reads as a question waiting for the person. */
+.mpage .art-ask {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--aui-border, var(--aui-subtle));
+  border-radius: var(--rad);
+  overflow-wrap: anywhere;
+}
+.mpage .art-ask dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 2px 12px;
+  margin: 0;
+  font-size: 13px;
+}
+.mpage .art-ask dt {
+  color: var(--aui-muted);
+}
+.mpage .art-ask dd {
+  margin: 0;
+}
+.mpage .art-warn {
+  margin: 0;
+  font-size: 13px;
+}
+.mpage .art-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.mpage .art-msg {
+  margin: 0;
+  font-size: 13px;
+}
+.mpage .art-msg.err {
+  color: var(--aui-danger);
+}
+.mpage .art-msg.ok {
+  color: var(--aui-success);
+}
+
+/* A link is long and unbroken: it wraps anywhere rather than push the row's buttons off the page. */
+.mpage .art-url {
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
