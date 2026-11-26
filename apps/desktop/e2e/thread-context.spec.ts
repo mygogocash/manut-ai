@@ -121,8 +121,10 @@ test("from the keyboard: Cmd+Shift+N opens the note, Esc closes it, and a chip i
   await page.reload();
   await chatOpen(page);
   await expect(page.getByTestId("carry-chip")).toContainText("“order page” · keep this");
-  // Tab reaches its x, and the chip goes
-  await page.getByTestId("carry-remove").focus();
+  // Shift+Tab from the box reaches the chip's x, and Enter takes the chip away
+  await page.getByTestId("composer").focus();
+  for (let i = 0; i < 4 && !(await page.evaluate(() => document.activeElement?.getAttribute("data-testid") === "carry-remove")); i++) await page.keyboard.press("Shift+Tab");
+  await expect(page.getByTestId("carry-remove")).toBeFocused();
   await page.keyboard.press("Enter");
   await expect(page.getByTestId("carry-chip")).toHaveCount(0);
   await page.reload();
@@ -179,7 +181,7 @@ test("Bring context from… in the + menu, by keyboard only", async ({ page }) =
   await page.keyboard.press("Shift+Tab");
   await expect(page.getByTestId("attach")).toBeFocused();
   await page.keyboard.press("Enter");
-  await page.getByTestId("attach-bring").focus();
+  await tabTo(page, "attach-bring");
   await page.keyboard.press("Enter");
   await expect(page.getByTestId("bring-search")).toBeFocused();
   await page.keyboard.type("receipt");
@@ -191,12 +193,21 @@ test("Bring context from… in the + menu, by keyboard only", async ({ page }) =
   // Esc closes the list and brings nothing
   await page.keyboard.press("Shift+Tab");
   await page.keyboard.press("Enter");
-  await page.getByTestId("attach-bring").focus();
+  await tabTo(page, "attach-bring");
   await page.keyboard.press("Enter");
   await page.keyboard.press("Escape");
   await expect(page.getByTestId("bring-pop")).toHaveCount(0);
   await expect(page.getByTestId("carry-chip")).toHaveCount(1);
 });
+
+/** Tab until `id` has the focus, as a person with no mouse moves through a menu. */
+async function tabTo(page: Page, id: string) {
+  for (let i = 0; i < 8; i++) {
+    if (await page.evaluate((t) => document.activeElement?.getAttribute("data-testid") === t, id)) return;
+    await page.keyboard.press("Tab");
+  }
+  await expect(page.getByTestId(id).first()).toBeFocused();
+}
 
 const ROOT = "/home/you/code/baanmali-preorder";
 
@@ -234,11 +245,14 @@ test("Continue with, by keyboard: a new chat in the same lane with the old one's
   const old = await codingChat(page, "Fix the totals");
   const before = (await sessionCalls(page)).filter((c) => c.op === "chat.start").length;
   // the agent chip opens Continue with…; its first row takes the focus
-  await page.getByTestId("session-agent-fixed").focus();
+  await page.getByTestId("composer").focus();
+  await tabTo(page, "session-agent-fixed");
   await page.keyboard.press("Enter");
   await expect(page.getByTestId("continue-menu")).toBeVisible();
-  const codex = page.locator("[data-testid=continue-pick][data-agent=codex]");
-  await codex.focus();
+  await expect(page.getByTestId("continue-pick").first()).toBeFocused();
+  // Tab to Codex, past the other models of Claude Code
+  for (let i = 0; i < 6 && !(await page.evaluate(() => document.activeElement?.getAttribute("data-agent") === "codex")); i++) await page.keyboard.press("Tab");
+  await expect(page.locator("[data-testid=continue-pick][data-agent=codex]")).toBeFocused();
   await page.keyboard.press("Enter");
 
   // a New session chat on Codex, its context above the box, unsent
