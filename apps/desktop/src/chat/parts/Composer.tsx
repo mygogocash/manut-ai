@@ -79,6 +79,7 @@ export function Composer({
   boxKind = "member",
   limit,
   scope = {},
+  waitNote = null,
 }: {
   bot: Bot;
   running: boolean;
@@ -141,6 +142,9 @@ export function Composer({
   /** The shop or coding account this chat belongs to (chat/box/scope.ts): a chip made under another is shown refused and
    *  never sent. */
   scope?: Scope;
+  /** Why Send waits now (a lane's other chat works there, item 97): the box keeps what is typed, Send and Enter do nothing, and
+   *  this line under the box says why. */
+  waitNote?: string | null;
 }) {
   // unsent text survives switching chats and restarts (drafts.ts; the composer is keyed by its chat)
   const [text, setText] = useState(() => getDraft(bot.name));
@@ -515,7 +519,7 @@ export function Composer({
 
   /** Send with Enter or Cmd+Enter (`key`): while an answer runs they choose between waiting for it and adding it now. */
   const send = async (key: "enter" | "cmd" = "enter") => {
-    if (!has || offline || sending) return;
+    if (!has || offline || sending || waitNote) return;
     const how = running ? whileRunning(key, steers, follow) : undefined;
     vc.sending();
     if (threadCmd && onNewThread) {
@@ -753,7 +757,7 @@ export function Composer({
       className="send"
       aria-label={t("cmp.send")}
       title={t("cmp.send")}
-      disabled={!has || offline || sending}
+      disabled={!has || offline || sending || !!waitNote}
       onClick={() => void send()}
       data-testid="send"
     >
@@ -892,6 +896,11 @@ export function Composer({
               {t("later.sendAt", { when: limit.until })}
             </button>
           )}
+        </div>
+      )}
+      {waitNote && (
+        <div className="cmp-keys" role="note" data-testid="composer-lane-wait">
+          {waitNote}
         </div>
       )}
       {aside && (

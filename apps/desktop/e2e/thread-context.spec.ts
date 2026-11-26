@@ -198,6 +198,102 @@ test("Bring context from… in the + menu, by keyboard only", async ({ page }) =
   await expect(page.getByTestId("carry-chip")).toHaveCount(1);
 });
 
+const ROOT = "/home/you/code/baanmali-preorder";
+
+/** A coding chat with Claude Code in a lane of ROOT, started with `first` and opened, as the + menu's Chat with Kit does. */
+async function codingChat(page: Page, first: string): Promise<string> {
+  await page.addInitScript((root) => {
+    localStorage.removeItem("manut.kit.projects");
+    (window as any).__manutBranches = { [root]: "main" };
+    (window as any).__manutMockTaken = [];
+  }, ROOT);
+  await page.goto("/");
+  await chatOpen(page);
+  const id = await page.evaluate(
+    async ([root, text]) => {
+      const s = (window as any).__manutSessions;
+      await s.loadAgents();
+      const id = s.draftChat("claude", root);
+      await s.start(id, text);
+      return id as string;
+    },
+    [ROOT, first],
+  );
+  await page.evaluate(async (i) => {
+    const store = (await import(/* @vite-ignore */ "/src/state/store.ts" as string)) as { getStore(): { actions: { openSession(id: string): void } } };
+    store.getStore().actions.openSession(i);
+  }, id);
+  await expect(page.getByTestId("bubble-bot").last()).toContainText("You said: Fix the totals");
+  return id;
+}
+type Call = { op: string; agent?: string; cwd?: string };
+const sessionCalls = (page: Page) => page.evaluate(() => ((window as unknown as { __manutSessionCalls?: Call[] }).__manutSessionCalls ?? []));
+const recOf = (page: Page, id: string) => page.evaluate((i) => (window as any).__manutSessions.getState().list.find((r: { id: string }) => r.id === i), id);
+
+test("Continue with, by keyboard: a new chat in the same lane with the old one's context above its box, nothing started, linked both ways", async ({ page }) => {
+  const old = await codingChat(page, "Fix the totals");
+  const before = (await sessionCalls(page)).filter((c) => c.op === "chat.start").length;
+  // the agent chip opens Continue with…; its first row takes the focus
+  await page.getByTestId("session-agent-fixed").focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("continue-menu")).toBeVisible();
+  const codex = page.locator("[data-testid=continue-pick][data-agent=codex]");
+  await codex.focus();
+  await page.keyboard.press("Enter");
+
+  // a New session chat on Codex, its context above the box, unsent
+  await expect(page.getByTestId("session-chat")).toHaveAttribute("data-draft", "true");
+  await expect(page.getByTestId("session-agent-fixed")).toContainText("Codex");
+  await expect(page.getByTestId("carry-chip")).toHaveCount(1);
+  await expect(page.getByTestId("carry-chip")).toContainText("Fix the totals");
+  await expect(page.getByTestId("continue-line")).toContainText("Continued from Claude Code");
+  await page.getByTestId("carry-open").click();
+  await expect(page.getByTestId("carry-text")).toContainText("Last answer: (mock Claude Code) You said: Fix the totals");
+  await expect(page.getByTestId("carry-text")).toContainText("Files changed in its lane");
+  // no turn: no agent started for it
+  expect((await sessionCalls(page)).filter((c) => c.op === "chat.start")).toHaveLength(before);
+  const draft = await page.evaluate(() => (window as any).__manutSessions.getState().list[0]);
+  const oldRec = await recOf(page, old);
+  expect(draft.lane.worktree).toBe(oldRec.lane.worktree);
+  expect(draft.continuedFrom).toBe(oldRec.linkId);
+  expect(oldRec.continuedIn).toBe(draft.linkId);
+  expect(oldRec.status).toBe("running");
+
+  // the person reads it and sends: Codex starts in the same lane folder, the context goes first
+  await page.getByTestId("composer").fill("Carry on with the receipt");
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("session-chat")).not.toHaveAttribute("data-draft", "true");
+  const starts = (await sessionCalls(page)).filter((c) => c.op === "chat.start");
+  expect(starts.at(-1)).toMatchObject({ agent: "codex", cwd: oldRec.lane.dir });
+  await expect(page.getByTestId("bubble-user").last().getByTestId("bubble-context")).toContainText("Fix the totals");
+
+  // back to the old chat by its link: it says where it went on, and offers to stop its idle agent
+  await page.getByTestId("continue-line").getByTestId("continue-open").click();
+  await expect(page.getByTestId("continue-line")).toContainText("Continued in Codex");
+  await page.getByTestId("continue-stop").click();
+  await expect.poll(async () => (await recOf(page, old)).status).toBe("exited");
+});
+
+test("one working agent in a lane: the old chat's box waits while the new one works", async ({ page }) => {
+  const old = await codingChat(page, "Fix the totals");
+  const next = await page.evaluate((i) => (window as any).__manutSessions.continueWith(i, { agent: "codex" }), old);
+  // the new one works: its turn runs (the stand-in's slow answer)
+  await page.evaluate(async (i) => {
+    const s = (window as any).__manutSessions;
+    await s.start(i, "/slow");
+  }, next);
+  await page.evaluate(async (i) => {
+    const store = (await import(/* @vite-ignore */ "/src/state/store.ts" as string)) as { getStore(): { actions: { openSession(id: string): void } } };
+    store.getStore().actions.openSession(i);
+  }, old);
+  const wait = page.getByTestId("composer-lane-wait");
+  await expect(wait).toHaveText("Codex is working in this lane. Send when it is done: one agent works in a lane at a time.");
+  await page.getByTestId("composer").fill("me too");
+  await expect(page.getByTestId("send")).toBeDisabled();
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("composer")).toHaveValue("me too");
+});
+
 test.describe("pictures", () => {
   test.skip(!SHOTS, "MANUT_SHOTS=<dir> keeps the pictures");
   for (const width of [1280, 900]) {
@@ -221,6 +317,23 @@ test.describe("pictures", () => {
         await page.keyboard.press("Enter");
         await expect(page.getByTestId("bubble-carry")).toHaveCount(1);
         await page.screenshot({ path: join(SHOTS, `note-bubble-${scheme}-${width}.png`), animations: "disabled" });
+      });
+      test(`Continue with, ${scheme}, ${width}`, async ({ page }) => {
+        mkdirSync(SHOTS, { recursive: true });
+        await page.setViewportSize({ width, height: 820 });
+        await page.emulateMedia({ colorScheme: scheme });
+        await codingChat(page, "Fix the totals");
+        await page.getByTestId("session-agent-fixed").click();
+        await motionDone(page);
+        await page.screenshot({ path: join(SHOTS, `continue-menu-${scheme}-${width}.png`), animations: "disabled" });
+        await page.locator("[data-testid=continue-pick][data-agent=codex]").click();
+        await expect(page.getByTestId("carry-chip")).toHaveCount(1);
+        await motionDone(page);
+        await page.screenshot({ path: join(SHOTS, `continue-new-${scheme}-${width}.png`), animations: "disabled" });
+        await page.getByTestId("continue-line").getByTestId("continue-open").click();
+        await expect(page.getByTestId("continue-line")).toContainText("Continued in Codex");
+        await motionDone(page);
+        await page.screenshot({ path: join(SHOTS, `continue-old-${scheme}-${width}.png`), animations: "disabled" });
       });
       test(`another chat's context, ${scheme}, ${width}`, async ({ page }) => {
         mkdirSync(SHOTS, { recursive: true });

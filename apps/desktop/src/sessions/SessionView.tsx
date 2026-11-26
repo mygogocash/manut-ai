@@ -55,6 +55,7 @@ import { LaneReview } from "../code/Review";
 import { isLaneChat } from "../code/laneStore";
 import { Icon } from "../ui/icons";
 import { chatScope } from "../chat/box/scope";
+import { AgentContinue, ContinueLines, useLaneWait } from "./ContinueMenu";
 
 const STATUS: Record<string, Key> = { starting: "ss.starting", running: "ss.running", exited: "ss.ended", failed: "ss.couldNotStart" };
 
@@ -184,6 +185,8 @@ function ChatPane({ rec, chatKey }: { rec: SessionRec; chatKey: string }) {
   // the agent's predicted next message, when the person turned suggestions on and this agent can give one (lib/suggest.ts)
   const suggestion = useSuggestion(chatKey);
   const limitOffer = useLimitOffer(chatKey, rec);
+  // one working agent in a lane: while the chat this one is linked with by Continue with works there, the box holds (item 97)
+  const laneWait = useLaneWait(rec);
   return (
     <div className="pane ss-chat" data-pane={chatKey} data-testid="session-chat">
       <Timeline
@@ -195,6 +198,8 @@ function ChatPane({ rec, chatKey }: { rec: SessionRec; chatKey: string }) {
       />
       {rec.paused ? <Paused rec={rec} /> : ended && <Ended rec={rec} />}
       <OwnApprovals agent={rec.agent} />
+      {/* the chat this one continued in or from (item 97), each with Open */}
+      <ContinueLines rec={rec} />
       {/* a message kept to send when this chat's account resets (item 95) */}
       <WaitingRow chatKey={chatKey} />
       <Composer
@@ -226,9 +231,11 @@ function ChatPane({ rec, chatKey }: { rec: SessionRec; chatKey: string }) {
         rows
         // the microphone and voice mode (item 81): voice mode talks with this session's agent, its asks on their cards
         voice
+        waitNote={laneWait}
         tools={
           <>
-            <AgentFixed agent={rec.agent} />
+            {/* an agent chat's agent chip opens Continue with… (item 97); a Hermes folder chat's stays as it was */}
+            {takesFiles && rec.status !== "draft" ? <AgentContinue rec={rec} /> : <AgentFixed agent={rec.agent} />}
             {/* the chat box's model with its effort, and how much the agent may do before asking (item 80) */}
             <SessionModel rec={rec} options={ss.models[rec.id]} note={ss.notes[rec.id]} />
             {(modesOf(rec.agent).length > 0 || takesFiles) && <SessionApproval rec={rec} />}
@@ -518,6 +525,8 @@ function DraftPane({ rec }: { rec: SessionRec }) {
   };
   // the composer takes the focus once it can be typed in (the folder or the agent list may arrive after it shows)
   const live = ready && !terminal;
+  // a chat made by Continue with waits while the chat it continues works in their lane (item 97)
+  const laneWait = useLaneWait(rec);
   useEffect(() => {
     if (live) document.querySelector<HTMLTextAreaElement>(`[data-pane="${key}"] [data-testid=composer]`)?.focus();
   }, [live, key]);
@@ -533,8 +542,10 @@ function DraftPane({ rec }: { rec: SessionRec }) {
         </div>
       </div>
       <OwnApprovals agent={rec.agent} />
+      <ContinueLines rec={rec} />
       <Composer
         key={key}
+        waitNote={laneWait}
         bot={bot}
         running={false}
         offline={!ready || terminal}
