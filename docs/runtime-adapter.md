@@ -953,7 +953,8 @@ The rules a bundle keeps are in three places that say the same thing: `apps/api/
 - **Sharing.** The Artifacts page's Share skills as a link offers the person's own skills from Settings › MCP and Skills' list
   (`from: home`, by folder name). The shell reads each folder (`skill_bundle_read`) following no link: a link, a binary, an
   over-large or special file is named and stops the publish, and dot-files are left out and named. A file in which the key masker
-  (`src/lib/secrets.ts`) finds a key stops it too, named, never shown. Otherwise `askToShareSkills` opens a `public_post` whose
+  (`src/lib/secrets.ts`) finds a key stops it too, named, never shown, and so does a skill an agent would act on by itself
+  (`fileActsAlone`, below). Otherwise `askToShareSkills` opens a `public_post` whose
   detail is the exact bundle; its Yes is refused (`not_reviewed`) until every file was opened or the tick is set
   (`src/runtime/fileReview.ts`). `artifacts.publishSkills` takes only the ask's id, checks the rules and keys again, and sends
   exactly `{ title, kind: "skills", skills }` (`skills_off` while the switch is off, nothing sent).
@@ -965,6 +966,16 @@ The rules a bundle keeps are in three places that say the same thing: `apps/api/
   settled Yes reaches `skill_install_settle`, once. The shell then writes each skill as a new folder in Claude Code's `skills/` or
   `~/.agents/skills/` for Codex: the skills folder may not be a link (`link_root`), an existing skill is refused (`exists:<name>`)
   at the ask and again before writing, every folder and file is made new (`create_new`), files are `0644`, and nothing runs.
+- **What an agent would act on by itself** (item 113). `src/runtime/skillBundle.ts` `fileActsAlone` and its twin
+  `src-tauri/src/skill_links.rs` `file_acts_alone` read every markdown file's settings at its top against an allow-list (`name`,
+  `description`, `when_to_use`, `argument-hint`, `disable-model-invocation`, `user-invocable`, `license`, `compatibility`,
+  `metadata`), look for a command run as the skill loads, and allow only `interface` in a Codex `agents/*.yaml`. Anything else,
+  or a top they cannot read as plain settings, refuses the skill by file and setting: the publish lists it, the install page
+  names it and cannot choose it, and the shell refuses `acts_alone:...` at the ask and before writing. Both run
+  `src/runtime/skillActs.cases.json`. The review marks the top SKILL.md as the instructions the agent follows and any file in a
+  `scripts` or `bin` folder, with a script's ending, a `#!` line or an executable bit as a script it may ask to run; the install
+  card says nothing runs now, and that in a later chat the agent may follow these instructions and ask to run these scripts,
+  each step asking as usual.
 
 ## Signing in
 

@@ -3159,13 +3159,31 @@ the desktop installs from. No HTML is ever made from a bundle. Every answer carr
 
 **The desktop.** Publishing: the Artifacts page's Share skills as a link, behind Settings › Artifacts › Allow sharing skills by
 link (off by default). The person picks their own skills (never a plugin's or a project's); the shell reads each folder without
-following any link; a link, a binary file or a file in which the app's key masker finds a key stops the publish, named and never
-shown; the ask (`public_post`) shows every file with its size and each script marked, and its Yes is refused until every file
-was opened or "I have looked at every file" is ticked. Installing: Settings › MCP and Skills › Install skills from a link, behind
+following any link; a link, a binary file, a file in which the app's key masker finds a key, or a skill an agent would act on
+by itself (below) stops the publish, named and never shown; the ask (`public_post`) shows every file with its size, SKILL.md
+marked as the instructions the agent follows and each script marked, and its Yes is refused until every file was opened or "I
+have looked at every file" is ticked. Installing: Settings › MCP and Skills › Install skills from a link, behind
 the same switch. A link on any host but `origin` is refused before anything is fetched, by the page and again by the shell; the
-shell fetches the JSON, holds it to these rules again and keeps it; the ask (`command`) says what a skill is and that nothing
-runs now; on a Yes the shell writes each skill as a new folder in the agent's own skills folder, never through a link, never over
-an existing skill, with no executable bit, running nothing (`docs/runtime-adapter.md`, "Skills shared by a link").
+shell fetches the JSON, holds it to these rules again and keeps it; a skill an agent would act on by itself is named with its
+file and setting and cannot be chosen; the ask (`command`) marks SKILL.md and each script as above, says what a skill is, that
+nothing runs now, and that in a later chat the agent may follow these instructions and ask to run these scripts, each such step
+asking as usual; on a Yes the shell writes each skill as a new folder in the agent's own skills folder, never through a link,
+never over an existing skill, with no executable bit, running nothing (`docs/runtime-adapter.md`, "Skills shared by a link").
+
+**What an agent would act on by itself (item 113).** Some of what a skill holds is acted on by the coding agent without its
+permission prompt, so neither the person nor Kit's dial would see it: in Claude Code (its skills documentation, read 26 Nov
+2026) tools allowed in advance (`allowed-tools`), hooks, a command run while the skill loads, and settings that start a
+subagent or change the model or effort; in Codex, the `dependencies` of `agents/openai.yaml`, which declare tools such as an MCP
+server at an address. The desktop takes a skill only when every markdown file's settings at its top (between `---` lines) are on
+an allow-list of ones that describe the skill or only narrow when it is used: `name`, `description`, `when_to_use`,
+`argument-hint`, `disable-model-invocation`, `user-invocable`, `license`, `compatibility` and `metadata`; when no markdown file
+holds a command run as it loads (`!` then a backtick, or a fence opened with three backticks or tildes and `!`); and when a Codex
+`agents/*.yaml` sets only `interface`. Any other setting, and settings it cannot read as plain `name: value` lines (a quoted or
+indented name, a fence that never closes, another document marker), refuse the skill whole, naming the file and the setting
+(`acts_alone:<why>:<skill>/<path>[:<field>]`): the page says so before a publish or an install is asked, and the shell refuses
+again at the ask and before writing. Nothing is stripped so that the rest can be installed. The table both readers run is
+`apps/desktop/src/runtime/skillActs.cases.json`. The API does not check this, as it does not check keys: the desktop that
+installs is where it is enforced.
 
 **Not built yet.** A way for someone who is not the owner to report a link; installing for an agent other than Claude Code and
 Codex; installing from a link while signed out or as a helper (the origin comes with the owner's list); and sharing a project's
