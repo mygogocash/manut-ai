@@ -2,7 +2,8 @@
 # The newest CI run of the working branch: what it ran, what failed, and the failing tests' own lines.
 # Usage: ci-failures.sh [<commit prefix>]      (no argument: the newest push run on pilot/week-1)
 # It reads job logs through the API, which works while the run is still going; `gh run view --log` does not.
-# CI's Playwright shards may fail without failing the run, so a green run can still hold failed specs: they show here.
+# A failing browser spec fails the run since item 126 (26 Nov 2026); an older green run can still hold failed specs,
+# and they show here too.
 set -u
 repo=mygogocash/manut-ai
 export GH_TOKEN="$(gh auth token --user KunanonJ)"
