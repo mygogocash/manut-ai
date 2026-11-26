@@ -1,6 +1,7 @@
 // A harness's official mark (`<HarnessMark id/>`), a Hermes child's mark with its model's maker as a small second
 // mark (`<HarnessFace/>`), and a row of marks for everyone working on a thread (`<HarnessStack/>`, "+N" past `max`).
-// Marks come from the one registry (./registry); an unknown harness gets the neutral mark, never a company's logo.
+// Marks come from the one registry (./registry) through AgentIcon: each harness's own published logo, or its monogram
+// when none is published; an unknown harness gets the neutral mark, never a company's logo.
 import type { CSSProperties } from "react";
 import { AgentIcon } from "../ui/AgentIcon";
 import { ModelIcon } from "../ui/ModelIcon";
@@ -8,10 +9,9 @@ import { t } from "../i18n";
 import { harness, harnessOf, type HarnessFacts, type HarnessId } from "./registry";
 import "./harness.css";
 
-export function HarnessMark({ id, size = 14, character = false, style }: { id: HarnessId | string; size?: number; character?: boolean; style?: CSSProperties }) {
+export function HarnessMark({ id, size = 14, style }: { id: HarnessId | string; size?: number; style?: CSSProperties }) {
   const h = harness(id);
-  const file = (character && h.character) || h.mark;
-  if (!file)
+  if (h.id === "generic")
     return (
       <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true" className="hn-mk hn-generic" data-harness={h.id} style={style}>
         <rect x="3" y="3" width="18" height="18" rx="5" fill="none" stroke="currentColor" strokeWidth="1.6" opacity="0.6" />
@@ -20,7 +20,7 @@ export function HarnessMark({ id, size = 14, character = false, style }: { id: H
     );
   return (
     <span className="hn-mk" data-harness={h.id} title={h.label} style={{ width: size, height: size, ...style }}>
-      <AgentIcon id={h.label} file={file} size={size} />
+      <AgentIcon id={h.id} title={h.label} size={size} />
     </span>
   );
 }

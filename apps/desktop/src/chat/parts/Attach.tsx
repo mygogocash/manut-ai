@@ -198,8 +198,8 @@ export function AttachButton({
           )}
           {onMention && (
             <button type="button" role="menuitem" className="att-row" onClick={then(onMention)} onMouseEnter={() => setSub(false)} data-testid="attach-mention">
-              <span className="att-ic att-sigil" aria-hidden="true">
-                @
+              <span className="att-ic" aria-hidden="true">
+                <Icon name="at-sign" />
               </span>
               <span className="att-n">{t("box.mention")}</span>
               <kbd>@</kbd>
@@ -207,8 +207,8 @@ export function AttachButton({
           )}
           {onActions && (
             <button type="button" role="menuitem" className="att-row" onClick={then(onActions)} onMouseEnter={() => setSub(false)} data-testid="attach-actions">
-              <span className="att-ic att-sigil" aria-hidden="true">
-                /
+              <span className="att-ic" aria-hidden="true">
+                <Icon name="square-slash" />
               </span>
               <span className="att-n">{t("box.actions")}</span>
               <kbd>/</kbd>

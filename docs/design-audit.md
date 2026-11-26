@@ -16,8 +16,11 @@ The fixes are items 85e to 85i in `docs/plan.md`; the motion is items 85a to 85c
   left empty rather than filled.
 - **Grouping:** grey bands and space group things. A card is only for a decision, and there is one shadow, only for
   things that float.
-- **What shows:** no vendor logos, model names, file paths or raw errors on everyday pages. They live under "Under the
-  hood".
+- **What shows:** no model names, file paths or raw errors on everyday pages. They live under "Under the hood". The
+  owner changed the logo half of this rule on 26 Nov 2026 (item 122, `docs/decisions.md`): each coding agent, provider
+  and editor is drawn by its own published logo wherever it is named (its monogram where none is published), and every
+  menu entry leads with an icon. What stays: the app's own places, pages and actions use only the app's own icon set
+  (`src/ui/icons.tsx`), and a provider's logo stands only for that provider.
 
 ## Findings
 
@@ -42,7 +45,9 @@ The fixes are items 85e to 85i in `docs/plan.md`; the motion is items 85a to 85c
 5. **Code** opens on the old TERMINALS section with other companies' logos on an otherwise empty page. The Code board
    shows lanes, the conversation and a diff: at least a grey Lanes band and `StatesCode`'s empty state. Seen. Fixed in
    item 85i (26 Nov): it opens on the grey Lanes band with New lane over an empty state, then Terminals under a grey band
-   in sentence case; the task sources and the coding tools' plans are named in words, with no company's mark.
+   in sentence case; the task sources and the coding tools' plans are named in words, with no company's mark. Item
+   122 (26 Nov, the owner's request): each coding tool's plan and its use outside Manut AI lead with that tool's own
+   logo; the task sources stay words.
 6. **The foot of the side menu** shows three small squares for each coding tool's use, and "You". The board has the
    budget pill and the person's name with their shop. Seen. Fixed in item 85i (26 Nov): the foot is the pill (shown only with
    the runtime's numbers, none yet) and the person with their shop; the coding tools' use is on the Code page.
@@ -63,7 +68,9 @@ The fixes are items 85e to 85i in `docs/plan.md`; the motion is items 85a to 85c
    drawn on its grid with its line, ends and corners for the board to take in or redraw: arrow-left, panel-right,
    terminal, grid, gear, expand, shrink, pin, bolt, wrench, database, globe, chip, cube, folder, chevrons-up-down,
    chevrons-down-up, git-branch, diff, camera, hard-drive, columns-2, message-plus, list, paperclip, audio-lines, reply,
-   home, nodes. `src/ui/icons.test.tsx` fails on a line icon drawn anywhere else (marks, faces, meters, state glyphs
+   home, nodes. Item 122 (26 Nov, the owner's request that every menu lead with an icon) drew eleven more on the same
+   grid for menu entries that had words only: at-sign, square-slash, archive, pin-off, folder-plus, clipboard,
+   text-select, eraser, rows-2, user and git-pull-request. `src/ui/icons.test.tsx` fails on a line icon drawn anywhere else (marks, faces, meters, state glyphs
    and the run graph are listed with why), and `e2e/quiet-sweep.spec.ts` measures every icon on the menu's pages and in
    Settings.
 10. **Two segmented switches.** Home's is a 28px pill; Settings' (`.mseg`) are 22px rectangles with 11.5px text. Seen.

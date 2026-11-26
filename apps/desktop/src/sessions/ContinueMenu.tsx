@@ -78,7 +78,7 @@ export function AgentContinue({ rec }: { rec: SessionRec }) {
                 data-testid="continue-pick"
                 data-agent={p.agent}
               >
-                <AgentMark agent={p.agent} size={13} />
+                <AgentMark agent={p.agent} size={16} />
                 <span className="mp-n">{p.model ? `${agentLabel(p.agent, ss.agents)} · ${p.model.label}` : agentLabel(p.agent, ss.agents)}</span>
               </button>
             ))

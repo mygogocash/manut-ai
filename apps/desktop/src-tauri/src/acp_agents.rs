@@ -2,10 +2,11 @@
 //!
 //! Each row says everything manut needs to offer the agent: its id (which is also its program), its name, the one
 //! fixed argument that starts its ACP server, the command a person runs to sign it in, the install line the menu
-//! shows, its mark (a file in `src/assets/agents`) and whether a Restart continues its conversation. The shell keeps
-//! this, the authoritative copy: [`crate::sessions::agent`] and [`crate::sessions::chat_args`] read it to decide what
-//! may run, [`crate::acp_chat::acp_agent`] reads it for the adapter, and the agent look-up (`sessions_agents`) hands
-//! each row to the UI, which keeps no table of its own for these agents.
+//! shows, its mark (a file name the desktop's AgentIcon maps to a logo) and whether a Restart continues its
+//! conversation. The shell keeps this, the authoritative copy: [`crate::sessions::agent`] and
+//! [`crate::sessions::chat_args`] read it to decide what may run, [`crate::acp_chat::acp_agent`] reads it for the
+//! adapter, and the agent look-up (`sessions_agents`) hands each row to the UI, which keeps no table of its own for
+//! these agents.
 //!
 //! The main agents (Claude Code, Codex, OmO) and the other built-ins (DSH, oh-my-hermes, pi, oh-my-pi, Grok,
 //! OpenCode, with its own rule check) keep their own rows and adapters in `sessions::AGENTS`; they are not here.
@@ -27,7 +28,8 @@ pub struct AcpEntry {
     pub acp: AcpAgent,
     /// The install line the menu shows (manut never runs it).
     pub install: &'static str,
-    /// The mark's file in `src/assets/agents`.
+    /// The mark's file name, which the desktop's AgentIcon maps to the agent's logo (src/ui/agentMarks.ts) or to
+    /// its monogram.
     pub mark: &'static str,
     /// Restart (and a restart of manut) continues its conversation (`session/resume`, or `session/load`).
     pub continues: bool,
@@ -118,8 +120,9 @@ mod tests {
     const ACP_ARGS: [&[&str]; 2] = [&["acp"], &["--acp"]];
 
     /// Each row is one consistent agent: the id is the program, a chat, one of the two ACP arguments, the adapter
-    /// named the same, and its mark a file name the desktop looks up. Manut AI ships none of the vendors' logos
-    /// (docs/decisions.md): the desktop draws a letter mark when the file is missing (src/ui/AgentIcon.tsx).
+    /// named the same, and its mark a file name the desktop looks up. No mark file ships in src/assets/agents: since
+    /// item 122 the desktop draws each agent's own published logo from src/ui/agentMarks.ts (generated from Lobe
+    /// Icons), found by the agent's id or this file name, and its monogram when none is published (src/ui/AgentIcon.tsx).
     #[test]
     fn every_row_is_one_agent() {
         let assets = Path::new(env!("CARGO_MANIFEST_DIR")).join("../src/assets/agents");
@@ -132,7 +135,7 @@ mod tests {
             assert!(ACP_ARGS.contains(&e.args), "{id}: {:?}", e.args);
             assert_eq!((e.acp.id, e.acp.label), (id, e.agent.label), "{id}");
             assert!(e.acp.skill_tool.is_none() && e.acp.rules.is_none(), "{id}: a generic agent has no rule probe");
-            // A plain file name of a kind the desktop's asset loader reads (src/harness/assets.ts: *.svg, *.png).
+            // A plain file name of a kind the desktop's mark look-up names (AgentIcon.tsx `fileMark`: *.svg, *.png).
             assert!((e.mark.ends_with(".svg") || e.mark.ends_with(".png")) && !e.mark.contains('/'), "{id}: {}", e.mark);
             assert!(!assets.join(e.mark).exists(), "{id}: {} ships, but the vendors' logos are left out", e.mark);
             // an npm package, or (Cursor, Antigravity) the vendor's own installer line from its documentation

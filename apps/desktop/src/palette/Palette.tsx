@@ -24,6 +24,7 @@ import { keyResult } from "./filter";
 import { buildGroups, flat, type Group } from "./groups";
 import type { PaletteCtx, Row } from "./registry";
 import { Icon } from "../ui/icons";
+import { AgentIcon } from "../ui/AgentIcon";
 
 const LIST_ID = "palette-list";
 const optionId = (i: number) => `palette-opt-${i}`;
@@ -110,7 +111,7 @@ export function PaletteView(p: PaletteViewProps) {
                       data-testid="palette-row"
                       data-row={r.id}
                     >
-                      <Icon name={r.icon ?? g.icon} />
+                      {r.mark ? <AgentIcon id={r.mark.id} title={r.mark.title} size={16} /> : <Icon name={r.icon ?? g.icon} />}
                       <span className="pal-n">{r.label}</span>
                       {r.hint && <span className="pal-sub">{r.hint}</span>}
                     </li>

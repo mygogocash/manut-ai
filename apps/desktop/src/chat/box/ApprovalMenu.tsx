@@ -9,7 +9,7 @@ import { ChevronDown, Popover } from "../../ui";
 import { CheckIcon } from "../model/CheckIcon";
 import { t } from "../../i18n";
 import { modeHint, modeLabel } from "../../sessions/controls";
-import { Icon } from "../../ui/icons";
+import { Icon, type IconName } from "../../ui/icons";
 
 /** A small shield: what the word beside it is about (who may act before asking). */
 export const ShieldIcon = () => (
@@ -90,6 +90,9 @@ export function ApprovalRows(p: ApprovalMenuProps) {
         const on = m === p.current;
         return (
           <button key={m} type="button" className={`ss-item ss-mode-row${on ? " on" : ""}`} aria-pressed={on} onClick={() => p.onPick(m)} data-testid={`${p.testId}-opt`} data-mode={m}>
+            <span className="ss-ic" aria-hidden="true">
+              <Icon name={MODE_ICON[m] ?? "shield"} />
+            </span>
             <span className="ss-mode-t">
               <span className="ss-n">{modeLabel(m)}</span>
               <span className="ss-mode-d">{(p.hint ?? modeHint)(m)}</span>
@@ -103,6 +106,17 @@ export function ApprovalRows(p: ApprovalMenuProps) {
     </div>
   );
 }
+
+/** Each approval mode's icon of the set (item 122: every menu led by an icon); a mode the agent names that the app does not
+ *  know leads with the approval menu's own shield. */
+const MODE_ICON: Record<string, IconName> = {
+  default: "circle-question",
+  ask: "circle-question",
+  plan: "list",
+  acceptEdits: "pencil",
+  "read-only": "eye",
+  auto: "bolt",
+};
 
 /** A dial of levels inside the approval menu (Kit's, for the project): one row per level, the chosen one ticked, and
  *  what it lets the agent do alone under them. */

@@ -525,6 +525,53 @@ https://github.com/google/fonts).
 Google Inc.
 ```
 
+## Coding agents', providers' and models' marks
+
+Each coding agent, provider and editor the app names is drawn by its own published mark (the owner's request of
+26 Nov 2026), and each model by its maker's. The drawings are taken whole from the two packages below:
+`scripts/import-agent-marks.mjs` writes `src/ui/agentMarks.ts` (which names every mark's file and version), and
+`src/ui/modelMarks.ts` was generated from Lobe Icons the same way. Neither package is a dependency of the app. The
+names and logos are their owners' trademarks; each is shown only to name that owner's own product, and Manut AI is
+not affiliated with or endorsed by them. An agent with no published mark draws a monogram of its name instead.
+
+### Lobe Icons (lobehub/lobe-icons)
+
+Source: <https://github.com/lobehub/lobe-icons>, npm package `@lobehub/icons-static-svg` 1.106.0, `icons/`:
+claude-color, codex, gemini-color, antigravity-color, qwen-color, kimi-color, grok, cursor, githubcopilot, opencode,
+cline, pi, hermesagent, deepseek-color, zai, amp-color, goose, kilocode, junie-color, trae-color, roocode and
+windsurf (`src/ui/agentMarks.ts`); the model makers' marks in `src/ui/modelMarks.ts`.
+
+```
+MIT License
+
+Copyright (c) 2023 LobeHub
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+### Simple Icons (simple-icons/simple-icons)
+
+Source: <https://github.com/simple-icons/simple-icons>, npm package `simple-icons` 16.38.1, `icons/`: zedindustries
+(Zed), the editor's mark in its Open in menu. Simple Icons is dedicated to the public domain under CC0 1.0 Universal
+(<https://creativecommons.org/publicdomain/zero/1.0/>); its own disclaimer says the brands' trademarks stay their
+owners'. No Apple mark is taken: Xcode draws its monogram.
+
 ## The pairing code's QR image
 
 Settings › Sharing and access draws the pairing code as a QR code with `qrcode` 1.5.4 (soldair/node-qrcode), the same

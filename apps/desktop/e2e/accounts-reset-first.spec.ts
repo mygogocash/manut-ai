@@ -143,8 +143,9 @@ test("the CLI's version sits beside its name as muted text; a CLI with none show
   await expect(page.getByTestId("cli-version-codex")).toHaveText("0.167.0-alpha.4.1");
   await expect(page.getByTestId("cli-version-pi")).toHaveCount(0);
   const head = page.getByTestId("accounts-codex").locator(".acc-gh");
-  // The leading C is Codex's mark: the fork draws other tools' marks as their first letter (README.md, what was removed).
-  await expect(head).toHaveText(/^C\s*Codex\s*0\.167\.0-alpha\.4\.1$/);
+  // Codex's own mark leads the heading: a drawing, so no words of its own (the owner's request of 26 Nov 2026).
+  await expect(head).toHaveText(/^Codex\s*0\.167\.0-alpha\.4\.1$/);
+  await expect(head.locator('svg.agent-ic[data-agent="codex"]')).toHaveCount(1);
   // text only: no border, fill or icon on the version
   const v = page.getByTestId("cli-version-codex");
   expect(await v.evaluate((e) => { const s = getComputedStyle(e); return [s.backgroundColor, s.borderTopWidth, s.boxShadow, e.children.length].join("|"); })).toBe("rgba(0, 0, 0, 0)|0px|none|0");

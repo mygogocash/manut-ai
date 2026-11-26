@@ -193,7 +193,7 @@ export function ModelMenu(p: ModelMenuProps) {
                         onMouseMove={() => many && i !== active && setActive(i)}
                         data-testid="model-opt"
                       >
-                        <ModelIcon model={`${o.id} ${o.label}`} provider={o.provider ?? p.mark.provider} size={13} />
+                        <ModelIcon model={`${o.id} ${o.label}`} provider={o.provider ?? p.mark.provider} size={16} />
                         <span className="mp-n">{o.label}</span>
                         <span className="mp-ck">
                           <CheckIcon />

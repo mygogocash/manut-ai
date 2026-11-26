@@ -14,7 +14,8 @@ import { useMates } from "./restart";
 import type { RowDrag } from "./useRowDrag";
 import { NewThreadIcon } from "../threads/NewThreadIcon";
 import { termLinkText } from "../sessions/termShare";
-import { Icon } from "../ui/icons";
+import { Icon, type IconName } from "../ui/icons";
+import { MenuIcon } from "../ui/MenuIcon";
 
 /** The newest thing said in a bot's threads: when, and the line. The bot row shows it when it is newer than the main
  *  chat's own last line. A thread with nothing said yet gives nothing: its title is listed right under the bot, so
@@ -136,6 +137,8 @@ function Menu({ menu, onClose, name, bot, at }: { menu: RowMenu; onClose: () => 
     ...(menu.onRestart ? [{ kind: "restart", label: menu.offline ? t("row.start") : t("row.restart"), fn: menu.onRestart } satisfies Item] : []),
     { kind: "remove", label: t("row.remove"), fn: menu.onRemove },
   ];
+  // each entry's icon of the set (item 122: every menu led by an icon)
+  const icon = (kind: Item["kind"]): IconName => (kind === "pin" ? (menu.pinned ? "pin-off" : "pin") : kind === "edit" ? "pencil" : kind === "restart" ? "rotate-cw" : kind === "remove" ? "minus" : "message-plus");
   return (
     <div
       ref={ref}
@@ -161,16 +164,21 @@ function Menu({ menu, onClose, name, bot, at }: { menu: RowMenu; onClose: () => 
         kind === "new" && fn ? (
           <div key={label} role="none" className="row-mg">
             <button type="button" role="menuitem" className="row-mi row-mi-new" onClick={run(fn)} data-testid="row-new-thread">
-              <NewThreadIcon />
+              <span className="mi-ic" aria-hidden="true">
+                <NewThreadIcon />
+              </span>
               <span className="row-mi-l">{label}</span>
             </button>
             <div role="separator" className="row-sep" data-testid="row-menu-sep" />
           </div>
         ) : kind === "restart" && mates.length && fn ? (
           <button key={label} type="button" role="menuitem" className="row-mi two" onClick={run(fn)} data-testid="row-restart">
-            {label}
-            <span className="row-mi-sub" data-testid="row-restart-with">
-              {t("row.restartWith", { list: listText(mates.map((m) => m.display_name)) })}
+            <MenuIcon name={icon(kind)} />
+            <span className="row-mi-two">
+              {label}
+              <span className="row-mi-sub" data-testid="row-restart-with">
+                {t("row.restartWith", { list: listText(mates.map((m) => m.display_name)) })}
+              </span>
             </span>
           </button>
         ) : (
@@ -184,6 +192,7 @@ function Menu({ menu, onClose, name, bot, at }: { menu: RowMenu; onClose: () => 
             title={!fn && kind === "remove" ? t("row.removeLast") : undefined}
             data-testid={kind === "restart" ? "row-restart" : kind === "remove" ? "row-remove" : undefined}
           >
+            <MenuIcon name={icon(kind)} />
             {label}
           </button>
         ),
