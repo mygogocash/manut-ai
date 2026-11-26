@@ -43,13 +43,18 @@ test.describe("Kit's chat", () => {
     await lane(page);
     const box = page.getByTestId("composer-box");
     await expect(box.getByTestId("model-label")).toHaveText("Opus 5.5");
-    await expect(box.getByTestId("reasoning-label")).toHaveText("high");
+    await expect(box.getByTestId("reasoning-label")).toHaveText("High");
     await expect(page.getByTestId("head-right").getByTestId("model-pill")).toHaveCount(0);
+    // the chip opens the effort card (item 132); its title opens the model list, and a pick comes back to the card
     await box.getByTestId("model-pill").click();
+    await page.getByTestId("effort-title").click();
     await expect(page.getByTestId("model-opt")).toHaveText(["Opus 5.5", "Sonnet 5.5", "Haiku 5.5"]);
     await page.getByTestId("model-opt").filter({ hasText: "Haiku 5.5" }).click();
-    await page.getByTestId("reasoning-seg").getByRole("radio", { name: "low", exact: true }).click();
-    await expect(box.getByTestId("reasoning-label")).toHaveText("low");
+    await expect(page.getByTestId("effort-model")).toHaveText("Haiku 5.5");
+    await page.getByTestId("effort-slider").press("Home");
+    await expect(page.getByTestId("effort-level")).toHaveText("Low");
+    await page.keyboard.press("Escape");
+    await expect(box.getByTestId("reasoning-label")).toHaveText("Low");
     const sent = (await calls(page)).filter((c) => c.op === "chat.input").map((c) => c.input);
     expect(sent).toContainEqual({ kind: "model", model: "haiku" });
     expect(sent).toContainEqual({ kind: "effort", effort: "low" });
@@ -135,6 +140,9 @@ test.describe("Buddy's chat in Practice", () => {
     await expect(box(page).getByTestId("model-label")).toHaveText("Claude Code");
     await expect(page.getByTestId("box-approval")).toHaveText("Ask");
     await box(page).getByTestId("model-pill").click();
+    // nothing listed yet: the card says why in the slider's place, and so does the list behind its title
+    await expect(page.getByTestId("effort-none")).toHaveText("Claude Code lists its models once it has started. Send a message, then pick one here.");
+    await page.getByTestId("effort-title").click();
     await expect(page.getByTestId("model-empty")).toHaveText("Claude Code lists its models once it has started. Send a message, then pick one here.");
     await page.keyboard.press("Escape");
     // the first message starts the person's agent, which lists its models and says what it runs
@@ -142,14 +150,19 @@ test.describe("Buddy's chat in Practice", () => {
     await page.getByTestId("composer").press("Enter");
     await expect(page.getByTestId("bubble-bot").last()).toContainText("You said: hi");
     await expect(box(page).getByTestId("model-label")).toHaveText("Opus 5.5");
-    await expect(box(page).getByTestId("reasoning-label")).toHaveText("high");
+    await expect(box(page).getByTestId("reasoning-label")).toHaveText("High");
     await box(page).getByTestId("model-pill").click();
+    await page.getByTestId("effort-title").click();
     await expect(page.getByTestId("model-opt")).toHaveText(["Opus 5.5", "Sonnet 5.5", "Haiku 5.5"]);
     await page.getByTestId("model-opt").filter({ hasText: "Haiku 5.5" }).click();
-    await expect(box(page).getByTestId("model-label")).toHaveText("Haiku 5.5");
-    await page.getByTestId("reasoning-seg").getByRole("radio", { name: "low", exact: true }).click();
-    await expect(box(page).getByTestId("reasoning-label")).toHaveText("low");
+    await expect(page.getByTestId("effort-model")).toHaveText("Haiku 5.5");
+    // Buddy answers through Claude Code: the card offers its Ultrathink row too
+    await expect(page.getByTestId("ultrathink-row")).toBeVisible();
+    await page.getByTestId("effort-slider").press("Home");
+    await expect(page.getByTestId("effort-level")).toHaveText("Low");
     await page.keyboard.press("Escape");
+    await expect(box(page).getByTestId("model-label")).toHaveText("Haiku 5.5");
+    await expect(box(page).getByTestId("reasoning-label")).toHaveText("Low");
     // approval: Ask and Plan only, in plain words; never a level that skips asking
     await page.getByTestId("box-approval").click();
     const menu = page.getByTestId("box-approval-menu");

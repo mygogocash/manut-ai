@@ -1,7 +1,7 @@
-// The session controls' pure parts: the modes manut offers, reasoning labels, the agent's `/` menu, context use, and
+// The session controls' pure parts: the modes manut offers, the agent's `/` menu, context use, and
 // a message sent while a turn runs (the reducer's message.queued / taken / dropped).
 import { describe, expect, it } from "vitest";
-import { levelLabel, levelOptions, modeLabel, modesOf, tokens, usageText } from "./controls";
+import { modeLabel, modesOf, tokens, usageText } from "./controls";
 import { commandQuery, matchCommands, MENU_MAX, parseCommands, pickText, type AgentCommand } from "../chat/parts/commands";
 import { groupModels } from "./SessionView";
 import { initialState, reduce, type Action, type AppState } from "../state/store";
@@ -23,21 +23,6 @@ describe("permission modes", () => {
     expect(modeLabel("auto")).toBe("Auto in folder");
     expect(modeLabel("")).toBe("Agent's own");
     expect(modeLabel(undefined)).toBe("Agent's own");
-  });
-});
-
-describe("reasoning levels", () => {
-  it("shows levels by the agent's own names, untranslated in every language", async () => {
-    expect(levelOptions(["low", "medium", "high", "xhigh", "max"]).map((o) => o.label)).toEqual(["low", "medium", "high", "xhigh", "max"]);
-    expect(levelLabel("xhigh", ["low", "high", "xhigh"])).toBe("xhigh");
-    expect(levelOptions(["minimal", "low", "ultra"]).map((o) => o.label)).toEqual(["minimal", "low", "ultra"]);
-    const { setLang } = await import("../i18n");
-    setLang("ko");
-    try {
-      expect(levelOptions(["none", "low", "medium", "high", "xhigh", "max"]).map((o) => o.label)).toEqual(["none", "low", "medium", "high", "xhigh", "max"]);
-    } finally {
-      setLang("en");
-    }
   });
 });
 
