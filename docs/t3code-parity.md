@@ -89,12 +89,12 @@ keeps them:
 | Archive; pin | has | |
 | A Working section | has, off by default (item 94) | 94 |
 | Threads that wait on you rise to the top | has (Needs you) | |
-| Cmd+Enter sends in the background | no | 95 |
+| Cmd+Enter sends in the background | has (item 95): from Home, with a line that opens it; Settings swaps Enter and Cmd+Enter | 95 |
 | A thread on a schedule | off (workflows, item 77b; routines for the shop's team) | 94 |
-| Steer or queue, a key to swap, a default | part: both, as buttons on a held message; no key, no default | 95 |
-| Select several rows; bulk snooze, settle, new titles | part: select and bulk Pin, Snooze, Done for now, Archive in Recent and History (item 94); new titles wait for 96 | 94, 96 |
+| Steer or queue, a key to swap, a default | has (item 95): Settings › General › Chat box; until the person picks, a team member's chat takes it in and a coding chat waits, as each did; Cmd+Enter does the other for one message; the held message keeps its buttons | 95 |
+| Select several rows; bulk snooze, settle, new titles | part: select and bulk Pin, Snooze, Done for now, Archive in Recent and History (item 94); Write the title again is one row at a time (item 96) | 94, 96 |
 | Auto-settle after some days | has (item 94: 3 days by default) | 94 |
-| Several drafts; stash one | part: one draft a chat, no pictures | 95 |
+| Several drafts; stash one | has (item 95): Drafts at the top of Home, five kept with their pictures and files; Cmd+S puts a chat's draft there, to take into any chat or project | 95 |
 | Snapshot of any app with a global key | no | 104 |
 | Swipes on the phone; Live Activities | no (Live Activities need a native app) | 78c, 111 |
 
@@ -118,7 +118,7 @@ keeps them:
 | Files land where the agent can use them | has | |
 | Use across accounts and machines, outside sessions too | part: what Manut AI starts, this Mac | 106 |
 | Limits left for each account | has | |
-| Send when the limit resets | no | 95 |
+| Send when the limit resets | has (item 95): a coding chat on a limited account offers Send at <time>; sent once when the account is usable, within the hour, else it asks first | 95 |
 | Themes, VS Code themes, chat width and fonts | part: light and dark, text size; item 85i removes the six palettes as the brand asks | 99 (owner) |
 | Keybindings you set | no | 99 |
 | Settings for a project or an environment | part: Kit's level, rules and folders for a project | 99 |

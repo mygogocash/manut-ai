@@ -35,6 +35,7 @@ import { SourceControlPage } from "./SourceControlPage";
 import { ArtifactLinksPage } from "./ArtifactLinksPage";
 import { RemotePage } from "./RemotePage";
 import { setSuggestOn, useSuggestOn } from "../lib/suggest";
+import { modLabel, setAfterSend, setFollowUp, useAfterSend, usePickedFollowUp, type AfterSend, type FollowUp } from "../chat/box/keys";
 import { QUIET_DAYS, setInbox, useInbox } from "../sidebar/inbox";
 import { TITLE_EFFORTS, TITLE_MODELS, setTitleModel, useTitleModel } from "../lib/titleModel";
 import { VoicePage } from "./VoicePage";
@@ -729,6 +730,42 @@ export function TitlesRows() {
   );
 }
 
+/** Settings › General › Chat box › After sending from Home (item 95): what Enter does there; Cmd+Enter does the other. */
+function AfterSendSeg() {
+  const v = useAfterSend();
+  return (
+    <Modes
+      label={t("box.after")}
+      value={v}
+      options={[
+        { value: "open", label: t("box.afterOpen") },
+        { value: "stay", label: t("box.afterStay") },
+      ]}
+      onChange={(x) => setAfterSend(x as AfterSend)}
+      testId="set-after-send"
+    />
+  );
+}
+
+/** Settings › General › Chat box › While an answer is running (item 95): what Enter does with a message typed then. "Usual" is
+ *  where it starts and changes nothing: a team member takes it in now and a coding chat waits, as each did before the choice. */
+function FollowUpSeg() {
+  const v = usePickedFollowUp();
+  return (
+    <Modes
+      label={t("box.follow")}
+      value={v ?? "usual"}
+      options={[
+        { value: "usual", label: t("box.followUsual") },
+        { value: "queue", label: t("box.followQueue") },
+        { value: "steer", label: t("box.followSteer") },
+      ]}
+      onChange={(x) => setFollowUp(x === "usual" ? null : (x as FollowUp))}
+      testId="set-follow-up"
+    />
+  );
+}
+
 function GeneralPage() {
   const s = useStore();
   const h = s.hello;
@@ -766,6 +803,16 @@ function GeneralPage() {
         </Row>
       </div>
       <OutsideNotes />
+      {/* The chat box's keys (item 95), beside its other choices: each has the default nobody needs to change. */}
+      <div className="st-gh">{t("box.group")}</div>
+      <div className="st-grp" data-testid="set-box">
+        <Row title={t("box.after")} hint={t("box.afterHint", { mod: modLabel() })}>
+          <AfterSendSeg />
+        </Row>
+        <Row title={t("box.follow")} hint={t("box.followHint", { mod: modLabel() })}>
+          <FollowUpSeg />
+        </Row>
+      </div>
       <div className="st-gh">{t("suggest.group")}</div>
       <div className="st-grp">
         <Row title={t("suggest.title")} hint={t("suggest.hintCost")}>

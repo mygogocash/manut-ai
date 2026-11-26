@@ -15,6 +15,7 @@ import { promptText } from "../chat/parts/attachFiles";
 import { findTokens, toWire } from "../chat/parts/skillTokens";
 import { forBots, parseResume, RESUME_KEY, type ResumeSnap } from "../app/resume";
 import { getDraft } from "../app/drafts";
+import { followUp as savedFollowUp, type FollowUp } from "../chat/box/keys";
 import { moveInSidebar } from "./order";
 import { LANG_KEY, readLang, setLang, t as tr, type Key, type Lang } from "../i18n";
 import { firstRunEntry, flowReduce, ONBOARDED_KEY, startFlow, type FlowEvent, type FlowState } from "../onboarding/flow";
@@ -537,8 +538,9 @@ export const THINKING = "Thinking…";
  *  longer holds the steer queue. */
 export const PENDING_TURN_MS = 15_000;
 /** Steer errors that are a clear refusal (the gateway answered no): the row is sent normally after the turn. Any
- *  other error (disconnected, bot_offline, timeout, internal) leaves it unknown: Hermes may have taken it. */
-const STEER_REFUSED = new Set(["gateway_error", "bad_request"]);
+ *  other error (disconnected, bot_offline, timeout, internal) leaves it unknown: Hermes may have taken it. A runtime
+ *  that has no steer at all (`not_yet`, the connected one) refuses as clearly, so a Cmd+Enter there waits instead. */
+const STEER_REFUSED = new Set(["gateway_error", "bad_request", "not_yet"]);
 /** How much of a turn's thinking text is kept (the start; the rest is dropped, never shown cut mid-word). */
 export const THINKING_MAX = 20_000;
 
@@ -2099,14 +2101,17 @@ export interface Actions {
   init(): Promise<void>;
   selectBot(bot: string): Promise<void>;
   /** Sends to the main chat; a "Reply there" chip goes along as `reply_to` and is then cleared. Skill tokens
-   *  (`$name`) go out hoisted to the front as `/name`; the bubble keeps the text as typed. */
-  send(text: string): Promise<void>;
+   *  (`$name`) go out hoisted to the front as `/name`; the bubble keeps the text as typed. While a turn runs, `how`
+   *  says whether it waits for the turn or is steered in (chat/box/keys.ts; absent: Settings' choice). */
+  send(text: string, how?: FollowUp): Promise<void>;
+  /** Sends to `bot`'s main chat without opening it (Home's Cmd+Enter): the person stays where they are. */
+  sendAway(bot: string, text: string): Promise<void>;
   /** Put (or clear, with null) the composer's "Reply there" chip for a bot. Sends nothing. */
   setReplyTo(chip: ReplyChip | null, bot?: string): void;
   /** Attach each file in order (`chat.attach`), then send. Rejects, sending nothing, if any attach fails. */
-  sendWithFiles(text: string, files: OutFile[]): Promise<void>;
+  sendWithFiles(text: string, files: OutFile[], how?: FollowUp): Promise<void>;
   /** A message with files in `bot`'s thread `thread`, as `sendWithFiles` sends one in a main chat. */
-  threadSendWithFiles(bot: string, thread: string, text: string, files: OutFile[]): Promise<void>;
+  threadSendWithFiles(bot: string, thread: string, text: string, files: OutFile[], how?: FollowUp): Promise<void>;
   /** Stops the running turn of `bot`'s chat (the selected bot's by default), as the chat's Stop does. */
   interrupt(bot?: string): Promise<void>;
   /** Steer queue, on a held row of `bot`'s main chat (the selected bot's by default). Send now: stop the running
@@ -2305,15 +2310,17 @@ export interface Actions {
   reloadPlugins(bot: string, name?: string): Promise<OpMap["plugins.reload"]["result"]>;
   /** Re-read a bot's threads (`thread.list`). */
   loadThreads(bot: string): Promise<void>;
-  /** A new, empty thread under `bot`, opened in the main column (the composer takes focus). */
-  newThread(bot: string): Promise<string | null>;
+  /** A new, empty thread under `bot`, opened in the main column (the composer takes focus). `away`: made and listed, but
+   *  not opened, so the person stays where they are (Home's Cmd+Enter). */
+  newThread(bot: string, away?: boolean): Promise<string | null>;
   /** `./thread <text>`: a new thread under `bot`, opened, with `first` sent as its first message (it names the
-   *  thread); an empty `first` is the same as newThread. Nothing goes to the bot's main chat. */
-  newThreadWith(bot: string, first: string): Promise<string | null>;
+   *  thread); an empty `first` is the same as newThread. Nothing goes to the bot's main chat. `away`: the thread is not
+   *  opened (Home's Cmd+Enter). */
+  newThreadWith(bot: string, first: string, away?: boolean): Promise<string | null>;
   /** Show thread `thread` of `bot` (reads its messages the first time); null = the bot's main chat. */
   openThread(bot: string, thread: string | null): Promise<void>;
-  /** Send in a thread; the first message names it. */
-  threadSend(bot: string, thread: string, text: string): Promise<void>;
+  /** Send in a thread; the first message names it. `how` as `send`'s. */
+  threadSend(bot: string, thread: string, text: string, how?: FollowUp): Promise<void>;
   threadInterrupt(bot: string, thread: string): Promise<void>;
   /** Stop the thread when it runs, then archive it in Hermes (hidden, kept, restorable). Rejects on refusal. */
   removeThread(bot: string, thread: string): Promise<void>;
@@ -2366,6 +2373,9 @@ export interface StoreOptions {
   firstRoster?: "default" | "all";
   /** When the person last saw each bot's automation answers (unix s; null: never recorded). Default: localStorage. */
   watchSeen?: { get(bot: string): number | null; set(bot: string, ts: number): void };
+  /** What a message typed during a turn does when its sender did not say (Settings › General › Chat box; default the
+   *  saved choice, chat/box/keys.ts). */
+  followUp?: () => FollowUp;
   /** Automation answers found on (re)opening a chat that the person has not seen: the app shows one note per bot. */
   onWatchMissed?: (bot: string, rows: Msg[], state: AppState) => void;
 }
@@ -2509,18 +2519,21 @@ export function createStore(bridge: BridgeLike, opts: StoreOptions = {}): Store 
   /** A row of `bot` whose steer got no answer (it waits for Send or Delete): the text it carries, or null. */
   const unknownRow = (bot: string, id: string) =>
     state.chats[bot]?.items.some((i) => i.kind === "user" && i.id === id && i.steerUnknown) ? (held.get(id) ?? null) : null;
-  /** Typed in chat `key` (a bot's main chat or a thread) while its turn runs: steered into that turn at once
-   *  (messenger style: the bot keeps working and takes it in, no interrupt). Where it cannot be steered (files, a
-   *  Reply there target, a `/` command Hermes runs itself, no turn yet, the bridge coming back, a refused steer ahead
-   *  of it) it is held (steer queue, the ↵ ↓ × buttons) and sent when the turn ends. False when nothing runs there:
-   *  send it now. */
-  const holdIfBusy = (key: string, id: string, p: { text: string; wire: string; reply_to?: string; files?: OutFile[] }, row: Extract<Action, { type: "local.user" }>) => {
+  /** Typed in chat `key` (a bot's main chat or a thread) while its turn runs. `how` (the sender's key, else Settings'
+   *  choice, chat/box/keys.ts) says what it does: `steer` hands it to that turn at once (messenger style: the bot keeps
+   *  working and takes it in, no interrupt); `queue` holds it (steer queue, the ↵ ↓ × buttons) and sends it when the
+   *  turn ends. Where it cannot be steered (files, a Reply there target, a `/` command Hermes runs itself, no turn yet,
+   *  the bridge coming back, a refused steer ahead of it) it is held whatever `how` says. False when nothing runs
+   *  there: send it now. */
+  const followUpOf = opts.followUp ?? (() => savedFollowUp("member"));
+  const holdIfBusy = (key: string, id: string, p: { text: string; wire: string; reply_to?: string; files?: OutFile[] }, row: Extract<Action, { type: "local.user" }>, how?: FollowUp) => {
     if (!mustHold(state, key)) return false;
     held.set(id, { bot: key, ...p });
     const c = state.chats[key];
     // only behind rows that are themselves being steered in: never ahead of one that waits
     const ahead = (c?.queue ?? []).every((q) => c?.items.some((i) => i.kind === "user" && i.id === q && i.autoSteer));
-    const steer = !!c?.turn && !c.stale && !p.files?.length && !p.reply_to && !p.wire.trimStart().startsWith("/") && ahead;
+    const wanted = (how ?? followUpOf()) === "steer";
+    const steer = wanted && !!c?.turn && !c.stale && !p.files?.length && !p.reply_to && !p.wire.trimStart().startsWith("/") && ahead;
     dispatch({ ...row, held: true, ...(steer ? { steer } : {}) });
     steerNext(key);
     return true;
@@ -2531,6 +2544,28 @@ export function createStore(bridge: BridgeLike, opts: StoreOptions = {}): Store 
     const head = c?.queue?.[0];
     if (!head || !c.turn || c.steering) return;
     if (c.items.some((i) => i.kind === "user" && i.id === head && i.autoSteer)) void actions.queueSteer(head, key);
+  };
+  /** A message in `bot`'s main chat, open or not (the open one's Send, and Home's Cmd+Enter, which leaves it closed). */
+  const sendIn = async (bot: string | null, text: string, how?: FollowUp) => {
+    const t = text.trim();
+    if (!bot || !t) return;
+    const id = `local-${++localSeq}`;
+    const chip = state.replyTo[bot] ?? null;
+    const reply = chip ? { source: chip.source, label: chip.place } : undefined;
+    const wire = toWire(t, skillNames.get(bot) ?? []);
+    // a turn runs: manut holds it (steer queue) and sends it when the turn ends, or steers it in (`how`)
+    if (holdIfBusy(bot, id, { text: t, wire, ...(chip ? { reply_to: chip.session_id } : {}) }, { type: "local.user", bot, id, text: t, now: now(), reply, sent: wire, skills: tokenNames(t, bot) }, how)) {
+      if (chip) dispatch({ type: "reply.set", bot, chip: null });
+      return;
+    }
+    dispatch({ type: "local.user", bot, id, text: t, now: now(), reply, sent: wire, skills: tokenNames(t, bot) });
+    if (chip) dispatch({ type: "reply.set", bot, chip: null });
+    try {
+      await bridge.request("chat.send", chip ? { bot, text: wire, reply_to: chip.session_id } : { bot, text: wire });
+      dispatch({ type: "send.ok", bot, id, now: now() });
+    } catch (e) {
+      dispatch({ type: "send.failed", bot, id, error: errText(e) });
+    }
   };
   const fail = (e: unknown) => dispatch({ type: "error", message: errText(e) });
   const botArg = (bot?: string) => bot ?? state.selectedBot;
@@ -2940,36 +2975,21 @@ export function createStore(bridge: BridgeLike, opts: StoreOptions = {}): Store 
       opts.onSettled?.();
     },
     selectBot,
-    async send(text) {
-      const bot = state.selectedBot;
-      const t = text.trim();
-      if (!bot || !t) return;
-      const id = `local-${++localSeq}`;
-      const chip = state.replyTo[bot] ?? null;
-      const reply = chip ? { source: chip.source, label: chip.place } : undefined;
-      const wire = toWire(t, skillNames.get(bot) ?? []);
-      // a turn runs: manut holds it (steer queue) and sends it when the turn ends
-      if (holdIfBusy(bot, id, { text: t, wire, ...(chip ? { reply_to: chip.session_id } : {}) }, { type: "local.user", bot, id, text: t, now: now(), reply, sent: wire, skills: tokenNames(t, bot) })) {
-        if (chip) dispatch({ type: "reply.set", bot, chip: null });
-        return;
-      }
-      dispatch({ type: "local.user", bot, id, text: t, now: now(), reply, sent: wire, skills: tokenNames(t, bot) });
-      if (chip) dispatch({ type: "reply.set", bot, chip: null });
-      try {
-        await bridge.request("chat.send", chip ? { bot, text: wire, reply_to: chip.session_id } : { bot, text: wire });
-        dispatch({ type: "send.ok", bot, id, now: now() });
-      } catch (e) {
-        dispatch({ type: "send.failed", bot, id, error: errText(e) });
-      }
+    send: (text, how) => sendIn(state.selectedBot, text, how),
+    async sendAway(bot, text) {
+      if (!text.trim()) return;
+      // the chat is read first when it never was, so its answer lands in a chat that knows its history
+      if (!state.chats[bot]?.loaded) await loadChat(bot).catch(fail);
+      await sendIn(bot, text);
     },
     setReplyTo(chip, bot) {
       const b = botArg(bot);
       if (b) dispatch({ type: "reply.set", bot: b, chip });
     },
-    async sendWithFiles(text, files) {
+    async sendWithFiles(text, files, how) {
       const bot = state.selectedBot;
       if (!bot) return;
-      if (!files.length) return actions.send(text);
+      if (!files.length) return actions.send(text, how);
       if (mustHold(state, bot)) {
         // held with its files: they are attached when it goes out (an attach stages for the very next send)
         const id = `local-${++localSeq}`;
@@ -3412,7 +3432,7 @@ export function createStore(bridge: BridgeLike, opts: StoreOptions = {}): Store 
     restartScope: (bot) => bridge.request("bots.restart_scope", { bot }),
     reloadPlugins: (bot, name) => bridge.request("plugins.reload", name ? { bot, name } : { bot }),
     loadThreads,
-    async newThread(bot) {
+    async newThread(bot, away = false) {
       try {
         const key = `t${Date.now().toString(36)}${(threadSeq += 1)}`;
         const r = await threadReq("thread.create", { bot, key });
@@ -3420,15 +3440,15 @@ export function createStore(bridge: BridgeLike, opts: StoreOptions = {}): Store 
         dispatch({ type: "thread.upsert", bot, row: { ...row, last: now() / 1000 } });
         const ck = threadRoute(bot, row.thread);
         dispatch({ type: "chat.opened", bot: ck, res: { session_id: row.thread, messages: [], running: false, model, provider, reasoning }, now: now() });
-        dispatch({ type: "ui.thread", bot, thread: row.thread });
+        if (!away) dispatch({ type: "ui.thread", bot, thread: row.thread });
         return row.thread;
       } catch (e) {
         fail(e);
         return null;
       }
     },
-    async newThreadWith(bot, first) {
-      const thread = await actions.newThread(bot);
+    async newThreadWith(bot, first, away = false) {
+      const thread = await actions.newThread(bot, away);
       if (thread && first.trim()) await actions.threadSend(bot, thread, first);
       return thread;
     },
@@ -3438,12 +3458,12 @@ export function createStore(bridge: BridgeLike, opts: StoreOptions = {}): Store 
       dispatch({ type: "ui.thread", bot, thread });
       if (!state.chats[threadKey(bot, thread)]?.loaded) await loadThread(bot, thread);
     },
-    async threadSend(bot, thread, text) {
+    async threadSend(bot, thread, text, how) {
       const key = threadRoute(bot, thread);
       const id = `local-${++localSeq}`;
       const t = text.trim();
       // typed while the thread's turn runs: the same steer queue as the main chat (held, ↵ ↓ × buttons, sent in order)
-      if (holdIfBusy(key, id, { text: t, wire: t }, { type: "local.user", bot: key, id, text: t, now: now() })) return;
+      if (holdIfBusy(key, id, { text: t, wire: t }, { type: "local.user", bot: key, id, text: t, now: now() }, how)) return;
       dispatch({ type: "local.user", bot: key, id, text: t, now: now() });
       const row = (state.threads[bot] ?? []).find((r) => r.thread === thread);
       // the row reads the first words at once; Hermes' own title replaces them when it lands
@@ -3455,8 +3475,8 @@ export function createStore(bridge: BridgeLike, opts: StoreOptions = {}): Store 
         dispatch({ type: "send.failed", bot: key, id, error: errText(e) });
       }
     },
-    async threadSendWithFiles(bot, thread, text, files) {
-      if (!files.length) return actions.threadSend(bot, thread, text);
+    async threadSendWithFiles(bot, thread, text, files, how) {
+      if (!files.length) return actions.threadSend(bot, thread, text, how);
       const key = threadRoute(bot, thread);
       const id = `local-${++localSeq}`;
       const t = text.trim();

@@ -5,7 +5,11 @@
 // Home shows only what the store already holds. Left out until the runtime has them: the budget pill (no money data),
 // the quick links to Sales, Content, Books and Stock, Updates, Careful (no setting it fits), adding a file and
 // speaking. Automations shows, with its count, only when the runtime offers them.
-import { useRef, useState, type ReactNode, type Ref } from "react";
+import { useEffect, useRef, useState, type ReactNode, type Ref } from "react";
+import { firstWords } from "../threads/types";
+import { modLabel, sendKey, stashKey, staysHome, useAfterSend } from "../chat/box/keys";
+import { joinDraft, stashDraft } from "../app/stash";
+import { HomeDrafts } from "./HomeDrafts";
 import "./home.css";
 import { t } from "../i18n";
 import { can } from "../runtime";
@@ -34,6 +38,7 @@ import {
   offeredModes,
   sendAsk,
   settledAsks,
+  type Sent,
   workingMembers,
   type DoneHere,
   type HomeMode,
@@ -88,7 +93,16 @@ export interface HomeViewProps {
   canSend: boolean;
   onMode: (mode: HomeMode) => void;
   onText: (text: string) => void;
-  onSubmit: () => void;
+  /** Send. `stay`: leave the person on Home (Cmd+Enter, or Enter when Settings says so; chat/box/keys.ts). */
+  onSubmit: (stay: boolean) => void;
+  /** What Enter does here (Settings › General › Chat box): Send's tooltip says it, and what Cmd+Enter does instead. */
+  stays?: boolean;
+  /** The last send that left the person here: one quiet line that says it went, and opens it. */
+  started?: { name: string; words: string; open: () => void } | null;
+  /** Cmd+S in the box: its words go to Drafts, at the top of this page (item 95). */
+  onStash?: () => void;
+  /** The drafts kept for later, drawn at the top of the page (HomeDrafts.tsx). */
+  drafts?: ReactNode;
   /** why the last ask did not go (the store's error); the box keeps its words */
   sendError?: string | null;
   /** a suggestion was picked: its words go into the box, and nothing is sent until Send */
@@ -146,6 +160,7 @@ export function HomeView(p: HomeViewProps) {
       }
     >
       <div className="home hero" data-arrive="home" data-arrive-rows=".rows > li">
+        {p.drafts}
         <div className="lockup">
           <BrandMark size={46} />
           <span>Manut AI</span>
@@ -163,7 +178,7 @@ export function HomeView(p: HomeViewProps) {
           onKeyDown={holdImeEnter}
           onSubmit={(e) => {
             e.preventDefault();
-            p.onSubmit();
+            p.onSubmit(!!p.stays);
           }}
         >
           {/* The box is named for where the ask goes, so each mode's name reaches a screen reader too. */}
@@ -179,6 +194,19 @@ export function HomeView(p: HomeViewProps) {
             value={p.text}
             placeholder={t(words.placeholder)}
             onChange={(e) => p.onText(e.target.value)}
+            // Enter and Cmd+Enter: one opens what it started, the other stays here (keys.ts); the form's own submit is
+            // held back so a send happens once
+            onKeyDown={(e) => {
+              // Cmd+S puts the words aside in Drafts, never the browser's Save
+              if (stashKey(e)) {
+                e.preventDefault();
+                return p.onStash?.();
+              }
+              const k = sendKey(e);
+              if (!k) return;
+              e.preventDefault();
+              p.onSubmit(staysHome(k, p.stays ? "stay" : "open"));
+            }}
             data-testid="home-ask"
           />
           <div className="askrow">
@@ -189,7 +217,7 @@ export function HomeView(p: HomeViewProps) {
                 </button>
               ))}
             </div>
-            <button type="submit" className="send" aria-label={t("cmp.send")} title={t("cmp.send")} disabled={!p.canSend} data-testid="home-send">
+            <button type="submit" className="send" aria-label={t("cmp.send")} title={t(p.stays ? "home.sendStays" : "home.sendOpens", { mod: modLabel() })} disabled={!p.canSend} data-testid="home-send">
               <SendGlyph />
             </button>
           </div>
@@ -199,6 +227,15 @@ export function HomeView(p: HomeViewProps) {
             </p>
           )}
         </form>
+        {/* A send that left the person here says it went, once, and opens what it started (item 95). */}
+        {p.started && (
+          <p className="started mo-rise" role="status" data-testid="home-started">
+            <span className="grow">{t("home.started", { name: p.started.name, words: p.started.words })}</span>
+            <button type="button" className="lk" onClick={p.started.open} data-testid="home-started-open">
+              {t("home.open")}
+            </button>
+          </p>
+        )}
         <div className="wide sugg">
           <p className="sugg-h" id="home-sugg">
             {t(words.title)}
@@ -403,6 +440,8 @@ export function HomePage() {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
+  const [started, setStarted] = useState<{ sent: Sent; words: string } | null>(null);
+  const after = useAfterSend();
   const [done, setDone] = useState<DoneHere[]>([]);
   const [rowStates, setRowStates] = useState<Record<string, RowState>>({});
   const input = useRef<HTMLInputElement>(null);
@@ -414,20 +453,54 @@ export function HomePage() {
   const jobs = useJobs();
   const helped = helpedShop(s.shops);
 
-  const submit = async () => {
+  const submit = async (stay: boolean) => {
     const words = text.trim();
     if (!words || !route || sending) return;
+    // these words are on their way: a send that opens the chat leaves Home before the box empties, and must not keep
+    // them as a draft too
+    typed.current = "";
     setSending(true);
     setSendError(null);
+    setStarted(null);
     // The store reports a failed request only through lastError: clear it, then look after the call, as the model
     // picker does.
     const store = getStore();
     store.dispatch({ type: "error", message: null });
-    const sent = await sendAsk(s, route, words);
+    const sent = await sendAsk(s, route, words, stay);
     setSending(false);
     // A thread that could not be made leaves the words in the box, with the store's reason under it.
-    if (sent) setText("");
-    else setSendError(store.getState().lastError || t("card.notTaken"));
+    if (!sent) return setSendError(store.getState().lastError || t("card.notTaken"));
+    setText("");
+    // Cmd+Enter left the person here: the box is ready for the next one, and a line says where this one went.
+    if (stay) {
+      setStarted({ sent, words: firstWords(words) });
+      input.current?.focus();
+    }
+  };
+  const nameOf = (bot: string) => s.bots.find((b) => b.name === bot)?.display_name ?? bot;
+
+  // Words left unsent in this box are a new chat's draft: leaving Home, or the app closing, keeps them in Drafts at the
+  // top of this page (app/stash.ts), so the next new chat starts from an empty box and nothing typed is lost.
+  const typed = useRef(text);
+  typed.current = text;
+  useEffect(() => {
+    const keep = () => {
+      const words = typed.current;
+      typed.current = "";
+      if (words.trim()) void stashDraft({ text: words, from: "home" }).catch(() => undefined);
+    };
+    window.addEventListener("pagehide", keep);
+    return () => {
+      window.removeEventListener("pagehide", keep);
+      keep();
+    };
+  }, []);
+  const stash = () => {
+    const words = text;
+    if (!words.trim()) return;
+    typed.current = "";
+    setText("");
+    void stashDraft({ text: words, from: "home" }).catch(() => setText(words));
   };
 
   const approve = async (a: Ask) => {
@@ -456,7 +529,29 @@ export function HomePage() {
         setText(words);
         setSendError(null);
       }}
-      onSubmit={() => void submit()}
+      onSubmit={(stay) => void submit(stay)}
+      onStash={stash}
+      drafts={
+        <HomeDrafts
+          s={s}
+          nowMs={now}
+          here={(words) => {
+            setText((cur) => joinDraft(cur, words));
+            input.current?.focus();
+          }}
+        />
+      }
+      stays={after === "stay"}
+      started={
+        started && {
+          name: nameOf(started.sent.bot),
+          words: started.words,
+          open: () => {
+            const to = started.sent;
+            void (to.to === "thread" ? s.openThread(to.bot, to.thread) : s.selectBot(to.bot));
+          },
+        }
+      }
       sendError={sendError}
       onChip={(words) => {
         setText(words);

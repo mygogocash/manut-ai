@@ -59,6 +59,8 @@ import { forgetPreview } from "../code/previewStore";
 import { continuesItself, type SavedSession } from "../app/resume";
 import { accountGroups } from "../settings/accounts/useAccounts";
 import { ASK_MODE, modesOf, steersOf } from "./controls";
+import { followUp as savedFollowUp, type FollowUp } from "../chat/box/keys";
+import { draftFolders } from "../app/stash";
 import { parseCommands, type AgentCommand } from "../chat/parts/commands";
 import { noteMcpSeen } from "../settings/mcp/agentConfig";
 import { t as tr, type Key } from "../i18n";
@@ -71,7 +73,7 @@ import { folderGroups, getFolderPrefs, orderFolders, pathKey, ranElsewhere, reve
 import { broughtBackNote, REWINDS, rewoundNote, TurnBook, turnTitle } from "./rewind";
 
 /** The Accounts CLI a session of `agent` signs in as (mirrors `session_cli` in src-tauri/src/accounts.rs). */
-const ACCOUNT_CLI: Partial<Record<AgentId, AccountCli>> = { claude: "claude", codex: "codex", grok: "grok" };
+export const ACCOUNT_CLI: Partial<Record<AgentId, AccountCli>> = { claude: "claude", codex: "codex", grok: "grok" };
 
 /** The account a new session of `agent` runs as, from the Accounts list when it is loaded (none = unknown or the
  *  agent has no accounts; the shell then uses the one picked for new sessions). */
@@ -1053,8 +1055,10 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
   };
 
   /** Send chat text: the bubble shows at once; a refusal marks it "Not sent". True when it went to the agent or waits for the
-   *  running turn, false when nothing was sent. */
-  const send = async (id: string, text: string): Promise<boolean> => {
+   *  running turn, false when nothing was sent. While a turn runs it waits (the steer queue); with `how` "steer" (the chat
+   *  box's Cmd+Enter or Settings' choice, chat/box/keys.ts) it is handed to the running turn at once, as its ↵ does, when
+   *  the agent takes a steer and nothing waits ahead of it. */
+  const send = async (id: string, text: string, how?: FollowUp): Promise<boolean> => {
     const t = text.trim();
     const key = keys.get(id);
     if (!t || !key) return false;
@@ -1062,6 +1066,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     const lid = `local-s${++localSeq}`;
     if (mustHoldHere(id, key)) {
       hold(id, key, lid, { kind: "send", text: t, id: lid }, () => st.dispatch({ type: "local.user", bot: key, id: lid, text: t, now: Date.now(), held: true }));
+      if ((how ?? savedFollowUp("code")) === "steer" && chatOf(key)?.turn && chatOf(key)?.queue?.[0] === lid) await queuePick(id, lid, "steer");
       return true;
     }
     st.dispatch({ type: "local.user", bot: key, id: lid, text: t, now: Date.now() });
@@ -1143,9 +1148,9 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
    * Send a message with files from a running chat. The files are saved first; if one cannot be, nothing is sent
    * and the error goes back to the composer (its chips stay).
    */
-  const sendFiles = async (id: string, text: string, files: OutFile[]): Promise<void> => {
+  const sendFiles = async (id: string, text: string, files: OutFile[], how?: FollowUp): Promise<void> => {
     if (!files.length) {
-      await send(id, text);
+      await send(id, text, how);
       return;
     }
     const key = keys.get(id);
@@ -2294,7 +2299,8 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     if (restored || state.list.length > 0) return;
     restored = true;
     if (!saved.length) {
-      void ready().then(() => host.pruneFiles([]).catch(() => undefined));
+      // the drafts kept on Home keep their files' folders (app/stash.ts)
+      void ready().then(() => host.pruneFiles(draftFolders()).catch(() => undefined));
       void ready().then(() => turns.prune([]));
       void ready().then(() => pruneHistory(host, savedPanelKeys()));
       saveSentFiles({});
@@ -2412,7 +2418,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     for (const r of list) if (keys.has(r.id)) registerRoute(r.id);
     // the saved copies of sessions that are gone go; the ones kept show again in their bubbles
     const ids = list.map((r) => r.id);
-    void ready().then(() => host.pruneFiles(ids).catch(() => undefined));
+    void ready().then(() => host.pruneFiles([...ids, ...draftFolders()]).catch(() => undefined));
     // and the kept turns of sessions that are gone
     void ready().then(() => turns.prune(ids));
     // the kept history of terminals that are gone goes (the bottom panel's tabs keep theirs)

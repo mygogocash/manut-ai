@@ -18,6 +18,8 @@ import { addAt, matchMembers, mentionAt, putMention, withAction, withFolders, ty
 import { FolderChips, MentionPicker } from "../box/BoxParts";
 import { useBoxVoice } from "../box/Voice";
 import { voiceOffered } from "../../voice/engine";
+import { keysCaption, sendKey, stashKey, useFollowUp, whileRunning, type BoxKind, type FollowUp } from "../box/keys";
+import { filesOf, stashDraft, takeHanded } from "../../app/stash";
 
 const MAX_H = 200;
 
@@ -34,7 +36,11 @@ const MAX_H = 200;
  * The + is Add context (item 80): files, a folder (named on its own line by its path when the message goes,
  * chat/box/context.ts), a teammate with `@` (`mentions`: typing `@` at a word's start opens the same menu) and the
  * agent's actions (`actions`: the `/` menu, which the + opens over text already typed, the action then going first).
- * With `voice` (item 81, the Mac app), the microphone and voice mode sit before Send (chat/box/Voice.tsx). */
+ * With `voice` (item 81, the Mac app), the microphone and voice mode sit before Send (chat/box/Voice.tsx).
+ * While an answer runs (item 95), Enter does Settings' "While an answer is running" (wait for it, or add it now) and
+ * Cmd+Enter the other, for that one message (chat/box/keys.ts); a quiet line under the box says which. With no answer
+ * running both keys send. Cmd+S puts the draft aside, words, folders and files, in Drafts on Home (app/stash.ts), and a
+ * draft taken from there into this chat brings its files along. */
 export function Composer({
   bot,
   running,
@@ -62,15 +68,19 @@ export function Composer({
   suggestion,
   onSuggestionTaken,
   voice = false,
+  steers = true,
+  boxKind = "member",
+  limit,
 }: {
   bot: Bot;
   running: boolean;
   /** An approval or question card of this bot is waiting above: the placeholder points at it. */
   asking?: boolean;
   offline: boolean;
-  onSend: (text: string) => void;
+  /** `how`: while an answer runs, whether the message waits for it or goes into it now (absent: Settings' choice). */
+  onSend: (text: string, how?: FollowUp) => void;
   /** Files with the text (a bot's main chat, a SESSIONS chat agent). Without it there is no +, drop or file paste. */
-  onSendFiles?: (text: string, files: OutFile[]) => Promise<void>;
+  onSendFiles?: (text: string, files: OutFile[], how?: FollowUp) => Promise<void>;
   onStop: () => void;
   reply?: ReplyChip | null;
   onClearReply?: () => void;
@@ -112,6 +122,14 @@ export function Composer({
   /** The microphone, which puts the words heard into the text, and voice mode, which talks with the agent of this chat
    *  (item 81): a chat whose box carries the agent's controls, in the Mac app. */
   voice?: boolean;
+  /** This chat's agent can take a message mid-answer (a steer). Without one, a message typed during an answer always
+   *  waits, with Enter or Cmd+Enter, and the line under the box says so. */
+  steers?: boolean;
+  /** A team member's chat (the default) or a coding chat: what a message typed mid-answer does until the person picks (chat/box/keys.ts). */
+  boxKind?: BoxKind;
+  /** The account this chat runs on is at its limit (item 95, chat/box/later.ts): until when, and how to keep what is
+   *  typed to send then. `onWait` is false when a message already waits in this chat. */
+  limit?: { until: string; onWait: (text: string) => boolean } | null;
 }) {
   // unsent text survives switching chats and restarts (drafts.ts; the composer is keyed by its chat)
   const [text, setText] = useState(() => getDraft(bot.name));
@@ -123,6 +141,8 @@ export function Composer({
   const [forced, setForced] = useState(false);
   const [sending, setSending] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  /** Cmd+S just put the draft aside: one quiet line says where it went, until the person types again. */
+  const [aside, setAside] = useState(false);
   const ref = useRef<HTMLTextAreaElement>(null);
   const wrap = useRef<HTMLDivElement>(null);
   const mirror = useRef<HTMLDivElement>(null);
@@ -140,6 +160,7 @@ export function Composer({
   const edit = (next: string) => {
     recall.current = null;
     setForced(false);
+    setAside(false);
     setText(next);
   };
 
@@ -409,15 +430,53 @@ export function Composer({
       return cur.filter((c) => c.id !== id);
     });
 
+  // A draft taken from Home's Drafts into this chat (app/stash.ts): its files join the box, read back from their saved
+  // copies. Its words came as the chat's draft.
+  const draftN = store.ui.draft?.n;
+  useEffect(() => {
+    const h = takeHanded(bot.name);
+    if (!h) return;
+    void filesOf(h).then(({ files, missing }) => {
+      if (files.length) add(files);
+      if (missing.length) setErr(t("stash.missing", { names: missing.join(", ") }));
+    });
+  }, [bot.name, draftN, add]);
+
+  /** Cmd+S: the draft leaves the box for Drafts on Home, with its folders and files. Nothing is sent. A file that cannot
+   *  be saved keeps the whole draft in the box, with the reason. */
+  const putAside = async () => {
+    if (!has || sending || offline) return;
+    const body = folders.length ? withFolders(text, folders) : text;
+    setSending(true);
+    setErr(null);
+    try {
+      await stashDraft({ text: body, files: good, from: bot.name });
+      edit("");
+      setFolders([]);
+      setChips((cur) => {
+        cur.forEach((c) => !c.reason && c.url && URL.revokeObjectURL(c.url));
+        return cur.filter((c) => c.reason);
+      });
+      setAside(true);
+    } catch (e) {
+      setErr(t("stash.failed", { error: e instanceof Error ? e.message : String(e) }));
+    } finally {
+      setSending(false);
+    }
+  };
+
   // Unsent chips let go of their local copies when the composer goes; sent ones live on in the bubble.
   const latest = useRef(chips);
   latest.current = chips;
   useEffect(() => () => latest.current.forEach((c) => c.url && URL.revokeObjectURL(c.url)), []);
 
   const overlay = useDropZone(wrap, !offline && !!onSendFiles, add);
+  const follow = useFollowUp(boxKind);
 
-  const send = async () => {
+  /** Send with Enter or Cmd+Enter (`key`): while an answer runs they choose between waiting for it and adding it now. */
+  const send = async (key: "enter" | "cmd" = "enter") => {
     if (!has || offline || sending) return;
+    const how = running ? whileRunning(key, steers, follow) : undefined;
     vc.sending();
     if (threadCmd && onNewThread) {
       if (good.length) return setErr(t("thread.cmdFiles"));
@@ -428,7 +487,7 @@ export function Composer({
     // the folders named go on their own lines under the text (none: the text as typed)
     const body = folders.length ? withFolders(text, folders) : text;
     if (!good.length || !onSendFiles) {
-      onSend(body);
+      onSend(body, how);
       edit("");
       setFolders([]);
       return;
@@ -436,7 +495,7 @@ export function Composer({
     setSending(true);
     setErr(null);
     try {
-      await onSendFiles(body, good);
+      await onSendFiles(body, good, how);
       edit("");
       setFolders([]);
       setChips((cur) => cur.filter((c) => c.reason)); // red chips stay: they were never sent
@@ -519,6 +578,12 @@ export function Composer({
         }}
         onKeyDown={(e) => {
           const composing = imeComposing(e);
+          // Cmd+S puts the draft aside (never the browser's Save, which would save the page)
+          if (stashKey(e)) {
+            e.preventDefault();
+            void putAside();
+            return;
+          }
           // Tab takes the suggestion into the box, where it is the person's own text to edit and send; nothing is sent
           if (ghost && e.key === "Tab" && !e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey && !composing) {
             e.preventDefault();
@@ -623,7 +688,8 @@ export function Composer({
           }
           if (e.key === "Enter" && !e.shiftKey && !composing) {
             e.preventDefault();
-            void send();
+            // Cmd+Enter does the other of wait and add now while an answer runs; any other Enter is a plain send
+            void send(sendKey(e) ?? "enter");
           } else if (e.key === "Backspace" && !text && reply) {
             e.preventDefault();
             onClearReply?.();
@@ -733,6 +799,39 @@ export function Composer({
       {heldNote && has && (
         <div className="cmp-held" role="note" data-testid="composer-held">
           {heldNote}
+        </div>
+      )}
+      {/* The account is at its limit: Enter still sends now, and one button keeps the words to send at the reset. A
+          message with files cannot wait (its copies are the session's), so the line only says when the limit lifts. */}
+      {limit && has && !running && !offline && !action && (
+        <div className="cmp-keys cmp-later" role="note" data-testid="composer-limit">
+          <span>{t(good.length ? "later.limitFiles" : "later.limit", { when: limit.until })}</span>
+          {!good.length && (
+            <button
+              type="button"
+              className="card-btn"
+              onClick={() => {
+                const body = folders.length ? withFolders(text, folders) : text;
+                if (!limit.onWait(body)) return;
+                edit("");
+                setFolders([]);
+              }}
+              data-testid="composer-wait"
+            >
+              {t("later.sendAt", { when: limit.until })}
+            </button>
+          )}
+        </div>
+      )}
+      {aside && (
+        <div className="cmp-keys" role="status" data-testid="composer-stashed">
+          {t("stash.put")}
+        </div>
+      )}
+      {/* While an answer runs, what Enter does with what is typed, and what Cmd+Enter does instead (item 95). */}
+      {running && has && !action && !offline && (
+        <div className="cmp-keys" role="note" data-testid="composer-keys" data-steers={steers ? "true" : "false"}>
+          {keysCaption(steers, bot.display_name, follow)}
         </div>
       )}
       {foot}
