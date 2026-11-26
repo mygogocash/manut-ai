@@ -256,6 +256,14 @@ program or reaches the network. What it does not understand is `unknown`, and as
   message from, which a kept "git commit" rule would otherwise carry out with the next push. A list of files read from a
   file (`--files0-from`, `--files-from`, tar's `-T`, zip's `-@`) asks, since the files are named nowhere, and `@file`
   that names a path from a root, the home folder or a folder above is checked as that path.
+- **Another computer, for every program.** A word that holds an address (`scheme://`, but a `file://` link) makes any
+  step below `unknown` a send, a change and an install included (`pnpm add https://…`, `docker build https://…`); words
+  read as text (a message, a pattern, a script) do not count, and git and gh read their own addresses as before. A read
+  or a check with an option that names a server (`--server`, `--api`, `--repo`, `--registry`, `--endpoint`, `--url`,
+  `--host`, `--remote`, `--proxy`, or a name ending in one, such as `--index-url`) is a send too, and so are turbo's
+  `--token` and `--team`, kubectl's `-s`, helm's `--kube-apiserver` and `go list -m` asking for versions, updates or
+  retractions. A kubeconfig or kuberc named on the line asks (it can name a program kubectl runs), and `turbo.json`,
+  which can name where turbo sends its cache, is a file a change to which always asks.
 
 `command.hostile.test.ts` holds 170 such lines, each beside the plain line it imitates, which reads as it did.
 
@@ -273,7 +281,7 @@ option's joined value, a redirect or the folder it went into first.
   `.yarn/`, `.pnpmfile.*`, `bunfig.toml`, `pnpm-workspace.yaml`, `.vscode/`, `.idea/`, `.devcontainer/`, `.cargo/`, CI
   files, pre-commit, lefthook and lint-staged settings, `.gitmodules`.
 - `package.json`, `Makefile`, `justfile`, `Taskfile.yml` and the like, whose scripts a check and Preview's Start run by a
-  name that says nothing of them.
+  name that says nothing of them, and `turbo.json`, which can name where turbo sends its cache (item 112).
 - The app's own storage: all of `~/.manut` but the folder the session itself works in when that is a lane's own
   (exactly two names below `~/.manut/lanes`), and the web view's data and caches under `~/Library`.
 
