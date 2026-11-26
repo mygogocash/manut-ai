@@ -24,7 +24,7 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
 | Dev secrets | the Worker, and the owner's macOS Keychain: `manut-dev-operator-key`, `manut-dev-approval-link-secret`, `manut-dev-cred-key` |
 | Cloudflare token | GitHub environment `dev` (`CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`) |
 | Implementation plan | https://claude.ai/artifact/UBrAFtxwR159AM2rxbLTMr (not reachable from T3 Code sessions) |
-| Design canvas (screen spec) | https://claude.ai/artifact/Qd8PtNKK48ji7cFU4SpTsG, sources in `~/Developer/gospark-main/manut-ai-artifacts/app-screens/project/` |
+| Design canvas (screen spec) | https://claude.ai/artifact/Qd8PtNKK48ji7cFU4SpTsG, sources in `~/Developer/manut-ai-artifacts/app-screens/project/` |
 | GoSpark (source of the backend and the rules) | `~/Developer/gospark` (clone of `mygogocash/gospark`) |
 | Oh My Hermes (desktop base) | https://github.com/rlaope/oh-my-hermes, app in `apps/omher` (forked at commit `77b8646`) |
 | Orca (agent protocol code, worktrees) | https://github.com/stablyai/orca |
@@ -298,11 +298,13 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    Merging also switched on Dependabot, whose pull requests target main.
    On the evening of 26 Nov the lead moved to a new Claude Code session. Item 129 merged (each Playwright worker has
    its own stand-in; three CI shards of four workers). Item 101 is split into 101a to 101e (rows in `docs/plan.md`);
-   101a (Cursor and Antigravity as chats) merged; 101e (the first-launch offer to bring over Claude Code and Codex
-   work) is in CI. Needs the owner from 101a: Cursor's Approval mode set to Allowlist (it is Run Everything, so Cursor
+   101a (Cursor and Antigravity as chats) and 101e (the first-launch offer to bring over Claude Code and Codex work)
+   merged. Running: 101b (Grok and Muse Code as chats), 131 (GoSpark's sounds) and 132 (GoSpark's effort card), the
+   last two asked for by the owner that night. From 101e: all 325 Codex sessions on the owner's Mac are compressed, so
+   only Claude Code's conversations are offered until 106b. Needs the owner from 101a: Cursor's Approval mode set to Allowlist (it is Run Everything, so Cursor
    chats are refused), and a Cursor plan with messages left to record a real tool call. GitHub reported 7 Dependabot alerts on `main` (2 critical) at that push, for the owner to look at.
-   The canvas sources move out of `~/Developer/gospark-main` (the owner is deleting the GoSpark folders): see the
-   path in "Where everything is" once moved.
+   The canvas sources moved to `~/Developer/manut-ai-artifacts` (the owner is deleting the GoSpark folders; the
+   GoSpark repository stays on GitHub, so a helper that needs its code clones it read-only into `mktemp -d`).
    Running at 14:15: items 100b, 119, 120 and 121, each a subagent in its own `cc-item…` worktree.
    By 15:35 on 26 Nov items 100b, 119 (the App Store edition), 120 (the fifth read's dial fixes) and 123 (the App
    Privacy draft) are merged. Item 121 (what an ask shows) is reviewed and in its gate; 122 (icon-led menus and

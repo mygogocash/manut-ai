@@ -35,7 +35,7 @@ keeps them:
 | Linux | part: the code and CI tests are there, no build is released | 111 |
 | Windows, Windows ARM | part: an installer builds by hand and is not published; no ARM | 111 |
 | Stable and nightly channels | part: a signed in-app updater, one channel | 111 |
-| Imports your threads and projects on first launch | part: recent Claude Code and Codex conversations can be continued; no first-launch import | 101 |
+| Imports your threads and projects on first launch | has (item 101e): the first launch after the setup offers the folders Claude Code and Codex worked in that are still on this Mac, with their conversations counted; the picked ones join the Code page and their conversations show in History, where they continue. History's Bring over… offers it again. Read-only; Codex's compressed sessions are skipped and counted (106b) | 101 |
 | Thread switching on a bad connection | no (only the phone link's catch-up) | 108 |
 
 ## Agents and models

@@ -30,6 +30,7 @@ import { JobPage } from "../pages/JobPage";
 import { ActivityPage } from "../pages/ActivityPage";
 import { Onboarding } from "../onboarding/Onboarding";
 import { isFirstRunOpen } from "../onboarding/flow";
+import { ImportPast, useImportOffer } from "../importPast/ImportPast";
 import { useLookAttributes, useThemeAttribute } from "./theme";
 import { useShortcuts } from "./shortcuts";
 import { useAsksBadge } from "./badge";
@@ -61,6 +62,10 @@ export function App() {
   useShortcuts();
   useAsksBadge();
   const term = useTermPanel();
+  // Bring over (item 101e): once the first-run setup is out of the way, the first launch looks once for Claude Code and Codex
+  // work to offer
+  const firstRun = isFirstRunOpen(s.ui);
+  useImportOffer(firstRun);
   useEffect(() => {
     void s.init();
     // close = hide to the tray, keep awake while agents work (Settings › General)
@@ -101,7 +106,7 @@ export function App() {
 
   // The first-run setup fills the window, as the canvas's Welcome and Onboarding boards have no side menu. The store
   // still starts behind it (the effect above), so Home and the team are ready when it ends.
-  if (isFirstRunOpen(s.ui)) return <Onboarding />;
+  if (firstRun) return <Onboarding />;
 
   return (
     <MentionContext.Provider value={mentions}>
@@ -152,6 +157,8 @@ export function App() {
       <CloseToasts />
       {/* ⌘K and the menu's Search open it over whatever is showing */}
       <Palette />
+      {/* Bring over's offer, over whatever is showing: once on a first launch, then from History */}
+      <ImportPast />
     </div>
     </MentionContext.Provider>
   );
