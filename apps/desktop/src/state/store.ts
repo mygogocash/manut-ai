@@ -31,9 +31,9 @@ import { forBots, parseResume, RESUME_KEY, type ResumeSnap } from "../app/resume
 import { getDraft } from "../app/drafts";
 import { followUp as savedFollowUp, type FollowUp } from "../chat/box/keys";
 import { moveInSidebar } from "./order";
-import { LANG_KEY, readLang, setLang, t as tr, type Lang } from "../i18n";
-import { firstRunEntry, flowReduce, ONBOARDED_KEY, startFlow, type FlowEvent, type FlowState } from "../onboarding/flow";
-import { cleanShop, parseShop, SHOP_KEY, type ShopProfile } from "../onboarding/shop";
+import { LANG_KEY, setLang, t as tr, type Lang } from "../i18n";
+import { flowReduce, ONBOARDED_KEY, startFlow, type FlowEvent, type FlowState } from "../onboarding/flow";
+import { cleanShop, SHOP_KEY, type ShopProfile } from "../onboarding/shop";
 import type {
   Away,
   LinkPlaces,
@@ -78,8 +78,6 @@ import type {
 import type { AgentRunSummary, CliAgent, NodePr, RunDetail } from "../lib/runs";
 import { firstWords, hideSplitBlocks, threadEvent, threadKey, type ThreadOps, type ThreadRow } from "../threads/types";
 import {
-  BUBBLE_STYLES,
-  PALETTES,
   isMenuPage,
   type PanelTabId,
   type Turn,
@@ -100,14 +98,13 @@ import {
   type Chat,
   type ReplyChip,
   type Theme,
-  type Palette,
-  type BubbleStyle,
   type Look,
   type MenuPage,
   type Ui,
   type AppState,
 } from "./types";
 import { activityText, WORKING, THINKING, PENDING_TURN_MS, STEER_REFUSED, THINKING_MAX, parsePlan, answerSoFar } from "./activity";
+import { savedLook, readList, ROSTER_KEY, seedRoster, saveList, writeStored, initialState } from "./prefs";
 
 export { BUBBLE_STYLES, PALETTES, MENU_PAGES, isMenuPage } from "./types";
 export type {
@@ -117,6 +114,7 @@ export type {
   MenuPage, Ui, FocusAsk, ShopsState, AppState,
 } from "./types";
 export { activityText, WORKING, THINKING, PENDING_TURN_MS, THINKING_MAX, parsePlan, liveLabel, answerSoFar, turnHasActivity } from "./activity";
+export { DEFAULT_LOOK, LOOK_VERSION, parseLook, savedLook, ROSTER_KEY, seedRoster, readTheme, initialState } from "./prefs";
 
 // ---- state helpers --------------------------------------------------------------------------
 
@@ -132,162 +130,6 @@ const emptyChat = (): Chat => ({
   sessionId: null,
   turnSeq: 0,
 });
-
-/** The Chat board's look (item 85f): an answer on the page with only the person's message in a bubble ("open"), at
- *  the board's sizes ("medium": a 17px answer, a 15px message). */
-export const DEFAULT_LOOK: Look = { palette: "manut", bubbles: "open", text: "medium" };
-/** Saved looks carry this from item 85f on. A look saved before it held the old defaults (soft bubbles, small text)
- *  whenever the person changed anything else, since the whole look is saved at once: those two values meant "as the
- *  app draws it" and read as today's defaults. A choice made since is kept as it is. */
-export const LOOK_VERSION = 2;
-
-/** A saved look (`manut.look`), read tolerantly: an unknown value falls back to the default. */
-export function parseLook(raw: string | null): Look {
-  try {
-    const v = raw ? (JSON.parse(raw) as Partial<Look> & { v?: unknown }) : {};
-    const before = v.v !== LOOK_VERSION;
-    const bubbles = BUBBLE_STYLES.includes(v.bubbles as BubbleStyle) && !(before && v.bubbles === "soft") ? (v.bubbles as BubbleStyle) : DEFAULT_LOOK.bubbles;
-    const text = v.text === "small" || v.text === "medium" || v.text === "large" ? (before && v.text === "small" ? DEFAULT_LOOK.text : v.text) : DEFAULT_LOOK.text;
-    return {
-      palette: PALETTES.includes(v.palette as Palette) ? (v.palette as Palette) : DEFAULT_LOOK.palette,
-      bubbles,
-      text,
-    };
-  } catch {
-    return { ...DEFAULT_LOOK };
-  }
-}
-
-/** What `manut.look` holds: the look and the version it was saved under. */
-export const savedLook = (look: Look): string => JSON.stringify({ ...look, v: LOOK_VERSION });
-
-function readLook(): Look {
-  try {
-    return parseLook(typeof localStorage !== "undefined" ? localStorage.getItem("manut.look") : null);
-  } catch {
-    return { ...DEFAULT_LOOK };
-  }
-}
-
-function readList(key: string): string[] {
-  try {
-    const raw = typeof localStorage !== "undefined" ? localStorage.getItem(key) : null;
-    const v: unknown = raw ? JSON.parse(raw) : [];
-    return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
-  } catch {
-    return [];
-  }
-}
-
-/** The saved roster, or null when this computer has none yet (a fresh install, or manut before the roster). */
-function readRoster(): string[] | null {
-  try {
-    if (typeof localStorage === "undefined" || localStorage.getItem(ROSTER_KEY) === null) return null;
-  } catch {
-    return null;
-  }
-  return readList(ROSTER_KEY);
-}
-
-export const ROSTER_KEY = "manut.roster";
-
-/** The first roster (no `manut.roster` yet): the bot saved for resume, then the pinned bots that still exist; with
- *  neither, the default profile (else the first bot). Bots the person hid from the old sidebar never enter it.
- *  `all`: with nothing saved, every bot joins, the default one first (`StoreOptions.firstRoster`). */
-export function seedRoster(bots: readonly Bot[], resumeBot: string | null, pinned: readonly string[], hidden: readonly string[], all = false): string[] {
-  const ok = (n: string | null): n is string => !!n && !hidden.includes(n) && bots.some((b) => b.name === n);
-  const out: string[] = [];
-  for (const n of [resumeBot, ...pinned]) if (ok(n) && !out.includes(n)) out.push(n);
-  if (out.length) return out;
-  const shown = bots.filter((b) => !hidden.includes(b.name));
-  const first = shown.find((b) => b.is_default) ?? shown.find((b) => b.name === "default") ?? shown[0] ?? bots[0];
-  if (!first) return [];
-  return all ? [first.name, ...shown.filter((b) => b.name !== first.name).map((b) => b.name)] : [first.name];
-}
-
-function saveList(key: string, v: string[]): void {
-  try {
-    if (typeof localStorage !== "undefined") localStorage.setItem(key, JSON.stringify(v));
-  } catch {
-    /* no storage */
-  }
-}
-
-export function readTheme(): Theme {
-  try {
-    const v = typeof localStorage !== "undefined" ? localStorage.getItem("manut.theme") : null;
-    if (v === "dark" || v === "light" || v === "system") return v;
-  } catch {
-    /* no storage */
-  }
-  return "system";
-}
-
-/** What this computer keeps under `key`, or null when it keeps nothing there or has no storage to read. */
-function readStored(key: string): string | null {
-  try {
-    return typeof localStorage !== "undefined" ? localStorage.getItem(key) : null;
-  } catch {
-    return null;
-  }
-}
-
-function writeStored(key: string, value: string): void {
-  try {
-    if (typeof localStorage !== "undefined") localStorage.setItem(key, value);
-  } catch {
-    /* no storage, or full: the state still holds it for this run */
-  }
-}
-
-export function initialState(): AppState {
-  const shop = parseShop(readStored(SHOP_KEY));
-  // A first run opens on the setup's Welcome, holding whatever an earlier run kept before it was quit halfway.
-  const entry = firstRunEntry(readStored(ONBOARDED_KEY));
-  return {
-    conn: "closed",
-    hello: null,
-    lastError: null,
-    bots: [],
-    selectedBot: null,
-    chats: {},
-    unread: {},
-    elsewhere: {},
-    peeks: {},
-    routines: {},
-    automations: null,
-    models: {},
-    agentBox: {},
-    replyTo: {},
-    threads: {},
-    shops: { list: [], current: null, left: [], dismissed: [], loaded: false },
-    ui: {
-      panelOpen: false,
-      panelTab: "details",
-      runId: null,
-      panelMax: false,
-      draft: null,
-      theme: readTheme(),
-      look: readLook(),
-      view: "chat",
-      back: "chat",
-      findSeq: 0,
-      findQuery: "",
-      settingsPage: "general",
-      pinned: readList("manut.pinned"),
-      roster: readRoster(),
-      focusAsk: null,
-      session: null,
-      thread: null,
-      automation: null,
-      job: null,
-      pluginsBot: null,
-      lang: readLang(),
-      shop,
-      firstRun: entry ? startFlow(entry, shop) : null,
-    },
-  };
-}
 
 /** An ask card with how an ask of one of several shops shows: its shop, and what the person's role there lets them do (its
  *  choices, passing it on) with any note passed on. An ask with no shop is left as it is. */
