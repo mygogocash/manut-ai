@@ -283,11 +283,16 @@ const upTo = (value: string): number => {
   return value.length;
 };
 
-/** `text`'s `whole` matches masked; in a command (`command`), not a key block, which `BLOCKS` masked first. */
+/** Whether `m`, found at `offset` in `text`, is part of a path: it holds a `/` or touches one. In a command such a word
+ *  names a program or a file (`./whsec_…/deploy.sh`, `rm -rf ./npm_…`), so it is shown (item 121). */
+const inPath = (m: string, [offset, text]: At): boolean => m.includes("/") || text.charAt(offset - 1) === "/" || text.charAt(offset + m.length) === "/";
+
+/** `text`'s `whole` matches masked; in a command (`command`), not a key block, which `BLOCKS` masked first, nor a word that
+ *  is part of a path. */
 function maskWhole(text: string, command = false): string {
   for (const [rx, kind] of WHOLE) {
     if (command && kind === "block") continue;
-    text = text.replace(rx, (m: string, ...args: unknown[]) => (kind === "word" && !alone(m, at(args)) ? m : spec.mask));
+    text = text.replace(rx, (m: string, ...args: unknown[]) => (kind === "word" && (!alone(m, at(args)) || (command && inPath(m, at(args)))) ? m : spec.mask));
   }
   return text;
 }
@@ -318,7 +323,7 @@ export function maskSecrets(text: string): string {
 /** One line of a command, masked as `maskCommand` says. A value that already holds the mask (a key block's) is left as it is. */
 function commandLine(line: string): string {
   line = maskWhole(line, true);
-  line = line.replace(WORD, (m: string, ...args: unknown[]) => (alone(m, at(args)) && keyShaped(m) ? spec.mask : m));
+  line = line.replace(WORD, (m: string, ...args: unknown[]) => (alone(m, at(args)) && !inPath(m, at(args)) && keyShaped(m) ? spec.mask : m));
   for (const rx of KEPT) {
     line = line.replace(rx, (m: string, before: string, secret: string, after: string) => {
       const n = aKey(secret) && !secret.includes(spec.mask) ? upTo(secret) : 0;

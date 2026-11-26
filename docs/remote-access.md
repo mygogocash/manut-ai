@@ -200,7 +200,8 @@ needs a QR reader, which the repository does not have: the browser's own is used
   command reads in the order it runs (item 121). The card and the phone (`hidden`) say the command holds hidden
   characters, a masked value stops at one, and Home offers no Approve beside such a command. A token-shaped word is
   masked only when it is a whole word with a key's shape, so a command's own operand (`rm -rf sk-releases-backup`) is
-  shown. The shell sends the card the whole command with its line breaks (it used to fold it to one line and cut it at
+  shown; since item 121 one that holds a `/` or touches one is part of a path that names a program or a file
+  (`./whsec_…/deploy.sh`, `rm -rf ./npm_…`) and is shown too. The shell sends the card the whole command with its line breaks (it used to fold it to one line and cut it at
   160 characters), and the phone gets it unclipped up to 20,000 characters; past that the phone gets the start, marked
   `long`, with Allow once left out of its offers, and the phone says only the Mac can allow it.
   An ask the card marks as needing an app update, or that the person may only pass on to the shop's owner, offers

@@ -472,7 +472,14 @@ pub fn reveal_hidden(t: &str) -> String {
     }).into_owned()
 }
 
-/// `t`'s `whole` matches masked; in a command (`command`), not a key block, which [`mask_blocks`] masked first.
+/// Whether the match `m` in `t` is part of a path: it holds a `/` or touches one (src/lib/secrets.ts `inPath`). In a command
+/// such a word names a program or a file, so it is shown (item 121).
+fn in_path(t: &str, m: regex::Match) -> bool {
+    m.as_str().contains('/') || t[..m.start()].ends_with('/') || t[m.end()..].starts_with('/')
+}
+
+/// `t`'s `whole` matches masked; in a command (`command`), not a key block, which [`mask_blocks`] masked first, nor a word
+/// that is part of a path.
 fn mask_whole(s: &Secrets, mut t: String, command: bool) -> String {
     for (rx, kind) in &s.whole {
         if command && kind == "block" {
@@ -480,7 +487,7 @@ fn mask_whole(s: &Secrets, mut t: String, command: bool) -> String {
         }
         t = rx.replace_all(&t, |c: &regex::Captures| {
             let m = c.get(0).expect("match");
-            if kind == "word" && !alone(s, &t, m) { m.as_str().to_string() } else { s.mask.clone() }
+            if kind == "word" && (!alone(s, &t, m) || (command && in_path(&t, m))) { m.as_str().to_string() } else { s.mask.clone() }
         }).into_owned();
     }
     t
@@ -774,11 +781,12 @@ fn mask_blocks(s: &Secrets, mut t: String) -> String {
     t
 }
 
-/// `t`'s token matches of `rx` masked, when they stand alone and have a key's shape.
-fn mask_tokens(s: &Secrets, rx: &Regex, t: String) -> String {
+/// `t`'s token matches of `rx` masked, when they stand alone and have a key's shape; in a command (`command`), not one that
+/// is part of a path.
+fn mask_tokens(s: &Secrets, rx: &Regex, t: String, command: bool) -> String {
     rx.replace_all(&t, |c: &regex::Captures| {
         let m = c.get(0).expect("match");
-        if alone(s, &t, m) && key_shaped(s, m.as_str()) { s.mask.clone() } else { m.as_str().to_string() }
+        if alone(s, &t, m) && !(command && in_path(&t, m)) && key_shaped(s, m.as_str()) { s.mask.clone() } else { m.as_str().to_string() }
     }).into_owned()
 }
 
@@ -809,7 +817,7 @@ pub fn mask_secrets(t: &str) -> String {
     for (rx, n) in &s.split {
         t = rx.replace_all(&t, |c: &regex::Captures| split_token(c, *n, &s.mask)).into_owned();
     }
-    t = mask_tokens(s, &s.tokens, t);
+    t = mask_tokens(s, &s.tokens, t, false);
     for rx in &s.kept {
         t = rx.replace_all(&t, |c: &regex::Captures| if a_key(s, &c[2]) { format!("{}{}{}", &c[1], s.mask, &c[3]) } else { c[0].to_string() }).into_owned();
     }
@@ -818,7 +826,7 @@ pub fn mask_secrets(t: &str) -> String {
 
 /// One line of a command, masked as [`mask_command`] says. A value that already holds the mask (a key block's) is left as it is.
 fn command_line(s: &Secrets, line: &str) -> String {
-    let mut t = mask_tokens(s, &s.word, mask_whole(s, line.to_string(), true));
+    let mut t = mask_tokens(s, &s.word, mask_whole(s, line.to_string(), true), true);
     for rx in &s.kept {
         t = rx.replace_all(&t, |c: &regex::Captures| {
             let v = &c[2];
