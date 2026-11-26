@@ -1,13 +1,17 @@
 // What a paired phone is shown of a chat (docs/remote-access.md, "What a person does", step 5): the chats as Working,
 // Needs you or Done, and for one chat its messages, its current step and its asks. Everything here is plain data built
-// from the store (fromStore.ts reads it) and every text in it goes through `maskSecrets` (lib/secrets.ts), the one masker
-// every surface of the app uses, so a token in a chat, a command or a step never reaches the phone. An ask is shown whole,
-// with every field its card shows (the title, the whole command, the folder, the plan, who asks), never cut short.
+// from the store (fromStore.ts reads it) and every text in it goes through the one masker every surface of the app uses
+// (lib/secrets.ts), so a token in a chat, a command or a step never reaches the phone. An ask is shown whole, with every
+// field its card shows (the title, the whole command with its line breaks, the folder, the plan, who asks), never cut
+// short. The command and the folder go through `maskCommand`, which masks a key and never anything the shell acts on, so
+// what a person allows is what runs (item 117). A command longer than a phone is sent (`PHONE_COMMAND_CHARS`) arrives as
+// its start, marked `long`, and cannot be allowed from the phone at all: No stays.
 //
 // From a phone an approval offers at most Allow once and No: Always allow and Allow for the session stay on the Mac, and
 // an ask the card marks as needing an app update offers nothing. Each ask carries a revision, which goes up whenever what
-// it shows changes, so an Allow the phone sends counts only for what the person saw (approval-core's `seenRevision`).
-import { maskSecrets } from "../lib/secrets";
+// it shows changes or anything it was built from changes, a key the masker hides included, so an Allow the phone sends
+// counts only for the very command the person saw (approval-core's `seenRevision`).
+import { maskCommand, maskSecrets } from "../lib/secrets";
 
 export type ChatState = "working" | "needs_you" | "done";
 
@@ -93,6 +97,8 @@ export type AskView =
       readonly ts: number;
       readonly title: string;
       readonly command: string;
+      /** The command is longer than a phone is sent: `command` is its start, and it is allowed only on the Mac. */
+      readonly long?: true;
       readonly cwd?: string;
       readonly plan?: string;
       readonly from?: string;
@@ -128,6 +134,15 @@ export interface ChatView {
 export const MAX_MESSAGES = 100;
 /** Settled asks a snapshot carries besides every open one. */
 export const MAX_SETTLED_ASKS = 20;
+/** The longest command a phone is sent, as the card's plan is cut at 20,000 too: a longer one arrives as its start, marked
+ *  `long`, and offers only No, since a person must not allow from a phone what it cannot show whole. */
+export const PHONE_COMMAND_CHARS = 20_000;
+
+/** `text`'s first `n` UTF-16 units, never ending inside a pair. */
+function start(text: string, n: number): string {
+  const end = /[\uD800-\uDBFF]/.test(text.charAt(n - 1)) ? n - 1 : n;
+  return text.slice(0, end);
+}
 
 /** The text the Mac binds an Allow's challenge to for one ask (the package's `requestId`): the chat and the request id,
  *  written so no two pairs can run into each other. The phone computes the same from what its screen shows. */
@@ -147,9 +162,11 @@ export function chatRow(source: ChatSource): ChatRow {
 const mask = (text: string | undefined): string | undefined => (text === undefined ? undefined : maskSecrets(text));
 
 function approvalView(item: SourceApproval): Omit<Extract<AskView, { kind: "approval" }>, "revision"> {
-  const offers: PhoneOption[] = item.outdated ? [] : (["once", "deny"] as const).filter((o) => item.choices.includes(o));
+  const whole = maskCommand(item.command);
+  const long = whole.length > PHONE_COMMAND_CHARS;
+  const offers: PhoneOption[] = item.outdated ? [] : (["once", "deny"] as const).filter((o) => item.choices.includes(o) && !(long && o === "once"));
   const outcome = item.resolved ? (item.resolved === "deny" ? "declined" : "allowed") : item.expired ? "expired" : undefined;
-  const cwd = mask(item.cwd);
+  const cwd = item.cwd === undefined ? undefined : maskCommand(item.cwd);
   const plan = mask(item.plan);
   const from = mask(item.from);
   return {
@@ -158,7 +175,8 @@ function approvalView(item: SourceApproval): Omit<Extract<AskView, { kind: "appr
     open: item.open,
     ts: item.ts,
     title: maskSecrets(item.title),
-    command: maskSecrets(item.command),
+    command: long ? start(whole, PHONE_COMMAND_CHARS) : whole,
+    ...(long ? { long: true as const } : {}),
     ...(cwd ? { cwd } : {}),
     ...(plan ? { plan } : {}),
     ...(from ? { from } : {}),
@@ -194,10 +212,14 @@ function questionView(item: SourceQuestion): Omit<Extract<AskView, { kind: "ques
   };
 }
 
-/** What makes up an ask's revision: everything it shows, and nothing about whether it is still open. */
-function printOf(ask: Omit<AskView, "revision">): string {
+/** What makes up an ask's revision: everything it shows, and everything it was built from, and nothing about whether it
+ *  is still open. What it was built from counts because the masker can make two commands look the same (`API_KEY=••••`):
+ *  an Allow must count only for the command the person was shown, never for another that reads alike (item 117). The
+ *  print stays in this Mac's memory and is never sent. */
+function printOf(ask: Omit<AskView, "revision">, item: SourceApproval | SourceQuestion): string {
   const { open: _open, outcome: _outcome, ts: _ts, ...shown } = ask as Record<string, unknown>;
-  return JSON.stringify(shown);
+  const from = item.kind === "approval" ? [item.title, item.command, item.cwd, item.plan, item.from] : [item.question, item.choices, item.questions, item.from];
+  return JSON.stringify([shown, from]);
 }
 
 /** Builds chat views and keeps each ask's revision: 1 when first shown, one more each time what it shows changes. A
@@ -212,9 +234,9 @@ export class Projector {
   /** By device, then by `askBinding(chat, ask)`: the newest revision that device was sent. */
   readonly #shown = new Map<string, Map<string, number>>();
 
-  #revision(chat: string, ask: Omit<AskView, "revision">): number {
+  #revision(chat: string, ask: Omit<AskView, "revision">, item: SourceApproval | SourceQuestion): number {
     const key = askBinding(chat, ask.id);
-    const print = printOf(ask);
+    const print = printOf(ask, item);
     const known = this.#revisions.get(key);
     if (!known) {
       this.#revisions.set(key, { print, revision: 1 });
@@ -238,7 +260,7 @@ export class Projector {
       .filter((i) => i.open || settled.includes(i))
       .map((item): AskView => {
         const shown = item.kind === "approval" ? approvalView(item) : questionView(item);
-        return { ...shown, revision: this.#revision(source.key, shown) } as AskView;
+        return { ...shown, revision: this.#revision(source.key, shown, item) } as AskView;
       });
     return { chat: source.key, title: maskSecrets(source.title), state: chatState(source), step: mask(source.step ?? undefined) ?? null, messages, asks };
   }
@@ -248,7 +270,7 @@ export class Projector {
     const item = source.items.find((i): i is SourceApproval | SourceQuestion => i.kind !== "message" && i.id === ask);
     if (!item) return null;
     const shown = item.kind === "approval" ? approvalView(item) : questionView(item);
-    return { ...shown, revision: this.#revision(source.key, shown) } as AskView;
+    return { ...shown, revision: this.#revision(source.key, shown, item) } as AskView;
   }
 
   /** Lets go of what the asks of `chat` that are no longer in the store showed, keeping their revisions, so a phone's old

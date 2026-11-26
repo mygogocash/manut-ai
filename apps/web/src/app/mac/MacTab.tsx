@@ -20,6 +20,9 @@ import type { ApprovalAsk, AskView, ChatRow, ChatState, MessageView, QuestionAsk
 const H1: CSSProperties = { margin: 0, fontSize: 24, fontWeight: 600, letterSpacing: "-.03em" };
 const H2: CSSProperties = { margin: 0, fontSize: 17, fontWeight: 600 };
 const SOFT: CSSProperties = { margin: 0, padding: "12px 14px", borderRadius: "var(--rad)", background: "var(--soft)", whiteSpace: "pre-wrap", overflowWrap: "anywhere" };
+/// A command, as the Mac's card shows it: whole, its line breaks kept, in the mono block, scrolling inside its own box once
+/// it is taller than half the screen, so the answer buttons stay near and nothing of it is cut (item 117).
+const COMMAND: CSSProperties = { ...SOFT, fontFamily: "var(--aui-font-mono)", fontSize: 13, maxHeight: "50vh", overflowY: "auto" };
 
 const NOTE_TONE: Readonly<Record<AskNote, "ok" | "info" | "warn" | "err">> = {
   allowed: "ok",
@@ -555,7 +558,8 @@ function AskFrom({ m, from }: { m: MacStrings; from: string | undefined }) {
 }
 
 /// An approval, as the Mac's card shows it: who asks, the title (or "Start working on this plan?"), the whole command,
-/// the plan and the folder. Allow once and No only, and only while the Mac is connected.
+/// the plan and the folder. Allow once and No only, and only while the Mac is connected. A command too long for a phone
+/// shows its start and says only the Mac can allow it; No stays.
 function ApprovalCard({ m, ask, state, live, remote }: { m: MacStrings; ask: ApprovalAsk; state: AskState | null; live: boolean; remote: MacRemote }) {
   const titleId = `mac-ask-${ask.id}`;
   const busy = state?.busy ?? null;
@@ -570,9 +574,14 @@ function ApprovalCard({ m, ask, state, live, remote }: { m: MacStrings; ask: App
         {ask.plan ? m.startPlan : ask.title || m.approvalNeeded}
       </p>
       {ask.command && (
-        <pre data-testid="mac-command" style={{ ...SOFT, fontFamily: "var(--aui-font-mono)", fontSize: 13 }}>
+        <pre data-testid="mac-command" style={COMMAND} tabIndex={0}>
           {ask.command}
         </pre>
+      )}
+      {ask.long && (
+        <p className="hint" style={{ margin: 0 }} data-testid="mac-command-long">
+          {m.tooLongHere}
+        </p>
       )}
       {ask.plan && <p style={SOFT}>{ask.plan}</p>}
       {ask.cwd && (
@@ -788,7 +797,7 @@ function SettledAsk({ m, ask, note }: { m: MacStrings; ask: AskView; note: AskNo
         {ask.outcome && <span className={`tag${ask.outcome === "allowed" || ask.outcome === "answered" ? " ok" : ""}`}>{m.outcomes[ask.outcome]}</span>}
         <span style={{ minWidth: 0, overflowWrap: "anywhere" }}>{words}</span>
       </div>
-      {ask.kind === "approval" && ask.command && <pre style={{ ...SOFT, fontFamily: "var(--aui-font-mono)", fontSize: 13 }}>{ask.command}</pre>}
+      {ask.kind === "approval" && ask.command && <pre style={COMMAND}>{ask.command}</pre>}
       {note && note !== "allowed" && note !== "declined" && note !== "answered" && <NoteBanner m={m} note={note} />}
     </li>
   );

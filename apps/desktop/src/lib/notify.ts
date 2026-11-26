@@ -13,6 +13,7 @@ import type { BridgeEvent } from "./protocol";
 import { t } from "../i18n";
 import { outsideSettings, presentOutside, routeAction, type Outside, type PresentContext, type Shown, type ShownAction } from "./outside";
 import { isMacPlatform } from "./power";
+import { maskCommand } from "./secrets";
 
 export interface Note {
   title: string;
@@ -117,8 +118,10 @@ export function noteFor(
       return {
         // an ask from one of several shops says whose it is: "Buddy at Ran Pa Noi needs your approval"
         title: t("note.approval", { bot: ev.shop?.name ? t("note.atShop", { bot: who, shop: ev.shop.name }) : who }),
-        // a request whose whole text is too long for a notification says its own short line instead (Ton's append of the books)
-        body: clip(shortenRefs(ev.brief || ev.command || ev.title || t("ask.allowThis"))),
+        // a request whose whole text is too long for a notification says its own short line instead (Ton's append of the books).
+        // A command's keys are masked as on its card (maskCommand): Notification Centre keeps what it was shown, and a body
+        // a masker changed is no longer the exact action below, so it never offers Approve (item 117).
+        body: clip(shortenRefs(ev.brief || (ev.command ? (ev.whole ? ev.command : maskCommand(ev.command)) : "") || ev.title || t("ask.allowThis"))),
         bot,
         tag: `${bot}:approval`,
         // only the connected runtime's asks carry an approval-core kind; any other has none and is owner-only

@@ -30,8 +30,9 @@ What a person does:
    own, so there is nothing to compare and press Allow on by habit: a phone that was raced by someone who photographed
    the code is refused and shows no digits, so there is nothing to type.
 5. The phone lists the chats as Working, Needs you or Done. Opening one shows its messages, its current step and its
-   asks, with the whole command as the card shows it. The person can Allow once (Face ID), say No, answer a question
-   (Face ID), or stop the turn.
+   asks, with the whole command as the card shows it, every line of it, scrolling in its own box when it is long. The
+   person can Allow once (Face ID), say No, answer a question (Face ID), or stop the turn. A command too long for a
+   phone (over 20,000 characters) shows its start and says only the Mac can allow it; No still works.
 
 Left out on purpose: sending messages, Always allow, Kit's dial, modes, diffs and files, Live Activities, guest links,
 linked environments, the preview, and a listener on the local network (Tailscale is the second road, below). The need
@@ -155,18 +156,29 @@ needs a QR reader, which the repository does not have: the browser's own is used
   Allow does, so it takes the same one-use challenge, for a typed answer and a picked choice alike. Only No to an
   approval and Stop go without one: they can only hold something back.
 - **Revisions.** The store's approvals carry none, so the Mac counts them for a phone: 1 when an ask is first shown, one
-  more whenever what it shows changes. An Allow, a No or an answer on another revision is refused as `changed`, also
+  more whenever what it shows changes, or anything it was built from changes (item 117): two commands that the masker
+  shows alike (`API_KEY=•••• pnpm deploy` with two different keys) are two revisions, so two different challenges, and
+  an Allow given for one is refused for the other. An Allow, a No or an answer on another revision is refused as `changed`, also
   when the ask changed while the person looked at Face ID. Since the third review (26 Nov 2026) a revision is never
   given twice to one ask while the app runs: it is kept when every phone leaves and across the switch going off and on
   (one `Projector` for the RemoteMac's life), and an ask that leaves the store and comes back with the same id goes on
   counting. The Mac also keeps, per phone, the newest revision of each ask it sent that phone, and acts only on that
   one: a phone answering a chat it never opened, or a Mac started again, is refused as `changed`, and the phone opens
   the chat again.
-- **What a phone sees** is masked with `lib/secrets.ts`, the command included (the card masks it too), and shown whole. The masker's
-  patterns are `lib/secrets.json`, shared with the shell's `tasks::mask_secrets` and held by one table both run
-  (`lib/secrets.cases.json`): tokens by their prefix, private key blocks, JSON web tokens, credentials in HTTP headers,
-  `password:` and `"password":` values, the password in `scheme://user:pass@host`, quoted `KEY="..."` and `--password value`,
-  each with its name kept so the line still reads (item 113).
+- **What a phone sees** is masked with `lib/secrets.ts` and shown whole. The masker's patterns are `lib/secrets.json`, shared
+  with the shell's `tasks::mask_secrets` and held by one table both run (`lib/secrets.cases.json`): tokens by their
+  prefix, private key blocks, JSON web tokens, credentials in HTTP headers, `password:` and `"password":` values, the
+  password in `scheme://user:pass@host`, quoted `KEY="..."` and `--password value`, each with its name kept so the line
+  still reads (item 113).
+- **An approval shows what runs** (item 117). The command, and the folder it runs in, go through the masker's command form
+  (`maskCommand`, the shell's `tasks::mask_command`, the table's `command` rows), on the Mac's card and on the phone alike:
+  it masks a key and nothing else. It reads a command line by line, never joins two words, and a masked value stops at
+  the first character the shell acts on (a backtick, `$`, `(`, `)`, `|`, `;`, `&`, `<`, `>`, `{`, `}`, a backslash, a
+  line break), so a substitution, a pipe, a second command or a redirection is always shown. A token-shaped word is
+  masked only when it is a whole word with a key's shape, so a command's own operand (`rm -rf sk-releases-backup`) is
+  shown. The shell sends the card the whole command with its line breaks (it used to fold it to one line and cut it at
+  160 characters), and the phone gets it unclipped up to 20,000 characters; past that the phone gets the start, marked
+  `long`, with Allow once left out of its offers, and the phone says only the Mac can allow it.
   An ask the card marks as needing an app update, or that the person may only pass on to the shop's owner, offers
   nothing; an approval offers at most Allow once and No.
 - **The relay's state.** The API's public `/v1/health` now says `relay: "on"` or `"off"`. After a socket that never came

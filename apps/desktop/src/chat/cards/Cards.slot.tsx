@@ -26,7 +26,7 @@ import { riskOf } from "./risk";
 import { t, type Key } from "../../i18n";
 import { Markdown } from "../parts/Markdown";
 import { composing, holdImeEnter } from "../../lib/ime";
-import { maskSecrets } from "../../lib/secrets";
+import { maskCommand, maskSecrets } from "../../lib/secrets";
 import { KitSays, kitButtons, kitDoneText, useKitCard } from "../../code/KitCardParts";
 import { addRule, updateKitProjects } from "../../code/project";
 import { computerAsk } from "../../computer/computer";
@@ -50,6 +50,39 @@ const BUTTONS: { choice: ApprovalChoice; label: Key; key: string }[] = [
   { choice: "once", label: "card.allowOnce", key: "2" },
   { choice: "session", label: "card.allowSession", key: "3" },
 ];
+
+/** A command in the card's mono block, whole (item 117). A long one scrolls inside the block, by keyboard too (Home and End
+ *  move the command, not the chat, whose End jumps to its bottom), and while more of it is below the fold its lower edge
+ *  fades, as a long list of agents does (sessions.css `.ss-scroll.more`), so the block reads as one that scrolls; the fade
+ *  is gone once it is scrolled to its end. */
+function CommandBlock({ text }: { text: string }) {
+  const ref = useRef<HTMLPreElement>(null);
+  const [more, setMore] = useState(false);
+  const measure = (el: HTMLElement) => setMore(el.scrollTop + el.clientHeight < el.scrollHeight - 1);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    measure(el);
+    const seen = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(() => measure(el));
+    seen?.observe(el);
+    return () => seen?.disconnect();
+  }, [text]);
+  return (
+    <pre
+      ref={ref}
+      className={more ? "card-cmd more" : "card-cmd"}
+      data-testid="card-command"
+      tabIndex={0}
+      aria-label={t("card.command")}
+      onScroll={(e) => measure(e.currentTarget)}
+      onKeyDown={(e) => {
+        if (e.key === "Home" || e.key === "End") e.stopPropagation();
+      }}
+    >
+      {text}
+    </pre>
+  );
+}
 
 /** Cards already scrolled to for a given focus request, so a re-mount does not steal focus again. */
 const handled = new Set<number>();
@@ -105,11 +138,11 @@ function Approval({ bot, item }: { bot: string; item: ApprovalItem }) {
   const ref = useRef<HTMLDivElement>(null);
   useFocusRequest(bot, item.id, ref, open);
   // a closed card's line names the shop too, so a list of them from several shops still says whose each was; a key in
-  // the command is never shown there (maskSecrets), as on a coding session's ask
+  // the command is never shown there (maskCommand), as on a coding session's ask
   // a computer use card (item 82) is drawn in the person's language from what the shell named (computerCard.ts)
   const comp = computerAsk(item.tool?.computer);
   const said = comp ? computerWords(comp) : null;
-  const detail = [shop, said ? said.title : maskSecrets(item.command || item.title)].filter(Boolean).join(" · ");
+  const detail = [shop, said ? said.title : item.command ? maskCommand(item.command) : maskSecrets(item.title)].filter(Boolean).join(" · ");
   // a coding session's ask, read as one of Kit's steps (src/code/): its words, and Always allow in this project
   const kit = useKitCard(bot, item);
 
@@ -188,7 +221,9 @@ function Approval({ bot, item }: { bot: string; item: ApprovalItem }) {
       )}
       {/* a browser write's sentence is read whole before it is approved, exactly as the API wrote it: its block grows
           with it (cards.css .whole), and nothing in it is masked, since what is approved must be what is typed. Every
-          other command hides any key in it (maskSecrets). */}
+          other command arrives whole, its line breaks kept, and hides only the keys in it (maskCommand: never a
+          substitution, a pipe or a second command); a long one scrolls in its block, which the keyboard can scroll too
+          (item 117). */}
       {said ? (
         <>
           <pre className="card-cmd whole" data-testid="card-computer">
@@ -198,7 +233,12 @@ function Approval({ bot, item }: { bot: string; item: ApprovalItem }) {
           {comp?.picture && <img className="card-computer-picture" data-testid="card-computer-picture" src={`data:image/png;base64,${comp.picture}`} alt={t("computer.ask.picture", { app: comp.app })} />}
         </>
       ) : (
-        item.command && <pre className={item.whole ? "card-cmd whole" : "card-cmd"}>{item.whole ? item.command : maskSecrets(item.command)}</pre>
+        item.command &&
+        (item.whole ? (
+          <pre className="card-cmd whole">{item.command}</pre>
+        ) : (
+          <CommandBlock text={maskCommand(item.command)} />
+        ))
       )}
       {kit && <KitSays card={kit} />}
       {/* plan mode's plan: the agent's markdown as an answer reads, whole, scrolling inside the card */}

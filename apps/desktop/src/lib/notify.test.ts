@@ -47,6 +47,14 @@ describe("noteFor: only what needs the person", () => {
     const n = noteFor(ev({ event: "approval.request", request_id: "a", title: "Run", command: "curl https://api.example.com/v1/x -o /tmp/a/b/out.json", choices: [] }), ctx());
     expect(n).toMatchObject({ title: "Kami needs your approval", body: "curl api.example.com -o out.json" });
   });
+  it("an approval's key never reaches Notification Centre, and a masked body is never the action Approve would allow (item 117)", () => {
+    const n = noteFor(ev({ event: "approval.request", request_id: "a", title: "Run", command: "API_KEY=abc123 pnpm deploy", choices: ["once", "deny"], kind: "reply" }), ctx());
+    // (a body drops markdown's marks, `_` among them, as every notification's does)
+    expect(n).toMatchObject({ body: "APIKEY=•••• pnpm deploy", ask: { action: "API_KEY=abc123 pnpm deploy" } });
+    expect(JSON.stringify(n?.body)).not.toContain("abc123");
+    // notify-rules offers Approve only when the body is the action word for word, which a masked body is not
+    expect(n?.body).not.toBe(n?.ask?.action);
+  });
   it("an approval from one of several shops says whose it is, and offers no Approve where the person's role may not decide", () => {
     const shop = { id: "pilot:b", name: "Ran Pa Noi", owner: "Noi", role: "helper" as const };
     const reply = noteFor(ev({ event: "approval.request", request_id: "pilot%3Ab/r@1", title: "", command: "Send on LINE: “Hi”", choices: ["once", "deny"], kind: "reply", shop }), ctx());

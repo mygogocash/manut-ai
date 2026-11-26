@@ -329,21 +329,37 @@ pub struct Status {
 const SECRETS: &str = include_str!("../../src/lib/secrets.json");
 
 struct Secrets {
-    /// replaced whole, first: private key blocks, provider-prefixed keys, JSON web tokens
-    whole: Vec<Regex>,
+    /// replaced whole, first: private key blocks, provider-prefixed keys, JSON web tokens; `true` when the match must
+    /// stand alone as a word
+    whole: Vec<(Regex, bool)>,
     /// a fixed-length family broken over lines: (pattern, body length)
     split: Vec<(Regex, usize)>,
     tokens: Regex,
+    /// `tokens` as one word, for a command
+    word: Regex,
     /// three groups each: the first and third kept, the second masked
     kept: Vec<Regex>,
     assigned: Regex,
     mask: String,
+    /// a character that, glued to a token, makes it part of a longer name
+    edge: Regex,
+    /// what a token's body holds: a capital or a digit; or the token has a provider's exact shape and length
+    needs: Regex,
+    exact: Regex,
+    /// a prefix that ordinary names start with too (`sk-`), its named forms, and the run of letters and digits it needs
+    wordlike: Regex,
+    named: Regex,
+    run: Regex,
+    /// a token's prefix, at the start
+    prefix: Regex,
+    /// a character the shell acts on: in a command, a masked value stops at it
+    shell: Regex,
 }
 
-/// A pattern of secrets.json as the page's JavaScript reads it: `{names}` filled in, its flags (`i`, `m`), and `\b` an ASCII
-/// word boundary, so a token right after Thai text, which JavaScript sees as no word, is masked here too.
-fn pattern(p: &str, flags: &str, names: &str) -> Regex {
-    RegexBuilder::new(&p.replace("{names}", names).replace(r"\b", r"(?-u:\b)"))
+/// A pattern of secrets.json as the page's JavaScript reads it: `{names}` and `{prefixes}` filled in, its flags (`i`, `m`),
+/// and `\b` an ASCII word boundary, so a token right after Thai text, which JavaScript sees as no word, is masked here too.
+fn pattern(p: &str, flags: &str, names: &str, prefixes: &str) -> Regex {
+    RegexBuilder::new(&p.replace("{names}", names).replace("{prefixes}", prefixes).replace(r"\b", r"(?-u:\b)"))
         .case_insensitive(flags.contains('i'))
         .multi_line(flags.contains('m'))
         .build()
@@ -356,23 +372,73 @@ fn secrets() -> &'static Secrets {
         let v: Value = serde_json::from_str(SECRETS).expect("secrets.json");
         let get = |k: &str| v[k].as_str().expect("secrets.json key").to_string();
         let names = get("names");
-        let list = |k: &str| -> Vec<Regex> {
-            v[k].as_array().expect("secrets.json list").iter()
-                .map(|e| pattern(e[0].as_str().expect("pattern"), e[1].as_str().expect("flags"), &names))
-                .collect()
-        };
-        let split = v["split"].as_array().expect("secrets.json split").iter()
-            .map(|e| (pattern(e[0].as_str().expect("split pattern"), "", &names), e[1].as_u64().expect("split length") as usize))
+        let prefixes = get("prefixes");
+        let one = |k: &str| pattern(&get(k), "", &names, &prefixes);
+        let entries = |k: &str| v[k].as_array().expect("secrets.json list").clone();
+        let compiled = |e: &Value| pattern(e[0].as_str().expect("pattern"), e[1].as_str().expect("flags"), &names, &prefixes);
+        let split = entries("split").iter()
+            .map(|e| (pattern(e[0].as_str().expect("split pattern"), "", &names, &prefixes), e[1].as_u64().expect("split length") as usize))
             .collect();
         Secrets {
-            whole: list("whole"),
+            whole: entries("whole").iter().map(|e| (compiled(e), e.get(2).and_then(Value::as_str) == Some("word"))).collect(),
             split,
-            tokens: pattern(&get("tokens"), "", &names),
-            kept: list("kept"),
-            assigned: pattern(&get("assigned"), "i", &names),
+            tokens: one("tokens"),
+            word: one("word"),
+            kept: entries("kept").iter().map(compiled).collect(),
+            assigned: pattern(&get("assigned"), "i", &names, &prefixes),
             mask: get("mask"),
+            edge: one("edge"),
+            needs: one("needs"),
+            exact: one("exact"),
+            wordlike: one("wordlike"),
+            named: one("named"),
+            run: one("run"),
+            prefix: pattern(&format!("^{prefixes}"), "", &names, &prefixes),
+            shell: one("shell"),
         }
     })
+}
+
+/// Whether the match `m` in `t` stands alone: no letter, digit, `_` or `-` glued to either side, so a token inside a
+/// longer name (`build-sk-…`) is the name's and stays (src/lib/secrets.ts `alone`).
+fn alone(s: &Secrets, t: &str, m: regex::Match) -> bool {
+    let touches = |c: Option<char>| c.is_some_and(|c| s.edge.is_match(c.encode_utf8(&mut [0; 4])));
+    !touches(t[..m.start()].chars().next_back()) && !touches(t[m.end()..].chars().next())
+}
+
+/// Whether a `tokens` match has a key's shape (src/lib/secrets.ts `keyShaped`).
+fn key_shaped(s: &Secrets, m: &str) -> bool {
+    if s.exact.is_match(m) {
+        return true;
+    }
+    if s.wordlike.is_match(m) {
+        return s.named.is_match(m) || s.run.find_iter(m).any(|r| s.needs.is_match(r.as_str()));
+    }
+    s.needs.is_match(&s.prefix.replace(m, ""))
+}
+
+/// How much of a value may be masked in a command: up to the first character the shell acts on.
+fn up_to(s: &Secrets, v: &str) -> usize {
+    s.shell.find(v).map_or(v.len(), |m| m.start())
+}
+
+/// `t`'s `whole` matches masked.
+fn mask_whole(s: &Secrets, mut t: String) -> String {
+    for (rx, word) in &s.whole {
+        t = rx.replace_all(&t, |c: &regex::Captures| {
+            let m = c.get(0).expect("match");
+            if *word && !alone(s, &t, m) { m.as_str().to_string() } else { s.mask.clone() }
+        }).into_owned();
+    }
+    t
+}
+
+/// `t`'s token matches of `rx` masked, when they stand alone and have a key's shape.
+fn mask_tokens(s: &Secrets, rx: &Regex, t: String) -> String {
+    rx.replace_all(&t, |c: &regex::Captures| {
+        let m = c.get(0).expect("match");
+        if alone(s, &t, m) && key_shaped(s, m.as_str()) { s.mask.clone() } else { m.as_str().to_string() }
+    }).into_owned()
 }
 
 /// A `split` match: the prefix and the body's pieces up to exactly `n` token characters become `mask` (the pieces
@@ -394,21 +460,48 @@ fn split_token(c: &regex::Captures, n: usize, mask: &str) -> String {
 }
 
 /// `t` with every token-like string replaced by `••••` (src/lib/secrets.ts `maskSecrets`, step for step). A secret with a name
-/// keeps its name and what frames it (`token=••••`, `"password": "••••"`, `Authorization: Bearer ••••`).
+/// keeps its name and what frames it (`token=••••`, `"password": "••••"`, `Authorization: Bearer ••••`). For text that never
+/// runs: what an approval shows goes through [`mask_command`].
 pub fn mask_secrets(t: &str) -> String {
     let s = secrets();
-    let mut t = t.to_string();
-    for rx in &s.whole {
-        t = rx.replace_all(&t, regex::NoExpand(&s.mask)).into_owned();
-    }
+    let mut t = mask_whole(s, t.to_string());
     for (rx, n) in &s.split {
         t = rx.replace_all(&t, |c: &regex::Captures| split_token(c, *n, &s.mask)).into_owned();
     }
-    t = s.tokens.replace_all(&t, regex::NoExpand(&s.mask)).into_owned();
+    t = mask_tokens(s, &s.tokens, t);
     for rx in &s.kept {
         t = rx.replace_all(&t, |c: &regex::Captures| format!("{}{}{}", &c[1], s.mask, &c[3])).into_owned();
     }
     s.assigned.replace_all(&t, |c: &regex::Captures| format!("{}={}", &c[1], s.mask)).into_owned()
+}
+
+/// One line of a command, masked as [`mask_command`] says.
+fn command_line(s: &Secrets, line: &str) -> String {
+    let mut t = mask_tokens(s, &s.word, mask_whole(s, line.to_string()));
+    for rx in &s.kept {
+        t = rx.replace_all(&t, |c: &regex::Captures| {
+            let v = &c[2];
+            match up_to(s, v) {
+                0 => c[0].to_string(),
+                n => format!("{}{}{}{}", &c[1], s.mask, &v[n..], &c[3]),
+            }
+        }).into_owned();
+    }
+    s.assigned.replace_all(&t, |c: &regex::Captures| {
+        let v = &c[0][c[1].len() + 1..];
+        match up_to(s, v) {
+            0 => c[0].to_string(),
+            n => format!("{}={}{}", &c[1], s.mask, &v[n..]),
+        }
+    }).into_owned()
+}
+
+/// A command, or anything else an approval shows, with its keys masked and nothing else (src/lib/secrets.ts `maskCommand`,
+/// step for step): line by line, never joined across a blank, and a masked value stops at the first character the shell
+/// acts on, which is shown with what follows it.
+pub fn mask_command(t: &str) -> String {
+    let s = secrets();
+    t.split('\n').map(|l| command_line(s, l)).collect::<Vec<_>>().join("\n")
 }
 
 /// A text field of a CLI answer: control characters out, token-like strings masked.
@@ -1358,6 +1451,23 @@ mod tests {
         for c in cases {
             assert_eq!(mask_secrets(c[0].as_str().unwrap()), c[1].as_str().unwrap(), "{c}");
         }
+        // what an approval shows (item 117): the command form, the same rows the page runs
+        let command = v["command"].as_array().unwrap();
+        assert!(command.len() > 25);
+        // a value also stops at a backslash; a key block on one line keeps its own, which escape only its masked characters
+        let shell = |s: &str| s.chars().filter(|c| "`$()|;&<>{}\n".contains(*c)).collect::<String>();
+        for c in command {
+            let (text, want) = (c[0].as_str().unwrap(), c[1].as_str().unwrap());
+            assert_eq!(mask_command(text), want, "{c}");
+        }
+        for c in command.iter().chain(cases) {
+            let text = c[0].as_str().unwrap();
+            assert_eq!(shell(&mask_command(text)), shell(text), "{c}");
+        }
+        // an sk- key of 32 lowercase hex, built here so no scanner reads the table as a live key
+        let key = format!("sk-{}", "0a1b2c3d".repeat(4));
+        assert_eq!(mask_secrets(&format!("deepseek {key} done")), "deepseek •••• done");
+        assert_eq!(mask_command(&format!("DEEPSEEK={key} pnpm test")), "DEEPSEEK=•••• pnpm test");
         // the verifier's V4 (PR #2908): a token broken by a line break, through parse_view
         let raw = serde_json::json!({"number": 1, "title": "safe", "body": format!("before ghp_XXXX\n{} after", "X".repeat(32))}).to_string();
         assert_eq!(parse_view(Source::Github, Kind::Issues, &raw).unwrap().body, "before •••• after");

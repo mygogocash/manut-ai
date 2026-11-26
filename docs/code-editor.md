@@ -113,7 +113,10 @@ The states whose rules are pure functions, with their tests, then the screens th
 - `apps/desktop/src/code/secrets.ts`: keys in Kit's changes, counted with the app's one masker (`src/lib/secrets.ts`). Since
   item 113 the masker also knows private key blocks, provider-prefixed keys, JSON web tokens, credentials in HTTP headers,
   `password:` and `"password":` values, the password in `scheme://user:pass@host`, quoted `KEY="..."` and `--password value`,
-  so a change holding any of them makes a commit or a push ask too.
+  so a change holding any of them makes a commit or a push ask too. Since item 117 the masker has two forms: `maskSecrets`
+  for text that never runs, and `maskCommand` for what an ask's card shows, which masks a key and never a substitution, a
+  pipe, a second command or a command's own operand (a token-shaped word is a key only as a whole word with a key's
+  shape). The card shows a command whole, its line breaks kept, scrolling in its block.
 - `apps/desktop/src/code/kitAsks.ts`: the dial at work on a session's asks, through the asks' own cards.
 - `apps/desktop/src/code/KitCardParts.tsx`, `KitPanel.tsx`, `kit.css`: Kit's words on an ask's card, and Kit on the
   Code page.
@@ -184,8 +187,9 @@ The states whose rules are pure functions, with their tests, then the screens th
 
 ### How an ask is read
 
-An ask's title and command are for the person: the shell cuts them to one short line. So the shell also names what
-the agent asked, from the agent's own message, and the dial reads that:
+An ask's title and command are for the person: since item 117 the command is whole, its line breaks kept, and the card
+masks only its keys (`maskCommand`). The dial does not decide from those words, which the masker has been over, so the
+shell also names what the agent asked, from the agent's own message, and the dial reads that:
 
 | Agent | Where it comes from | What is named |
 | --- | --- | --- |

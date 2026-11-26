@@ -847,6 +847,7 @@ export const ja: Record<Key, string> = {
   "card.allowSession": "このセッション中は許可",
   "card.approvalNeeded": "承認が必要です",
   "card.inCwd": "{cwd} で",
+  "card.command": "コマンド全体",
   "card.startPlan": "この計画で作業を始めますか？",
   "card.notSent": "未送信 · {error}",
   "card.answerOpt": "回答（任意）",

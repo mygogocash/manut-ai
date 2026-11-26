@@ -307,6 +307,35 @@ describe("Allow once", () => {
     expect(s.chats.done).toEqual([]);
   });
 
+  it("binds to the command itself: two commands that mask to the same view get different challenges, and an Allow for one is refused for the other (item 117)", async () => {
+    const s = await setup();
+    const withKey = (key: string) =>
+      s.chats.update("buddy", (items) => items.map((i) => (i.kind === "approval" && i.id === "req-1" ? { ...i, command: `API_KEY=${key} pnpm deploy` } : i)));
+    const shown = async () => {
+      const opened = await s.send(PHONE, { t: "open", chat: "buddy" });
+      return (opened.view as { asks: { id: string; command: string; revision: number }[] }).asks.find((a) => a.id === "req-1")!;
+    };
+    withKey("abc123");
+    const first = await shown();
+    expect(first.command).toBe("API_KEY=•••• pnpm deploy");
+    const issued = await s.send(PHONE, { t: "allow", chat: "buddy", ask: "req-1", revision: first.revision });
+    expect(issued).toMatchObject({ t: "challenge", revision: first.revision });
+    // Another command that masks to the same words is another revision, so its challenge is other bytes for one nonce.
+    withKey("xyz789");
+    const second = await shown();
+    expect(second.command).toBe(first.command);
+    expect(second.revision).toBe(first.revision + 1);
+    const nonce = fromBase64Url(String(issued.nonce));
+    const bound = (revision: number) => decisionChallenge(nonce, { deviceId: PHONE, requestId: JSON.stringify(["buddy", "req-1"]), revision, optionId: "once" });
+    expect(toBase64Url(await bound(second.revision))).not.toBe(toBase64Url(await bound(first.revision)));
+    // The Allow the person gave the first is refused for the second, before a challenge and after Face ID alike.
+    expect(await s.allow(PHONE, { chat: "buddy", ask: "req-1", revision: first.revision })).toMatchObject({ t: "refused", reason: "changed" });
+    expect(
+      await s.allow(PHONE, { chat: "buddy", ask: "req-1", revision: second.revision }, { before: () => withKey("abc123") }),
+    ).toMatchObject({ t: "refused", reason: "changed" });
+    expect(s.chats.done).toEqual([]);
+  });
+
   it("has at most sixteen challenges waiting", async () => {
     const s = await setup();
     for (let i = 0; i < 16; i++) expect(await s.send(PHONE, { t: "allow", chat: "buddy", ask: "req-1", revision: 1 })).toMatchObject({ t: "challenge" });
