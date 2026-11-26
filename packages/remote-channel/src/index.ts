@@ -66,9 +66,11 @@ export {
   type DecisionRefusal,
   type DecisionResult,
   type IssuedChallenge,
+  type QuestionAnswer,
   DECISION_LIMIT,
   DECISION_TTL_MS,
   DecisionChallenges,
+  answerOption,
   decisionChallenge,
 } from "./decision";
 export {

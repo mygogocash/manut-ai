@@ -9,7 +9,8 @@ below), and the read of Tailscale's state (78f's first part, below). The plan's 
 
 ## The first version
 
-A paired phone watches Buddy and Kit's lanes live from anywhere, and answers their asks. Every Allow needs Face ID.
+A paired phone watches Buddy and Kit's lanes live from anywhere, and answers their asks. Every Allow and every answer
+to a question needs Face ID.
 
 It covers: network access (through the relay, not a port on the local network), approval of new devices (always on),
 permissions (one fixed set for every phone), and notifications with no content in them (the last phase).
@@ -28,8 +29,8 @@ What a person does:
    own, so there is nothing to compare and press Allow on by habit: a phone that was raced by someone who photographed
    the code is refused and shows no digits, so there is nothing to type.
 5. The phone lists the chats as Working, Needs you or Done. Opening one shows its messages, its current step and its
-   asks, with the whole command as the card shows it. The person can Allow once (Face ID), say No, answer a question,
-   or stop the turn.
+   asks, with the whole command as the card shows it. The person can Allow once (Face ID), say No, answer a question
+   (Face ID), or stop the turn.
 
 Left out on purpose: sending messages, Always allow, Kit's dial, modes, diffs and files, Live Activities, guest links,
 linked environments, the preview, and a listener on the local network (Tailscale is the second road, below). The need
@@ -121,12 +122,17 @@ which the repository does not have.
   name arrives only here, so the Mac's field reads "Type the four digits your phone shows." without it.
 - **Messages inside a session** are JSON with a number `id` the phone picks: `list`, `open` (`chat`), `catchup`
   (`chat`, `cursor`), `allow` (`chat`, `ask`, `revision`; then again with `option: "once"` and the passkey's `answer`
-  to the challenge), `reply` (`chat`, `ask`, `revision`, and `no: true` or `answer`, or `answers` for an interview),
-  `stop` (`chat`). The Mac answers `chats`, `chat` (a view and a cursor), `events`, `challenge`, `done` or
-  `refused` (`request`, `reason`), and pushes `event` for each change of a chat the phone has open. Anything else is
-  refused by name: `stays_on_mac` for Always allow, the session, a folder, the dial, pairing, Unpair, the switch and the
-  consent; `unknown_request` for the rest. The challenge binds the device, `["<chat>","<ask>"]` as JSON, the revision
-  and `once`.
+  to the challenge), `reply` (`chat`, `ask`, `revision`, and `no: true` for No; or `answer`, or `answers` for an
+  interview, then again with the same answer and the passkey's answer to the challenge as `passkey`), `stop`
+  (`chat`). The Mac answers `chats`, `chat` (a view and a cursor), `events`, `challenge`, `done` or `refused`
+  (`request`, `reason`), and pushes `event` for each change of a chat the phone has open. Anything else is refused by
+  name: `stays_on_mac` for Always allow, the session, a folder, the dial, pairing, Unpair, the switch and the consent;
+  `unknown_request` for the rest. The challenge binds the device, `["<chat>","<ask>"]` as JSON, the revision and the
+  choice: `once` for an Allow, and for an answer `answer:` with a digest of the exact words (the package's
+  `answerOption`), so the words sent, the words challenged and the words the passkey signed must all be the same.
+- **Answers need Face ID too** (third review, 26 Nov 2026). An answer to a question steers the agent as much as an
+  Allow does, so it takes the same one-use challenge, for a typed answer and a picked choice alike. Only No to an
+  approval and Stop go without one: they can only hold something back.
 - **Revisions.** The store's approvals carry none, so the Mac counts them for a phone: 1 when an ask is first shown, one
   more whenever what it shows changes. An Allow or a No on another revision is refused as `changed`, also when the ask
   changed while the person looked at Face ID.
@@ -243,7 +249,8 @@ installed iPhone web app opens the socket, what Android Chrome asks, and how fas
   at that moment.
 - **Stays on the Mac:** the dial, Always allow, Allow this folder, pairing, Unpair, the switch, and any ask the card
   marks as needing an app update.
-- **A lost or stolen phone** can read the chats, say No and Stop. It cannot Allow without Face ID or the passcode.
+- **A lost or stolen phone** can read the chats, say No and Stop. It cannot Allow, or answer an agent's question,
+  without Face ID or the passcode.
   Unpair on the Mac sends `revoke`: the relay closes that phone's door and the Mac deletes its K. A copied token opens
   only the relay's door, never the session.
 - **What the relay sees:** internet addresses (Cloudflare sees them; the relay object keeps only a digest), times, byte

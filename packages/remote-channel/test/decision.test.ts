@@ -4,6 +4,7 @@ import {
   DECISION_TTL_MS,
   type DecisionBinding,
   DecisionChallenges,
+  answerOption,
   decisionChallenge,
   fromBase64Url,
   toBase64Url,
@@ -186,5 +187,42 @@ describe("decision challenges", () => {
     for (const binding of bad) expect(await refusal(() => vault.issue(binding, T0)), JSON.stringify(binding).slice(0, 80)).toBe("invalid");
     expect(await refusal(() => decisionChallenge(new Uint8Array(31), ALLOW))).toBe("invalid");
     expect(fromBase64Url((await vault.issue(ALLOW, T0)).id)).toHaveLength(32);
+  });
+});
+
+/// An answer to a question steers the agent as much as an Allow, so its challenge is bound to the exact words: the
+/// choice is `answer:` and a digest of the answer, which the phone recomputes from what it shows.
+describe("answer options", () => {
+  it("are the digest the README lays out, recomputed here straight from Web Crypto", async () => {
+    const expected = async (json: string) => {
+      const bytes = new TextEncoder().encode(`manut-remote-v1 answer\u0000${json}`);
+      return `answer:${toBase64Url(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)))}`;
+    };
+    expect(await answerOption("Friday")).toBe(await expected('["text","Friday"]'));
+    expect(await answerOption([["a", "yes"], ["b", null]])).toBe(await expected('["answers",[["a","yes"],["b",null]]]'));
+    expect(await answerOption("Friday")).toMatch(/^answer:[A-Za-z0-9_-]{43}$/);
+  });
+
+  it("differ for any other words, form or order, so a challenge for one answer never covers another", async () => {
+    const answers: Parameters<typeof answerOption>[0][] = [
+      "Friday",
+      "friday",
+      "Friday ",
+      "Saturday",
+      "",
+      [["a", "Friday"]],
+      [["a", "yes"], ["b", null]],
+      [["b", null], ["a", "yes"]],
+      [["a", "yes"], ["b", ""]],
+      [["a", "yes"], ["b", "null"]],
+      [["a", "yes,b"], ["", null]],
+      [],
+    ];
+    const options = await Promise.all(answers.map((a) => answerOption(a)));
+    expect(new Set(options).size).toBe(answers.length);
+    // Bound into the challenge, an answer's option is one more choice: another answer's challenge is a different one.
+    const nonce = new Uint8Array(32).fill(7);
+    const binding = { deviceId: DEVICE_ID, requestId: '["buddy","q-1"]', revision: 1 };
+    expect(await decisionChallenge(nonce, { ...binding, optionId: options[0]! })).not.toEqual(await decisionChallenge(nonce, { ...binding, optionId: options[3]! }));
   });
 });

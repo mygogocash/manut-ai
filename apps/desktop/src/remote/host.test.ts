@@ -177,6 +177,8 @@ describe("what crosses the relay", () => {
     await session.request({ t: "list" });
     await session.request({ t: "open", chat: "buddy" });
     expect(await phone.allow(session, { chat: "buddy", ask: "req-1", revision: 1 })).toMatchObject({ t: "done" });
+    expect(await phone.answer(session, { chat: "buddy", ask: "q-1", revision: 1 }, { answer: "Saturday" })).toMatchObject({ t: "done" });
+    expect(h.chats.done.at(-1)).toEqual({ action: "answer", chat: "buddy", ask: "q-1", by: phone.deviceId, answer: "Saturday" });
     const { secret } = phone.secrets();
     const words = [PLAIN.title, PLAIN.message, PLAIN.reply, PLAIN.command, PLAIN.question, "Somchai"];
     const contains = (hay: Uint8Array, needle: Uint8Array) => {
