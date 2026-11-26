@@ -3903,7 +3903,8 @@ impl ChatSessions {
         self.start_agent_mine_in(agent_id, cwd, resume, account_env, files, suggest, mode, &mine, sink)
     }
 
-    /// [`ChatSessions::start_agent_mine_in`] in the agent's careful mode.
+    /// [`ChatSessions::start_agent_mine_in`] in the agent's careful mode (the tests' way in).
+    #[cfg(test)]
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn start_agent_mine<F>(
         &self,
