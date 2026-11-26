@@ -14,6 +14,7 @@ import { steersOf } from "./controls";
 import type { DiskLevel, DiskState } from "../lib/disk";
 import type { ImportApp, ImportProfile } from "./term/import";
 import { readLaneFolder, type LaneFolder } from "../code/laneFolder";
+import { savedKeys, type SavedKeys } from "../code/secrets";
 import { readView, type GitView } from "../code/moved";
 import { MOCK_MOVED, MOCK_MOVED_ROOT } from "../code/mockMoved";
 import { readCleaned, readKept, readMade, readReleased, readRemoved, type KeptLane, type LaneCleaned, type LaneMade, type LaneReleased, type LaneRemoveAsk, type LaneRemoved } from "../code/laneBranch";
@@ -243,6 +244,10 @@ export interface SessionHost extends HistoryHost {
   /** What really changed in the lane's own folder `worktree` since the lane started, from git (the Diff beside the lane): each file
    *  with its state and text, bounded. null when this host cannot read a folder; rejects for a folder the app did not make. */
   laneDiff(worktree: string): Promise<LaneFolder | null>;
+  /** The keys in what a commit or a push from the lane's folder `worktree` would save, from the same read-only, bounded read
+   *  (code/secrets.ts `savedKeys`, item 117). null when this host cannot read a folder; rejects for a folder the app did not
+   *  make. Kit's dial asks before a commit or a push unless this answered in time with nothing unread and no key. */
+  laneKeys?(worktree: string): Promise<SavedKeys | null>;
   /** Show folder `cwd` in the file manager. */
   reveal(cwd: string): Promise<void>;
   /** Open the person's own system terminal in folder `cwd` (their shell; nothing typed into it). */
@@ -537,6 +542,10 @@ export class TauriHost implements SessionHost, BuddyHost {
   async laneDiff(worktree: string) {
     const { invoke } = await this.core();
     return readLaneFolder(await invoke<unknown>("lane_diff", { worktree }));
+  }
+  async laneKeys(worktree: string) {
+    const { invoke } = await this.core();
+    return savedKeys(await invoke<unknown>("lane_diff", { worktree }));
   }
   async mainMoved(cwd: string, o: { base?: string | null; show?: string[] } = {}) {
     const { invoke } = await this.core();
@@ -1650,6 +1659,10 @@ export class MockHost implements SessionHost, BuddyHost {
   }
   async laneDiff() {
     // a browser reads no folder: the pane shows what the chat's events say
+    return null;
+  }
+  async laneKeys() {
+    // nor what a commit would save: a commit or a push asks
     return null;
   }
   async mainMoved(cwd: string, o: { base?: string | null; show?: string[] } = {}) {

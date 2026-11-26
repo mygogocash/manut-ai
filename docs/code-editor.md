@@ -53,7 +53,7 @@ state that needs the owner: a real GitHub account, money, a real sign-in or real
 | State | Desktop | Where |
 | --- | --- | --- |
 | Kit needs a secret: typed once into the vault, Kit uses it without seeing it | Lacks on the desktop. The API's vault keeps the shop's sign-ins; the desktop keeps only its own session in the keychain (Owner: real secrets) | `apps/api/src/sign-in-vault.ts`, `src-tauri/src/api_link.rs` |
-| A secret found in the code: moved out, never committed | Part (this branch): a key in Kit's changes is found and named, a commit or push then asks at every level, and no diff shows it. Moving it to a vault lacks | `code/secrets.ts`, `code/kitAsks.ts`, `chat/activity/Work.tsx` |
+| A secret found in the code: moved out, never committed | Part (this branch): a key in Kit's changes is found and named, a commit or push then asks at every level, and no diff shows it. Since item 117 a commit or a push the dial would let go alone first reads what it saves (the lane's own diff), so a key a command wrote makes it ask too, as does a diff that could not be read. Moving it to a vault lacks | `code/secrets.ts`, `code/kitAsks.ts`, `chat/activity/Work.tsx` |
 | No secret in the preview: a sample until the owner adds one | Part (this branch): the state and its words. A secret Kit's changed code reads by name (`process.env.PROMPTPAY_SHOP_ID`) shows as Sample, "The preview has no shop ID yet, so the QR code is a sample", with Add the shop ID, which says the vault comes later. The rule for what a preview runs with (a sample unless the owner added that secret) is `previewEnv`, and the preview of a lane runs with it (this branch), with a sample too for each secret the lane folder's `.env.example` names. Nothing adds a secret: the owner has not said where a developer's secrets live (Owner: real secrets) | `code/preview.ts`, `code/previewRun.ts` (`previewSecrets`), `code/PreviewSample.tsx` |
 
 ### The project and its history
@@ -113,7 +113,13 @@ The states whose rules are pure functions, with their tests, then the screens th
 - `apps/desktop/src/code/secrets.ts`: keys in Kit's changes, counted with the app's one masker (`src/lib/secrets.ts`). Since
   item 113 the masker also knows private key blocks, provider-prefixed keys, JSON web tokens, credentials in HTTP headers,
   `password:` and `"password":` values, the password in `scheme://user:pass@host`, quoted `KEY="..."` and `--password value`,
-  so a change holding any of them makes a commit or a push ask too. Since item 117 the masker has two forms: `maskSecrets`
+  so a change holding any of them makes a commit or a push ask too. Since item 117 the count never goes down (a key taken
+  out again may already be in a commit), and a commit or a push the dial would otherwise let go alone first reads what it
+  saves: the lane's own diff, from the shell's read-only `lane_diff` (bounded, `--no-ext-diff --no-textconv`, no clean filter,
+  each file's diff masked by the shell's twin). A file an added line of which holds a key makes the step ask, whoever wrote it,
+  and so does a file it could not read whole (binary, too large, past its budget or its list) or a read that failed or took
+  more than five seconds. That read only reaches a folder the app made, so a commit or a push from a session in the
+  developer's own folder always asks. Since item 117 the masker has two forms: `maskSecrets`
   for text that never runs, and `maskCommand` for what an ask's card shows, which masks a key and never a substitution, a
   pipe, a second command or a command's own operand (a token-shaped word is a key only as a whole word with a key's
   shape). The card shows a command whole, its line breaks kept, scrolling in its block.

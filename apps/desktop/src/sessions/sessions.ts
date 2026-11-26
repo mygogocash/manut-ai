@@ -47,11 +47,12 @@ import { NAME_MAX, parseTitles, promptTitle, putTitle, TITLES_KEY } from "./titl
 import { getDraft, setDraft as setUnsent } from "../app/drafts";
 import { getHost, type ChatEvent, type ChatInput, type ConvState, type PastChat, type SessionHost } from "./host";
 import { localBot } from "../peers/peerKey";
-import { folderKey, getStore, notifySessionEvent, notifySessionNote, onBridgeEvent, selectAsks, setChatRoute, setSessionKeyLookup, type OutFile, type SentFile, type Store } from "../state/store";
+import { askOpen, folderKey, getStore, notifySessionEvent, notifySessionNote, onBridgeEvent, selectAsks, setChatRoute, setSessionKeyLookup, type ApprovalItem, type OutFile, type SentFile, type Store } from "../state/store";
 import { blobType, bytesOf, inlinePicture, parseSentFiles, pathsTyped, putSentFiles, SENT_FILES_KEY, shellQuote, wireText, type SavedFile, type SentFilesBook } from "./attach";
 import type { AccountCli, AccountGroup, ApprovalChoice, BridgeEvent, ClarifyAnswers, DiffFile, EventOf, Msg } from "../lib/protocol";
 import { settleApproval } from "../chat/cards/respond";
-import { kitAnswer, noteChange } from "../code/kitAsks";
+import { kitAnswer, noteChange, noteSaved, savesAlone } from "../code/kitAsks";
+import { readSaved } from "../code/secrets";
 import { planLaneBranch, workDir, type LaneBranch } from "../code/laneBranch";
 import { openFolderInEditor } from "../code/editor";
 import { startOf, worktreeSettings } from "../lib/worktrees";
@@ -563,8 +564,24 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     if (ev.event !== "approval.request" || !key?.startsWith("agent:") || !r?.cwd) return null;
     const ask = ev as unknown as EventOf<"approval.request">;
     // a lane's project is the session's folder, whose settings the dial keeps; what is inside it is the lane's own folder
-    const a = kitAnswer(ask, { chat: key, root: workDir(r), project: r.cwd, home: state.home, branch: state.live[id]?.branch, ...(r.workflow ? { careful: true } : {}) });
-    return a ? () => settleApproval(store(), key, { id: `approval-${ask.request_id}`, request_id: ask.request_id }, a.choice) : null;
+    const ctx = { chat: key, root: workDir(r), project: r.cwd, home: state.home, branch: state.live[id]?.branch, ...(r.workflow ? { careful: true } : {}) };
+    const card = { id: `approval-${ask.request_id}`, request_id: ask.request_id };
+    if (savesAlone(ask, ctx)) {
+      // a commit or a push the dial would let go alone: what it saves is read first (item 117), and a key there, or a read not
+      // made whole and in time, leaves it to the person, who is then told of it as of any ask
+      const dir = ctx.root;
+      return async () => {
+        const saved = await readSaved(() => (host.laneKeys ? host.laneKeys(dir) : Promise.resolve(null)));
+        const a = kitAnswer(ask, ctx, Date.now(), saved);
+        if (a) return settleApproval(store(), key, card, a.choice);
+        noteSaved(key, saved?.files ?? []);
+        const items = store().getState().chats[key]?.items ?? [];
+        const item = items.find((i): i is ApprovalItem => i.kind === "approval" && i.request_id === ask.request_id);
+        if (item && askOpen(items, item)) notify?.({ ...ev, bot: key } as unknown as BridgeEvent);
+      };
+    }
+    const a = kitAnswer(ask, ctx);
+    return a ? () => settleApproval(store(), key, card, a.choice) : null;
   };
 
   /** The chat's program is gone (it exited, or manut stopped it): a turn the chat still shows ends with it. The
