@@ -42,7 +42,7 @@ keeps them:
 
 | Feature | Today | Plan |
 | --- | --- | --- |
-| Codex, Claude Code, Cursor, Grok, OpenCode, Antigravity, Muse Code, Pi | part: all but Muse Code; Grok is a terminal only; Cursor and Antigravity never run as a chat | 101 |
+| Codex, Claude Code, Cursor, Grok, OpenCode, Antigravity, Muse Code, Pi | part: all but Muse Code; Grok is a terminal only. Cursor and Antigravity run as chats over ACP (item 101a): replies, steps, asks and Cursor's questions, each held to the modes in which it asks; a Cursor whose own settings say Run Everything does not start | 101 |
 | The ACP registry, and any ACP agent by hand | part: any ACP agent by hand (Settings, Providers); seven fixed rows, no registry | 101 |
 | Reuses installed agents and their sign-ins | has | |
 | Several accounts of one provider | part: Claude Code and Codex; not Grok or pi; off on Windows | 101 |

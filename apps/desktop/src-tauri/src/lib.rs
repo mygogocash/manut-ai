@@ -312,6 +312,13 @@ async fn provider_version(id: String) -> Result<Option<String>, String> {
     tauri::async_runtime::spawn_blocking(move || providers::version_here(&id)).await.map_err(|e| e.to_string())?
 }
 
+/// Agent `id`'s sign-in as its own fixed status command says it (Cursor, Antigravity: `providers::SIGNIN_AGENTS`), or
+/// null when it says nothing; never a token, an email at most.
+#[tauri::command]
+async fn provider_signin(id: String) -> Result<Option<accounts::LoginStatus>, String> {
+    tauri::async_runtime::spawn_blocking(move || providers::signin_here(&id)).await.map_err(|e| e.to_string())?
+}
+
 /// The allow-listed agent programs (claude, codex, omo, dsh, omh, pi, omp, grok), how each opens and where each
 /// was found, if anywhere.
 /// One row of the agent look-up: an allow-listed agent, or one the person added on Settings › Agents.
@@ -1831,6 +1838,7 @@ fn commands(invoke: tauri::ipc::Invoke) -> bool {
         providers_list,
         provider_save,
         provider_version,
+        provider_signin,
         sessions_agents,
         custom_agents_list,
         custom_agent_preview,

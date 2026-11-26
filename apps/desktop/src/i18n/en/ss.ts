@@ -133,4 +133,8 @@ export const ss = {
   "ss.dshOld": "This DSH session ran deepseek-bot (Manut AI 0.2.4). DSH is DeepSeek Harness now: Restart starts it in this folder.",
   "ss.gone": "{agent} is no longer offered in Manut AI",
   "ss.dshApp": " (or the DeepSeek Harness app, which carries it)",
+  // Cursor and Antigravity as chats (item 101a): an agent that would not ask before it acts
+  "ss.noAsks": "{agent} did not start because its own settings let it run commands and change files without asking first. Set Approval mode to Allowlist in {agent}'s own settings, then start the chat again.",
+  "ss.asksModeSet": "{agent} was in its {mode} mode, which does not ask before it acts, so Manut AI switched it to {to}.",
+  "ss.asksModeKept": "{agent} stayed in its {mode} mode, which does not ask before it acts, so Manut AI sends it nothing more. Close this chat and start a new one.",
 };

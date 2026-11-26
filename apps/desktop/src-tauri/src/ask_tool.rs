@@ -68,10 +68,10 @@ fn stays_under(pattern: &str) -> bool {
     !absolute && !p.split(['/', '\\']).any(|part| part == "..")
 }
 
-/// The folder a command runs in when its own arguments name one (`cwd`, `workdir` or `directory`, read from the
-/// session's folder when relative), else the session's folder, where the agent was started.
+/// The folder a command runs in when its own arguments name one (`cwd`, `workdir` or `directory`, or Antigravity's
+/// `Cwd`, read from the session's folder when relative), else the session's folder, where the agent was started.
 fn run_folder(args: &Value, session: &str) -> String {
-    match ["cwd", "workdir", "directory"].into_iter().find_map(|k| text(args, k)) {
+    match ["cwd", "workdir", "directory", "Cwd"].into_iter().find_map(|k| text(args, k)) {
         Some(d) => Path::new(session).join(d).to_string_lossy().into_owned(),
         None => session.to_string(),
     }
@@ -246,14 +246,28 @@ pub(crate) fn codex_change_tool(change: Option<&(Vec<String>, bool)>, p: &Value,
 
 /// The ask's `tool` for an ACP permission request (`session/request_permission`): the tool call's own `kind`, one of
 /// ACP's (`execute`, `read`, `edit`, `delete`, `search`, `move`, `fetch` …), and from the call's input (`rawInput`) an
-/// `execute`'s command line and folder, and the file a file tool names. A search is not known to name its folder and a
-/// move its destination, so neither carries paths. A call with no `kind`, or another one, is `other`; the call's
-/// title is the agent's words for the person and is never read for it.
+/// `execute`'s command line and folder, and the file a file tool names, with the file of each diff the call carries
+/// (ACP's `content` of `type: "diff"`, which is the change itself). A search is not known to name its folder and a move
+/// its destination, so neither carries paths. A call with no `kind`, or another one, is `other`; the call's title is the
+/// agent's words for the person and is never read for it (Cursor's requests carry no input, so its dial asks).
+///
+/// Antigravity's own names (item 101a: its `run_command` takes `CommandLine` and `Cwd`, "the working directory is `Cwd`
+/// if given, else `WORKSPACES[0]`", in its binary's tool description; its file tools `TargetFile` and `AbsolutePath`, as
+/// GoSpark's Antigravity adapter reads them) are read as the others' are.
 pub(crate) fn acp_tool(tc: &Value, session: &str) -> Value {
     let raw = tc.get("rawInput").unwrap_or(&Value::Null);
-    let file = || ["filePath", "file_path", "path", "filepath"].into_iter().find_map(|k| text(raw, k)).map(|p| vec![p.to_string()]);
+    let file = || {
+        let mut paths: Vec<String> = ["filePath", "file_path", "path", "filepath", "TargetFile", "AbsolutePath"].into_iter().find_map(|k| text(raw, k)).map(|p| vec![p.to_string()]).unwrap_or_default();
+        for c in tc.get("content").and_then(Value::as_array).into_iter().flatten().filter(|c| c.get("type").and_then(Value::as_str) == Some("diff")) {
+            if let Some(p) = text(c, "path") {
+                push_new(&mut paths, p);
+            }
+        }
+        (!paths.is_empty()).then_some(paths)
+    };
+    let line = text(raw, "command").or_else(|| text(raw, "CommandLine"));
     match tc.get("kind").and_then(Value::as_str).unwrap_or("") {
-        "execute" => ask_tool("command", "", text(raw, "command"), None, &run_folder(raw, session)),
+        "execute" => ask_tool("command", "", line, None, &run_folder(raw, session)),
         "read" => ask_tool("read", "", None, file(), session),
         "edit" => ask_tool("edit", "", None, file(), session),
         "delete" => ask_tool("delete", "", None, file(), session),
@@ -428,6 +442,29 @@ mod tests {
         for kind in [Value::Null, json!("think"), json!("terminal")] {
             assert_eq!(acp_tool(&call(kind.clone(), json!({"command": "ls"})), "/w/proj"), json!({"kind": "other", "cwd": "/w/proj"}), "{kind}");
         }
+    }
+
+    /// Item 101a: Antigravity's own input names, as its real request carried them (`agy-2-allow-once.jsonl`), and the
+    /// folder its `run_command` takes; Cursor's requests, which carry no input, give the dial nothing to read but the file
+    /// of the diff they carry.
+    #[test]
+    fn antigravitys_and_cursors_asks_name_what_they_carry() {
+        let agy = |kind: &str, raw: Value| json!({"toolCallId": "call_1", "name": "run_command", "title": "pwd", "kind": kind, "rawInput": raw});
+        assert_eq!(
+            acp_tool(&agy("execute", json!({"CommandLine": "pwd", "WaitMsBeforeAsync": 5000, "toolSummary": "Print working directory"})), "/w/proj"),
+            json!({"kind": "command", "line": "pwd", "cwd": "/w/proj"})
+        );
+        // its own folder is where the command runs, never the session's when it names another
+        assert_eq!(acp_tool(&agy("execute", json!({"CommandLine": "rm -rf build", "Cwd": "/w/other"})), "/w/proj")["cwd"], json!("/w/other"));
+        assert_eq!(acp_tool(&agy("edit", json!({"TargetFile": "/w/proj/a.ts", "CodeContent": "x"})), "/w/proj")["paths"], json!(["/w/proj/a.ts"]));
+        assert_eq!(acp_tool(&agy("read", json!({"AbsolutePath": "/w/elsewhere/b.txt"})), "/w/proj")["paths"], json!(["/w/elsewhere/b.txt"]));
+        // Cursor: a command named only in its title is not read; a write names its file in the diff it carries
+        let shell = json!({"toolCallId": "t1", "title": "`npm test`", "kind": "execute", "status": "pending"});
+        assert_eq!(acp_tool(&shell, "/w/proj"), json!({"kind": "command", "cwd": "/w/proj"}));
+        let write = json!({"toolCallId": "t2", "title": "Edit `src/a.ts`", "kind": "edit", "status": "pending", "content": [{"type": "diff", "path": "/w/proj/src/a.ts", "oldText": "a", "newText": "b"}]});
+        assert_eq!(acp_tool(&write, "/w/proj"), json!({"kind": "edit", "paths": ["/w/proj/src/a.ts"], "cwd": "/w/proj"}));
+        let delete = json!({"toolCallId": "t3", "title": "Delete `old.ts`", "kind": "edit", "status": "pending"});
+        assert_eq!(acp_tool(&delete, "/w/proj"), json!({"kind": "edit", "cwd": "/w/proj"}));
     }
 
     #[test]

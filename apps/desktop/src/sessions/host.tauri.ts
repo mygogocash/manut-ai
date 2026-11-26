@@ -12,7 +12,7 @@ import { readCleaned, readKept, readMade, readReleased, readRemoved, type LaneRe
 import { readAgentConfig } from "../settings/mcp/agentConfig";
 import { readInstallAsk, readInstallDone, readLinkRead, readSkillReads } from "../runtime/skillBundle";
 import { readAsk, readDone, readDraft, readMadeProject, readPulled, readRepoAsk, readTools, type MergeMethod } from "../code/source";
-import { type ProviderPatch, type ProviderView } from "../settings/providers/model";
+import { type ProviderPatch, type ProviderView, type SignIn } from "../settings/providers/model";
 import type { ChatInput, ChatEvent, PastChat, ConvState, PastMsg, BuddyChatInput, BuddyHost, TitleRequest, TitleWords, SessionHost, LaneStart } from "./host";
 
 // ---- Tauri ----------------------------------------------------------------------------------
@@ -337,6 +337,10 @@ export class TauriHost implements SessionHost, BuddyHost {
   async providerVersion(id: string) {
     const { invoke } = await this.core();
     return invoke<string | null>("provider_version", { id });
+  }
+  async providerSignin(id: string) {
+    const { invoke } = await this.core();
+    return invoke<SignIn | null>("provider_signin", { id });
   }
   async customList() {
     const { invoke } = await this.core();

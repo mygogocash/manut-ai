@@ -29,6 +29,7 @@ import {
   patchOf,
   refusalText,
   shownName,
+  signinAgent,
   statusLine,
   type ProviderForm,
   type ProviderView,
@@ -43,6 +44,7 @@ export function ProvidersPage({ focus }: { focus?: "accounts" }) {
   const host = getHost();
   const [views, setViews] = useState<ProviderView[] | null>(null);
   const [versions, setVersions] = useState<Record<string, string>>({});
+  const [signins, setSignins] = useState<Record<string, SignIn>>({});
   const [chosen, setChosen] = useState<string | null>(null);
   const [err, setErr] = useState("");
   const acc = useAccounts();
@@ -63,6 +65,12 @@ export function ProvidersPage({ focus }: { focus?: "accounts" }) {
         const ver = await host.providerVersion(v.id).catch(() => null);
         if (ver) setVersions((cur) => ({ ...cur, [v.id]: ver }));
       }
+      // then Cursor's and Antigravity's sign-in, each its own status command, one at a time too (item 101a)
+      for (const v of list) {
+        if (!v.signin || !v.found || !signinAgent(v.id) || !host.providerSignin) continue;
+        const s = await host.providerSignin(v.id).catch(() => null);
+        if (s) setSignins((cur) => ({ ...cur, [v.id]: s }));
+      }
     } catch (e) {
       setErr(errorText(e, ""));
     }
@@ -75,11 +83,12 @@ export function ProvidersPage({ focus }: { focus?: "accounts" }) {
     if (focus === "accounts") accounts.current?.scrollIntoView({ block: "start" });
   }, [focus, views === null]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  /** The sign-in the Accounts copy read for the account new sessions of `id` use (Claude Code and Codex only). */
+  /** The sign-in the Accounts copy read for the account new sessions of `id` use (Claude Code and Codex), else the one
+   *  its own status command gave (Cursor, Antigravity). */
   const signinOf = (id: string): SignIn | null => {
     const g = acc.groups?.find((x) => x.cli === id);
     const st = acc.status[`${id}:${g?.active ?? "default"}`];
-    return st ?? null;
+    return st ?? signins[id] ?? null;
   };
 
   const put = (v: ProviderView) => setViews((cur) => (cur ? cur.map((x) => (x.id === v.id ? v : x)) : cur));

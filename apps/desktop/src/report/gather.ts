@@ -10,7 +10,7 @@ import { notifyEnabled, notifyErrorsEnabled } from "../state/store";
 import { getHost } from "../sessions/host";
 import { getSessions } from "../sessions/sessions";
 import { accountsNow, reloadAccounts } from "../settings/accounts/useAccounts";
-import { shownName } from "../settings/providers/model";
+import { shownName, signinAgent } from "../settings/providers/model";
 import { recentErrors } from "./errors";
 import type { ReportAgent, ReportInput } from "./report";
 
@@ -60,7 +60,11 @@ export async function gather(): Promise<ReportInput> {
     const installed = v.found !== null;
     const version = installed && v.version && host.providerVersion ? ((await host.providerVersion(v.id).catch(() => null)) ?? "") : "";
     let signedIn: boolean | null = null;
-    if (installed && v.signin) {
+    if (installed && v.signin && signinAgent(v.id)) {
+      // Cursor and Antigravity: their own status command, read now like the version (item 101a)
+      const st = host.providerSignin ? await host.providerSignin(v.id).catch(() => null) : null;
+      signedIn = st ? st.logged_in : null;
+    } else if (installed && v.signin) {
       const g = acc.groups?.find((x) => x.cli === v.id);
       const st = acc.status[`${v.id}:${g?.active ?? "default"}`];
       signedIn = st ? st.logged_in : null;

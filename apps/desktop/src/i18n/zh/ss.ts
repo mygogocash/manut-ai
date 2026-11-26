@@ -133,4 +133,8 @@ export const ss: Record<keyof typeof en, string> = {
   "ss.dshOld": "这个 DSH 会话运行的是 deepseek-bot（Manut AI 0.2.4）。DSH 现在是 DeepSeek Harness：点 Restart 会在此文件夹中启动它。",
   "ss.gone": "Manut AI 已不再提供 {agent}",
   "ss.dshApp": "（或自带 CLI 的 DeepSeek Harness 应用）",
+  // Cursor and Antigravity as chats (item 101a): an agent that would not ask before it acts
+  "ss.noAsks": "{agent} 自己的设置允许它不经询问就运行命令和修改文件，因此没有启动。请在 {agent} 的设置中把 Approval mode 设为 Allowlist，然后重新开始聊天。",
+  "ss.asksModeSet": "{agent} 当时处于 {mode} 模式，执行前不会询问，因此 Manut AI 已将其切换到 {to}。",
+  "ss.asksModeKept": "{agent} 仍停留在执行前不会询问的 {mode} 模式，因此 Manut AI 不再向它发送任何内容。请关闭此聊天并重新开始。",
 };
