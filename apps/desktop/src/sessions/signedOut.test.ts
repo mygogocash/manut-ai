@@ -30,7 +30,7 @@ describe("an agent the app can tell is not signed in", () => {
   it("falls back to the bridge's own state when the CLI could not be asked, as Settings › Accounts does", () => {
     expect(agentSignedOut(known([group("claude", [account({ state: "login" })])]), "claude")).toBe(true);
     expect(agentSignedOut(known([group("claude", [account({ state: "active" })])]), "claude")).toBe(false);
-    // Grok has no status command: only the bridge's state tells
+    // Grok has no status command here: the account folder's own auth file (the bridge's state, "login") tells
     expect(agentSignedOut(known([group("grok", [account({ state: "login" })])]), "grok")).toBe(true);
   });
 
@@ -43,7 +43,21 @@ describe("an agent the app can tell is not signed in", () => {
     expect(agentSignedOut(known([group("codex", [account({ state: "login" })])]), "claude")).toBe(false);
     expect(agentSignedOut(known([group("claude", [], null)]), "claude")).toBe(false);
     const all = [group("claude", [account({ state: "login" })]), group("pi", [account({ state: "login" })]), group("omp", [account({ state: "login" })])];
-    for (const agent of ["pi", "omp", "opencode", "omo", "dsh", "omh", "cursor", "my-own"]) expect(agentSignedOut(known(all), agent), agent).toBe(false);
+    for (const agent of ["omp", "opencode", "omo", "dsh", "omh", "cursor", "my-own"]) expect(agentSignedOut(known(all), agent), agent).toBe(false);
+  });
+});
+
+describe("Grok and pi accounts (item 101d)", () => {
+  it("reads Grok for the account a new session runs as, not another one", () => {
+    const groups = [group("grok", [account({ state: "login" }), account({ id: "work", state: "ready" })], "work")];
+    expect(agentSignedOut(known(groups, { "grok:default": status(false), "grok:work": status(true) }), "grok")).toBe(false);
+    const other = [group("grok", [account({ state: "ready" }), account({ id: "work", state: "login" })], "work")];
+    expect(agentSignedOut(known(other, { "grok:default": status(true), "grok:work": status(false) }), "grok")).toBe(true);
+  });
+
+  it("never says pi is not signed in, whatever its folder holds: a key in its environment signs it in and no folder shows that", () => {
+    const groups = [group("pi", [account({ state: "login" }), account({ id: "work", state: "login" })], "work")];
+    expect(agentSignedOut(known(groups, { "pi:work": status(false) }), "pi")).toBe(false);
   });
 });
 
@@ -53,8 +67,9 @@ describe("the tooltip", () => {
     expect(signedOutTip("codex", "Codex")).toContain("codex login");
   });
 
-  it("names no command for an agent whose sign-in the app does not know", () => {
-    expect(signedOutTip("grok", "Grok")).toBe("Grok is not signed in on this computer. Sign in with its own command in a terminal. You can still start it.");
+  it("names Grok's own sign-in line, and none for an agent whose sign-in the app does not know", () => {
+    expect(signedOutTip("grok", "Grok")).toBe("Grok is not signed in on this computer. To sign in, run grok login in a terminal. You can still start it.");
+    expect(signedOutTip("opencode", "OpenCode")).toBe("OpenCode is not signed in on this computer. Sign in with its own command in a terminal. You can still start it.");
   });
 
   it("reads in every language", () => {
@@ -62,7 +77,7 @@ describe("the tooltip", () => {
       setLang(lang);
       expect(signedOutTip("claude", "Claude Code"), lang).toContain("claude auth login");
       expect(t("ss.notSignedIn"), lang).not.toBe("");
-      expect(signedOutTip("grok", "Grok"), lang).toContain("Grok");
+      expect(signedOutTip("grok", "Grok"), lang).toContain("grok login");
     }
   });
 });

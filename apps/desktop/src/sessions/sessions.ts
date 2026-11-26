@@ -1280,14 +1280,16 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
    * TERMINALS +: start `agent` (or the Shell, `SHELL`) in a terminal in `cwd` (none: the last folder used, else home)
    * at once, and open it. Never a chat: an agent that usually opens as manut's chat is opened as its own terminal.
    * A Shell runs `shell` (an id from the shell's list; none: Settings › Terminal › Default shell, else the login shell).
+   * `as`: the account the terminal runs as, instead of the one picked for new sessions (Settings › Accounts opens pi's
+   * terminal as the account it just added, so the person can type pi's own /login there; item 101d).
    */
-  const startTerminal = (agent: AgentId, cwd?: string, shell?: string): string | null => {
+  const startTerminal = (agent: AgentId, cwd?: string, shell?: string, as?: string): string | null => {
     const at = cwd || draftFolder(state.recent, state.home);
     if (!at) return null;
     const id = `s${++seq}`;
     const startedAt = Date.now();
     const asTerminal = !isShell(agent) && sessionMode(state.agents, { agent }) !== "terminal";
-    const account = isShell(agent) ? undefined : accountFor(accounts(), agent);
+    const account = isShell(agent) ? undefined : as ?? accountFor(accounts(), agent);
     const shellId = isShell(agent) ? shell || readTermSettings().defaultShell || undefined : undefined;
     const r: SessionRec = {
       id,
