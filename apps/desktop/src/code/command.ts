@@ -937,6 +937,11 @@ const RUNS_PROGRAM: Record<string, { opts: string[]; values: string }> = {
   more: { opts: ["-k", "--lesskey-file", "--lesskey-src", "--lesskey-content"], values: "bhjopPtTxyzO#" },
 };
 const CHANGES = new Set(["mkdir", "touch", "cp", "mv", "chmod", "install", "tar", "unzip", "zip", "gzip", "gunzip", "dos2unix", "truncate"]);
+/** The options of uniq and xxd that take a value: what is left are the files it reads and writes (a second one is the file
+ *  it writes). Each program has its own: taking `-c` for one that takes a value, as both once shared, swallowed uniq's
+ *  input and hid the file it writes. An option left out here only counts one more file, which asks more, never less. */
+const UNIQ_VALUES: ReadonlySet<string> = new Set(["-f", "-s", "-w"]);
+const XXD_VALUES: ReadonlySet<string> = new Set(["-c", "-g", "-l", "-n", "-o", "-s"]);
 /** Programs that write files the command does not name: a link (`ln`, `link`, `cp -s`) makes a later change to its path
  *  land where the link leads, and a patch names its own files inside. */
 const WRITES_UNNAMED = new Set(["ln", "link", "patch"]);
@@ -1184,6 +1189,11 @@ function pip(words: string[]): Verdict {
   return unknownProgram(words[0]);
 }
 
+/** An option's name as written, in lower case, without its dashes or its value: `--Cache-Dir=x` is `cache-dir`. */
+const optName = (w: string) => (w.startsWith("-") ? w.replace(/^-+/, "").split("=")[0].toLowerCase() : "");
+/** Whether any of `words` is one of the options `names` (by `optName`), with one dash or two, its value joined or not. */
+const hasNamed = (words: readonly string[], ...names: string[]) => words.some((w) => names.includes(optName(w)));
+
 /** A program that deploys, and the words of its own that do not. */
 function deployer(name: string, words: string[]): Verdict | null {
   const sub = words[1] ?? "";
@@ -1210,21 +1220,30 @@ function deployer(name: string, words: string[]): Verdict | null {
       if (["deploy", "up", "redeploy"].includes(sub)) return live();
       return ["status", "logs"].includes(sub) ? look() : unknownProgram(name);
     case "kubectl":
+      // its cache and a profile are files it writes (a profile lands in the folder it runs in)
+      if (hasNamed(words, "cache-dir", "profile-output") || words.some((w, i) => optName(w) === "profile" && (w.split("=")[1] ?? words[i + 1]) !== "none")) return v("change", say("kit.say.change"), "exact");
       if (["get", "describe", "logs", "explain", "version", "diff"].includes(sub)) return look();
       return ["apply", "create", "delete", "replace", "patch", "rollout", "scale", "set", "edit", "run"].includes(sub) ? live() : unknownProgram(name);
     case "terraform":
     case "tofu":
+      // a plan saved to a file, and configuration it writes for what it imports, are files it writes
+      if (sub === "plan" && hasNamed(words, "out", "generate-config-out", "state-out")) return v("change", say("kit.say.change"), "exact");
       if (["plan", "validate", "show", "output"].includes(sub)) return look();
       if (["apply", "destroy", "import"].includes(sub)) return live();
       return sub === "init" ? v("install", say("kit.say.update"), 2) : sub === "fmt" ? v("change", say("kit.say.format"), 2) : unknownProgram(name);
     case "pulumi":
+      if (sub === "preview" && hasNamed(words, "save-plan")) return v("change", say("kit.say.change"), "exact");
       return sub === "preview" ? look() : ["up", "destroy", "refresh"].includes(sub) ? live() : unknownProgram(name);
     case "helm":
+      // a post-renderer is a program it runs on what it renders; `--output-dir` writes what it renders into files
+      if (hasNamed(words, "post-renderer")) return unknownProgram(name);
+      if (hasNamed(words, "output-dir")) return v("change", say("kit.say.change"), "exact");
       return ["list", "status", "template", "lint"].includes(sub) ? look() : ["install", "upgrade", "uninstall", "rollback"].includes(sub) ? live() : unknownProgram(name);
     case "serverless":
     case "sls":
     case "cdk":
-      return ["deploy", "remove", "destroy"].includes(sub) ? live() : ["synth", "diff"].includes(sub) ? look() : unknownProgram(name);
+      // a synth (and a diff, which synths first) runs the project's app and writes what it makes into a folder
+      return ["deploy", "remove", "destroy"].includes(sub) ? live() : ["synth", "diff"].includes(sub) ? v("change", say("kit.say.build"), 2) : unknownProgram(name);
     case "eas":
     case "expo":
       return ["submit", "update", "publish"].includes(sub) ? live() : unknownProgram(name);
@@ -1383,12 +1402,15 @@ function classify(words: string[], where: Where): Verdict {
   // `-R` runs tree again in every folder with `-o`, writing a file in each
   if (name === "tree" && hasIn("LPIHT", words.slice(1), "-o", "-R")) return v("change", say("kit.say.change"), 1);
   // programs that read, but write their output into a file named after the input (uniq, xxd) or by an option
-  if ((name === "uniq" || name === "xxd") && operands(words, 1, new Set(["-f", "-s", "-w", "-c", "-g", "-l", "-o", "-n"])).length > 1) return v("change", say("kit.say.change"), 1);
+  if ((name === "uniq" || name === "xxd") && operands(words, 1, name === "uniq" ? UNIQ_VALUES : XXD_VALUES).length > 1) return v("change", say("kit.say.change"), 1);
+  // lsof's device cache, on a system built with one, is a file it builds and updates
+  if (name === "lsof" && words.some((w) => w.startsWith("-D"))) return v("change", say("kit.say.change"), 1);
   if ((name === "less" || name === "more") && hasIn("bhjkpPtTxyz#", words.slice(1), "-o", "-O", "--log-file", "--LOG-FILE")) return v("change", say("kit.say.change"), 1);
   if (name === "file" && hasIn("mfFeP", words.slice(1), "-C", "--compile")) return v("change", say("kit.say.change"), 1);
   if (name === "hostname" && operands(words, 1).length) return thisMac();
   if (name === "jq" || name === "yq") {
-    if (hasIn("poIs", words.slice(1), "-i", "--inplace")) return (v("change", say("kit.say.change"), 1));
+    // yq's `--split-exp` writes each result into a file its expression names
+    if (hasIn("poIs", words.slice(1), "-i", "--inplace") || (name === "yq" && hasIn("poI", words.slice(1), "-s", "--split-exp"))) return (v("change", say("kit.say.change"), 1));
     const ops = operands(words, 1, new Set(["--arg", "--argjson", "-f", "--from-file", "--indent"]));
     return (v("read", say("kit.say.read"), undefined, { text: new Set(ops.slice(0, 1)) }));
   }

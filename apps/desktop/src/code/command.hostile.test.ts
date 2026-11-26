@@ -401,6 +401,39 @@ describe("B3: what zsh expands that bash does not", () => {
   });
 });
 
+describe("B4: a reading program's output file", () => {
+  it("sees the file a reading program writes, by its own options", () => {
+    counted += holds([
+      ["echo \"x\" | uniq -c - src/x.test.js", "echo x | uniq -c", "read"],
+      ["uniq -c in.txt out.txt", "uniq -c in.txt", "read"],
+      ["uniq -cd a.txt b.txt", "uniq -cd a.txt", "read"],
+      ["uniq -D a.txt b.txt", "uniq -D a.txt", "read"],
+      ["uniq --count a.txt b.txt", "uniq --count a.txt", "read"],
+      ["uniq -i -u a.txt b.txt", "uniq -i -u a.txt", "read"],
+      ["uniq -f 1 -c a.txt b.txt", "uniq -f 1 a.txt", "read"],
+      ["uniq --skip-chars=2 a.txt b.txt", "uniq -s 2 a.txt", "read"],
+      ["xxd -i a.bin out.h", "xxd -i a.bin", "read"],
+      ["xxd -u a.bin out.hex", "xxd -u a.bin", "read"],
+      ["xxd -cols 8 a.bin out.hex", "xxd -c 8 a.bin", "read"],
+      ["yq -s '\"out_\" + $index' a.yaml", "yq '.a' a.yaml", "read"],
+      ["yq --split-exp .name a.yaml", "yq -o json a.yaml", "read"],
+      ["terraform plan -out=tf.plan", "terraform plan", "read"],
+      ["terraform plan -out tf.plan", "terraform plan -refresh-only", "read"],
+      ["terraform plan -generate-config-out=gen.tf", "terraform plan -var-file=dev.tfvars", "read"],
+      ["helm template web ./chart --output-dir out", "helm template web ./chart", "read"],
+      ["helm template web ./chart --post-renderer ./x", "helm lint ./chart", "read"],
+      ["pulumi preview --save-plan=plan.json", "pulumi preview", "read"],
+      ["kubectl get pods --cache-dir=kc", "kubectl get pods", "read"],
+      ["kubectl get pods --profile=cpu", "kubectl get pods -n web", "read"],
+      ["kubectl get pods --profile-output=x.pprof", "kubectl get pods --profile=none", "read"],
+      ["lsof -Db", "lsof -i :3000", "read"],
+      ["docker compose config --output=out.yml", "docker compose config --services", "read"],
+    ]);
+    // a synth runs the project's app and writes what it makes: no read
+    for (const line of ["cdk synth", "cdk diff"]) expect([line, read(line).action]).toEqual([line, "change"]);
+  });
+});
+
 describe("the table", () => {
   it("holds at least 120 hostile lines, each beside the plain line it imitates", () => {
     expect(counted).toBeGreaterThanOrEqual(120);

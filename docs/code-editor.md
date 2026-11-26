@@ -241,6 +241,13 @@ program or reaches the network. What it does not understand is `unknown`, and as
   than bash: `$=X` splits a variable into words, `$~X` reads it as a pattern, and `$^X`, `$+X`, `${(z)X}` and `${(e)X}`
   do more. An unquoted `$` followed by anything but a blank or the line's end is not read in advance, so a variable set
   earlier in the line never reaches a later word unseen. `=(…)` and `<(…)` already asked.
+- **A reading program's own output file.** uniq and xxd each have their own options that take a value, so a second file
+  (the one they write) is always seen; yq's `--split-exp`, terraform's `plan -out` and `-generate-config-out`, helm's
+  `--output-dir`, pulumi's `preview --save-plan`, kubectl's `--cache-dir` and `--profile`, lsof's device cache and
+  `docker compose config -o` are changes, and helm's `--post-renderer` asks. `cdk synth` and `cdk diff` run the project's
+  app and write `cdk.out`, so they are a build, not a read. Each program the reader calls a read was checked against its
+  own manual for an option or a file it writes; diff, cmp, comm, cut, tr, nl, od, hexdump, strings, column, fold, rev, wc,
+  stat, du, df, ls, file (but `-C`), head, tail and cat have none.
 
 `command.hostile.test.ts` holds 170 such lines, each beside the plain line it imitates, which reads as it did.
 
