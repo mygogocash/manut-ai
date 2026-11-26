@@ -1,7 +1,7 @@
 import type { acc as en } from "../en/acc";
 
 export const acc: Record<keyof typeof en, string> = {
-  "acc.headerLine": "Manut AI が Claude Code、Codex、pi を代わりに実行するときに使うログインです。チームは{bots}で設定します。",
+  "acc.headerLine": "Manut AI が Claude Code、Codex、Grok、pi を代わりに実行するときに使うログインです。チームは{bots}で設定します。",
   "acc.autoSwitch": "自動切り替え",
   "acc.autoSwitchOf": "{cli} の自動切り替え",
   "acc.autoSwitchLine": "このアカウントが上限に達すると、新しいターンは次のアカウントを使います。",
@@ -29,6 +29,11 @@ export const acc: Record<keyof typeof en, string> = {
   "acc.removeConfirm": "Manut AI から {name} を削除しますか？このコンピュータ上のサインイン情報も削除されます。",
   "acc.removeBtn": "削除",
   "acc.addSoonTip": "{cli} のアカウントはまだ追加できません。Manut AI はこのコンピューターの {cli} のログインを使います。",
+  "acc.piTitle": "{name} として pi にサインイン",
+  "acc.piLine": "このアカウントで pi を開き、/login と入力してプロバイダーを選んでから、ここに戻ってください。",
+  "acc.piOpen": "pi を開く",
+  "acc.piDone": "完了",
+  "acc.addConfirm": "追加",
   "acc.add": "+ アカウントを追加",
   "acc.soon": "近日公開",
   "acc.namePh": "名前（任意。例: 仕事）",

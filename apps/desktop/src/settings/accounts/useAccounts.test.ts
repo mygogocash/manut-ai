@@ -20,7 +20,14 @@ vi.mock("react", async (importOriginal) => ({
   ...(await importOriginal<typeof import("react")>()),
   useSyncExternalStore: (subscribe: (f: () => void) => () => void, get: () => unknown) => ((react.subscribe = subscribe), get()),
 }));
-vi.mock("./native", () => ({ accountHost: () => ({ clis: async () => ({ codex: true }), status: async () => null, version: async () => null }) }));
+const asked = vi.hoisted(() => ({ status: [] as string[], version: [] as string[] }));
+vi.mock("./native", () => ({
+  accountHost: () => ({
+    clis: async () => ({ codex: true, grok: true, pi: true }),
+    status: async (cli: string, id: string) => (asked.status.push(`${cli}:${id}`), null),
+    version: async (cli: string) => (asked.version.push(cli), null),
+  }),
+}));
 
 const acc = (id: string): Account => ({
   id,
@@ -91,5 +98,18 @@ describe("the shared copy's readers", () => {
     const before = told.length;
     await reloadAccounts();
     expect(told).toHaveLength(before);
+  });
+});
+
+describe("the sign-in read for each CLI's accounts (item 101d)", () => {
+  it("asks for every Grok and pi account's own sign-in, as for Claude Code and Codex, and for no CLI that has none", async () => {
+    const { reloadAccounts } = await import("./useAccounts");
+    asked.status.length = 0;
+    asked.version.length = 0;
+    const row = (id: string): Account => ({ id, label: "", email: "", state: "login" });
+    groups = (["grok", "pi", "omp", "gemini"] as const).map((cli) => ({ cli, installed: true, active: "default", accounts: [row("default"), row("work")] }));
+    await reloadAccounts();
+    expect(asked.status.sort()).toEqual(["grok:default", "grok:work", "pi:default", "pi:work"]);
+    expect(asked.version.sort()).toEqual(["grok", "pi"]);
   });
 });

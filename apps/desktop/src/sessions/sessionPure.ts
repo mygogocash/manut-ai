@@ -4,7 +4,7 @@ import type { AccountCli, AccountGroup } from "../lib/protocol";
 import { type SavedSession } from "../app/resume";
 
 /** The Accounts CLI a session of `agent` signs in as (mirrors `session_cli` in src-tauri/src/accounts.rs). */
-export const ACCOUNT_CLI: Partial<Record<AgentId, AccountCli>> = { claude: "claude", codex: "codex", grok: "grok" };
+export const ACCOUNT_CLI: Partial<Record<AgentId, AccountCli>> = { claude: "claude", codex: "codex", grok: "grok", pi: "pi" };
 
 /** The account a new session of `agent` runs as, from the Accounts list when it is loaded (none = unknown or the
  *  agent has no accounts; the shell then uses the one picked for new sessions). */

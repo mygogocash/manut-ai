@@ -45,7 +45,7 @@ keeps them:
 | Codex, Claude Code, Cursor, Grok, OpenCode, Antigravity, Muse Code, Pi | part: all but Muse Code. Cursor and Antigravity run as chats over ACP (item 101a): replies, steps, asks and Cursor's questions, each held to the modes in which it asks; a Cursor whose own settings say Run Everything does not start. Grok runs as a chat over its ACP server too, and still as its own terminal (item 101b): held to its asking mode, never sent its `/always-approve`, and not started while its own settings (or Claude's `defaultMode`, which it reads) skip asks, which this Mac's do today; not yet run signed in. Muse Code (Meta's `muse` CLI, whose server speaks its own MSP, not ACP) is not installed here, so nothing was built for it: needs the owner | 101 |
 | The ACP registry, and any ACP agent by hand | part: any ACP agent by hand (Settings, Providers); seven fixed rows, no registry | 101 |
 | Reuses installed agents and their sign-ins | has | |
-| Several accounts of one provider | part: Claude Code and Codex; not Grok or pi; off on Windows | 101 |
+| Several accounts of one provider | part: Claude Code, Codex, Grok and pi (item 101d); Grok signs in with `grok login`, pi through its own /login in a pi terminal opened as the account; Grok and pi show no usage or limit; not oh-my-pi or Gemini CLI; off on Windows | 101 |
 | Pick the model that writes titles, commit messages and PR words | part: chat titles and PR words by Claude Code only, off by default; no commit messages | 96 |
 
 ## Orchestration

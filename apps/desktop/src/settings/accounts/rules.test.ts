@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import type { Account, AccountGroup, UsageProvider } from "../../lib/protocol";
 import {
   accountForNewSessions,
+  CLI_NAME,
+  SIGN_IN,
   accountName,
   autoSwitchOn,
   isCpa,
@@ -324,5 +326,36 @@ describe("pruneSeen (told pairs kept until their reset passes)", () => {
     const live = Array.from({ length: 150 }, (_, i) => `codex:id${i}:${NOW + 600}`);
     const gone = [`codex:old:${NOW - 1}`, `codex:older:${NOW}`];
     expect(pruneSeen([...gone, ...live], NOW)).toEqual(live);
+  });
+});
+
+describe("Grok and pi accounts (item 101d)", () => {
+  it("adds a Grok account by running its own sign-in, and a pi account through pi's own /login in a terminal", () => {
+    expect(SIGN_IN.claude).toBe("run");
+    expect(SIGN_IN.codex).toBe("run");
+    expect(SIGN_IN.grok).toBe("run");
+    expect(SIGN_IN.pi).toBe("session");
+    expect(CLI_NAME.grok).toBe("Grok");
+    // oh-my-pi and Gemini CLI still add none
+    expect(SIGN_IN.omp).toBeNull();
+    expect(SIGN_IN.gemini).toBeNull();
+  });
+
+  it("reads a Grok or pi account from its folder's own sign-in, with no usage line, and names an added one", () => {
+    const signedIn = { logged_in: true, email: null, plan: null, method: null };
+    const grok = mergeRow(acc("work", "login", { label: "Work" }), signedIn);
+    expect(grok.signedIn).toBe(true);
+    expect(grok.state).toBe("ready");
+    expect(usageLines(grok.usage, NOW)).toEqual([]);
+    expect(rowTitle(grok, 1)).toBe("Work");
+    expect(rowSub(grok)).toBe("Added in Manut AI");
+    const pi = mergeRow(acc("play", "login"), { ...signedIn, logged_in: false });
+    expect(pi.signedIn).toBe(false);
+    expect(pill(pi, false, NOW, 2)).toBe("Not signed in");
+  });
+
+  it("never switches off a Grok or pi account for a limit, since neither reports one", () => {
+    const g = [acc("default", "active"), acc("work", "ready")];
+    expect(nextAccount(g, {}, "default")).toBeNull();
   });
 });

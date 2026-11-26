@@ -1,7 +1,7 @@
 import type { acc as en } from "../en/acc";
 
 export const acc: Record<keyof typeof en, string> = {
-  "acc.headerLine": "Manut AI가 Claude Code, Codex, pi를 대신 실행할 때 쓰는 로그인이에요. 팀은 {bots}에서 설정해요.",
+  "acc.headerLine": "Manut AI가 Claude Code, Codex, Grok, pi를 대신 실행할 때 쓰는 로그인이에요. 팀은 {bots}에서 설정해요.",
   "acc.autoSwitch": "자동 전환",
   "acc.autoSwitchOf": "{cli} 자동 전환",
   "acc.autoSwitchLine": "이 계정이 한도에 도달하면 새 요청은 다음 계정을 써요.",
@@ -29,6 +29,11 @@ export const acc: Record<keyof typeof en, string> = {
   "acc.removeConfirm": "Manut AI에서 {name} 계정을 삭제할까요? 이 컴퓨터의 로그인 정보도 함께 지워져요.",
   "acc.removeBtn": "삭제",
   "acc.addSoonTip": "아직 {cli} 계정을 하나 더 추가할 수는 없어요. Manut AI는 이 컴퓨터의 {cli} 로그인을 써요.",
+  "acc.piTitle": "{name} 계정으로 pi에 로그인",
+  "acc.piLine": "이 계정으로 pi를 열고 /login을 입력해 제공자를 고른 다음, 여기로 돌아와 주세요.",
+  "acc.piOpen": "pi 열기",
+  "acc.piDone": "완료",
+  "acc.addConfirm": "추가",
   "acc.add": "+ 계정 추가",
   "acc.soon": "준비 중",
   "acc.namePh": "이름 (선택, 예: 회사)",
