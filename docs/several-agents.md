@@ -420,6 +420,15 @@ the screens are built on tested ground.
   from memory (R7), ported with GoSpark's `BuddyBatchingTests`, `BuddyHeadCapTests` and `BuddyReportTests` as tables.
   Safety test: the budget clock does not move while an ask waits, and a round never hands over while any helper's ask
   waits.
+  **Built 27 Nov 2026** (`src/jobs/rules.ts` and `rules.test.ts`; `docs/decisions/102d-helper-rules.md`). Plain data and pure
+  functions with the time passed in. What changed from the design or was settled on the way: Settings' number only lowers
+  the memory's (R7's "may lower it"), and memory the shell could not read counts as 8 GB; GoSpark's 60-second
+  `answeredGrace` is kept, so a time stop (not the step stop) waits a minute after the person's last answer; a report for
+  a round already handed over, or from a helper that never started in it, is not kept, and one sent again before the
+  hand-over replaces the earlier; the breaker drops the waiting helpers itself and counts them on their round; the budget
+  answers actions (nudge, wrap up, stop, the report's stop), and the notes' words are 102h's, through the dictionaries;
+  GoSpark's `failureKindOf` fragments are ported for an agent's own failure words, while the runtime marks the troubles
+  the app knows of itself. Not ported: GoSpark's unsealed rounds and company waves, and the message's words (102j).
 - **102e. The helper blocks and the Start helpers card.** The block parser (GoSpark's `delegationOutcome` and
   `streamingOutcome`, with the fork's top-level fence walk), hidden while streaming; the card with every brief whole,
   settled once through approval-core; the Helpers switch in a lane's box; not offered in a workflow's lane, Buddy's chat or
