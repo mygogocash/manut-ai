@@ -325,15 +325,29 @@ pub struct Status {
 
 // ---- parsing ------------------------------------------------------------------------------------
 
-/// manut's one masker (src/lib/secrets.json: the bridge and the page use the same patterns).
+/// manut's one masker (src/lib/secrets.json: the page uses the same patterns).
 const SECRETS: &str = include_str!("../../src/lib/secrets.json");
 
 struct Secrets {
+    /// replaced whole, first: private key blocks, provider-prefixed keys, JSON web tokens
+    whole: Vec<Regex>,
     /// a fixed-length family broken over lines: (pattern, body length)
     split: Vec<(Regex, usize)>,
     tokens: Regex,
+    /// three groups each: the first and third kept, the second masked
+    kept: Vec<Regex>,
     assigned: Regex,
     mask: String,
+}
+
+/// A pattern of secrets.json as the page's JavaScript reads it: `{names}` filled in, its flags (`i`, `m`), and `\b` an ASCII
+/// word boundary, so a token right after Thai text, which JavaScript sees as no word, is masked here too.
+fn pattern(p: &str, flags: &str, names: &str) -> Regex {
+    RegexBuilder::new(&p.replace("{names}", names).replace(r"\b", r"(?-u:\b)"))
+        .case_insensitive(flags.contains('i'))
+        .multi_line(flags.contains('m'))
+        .build()
+        .expect("secrets.json pattern")
 }
 
 fn secrets() -> &'static Secrets {
@@ -341,12 +355,23 @@ fn secrets() -> &'static Secrets {
     R.get_or_init(|| {
         let v: Value = serde_json::from_str(SECRETS).expect("secrets.json");
         let get = |k: &str| v[k].as_str().expect("secrets.json key").to_string();
+        let names = get("names");
+        let list = |k: &str| -> Vec<Regex> {
+            v[k].as_array().expect("secrets.json list").iter()
+                .map(|e| pattern(e[0].as_str().expect("pattern"), e[1].as_str().expect("flags"), &names))
+                .collect()
+        };
         let split = v["split"].as_array().expect("secrets.json split").iter()
-            .map(|e| (Regex::new(e[0].as_str().expect("split pattern")).expect("split pattern"), e[1].as_u64().expect("split length") as usize))
+            .map(|e| (pattern(e[0].as_str().expect("split pattern"), "", &names), e[1].as_u64().expect("split length") as usize))
             .collect();
-        let tokens = Regex::new(&get("tokens")).expect("secrets.json tokens");
-        let assigned = RegexBuilder::new(&get("assigned")).case_insensitive(true).build().expect("secrets.json assigned");
-        Secrets { split, tokens, assigned, mask: get("mask") }
+        Secrets {
+            whole: list("whole"),
+            split,
+            tokens: pattern(&get("tokens"), "", &names),
+            kept: list("kept"),
+            assigned: pattern(&get("assigned"), "i", &names),
+            mask: get("mask"),
+        }
     })
 }
 
@@ -368,14 +393,21 @@ fn split_token(c: &regex::Captures, n: usize, mask: &str) -> String {
     c[0].to_string()
 }
 
-/// `t` with every token-like string replaced by `••••` (an assignment keeps its name: `token=••••`).
+/// `t` with every token-like string replaced by `••••` (src/lib/secrets.ts `maskSecrets`, step for step). A secret with a name
+/// keeps its name and what frames it (`token=••••`, `"password": "••••"`, `Authorization: Bearer ••••`).
 pub fn mask_secrets(t: &str) -> String {
     let s = secrets();
     let mut t = t.to_string();
+    for rx in &s.whole {
+        t = rx.replace_all(&t, regex::NoExpand(&s.mask)).into_owned();
+    }
     for (rx, n) in &s.split {
         t = rx.replace_all(&t, |c: &regex::Captures| split_token(c, *n, &s.mask)).into_owned();
     }
-    let t = s.tokens.replace_all(&t, s.mask.as_str());
+    t = s.tokens.replace_all(&t, regex::NoExpand(&s.mask)).into_owned();
+    for rx in &s.kept {
+        t = rx.replace_all(&t, |c: &regex::Captures| format!("{}{}{}", &c[1], s.mask, &c[3])).into_owned();
+    }
     s.assigned.replace_all(&t, |c: &regex::Captures| format!("{}={}", &c[1], s.mask)).into_owned()
 }
 
@@ -1322,7 +1354,7 @@ mod tests {
         // src/lib/secrets.cases.json: the same table the page (secrets.test.ts) and the bridge (OneMasker) run
         let v: Value = serde_json::from_str(include_str!("../../src/lib/secrets.cases.json")).unwrap();
         let cases = v["cases"].as_array().unwrap();
-        assert!(cases.len() > 10);
+        assert!(cases.len() > 120);
         for c in cases {
             assert_eq!(mask_secrets(c[0].as_str().unwrap()), c[1].as_str().unwrap(), "{c}");
         }

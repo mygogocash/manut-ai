@@ -17,6 +17,11 @@
 //! every folder below it is made new, every file is made new with `create_new`), never outside the agent's skills folder (every
 //! path is plain and relative, and the skill's name is one folder), never over an existing skill (refused `exists:<name>`, at
 //! the ask and again before writing), sets no executable bit (files are made `0644`), and runs nothing.
+//!
+//! What a skill holds that an agent would act on by itself, without its permission prompt (item 113: Claude Code's
+//! `allowed-tools`, `hooks`, a command run as the skill loads, any setting not on the harmless list; Codex's
+//! `agents/openai.yaml` beyond its look), is refused at the ask and again before writing (`acts_alone`), naming the file and
+//! the setting. Nothing is stripped so that the rest can be installed.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -139,6 +144,213 @@ pub fn bundle_refusal(skills: &[Skill]) -> Option<&'static str> {
         }
     }
     None
+}
+
+// ---- what a coding agent would act on by itself (item 113) ----------------------------------------------------------------
+//
+// A skill is instructions, and every step an agent takes from them asks as usual. Some of what a skill's files can hold is acted
+// on by the agent itself, before or without that prompt, so Kit's dial never sees it: in Claude Code (its skills documentation,
+// read 26 Nov 2026) `allowed-tools`, `hooks`, a command run while the skill loads (`!` then a backtick, or a fence opened with
+// "```!"), and settings that start a subagent or change the model or effort; in Codex, `agents/openai.yaml`'s `dependencies`,
+// which declare tools such as an MCP server at an address. None of it is installed. The rule is an allow-list, the same as
+// src/runtime/skillBundle.ts `fileActsAlone`, and src/runtime/skillActs.cases.json is the table both run.
+
+/// The settings at the top of a skill's markdown that only describe it or narrow when it is used (skillBundle.ts HARMLESS_FIELDS).
+pub const HARMLESS_FIELDS: &[&str] =
+    &["name", "description", "when_to_use", "argument-hint", "disable-model-invocation", "user-invocable", "license", "compatibility", "metadata"];
+/// The settings of a Codex `agents/openai.yaml` that only change how the skill is shown.
+pub const HARMLESS_AGENT_FIELDS: &[&str] = &["interface"];
+
+/// Why a file of a skill would be acted on by an agent by itself: `field` (a setting not on the harmless list, named in
+/// `field`), `command` (a command run when the skill loads) or `unreadable` (a top that cannot be read as plain settings).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActsAlone {
+    pub why: &'static str,
+    pub field: String,
+}
+
+impl ActsAlone {
+    fn why(why: &'static str) -> Option<ActsAlone> {
+        Some(ActsAlone { why, field: String::new() })
+    }
+}
+
+/// Blank: Rust's whitespace and the BOM, the same set as JavaScript's `\s` and NEL.
+fn is_blank(c: char) -> bool {
+    c.is_whitespace() || c == '\u{feff}'
+}
+
+/// Space within a line: blank, but no line break.
+fn is_space(c: char) -> bool {
+    matches!(c, '\t' | ' ' | '\u{a0}' | '\u{1680}' | '\u{2000}'..='\u{200a}' | '\u{202f}' | '\u{205f}' | '\u{3000}' | '\u{feff}')
+}
+
+/// `text`'s lines, split at every break a YAML or JavaScript reader may take as one (`\r\n`, `\n`, `\r`, NEL, U+2028, U+2029).
+fn lines(text: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut start = 0;
+    let mut it = text.char_indices().peekable();
+    while let Some((i, c)) = it.next() {
+        if matches!(c, '\n' | '\r' | '\u{85}' | '\u{2028}' | '\u{2029}') {
+            out.push(&text[start..i]);
+            let mut end = i + c.len_utf8();
+            if c == '\r' && it.peek().map(|p| p.1) == Some('\n') {
+                it.next();
+                end += 1;
+            }
+            start = end;
+        }
+    }
+    out.push(&text[start..]);
+    out
+}
+
+/// One plain setting's name and what follows on its line: a letter, then up to 63 letters, digits, `_` or `-`, then a colon and
+/// a space or the line's end.
+fn setting_name(line: &str) -> Option<(&str, &str)> {
+    let b = line.as_bytes();
+    if !b.first()?.is_ascii_alphabetic() {
+        return None;
+    }
+    let n = b.iter().take_while(|c| c.is_ascii_alphanumeric() || matches!(c, b'_' | b'-')).count();
+    if n > 64 {
+        return None;
+    }
+    let rest = line[n..].trim_start_matches([' ', '\t']);
+    let after = rest.strip_prefix(':')?;
+    (after.is_empty() || after.starts_with([' ', '\t'])).then_some((&line[..n], after))
+}
+
+/// Whether a setting with `value` on its line takes the indented lines under it (skillBundle.ts OPENS_BLOCK): nothing after the
+/// colon, or only a comment, or a block mark (`|`, `>`, with its keep, strip or indent signs). Only under one of these may
+/// indented lines follow: a one-line value with an indented line under it is read differently by a strict YAML reader and a
+/// forgiving one, so it is not read at all.
+fn opens_block(value: &str) -> bool {
+    let v = value.trim_matches(is_blank);
+    let mut c = v.chars().peekable();
+    if matches!(c.peek(), Some('|' | '>')) {
+        c.next();
+        match c.peek().copied() {
+            Some('+' | '-') => {
+                c.next();
+                if c.peek().is_some_and(|d| ('1'..='9').contains(d)) {
+                    c.next();
+                }
+            }
+            Some(d) if ('1'..='9').contains(&d) => {
+                c.next();
+                if matches!(c.peek(), Some('+' | '-')) {
+                    c.next();
+                }
+            }
+            _ => {}
+        }
+    }
+    let rest: String = c.collect();
+    let rest = rest.trim_start_matches([' ', '\t']);
+    rest.is_empty() || rest.starts_with('#')
+}
+
+/// The settings of `lines` from `from`, each held to `allowed`, until a line that is exactly `---` (when `fenced`) or the end.
+fn settings_refusal(lines: &[&str], from: usize, fenced: bool, allowed: &[&str]) -> Option<ActsAlone> {
+    // whether the setting above takes indented lines, and how far its first one was indented: a later line indented less
+    // would leave its block, which no setting does by being indented
+    let mut open = false;
+    let mut indent: Option<usize> = None;
+    for line in lines.iter().skip(from) {
+        if fenced && *line == "---" {
+            return None;
+        }
+        if line.chars().all(is_blank) {
+            continue;
+        }
+        if line.starts_with("---") || line.starts_with("...") {
+            return ActsAlone::why("unreadable");
+        }
+        if line.starts_with(' ') {
+            let n = line.bytes().take_while(|b| *b == b' ').count();
+            if !open || line[n..].starts_with('\t') || indent.is_some_and(|i| n < i) {
+                return ActsAlone::why("unreadable");
+            }
+            indent.get_or_insert(n);
+            continue;
+        }
+        if line.starts_with('#') {
+            continue;
+        }
+        let Some((name, value)) = setting_name(line) else { return ActsAlone::why("unreadable") };
+        if !allowed.contains(&name) {
+            return Some(ActsAlone { why: "field", field: name.to_string() });
+        }
+        open = opens_block(value);
+        indent = None;
+    }
+    if fenced { ActsAlone::why("unreadable") } else { None }
+}
+
+/// `!` then a backtick with only space between, or a fence of three or more backticks or tildes whose word starts with `!`,
+/// anywhere in the text (Claude Code runs the first only at a line's start or after a space: wider only refuses more).
+fn runs_on_load(text: &str) -> bool {
+    let c: Vec<char> = text.chars().collect();
+    (0..c.len()).filter(|&i| c[i] == '!').any(|i| {
+        let after = c[i + 1..].iter().find(|x| !is_space(**x));
+        let mut j = i;
+        while j > 0 && is_space(c[j - 1]) {
+            j -= 1;
+        }
+        let fence = j > 0 && matches!(c[j - 1], '`' | '~') && c[..j].iter().rev().take_while(|x| **x == c[j - 1]).count() >= 3;
+        after == Some(&'`') || fence
+    })
+}
+
+/// What in file `path` of a skill an agent would act on by itself, or None (skillBundle.ts `fileActsAlone`): the settings at the
+/// top of any markdown file and any command run as it loads, and the settings of a Codex `agents/*.yaml`.
+pub fn file_acts_alone(path: &str, text: &str) -> Option<ActsAlone> {
+    let lower = path.to_ascii_lowercase();
+    let markdown = [".md", ".markdown", ".mdx"].iter().any(|e| lower.ends_with(e));
+    let steps: Vec<&str> = lower.split('/').collect();
+    let name = steps[steps.len() - 1];
+    let agent_yaml = steps.len() >= 2
+        && steps[steps.len() - 2] == "agents"
+        && name.strip_suffix(".yaml").or_else(|| name.strip_suffix(".yml")).is_some_and(|stem| !stem.is_empty());
+    if !markdown && !agent_yaml {
+        return None;
+    }
+    let all = lines(text.trim_start_matches('\u{feff}'));
+    let first = all.iter().position(|l| !l.chars().all(is_blank));
+    if agent_yaml {
+        let first = first?;
+        let top = all[first];
+        if top.starts_with("---") && top != "---" {
+            return ActsAlone::why("unreadable");
+        }
+        return settings_refusal(&all, if top == "---" { first + 1 } else { first }, false, HARMLESS_AGENT_FIELDS);
+    }
+    if let Some(first) = first {
+        let top = all[first].trim_start_matches(is_blank);
+        if top.starts_with("---") {
+            if top != "---" {
+                return ActsAlone::why("unreadable");
+            }
+            if let Some(refused) = settings_refusal(&all, first + 1, true, HARMLESS_FIELDS) {
+                return Some(refused);
+            }
+        }
+    }
+    if runs_on_load(text) { ActsAlone::why("command") } else { None }
+}
+
+/// The first file of the first skill of `skills` an agent would act on by itself, as the shell refuses it:
+/// `acts_alone:<why>:<skill>/<path>`, with `:<field>` for a setting. Neither a name nor a path can hold a colon.
+pub fn acts_alone_refusal(skills: &[Skill]) -> Option<String> {
+    skills.iter().find_map(|s| {
+        s.files.iter().find_map(|f| {
+            file_acts_alone(&f.path, &f.text).map(|a| {
+                let field = if a.field.is_empty() { String::new() } else { format!(":{}", a.field) };
+                format!("acts_alone:{}:{}/{}{field}", a.why, s.name, f.path)
+            })
+        })
+    })
 }
 
 // ---- reading the person's own skill ---------------------------------------------------------------------------------------
@@ -452,8 +664,8 @@ impl Installs {
 
     /// Asks to install the skills `names` of fetched bundle `read` for `agent` (`claude` or `codex`) into `root`, its skills
     /// folder (agent_config.rs `install_root`). Writes nothing. Err `not_found` or `expired` for the read, `no_skills`,
-    /// `bad_bundle:<reason>`, `link_root` when the skills folder is a link, `not_a_folder`, or `exists:<name>` for a skill the
-    /// agent already has.
+    /// `bad_bundle:<reason>`, `acts_alone:<why>:<skill>/<path>[:<field>]` for a skill an agent would act on by itself,
+    /// `link_root` when the skills folder is a link, `not_a_folder`, or `exists:<name>` for a skill the agent already has.
     pub fn ask(&self, home: &Path, agent: &str, root: &Path, read: &str, names: &[String]) -> Result<InstallAsk, String> {
         let bundle = {
             let m = self.reads.lock().unwrap_or_else(|e| e.into_inner());
@@ -469,6 +681,10 @@ impl Installs {
         }
         if let Some(why) = bundle_refusal(&skills) {
             return Err(format!("bad_bundle:{why}"));
+        }
+        // Never stripped and installed without it: the skill is refused whole, naming its file and setting.
+        if let Some(why) = acts_alone_refusal(&skills) {
+            return Err(why);
         }
         root_ok(root)?;
         if let Some(s) = skills.iter().find(|s| taken(&root.join(&s.name))) {
@@ -584,6 +800,9 @@ fn write_files(dir: &Path, skill: &Skill) -> std::io::Result<()> {
 fn install(_settled: Settled, plan: &Plan) -> Result<InstallDone, String> {
     if let Some(why) = bundle_refusal(&plan.skills) {
         return Err(format!("bad_bundle:{why}"));
+    }
+    if let Some(why) = acts_alone_refusal(&plan.skills) {
+        return Err(why);
     }
     root_ok(&plan.root)?;
     if let Some(s) = plan.skills.iter().find(|s| taken(&plan.root.join(&s.name))) {
@@ -880,6 +1099,62 @@ mod tests {
         assert_eq!(installs.settle("never-made", true), Err("not_found".into()));
         let _ = fs::remove_dir_all(home);
         let _ = fs::remove_dir_all(elsewhere);
+    }
+
+    /// A one-file row of src/runtime/skillActs.cases.json as a skill named `x`: the file, beside a plain SKILL.md when it is not
+    /// SKILL.md itself.
+    fn case_skill(path: &str, text: &str) -> Skill {
+        if path == SKILL_FILE {
+            skill("x", vec![file(path, text)])
+        } else {
+            skill("x", vec![file(SKILL_FILE, "Plain instructions."), file(path, text)])
+        }
+    }
+
+    #[test]
+    fn an_install_refuses_a_skill_the_agent_would_act_on_by_itself_naming_the_file_and_the_field() {
+        // src/runtime/skillActs.cases.json: the same table the page (skillBundle.test.ts) runs
+        let v: serde_json::Value = serde_json::from_str(include_str!("../../src/runtime/skillActs.cases.json")).unwrap();
+        let cases = v["cases"].as_array().unwrap();
+        assert!(cases.len() > 60);
+        let home = temp("acts");
+        let root = home.join(".claude/skills");
+        let installs = Installs::default();
+        for c in cases {
+            let [path, text, why, field] = [0, 1, 2, 3].map(|i| c[i].as_str().unwrap());
+            let read = installs.keep_read(Bundle { title: "t".into(), skills: vec![case_skill(path, text)] });
+            let asked = installs.ask(&home, "claude", &root, &read, &["x".into()]);
+            if why.is_empty() {
+                assert!(asked.is_ok(), "{c} {asked:?}");
+                installs.withdraw(&asked.unwrap().id);
+            } else {
+                let want = if why == "field" { format!("acts_alone:field:x/{path}:{field}") } else { format!("acts_alone:{why}:x/{path}") };
+                assert_eq!(asked.map(|a| a.id), Err(want), "{c}");
+            }
+        }
+        // nothing was written for any of them
+        assert!(!root.exists());
+        // the reader itself answers each row as the page's twin does
+        for c in cases {
+            let [path, text, why, field] = [0, 1, 2, 3].map(|i| c[i].as_str().unwrap());
+            let got = file_acts_alone(path, text).map(|a| (a.why.to_string(), a.field));
+            assert_eq!(got, (!why.is_empty()).then(|| (why.to_string(), field.to_string())), "{c}");
+        }
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn a_settled_yes_checks_again_before_writing_and_writes_nothing_for_a_skill_that_acts_alone() {
+        let home = temp("acts-again");
+        let root = home.join(".claude/skills");
+        let plan = Plan {
+            root: root.clone(),
+            skills: vec![skill("plain", vec![file("SKILL.md", "Count.")]), case_skill("SKILL.md", "---\nhooks:\n  Stop: []\n---\n")],
+        };
+        assert_eq!(install(Settled(()), &plan), Err("acts_alone:field:x/SKILL.md:hooks".into()));
+        // the check comes before anything is written, so not even the plain skill before it is
+        assert!(!root.exists());
+        let _ = fs::remove_dir_all(home);
     }
 
     #[test]
