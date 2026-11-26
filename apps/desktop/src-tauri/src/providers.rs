@@ -426,7 +426,8 @@ pub const ARG_RULES: [ArgRules; 8] = [
     },
     ArgRules {
         id: "grok",
-        skips: &["always-approve", "allow", "allowedTools", "allowed-tools", "permission-mode", "sandbox", "add-dir", "agents"],
+        // `yolo`: always-approve's other name ("Alias: `--yolo`", Grok Build 1.0.93's `agent-mode.md`, item 101b)
+        skips: &["always-approve", "yolo", "allow", "allowedTools", "allowed-tools", "permission-mode", "sandbox", "add-dir", "agents"],
         own: &[
             "c",
             "continue",
@@ -554,16 +555,33 @@ pub const VERSION_AGENTS: [&str; 7] = ["claude", "codex", "opencode", "gemini", 
 /// Code and Codex, whose sign-in the Accounts list reads for the account new sessions use: Cursor's `status --format json`
 /// (`cursor-agent help status` on this Mac, 2026.11.22) and Antigravity's `models`, which lists models only when it is
 /// signed in (it has no status command; `agy --help` on this Mac, 1.5.18, and GoSpark's Antigravity adapter, which reads
-/// its sign-in the same way). Neither spends a message.
-pub const SIGNIN_AGENTS: [&str; 2] = ["cursor-agent", "agy"];
+/// its sign-in the same way). Grok's `models` ("List available models and exit", Grok Build 1.0.93) starts with a line
+/// that says how it is signed in (item 101b). None spends a message.
+pub const SIGNIN_AGENTS: [&str; 3] = ["cursor-agent", "agy", "grok"];
 
 /// The fixed arguments of agent `id`'s sign-in read, or `None`: never text from the page.
 pub fn signin_args(id: &str) -> Option<&'static [&'static str]> {
     match id {
         "cursor-agent" => Some(&["status", "--format", "json"]),
-        "agy" => Some(&["models"]),
+        "agy" | "grok" => Some(&["models"]),
         _ => None,
     }
+}
+
+/// Grok's `models`: the line that opens it says how Grok is signed in. "You are not authenticated." (what Grok Build
+/// 1.0.93 printed on this Mac, signed out) is signed out; "You are logged in with …", "You are using XAI_API_KEY." and "You
+/// are authenticated via deployment key." are signed in (the sentences its binary holds; the signed-in ones were not seen
+/// printed here). Anything else says nothing, and nothing of the line is kept but the answer: a login's name is not.
+pub fn parse_grok_models(stdout: &str) -> Option<crate::accounts::LoginStatus> {
+    let said = |l: bool| Some(crate::accounts::LoginStatus { logged_in: l, ..Default::default() });
+    let first = stdout.lines().map(str::trim).find(|l| !l.is_empty())?;
+    if first == "You are not authenticated." {
+        return said(false);
+    }
+    if first.starts_with("You are logged in with ") || first == "You are using XAI_API_KEY." || first == "You are authenticated via deployment key." {
+        return said(true);
+    }
+    None
 }
 
 /// Cursor's `status --format json`: signed in when its `isAuthenticated` is `true`, with `userInfo.email` (an address, at
@@ -611,6 +629,7 @@ pub fn signin_here(id: &str) -> Result<Option<crate::accounts::LoginStatus>, Str
     Ok(match id {
         "cursor-agent" => parse_cursor_status(&out),
         "agy" => parse_agy_models(code, &out, &err),
+        "grok" => parse_grok_models(&out),
         _ => None,
     })
 }
@@ -1837,5 +1856,27 @@ mod tests {
         assert_eq!(parse_agy_models(Some(0), "some words\tmore", "").map(|s| s.logged_in), None);
         assert_eq!(parse_agy_models(Some(1), "", "network unreachable"), None);
         assert_eq!(parse_agy_models(Some(2), listed, ""), None, "a list on a failing exit is not trusted");
+    }
+
+    /// Item 101b: Grok's row reads its sign-in from `grok models`, whose first line says it; only the answer is kept.
+    #[test]
+    fn grok_says_whether_it_is_signed_in() {
+        let v = view_of(crate::sessions::agent("grok").unwrap(), &Stored::default(), Some(PathBuf::from("/opt/bin/grok")), true);
+        assert!(v.signin && v.version);
+        assert_eq!(v.chat.as_deref(), Some("/opt/bin/grok --permission-mode default agent stdio"));
+        assert_eq!(signin_args("grok"), Some(&["models"][..]));
+        // Grok Build 1.0.93's `models` as it printed on this Mac, signed out
+        let out = "You are not authenticated.\n\nDefault model: grok-4.6\n\nAvailable models:\n  * grok-4.6 (default)\n  - grok-4.5\n";
+        assert_eq!(parse_grok_models(out).map(|s| s.logged_in), Some(false));
+        // the signed-in sentences its binary holds (a made-up name), and nothing of the name is kept
+        for signed in ["You are logged in with me@example.com.\n\nDefault model: grok-4.6\n", "You are using XAI_API_KEY.\n", "You are authenticated via deployment key.\n"] {
+            let st = parse_grok_models(signed).unwrap();
+            assert_eq!((st.logged_in, st.email, st.plan, st.method), (true, None, None, None), "{signed}");
+        }
+        for nothing in ["", "\n\n", "Default model: grok-4.6\nYou are not authenticated.\n", "Model 'x' is using its own API key.\n", "error: unexpected argument"] {
+            assert_eq!(parse_grok_models(nothing), None, "{nothing:?}");
+        }
+        // `--yolo` is always-approve's other name: refused like it
+        assert_eq!(check_args("grok", &s(&["--yolo"])).unwrap_err().why, Why::ArgSkips);
     }
 }

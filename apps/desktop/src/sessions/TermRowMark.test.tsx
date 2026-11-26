@@ -59,7 +59,9 @@ describe("terminal rows", () => {
   it("only terminal sessions are listed: a saved chat-mode session is not", () => {
     expect(isTerminalRec(null, { agent: "claude", open: "terminal", status: "running" })).toBe(true);
     expect(isTerminalRec(null, { agent: "shell", status: "running" })).toBe(true);
-    expect(isTerminalRec(null, { agent: "grok", status: "exited" })).toBe(true);
+    // Grok is a chat since item 101b: its terminal is one opened as a terminal
+    expect(isTerminalRec(null, { agent: "grok", open: "terminal", status: "exited" })).toBe(true);
+    expect(isTerminalRec(null, { agent: "grok", status: "exited" })).toBe(false);
     expect(isTerminalRec(null, { agent: "claude", status: "exited" })).toBe(false);
     expect(isTerminalRec(null, { agent: "omh", status: "running" })).toBe(false);
     expect(isTerminalRec(null, { agent: "claude", status: "draft" })).toBe(false);

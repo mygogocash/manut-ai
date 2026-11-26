@@ -81,16 +81,17 @@ describe("the + menu's two ways", () => {
     expect(ways.chat).toEqual(["claude"]);
     expect(ways.more).toContain("codex");
     // with none installed that can chat, the chat part is empty and says so (ChatWay); the terminal part lists them all
-    const none = both(info(["grok"]));
+    const none = both(info(["omh"]));
     expect(none.chat).toEqual([]);
-    expect(none.terminal).toEqual(["grok"]);
+    // Grok is a chat since item 101b, and still a terminal
+    expect(both(info(["grok"]))).toMatchObject({ chat: ["grok"], terminal: ["grok"] });
     expect(both(info([]))).toMatchObject({ chat: [], terminal: expect.arrayContaining(["claude", "codex"]) });
   });
 
-  it("keeps each agent to the ways it has: Grok only in a terminal, DeepSeek Harness and a person's own agent only as a chat", () => {
+  it("keeps each agent to the ways it has: Grok both since item 101b, DeepSeek Harness and a person's own agent only as a chat", () => {
     const mine: AcpRow = { id: "stub-acp", label: "Stub ACP", program: "stub-acp", args: ["acp"], login: "stub-acp login", install: "", mark: "", continues: false, custom: true };
     const ways = both(info(["claude", "grok", "dsh", "stub-acp"], [mine]));
-    expect(ways.chat).toEqual(["claude", "dsh", "stub-acp"]);
+    expect(ways.chat).toEqual(["claude", "dsh", "grok", "stub-acp"]);
     expect(ways.terminal).toEqual(["claude", "grok"]);
   });
 
