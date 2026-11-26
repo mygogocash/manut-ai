@@ -578,7 +578,7 @@ test("a node is its title, one mark with what ran it, and a status icon with a w
   expect(await cut()).toEqual([]);
   expect(await nodes.evaluateAll((els) => els.map((e) => (e as HTMLElement).scrollHeight <= (e as HTMLElement).clientHeight))).toEqual(Array(6).fill(true)); // nor is a box too short for its lines
   await page.setViewportSize({ width: 1280, height: 820 });
-  await expect.poll(async () => Math.round((await page.getByTestId("details").boundingBox())?.width ?? 0)).toBe(552);
+  await expect.poll(async () => Math.round((await page.getByTestId("details").boundingBox())?.width ?? 0)).toBe(560); // beside the 196px side menu
   await expect(box.getByTestId("run-canvas")).not.toContainText("Start node");
   // every box: one width, a thin outline, the panel's own surface behind it, nothing else painted at rest
   const surface = await page.getByTestId("details").evaluate((e) => getComputedStyle(e).backgroundColor);
@@ -713,7 +713,9 @@ test("a node shows the logo of the model that ran it: Claude, OpenAI, Gemini; th
   const via = nodeOf(f, "t3-doctor").getByTestId("node-via");
   const facts = nodeOf(f, "t3-doctor").locator(".bx-ft");
   await expect(facts).toHaveText("Opus 5.5 · low");
-  expect(await via.evaluate((e) => getComputedStyle(e).color)).not.toBe(await facts.evaluate((e) => getComputedStyle(e).color));
+  // one grey for second-line text since item 85i: the "via" words are told from the facts by coming after them, not by a
+  // fainter grey that fell under the contrast the board asks
+  expect(await via.evaluate((e) => getComputedStyle(e).color)).toBe(await facts.evaluate((e) => getComputedStyle(e).color));
   // it follows the facts on their line, and nothing but text stands between the mark and it
   const order = await nodeOf(f, "t3-doctor").getByTestId("node-facts").evaluate((e) => [...e.querySelectorAll("svg, img, .bx-ft, [data-testid=node-via]")].map((x) => (x.matches("svg, img") ? "logo" : x.textContent)));
   expect(order).toEqual(["logo", "Opus 5.5 · low", " · via Codex"]); // the same " · " as between the facts
