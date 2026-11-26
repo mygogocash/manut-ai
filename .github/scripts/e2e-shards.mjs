@@ -2,10 +2,14 @@
 // together. Playwright's own `--shard` splits by test count, and a few spec files are far longer than the rest: on 26
 // Nov 2026 one shard ran for 17 minutes while another was done in 6, so every run waited on the slowest.
 //
-// Each spec file goes whole to one shard, because a shard runs one worker against one mock bridge that holds shared
-// state (apps/desktop/playwright.config.ts) and a file's tests may depend on running in order. The files are taken
-// longest first, and each goes to the shard with the least time so far (ties to the lower shard); a file with the same
-// time as another goes by its name. The same files and timings therefore always give the same shards.
+// Each spec file goes whole to one shard, because a file's tests may depend on running in order. A shard runs several
+// Playwright workers, each against a mock bridge of its own (apps/desktop/playwright.config.ts, item 129), and
+// Playwright hands a shard's files to its workers one at a time, in the order of their names, each to the worker that
+// is free first. So a shard's time is not its files' sum divided by the workers: a long file named late starts late.
+// The split therefore plays that order out for each shard (`wall`), takes the files longest first, and gives each to
+// the shard whose time would then be shortest (ties to the shard with less work so far, then to the lower shard); a
+// file with the same time as another goes by its name. With one worker a shard's time is its sum, so that is the
+// shard with the least time so far. The same files, timings and workers therefore always give the same shards.
 //
 // A spec file therefore runs after different neighbours whenever the times change, so it must not depend on what ran
 // before it on the shared mock bridge: a file that counts notes or asks resets the bridge first (`mock.reset`), and a
@@ -21,7 +25,8 @@
 //   node .github/scripts/e2e-shards.mjs --total <n> --shard <k>   the Playwright filters of shard k, one a line, on
 //                                                                 stdout; what it holds, as Markdown, on stderr
 //   node .github/scripts/e2e-shards.mjs --total <n>               every shard's file count and time, to choose n
-// Options: --dir <spec folder> (default apps/desktop/e2e), --timings <file> (default timings.json in that folder).
+// Options: --workers <w> (each shard's Playwright workers, MANUT_E2E_WORKERS; default 1), --dir <spec folder> (default
+// apps/desktop/e2e), --timings <file> (default timings.json in that folder).
 //
 // A filter is the file's absolute path as an anchored regular expression: Playwright reads each argument as a regular
 // expression against absolute paths, so `e2e/term.spec.ts` alone would also pick `e2e/term.spec.tsx` or a file of the
@@ -82,28 +87,63 @@ export function median(values) {
   return sorted.length % 2 === 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
+/** Playwright's order of spec files, which is the order it hands them to workers: each folder's entries by
+ *  `localeCompare` of their names. */
+export function playwrightOrder(a, b) {
+  const x = a.split("/");
+  const y = b.split("/");
+  for (let i = 0; i < Math.min(x.length, y.length); i++) {
+    const c = x[i].localeCompare(y[i], "en");
+    if (c !== 0) return c;
+  }
+  return x.length - y.length;
+}
+
+/** How long a shard takes on `workers` workers: Playwright gives each file, in its order, to the worker that is free
+ *  first (the lowest when several are). */
+export function wall(files, cost, workers) {
+  const free = Array(workers).fill(0);
+  for (const file of [...files].sort(playwrightOrder)) {
+    let first = 0;
+    for (let i = 1; i < workers; i++) if (free[i] < free[first]) first = i;
+    free[first] += cost(file);
+  }
+  return Math.max(0, ...free);
+}
+
 /**
- * The shards: each a list of files, sorted by name, with the seconds they are expected to take. Every file is in
- * exactly one shard.
+ * The shards: each a list of files, sorted by name, with the seconds of work they hold and the seconds they are
+ * expected to take on `workers` workers. Every file is in exactly one shard.
  *
  * @param {string[]} files
  * @param {Record<string, number>} timings
  * @param {number} total
- * @returns {{ shards: { files: string[], seconds: number }[], guessed: string[], fallback: number }}
+ * @param {number} [workers]
+ * @returns {{ shards: { files: string[], seconds: number, wall: number }[], guessed: string[], fallback: number }}
  */
-export function assign(files, timings, total) {
+export function assign(files, timings, total, workers = 1) {
   if (!Number.isInteger(total) || total < 1) throw new Error(`the number of shards must be a whole number of at least 1, not ${total}`);
+  if (!Number.isInteger(workers) || workers < 1) throw new Error(`the number of workers must be a whole number of at least 1, not ${workers}`);
   const fallback = median(Object.values(timings));
   const unique = [...new Set(files)];
   const guessed = unique.filter((file) => !Object.hasOwn(timings, file)).sort(byName);
   const cost = (file) => (Object.hasOwn(timings, file) ? timings[file] : fallback);
   const order = unique.sort((a, b) => cost(b) - cost(a) || byName(a, b));
-  const shards = Array.from({ length: total }, () => ({ files: [], seconds: 0 }));
+  const shards = Array.from({ length: total }, () => ({ files: [], seconds: 0, wall: 0 }));
   for (const file of order) {
-    let least = 0;
-    for (let i = 1; i < total; i++) if (shards[i].seconds < shards[least].seconds) least = i;
-    shards[least].files.push(file);
-    shards[least].seconds += cost(file);
+    let best = 0;
+    let bestWall = Infinity;
+    for (let i = 0; i < total; i++) {
+      // With one worker a shard's time is its sum, so this needs no playing out.
+      const after = workers === 1 ? shards[i].seconds + cost(file) : wall([...shards[i].files, file], cost, workers);
+      if (after < bestWall || (after === bestWall && shards[i].seconds < shards[best].seconds)) {
+        best = i;
+        bestWall = after;
+      }
+    }
+    shards[best].files.push(file);
+    shards[best].seconds += cost(file);
+    shards[best].wall = bestWall;
   }
   for (const shard of shards) shard.files.sort(byName);
   return { shards, guessed, fallback };
@@ -115,6 +155,7 @@ export function filterFor(dir, file) {
 }
 
 const specFiles = (n) => `${n} spec file${n === 1 ? "" : "s"}`;
+const workerCount = (n) => `${n} worker${n === 1 ? "" : "s"}`;
 const clock = (seconds) => {
   const s = Math.round(seconds);
   return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
@@ -124,7 +165,7 @@ const clock = (seconds) => {
 function options(argv) {
   const out = {};
   for (let i = 0; i < argv.length; i++) {
-    const match = /^--(total|shard|dir|timings)$/.exec(argv[i]);
+    const match = /^--(total|shard|workers|dir|timings)$/.exec(argv[i]);
     if (!match || argv[i + 1] === undefined) throw new Error(`unknown or incomplete option ${argv[i]}`);
     out[match[1]] = argv[++i];
   }
@@ -135,11 +176,12 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
   try {
     const opts = options(process.argv.slice(2));
     const total = Number(opts.total);
+    const workers = Number(opts.workers ?? 1);
     const dir = resolve(opts.dir ?? SPEC_DIR);
     const timingsPath = resolve(opts.timings ?? join(dir, "timings.json"));
     const files = listSpecFiles(dir);
     const { timings, problem } = readTimings(timingsPath);
-    const { shards, guessed, fallback } = assign(files, timings, total);
+    const { shards, guessed, fallback } = assign(files, timings, total, workers);
     // What a reader should know about the times: the file was unusable, or some files have no time yet.
     const notes = (among) => {
       const untimed = guessed.filter((file) => among.includes(file));
@@ -149,8 +191,8 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
     };
     if (opts.shard === undefined) {
       // The whole plan, for choosing the number of shards.
-      console.log(`${specFiles(files.length)} in ${total} shards; no shard can be shorter than the longest file, ${clock(Math.max(0, ...files.map((f) => (Object.hasOwn(timings, f) ? timings[f] : fallback))))}:`);
-      shards.forEach((shard, i) => console.log(`  shard ${i + 1}: ${specFiles(shard.files.length)}, about ${clock(shard.seconds)}`));
+      console.log(`${specFiles(files.length)} in ${total} shards of ${workerCount(workers)}; no shard can be shorter than the longest file, ${clock(Math.max(0, ...files.map((f) => (Object.hasOwn(timings, f) ? timings[f] : fallback))))}:`);
+      shards.forEach((shard, i) => console.log(`  shard ${i + 1}: ${specFiles(shard.files.length)}, about ${clock(shard.wall)}${workers > 1 ? ` (${clock(shard.seconds)} of work)` : ""}`));
       for (const note of notes(files)) console.log(note);
     } else {
       const k = Number(opts.shard);
@@ -162,7 +204,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
       console.error([
         `### Shard ${k} of ${total}`,
         "",
-        `${specFiles(shard.files.length)}, about ${clock(shard.seconds)} by the committed timings (the longest shard: about ${clock(Math.max(...shards.map((s) => s.seconds)))}).`,
+        `${specFiles(shard.files.length)} on ${workerCount(workers)}, about ${clock(shard.wall)}${workers > 1 ? ` (${clock(shard.seconds)} of work)` : ""} by the committed timings (the longest shard: about ${clock(Math.max(...shards.map((s) => s.wall)))}).`,
         ...notes(shard.files).flatMap((note) => ["", note]),
         "",
         "<details><summary>The files</summary>",

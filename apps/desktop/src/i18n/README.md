@@ -12,6 +12,12 @@ object, `Key` is still every key, and nothing that imports `t`, `Key` or `DICT` 
 Until item 128 (26 Nov 2026) each language was one object, and every feature added its keys at its end, so two items
 built side by side conflicted there in all four files. Now an item adds to its own area's files.
 
+The dev server (`vite`, which the browser specs and `tauri dev` use) still sends each language as one module:
+`oneModule.ts` writes each area's object into `<lang>.ts` as it serves it, because 608 area modules fetched by every
+fresh page made the browser specs about a fifth slower (item 129). It does so only for an area file of type-only
+imports and one `export const <prefix> = { "<key>": "<words>" }`; any other shape is served as separate files with a
+warning in the dev server's log, and `oneModule.test.ts` fails.
+
 ## Adding words
 
 1. A key's prefix is its area. Add the key to that area's file in all four languages, at the end of the object or under
