@@ -240,7 +240,9 @@ program or reaches the network. What it does not understand is `unknown`, and as
 - **zsh's expansions.** Codex (`zsh -lc`) and Claude Code run commands in zsh on a Mac, and zsh expands more after a `$`
   than bash: `$=X` splits a variable into words, `$~X` reads it as a pattern, and `$^X`, `$+X`, `${(z)X}` and `${(e)X}`
   do more. An unquoted `$` followed by anything but a blank or the line's end is not read in advance, so a variable set
-  earlier in the line never reaches a later word unseen. `=(…)` and `<(…)` already asked.
+  earlier in the line never reaches a later word unseen. `=(…)` and `<(…)` already asked. printf with an option
+  (`printf -v PATH …` sets a variable, PATH among them, for every later word) asks; any other builtin that sets one
+  (`read`, `declare`, `typeset`, `print -v`) already did, as did an assignment to anything but a harmless variable.
 - **A reading program's own output file.** uniq and xxd each have their own options that take a value, so a second file
   (the one they write) is always seen; yq's `--split-exp`, terraform's `plan -out` and `-generate-config-out`, helm's
   `--output-dir`, pulumi's `preview --save-plan`, kubectl's `--cache-dir` and `--profile`, lsof's device cache and

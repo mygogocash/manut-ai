@@ -399,6 +399,15 @@ describe("B3: what zsh expands that bash does not", () => {
     expect(read("echo $ done").action).toBe("read");
     expect(read("grep -n 'a$' src/a.ts").action).toBe("read");
   });
+
+  it("never reads a builtin that sets a variable a later word depends on as a read", () => {
+    counted += holds([
+      ["printf -v PATH %s ./bin; ls", "printf %s ./bin; ls", "read"],
+      ["printf -vPATH %s ./bin && git status", "printf -- '-v\\n' && git status", "read"],
+      ["export PATH=./bin; ls", "export LANG=C; ls", "read"],
+      ["PATH=./bin; ls", "LANG=C; ls", "read"],
+    ]);
+  });
 });
 
 describe("B4: a reading program's output file", () => {

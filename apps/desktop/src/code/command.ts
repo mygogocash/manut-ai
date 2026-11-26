@@ -1421,6 +1421,9 @@ function classify(words: string[], where: Where): Verdict {
     const to = ops.length ? words[ops[0]] : "~";
     return to === "-" ? v("unknown", say("kit.say.opaque")) : v("read", say("kit.say.read"), undefined, { cd: to });
   }
+  // bash's and zsh's printf take one option, `-v NAME`, which puts its text into a variable instead of printing it: into
+  // PATH, it decides which program every later word of the line runs
+  if (name === "printf" && /^-./.test(words[1] ?? "") && words[1] !== "--") return v("unknown", say("kit.say.opaque"));
   if (ONLY_TEXT.has(name)) return v("read", say("kit.say.read"), undefined, { text: new Set(words.map((_, i) => i).slice(1)) });
   if (READS.has(name)) return v("read", say("kit.say.read"));
   if (DELETES.has(name)) return v("delete", say("kit.say.delete"), "exact");
