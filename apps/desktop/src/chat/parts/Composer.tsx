@@ -24,7 +24,7 @@ import { getSessions } from "../../sessions/sessions";
 import { useBoxVoice } from "../box/Voice";
 import { voiceOffered } from "../../voice/engine";
 import { keysCaption, sendKey, stashKey, useFollowUp, whileRunning, type BoxKind, type FollowUp } from "../box/keys";
-import { filesOf, stashDraft, takeHanded } from "../../app/stash";
+import { filesOf, stashDraft, takeHanded, takeLoose } from "../../app/stash";
 
 const MAX_H = 200;
 
@@ -464,6 +464,9 @@ export function Composer({
   // copies. Its words came as the chat's draft.
   const draftN = store.ui.draft?.n;
   useEffect(() => {
+    // a snapshot's picture of a window (item 104), handed as it is
+    const own = takeLoose(bot.name);
+    if (own.length) add(own);
     const h = takeHanded(bot.name);
     if (!h) return;
     void filesOf(h).then(({ files, missing }) => {

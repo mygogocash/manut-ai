@@ -117,6 +117,7 @@ import { shops } from "./en/shops";
 import { side } from "./en/side";
 import { skills } from "./en/skills";
 import { skl } from "./en/skl";
+import { snap } from "./en/snap";
 import { sounds } from "./en/sounds";
 import { split } from "./en/split";
 import { sq } from "./en/sq";
@@ -272,6 +273,7 @@ export const en = {
   ...side,
   ...skills,
   ...skl,
+  ...snap,
   ...sounds,
   ...split,
   ...sq,

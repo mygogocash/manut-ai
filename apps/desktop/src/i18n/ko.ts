@@ -116,6 +116,7 @@ import { shops } from "./ko/shops";
 import { side } from "./ko/side";
 import { skills } from "./ko/skills";
 import { skl } from "./ko/skl";
+import { snap } from "./ko/snap";
 import { sounds } from "./ko/sounds";
 import { split } from "./ko/split";
 import { sq } from "./ko/sq";
@@ -271,6 +272,7 @@ export const ko: Record<Key, string> = {
   ...side,
   ...skills,
   ...skl,
+  ...snap,
   ...sounds,
   ...split,
   ...sq,
