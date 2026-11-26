@@ -227,7 +227,56 @@ program or reaches the network. What it does not understand is `unknown`, and as
   (a later change to its path lands where it leads), `git clean -x`, zsh's `=word` and `>!`, and `>& file` read as the
   file it is.
 
-`command.hostile.test.ts` holds 170 such lines, each beside the plain line it imitates, which reads as it did.
+#### What the third review added (item 112)
+
+- **Every action, not the first.** A find is read word by word from a list of its known tests and options: each command
+  it runs (every `-exec`, `-execdir`, `-ok`, `-okdir`) is read as a command of its own, `-delete`, `-fprint`, `-fls` and
+  any test or action the list does not know make it no read, and a file it compares with (`-newer`, `-samefile`) is
+  checked against the project. A subcommand is read only where its program looks for it: `git stash -m list` is a push
+  of the stash, and `docker compose` with its own options before the command asks.
+- **A runner's own options.** npx (and `npm exec`) is read only with `-y`, `--yes`, `--no`, `-q`, `--quiet`, `-s` or
+  `--silent` before the tool: npm reads any other as one of its settings (`--node-options`, `--registry`). `pnpm exec`,
+  `yarn exec`, `bun x` and bunx with any option before the tool ask, and pnpx is `pnpm dlx`, which asks. node itself,
+  `NODE_OPTIONS` and npm's `npm_config_*` in front of a command already asked; a test runner told to hand node options to
+  its workers (mocha's `-n`, ava's `--node-arguments`, vitest's `execArgv`) or to load a module (vitest's `--pool`,
+  `--diff`, `--workspace`, a custom coverage provider; jest's `--runner`) as a file is no check.
+- **zsh's expansions.** Codex (`zsh -lc`) and Claude Code run commands in zsh on a Mac, and zsh expands more after a `$`
+  than bash: `$=X` splits a variable into words, `$~X` reads it as a pattern, and `$^X`, `$+X`, `${(z)X}` and `${(e)X}`
+  do more. An unquoted `$` followed by anything but a blank or the line's end is not read in advance, so a variable set
+  earlier in the line never reaches a later word unseen. `=(…)` and `<(…)` already asked. printf with an option
+  (`printf -v PATH …` sets a variable, PATH among them, for every later word) asks; any other builtin that sets one
+  (`read`, `declare`, `typeset`, `print -v`) already did, as did an assignment to anything but a harmless variable.
+- **A reading program's own output file.** uniq and xxd each have their own options that take a value, so a second file
+  (the one they write) is always seen; yq's `--split-exp`, terraform's `plan -out` and `-generate-config-out`, helm's
+  `--output-dir`, pulumi's `preview --save-plan`, kubectl's `--cache-dir` and `--profile`, lsof's device cache and
+  `docker compose config -o` are changes, and helm's `--post-renderer` asks. `cdk synth` and `cdk diff` run the project's
+  app and write `cdk.out`, so they are a build, not a read. Each program the reader calls a read was checked against its
+  own manual for an option or a file it writes; diff, cmp, comm, cut, tr, nl, od, hexdump, strings, column, fold, rev, wc,
+  stat, du, df, ls, file (but `-C`), head, tail and cat have none.
+- **A file read that the words did not show as one.** With `-f` jq takes the first file as its filter wherever `-f`
+  stands, so no word is a filter then and every file is checked; a jq filter that imports or includes a module asks, and
+  `-L`'s folder is checked. git grep's `-f` file is checked, and so is the file `git commit -F`, `--file` or `-t` takes a
+  message from, which a kept "git commit" rule would otherwise carry out with the next push. A list of files read from a
+  file (`--files0-from`, `--files-from`, tar's `-T`, zip's `-@`) asks, since the files are named nowhere, and `@file`
+  that names a path from a root, the home folder or a folder above is checked as that path.
+- **Another computer, for every program.** A word that holds an address (`scheme://`, but a `file://` link) makes any
+  step below `unknown` a send, a change and an install included (`pnpm add https://…`, `docker build https://…`); words
+  read as text (a message, a pattern, a script) do not count, and git and gh read their own addresses as before. A read
+  or a check with an option that names a server (`--server`, `--api`, `--repo`, `--registry`, `--endpoint`, `--url`,
+  `--host`, `--remote`, `--proxy`, or a name ending in one, such as `--index-url`) is a send too, and so are turbo's
+  `--token` and `--team`, kubectl's `-s`, helm's `--kube-apiserver` and `go list -m` asking for versions, updates or
+  retractions. A kubeconfig or kuberc named on the line asks (it can name a program kubectl runs), and `turbo.json`,
+  which can name where turbo sends its cache, is a file a change to which always asks.
+
+`command.hostile.test.ts` holds over 300 such lines, each beside the plain line it imitates, which reads as it did, and
+221 everyday commands, each pinned to what it read as before item 112 (only `cdk synth` moved, to a build).
+
+Still read as reads or checks, for the owner to decide (a design question, not a reading): a check, `terraform plan` and
+`pulumi preview` run the project's own code, which an agent may have edited at Edits alone, and `terraform plan`,
+`go list -m all` and a check that fetches what it needs reach the network with what the person is signed in to.
+A jq or yq filter that prints the environment (`env`, `$ENV`, yq's `env(NAME)` and `strenv`) asks, as `printenv` does;
+a field or key called env is only a name. jq's `--arg`, `--argjson`, `--slurpfile` and `--rawfile` are read with their
+two values, so the word after them is not taken for the filter.
 
 #### Files a change to which always asks (item 88)
 
@@ -243,7 +292,7 @@ option's joined value, a redirect or the folder it went into first.
   `.yarn/`, `.pnpmfile.*`, `bunfig.toml`, `pnpm-workspace.yaml`, `.vscode/`, `.idea/`, `.devcontainer/`, `.cargo/`, CI
   files, pre-commit, lefthook and lint-staged settings, `.gitmodules`.
 - `package.json`, `Makefile`, `justfile`, `Taskfile.yml` and the like, whose scripts a check and Preview's Start run by a
-  name that says nothing of them.
+  name that says nothing of them, and `turbo.json`, which can name where turbo sends its cache (item 112).
 - The app's own storage: all of `~/.manut` but the folder the session itself works in when that is a lane's own
   (exactly two names below `~/.manut/lanes`), and the web view's data and caches under `~/Library`.
 
