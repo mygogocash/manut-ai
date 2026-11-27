@@ -2,6 +2,8 @@
 // build signed with the key whose public half is pinned there. Outside Tauri (browser dev, e2e) there is no updater,
 // unless the page sets `window.__manutUpdateHost`, the e2e stand-in.
 //
+// Which feed a check reads is the person's channel, Stable or Nightly (updateChannel.ts).
+//
 // The updater is on (`UPDATER_ENABLED`) with Manut AI's own key: tauri.conf.json pins the public half and names a
 // `latest.json` under GitHub's releases/latest, which skips drafts, so it moves only when the owner publishes a
 // release (docs/releasing.md). The flag stays so a build can be made that asks nothing, and so tests can see it.
@@ -12,6 +14,7 @@
 import { isAppStore } from "../appStore";
 import { t } from "../i18n";
 import { inTauri } from "../lib/tauri";
+import { CHANNEL_EVENT, updateChannel } from "./updateChannel";
 
 /** Download progress: bytes so far and the total when the server sent one. */
 export type UpdateProgress = { done: number; total: number | null };
@@ -49,8 +52,18 @@ export const UPDATER_ENABLED = true;
 export function tauriHost(): UpdateHost {
   return {
     async check() {
-      const { check } = await import("@tauri-apps/plugin-updater");
-      const u = await check({ timeout: CHECK_TIMEOUT_MS });
+      const { check, Update } = await import("@tauri-apps/plugin-updater");
+      const channel = updateChannel();
+      // Stable is the plugin's own check, which reads tauri.conf.json's endpoint. The plugin's JS `check` cannot name
+      // another endpoint, so Nightly asks the shell (update_channel.rs), which returns the same metadata, and the page
+      // makes the plugin's own `Update` from it: download and install are then the plugin's, unchanged.
+      let u;
+      if (channel === "stable") u = await check({ timeout: CHECK_TIMEOUT_MS });
+      else {
+        const { invoke } = await import("@tauri-apps/api/core");
+        const meta = await invoke<ConstructorParameters<typeof Update>[0] | null>("check_update_channel", { channel, timeout: CHECK_TIMEOUT_MS });
+        u = meta ? new Update(meta) : null;
+      }
       if (!u) return null;
       return {
         version: u.version,
@@ -99,6 +112,8 @@ export function watchForUpdates(
 ): () => void {
   let live = true;
   let flying = false;
+  // the channel changed while a check was in flight: that answer is for the old channel, so ask again when it lands
+  let askAgain = false;
   let failures = 0;
   let lastOk: number | null = null;
   let lastTry = 0;
@@ -117,7 +132,7 @@ export function watchForUpdates(
       const u = await host.check();
       failures = 0;
       lastOk = Date.now();
-      if (live && !paused()) found(u);
+      if (live && !paused() && !askAgain) found(u);
       plan(CHECK_EVERY_MS);
     } catch {
       // offline or the endpoint is down: stay quiet and try again soon
@@ -125,7 +140,16 @@ export function watchForUpdates(
       plan(retryDelay(failures));
     } finally {
       flying = false;
+      if (askAgain && live) {
+        askAgain = false;
+        void run();
+      }
     }
+  };
+  // a new channel means a new feed: forget how recent the last check was and ask it now
+  const switched = () => {
+    if (flying) askAgain = true;
+    else void run();
   };
   const back = () => {
     if (document.visibilityState === "hidden") return;
@@ -136,12 +160,14 @@ export function watchForUpdates(
   };
   window.addEventListener("focus", back);
   document.addEventListener("visibilitychange", back);
+  window.addEventListener(CHANNEL_EVENT, switched);
   void run();
   return () => {
     live = false;
     clearTimeout(timer);
     window.removeEventListener("focus", back);
     document.removeEventListener("visibilitychange", back);
+    window.removeEventListener(CHANNEL_EVENT, switched);
   };
 }
 
