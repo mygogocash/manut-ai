@@ -110,7 +110,7 @@ The states whose rules are pure functions, with their tests, then the screens th
   names nothing is read by the words the shell writes on it.
 - `apps/desktop/src/code/project.ts`: each project's level, kept rules, folders Kit may read and stopped steps, on this
   computer.
-- `apps/desktop/src/code/secrets.ts`: keys in Kit's changes, counted with the app's one masker (`src/lib/secrets.ts`). Since
+- `apps/desktop/src/code/secrets.ts`: keys in Kit's changes, counted with the app's one masker (`packages/mask-secrets`, through `src/lib/secrets.ts`). Since
   item 113 the masker also knows private key blocks, provider-prefixed keys, JSON web tokens, credentials in HTTP headers,
   `password:` and `"password":` values, the password in `scheme://user:pass@host`, quoted `KEY="..."` and `--password value`,
   so a change holding any of them makes a commit or a push ask too. Item 117 added `name = value` with blanks round the

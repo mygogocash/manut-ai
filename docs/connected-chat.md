@@ -105,8 +105,8 @@ owner (`docs/decisions/102l-connected-chat.md`). Where it differs from the desig
 - **The shop's consent.** A message also needs the shop's consent to cloud work (403 `consent_required`), which the design
   did not name: what goes to the model holds the shop's facts and customers' words, as a worker's request does.
 - **Kept masked.** The owner's message and Buddy's answer are kept masked, not only sent masked, so a key the owner pastes is
-  never stored. The masker is the app's one (`apps/desktop/src/lib/secrets.ts`), taken by the Worker as it is; the API had
-  none of its own.
+  never stored. The masker is the app's one, the workspace package `@manut/mask-secrets` (`packages/mask-secrets`), which the
+  desktop, its shell and the API share; the API had none of its own.
 - **Nothing kept for a refusal.** A message is let through (thread, caps and the hour) before the call, and kept with
   Buddy's answer only after it, so a gateway refusal leaves the thread as it was. A let-through message counts against the
   hour whatever the gateway answers.

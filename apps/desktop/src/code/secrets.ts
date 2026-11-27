@@ -11,8 +11,7 @@
 // may hold a key, so the step asks. And nothing is ever taken away: a key taken out again is still in the lane's history,
 // which a push sends.
 import type { DiffFile } from "../lib/protocol";
-import { maskSecrets } from "../lib/secrets";
-import spec from "../lib/secrets.json";
+import { MASK, maskSecrets } from "../lib/secrets";
 
 /** Whether `line` holds something the masker hides. */
 export const holdsKey = (line: string): boolean => maskSecrets(line) !== line;
@@ -59,7 +58,7 @@ export function savedKeys(raw: unknown): SavedKeys | null {
     if (typeof o.path !== "string" || !o.path) return null;
     if (o.note !== undefined && o.note !== null) unread = true;
     const diff = typeof o.diff === "string" ? o.diff : "";
-    const added = diff.split("\n").some((l) => l.startsWith("+") && !l.startsWith("+++ ") && l.includes(spec.mask));
+    const added = diff.split("\n").some((l) => l.startsWith("+") && !l.startsWith("+++ ") && l.includes(MASK));
     if (added && !files.includes(o.path)) files.push(o.path);
   }
   if (r.history === undefined || r.history === null) return { files: files.sort(), unread };

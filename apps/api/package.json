@@ -26,6 +26,7 @@
     "@manut/approval-core": "workspace:*",
     "@manut/books": "workspace:*",
     "@manut/format": "workspace:*",
+    "@manut/mask-secrets": "workspace:*",
     "@manut/member-grants": "workspace:*",
     "@manut/people-rules": "workspace:*",
     "@manut/routine-rules": "workspace:*",

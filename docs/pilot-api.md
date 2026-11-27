@@ -3371,8 +3371,8 @@ tokens: Buddy's short instructions (that it only talks and starts nothing, and t
 instructions); the shop's usable facts (`usableFacts`: confirmed ones only, so a customer's fact still waiting never goes),
 fenced between the lines `<<<shop-facts` and `shop-facts>>>`, one fact a line, each marked `[customer]` (a customer's words,
 which the owner confirmed and which are still only what the customer said) or `[shop]`; the thread's latest turns; and the
-owner's message. Every text is masked by the app's one masker (`apps/desktop/src/lib/secrets.ts`, which the desktop and its
-shell use too). The whole is held under 48,000 tokens as the gateway estimates them: the oldest turns go first, then the
+owner's message. Every text is masked by the app's one masker (`@manut/mask-secrets`, `packages/mask-secrets`, which the
+desktop and its shell use too). The whole is held under 48,000 tokens as the gateway estimates them: the oldest turns go first, then the
 oldest facts, never the owner's message.
 
 **What is kept.** In the shop's TenantObject: the threads (at most 50), one record per message (at most 1,000 a thread, the

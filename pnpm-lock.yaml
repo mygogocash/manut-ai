@@ -206,6 +206,9 @@ importers:
       '@manut/format':
         specifier: workspace:*
         version: link:../../packages/format
+      '@manut/mask-secrets':
+        specifier: workspace:*
+        version: link:../../packages/mask-secrets
       '@manut/member-grants':
         specifier: workspace:*
         version: link:../../packages/member-grants
@@ -261,6 +264,9 @@ importers:
       '@manut/format':
         specifier: workspace:*
         version: link:../../packages/format
+      '@manut/mask-secrets':
+        specifier: workspace:*
+        version: link:../../packages/mask-secrets
       '@manut/member-grants':
         specifier: workspace:*
         version: link:../../packages/member-grants
@@ -489,6 +495,15 @@ importers:
         version: 5.1.1(@types/node@26.6.10)(jsdom@31.0.1)(vite@8.3.8(@types/node@26.6.10)(esbuild@0.28.2))
 
   packages/format:
+    devDependencies:
+      typescript:
+        specifier: 7.0.2
+        version: 7.0.2
+      vitest:
+        specifier: 5.1.1
+        version: 5.1.1(@types/node@26.6.10)(jsdom@31.0.1)(vite@8.3.8(@types/node@26.6.10)(esbuild@0.28.2))
+
+  packages/mask-secrets:
     devDependencies:
       typescript:
         specifier: 7.0.2

@@ -19,8 +19,8 @@
 //!   field holds.
 //! - **Masked before it leaves the shell.** Every name, title and value loses its invisible format characters, an
 //!   approval link loses its token ([`room::hide_links`]) and token-like text becomes `••••` ([`mask_secrets`], the app's
-//!   one masker, `src/lib/secrets.json`), each counted so the draft says how many were hidden; then it is cut to
-//!   [`TEXT_MAX`] characters.
+//!   one masker, `packages/mask-secrets/src/secrets.json`), each counted so the draft says how many were hidden; then it
+//!   is cut to [`TEXT_MAX`] characters.
 //! - **No permission, no surprise.** Without Accessibility nothing is read and the page is told what is missing; nothing
 //!   here asks macOS for anything (mod.rs `reading_the_permissions_never_prompts` reads this file too). A picture of the
 //!   window comes only when the person turned it on and Screen capture is already allowed.

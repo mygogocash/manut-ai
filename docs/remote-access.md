@@ -167,8 +167,9 @@ needs a QR reader, which the repository does not have: the browser's own is used
   counting. The Mac also keeps, per phone, the newest revision of each ask it sent that phone, and acts only on that
   one: a phone answering a chat it never opened, or a Mac started again, is refused as `changed`, and the phone opens
   the chat again.
-- **What a phone sees** is masked with `lib/secrets.ts` and shown whole. The masker's patterns are `lib/secrets.json`, shared
-  with the shell's `tasks::mask_secrets` and held by one table both run (`lib/secrets.cases.json`): tokens by their
+- **What a phone sees** is masked with `lib/secrets.ts` and shown whole. The masker is the workspace package
+  `packages/mask-secrets`: its patterns are `src/secrets.json` there, shared with the shell's `tasks::mask_secrets` and held
+  by one table both run (`test/secrets.cases.json`): tokens by their
   prefix, private key blocks, JSON web tokens, credentials in HTTP headers, `password:` and `"password":` values, the
   password in `scheme://user:pass@host`, quoted `KEY="..."` and `--password value`, each with its name kept so the line
   still reads (item 113). Item 117 added `name = value` as `~/.aws/credentials` writes it, `DB_PASS`, `MYSQL_PWD`,

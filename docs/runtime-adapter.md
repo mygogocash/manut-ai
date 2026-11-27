@@ -953,7 +953,7 @@ The rules a bundle keeps are in three places that say the same thing: `apps/api/
 - **Sharing.** The Artifacts page's Share skills as a link offers the person's own skills from Settings › MCP and Skills' list
   (`from: home`, by folder name). The shell reads each folder (`skill_bundle_read`) following no link: a link, a binary, an
   over-large or special file is named and stops the publish, and dot-files are left out and named. A file in which the key masker
-  (`src/lib/secrets.ts`) finds a key stops it too, named, never shown, and so does a skill an agent would act on by itself
+  (`packages/mask-secrets`, through `src/lib/secrets.ts`) finds a key stops it too, named, never shown, and so does a skill an agent would act on by itself
   (`fileActsAlone`, below). Otherwise `askToShareSkills` opens a `public_post` whose
   detail is the exact bundle; its Yes is refused (`not_reviewed`) until every file was opened or the tick is set
   (`src/runtime/fileReview.ts`). `artifacts.publishSkills` takes only the ask's id, checks the rules and keys again, and sends

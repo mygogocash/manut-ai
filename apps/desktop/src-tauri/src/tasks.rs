@@ -325,8 +325,9 @@ pub struct Status {
 
 // ---- parsing ------------------------------------------------------------------------------------
 
-/// manut's one masker (src/lib/secrets.json: the page uses the same patterns).
-const SECRETS: &str = include_str!("../../src/lib/secrets.json");
+/// manut's one masker (packages/mask-secrets/src/secrets.json, in the workspace package the page and the API use too, so all
+/// three mask with the same patterns).
+const SECRETS: &str = include_str!("../../../../packages/mask-secrets/src/secrets.json");
 
 struct Secrets {
     /// replaced whole, first: private key blocks, provider-prefixed keys, JSON web tokens; with its kind: `word` (the match
@@ -432,13 +433,13 @@ fn secrets() -> &'static Secrets {
 }
 
 /// Whether the match `m` in `t` stands alone: no letter, digit, `_` or `-` glued to either side, so a token inside a
-/// longer name (`build-sk-…`) is the name's and stays (src/lib/secrets.ts `alone`).
+/// longer name (`build-sk-…`) is the name's and stays (packages/mask-secrets `alone`).
 fn alone(s: &Secrets, t: &str, m: regex::Match) -> bool {
     let touches = |c: Option<char>| c.is_some_and(|c| s.edge.is_match(c.encode_utf8(&mut [0; 4])));
     !touches(t[..m.start()].chars().next_back()) && !touches(t[m.end()..].chars().next())
 }
 
-/// Whether a `tokens` match has a key's shape (src/lib/secrets.ts `keyShaped`).
+/// Whether a `tokens` match has a key's shape (packages/mask-secrets `keyShaped`).
 fn key_shaped(s: &Secrets, m: &str) -> bool {
     if s.exact.is_match(m) {
         return true;
@@ -449,12 +450,12 @@ fn key_shaped(s: &Secrets, m: &str) -> bool {
     s.needs.is_match(&s.prefix.replace(m, ""))
 }
 
-/// Whether a named value is a key at all: not a reference and not a word that says there is none (src/lib/secrets.ts `aKey`).
+/// Whether a named value is a key at all: not a reference and not a word that says there is none (packages/mask-secrets `aKey`).
 fn a_key(s: &Secrets, v: &str) -> bool {
     !s.reference.is_match(v) && !s.plain.is_match(v)
 }
 
-/// Whether `c` is one a masked value in a command stops at (src/lib/secrets.ts `stops`): a `shell` character, or one that does
+/// Whether `c` is one a masked value in a command stops at (packages/mask-secrets `stops`): a `shell` character, or one that does
 /// not show.
 fn stops(s: &Secrets, c: char) -> bool {
     let b = &mut [0; 4];
@@ -468,7 +469,7 @@ fn up_to(s: &Secrets, v: &str) -> usize {
 }
 
 /// `t` with every character that does not show, or that reorders what does, replaced by a visible mark (`⟨U+202E⟩`)
-/// (src/lib/secrets.ts `revealHidden`, item 121).
+/// (packages/mask-secrets `revealHidden`, item 121).
 pub fn reveal_hidden(t: &str) -> String {
     let s = secrets();
     s.hidden.replace_all(t, |c: &regex::Captures| {
@@ -477,7 +478,7 @@ pub fn reveal_hidden(t: &str) -> String {
     }).into_owned()
 }
 
-/// Whether the match `m` in `t` is part of a path: it holds a `/` or touches one (src/lib/secrets.ts `inPath`). In a command
+/// Whether the match `m` in `t` is part of a path: it holds a `/` or touches one (packages/mask-secrets `inPath`). In a command
 /// such a word names a program or a file, so it is shown (item 121).
 fn in_path(t: &str, m: regex::Match) -> bool {
     m.as_str().contains('/') || t[..m.start()].ends_with('/') || t[m.end()..].starts_with('/')
@@ -498,14 +499,14 @@ fn mask_whole(s: &Secrets, mut t: String, command: bool) -> String {
     t
 }
 
-/// A command read as the shell reads it (src/lib/secrets.ts `lex`, step for step): its words as byte ranges, and for each byte
+/// A command read as the shell reads it (packages/mask-secrets `lex`, step for step): its words as byte ranges, and for each byte
 /// whether a key block there is data that is only written out, so it may be masked.
 struct Reading {
     words: Vec<(usize, usize)>,
     data: Vec<bool>,
 }
 
-/// The terminator a heredoc's word names, and whether it was quoted (src/lib/secrets.ts `heredocWord`): a plain word, a word in
+/// The terminator a heredoc's word names, and whether it was quoted (packages/mask-secrets `heredocWord`): a plain word, a word in
 /// one pair of single or double quotes, or a word after one backslash. Any other form is not read.
 fn heredoc_word(w: &str) -> Option<(String, bool)> {
     static PLAIN: OnceLock<Regex> = OnceLock::new();
@@ -525,7 +526,7 @@ enum Quote {
     Dollar,
 }
 
-/// The reader's state (src/lib/secrets.ts `lex`): byte offsets throughout.
+/// The reader's state (packages/mask-secrets `lex`): byte offsets throughout.
 struct Lexer<'a> {
     text: &'a str,
     words: Vec<(usize, usize)>,
@@ -592,7 +593,7 @@ impl Lexer<'_> {
     }
 }
 
-/// A command read as the shell reads it (src/lib/secrets.ts `lex`, which says how).
+/// A command read as the shell reads it (packages/mask-secrets `lex`, which says how).
 fn lex(text: &str) -> Reading {
     let s = secrets();
     let b: Vec<(usize, char)> = text.char_indices().collect();
@@ -709,7 +710,7 @@ fn shell_words(t: &str) -> Vec<String> {
 }
 
 /// Whether pieces `i..` of a masked word follow at byte `at` of `before`, the mask before piece `i` standing for a run of one or
-/// more characters `free` allows (src/lib/secrets.ts `aligned`).
+/// more characters `free` allows (packages/mask-secrets `aligned`).
 fn rest(before: &str, from: usize, pieces: &[&str], i: usize, at: usize, free: &dyn Fn(usize) -> bool, failed: &mut std::collections::HashSet<(usize, usize)>) -> bool {
     if failed.contains(&(i, at)) {
         return false;
@@ -752,7 +753,7 @@ fn shaped(before: &str, after: &str, free: &dyn Fn(&Reading, usize) -> bool) -> 
     a.words.len() == b.words.len() && a.words.iter().zip(&b.words).all(|(&(f, t), &(g, u))| aligned(&before[f..t], f, &after[g..u], &s.mask, &|k| free(&a, k)))
 }
 
-/// The structural check of what an approval shows (src/lib/secrets.ts `sameShape`): `after` splits into exactly `before`'s
+/// The structural check of what an approval shows (packages/mask-secrets `sameShape`): `after` splits into exactly `before`'s
 /// shell words, each the same or with only a key's part masked, a run that holds no character the command form stops at.
 fn same_shape(before: &str, after: &str) -> bool {
     let s = secrets();
@@ -760,7 +761,7 @@ fn same_shape(before: &str, after: &str) -> bool {
 }
 
 /// A command's private key blocks whose body holds only key lines, where the whole block is data a writer only writes out
-/// ([`lex`]): the BEGIN and END lines stay, the body is one mask line (src/lib/secrets.ts `maskBlocks`). A block with no END
+/// ([`lex`]): the BEGIN and END lines stay, the body is one mask line (packages/mask-secrets `maskBlocks`). A block with no END
 /// of its own is masked only when none comes before the next BEGIN.
 fn mask_blocks(s: &Secrets, mut t: String) -> String {
     if !t.contains("PRIVATE KEY") {
@@ -813,7 +814,7 @@ fn split_token(c: &regex::Captures, n: usize, mask: &str) -> String {
     c[0].to_string()
 }
 
-/// `t` with every token-like string replaced by `••••` (src/lib/secrets.ts `maskSecrets`, step for step). A secret with a name
+/// `t` with every token-like string replaced by `••••` (packages/mask-secrets `maskSecrets`, step for step). A secret with a name
 /// keeps its name and what frames it (`token=••••`, `"password": "••••"`, `Authorization: Bearer ••••`). For text that never
 /// runs: what an approval shows goes through [`mask_command`].
 pub fn mask_secrets(t: &str) -> String {
@@ -850,7 +851,7 @@ fn command_line(s: &Secrets, line: &str) -> String {
     }).into_owned()
 }
 
-/// What an approval shows of a command (src/lib/secrets.ts `ShownCommand`).
+/// What an approval shows of a command (packages/mask-secrets `ShownCommand`).
 pub struct Shown {
     /// the command with its keys masked; or as it is, when masking it could change what it seems to do
     pub text: String,
@@ -861,7 +862,7 @@ pub struct Shown {
     pub hidden: bool,
 }
 
-/// A command, or anything else an approval shows, with its keys masked and nothing else (src/lib/secrets.ts `showCommand`,
+/// A command, or anything else an approval shows, with its keys masked and nothing else (packages/mask-secrets `showCommand`,
 /// step for step): line by line, never joined across a blank, and a masked value stops at the first blank, quote, `#`, glob
 /// character or character the shell acts on, which is shown with what follows it; then the structural check, or the command
 /// is shown as it is.
@@ -1819,7 +1820,7 @@ mod tests {
         assert_eq!(d.comments[0].body, "password=•••• and ••••");
         let (p, _) = parse_list(Source::Github, Kind::Issues, 0, None, &format!("[{view}]")).unwrap();
         assert_eq!(p.items[0].title, "leak ••••");
-        // the same patterns as the page's and the bridge's (src/lib/secrets.json); ordinary words stay
+        // the same patterns as the page's and the bridge's (packages/mask-secrets/src/secrets.json); ordinary words stay
         for plain in ["task-management works", "a risk-assessment", "the token is in the vault", "password: see wiki"] {
             assert_eq!(mask_secrets(plain), plain);
         }
@@ -1827,8 +1828,9 @@ mod tests {
 
     #[test]
     fn the_shared_masker_table() {
-        // src/lib/secrets.cases.json: the same table the page (secrets.test.ts) and the bridge (OneMasker) run
-        let v: Value = serde_json::from_str(include_str!("../../src/lib/secrets.cases.json")).unwrap();
+        // packages/mask-secrets/test/secrets.cases.json: the same table the page's (the package's secrets.test.ts) and the
+        // bridge (OneMasker) run
+        let v: Value = serde_json::from_str(include_str!("../../../../packages/mask-secrets/test/secrets.cases.json")).unwrap();
         let cases = v["cases"].as_array().unwrap();
         assert!(cases.len() > 120);
         for c in cases {

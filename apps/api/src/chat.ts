@@ -23,11 +23,10 @@
 /// a key the owner pastes is never kept or sent. Nothing about a message is logged, and the audit log names only ids.
 
 import { buildBuddyChat } from "@manut/agent-prompts";
+// The app's one masker for keys (item 113 and item 121), the package the desktop and its shell's twin read too, so a key is
+// masked the same way on every surface.
+import { maskSecrets } from "@manut/mask-secrets";
 import { emptyState } from "@manut/shop-memory";
-// The app's one masker for keys (item 113 and item 121), shared with the desktop and its shell's twin, so a key is masked
-// the same way on every surface. It lives with the desktop's code, where it was written; the Worker's bundle takes it from
-// there as it is.
-import { maskSecrets } from "../../desktop/src/lib/secrets";
 import { readJsonBody } from "./body";
 import {
   MAX_ANSWER_CHARS,

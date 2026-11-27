@@ -1,0 +1,15 @@
+{
+  "name": "@manut/mask-secrets",
+  "private": true,
+  "type": "module",
+  "description": "The app's one masker for keys and passwords in text, shared by the desktop, its shell (the patterns) and the API.",
+  "exports": { ".": "./src/index.ts" },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "7.0.2",
+    "vitest": "5.1.1"
+  }
+}
