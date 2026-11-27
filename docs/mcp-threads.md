@@ -5,7 +5,7 @@ its order: "must be designed first because it can act for the person"). The owne
 lists, opens and messages threads through an MCP server, with an address to copy for it, off by default, designed first
 for who may connect and so that everything asked through it is an ask the person answers, never a way round one.
 
-Status on 27 Nov 2026: design, with slices 103a (the door, in the shell), 103b (Settings, the list and the let-in card) and 103c (reads and messages) built; a new lane (103d) is not built. The decisions are in `docs/decisions/103-mcp-threads.md`; the slices are
+Status on 27 Nov 2026: built, slices 103a to 103d (the door in the shell; Settings, the list and the let-in card; reads and messages; a new lane). Not tried with a real MCP program on a real Mac; the later items at the end are the owner's to want. The decisions are in `docs/decisions/103-mcp-threads.md`; the slices are
 at the end and are in `docs/plan.md` as 103a to 103d.
 
 ## The promise this design keeps
@@ -216,6 +216,9 @@ shell's error strings for a refused call hold none of the call's arguments. [103
   program gave up is refused as superseded.
 - **103d. A new lane.** `open_chat` through `startOpenedLane`, in the listed chat's project, in its agent's Ask mode, the card
   showing the brief whole. Safety test: an unanswered card starts nothing.
+  **Built 27 Nov 2026** (the `open` card in `src/threadsMcp/store.ts` and `Cards.tsx`, `openLane` on the sessions store,
+  `OpenLane.program`; the last test of `e2e/other-programs.spec.ts`). The new lane is put on the program's list when there is
+  room, and its words are English only (the owner's English-first call).
 - **Later, each the owner's to want:** the cards on a paired phone after its passkey (item 115's rule); Linux through
   `SO_PEERCRED`; remembering a program across runs by its code signature.
 

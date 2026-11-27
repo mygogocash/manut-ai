@@ -40,4 +40,11 @@ export const tm: Record<keyof typeof en, string> = {
   "tm.send.yes": "发到那里",
   "tm.send.no": "不发送",
   "tm.from": "来自 Manut AI 之外的 {name}，由你转发",
+  // item 103d: English first (the owner, 27 Nov 2026); the same English in every language until translated
+  "tm.open.title": "{name} asks to start a lane in the project of “{title}”",
+  "tm.open.lane": "“{title}” on {agent}, made from {folder}",
+  "tm.open.what": "It would be an ordinary lane on a branch of its own, in {agent}'s Ask mode, with this brief as its first message, marked as from the program. Every step it takes asks you.",
+  "tm.open.yes": "Start lane",
+  "tm.open.no": "Not now",
+  "tm.opened.note": "Opened by {name}, outside Manut AI, after you pressed Start lane on its card.",
 };

@@ -83,4 +83,18 @@ describe("a program asking to read a chat or to send it a message (103c)", () =>
     expect(w).toContain("Send there");
     expect(w).toContain("Keep out");
   });
+
+  it("shows a new lane's title, agent, folder and brief whole, with Start lane and Not now (103d)", () => {
+    const html = renderToString(
+      <McpCardsView cards={[{ ...CURSOR, kind: "open", chat, title: "Print the shop's name", brief: "Add the name at the top.", agent: "codex", agentLabel: "Codex", cwd: "/home/you/code/shop" }]} onAnswer={noop} onDismiss={noop} />,
+    );
+    const w = words(html);
+    expect(w).toContain("Cursor asks to start a lane in the project of “Fix the login”");
+    expect(w).toContain("“Print the shop's name” on Codex, made from /home/you/code/shop");
+    expect(html).toMatch(/data-testid="tm-text"[^>]*>Add the name at the top\.</);
+    expect(w).toContain("in Codex's Ask mode");
+    expect(w).toContain("Start lane");
+    expect(w).toContain("Not now");
+    expect(w).not.toMatch(/\{[a-z]+\}/);
+  });
 });

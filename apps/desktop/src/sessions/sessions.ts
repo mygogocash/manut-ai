@@ -1453,7 +1453,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
       status: "draft",
       view: "chat",
       title: p.title.replace(/\s+/g, " ").trim().slice(0, NAME_MAX),
-      openedBy: p.from,
+      ...(p.from ? { openedBy: p.from } : {}),
       // the agent's own Ask mode, named on its command line whatever mode the person last used (item 89)
       ...(ask && modesOf(agent).includes(ask) ? { mode: ask } : {}),
       ...(p.model ? { modelWant: p.model } : {}),
@@ -1465,7 +1465,8 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     if (!started) return { ok: false, why: tr("reach.notStarted") };
     const key = keys.get(id);
     const from = rec(p.from);
-    if (key) store().dispatch({ type: "system.note", bot: key, text: tr("reach.opened.note", { title: from ? pickTitle(from, folderName(from.cwd)).title : tr("ss.session") }), now: Date.now() });
+    const note = p.program ? tr("tm.opened.note", { name: p.program }) : tr("reach.opened.note", { title: from ? pickTitle(from, folderName(from.cwd)).title : tr("ss.session") });
+    if (key) store().dispatch({ type: "system.note", bot: key, text: note, now: Date.now() });
     return { ok: true, id };
   };
 
@@ -3166,6 +3167,9 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
      *  while any ask or question of it waits, and never steered in, so its words never answer anything. For a message the person
      *  sent on from a card that showed it whole (item 102k's Send there, item 103c's); false when the chat's agent cannot take it. */
     route: (id: string, text: string): Promise<boolean> => route(id, text),
+    /** Starts an ordinary lane at the person's Start lane on a card that showed its title, agent and brief whole (item 102k's, item
+     *  103d's): in its agent's Ask mode, beside the person's drafts, not opened in front of them, the brief its first message. */
+    openLane: (p: OpenLane): Promise<{ ok: true; id: string } | { ok: false; why: string }> => startOpenedLane(p),
     /** The person's yes (`yes`) or no on reach card `askId` of session `id`: checked again, settled once in approval-core, and only
      *  then read, sent or opened (item 102k). */
     answerReach: (id: string, askId: string, yes: boolean) => reach.answer(id, askId, yes),
