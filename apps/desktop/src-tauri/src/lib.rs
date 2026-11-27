@@ -44,6 +44,7 @@ mod preview;
 mod pulls;
 mod pulls_other;
 mod providers;
+mod remote_door;
 mod remote_keys;
 #[cfg(all(test, unix))]
 mod pty_bench;
@@ -56,6 +57,7 @@ mod shop_cache;
 mod shop_cache_key;
 mod skill_links;
 mod tailscale;
+mod tailscale_serve;
 mod tasks;
 mod title_run;
 mod term_history;
@@ -2125,7 +2127,13 @@ fn commands(invoke: tauri::ipc::Invoke) -> bool {
         threads_mcp::threads_mcp_set,
         threads_mcp::threads_mcp_listen,
         threads_mcp::threads_mcp_reply,
-        tailscale::tailscale_state
+        tailscale::tailscale_state,
+        remote_door::tailscale_door_on,
+        remote_door::tailscale_door_off,
+        remote_door::door_devices,
+        remote_door::door_status,
+        remote_door::door_send,
+        remote_door::door_close
     ];
     answer(invoke)
 }
