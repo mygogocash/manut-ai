@@ -264,6 +264,17 @@ describe("GET /v1/approvals?state=open", () => {
     expect(lookupPaths(walked.calls)).toEqual(["GET /approvals/open", "GET /index", "POST /approvals/backfill"]);
   });
 
+  it("lists a request of a task made after the last read: the read's copy of the shop's task index is never stale", async () => {
+    const { tenant, headers } = await session();
+    const first = await ownTask(tenant, "first");
+    const one = await proposeReply(tenant, first, "one");
+    expect(ids((await list(headers, "state=open")).body.approvals)).toEqual([one.id]);
+    // a task made after that read, with a request of its own: the next read lists it too
+    const later = await ownTask(tenant, "later");
+    const two = await proposeReply(tenant, later, "two");
+    expect(ids((await list(headers, "state=open")).body.approvals).sort()).toEqual([one.id, two.id].sort());
+  });
+
   it("keeps an entry whose request never opened until it cannot be opening, lists nothing for it, then clears it", async () => {
     const { tenant, headers } = await session();
     const taskId = await ownTask(tenant);

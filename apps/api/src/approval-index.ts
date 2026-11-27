@@ -118,9 +118,24 @@ function readySync(kv: SyncKvStorage, tenant: string): boolean {
   return (kv.get<string[]>(indexKey(tenant)) ?? []).length === 0;
 }
 
+/// The tasks in each shop's index, parsed once per object and kept until the index is written again: every approvals read
+/// is bounded by it, and the index only grows, so parsing the whole list on each read cost more with every task. Keyed on
+/// the object's storage, one per object for its life. Every write of the index forgets it (`forgetIndexed`): the task
+/// object's `indexTask` and the wipe, its only writers.
+const indexedCache = new WeakMap<DurableObjectStorage, Map<string, Set<string>>>();
+
 /// The tasks in the shop's index, which bound what readers are shown.
-function indexedSync(kv: SyncKvStorage, tenant: string): Set<string> {
-  return new Set(kv.get<string[]>(indexKey(tenant)) ?? []);
+function indexedSync(storage: DurableObjectStorage, tenant: string): Set<string> {
+  let byTenant = indexedCache.get(storage);
+  if (!byTenant) indexedCache.set(storage, (byTenant = new Map()));
+  let ids = byTenant.get(tenant);
+  if (!ids) byTenant.set(tenant, (ids = new Set(storage.kv.get<string[]>(indexKey(tenant)) ?? [])));
+  return ids;
+}
+
+/// The shop's index was written: the next read parses it again.
+export function forgetIndexed(storage: DurableObjectStorage, tenant: string): void {
+  indexedCache.get(storage)?.delete(tenant);
 }
 
 function openSync(kv: SyncKvStorage, tenant: string, requestId: string, taskId: string, at: number): void {
@@ -197,7 +212,7 @@ export async function approvalIndexRoute(storage: DurableObjectStorage, request:
     const tenant = url.searchParams.get("tenant") ?? "";
     if (!isValidTenant(tenant)) return json({ error: "invalid_request" }, 400);
     if (route === "GET /approvals/open") {
-      const indexed = indexedSync(kv, tenant);
+      const indexed = indexedSync(storage, tenant);
       const prefix = openPrefix(tenant);
       const open: Located[] = [];
       for (const [key, taskId] of kv.list<string>({ prefix })) {
@@ -214,7 +229,7 @@ export async function approvalIndexRoute(storage: DurableObjectStorage, request:
           (after !== null && (!after.startsWith(prefix) || after.length > prefix.length + 17 + MAX_REQUEST_ID))) {
         return json({ error: "invalid_request" }, 400);
       }
-      const indexed = indexedSync(kv, tenant);
+      const indexed = indexedSync(storage, tenant);
       const settled: SettledEntry[] = [];
       let taken: string | null = null;
       let next: string | null = null;
@@ -234,7 +249,7 @@ export async function approvalIndexRoute(storage: DurableObjectStorage, request:
       const requestId = url.searchParams.get("request") ?? "";
       if (!isId(requestId, MAX_REQUEST_ID)) return json({ error: "invalid_request" }, 400);
       const entry = kv.get<Entry>(entryKey(tenant, requestId));
-      const taskId = entry !== undefined && indexedSync(kv, tenant).has(entry.taskId) ? entry.taskId : null;
+      const taskId = entry !== undefined && indexedSync(storage, tenant).has(entry.taskId) ? entry.taskId : null;
       return json({ ready: readySync(kv, tenant), taskId });
     }
     return json({ error: "not_found" }, 404);
@@ -335,6 +350,7 @@ export function readyOnFirstTask(kv: SyncKvStorage, tenant: string, indexBefore:
 /// Forgets the shop's whole lookup and its backfill's place, for the tenant deletion (tenant-object.ts, `tenantWipe`).
 /// The keys are listed whole before any is deleted, so no listing runs over rows being deleted under it.
 export function wipeApprovalIndex(storage: DurableObjectStorage, tenant: string): void {
+  forgetIndexed(storage, tenant);
   const kv = storage.kv;
   storage.transactionSync(() => {
     const doomed = [entryPrefix(tenant), openPrefix(tenant), donePrefix(tenant)]

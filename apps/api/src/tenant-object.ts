@@ -1,5 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
-import { approvalIndexRoute, readyOnFirstTask, stepBackfill, wipeApprovalIndex } from "./approval-index";
+import { approvalIndexRoute, forgetIndexed, readyOnFirstTask, stepBackfill, wipeApprovalIndex } from "./approval-index";
 import { artifactTenantRoute, wipeArtifactsTenant } from "./artifact-store";
 import { actorOr, auditPut, auditTenantRoute, wipeAuditTenant } from "./audit-log";
 import { readJsonBody } from "./body";
@@ -324,6 +324,8 @@ export class TenantObject extends DurableObject {
     if (!ids.includes(body.taskId)) {
       await this.ctx.storage.put({ [key]: [...ids, body.taskId],
         ...readyOnFirstTask(this.ctx.storage.kv, body.tenant, ids) });
+      // the approvals reads' parsed copy of the index is now old (approval-index.ts)
+      forgetIndexed(this.ctx.storage, body.tenant);
       // A new task is new on History and in Mission Control. The task object pings again once it is made, within the
       // same second, so the two ride together.
       this.feed.touch();
