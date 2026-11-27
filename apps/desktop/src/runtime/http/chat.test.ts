@@ -184,6 +184,32 @@ describe("a conversation made with New thread", () => {
     ]);
   });
 
+  it("keeps the conversation the main chat's first message made while the chat was opening, so the next one goes to it too", async () => {
+    let release = () => {};
+    const gate = new Promise<void>((done) => (release = done));
+    let holding = false;
+    const { api, req } = await opened({}, (path) => (holding && path === "/v1/tasks" ? gate : null));
+    // the shop's read is old enough that opening the chat reads it again, and that read is slow
+    await vi.advanceTimersByTimeAsync(20_000);
+    holding = true;
+    const opening = req("chat.open", { bot: "buddy" });
+    await vi.advanceTimersByTimeAsync(0);
+    // the person typed before the chat finished opening (found by item 102l-3's browser spec)
+    await req("chat.send", { bot: "buddy", text: "How were sales today?" });
+    release();
+    holding = false;
+    await opening;
+    await req("chat.send", { bot: "buddy", text: "And yesterday?" });
+    expect(posts(api)).toEqual([
+      [OWNER_A, { text: "How were sales today?" }],
+      [OWNER_A, { thread: chatId(1), text: "And yesterday?" }],
+    ]);
+    // opened again later, its next message starts another, as before
+    await req("chat.open", { bot: "buddy" });
+    await req("chat.send", { bot: "buddy", text: "New day" });
+    expect(posts(api)[2]).toEqual([OWNER_A, { text: "New day" }]);
+  });
+
   it("takes two messages sent at once one at a time: one conversation, each message posted once, in order", async () => {
     const { api, shops, req } = await opened();
     const row = await req("thread.create", { bot: "buddy", key: "k2" });

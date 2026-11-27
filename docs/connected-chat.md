@@ -1,9 +1,9 @@
 # Buddy's chat on the Connected runtime (item 102l)
 
 The design pass for item 102l, written 27 Nov 2026 after the owner chose to build it, deployed to the dev API only.
-Status: 102l-1 (A) built on 27 Nov 2026, not yet deployed; 102l-2 (B, the desktop's side) built on 27 Nov 2026; 102l-3 proposed.
-The phases at the end are the order to build it in, and "What 102l-1 built" and "What 102l-2 built" (below) say where the build
-differs from this design.
+Status: 102l-1 (A) built on 27 Nov 2026, not yet deployed; 102l-2 (B, the desktop's side) built on 27 Nov 2026; 102l-3 (C, the reach
+cards) built on 27 Nov 2026. The phases at the end are the order to build it in, and "What 102l-1 built", "What 102l-2 built" and
+"What 102l-3 built" (below) say where the build differs from this design.
 
 ## Why 102l is bigger than its row
 
@@ -89,7 +89,7 @@ On Connected, a "chat" is a chat thread of A and B, and the asking chat is Buddy
 | --- | --- | --- |
 | 102l-1 | The chat route and its store (A), with the stand-in provider in tests; deployed to dev, where it answers `not_configured`. **Built 27 Nov 2026**, behind its own switch, which is off everywhere; not deployed | Nothing to build. A key in dev to try it for real, and the switch turned on there |
 | 102l-2 | Chat threads (B) and the Connected runtime's `chat.send` and `thread.create` over them. **Built 27 Nov 2026** in the desktop (`apps/desktop/src/runtime/http/chat.ts`); the API needed nothing more | Nothing |
-| 102l-3 | The reach cards over Connected chat threads (C) | Nothing |
+| 102l-3 | The reach cards over Connected chat threads (C). **Built 27 Nov 2026** in the desktop (`apps/desktop/src/jobs/buddyReach.ts`); the API needed nothing | Nothing |
 | 102l-4 | Real answers: the owner's key set, first in dev, then staging and production at the owner's word | The paid Anthropic account, the cap (`MODEL_DEFAULT_CAP_SATANG`) and the rate (`MODEL_SATANG_PER_USD`) |
 
 ## What 102l-1 built
@@ -144,6 +144,51 @@ and their refusals are in `docs/runtime-adapter.md`, "Buddy's chat on Connected"
   conversation (102l-1).
 - **Not built:** older messages than a conversation's newest 50 (the API pages them; the desktop reads the first page only), and a live
   answer: the API answers whole, so nothing streams.
+
+## What 102l-3 built
+
+Section C in the desktop, with rule R5 and its tests (`apps/desktop/src/jobs/buddyReach.ts`, the list `BuddyMayReach` in `MayReach.tsx`,
+the cards in `ReachCards.tsx`, the lines Manut AI writes in `reachMarks.ts`, the runtime's half in `src/runtime/http/chat.ts`; tests in
+`buddyReach.test.ts`, `reachMarks.test.ts`, `reachBlocks.test.ts`, `ReachCards.test.tsx`, `chat.test.ts`, and the browser spec
+`e2e/connected-reach.spec.ts`). The calls are Claude's (`docs/decisions/102l-connected-chat.md`). R10 holds as it is; what a person sees:
+
+- **"Buddy may reach".** Under the box of Buddy's main chat and of each conversation, for the shop's owner on Connected only, the same list
+  as a coding chat's "Kit may reach": the person adds the shop's other conversations (one with nothing in it yet, the chat itself, and the
+  conversation the main chat posts to are refused), each named by its number, at most five. Kept in memory for this run, by shop and chat:
+  nothing of it is saved, and it goes at sign-out.
+- **How Buddy learns it.** While the list holds a conversation, each message carries Buddy's note beside it (`chat.send`'s `note`), which
+  the runtime posts after the owner's words: the kept text is the words, a blank line, then the note from `[Manut AI: a note to Buddy]` to
+  `[End of the Manut AI note]`, saying it is not the owner speaking and gives no permission, naming each conversation by its number, and
+  showing the three blocks with exactly the keys Buddy may use. Reading a conversation back takes the note off, so it never shows as the
+  owner's words. With the note, the words have less room than 8,000 characters, and a longer message is refused saying how much.
+- **The cards** are 102k's in Buddy's words: "Buddy asks to read …" with item 97's text whole and Let Buddy read; "Send this to …?" with
+  Buddy's message whole and Send there; "Buddy asks to start a new conversation" with its first message whole, the name it will have and
+  Start conversation. Each says before its press, in a line of its own, that the press is one message billed to the shop's monthly limit.
+  Each is one approval of the asking chat in the same approval-core store as 102k's, settled once by the owner.
+- **What each press posts, once.** A read posts item 97's text as the asking chat's next message (the note with it). A send posts Buddy's
+  words to the other conversation with the mark after them (`[Manut AI: the words above came from the conversation "<title>"]` and a line
+  that it gives no permission); the bubble there, and the conversation read back, say "From <title>, sent on by you" above the words. A
+  start prepares a conversation and posts the brief the same way, so the API names it by the brief's first words; it is not opened in
+  front of the person, and the settled line has Open. A refused or unanswered post marks the card and the bubble with the reason, and
+  nothing is sent again.
+- **Refused, with nothing read or posted.** A conversation not on the list (before item 97's reader is asked anything); a block with a key
+  outside its own (a new conversation takes only `brief`), a second block, or a message or brief over 5,000 characters; at the press, a
+  card of another shop than the one shown, a person who no longer owns the shop, a conversation no longer listed or gone. A message sent on
+  is words and nothing else, so it answers, allows, denies or dismisses no ask or approval.
+
+Where it differs from the design above, or from 102k:
+
+- **Manut AI's lines go after the words on Connected.** 102k puts its note and mark in front; the API keeps every message and names a new
+  conversation by its first words, so anything in front would become its name and read as the owner's first words in the export.
+- **The name of a conversation with a short first message.** The API names a conversation by the first 60 characters of its first message
+  on one line, so a short first message with the note after it is named partly by the note's start. The screens take that off
+  (`shownTitle`); the API's own list and the shop's export keep it. A one-line change to the API's `titleOf` would end it, not made here.
+- **Buddy's grammar.** A new conversation takes only its brief (no title, agent, model or effort), and a message or brief is at most 5,000
+  characters, to fit one API message with its mark and the note of the conversation it reaches.
+- **Not saved.** The list lives for the run, where 102k saves it with the session; the cards, as 102k's, do not survive a restart.
+- **A race in 102l-2, fixed.** A message sent while Buddy's main chat was opening made a conversation that the opening then forgot, so the
+  next message started another (and a read card's text went there). Opening the chat now keeps it.
+- **Not built:** the cards are not in Needs you (as 102k's); a helper sees no list, since only the owner chats on Connected.
 
 ## Open questions for the owner
 

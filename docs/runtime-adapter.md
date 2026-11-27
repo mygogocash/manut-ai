@@ -640,7 +640,9 @@ words in `src/threads/kind.ts`), the desktop's half of `docs/connected-chat.md`,
   main chat's first message makes a conversation, which is then listed with the others (`thread.added`), and its next messages go to it
   until the chat is opened again (a restart, a switch of shop, a reconnect), when the next message starts another: the chat the person
   sees then holds none of the earlier one, which stays in the list. Two messages sent at once go one after the other, so a message
-  sent while the first is making a conversation goes to that conversation, never to a second new one.
+  sent while the first is making a conversation goes to that conversation, never to a second new one. A message sent while the chat is
+  still opening (its `chat.open` waits for the shop's read) belongs to the chat being opened: the opening keeps the conversation it made
+  (item 102l-3, which found the race).
 - **Buddy's answer** is the turn's events, `turn.start`, the answer as a `message` (id `<conversation>/<message>`), `turn.end` with
   `done`, tagged with the conversation (`session`) for a conversation, and only once the API answered. A turn that started before the
   API let the message through would end Failed for a refusal (a Failed line, a sound, a notification), where a refused message is a
@@ -677,7 +679,16 @@ words in `src/threads/kind.ts`), the desktop's half of `docs/connected-chat.md`,
   still settle only through the decide route; nothing is deleted. Older messages than a conversation's newest 50 are not read yet.
   Buddy's main chat still shows the hint that Buddy has no model yet and a "Pick a model" button, as it did before this item: the
   runtime names no model (`models.options` lists none, and the API chooses Buddy's), and what the box should show for it is left for
-  later. The reach cards over conversations are item 102l-3.
+  later.
+- **The reach cards' lines** (item 102l-3, `docs/connected-chat.md`, "What 102l-3 built"; `src/jobs/reachMarks.ts`). `chat.send` takes
+  `note`, Buddy's note naming the conversations it may reach, which the store's reach cards put beside a message while the chat's list
+  holds one (`src/jobs/buddyReach.ts`). It is posted after the words and a blank line, so the API names a new conversation by the words;
+  anything but a whole note is refused `invalid_request` with nothing sent, and words that leave it no room inside 8,000 characters are
+  refused `text_too_long`, saying how many characters they may have. A message sent on from another conversation, and a new
+  conversation's first message from a Start card, come with their mark after the words. `thread.open` reads a conversation back as the
+  screens draw it: the note off, a sent-on mark turned into the one in front (`fromChatText`, as on this Mac), and the reach block of an
+  answer to a message that carried the note hidden (an answer that was only the block is left out). A conversation's name is shown without
+  the start of those lines after a short first message (`shownTitle`).
 - **Tests.** `chat.test.ts` (each op over the fake API: the session, the body, the turn, the conversation listed and opened, two at
   once, every refusal in words with one request and no turn, blank and too long, signed out, the store marking a refused message
   "Not sent", offline, a helper's shop, a task told from a conversation, the shop after the switcher moved, removal not offered, and

@@ -200,6 +200,8 @@ export class BuddyChat {
   /** The last message of each chat on its way, so the next one waits for it (`inTurn`). */
   private readonly turns = new WeakMap<object, Promise<unknown>>();
   private made = 0;
+  /** How many messages Buddy's main chat has sent this run, so opening it can tell one sent while it was opening (`openingMark`). */
+  private mainSent = 0;
 
   constructor(private readonly link: ChatLink) {}
 
@@ -208,9 +210,20 @@ export class BuddyChat {
     return typeof id === "string" && this.convs.has(id);
   }
 
+  /** Taken when `chat.open` of Buddy's main chat starts, and handed back to `opened` once the shop's read it waits for is done. */
+  openingMark(): number {
+    return this.mainSent;
+  }
+
   /** Buddy's main chat was opened, for the shop the switcher shows now: its next message starts a new conversation there, as the chat
-   *  the person sees holds none of an earlier one (its earlier conversation is listed with the others). */
-  opened(): void {
+   *  the person sees holds none of an earlier one (its earlier conversation is listed with the others). `mark` (`openingMark`, taken
+   *  when the opening started): a message the person sent while the chat was opening already went, or is going, to a conversation of
+   *  the chat being opened, which goes on with it; starting another then would split what they wrote in two (item 102l-3 found it). */
+  opened(mark?: number): void {
+    if (mark !== undefined && mark !== this.mainSent && this.main) {
+      this.main.opened = true;
+      return;
+    }
     this.main = { shop: this.link.viewing(), api: null, opened: true };
   }
 
@@ -231,6 +244,7 @@ export class BuddyChat {
     if (p.note !== undefined && !isBuddyNote(p.note)) throw new OpError("invalid_request", t("rt.chat.refused"));
     const note = p.note === undefined ? null : p.note;
     const text = this.words(p.text, note);
+    if (target.main) this.mainSent += 1;
     return this.inTurn(target.main ?? target.conv, () => this.post(shop, target, note === null ? text : withBuddyNote(text, note)));
   }
 

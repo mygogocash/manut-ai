@@ -573,7 +573,9 @@ the screens are built on tested ground.
   threads can be read through item 97 and nothing more. When `apps/api` lets a chat send and open a thread, the cards of
   R10 work there too, each still an approval settled once. Needs the owner (see the questions). The owner chose to build
   it on 27 Nov (dev only); its design is `docs/connected-chat.md`: Buddy's chat on the owner's session first, chat
-  threads that are not tasks, then the cards.
+  threads that are not tasks, then the cards. The cards were built as 102l-3 on 27 Nov 2026 (`src/jobs/buddyReach.ts`, reusing
+  102k's blocks, list, asks and cards): "Buddy may reach" under the box of Buddy's main chat and each conversation, each press one
+  message to the API's chat, billed to the shop and said so on the card (`docs/connected-chat.md`, "What 102l-3 built").
 - **Item 103** exposes these verbs as MCP tools under the same rules; its own design decides who may connect.
 
 ## What it does not do
