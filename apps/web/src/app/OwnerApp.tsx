@@ -1,5 +1,5 @@
 import type { OptionEffect } from "@manut/approval-core";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { ApiError, useApiSetup, type PilotApi, type WebShop } from "../api";
 import { SHOP_TIME_ZONE } from "../format";
 import { joinStrings } from "../join/strings";
@@ -132,6 +132,16 @@ export function OwnerApp() {
     window.addEventListener("hashchange", take);
     return () => window.removeEventListener("hashchange", take);
   }, []);
+  // Reads who is signed in and what that opens. One function for an `api`, so the effects that start it follow the api
+  // alone.
+  const start = useCallback(async (): Promise<void> => {
+    const next = await openSession(api);
+    setPhase(next);
+    if (next.name !== "in") {
+      setNeeds(null);
+      setReadAt(null);
+    }
+  }, [api]);
   const flow = useCodeSignIn(js, {
     api,
     exchange: (address, code) => api.webSignIn({ email: address, code }),
@@ -143,25 +153,19 @@ export function OwnerApp() {
     document.title = s.documentTitle;
   }, [s]);
 
-  async function start(): Promise<void> {
-    const next = await openSession(api);
-    setPhase(next);
-    if (next.name !== "in") {
-      setNeeds(null);
-      setReadAt(null);
-    }
-  }
-
   useEffect(() => {
     // Opening the app reads who is signed in once; everything after follows from what it said.
     void start();
-  }, [api]);
+  }, [start]);
 
-  // Opened offline: try again by itself once the phone says it is back online.
+  // Opened offline: try again by itself once the phone says it is back online. Only coming back online starts it; the
+  // phase is read as it stands then, without the effect following it.
+  const phaseNow = useRef(phase);
+  phaseNow.current = phase;
   useEffect(() => {
-    if (online && phase.name === "unreachable" && phase.offline) void start();
-    // Only coming back online starts it; the phase it reads is the one this render has.
-  }, [online]);
+    const p = phaseNow.current;
+    if (online && p.name === "unreachable" && p.offline) void start();
+  }, [online, start]);
 
   const shops = phase.name === "in" ? phase.shops : null;
 
@@ -194,21 +198,23 @@ export function OwnerApp() {
 
   // Read on signing in, when the shops change, when the phone comes back online, when the app comes back into view, and
   // every minute while it is in view.
+  // the newest `read`, which reads the shops this render has; the effect follows the shops and being online
+  const readNow = useRef(read);
+  readNow.current = read;
   useEffect(() => {
     if (!shops || !online) return;
-    void read();
+    void readNow.current();
     const timer = setInterval(() => {
-      if (document.visibilityState !== "hidden") void read();
+      if (document.visibilityState !== "hidden") void readNow.current();
     }, REFRESH_MS);
     const visible = () => {
-      if (document.visibilityState === "visible") void read();
+      if (document.visibilityState === "visible") void readNow.current();
     };
     document.addEventListener("visibilitychange", visible);
     return () => {
       clearInterval(timer);
       document.removeEventListener("visibilitychange", visible);
     };
-    // `read` reads the shops it closes over, which this effect follows.
   }, [shops, online]);
 
   // Leaving Needs you clears what was answered here; its outcomes are in Answered lately by then.

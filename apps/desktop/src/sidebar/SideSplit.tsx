@@ -44,7 +44,8 @@ type Sec = RefObject<HTMLElement | null>;
 /** The two regions' styles for the saved share (none in auto) and the handle's actions. */
 export function useSideSplit(bots: Sec, terms: Sec) {
   const [share, setShare] = useState<number | null>(load);
-  const heights = () => [bots.current?.getBoundingClientRect().height ?? 0, terms.current?.getBoundingClientRect().height ?? 0] as const;
+  // read from the two regions as they stand when asked: the refs are the same objects for the hook's life
+  const heights = useCallback(() => [bots.current?.getBoundingClientRect().height ?? 0, terms.current?.getBoundingClientRect().height ?? 0] as const, [bots, terms]);
   const onDrag = useCallback(
     (e: PointerEvent<HTMLElement>) => {
       if (e.button !== 0) return;
@@ -67,7 +68,7 @@ export function useSideSplit(bots: Sec, terms: Sec) {
       addEventListener("pointermove", move);
       addEventListener("pointerup", up);
     },
-    [],
+    [heights],
   );
   const reset = useCallback(() => {
     save(null);
@@ -81,7 +82,7 @@ export function useSideSplit(bots: Sec, terms: Sec) {
     const next = clampSplit(hb + ht, hb + d);
     save(next);
     setShare(next);
-  }, []);
+  }, [heights]);
   const style = (grow: number): CSSProperties => ({ flex: `${grow} 1 0px`, minHeight: SPLIT_MIN, maxHeight: "none" });
   return {
     share,

@@ -100,6 +100,7 @@ export function Timeline({
   const lastSent = [...items].reverse().find((i) => i.kind === "user" && (!i.held || i.autoSteer) && !i.error && !i.steerUnknown)?.id;
   // the way back: the Jump to bottom pill and the pinned own message (TimelineJump.tsx)
   const nav = useTimelineNav(ref, items, bot.name, pinned);
+  const { measure } = nav;
   const keptFiles =
     lastUserAt >= 0 && items.slice(lastUserAt + 1).some((i) => i.kind === "activity" && i.turn.steps.some((st) => st.diff?.length));
 
@@ -109,8 +110,8 @@ export function Timeline({
     if (!el) return;
     if (lastBot.current !== bot.name || pinned.current) el.scrollTop = el.scrollHeight;
     lastBot.current = bot.name;
-    nav.measure();
-  }, [bot.name, items, writing, typing, nav.measure]);
+    measure();
+  }, [bot.name, items, writing, typing, measure]);
 
   // Files the bot sent load after the row is drawn and make it taller: stay at the bottom if pinned.
   useEffect(() => {
