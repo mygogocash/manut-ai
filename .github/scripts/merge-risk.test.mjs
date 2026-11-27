@@ -68,7 +68,7 @@ describe("versions", () => {
 
 describe("documentation", () => {
   it("is low for Markdown anywhere, docs text and pictures under docs/assets", () => {
-    assert.equal(risk([{ path: "docs/plan.md", old: "a", new: "b" }, { path: "README.md", old: "a", new: "b" },
+    assert.equal(risk([{ path: "docs/code-editor.md", old: "a", new: "b" }, { path: "README.md", old: "a", new: "b" },
       { path: "docs/notes.txt", old: "a", new: "b" }, { status: "A", path: "docs/assets/shot.png", new: "" },
       { status: "A", path: "docs/assets/photo.JPG", new: "" }]), "low");
   });
@@ -85,6 +85,15 @@ describe("documentation", () => {
       "docs/threat-model.md", "SECURITY.md", "docs/security/reads.md", "docs/privacy.md"]) {
       assert.equal(risk([{ path, old: "a", new: "b" }]), "review", path);
     }
+  });
+
+  it("is review for the plan, the handoff and the decisions, which agents read as their rules", () => {
+    for (const path of ["docs/plan.md", "docs/handoff.md", "docs/decisions/139-omp-asks.md", "docs/decisions/README.md"]) {
+      assert.equal(risk([{ path, old: "a", new: "b" }]), "review", path);
+      assert.match(why([{ path, old: "a", new: "b" }]), /the plan, the handoff or a decision/);
+    }
+    // A doc beside them that agents do not read as rules stays low.
+    assert.equal(risk([{ path: "docs/plan-notes.md", old: "a", new: "b" }]), "low");
   });
 
   it("is review for CI, the classifier itself and the agents' rules, whatever the change", () => {
@@ -307,6 +316,15 @@ describe("a declared refactor", () => {
       "apps/desktop/src-tauri/tauri.conf.json", "apps/desktop/src-tauri/tauri.appstore.conf.json"]) {
       assert.equal(risk([{ path, old: "a", new: "b" }], REFACTOR), "review", path);
     }
+  });
+
+  it("is review for the approval code, even when declared a refactor", () => {
+    for (const path of ["packages/approval-core/src/index.ts", "packages/approval-core/test/rules.test.ts", "apps/api/src/approvals.ts",
+      "apps/api/src/approval-index.ts", "apps/api/src/approval-link.ts"]) {
+      assert.equal(risk([{ path, old: "export {};\n", new: "export {};\n// moved\n" }], REFACTOR), "review", path);
+    }
+    // Other API source under the same declaration still may merge.
+    assert.equal(risk([{ path: "apps/api/src/chat.ts", old: "export {};\n", new: "export {};\n// moved\n" }], REFACTOR), "low");
   });
 
   it("is review for a file type it cannot classify, even when declared", () => {

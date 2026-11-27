@@ -82,8 +82,8 @@ list names only.
   `mktemp -d` and use `git commit -F <file>`.
 - End each message with `Co-Authored-By:` and the model you are, for example
   `Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>`.
-- When those checks are green, merge the lead's branch in (`git merge --no-edit feat/continue-pilot-week-1`, unless
-  your brief names another), so CI checks the very commit the lead will merge, and run your tests again if the merge
+- When those checks are green, merge the lead's branch in (`git fetch origin && git merge --no-edit origin/pilot/week-1`,
+  since the lead pushes each merge there, unless your brief names another), so CI checks the very commit the lead will merge, and run your tests again if the merge
   brought anything in. Then push your branch: `git push -u origin <your branch>`. CI runs on every push of a `feat/`,
   `fix/`, `refactor/`, `test/`, `docs/`, `ci/` or `chore/` branch, measured from the newest green `pilot/week-1` commit
   your branch holds.

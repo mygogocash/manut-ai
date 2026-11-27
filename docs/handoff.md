@@ -347,6 +347,19 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    app-crate builds (30 GB) and incremental cache were cleared. Then 102l-5 (`feat/chat-lines-apart`) started as a helper in
    its own `cc-item…` worktree, beside a sixth security read over everything merged since the fifth (26 Nov, 14:10). 108b
    stays proposed: it waits for the owner's answers to item 108's nine questions (`docs/multi-machine.md`).
+   Then the owner set the goal: every feature not done yet, macOS first, then iOS, and Paradev (`ParadevAI/Paradev`, MIT)
+   as a resource for the code mode (`docs/decisions/2026-11-27-macos-then-ios.md`). So 108b started after all
+   (`feat/machine-levels`, on the recommended answers), with item 138, a study of Paradev for the code mode
+   (`docs/paradev-parity`), whose rows from 139 come next. iOS follows the macOS items, design first. The merge scripts
+   now take the lead's worktree in `LEAD_WORKTREE` (the T3 folder they named is gone).
+   The SIXTH SECURITY READ (findings only, over everything merged since the fifth, 26 Nov 13:34 to 27 Nov 22:19) found no
+   critical, one high, three medium and seven low; its write-up was kept outside the repository and each fix's commit says
+   what was wrong. The high: oh-my-pi lanes and chats ran every tool with no card (omp's own default is `yolo`), item 139.
+   The rest are items 140 to 144. Found sound: item 103's door, the Tailscale road but two lows, the phone's push, and the
+   landing of helper patches.
+   Item 144 (the lead's tools) merged on 28 Nov. At about 02:30 on 28 Nov the account reached its five-hour limit with
+   five helpers mid-work (102l-5, 108b, 138, 139, 140; only 102l-5 had commits). It reset at 02:50, and 102l-5, 139 and
+   138 were sent on in their own threads; 140 and 108b wait for a slot, as five heavy helpers at once reached the limit.
    The dev relay is on with its push key pair as dev secrets, deployed to dev 27 Nov; the owner's try on an iPhone is left.
    Two Rust tests that raced under load (the MCP relay's round trip, the Grok account check) now wait for their answers, and
    the 16 hook-dependency warnings `pnpm lint` found are settled. Fonts stay 99, the owner's. From 27 Nov the owner asked for English first: new words are English, copied into ja, ko and zh. Needs the owner from 101b: Grok signed in and `permission_mode = "ask"`
@@ -630,8 +643,9 @@ Every switch that turns a built part on, and what each needs from the owner, is 
 
 - **Manut AI on more than one machine (item 108, `docs/multi-machine.md`, "Open questions for the owner"):** nine
   questions, each with a recommendation (a local-network road, the relay's cost, Macs only, a terminal from afar, others'
-  devices, pairing from afar, when updates install, agents reaching other machines, and the consent words). Its phases
-  108a to 108j stay proposed until the owner answers; 108b's levels table follows questions 4 to 6.
+  devices, pairing from afar, when updates install, agents reaching other machines, and the consent words). On the
+  owner's goal of 27 Nov the phases are built on the recommended answers, switched off; say if any answer should differ.
+  The consent words, a second Mac, a real phone and any new dependency stay the owner's.
 - **Confirm the console behind Access:** open https://dev.manut.xyz/ops, log in with the emailed code, and
   paste the operator key (`security find-generic-password -s manut-dev-operator-key -w | pbcopy`). The shop
   list should load. That proves the admin gate gets `ctx.access` on the deployed front door.

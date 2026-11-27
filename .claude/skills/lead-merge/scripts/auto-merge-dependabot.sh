@@ -1,6 +1,6 @@
 #!/bin/bash
 # Merges Dependabot's low-risk pull requests into pilot/week-1 once CI is green on their head; lists the others.
-# Usage: auto-merge-dependabot.sh [--yes] [--wait]
+# Usage: LEAD_WORKTREE=<the lead's worktree> auto-merge-dependabot.sh [--yes] [--wait]
 #
 # Why: the owner agreed on 26 Nov 2026 that minor and patch dependency bumps merge on a green CI run. Dependabot's
 # version updates target pilot/week-1 (item 127). For each open Dependabot pull request into pilot/week-1 it fetches the
@@ -24,7 +24,9 @@ done
 here=$(cd "$(dirname "$0")" && pwd)
 repo=mygogocash/manut-ai
 base=pilot/week-1
-lead="$HOME/.t3/worktrees/manut-ai/t3-0c461873-e8dd6bc2489b4766"
+# The lead's worktree, named each time (finish-item.sh says why): only its copy of the classifier is trusted.
+lead=${LEAD_WORKTREE:-}
+[ -n "$lead" ] && [ -d "$lead" ] || { echo "set LEAD_WORKTREE to the lead's worktree, whose classifier is the one trusted"; exit 1; }
 clone="$HOME/Developer/manut-ai"
 classifier="$lead/.github/scripts/merge-risk.mjs"
 if [ -z "${GH_TOKEN:-}" ]; then token=$(gh auth token --user KunanonJ 2>/dev/null) && [ -n "$token" ] && export GH_TOKEN="$token"; fi

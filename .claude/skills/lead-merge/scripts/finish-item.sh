@@ -1,6 +1,6 @@
 #!/bin/bash
 # Merges a checked item branch into the lead's worktree and clears the item's worktree and branches away.
-# Usage: finish-item.sh [--ci] <item worktree> <merge message file>
+# Usage: LEAD_WORKTREE=<the lead's worktree> finish-item.sh [--ci] <item worktree> <merge message file>
 #
 # With --ci (the usual way since item 126, 26 Nov 2026): the helper has merged the lead's branch into the item's and
 # pushed it, and CI on GitHub checked that commit. This script requires the item's head here to be the branch's head on
@@ -21,10 +21,27 @@ if [ "${1:-}" = "--ci" ]; then ci=1; shift; fi
 wt=${1:?usage: finish-item.sh [--ci] <item worktree> <merge message file>}
 msg=${2:?merge message file}
 here=$(cd "$(dirname "$0")" && pwd)
-lead="$HOME/.t3/worktrees/manut-ai/t3-0c461873-e8dd6bc2489b4766"
+# The lead's worktree is named each time, in LEAD_WORKTREE. Until 27 Nov 2026 it was one fixed T3 Code folder written
+# here; since then each lead session works in a worktree of its own (a Paradev workspace, say), and a default such as
+# "the folder this runs from" would merge into whatever branch that folder had checked out.
+lead=${LEAD_WORKTREE:-}
+[ -n "$lead" ] && [ -d "$lead" ] || { echo "set LEAD_WORKTREE to the lead's worktree, the one that pushes HEAD:pilot/week-1"; exit 1; }
 repo="$HOME/Developer/manut-ai"
+# This script ends by removing the item's worktree and branch, so it takes only a helper's worktree that start-item.sh
+# made, and never the lead's own: two lead sessions once shared one Paradev worktree, and removing it would have taken
+# the other's work with it.
+items=$(cd "$HOME/.t3/worktrees/manut-ai" 2>/dev/null && pwd -P) || items=""
+[ "$(cd "$wt" && pwd -P)" != "$(cd "$lead" && pwd -P)" ] || { echo "the item's worktree is the lead's: nothing merged or removed"; exit 1; }
+case "$(cd "$wt" && pwd -P)" in
+  "$items"/cc-item*) ;;
+  *) echo "$wt is not a helper's worktree from start-item.sh (~/.t3/worktrees/manut-ai/cc-item…): nothing merged or removed"; exit 1 ;;
+esac
 branch=$(git -C "$wt" branch --show-current)
 lead_branch=$(git -C "$lead" branch --show-current)
+# The branch is deleted on GitHub at the end, so it must be an item's own, never main or a pilot branch (the sixth
+# security read, 27 Nov 2026, L6; auto-merge.sh has the same guard).
+[ -n "$branch" ] || { echo "the item's worktree is not on a branch: nothing merged or removed"; exit 1; }
+case "$branch" in main|pilot/*) echo "$branch is not an item branch: nothing merged or removed"; exit 1 ;; esac
 
 [ -z "$(git -C "$wt" status --porcelain)" ] || { echo "the item's worktree has uncommitted files"; exit 1; }
 [ -z "$(git -C "$lead" status --porcelain)" ] || { echo "the lead's worktree has uncommitted files"; exit 1; }

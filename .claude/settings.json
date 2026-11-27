@@ -31,7 +31,19 @@
       "Bash(pnpm exec wrangler deploy --env prod*)",
       "Bash(pnpm exec wrangler deploy --env staging*)",
       "Bash(npx wrangler deploy --env prod*)",
-      "Bash(npx wrangler deploy --env staging*)"
+      "Bash(npx wrangler deploy --env staging*)",
+      "Bash(git push *:main*)",
+      "Bash(git push *:refs/heads/main*)",
+      "Bash(git push *--tags*)",
+      "Bash(git push *refs/tags/*)",
+      "Bash(git push * desktop-v*)",
+      "Bash(*wrangler deploy*--env prod*)",
+      "Bash(*wrangler deploy*--env=prod*)",
+      "Bash(*wrangler deploy*--env staging*)",
+      "Bash(*wrangler deploy*--env=staging*)",
+      "Bash(*wrangler deploy* -e prod*)",
+      "Bash(*wrangler deploy* -e staging*)",
+      "Bash(gh api *pulls/*/merge*)"
     ]
   }
 }
