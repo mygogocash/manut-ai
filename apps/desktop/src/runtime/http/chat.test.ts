@@ -15,6 +15,7 @@ import { answerText, CHAT_MESSAGES_PATH, decodeChatPage, decodeChatThreads, deco
 import { HttpHost } from "./host";
 import { HttpRuntime } from "./index";
 import { ApiSession } from "./session";
+import type { FetchLike } from "./shell";
 import { chatId, fakeApi, keptPlain, memoryCacheStore, memoryVault, ORIGIN, serveShops, SHOP_A, SHOP_B, shopToken, storedSession, T0, useMicrotaskCrypto, workerTaskJson, type FakeAnswer, type FakeApi, type ShopWorkJson } from "./testkit";
 
 const NOW = T0 + 600_000;
@@ -26,12 +27,22 @@ const OWNER_C = shopToken(SHOP_C.id, "owner");
 
 type Req = (op: string, params?: unknown) => Promise<any>;
 
-async function opened(work: Record<string, Partial<ShopWorkJson>> = {}) {
+/** The runtime over the fake API. `hold` keeps back the answer to a request to `path` until the promise it gives settles: the API
+ *  answered it when it came, and the answer is on its way. */
+async function opened(work: Record<string, Partial<ShopWorkJson>> = {}, hold?: (path: string) => Promise<void> | null) {
   const api = fakeApi();
   const shops = serveShops(api, [SHOP_A, SHOP_B, SHOP_C], {}, () => NOW, work);
   const disk = memoryCacheStore();
   const cache = new ShopCache(disk);
-  const session = new ApiSession({ origin: ORIGIN, fetch: api.fetch, vault: memoryVault(storedSession(NOW)), onEnd: () => cache.clear() });
+  const fetch: FetchLike = async (url, init) => {
+    const answered = api.fetch(url, init);
+    const wait = hold?.(new URL(url).pathname);
+    if (!wait) return answered;
+    const res = await answered;
+    await wait;
+    return res;
+  };
+  const session = new ApiSession({ origin: ORIGIN, fetch, vault: memoryVault(storedSession(NOW)), onEnd: () => cache.clear() });
   const host = new HttpHost({ session, cache });
   const rt = new HttpRuntime(host);
   const events: BridgeEvent[] = [];
@@ -150,6 +161,25 @@ describe("a conversation made with New thread", () => {
       ["assistant", answerTo("Only Monday and Thursday")],
     ]);
     expect(api.to("GET", `/v1/chat/threads/${chatId(1)}`).map((c) => c.bearer)).toEqual([OWNER_A]);
+  });
+
+  it("keeps the conversation its first message made while a read of the list from before it was on its way", async () => {
+    let release = () => {};
+    const gate = new Promise<void>((done) => (release = done));
+    const { api, req } = await opened({}, (path) => (path === "/v1/chat/threads" ? gate : null));
+    const row = await req("thread.create", { bot: "buddy", key: "k5" });
+    const listing = req("thread.list", { bot: "buddy" });
+    await vi.advanceTimersByTimeAsync(0);
+    // the API answered the list before the conversation was made, and that answer is still on its way
+    expect(api.to("GET", "/v1/chat/threads")).toHaveLength(1);
+    await req("chat.send", { bot: "buddy", session: row.thread, text: "First" });
+    release();
+    expect(chatRows((await listing).threads).map((r) => [r.thread, r.message_count])).toEqual([[row.thread, 2]]);
+    await req("chat.send", { bot: "buddy", session: row.thread, text: "Second" });
+    expect(posts(api)).toEqual([
+      [OWNER_A, { text: "First" }],
+      [OWNER_A, { thread: chatId(1), text: "Second" }],
+    ]);
   });
 
   it("takes two messages sent at once one at a time: one conversation, each message posted once, in order", async () => {

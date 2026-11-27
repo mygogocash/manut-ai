@@ -246,6 +246,9 @@ export class BuddyChat {
     } catch {
       return [];
     }
+    // The conversations the API had made before this read went out: only these can be gone from what it lists. One a message made
+    // while the read was on its way may be missing from an answer the API gave before it, and is kept.
+    const before = new Set([...this.convs.values()].filter((c) => c.shop === shop && c.api !== null).map((c) => c.api));
     const answer = await this.link.read(shop, CHAT_THREADS_PATH);
     const views = answer.kind === "ok" ? decodeChatThreads(answer.json) : null;
     if (answer.kind === "left") {
@@ -256,8 +259,12 @@ export class BuddyChat {
       const listed = new Set(views.map((v) => v.id));
       // one removed elsewhere is gone here too; a prepared one has nothing to be listed yet
       // (a Map's own iteration goes on safely past an entry deleted under it)
-      for (const conv of this.convs.values()) if (conv.shop === shop && conv.api !== null && !listed.has(conv.api)) this.drop(conv);
-      for (const view of views) this.remember(shop, view);
+      for (const conv of this.convs.values()) if (conv.shop === shop && conv.api !== null && before.has(conv.api) && !listed.has(conv.api)) this.drop(conv);
+      for (const view of views) {
+        // what a message answered while the read was on its way said of a conversation is newer than the read, and stays
+        const known = this.convs.get(this.byApi.get(view.id) ?? view.id);
+        if (!known || known.updatedAt <= view.updatedAt) this.remember(shop, view);
+      }
     }
     return [...this.convs.values()].filter((c) => c.shop === shop).map(rowOf);
   }
