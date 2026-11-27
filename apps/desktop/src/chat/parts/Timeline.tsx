@@ -16,6 +16,7 @@ export interface SessionQueue {
 }
 import { quoteFor } from "./answers";
 import { SystemDetail } from "./SystemDetail";
+import { ErrorBoundary } from "../../ui/ErrorBoundary";
 import { LiveFace, TypingRow, awaitingFirstToken } from "./Typing";
 import { liveFaceRow } from "./liveFace";
 import { ActivityFallback, CardFallback, RoutineFallback } from "./fallbacks";
@@ -312,7 +313,10 @@ export function Timeline({
             <div
               className={`row row-${it.kind}${liveLine ? " live-line" : ""}${fresh.has(it.id) && !liveLine ? (it.kind === "approval" || it.kind === "clarify" ? " arrived-ask" : " mo-rise") : ""}`} data-kind={it.kind} {...(it.kind === "user" ? { "data-item": it.id } : {})}>
               {liveFace && <LiveFace bot={bot.name} face={face} />}
-              {render(it, label ? undefined : items[i - 1], i)}
+              {/* one row that cannot be drawn says so in its place; the rest of the chat, and the app, stay */}
+              <ErrorBoundary source="chat" fallback={(_e, retry) => <RowFailed retry={retry} />}>
+                {render(it, label ? undefined : items[i - 1], i)}
+              </ErrorBoundary>
             </div>
           </Fragment>
         );
@@ -320,6 +324,18 @@ export function Timeline({
       {!slotId && writingRow}
       {!slotId && !aboveLine && typingRow}
       <JumpPill nav={nav} />
+    </div>
+  );
+}
+
+/** A chat row whose drawing threw: one quiet line in its place, with Try again for once what it read has changed. */
+function RowFailed({ retry }: { retry: () => void }) {
+  return (
+    <div className="line sys" data-testid="row-failed" role="alert">
+      <span className="line-t">{t("tl.rowFailed")}</span>
+      <button type="button" className="sys-detail-toggle" onClick={retry}>
+        {t("failed.retry")}
+      </button>
     </div>
   );
 }

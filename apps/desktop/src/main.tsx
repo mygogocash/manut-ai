@@ -10,6 +10,9 @@ import { resolveTheme } from "./app/theme";
 import { readTheme } from "./state/store";
 import { learnThisHost } from "./terminal/host";
 import { watchPageErrors } from "./report/errors";
+import { ErrorBoundary } from "./ui/ErrorBoundary";
+import { LoadFailed } from "./pages/MenuPage";
+import { maskSecrets } from "./lib/secrets";
 
 // The theme is set before <App> mounts, so the first paint is already in the person's theme.
 document.documentElement.dataset.theme = resolveTheme(readTheme());
@@ -38,4 +41,10 @@ startMotionDriver();
 // No gate in front of the app: Oh My Hermes waited here for its bridge process (and offered to install Hermes).
 // Manut AI's runtime is reached through `src/runtime`, and the default one lives in this page, so there is nothing
 // to wait for. A runtime that can be away says so through the store's `conn` state, which the chat already shows.
-createRoot(document.getElementById("root")!).render(<App />);
+// A render that throws past every part's own boundary shows the page's "did not load" banner instead of a blank window; Try
+// again draws the app once more.
+createRoot(document.getElementById("root")!).render(
+  <ErrorBoundary fallback={(e, retry) => <LoadFailed details={maskSecrets(e.message || e.name)} onRetry={retry} testId="app-failed" />}>
+    <App />
+  </ErrorBoundary>,
+);

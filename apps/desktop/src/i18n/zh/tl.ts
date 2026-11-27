@@ -9,4 +9,5 @@ export const tl: Record<keyof typeof en, string> = {
   "tl.jumpNew": "{n} 条新消息",
   "tl.pinnedOwn": "你的消息：{text}",
   "tl.sayHi": "和 {bot} 打个招呼吧",
+  "tl.rowFailed": "This part of the chat could not be shown.",
 };

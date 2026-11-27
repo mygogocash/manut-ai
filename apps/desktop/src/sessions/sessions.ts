@@ -532,6 +532,18 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     const careful = !!r.workflow || (!!r.helperOf && !!rec(r.helperOf.lead)?.workflow);
     const ctx = { chat: key, root: workDir(r), project: r.cwd, home: state.home, branch: state.live[id]?.branch, ...(careful ? { careful: true } : {}) };
     const card = { id: `approval-${ask.request_id}`, request_id: ask.request_id };
+    // the ask was added quietly, as Kit means to answer it: one Kit leaves, or whose answer the runtime did not take, is the
+    // person's again, and they are told of it as of any ask, so the agent never waits on a card nobody heard of
+    const tellIfOpen = () => {
+      const items = store().getState().chats[key]?.items ?? [];
+      const item = items.find((i): i is ApprovalItem => i.kind === "approval" && i.request_id === ask.request_id);
+      if (item && askOpen(items, item)) notify?.({ ...ev, bot: key } as unknown as BridgeEvent);
+    };
+    const settle = async (choice: Parameters<typeof settleApproval>[3]) => {
+      const why = await settleApproval(store(), key, card, choice).catch((e: unknown) => errText(e));
+      if (why !== null) tellIfOpen();
+      return why;
+    };
     if (savesAlone(ask, ctx)) {
       // a commit or a push the dial would let go alone: what it saves is read first (item 117), and a key there, or a read not
       // made whole and in time, leaves it to the person, who is then told of it as of any ask
@@ -541,14 +553,12 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
         // code switched since the last read is the one a push that names no branch sends
         const [saved, branch] = await Promise.all([readSaved(() => (host.laneKeys ? host.laneKeys(dir) : Promise.resolve(null))), branchNow(dir)]);
         const a = kitAnswer(ask, { ...ctx, branch }, Date.now(), saved);
-        if (a) return settleApproval(store(), key, card, a.choice);
-        const items = store().getState().chats[key]?.items ?? [];
-        const item = items.find((i): i is ApprovalItem => i.kind === "approval" && i.request_id === ask.request_id);
-        if (item && askOpen(items, item)) notify?.({ ...ev, bot: key } as unknown as BridgeEvent);
+        if (a) return settle(a.choice);
+        tellIfOpen();
       };
     }
     const a = kitAnswer(ask, ctx);
-    return a ? () => settleApproval(store(), key, card, a.choice) : null;
+    return a ? () => settle(a.choice) : null;
   };
 
   /** The chat's program is gone (it exited, or manut stopped it): a turn the chat still shows ends with it. The
