@@ -728,9 +728,13 @@ Every switch that turns a built part on, and what each needs from the owner, is 
 - `apps/desktop/e2e/term-link.spec.ts:202` ("a link to a terminal it does not have says so over an open terminal
   too"): failed once and passed on its retry in item 102h's two runs on 27 Nov (and showed in several runs before).
   If it fails twice in one run, fix it.
-- Rust `a_grok_chat_reads_its_accounts_own_home_for_its_asks` (item 101d): failed once in item 102g's first whole
-  Rust run on this Mac and passed alone and on the next run; it waits a fixed 300 ms for a stand-in process. If it fails
-  again, wait on the process instead of the clock.
+- Rust `a_grok_chat_reads_its_accounts_own_home_for_its_asks` (item 101d): failed in three loaded runs by 27 Nov and
+  passed alone each time; it slept a fixed 300 ms for a stand-in process. Fixed 27 Nov: it waits for the process's file.
+- Rust `threads_mcp::door::tests::a_call_goes_through_the_real_socket_and_back` (item 103): failed once on CI's macOS
+  runner on 27 Nov with an empty answer. Found and fixed the same day: the test ended its input right after the call,
+  and the end of input closes every call still open, by design, so the call was closed unanswered whenever its thread
+  had opened its connection first. The test now keeps its input open until the answer has come (`WaitsForAnswers`), as a
+  real program does; the relay's own round-trip test had the same race and has the same fix.
 - `apps/api` `test/task-companies.test.ts` ("non-members cannot wait on company tasks...", "deleting a company
   releases its tasks...") and `test/auth-email.test.ts` ("gives Apple's session in every way..."): timed out at 5 s in
   item 104's run 45873764860 (with a `rows.filter is not a function` uncaught in workerd), a branch that changes no API

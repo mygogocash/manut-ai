@@ -323,6 +323,41 @@ pub fn relay_main() -> i32 {
     0
 }
 
+/// A calling program's side of the relay's input, for tests: its lines, then held open until `answered` says its answers
+/// have come (ten seconds at most), then closed, as a real program keeps its end open while it waits. An input that ended
+/// at once raced the call it had just made: the end of input closes every call still open, so whenever the call's thread
+/// had opened its connection first, the call was closed unanswered (seen on a loaded macOS runner, 27 Nov 2026).
+#[cfg(test)]
+pub(crate) struct WaitsForAnswers<F: FnMut() -> bool> {
+    lines: std::io::Cursor<Vec<u8>>,
+    answered: F,
+}
+
+#[cfg(test)]
+impl<F: FnMut() -> bool> WaitsForAnswers<F> {
+    /// `lines` as the program wrote them, each ended with a newline so the last one is read before the wait.
+    pub(crate) fn new(lines: &str, answered: F) -> std::io::BufReader<Self> {
+        std::io::BufReader::new(WaitsForAnswers { lines: std::io::Cursor::new(format!("{}\n", lines.trim_end_matches('\n')).into_bytes()), answered })
+    }
+}
+
+#[cfg(test)]
+impl<F: FnMut() -> bool> std::io::Read for WaitsForAnswers<F> {
+    fn read(&mut self, b: &mut [u8]) -> std::io::Result<usize> {
+        let n = self.lines.read(b)?;
+        if n > 0 {
+            return Ok(n);
+        }
+        for _ in 0..2_000 {
+            if (self.answered)() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        Ok(0)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -487,7 +522,9 @@ mod tests {
         .join("\n");
         let out = Out::default();
         let w: Arc<Mutex<dyn Write + Send>> = Arc::new(Mutex::new(out.clone()));
-        serve(std::io::Cursor::new(input), w, socket);
+        // the program keeps its end open until both answers have come: closing it earlier would close the call
+        let answers = out.clone();
+        serve(WaitsForAnswers::new(&input, move || answers.0.lock().unwrap().iter().filter(|b| **b == b'\n').count() >= 2), w, socket);
         let lines = out.lines();
         assert_eq!(lines.len(), 2);
         assert_eq!(lines[1]["id"], 7);
