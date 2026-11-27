@@ -326,6 +326,15 @@
 /* The focus ring appears and stays still: it is never in a transition (motionRule.test.ts refuses `outline` and
    `all` in one), so it does not draw the eye by moving. Its look is base.css's :focus-visible. */
 
+/* ---- a hidden window: every loop holds still --------------------------------------------------------------------------
+   While the window is hidden (`<html data-hidden>`, app/hidden.ts, item 136), each move stops where it is and goes on from
+   there when the window shows again: nothing a person can see changes, and nothing is drawn for nobody. */
+html[data-hidden] *,
+html[data-hidden] *::before,
+html[data-hidden] *::after {
+  animation-play-state: paused !important;
+}
+
 /* ---- reduced motion: every move off, in this one place --------------------------------------------------------------
    Each move finishes at once in its end state rather than being removed (`animation: none`): a part that waits for
    its move's end to take the old element away (the ticker's old line, a leaving overlay) still hears that it ended, and
