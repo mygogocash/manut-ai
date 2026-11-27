@@ -118,3 +118,51 @@ describe("the grant", () => {
     expect(MAX_FRAME_BYTES).toBe(relayVectors.wire.maxPayloadBytes);
   });
 });
+
+describe("version 2: the Mac's tailnet name (item 78f-2d)", () => {
+  const NAME = "mac.tail1234.ts.net";
+
+  it("carries the tailnet name after version 1's bytes, and reads back exactly", () => {
+    const offer = newPairingOffer("A".repeat(43), undefined, NAME);
+    const text = encodePairingOffer(offer);
+    const bytes = fromBase64Url(text);
+    expect(bytes[0]).toBe(2);
+    expect(bytes).toHaveLength(113 + 1 + NAME.length);
+    expect(bytes[113]).toBe(NAME.length);
+    expect(decodePairingOffer(text)).toEqual(offer);
+    expect(readPairingLink(pairingLink("https://dev.manut.xyz/app/", offer)).tailnet).toBe(NAME);
+  });
+
+  it("leaves a code without a tailnet as version 1, byte for byte", () => {
+    const offer = newPairingOffer("A".repeat(43));
+    expect(fromBase64Url(encodePairingOffer(offer))[0]).toBe(1);
+    expect(decodePairingOffer(encodePairingOffer(offer)).tailnet).toBeUndefined();
+  });
+
+  it("refuses a name the desktop would not accept, at either end", () => {
+    for (const bad of ["evil.example.com", "x.ts.net.evil.com", "MAC.tail1234.ts.net", "ts.net", "-mac.tail1234.ts.net"]) {
+      expect(() => newPairingOffer("A".repeat(43), undefined, bad), bad).toThrow();
+    }
+    const good = fromBase64Url(encodePairingOffer(newPairingOffer("A".repeat(43), undefined, NAME)));
+    const forge = (name: string, len = name.length) => {
+      const raw = new TextEncoder().encode(name);
+      const out = new Uint8Array(114 + raw.length);
+      out.set(good.subarray(0, 113));
+      out[113] = len;
+      out.set(raw, 114);
+      return toBase64Url(out);
+    };
+    expect(() => decodePairingOffer(forge("evil.example.com"))).toThrow();
+    expect(() => decodePairingOffer(forge(NAME, NAME.length + 1))).toThrow();
+    expect(() => decodePairingOffer(forge(NAME, 0))).toThrow();
+    expect(() => decodePairingOffer(forge("mäc.tail1234.ts.net"))).toThrow();
+    expect(() => decodePairingOffer(toBase64Url(good.subarray(0, 113)))).toThrow();
+    expect(() => decodePairingOffer(forge(NAME) + "AA")).toThrow();
+  });
+
+  it("prints its secrets redacted, the name in the clear", () => {
+    const printed = JSON.stringify(newPairingOffer("A".repeat(43), undefined, NAME));
+    expect(printed).toContain(NAME);
+    expect(printed).not.toMatch(/"secret":\{|"secret":"[A-Za-z0-9_-]{20}/);
+  });
+});

@@ -1,7 +1,7 @@
 // The Mac's side put together (host.ts), against a relay in memory and a phone built from the package: built switched
 // off, sessions only for a device the Mac holds K for, Unpair ending everything of that phone on the Mac itself (with or
 // without a relay), and the switch ending everything.
-import { acceptSession, startSession, toBase64Url } from "@manut/remote-channel";
+import { acceptSession, readPairingLink, startSession, toBase64Url } from "@manut/remote-channel";
 import { describe, expect, it } from "vitest";
 import { settle } from "./testkit/clock";
 import { PLAIN } from "./testkit/chats";
@@ -355,5 +355,30 @@ describe("the road message (item 78f-2c)", () => {
     // off: the open session hears there is none any more
     h.remote.turnTailscaleOff();
     expect((await next.roadsHeard(2))[1]).toEqual({ t: "road", name: null });
+  });
+});
+
+describe("the pairing code and the Tailscale road (item 78f-2d)", () => {
+  it("names the Mac's tailnet in the code while the road is on, and is a version 1 code otherwise", async () => {
+    const shell: DoorShell = {
+      on: async () => ({ name: "mac.tail1234.ts.net", port: 47100 }),
+      off: async () => {},
+      devices: async () => true,
+      status: async () => true,
+      send: async () => true,
+      close: async () => true,
+    };
+    const h = macHarness({ door: shell });
+    await turnOn(h);
+    expect(await h.remote.startPairing()).toBe(true);
+    let view = h.remote.snapshot().pairing;
+    if (view.phase !== "showing") throw new Error(view.phase);
+    expect(readPairingLink(view.link).tailnet).toBeUndefined();
+    h.remote.cancelPairing();
+    await h.remote.turnTailscaleOn();
+    expect(await h.remote.startPairing()).toBe(true);
+    view = h.remote.snapshot().pairing;
+    if (view.phase !== "showing") throw new Error(view.phase);
+    expect(readPairingLink(view.link).tailnet).toBe("mac.tail1234.ts.net");
   });
 });

@@ -34,10 +34,10 @@ async function pairInPractice(practice: ReturnType<typeof practiceBackend>) {
 }
 
 describe("the Your Mac tab", () => {
-  it("says not available yet while the relay is off, and offers nothing", async () => {
+  it("offers the code while the relay is off to a phone not yet paired, since a code that names the Mac's tailnet pairs over it (item 78f-2d)", async () => {
     show({ relay: "off" });
-    expect(await screen.findByText(m.unavailableTitle)).toBeTruthy();
-    expect(screen.queryAllByRole("button")).toEqual([]);
+    expect(await screen.findByRole("heading", { name: m.scanTitle })).toBeTruthy();
+    expect(screen.queryByText(m.unavailableTitle)).toBeNull();
   });
 
   it("asks for the Mac's code: Scan only where the browser can read one, and the pasted link always", async () => {

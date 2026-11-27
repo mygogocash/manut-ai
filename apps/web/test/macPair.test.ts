@@ -8,6 +8,8 @@ import {
   fromBase64Url,
   macPairing,
   newPairingGrant,
+  newPairingOffer,
+  pairingLink,
   toBase64Url,
   verifyPasskeyRegistration,
 } from "@manut/remote-channel";
@@ -258,3 +260,34 @@ describe("the phone's name for the Mac's list", () => {
     expect(phoneName("")).toBe("Phone, browser");
   });
 });
+
+describe("a code that names the Mac's tailnet (item 78f-2d)", () => {
+  it("dials the pairing door over the tailnet first, and keeps the Mac's tailnet door with the paired Mac", async () => {
+    const { sockets, vault, passkeys, deps } = setup();
+    const hostId = toBase64Url(crypto.getRandomValues(new Uint8Array(32)));
+    const offer = newPairingOffer(hostId, undefined, "mac.tail1234.ts.net");
+    const link = pairingLink(`${ORIGIN}/app/`, offer);
+    const mac = macPairing(offer, NOW);
+    const { steps, result } = start(deps, link);
+    const socket = await sockets.next();
+    expect(socket.url).toBe(`wss://mac.tail1234.ts.net:47100/relay/v1/hosts/${hostId}/phone`);
+    await throughDigits(socket, mac);
+    await until(() => digitsOf(steps) !== null);
+    const channel = mac.allow(digitsOf(steps)!, NOW);
+    const grant = newPairingGrant();
+    for (const frame of await channel.seal(encodePairingGrant(grant))) socket.deliver(frame);
+    await sayJson(socket, channel, { t: "passkey", challenge: toBase64Url(crypto.getRandomValues(new Uint8Array(32))), rp: { id: RP.id }, user: grant.deviceId });
+    await until(() => passkeyStep(steps) !== null);
+    passkeyStep(steps)!.make();
+    await readJson(socket, channel);
+    await sayJson(socket, channel, { t: "paired" });
+    const done = await result;
+    if (!done.ok) throw new Error(done.why);
+    expect(done.mac.tailnet).toEqual({ name: "mac.tail1234.ts.net", port: 47100 });
+    expect((await vault.load())?.tailnet).toEqual({ name: "mac.tail1234.ts.net", port: 47100 });
+    // the relay was never needed: one socket, the tailnet's
+    expect(sockets.opened).toHaveLength(1);
+    expect(passkeys.created).toHaveLength(1);
+  });
+});
+

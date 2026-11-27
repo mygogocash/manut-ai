@@ -416,8 +416,12 @@ open session again when the road turns on or off. The phone keeps a name the des
 port with its paired Mac (`mac.tailnet`, docs/web-app.md) and from then on dials that door first and the relay after 1.5
 seconds, or at once when the tailnet turns it away; the first road to say `ready` carries the session and the other is
 closed when it comes; turned away by both, the relay's reason is said. `APP_POLICY` gains `wss://*.ts.net:47100` and
-nothing wider; no other page's policy changes. Not built: the pairing code carrying the Mac's tailnet name, so a phone
-still learns it over the relay's first session, and pairing with the relay switched off is not yet possible.
+nothing wider; no other page's policy changes. **Built: the pairing code names the tailnet (78f-2d, 27 Nov 2026).** While the Tailscale road is on, each code the Mac
+shows is version 2 of `@manut/remote-channel`'s offer, which adds the Mac's tailnet name; the phone dials the pairing door
+there first (the relay after 1.5 seconds), and keeps the name with the paired Mac. The Your Mac tab no longer stops at
+"not available" when the relay is off: a phone not yet paired is offered the code, and a paired phone that knows its
+Mac's tailnet door connects; only a paired phone with no tailnet door has no way to its Mac. So with the relay switched
+off, a phone on the tailnet pairs and works, and this road needs no server of ours.
 
 Left: **78f-2c**, the phone: the pairing code and the encrypted channel carry the Mac's tailnet
 name, the phone tries the tailnet first and starts the relay after 1.5 seconds, and `APP_POLICY` gains

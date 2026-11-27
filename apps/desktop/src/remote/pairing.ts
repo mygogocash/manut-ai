@@ -65,6 +65,9 @@ export interface PairingDeps {
   now(): number;
   readonly timers: Timers;
   readonly random?: RandomBytes;
+  /** The Mac's tailnet name while its Tailscale road is on (item 78f-2d), put in each new code so a phone can reach the
+   *  pairing door over the tailnet with the relay switched off; null otherwise, and the code is version 1 as before. */
+  tailnet?(): string | null;
   /** Told whenever the view changes. */
   onView(view: PairingView): void;
   /** Told when a phone has paired, so its sessions can be taken. */
@@ -126,7 +129,7 @@ export class PairingDoor {
       return false;
     }
     const createdAt = this.#deps.now();
-    const offer = newPairingOffer(this.#deps.hostId, this.#deps.random ?? systemRandom);
+    const offer = newPairingOffer(this.#deps.hostId, this.#deps.random ?? systemRandom, this.#deps.tailnet?.() ?? undefined);
     let link: string;
     let mac: MacPairing;
     let tokenHash: string;
