@@ -80,4 +80,8 @@ export const set = {
   "set.voice": "Voice",
   // Settings › Workflows (item 77b): workflows run from the files in ~/.manut/workflows (src/workflows/)
   "set.workflows": "Workflows",
+  "set.updatesChannel": "Channel",
+  "set.updatesChannelNote": "Stable is the release we publish. Nightly is a new build of the work in progress, made each night it changed, and it may break. Kept on this Mac.",
+  "set.channelStable": "Stable",
+  "set.channelNightly": "Nightly",
 };

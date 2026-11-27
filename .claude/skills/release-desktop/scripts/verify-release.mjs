@@ -1,5 +1,6 @@
 // Checks a downloaded release folder against the app's pinned updater key: every `.sig` must be a minisign signature
-// by that key over the file beside it, and latest.json must name both Mac chips with those same signatures.
+// by that key over the file beside it, and latest.json must name both Mac chips with those same signatures, and Linux and Windows too when the release has them (from 27 Nov 2026
+// the release workflow builds them; the nightly feed names all four).
 // Usage: node verify-release.mjs <downloads dir> <path to tauri.conf.json> [<assets.json>]
 // assets.json is `gh release view <tag> --repo mygogocash/manut-ai --json assets`, needed for a release made by
 // tauri-action 1.0 or later, whose latest.json names each file by its asset id (release-assets.mjs).
@@ -43,8 +44,18 @@ for (const name of files.filter((f) => f.endsWith(".sig"))) {
 if (files.includes("latest.json")) {
   const latest = JSON.parse(readFileSync(join(dir, "latest.json"), "utf8"));
   console.log("latest.json version:", latest.version, "platforms:", Object.keys(latest.platforms).join(", "));
-  for (const chip of ["darwin-aarch64", "darwin-x86_64"]) {
+  // The Mac chips are required. Linux and Windows are checked whenever the feed names them, and a build that has
+  // their files but no entry for them is a failure: that is the half-built release this script is here to catch.
+  const hasFile = (re) => files.some((f) => re.test(f));
+  const wanted = [
+    ["darwin-aarch64", true],
+    ["darwin-x86_64", true],
+    ["linux-x86_64", hasFile(/\.AppImage$/)],
+    ["windows-x86_64", hasFile(/-setup\.exe$/)],
+  ];
+  for (const [chip, required] of wanted) {
     const entry = latest.platforms[chip];
+    if (!entry && !required) continue;
     check(!!entry, `latest.json names ${chip}`);
     if (!entry) continue;
     const { name, error } = updateFileName(entry.url, assets);

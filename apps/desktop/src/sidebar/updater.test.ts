@@ -274,7 +274,7 @@ describe("an app left open keeps looking for a newer release", () => {
     expect(askedAt()).toEqual([31]);
     const gone = [vi.spyOn(window, "removeEventListener"), vi.spyOn(document, "removeEventListener")];
     stop();
-    expect(gone.map((g) => g.mock.calls.map((c) => c[0]))).toEqual([["focus"], ["visibilitychange"]]);
+    expect(gone.map((g) => g.mock.calls.map((c) => c[0]))).toEqual([["focus", "manut:update-channel"], ["visibilitychange"]]);
     await pass(7 * HOUR);
     focus();
     shown();
