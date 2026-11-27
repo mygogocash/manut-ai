@@ -80,8 +80,8 @@ export const set: Record<keyof typeof en, string> = {
   "set.report": "문제 신고",
   "set.voice": "음성",
   "set.workflows": "워크플로",
-  "set.updatesChannel": "Channel",
-  "set.updatesChannelNote": "Stable is the release we publish. Nightly is a new build of the work in progress, made each night it changed, and it may break. Kept on this Mac.",
-  "set.channelStable": "Stable",
-  "set.channelNightly": "Nightly",
+  "set.updatesChannel": "채널",
+  "set.updatesChannelNote": "안정 버전은 저희가 공개하는 정식 버전이에요. 나이틀리는 변경이 있던 날 밤마다 만들어지는 개발 중 빌드라서 문제가 생길 수 있어요. 이 Mac에만 저장돼요.",
+  "set.channelStable": "안정 버전",
+  "set.channelNightly": "나이틀리",
 };
