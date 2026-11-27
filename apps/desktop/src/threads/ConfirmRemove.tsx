@@ -50,9 +50,10 @@ export function ConfirmRemove({ at, running, onCancel, onConfirm }: { at: DOMRec
           className="danger"
           disabled={busy}
           data-testid="thread-confirm-remove"
-          onClick={async () => {
+          onClick={() => {
             setBusy(true);
-            await onConfirm();
+            // a removal that failed leaves the dialog open with its button usable again, instead of busy for good
+            onConfirm().catch(() => setBusy(false));
           }}
         >
           {running ? t("thread.stopRemove") : t("thread.removeYes")}

@@ -4,7 +4,7 @@
 //
 // Money is integer satang everywhere. Ton raises flags and never fixes: the
 // only entry that is left out is one that cannot be counted at all.
-import { DEFAULT_TIME_ZONE, splitVat } from "@manut/format";
+import { DEFAULT_TIME_ZONE, splitVat, plainBaht } from "@manut/format";
 
 export const CHANNELS = ["line", "shopee", "lazada", "shop"] as const;
 export type Channel = (typeof CHANNELS)[number];
@@ -410,11 +410,8 @@ export function monthBooks(entries: readonly Entry[], month: string, options: Bo
   };
 }
 
-/// Baht with two decimals, made from integer satang so no float is involved.
-function baht(satang: number): string {
-  const whole = Math.floor(satang / 100);
-  return `${whole}.${String(satang - whole * 100).padStart(2, "0")}`;
-}
+/// Baht with two decimals for the CSV, made from integer satang so no float is involved (`@manut/format`'s `plainBaht`).
+const baht = plainBaht;
 
 /// A text field that starts with one of these is run as a formula by a
 /// spreadsheet, so it gets a leading apostrophe. Tab and carriage return are

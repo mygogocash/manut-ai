@@ -358,6 +358,8 @@ async function performed(e: { actionId?: unknown; notification?: { id?: unknown 
  *  desktop notifications are shown without their actions"), so it exists before the first notification goes out. */
 let listening: Promise<boolean> | null = null;
 function listen(n: Plugin): Promise<boolean> {
+  // `performed` keeps its own errors and never throws; the plugin and its tests wait on the promise it returns
+  // eslint-disable-next-line typescript/no-misused-promises
   return (listening ??= n.onAction(performed).then(
     () => true,
     () => false,

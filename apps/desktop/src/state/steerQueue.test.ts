@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 import { answerSlot, createStore, heldDrafts, initialState, reduce, reduceQueue, type AppState, type BridgeLike, type Chat } from "./store";
 import type { BridgeEvent } from "../lib/protocol";
 import type { BridgeStatus } from "../lib/bridge";
+import { editBack } from "./queue";
 
 const T0 = 1_800_000_000_000;
 
@@ -670,5 +671,12 @@ describe("item 95: Settings on Wait for it; Cmd+Enter adds one message now", () 
     expect(row).not.toHaveProperty("steerUnknown");
     await turn(f);
     expect(f.sends()).toEqual(["go in now"]);
+  });
+});
+
+describe("Edit on a held message, in both steer queues", () => {
+  it("puts its text back in front of what the person typed since, and alone when the box was empty", () => {
+    expect(editBack("Use the blue logo", "")).toBe("Use the blue logo");
+    expect(editBack("Use the blue logo", "  and the new font \n")).toBe("Use the blue logo\nand the new font");
   });
 });

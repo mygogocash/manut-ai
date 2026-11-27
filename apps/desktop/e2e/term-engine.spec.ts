@@ -36,7 +36,7 @@ async function open(page: Page, gpu: Gpu) {
     w.__manutPickFolder = "/home/you/code/web-app";
     w.__manutMockAgents = ["claude", "codex", "omh"];
   }, gpu);
-  await page.route("**/src/sessions/sessions.ts*", async (route) => {
+  await page.route("**/src/sessions/terminals.ts*", async (route) => {
     const r = await route.fetch();
     const body = (await r.text()).replace("const fit = new FitAddon();", "const fit = new FitAddon(); (globalThis.__termTerms ??= []).push(term);");
     await route.fulfill({ response: r, body });

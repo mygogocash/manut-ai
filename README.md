@@ -92,6 +92,7 @@ You need Node 26 (the LTS; `.nvmrc` says so), [pnpm](https://pnpm.io) and, for t
 pnpm install          # only esbuild and workerd may run install scripts (pnpm-workspace.yaml)
 pnpm test             # every package's tests
 pnpm typecheck
+pnpm lint             # Oxlint with type information (.oxlintrc.json): warnings to read, not a gate yet
 
 pnpm --filter @manut/web dev    # the web app against an in-memory fake of the API
 pnpm --filter @manut/web e2e    # the owner's pages in WebKit and Chromium at phone sizes (docs/phone-pass.md)

@@ -1,5 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
-import { approvalIndexRoute, readyOnFirstTask, stepBackfill, wipeApprovalIndex } from "./approval-index";
+import { approvalIndexRoute, forgetIndexed, readyOnFirstTask, stepBackfill, wipeApprovalIndex } from "./approval-index";
 import { artifactTenantRoute, wipeArtifactsTenant } from "./artifact-store";
 import { actorOr, auditPut, auditTenantRoute, wipeAuditTenant } from "./audit-log";
 import { readJsonBody } from "./body";
@@ -65,7 +65,8 @@ export class TenantObject extends DurableObject {
     // object and is never billed for its time (docs/turning-on.md).
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
     // An object that wakes with work and no alarm sets one: holds made before the sweep existed, or an alarm lost.
-    ctx.blockConcurrencyWhile(async () => {
+    // not awaited, as a constructor cannot: the runtime holds every request until it is done, and a throw resets the object
+    void ctx.blockConcurrencyWhile(async () => {
       if ((await ctx.storage.getAlarm()) === null) await this.arm();
     });
   }
@@ -324,6 +325,8 @@ export class TenantObject extends DurableObject {
     if (!ids.includes(body.taskId)) {
       await this.ctx.storage.put({ [key]: [...ids, body.taskId],
         ...readyOnFirstTask(this.ctx.storage.kv, body.tenant, ids) });
+      // the approvals reads' parsed copy of the index is now old (approval-index.ts)
+      forgetIndexed(this.ctx.storage, body.tenant);
       // A new task is new on History and in Mission Control. The task object pings again once it is made, within the
       // same second, so the two ride together.
       this.feed.touch();

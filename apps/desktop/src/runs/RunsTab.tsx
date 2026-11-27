@@ -68,7 +68,7 @@ function useRuns(bot: string, n = 0) {
     let live = true;
     if (n > 0) void refreshRuns(bot);
     // the CLI list is extra: a bridge without `runs.cli` (or a failed read) leaves the bot's own runs showing
-    act()
+    void act()
       .runsCli()
       .then((r) => sortRuns(r.runs))
       .catch(() => [] as AgentRunSummary[])

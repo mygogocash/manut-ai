@@ -44,7 +44,7 @@ export function NewShopForm({ onCreated, onCancel, onForget }: {
     <div style={{ padding: "16px 16px 0", maxWidth: 640 }}>
       <form
         noValidate
-        onSubmit={submit}
+        onSubmit={(e) => void submit(e)}
         aria-labelledby="new-shop-title"
         className="box"
         style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12 }}

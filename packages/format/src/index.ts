@@ -37,6 +37,22 @@ export function formatMoney(satang: number, options: FormatMoneyOptions = {}): s
   return `${BAHT}${grouped}.${String(rest).padStart(2, "0")}`;
 }
 
+/// As `formatMoney`, with a minus sign before the baht sign below zero (`-฿500`): for a total that can go below zero, such as a
+/// month's sales less its refunds in the books, which a single payment never does.
+export function formatSignedMoney(satang: number, options: FormatMoneyOptions = {}): string {
+  assertAmount(satang, "amount");
+  return satang < 0 ? `-${formatMoney(-satang, options)}` : formatMoney(satang, options);
+}
+
+/// Baht as plain decimal text with two places and no baht sign, `1290.00` or `-1.50`: for a CSV or a spreadsheet, which take
+/// numbers. Made from the satang with integer arithmetic only, so no float's tail ever reaches the file.
+export function plainBaht(satang: number): string {
+  assertAmount(satang, "amount");
+  const sign = satang < 0 ? "-" : "";
+  const abs = Math.abs(satang);
+  return `${sign}${Math.floor(abs / SATANG_PER_BAHT)}.${String(abs % SATANG_PER_BAHT).padStart(2, "0")}`;
+}
+
 const TYPED_MONEY = /^฿?\s*(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d{1,2}))?$/;
 
 /// Reads what a person types: `1290`, `1,290`, `฿1,290.50`, `1290.5`. Anything

@@ -4,6 +4,7 @@
 import { dayLabel, elapsed, hhmm, sameDay } from "../app/time";
 import { t, type Key } from "../i18n";
 import type { Job, JobStage, JobStep, RecipientStatus, TraceResult, TraceStep } from "../runtime/mission";
+import { formatMoney } from "@manut/format";
 
 /** Digits in groups of three, as the canvas writes "1,964". */
 const groupDigits = (n: number) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
@@ -12,8 +13,7 @@ const groupDigits = (n: number) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ",
  *  is not a whole, safe, non-negative number of satang is a dash: a page never guesses an amount. */
 export function satangText(satang: number): string {
   if (!Number.isSafeInteger(satang) || satang < 0) return "—";
-  const rest = satang % 100;
-  return `฿${groupDigits(Math.floor(satang / 100))}${rest ? `.${String(rest).padStart(2, "0")}` : ""}`;
+  return formatMoney(satang);
 }
 
 /** How long one step took: tenths of a second under ten seconds, whole seconds under a minute, then minutes and hours. */

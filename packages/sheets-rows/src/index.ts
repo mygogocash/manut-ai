@@ -10,6 +10,7 @@
 // cell gets a leading apostrophe here: under RAW the apostrophe would show in the cell.
 
 import { CSV_HEADER, type BookLine, type MonthBooks } from "@manut/books";
+import { plainBaht } from "@manut/format";
 
 export interface AppendTarget {
   readonly spreadsheetId: string;
@@ -46,9 +47,7 @@ export function quoteSheetName(name: string): string {
 /// Baht as a JSON number with at most two decimals, made from integer satang through exact decimal text, so the
 /// request never carries a float's tail such as 1290.3299999. 129033 satang is 1290.33; 129030 is 1290.3.
 export function bahtNumber(satang: number): number {
-  const whole = Math.floor(satang / 100);
-  const rest = satang - whole * 100;
-  return Number(`${whole}.${String(rest).padStart(2, "0")}`);
+  return Number(plainBaht(satang));
 }
 
 function row(line: BookLine): Cell[] {

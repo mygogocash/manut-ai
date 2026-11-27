@@ -92,7 +92,8 @@ export async function startMcp(): Promise<void> {
   const m = getMcp();
   await getMcpShell()
     .listen(
-      (c) => m.call(c),
+      // a reply the shell could not take is the calling program's to time out; nothing here waits on it
+      (c) => void m.call(c).catch(() => undefined),
       (id) => m.gone(id),
     )
     .catch(() => undefined);
