@@ -185,7 +185,8 @@ export function TerminalPage() {
               <div className="tm-gh">{t(KIND[kind])}</div>
               <div className="tm-grid">
                 {list.map((th) => (
-                  <ThemeRow key={th.id} theme={th} on={th.id === picked.id} onPick={() => pick(th.id)} />
+                  // the picked entry as it is drawn: manut's own shows the app theme's terminal colours while one brings them
+                  <ThemeRow key={th.id} theme={th.id === picked.id ? picked : th} on={th.id === picked.id} onPick={() => pick(th.id)} />
                 ))}
               </div>
             </div>

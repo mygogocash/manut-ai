@@ -4,6 +4,7 @@
 import type { ITheme } from "@xterm/xterm";
 import type { TermCustomTheme, TermSettings } from "./settings";
 import { ORCA_TERM_THEMES } from "./themes-orca";
+import { appTermColors } from "./appColors";
 
 export interface TermTheme {
   id: string;
@@ -92,12 +93,19 @@ export function customTermTheme(c: TermCustomTheme): TermTheme {
   return { id: CUSTOM_THEME_ID, name: c.name, kind, theme };
 }
 
-/** The catalog entry a terminal uses under app theme `mode`: the pick for that mode, else manut's own for it. */
+/** The catalog entry a terminal uses under app theme `mode`: the pick for that mode, else manut's own for it. While the
+ *  app's theme brings terminal colours for `mode` (a VS Code theme's `terminal.*` keys, item 99b), they are what manut's
+ *  own means: the entry keeps manut's id, so the Terminal page still marks the default pick, and takes the theme's name. */
 export function termThemePick(mode: "dark" | "light", s: TermSettings): TermTheme {
   const id = mode === "light" ? s.themeLight : s.themeDark;
   if (id === CUSTOM_THEME_ID && s.custom) return customTermTheme(s.custom);
+  const fallback = mode === "light" ? "manut-light" : "manut-dark";
   const picked = termThemeById(id);
-  return picked ?? termThemeById(mode === "light" ? "manut-light" : "manut-dark")!;
+  if (!picked || picked.id === fallback) {
+    const app = appTermColors();
+    if (app && app.kinds.includes(mode)) return { ...customTermTheme({ name: app.name, colors: app.colors }), id: fallback, kind: mode };
+  }
+  return picked ?? termThemeById(fallback)!;
 }
 
 /** The theme a terminal uses under app theme `mode`. */

@@ -80,4 +80,8 @@ export const set: Record<keyof typeof en, string> = {
   "set.report": "报告问题",
   "set.voice": "语音",
   "set.workflows": "工作流",
+  "set.updatesChannel": "渠道",
+  "set.updatesChannelNote": "稳定版是我们发布的正式版本。每日构建版是每晚在有改动时生成的进行中版本，可能会出问题。仅保存在这台 Mac 上。",
+  "set.channelStable": "稳定版",
+  "set.channelNightly": "每日构建版",
 };

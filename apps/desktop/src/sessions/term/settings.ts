@@ -224,6 +224,15 @@ export function writeTermSettings(patch: Partial<TermSettings>): TermSettings {
   return next;
 }
 
+/** Every open terminal and the Terminal page take the look again though no setting changed: the app theme brought other
+ *  terminal colours (appColors.ts). A new record, so a view that reads the settings draws again. */
+export function touchTermSettings(): void {
+  if (!listeners.size) return;
+  const next = { ...readTermSettings() };
+  current = next;
+  for (const fn of listeners) fn(next);
+}
+
 export function onTermSettings(fn: (s: TermSettings) => void): () => void {
   listeners.add(fn);
   return () => {
