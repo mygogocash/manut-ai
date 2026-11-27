@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useLayoutEffect, useRef, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, type ReactNode } from "react";
 import { RestartAction, RestartLine } from "../../sidebar/RestartLine";
 import type { Bot } from "../../lib/protocol";
 import { answerSlot, answerSoFar, askOpen, selectTimeline, turnHasActivity, useStore, type TimelineItem } from "../../state/store";
@@ -132,8 +132,10 @@ export function Timeline({
     else s.queueDelete(id, bot.name);
   };
 
-  // a quote's click: the message it answers, brought into view and lit for a moment
-  const showMessage = (id: string) => {
+  // a quote's click: the message it answers, brought into view and lit for a moment. One function for the timeline's life (it
+  // reads only the ref), so the memoized bubbles it is handed to are not drawn again on every store change, a streamed token
+  // included (Bubble.tsx).
+  const showMessage = useCallback((id: string) => {
     const el = ref.current?.querySelector<HTMLElement>(`[data-item="${CSS.escape(id)}"]`);
     if (!el) return;
     el.scrollIntoView({ block: "center", behavior: "smooth" });
@@ -141,7 +143,7 @@ export function Timeline({
     void el.offsetWidth;
     el.classList.add("lit");
     window.setTimeout(() => el.classList.remove("lit"), 1400);
-  };
+  }, []);
 
   const render = (it: TimelineItem, prev?: TimelineItem, at = -1): ReactNode => {
     switch (it.kind) {

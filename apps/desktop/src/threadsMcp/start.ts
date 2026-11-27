@@ -3,7 +3,7 @@
 // drives with stand-ins and so imports none of this.
 import { appReader } from "../chat/box/contextReader";
 import { bringToFront, showNote, windowWatched } from "../lib/notify";
-import { getStore, notifyEnabled, selectAsks } from "../state/store";
+import { getStore, notifyEnabled, asksIn } from "../state/store";
 import { getSessions } from "../sessions/sessions";
 import { getHost } from "../sessions/host";
 import { agentLabel, sessionMode, type AgentInfo } from "../sessions/agents";
@@ -49,7 +49,7 @@ provideMcpDeps(() => {
     title: (ref) => reader().title(ref),
     stateOf: (key) => {
       const s = getStore().getState();
-      if (selectAsks(s).some((a) => a.bot === key)) return "waiting";
+      if (asksIn(s, key).length > 0) return "waiting";
       return s.chats[key]?.turn ? "working" : "idle";
     },
     whoOf: (ref) => {

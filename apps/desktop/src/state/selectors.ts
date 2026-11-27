@@ -60,17 +60,36 @@ export function askOpen(items: ChatItem[], it: ApprovalItem | ClarifyItem): bool
   return !!it.outside || owner === undefined || owner === -1;
 }
 
+/** One chat's open asks, oldest first, kept per items array: a chat event makes a new `state.chats` but leaves every other
+ *  chat's items as they were, so only the chat that changed is read again (a streamed token changes none). */
+const chatAsksCache = new WeakMap<readonly ChatItem[], { bot: string; out: Ask[] }>();
+
+function chatAsks(bot: string, items: ChatItem[]): Ask[] {
+  const hit = chatAsksCache.get(items);
+  if (hit && hit.bot === bot) return hit.out;
+  const out: Ask[] = [];
+  for (const it of items) {
+    if ((it.kind === "approval" || it.kind === "clarify") && askOpen(items, it)) out.push({ bot, item: it, ts: it.ts });
+  }
+  // a stable sort: asks at the same moment keep their order in the chat
+  out.sort((a, b) => a.ts - b.ts);
+  chatAsksCache.set(items, { bot, out });
+  return out;
+}
+
+/** The open asks of the chat under `key`, oldest first: what the sessions store and a chat's views read. */
+export function asksIn(state: AppState, key: string): Ask[] {
+  const chat = state.chats[key];
+  return chat ? chatAsks(key, chat.items) : [];
+}
+
 let asksCache: { chats: AppState["chats"]; out: Ask[] } | null = null;
 
-/** Every open ask across bots, oldest first. Memoised on `state.chats`, so safe to call from render. */
+/** Every open ask across bots, oldest first. Memoised on `state.chats`, so safe to call from render. Asks at the same moment
+ *  keep the chats' order, then their order in their chat, as before the per-chat lists. */
 export function selectAsks(state: AppState): Ask[] {
   if (asksCache && asksCache.chats === state.chats) return asksCache.out;
-  const out: Ask[] = [];
-  for (const [bot, chat] of Object.entries(state.chats)) {
-    for (const it of chat.items) {
-      if ((it.kind === "approval" || it.kind === "clarify") && askOpen(chat.items, it)) out.push({ bot, item: it, ts: it.ts });
-    }
-  }
+  const out = Object.entries(state.chats).flatMap(([bot, chat]) => chatAsks(bot, chat.items));
   out.sort((a, b) => a.ts - b.ts);
   asksCache = { chats: state.chats, out };
   return out;

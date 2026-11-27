@@ -7,7 +7,7 @@
 // No "+ New thread" line under the cards (owner, 2026-11-19: a line that is always there under the bot is too much;
 // it reversed 2026-11-18). A new thread opens from the bot row's + on hover, its right-click menu, or ./thread.
 import { useState } from "react";
-import { askText, selectAsks, useStore, type AppState } from "../state/store";
+import { askText, asksIn, useStore, type AppState } from "../state/store";
 import { busyFor, shortTime } from "../app/time";
 import { useNow } from "../elsewhere/useNow";
 import { plain } from "../sidebar/BotRow";
@@ -26,7 +26,7 @@ import { Icon } from "../ui/icons";
 export function rowStatus(state: AppState, bot: string, row: ThreadRow): ThreadStatus {
   const key = threadKey(bot, row.thread);
   const chat = state.chats[key];
-  const asks = selectAsks(state).filter((a) => a.bot === key).length;
+  const asks = asksIn(state, key).length;
   return threadStatus({
     running: chat ? !!chat.turn : row.running,
     asks: chat ? asks : row.needs ? 1 : 0,
@@ -56,7 +56,7 @@ export function rowPreview(state: AppState, bot: string, row: ThreadRow, nowMs: 
   let said: (typeof items)[number] | undefined;
   for (let i = items.length - 1; i >= 0 && !said; i -= 1) if (items[i]!.kind === "assistant" || items[i]!.kind === "user") said = items[i];
   const ts = Math.max(row.last ?? 0, row.started_at ?? 0, said?.ts ?? 0);
-  const asks = selectAsks(state).filter((a) => a.bot === key);
+  const asks = asksIn(state, key);
   // plain text on every kind: an ask names its command in backticks ("Allow `pnpm build:docs`?")
   if (asks.length) return { text: plain(askText(asks[asks.length - 1]!.item)), kind: "ask", ts };
   if (chat?.turn) return { text: t("thread.working", { name, time: busyFor(nowMs - chat.turn.startedAt) }), kind: "live", ts };

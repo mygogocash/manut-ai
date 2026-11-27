@@ -57,6 +57,7 @@ import { readJsonBody } from "./body";
 import { isValidTenant } from "./companies";
 import { openSecret, sealSecret, type SealedSecret } from "./cred-crypto";
 import { resealStore, type ResealStore } from "./reseal";
+import { timingSafeEqual } from "./timing-safe";
 import { credStub, type TenantDataEnv } from "./tenant-data";
 
 export type SignInVaultKeys = { CRED_KEY?: string; CRED_KEY_PREVIOUS?: string };
@@ -198,14 +199,6 @@ export function isSignInVaultPath(pathname: string): boolean {
     pathname === "/browser-steps" || pathname.startsWith("/browser-steps/");
 }
 
-/// Whether two hex digests are the same, in time that does not depend on where they differ.
-function sameDigest(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return diff === 0;
-}
-
 /// Online while its last beat is under 90 seconds old; asleep otherwise, and before its first beat.
 function outpostStatus(lastHeartbeatAt: string | null, nowMs: number): "online" | "asleep" {
   if (lastHeartbeatAt === null) return "asleep";
@@ -234,7 +227,8 @@ async function authenticated(storage: DurableObjectStorage, tenant: string, outp
   }
   const record = await storage.get<OutpostRecord>(keys.outpost(outpostId));
   if (!record || record.tenant !== tenant) return null;
-  return sameDigest(record.credentialHash, credentialHash) ? record : null;
+  // in time that does not depend on where the two digests differ
+  return timingSafeEqual(record.credentialHash, credentialHash) ? record : null;
 }
 
 const UNAUTHORIZED = { error: "unauthorized" };

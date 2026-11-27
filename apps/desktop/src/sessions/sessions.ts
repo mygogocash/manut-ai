@@ -47,7 +47,7 @@ import { NAME_MAX, pickTitle, promptTitle, putTitle, TITLES_KEY } from "./titles
 import { getDraft, setDraft as setUnsent } from "../app/drafts";
 import { getHost, type ChatEvent, type ChatInput, type ConvState, type PastChat, type SessionHost } from "./host";
 import { localBot } from "../peers/peerKey";
-import { askOpen, folderKey, getStore, notifySessionEvent, notifySessionNote, onBridgeEvent, selectAsks, setChatRoute, setSessionKeyLookup, type ApprovalItem, type OutFile, type SentFile, type Store } from "../state/store";
+import { askOpen, folderKey, getStore, notifySessionEvent, notifySessionNote, onBridgeEvent, asksIn, setChatRoute, setSessionKeyLookup, type ApprovalItem, type OutFile, type SentFile, type Store } from "../state/store";
 import { blobType, bytesOf, inlinePicture, pathsTyped, putSentFiles, SENT_FILES_KEY, shellQuote, wireText, type SavedFile, type SentFilesBook } from "./attach";
 import type { AccountGroup, ApprovalChoice, BridgeEvent, ClarifyAnswers, DiffFile, EventOf, Msg } from "../lib/protocol";
 import { settleApproval } from "../chat/cards/respond";
@@ -200,7 +200,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     rec,
     asks: (id) => {
       const key = keys.get(id);
-      return key ? selectAsks(store().getState()).filter((a) => a.bot === key).map((a) => a.item.request_id) : [];
+      return key ? asksIn(store().getState(), key).map((a) => a.item.request_id) : [];
     },
     working: (id) => working(id),
     lastAnswer: (id) => {
@@ -250,7 +250,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     },
     asks: (id) => {
       const key = keys.get(id);
-      return key ? selectAsks(store().getState()).filter((a) => a.bot === key).map((a) => a.item.request_id) : [];
+      return key ? asksIn(store().getState(), key).map((a) => a.item.request_id) : [];
     },
     personWaiting: (id) => {
       const key = keys.get(id);
@@ -560,7 +560,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     if (store().getState().chats[key]?.turn) store().dispatch({ type: "event", ev: { event: "turn.end", bot: key, outcome } as BridgeEvent, now: Date.now() });
     // nobody is left to take an answer: an ask still open (a background subagent's, which outlives its turn) reads
     // "Not answered"
-    for (const a of selectAsks(store().getState()).filter((x) => x.bot === key))
+    for (const a of asksIn(store().getState(), key))
       store().dispatch({ type: "event", ev: { event: "prompt.expired", bot: key, request_id: a.item.request_id, reason: "cancelled" } as BridgeEvent, now: Date.now() });
   };
 
@@ -1160,7 +1160,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     const key = keys.get(id);
     const t = text.trim();
     if (!key || !t || procs.get(id)?.kind !== "agent") return false;
-    const asks = selectAsks(store().getState()).some((a) => a.bot === key);
+    const asks = asksIn(store().getState(), key).length > 0;
     if (mustHoldHere(id, key) || asks) {
       const lid = `local-s${++localSeq}`;
       hold(id, key, lid, { kind: "send", text: t, id: lid }, () => store().dispatch({ type: "local.user", bot: key, id: lid, text: t, now: Date.now(), held: true }));
@@ -1187,9 +1187,20 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     saveSentFiles(next);
   };
 
+  /** Each session's bubble previews, let go when the session is closed: a preview holds the picture's bytes for as long as
+   *  its URL lives, and nothing else frees it. */
+  const previews = new Map<string, string[]>();
   /** The bubble's own preview of a file (the composer lets go of its chips' copies when it goes). */
-  const preview = (name: string, kind: SentFile["kind"], bytes: Uint8Array) =>
-    kind === "file" ? null : URL.createObjectURL(new Blob([bytes as BlobPart], { type: blobType(name) }));
+  const preview = (id: string, name: string, kind: SentFile["kind"], bytes: Uint8Array) => {
+    if (kind === "file") return null;
+    const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: blobType(name) }));
+    previews.set(id, [...(previews.get(id) ?? []), url]);
+    return url;
+  };
+  const forgetPreviews = (id: string) => {
+    for (const url of previews.get(id) ?? []) URL.revokeObjectURL(url);
+    previews.delete(id);
+  };
 
   /** A message with files, ready for the agent: each file saved under the session's own folder (pictures the agent
    *  reads itself listed apart), the text naming the others. Throws on the first file that cannot be saved; then
@@ -1210,7 +1221,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
       }
       (inlinePicture(f.name, f.size) ? images : named).push(path);
       saved.push({ name: f.name, size: f.size, kind: f.kind, path });
-      shown.push({ name: f.name, size: f.size, kind: f.kind, url: preview(f.name, f.kind, bytes) });
+      shown.push({ name: f.name, size: f.size, kind: f.kind, url: preview(id, f.name, f.kind, bytes) });
     }
     return { input: { kind: "send" as const, text: wireText(text, named), ...(images.length ? { images } : {}) }, saved, shown };
   };
@@ -1281,7 +1292,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
         e.files.map(async (f) => {
           if (f.kind === "file") return { name: f.name, size: f.size, kind: f.kind, url: null };
           try {
-            return { name: f.name, size: f.size, kind: f.kind, url: preview(f.name, f.kind, await host.readFile(f.path)) };
+            return { name: f.name, size: f.size, kind: f.kind, url: preview(id, f.name, f.kind, await host.readFile(f.path)) };
           } catch {
             return { name: f.name, size: f.size, kind: "file" as const, url: null };
           }
@@ -3000,6 +3011,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     void stopChat(id).then(() => Promise.all([host.removeFiles(id).catch(() => undefined), free ? letLaneGo(r?.lane) : undefined]));
     turns.forget(id);
     forgetSentFiles(id);
+    forgetPreviews(id);
     // a helper lane that had not reported is back as stopped by the person; a lead's helper lanes stop and land nothing (item 102h)
     runs.closed(id);
     leads.forget(id);

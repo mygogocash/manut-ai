@@ -1,5 +1,5 @@
 import "./chat.css";
-import { selectAsks, useStore } from "../state/store";
+import { asksIn, useStore } from "../state/store";
 import { Header } from "./parts/Header";
 import { Timeline } from "./parts/Timeline";
 import { Composer } from "./parts/Composer";
@@ -37,7 +37,7 @@ export function Chat() {
   // a thread of this bot (sidebar tree): the same parts, fed by the thread's chat
   if (s.ui.thread) return <ThreadChat bot={bot} thread={s.ui.thread} />;
   const chat = s.chats[bot.name];
-  const asking = selectAsks(s).some((a) => a.bot === bot.name);
+  const asking = asksIn(s, bot.name).length > 0;
   // the runtime is away (its adapter reconnects by itself): the composer says so and waits, like a bot that is offline
   const away = s.conn !== "open";
   const Picker = slots.modelPicker;

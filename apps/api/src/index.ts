@@ -27,6 +27,7 @@ import { memoryRoute } from "./memory";
 import { modelAdminRoute } from "./model-gateway";
 import { ACCOUNT_DELETION_PATH, accountRoute } from "./account-deletion";
 import { peopleRoute, queryNamesSession } from "./people";
+import { timingSafeEqual } from "./timing-safe";
 import { pilotRoute } from "./pilot";
 import { routinesRoute } from "./routines";
 import { relayEnabled, relayPath, relayRoute, relaySourceGroup } from "./relay";
@@ -257,15 +258,6 @@ async function ingressRateGate(request: Request, pathname: string, env: Env, art
     // No request data or error text is logged: failure denies work safely.
   }
   return json({ error: "rate_limit_unavailable" }, 503);
-}
-
-/// Constant-time comparison so key guesses learn nothing from timing.
-/// Length is checked first; key length alone is not treated as secret.
-function timingSafeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return diff === 0;
 }
 
 type RequestContext =
