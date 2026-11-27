@@ -31,7 +31,7 @@ import type {
 } from "../lib/protocol";
 import type { ThreadRow } from "../threads/types";
 import type { HelpersAsk } from "../jobs/helperAsks";
-import type { ReachAsk } from "../jobs/reachAsks";
+import type { BuddyAsk, ReachAsk } from "../jobs/reachAsks";
 
 export type PanelTabId = "details" | "terminal" | "schedule" | "worktrees" | "diff" | "runs";
 
@@ -307,14 +307,17 @@ export type HelpersAskItem = {
 /** A reach card (item 102k, src/jobs/ReachCards.tsx): a coding chat's agent asks to read a chat on its "Kit may reach" list, to
  *  send one a message, or to open a new lane. One approval of the asking chat, settled once through approval-core
  *  (src/jobs/reachAsks.ts). `done`: what became of it here (`yes` pressed, `no` pressed, `gone` taken back); `lane`: the lane Start
- *  lane opened; `error`: what went wrong after a yes. Never saved: after a restart the card is gone and nothing of it happens. */
+ *  lane opened; `error`: what went wrong after a yes. Never saved: after a restart the card is gone and nothing of it happens.
+ *  On the Connected runtime Buddy's chats carry the same cards (item 102l-3, `BuddyAsk`, src/jobs/buddyReach.ts); `thread` is the
+ *  conversation its Start conversation made. */
 export type ReachAskItem = {
   kind: "reachAsk";
   id: string;
   ts: number;
-  ask: ReachAsk;
+  ask: ReachAsk | BuddyAsk;
   done?: "yes" | "no" | "gone";
   lane?: string;
+  thread?: string;
   error?: string;
 };
 /** A lead lane's helper rounds put back after a restart (item 102j-2, src/jobs/HelpersRestartCard.tsx): Land what they did and

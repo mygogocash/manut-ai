@@ -200,7 +200,7 @@ export type Action =
   | { type: "reach.ask"; bot: string; item: ReachAskItem }
   /** What became of a reach card: pressed yes (then the lane it opened, or what went wrong), pressed no, or gone. Only an open card
    *  changes, but for a yes's outcome. */
-  | { type: "reach.done"; bot: string; id: string; done: NonNullable<ReachAskItem["done"]>; lane?: string; error?: string };
+  | { type: "reach.done"; bot: string; id: string; done: NonNullable<ReachAskItem["done"]>; lane?: string; thread?: string; error?: string };
 
 /** The bots whose "will brief you here" line was already shown (`localStorage["manut.briefNoticed"]`). */
 export function briefNoticed(): string[] {
@@ -625,11 +625,11 @@ export function reduce(state: AppState, a: Action): AppState {
       return touchChat(state, a.bot, (c) =>
         withItems(
           c,
-          // an open card takes what became of it; a card already pressed yes takes only what its press then did (the lane it opened,
-          // or what went wrong)
+          // an open card takes what became of it; a card already pressed yes takes only what its press then did (the lane or, on
+          // Connected, the conversation it opened, or what went wrong)
           c.items.map((i) =>
             i.kind === "reachAsk" && i.id === a.id && (!i.done || (i.done === "yes" && a.done === "yes"))
-              ? { ...i, done: a.done, ...(a.lane ? { lane: a.lane } : {}), ...(a.error ? { error: a.error } : {}) }
+              ? { ...i, done: a.done, ...(a.lane ? { lane: a.lane } : {}), ...(a.thread ? { thread: a.thread } : {}), ...(a.error ? { error: a.error } : {}) }
               : i,
           ),
         ),

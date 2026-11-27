@@ -8,7 +8,7 @@ import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it } from "vitest";
 import { setLang } from "../i18n";
 import { helperRows } from "./helperAsks";
-import type { ReachAsk } from "./reachAsks";
+import type { BuddyAsk, ReachAsk } from "./reachAsks";
 import { ReachCardView, reachRefusedWords, reachTitle } from "./ReachCards";
 import { MayReachView } from "./MayReach";
 import { addEntry, fromChatText, type ReachEntry } from "./reachList";
@@ -102,6 +102,62 @@ describe("the list under the box", () => {
     expect(text(html)).toContain("2QR builder");
     expect(html).toContain('aria-label="Take Receipt layout off the list"');
     expect(text(html)).toContain("Orders is in another shop");
+  });
+});
+
+// Item 102l-3: Buddy's cards on the Connected runtime, the same cards in Buddy's words, each saying before the press that it is one
+// message billed to the shop's monthly limit.
+describe("Buddy's cards on Connected (item 102l-3)", () => {
+  const conv = { n: 1, ref: { kind: "thread" as const, bot: "buddy", thread: "cht-000000001-abc-00000001" }, key: "fold:buddy:cht-000000001-abc-00000001", title: "Price list for March", scope: { shop: "pilot:shop-a" } };
+  const buddy = { id: "buddy-reach-1-t1", buddy: true as const, asker: "buddy", shop: "pilot:shop-a", turn: "buddy-t1" };
+  const B_READ: BuddyAsk = { ...buddy, kind: "read", target: conv, text: 'Context from the chat "Price list for March":\nLast answer: rice is ฿45 a bag' };
+  const B_SEND: BuddyAsk = { ...buddy, kind: "send", target: conv, message: "Please confirm the March prices." };
+  const B_OPEN: BuddyAsk = { ...buddy, kind: "open", brief: "Plan the Songkran sale: which items and what discount.", title: "Plan the Songkran sale: which items and what discount." };
+
+  it("a read shows what Buddy would get, whole, and says Let Buddy read is one message billed to the shop", () => {
+    const html = draw(createElement(ReachCardView, { ask: B_READ }));
+    expect(text(html)).toContain("Buddy asks to read “Price list for March”");
+    expect(text(html)).toContain("Last answer: rice is ฿45 a bag");
+    expect(text(html)).toContain("This is exactly what Buddy gets if you let it");
+    expect(text(html)).toContain("one message, billed to the shop's monthly limit.");
+    expect(html.indexOf('data-testid="reach-cost"')).toBeLessThan(html.indexOf('data-testid="reach-yes"'));
+    expect(text(html)).toMatch(/No.*Let Buddy read/);
+  });
+
+  it("a send shows the words whole, that Buddy answers them there, that they approve nothing, and what the press costs", () => {
+    const html = draw(createElement(ReachCardView, { ask: B_SEND }));
+    expect(reachTitle(B_SEND)).toBe("Send this to “Price list for March”?");
+    expect(text(html)).toContain("Please confirm the March prices.");
+    expect(text(html)).toContain("It cannot answer or approve anything that is waiting.");
+    expect(text(html)).toContain("Send there posts it to that conversation: one message, billed to the shop's monthly limit.");
+    expect(text(html)).toMatch(/Keep here.*Send there/);
+  });
+
+  it("a new conversation shows its first message whole, the name it will have, and what Start conversation costs", () => {
+    const html = draw(createElement(ReachCardView, { ask: B_OPEN }));
+    expect(text(html)).toContain("Buddy asks to start a new conversation");
+    expect(text(html)).toContain("It will be named “Plan the Songkran sale: which items and what discount.”");
+    expect(text(html)).toContain("Start conversation posts it: one message, billed to the shop's monthly limit.");
+    expect(text(html)).toMatch(/Not now.*Start conversation/);
+    expect(html).not.toMatch(/disabled=""[^>]*data-testid="reach-yes"/);
+  });
+
+  it("collapses to Buddy's line once settled, and says its own refusals", () => {
+    const line = (ask: BuddyAsk, done: "yes" | "no" | "gone") => text(draw(createElement(ReachCardView, { ask, done })));
+    expect(line(B_READ, "yes")).toContain("Buddy read “Price list for March”.");
+    expect(line(B_READ, "no")).toContain("Not read: nothing of “Price list for March” went to Buddy.");
+    expect(line(B_SEND, "yes")).toContain("Sent to “Price list for March”, marked as from this conversation.");
+    expect(line(B_SEND, "no")).toContain("Kept here: nothing was sent.");
+    expect(line(B_OPEN, "gone")).toContain("No longer open, so no conversation started.");
+    expect(reachRefusedWords("shop", true)).toBe("This card is of another shop than the one shown now, so nothing was sent.");
+    expect(reachRefusedWords("notOwner", true)).toBe("Only the shop's owner can press this, so nothing was sent.");
+    expect(reachRefusedWords("gone", true)).toBe("That chat is gone, so nothing happened.");
+  });
+
+  it("the list is Buddy's in Buddy's words", () => {
+    expect(text(draw(createElement(MayReachView, { list: [], buddy: true })))).toBe("Let Buddy reach another conversation…");
+    const list = addEntry([], { ref: conv.ref, title: conv.title, scope: conv.scope }).list;
+    expect(text(draw(createElement(MayReachView, { list, buddy: true })))).toContain("Buddy may reach");
   });
 });
 

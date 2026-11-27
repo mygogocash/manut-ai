@@ -5,8 +5,9 @@ import { Timeline } from "./parts/Timeline";
 import { Composer } from "./parts/Composer";
 import { promptsOf } from "./parts/promptHistory";
 import { t } from "../i18n";
-import { can } from "../runtime";
+import { can, runtimeKind } from "../runtime";
 import { ThreadChat } from "../threads/ThreadChat";
+import { BuddyMayReach } from "../jobs/MayReach";
 import { AgentBoxTools, pickFolder, teammates, useAgentBox } from "./box/AgentBox";
 import { slots } from "../features";
 import { chatScope } from "./box/scope";
@@ -74,6 +75,8 @@ export function Chat() {
           voice={!!box}
           // a note or another chat's context made in this shop goes only to this shop's chats (item 97)
           scope={chatScope(bot.name, s.shops.current, null, null)}
+          // on Connected, the conversations Buddy may ask to reach from here, each only after a card (item 102l-3)
+          foot={runtimeKind() === "http" ? <BuddyMayReach chatKey={bot.name} /> : undefined}
         />
       </div>
     </>

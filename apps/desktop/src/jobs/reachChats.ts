@@ -27,7 +27,7 @@ import type { Action } from "../state/reducer";
 import { helperRows } from "./helperAsks";
 import { BRIEF_MAX } from "./helperBlocks";
 import { reachOutcome, reachReply, type ReachKind, type ReachRefusal } from "./reachBlocks";
-import { answerReachAsk, openReachAsk, withdrawReachAsk, type ReachAsk, type ReachTarget } from "./reachAsks";
+import { answerReachAsk, isBuddyAsk, openReachAsk, withdrawReachAsk, type ReachAsk, type ReachTarget } from "./reachAsks";
 import { addEntry, findEntry, reachOffered, removeEntry, withReachNote, fromChatText, type NoteEntry, type ReachEntry } from "./reachList";
 import type { ThreadRef } from "../chat/box/threadContext";
 
@@ -87,15 +87,18 @@ interface Said {
   reach: boolean;
 }
 
-/** The words for a request that could not be read. */
-export function refusalWords(r: ReachRefusal): string {
+/** A coding chat's own reach card: one whose ask is item 102k's, not one of Buddy's on Connected. */
+type MacCard = ReachAskItem & { ask: ReachAsk };
+
+/** The words for a request that could not be read. `max`: the longest message or brief the place takes (a coding chat's by default). */
+export function refusalWords(r: ReachRefusal, max: number = BRIEF_MAX): string {
   switch (r.why) {
     case "key":
       return tr("reach.why.key", { key: r.key });
     case "value":
       return tr("reach.why.value", { key: r.key });
     case "long":
-      return tr("reach.why.long", { max: BRIEF_MAX.toLocaleString("en-US") });
+      return tr("reach.why.long", { max: max.toLocaleString("en-US") });
     default:
       return tr(`reach.why.${r.why}` as Key);
   }
@@ -123,7 +126,8 @@ export function createReach(deps: ReachDeps) {
   const listOf = (id: string): readonly ReachEntry[] => deps.rec(id)?.reach ?? [];
   const active = (id: string) => offered(id) && listOf(id).length > 0;
   const note = (key: string, text: string) => deps.store().dispatch({ type: "system.note", bot: key, text, now: now() });
-  const cardsOf = (key: string): ReachAskItem[] => (deps.store().getState().chats[key]?.items ?? []).filter((i): i is ReachAskItem => i.kind === "reachAsk");
+  // a coding chat holds only its own cards; Buddy's on Connected (item 102l-3) are `buddyReach.ts`'s
+  const cardsOf = (key: string): MacCard[] => (deps.store().getState().chats[key]?.items ?? []).filter((i): i is MacCard => i.kind === "reachAsk" && !isBuddyAsk(i.ask));
   const asSession = (id: string): ThreadRef => ({ kind: "session", id });
 
   /** Who answers in a listed chat, for the note: a coding chat's agent, else a team chat. */
