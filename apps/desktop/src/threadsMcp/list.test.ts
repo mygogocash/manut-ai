@@ -34,8 +34,11 @@ describe("the list other programs may reach", () => {
 
   it("is kept on this Mac and read back defensively, the cap holding", () => {
     const mem = new Mem();
-    const list = [entry(1), entry(3, "Fix the login", { ref: { kind: "thread", bot: "kit", thread: "t1" }, scope: { shop: "s1" }, link: undefined })];
+    const list = [entry(1), entry(3, "Fix the login", { scope: { shop: "s1" }, link: "L3" })];
     expect(saveList(mem, list)).toBe(true);
+    expect(loadList(mem)).toEqual(list);
+    // coding chats only: a team thread an earlier version kept is left out when the list is read back
+    saveList(mem, [...list, entry(4, "Weekly prices", { ref: { kind: "thread", bot: "kit", thread: "t1" }, scope: { shop: "s1" } })]);
     expect(loadList(mem)).toEqual(list);
     mem.setItem(LIST_KEY, "not json");
     expect(loadList(mem)).toEqual([]);

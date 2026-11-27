@@ -45,4 +45,5 @@ export const tm = {
   "tm.open.yes": "Start lane",
   "tm.open.no": "Not now",
   "tm.opened.note": "Opened by {name}, outside Manut AI, after you pressed Start lane on its card.",
+  "tm.add.team": "{title} is a team thread. Other programs may reach coding chats only, so it was not added.",
 };
