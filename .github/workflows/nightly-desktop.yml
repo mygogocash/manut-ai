@@ -1,0 +1,200 @@
+# The desktop app's nightly channel (item 111, owner 27 Nov 2026), beside the stable one in release-desktop.yml.
+#
+# Every night it looks at pilot/week-1. If the branch has not moved since the last nightly it stops. Otherwise it builds
+# Apple silicon, Intel, Linux and Windows into one published PRERELEASE tagged nightly-<date>, and only when all four
+# built it writes the update feed, nightly.json, into one fixed prerelease tagged `nightly`. The app, when its Settings >
+# General > Updates > Channel is Nightly, reads that feed (src-tauri/src/update_channel.rs). GitHub has no "latest
+# prerelease" address, which is why the feed lives in a release of its own whose tag never changes.
+#
+# Nothing here can reach the stable channel: a prerelease is never GitHub's `latest`, so the stable updater's
+# releases/latest/download/latest.json keeps naming the owner's published release (docs/releasing.md).
+#
+# Signing: the updater files are signed with the same updater key the stable releases use (TAURI_SIGNING_PRIVATE_KEY and
+# its password, by name), so one pinned public key in the app verifies both channels. Nothing else is signed: no Apple
+# secret is read, the Mac app takes an ad hoc identity, and the Windows installer is unsigned (SmartScreen warns).
+#
+# Two things the owner should know. A `schedule` trigger runs only from the repository's DEFAULT branch, so this file does
+# nothing nightly until it is on main; the "Run workflow" button works from any branch that has it. And each night's
+# release stays: nothing deletes old nightlies (deleting a release is the owner's call).
+#
+# The decisions (the tag, the version, "did the branch move", the feed's checks) are in .github/scripts/nightly.mjs and
+# tested by nightly.test.mjs, because this workflow cannot be run without spending build minutes.
+name: Nightly desktop
+
+on:
+  schedule:
+    # 19:17 UTC, which is 02:17 in Bangkok, an odd minute because GitHub delays jobs on the hour.
+    - cron: "17 19 * * *"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Build even when pilot/week-1 has not changed since the last nightly
+        type: boolean
+        default: false
+
+# One nightly at a time, and a started build is never cancelled half way through.
+concurrency:
+  group: nightly-desktop
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  BRANCH: pilot/week-1
+  FEED_TAG: nightly
+
+jobs:
+  decide:
+    name: Did pilot/week-1 change
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      build: ${{ steps.pick.outputs.build }}
+      sha: ${{ steps.pick.outputs.sha }}
+      tag: ${{ steps.pick.outputs.tag }}
+      date: ${{ steps.pick.outputs.date }}
+      version: ${{ steps.pick.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.BRANCH }}
+          persist-credentials: false
+      - name: Compare the branch with the last nightly
+        id: pick
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FORCE: ${{ inputs.force }}
+        run: |
+          sha="$(git rev-parse HEAD)"
+          date="$(date -u +%Y-%m-%d)"
+          # The feed release's body names the commit the last good nightly was built from. No such release yet: build.
+          body="$(gh release view "$FEED_TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body 2>/dev/null || true)"
+          force=""
+          if [ "$FORCE" = "true" ]; then force="force"; fi
+          build="$(node .github/scripts/nightly.mjs decide "$sha" "$body" $force)"
+          base="$(node -p "require('./apps/desktop/src-tauri/tauri.conf.json').version")"
+          {
+            echo "$build"
+            echo "sha=$sha"
+            echo "date=$date"
+            echo "tag=$(node .github/scripts/nightly.mjs tag "$date")"
+            echo "version=$(node .github/scripts/nightly.mjs version "$base" "$date")"
+          } >> "$GITHUB_OUTPUT"
+          echo "### Nightly: $build (pilot/week-1 at $sha)" >> "$GITHUB_STEP_SUMMARY"
+
+  build:
+    name: ${{ matrix.label }}
+    needs: decide
+    if: ${{ needs.decide.outputs.build == 'true' }}
+    strategy:
+      fail-fast: true
+      # One platform at a time, for the reason release-desktop.yml gives: tauri-action makes the release when it finds
+      # none and rewrites latest.json from the one it reads, so two builds finishing together could make two releases or
+      # leave a latest.json that names one platform only.
+      max-parallel: 1
+      matrix:
+        include:
+          - label: Mac (Apple silicon)
+            os: macos-latest
+            target: aarch64-apple-darwin
+            args: --target aarch64-apple-darwin
+            # an ad hoc identity so an Apple silicon Mac can run it at all, as the unsigned stable build does
+            extra: ',"bundle":{"macOS":{"signingIdentity":"-"}}'
+          - label: Mac (Intel)
+            os: macos-latest
+            target: x86_64-apple-darwin
+            args: --target x86_64-apple-darwin
+            extra: ',"bundle":{"macOS":{"signingIdentity":"-"}}'
+          - label: Linux
+            os: ubuntu-22.04
+            target: ""
+            args: --bundles appimage,deb
+            extra: ""
+          - label: Windows
+            os: windows-latest
+            target: ""
+            args: --bundles nsis
+            extra: ""
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.decide.outputs.sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/setup-workspace
+      - if: runner.os == 'Linux'
+        uses: ./.github/actions/tauri-linux-deps
+      # patchelf is on Tauri's own Linux list for bundling an AppImage and not on the CI list above.
+      - if: runner.os == 'Linux'
+        run: sudo apt-get install -y patchelf
+      - name: Install stable Rust and the target
+        shell: bash
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
+          if [ -n "${{ matrix.target }}" ]; then rustup target add ${{ matrix.target }}; fi
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: apps/desktop/src-tauri -> target
+          key: nightly-${{ matrix.label }}
+          save-if: false
+      # --config merges over tauri.conf.json for this build only, and tauri-action reads the merged version for the
+      # release's latest.json. Nothing in the repository's files changes.
+      - name: Build and add to the night's prerelease
+        uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # action-v1.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: apps/desktop
+          tagName: ${{ needs.decide.outputs.tag }}
+          releaseName: Manut AI nightly ${{ needs.decide.outputs.date }}
+          releaseBody: Nightly build of pilot/week-1 at ${{ needs.decide.outputs.sha }}. Unsigned, made from work in progress, and it may break. Not an update to the stable release.
+          releaseCommitish: ${{ needs.decide.outputs.sha }}
+          releaseDraft: false
+          prerelease: true
+          updaterJsonPreferNsis: true
+          args: ${{ matrix.args }} --config '{"version":"${{ needs.decide.outputs.version }}"${{ matrix.extra }}}'
+
+  feed:
+    # Last, and only when all four builds passed: the feed is what Nightly Macs read, so it never names a half-built night.
+    name: Publish the nightly feed
+    needs: [decide, build]
+    if: ${{ needs.build.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.decide.outputs.sha }}
+          persist-credentials: false
+      - name: Write nightly.json from the night's latest.json and publish it
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.decide.outputs.tag }}
+          VERSION: ${{ needs.decide.outputs.version }}
+          SHA: ${{ needs.decide.outputs.sha }}
+          DATE: ${{ needs.decide.outputs.date }}
+        run: |
+          work="$(mktemp -d)"
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern latest.json --dir "$work"
+          # Refuses a feed for another version or one that misses a platform, signature or https address.
+          node .github/scripts/nightly.mjs feed "$work/latest.json" "$work/nightly.json" "$VERSION"
+          if ! gh release view "$FEED_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$FEED_TAG" --repo "$GITHUB_REPOSITORY" --prerelease --latest=false \
+              --title "Nightly feed" --notes "Holds nightly.json, the update feed of the nightly channel."
+          fi
+          cd "$work"
+          gh release upload "$FEED_TAG" nightly.json --clobber --repo "$GITHUB_REPOSITORY"
+          # The body's first line says which commit this feed was built from, so it is written last: a night that
+          # failed above leaves the old line, and the next night builds again.
+          node "$GITHUB_WORKSPACE/.github/scripts/nightly.mjs" notes "$SHA" "$DATE" "$GITHUB_REPOSITORY" > notes.md
+          gh release edit "$FEED_TAG" --repo "$GITHUB_REPOSITORY" --prerelease --latest=false --notes-file notes.md
+          echo "### Nightly feed published for $VERSION ($SHA)" >> "$GITHUB_STEP_SUMMARY"

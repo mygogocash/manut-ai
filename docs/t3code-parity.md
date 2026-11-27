@@ -28,7 +28,7 @@ keeps them:
 
 | Feature | Today | Plan |
 | --- | --- | --- |
-| Open source; you bring your own AI subscriptions | part: the person's own CLI sign-ins, no model key of ours. No LICENSE file | 111 (owner: the licence) |
+| Open source; you bring your own AI subscriptions | has: MIT, the `LICENSE` file at the root (the owner, 27 Nov 2026), and the person's own CLI sign-ins, no model key of ours | 111a |
 | Desktop app | has (Mac, 0.1.1) | |
 | A web app against your own instances | part: `apps/web` is the shop owner's pages and the phone app, not a front end to a Mac | 108 |
 | iOS and Android apps | part: an installable web app; the phone's Your Mac tab is item 78c | 111 |
