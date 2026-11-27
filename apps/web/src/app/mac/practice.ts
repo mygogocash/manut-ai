@@ -209,11 +209,11 @@ export interface PracticeBackend extends MacBackend {
   typeDigits(): void;
 }
 
-export function practiceBackend(options: { relay?: "on" | "off"; timers?: Timers } = {}): PracticeBackend {
+/// `paired` starts with the pretend Mac already kept, as a phone paired before keeps it, with no door over the tailnet.
+export function practiceBackend(options: { relay?: "on" | "off"; paired?: boolean; timers?: Timers } = {}): PracticeBackend {
   const timers = options.timers ?? systemTimers;
   const vault = memoryVault();
-  // With the relay off the phone is one paired before, so the tab shows what such a phone sees.
-  const ready = options.relay === "off" ? practiceMac().then((mac) => vault.save(mac)) : Promise.resolve();
+  const ready = options.paired ? practiceMac().then((mac) => vault.save(mac)) : Promise.resolve();
   const chats = sampleChats(Date.now());
   let typed: (() => void) | null = null;
   const wait = (ms: number) => new Promise<void>((resolve) => timers.set(resolve, ms));

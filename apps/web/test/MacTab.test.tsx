@@ -13,8 +13,8 @@ const m = s.mac;
 const quick = { set: (run: () => void) => setTimeout(run, 0), clear: (h: unknown) => clearTimeout(h as ReturnType<typeof setTimeout>) };
 const noCamera: Scanner = { available: false, scan: async () => null };
 
-function show(options: { relay?: "on" | "off"; scanner?: Scanner; opened?: { link: string; installed: boolean } } = {}) {
-  const practice = practiceBackend({ relay: options.relay ?? "on", timers: quick });
+function show(options: { relay?: "on" | "off"; paired?: boolean; scanner?: Scanner; opened?: { link: string; installed: boolean } } = {}) {
+  const practice = practiceBackend({ relay: options.relay ?? "on", paired: options.paired === true, timers: quick });
   render(
     <main>
       <MacTab s={s} backend={practice} practice={practice} scanner={options.scanner ?? noCamera} opened={options.opened ?? null} />
@@ -38,6 +38,12 @@ describe("the Your Mac tab", () => {
     show({ relay: "off" });
     expect(await screen.findByRole("heading", { name: m.scanTitle })).toBeTruthy();
     expect(screen.queryByText(m.unavailableTitle)).toBeNull();
+  });
+
+  it("says reaching the Mac is not available to a phone paired before with the relay off and no tailnet door: it has no way there", async () => {
+    show({ relay: "off", paired: true });
+    expect(await screen.findByText(m.unavailableTitle)).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: m.scanTitle })).toBeNull();
   });
 
   it("asks for the Mac's code: Scan only where the browser can read one, and the pasted link always", async () => {
