@@ -128,8 +128,10 @@ export function createMcp(d: McpDeps) {
   const now = () => (d.now ?? Date.now)();
   const reply = (id: string, text: string, error: boolean) => void d.shell.reply(id, text, error);
 
-  /** Where listed chat `e` stands now; `gone` and `moved` are never reached. */
+  /** Where listed chat `e` stands now; `gone` and `moved` are never reached. A team thread is never reached either: the list holds
+   *  coding chats only, and this holds even for one that got onto it some other way. */
   const stateOf = (e: ReachEntry): ChatState => {
+    if (e.ref.kind !== "session") return "gone";
     const w = d.where(e.ref);
     if (!w) return "gone";
     if (e.ref.kind === "session" && e.link && d.link(e.ref) !== e.link) return "gone";
@@ -200,6 +202,8 @@ export function createMcp(d: McpDeps) {
     /** Puts chat `ref` on the list under the next free number. Null when it was added, else the line Settings shows. */
     add(ref: ThreadRef): string | null {
       const title = d.title(ref);
+      // coding chats only: a shop's team thread holds its customers' words (the owner, 27 Nov 2026)
+      if (ref.kind !== "session") return t("tm.add.team", { title });
       const w = d.where(ref);
       if (!w) return t("tm.add.gone", { title });
       const link = d.link(ref);

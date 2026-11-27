@@ -2,7 +2,8 @@
 // Skills › Other programs, at most `OUTSIDE_MAX` chats, each named by its number there and nothing else. It is 102k's list
 // (`jobs/reachList.ts`: the same entries, numbers that are never reused while a chat is listed, the shop or account a chat had
 // when it was listed) with its own cap, kept on this Mac rather than with one chat, since a program outside the app is not one
-// chat's agent.
+// chat's agent. It holds coding chats only: a shop's team threads hold customers' conversations, orders and payment talk, and a
+// program outside the app sends what it reads to its own model's provider (the owner, 27 Nov 2026).
 //
 // Also here, as plain text: what `list_chats` answers. It is English in every language, as 102k's notes to an agent are: the
 // program's model reads it, not the person.
@@ -56,7 +57,8 @@ export function listLines(list: readonly ReachEntry[], stateOf: (e: ReachEntry) 
 export function loadList(storage: Pick<Storage, "getItem"> | null): ReachEntry[] {
   try {
     const raw = storage?.getItem(LIST_KEY);
-    return raw ? parseEntries(JSON.parse(raw), OUTSIDE_MAX) : [];
+    // a team thread kept by an earlier version is left out: other programs reach coding chats only
+    return raw ? parseEntries(JSON.parse(raw), OUTSIDE_MAX).filter((e) => e.ref.kind === "session") : [];
   } catch {
     return [];
   }

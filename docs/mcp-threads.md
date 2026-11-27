@@ -138,10 +138,13 @@ before the answer is refused as waiting; after No, calls are refused without a c
 
 **M7. Only the chats the person listed.** The list holds at most 10 chats, added from item 97's picker and removable. A chat is
 named only by its number on the list; numbers are not reused while a chat is listed, and an entry keeps the chat's link id and
-its shop or account as it was when added, so a chat that moved to another shop or account is refused, as 102k's `crossing`. A
-coding chat is listed by its sessions-store id, a team thread by its bot and thread; a team thread can be read, not sent to,
-and a draft, a workflow's lane or a terminal session is not offered (102k's `reachOffered`). *Test:* a number not on the list,
-a session id, a chat key or a title names nothing and opens no card. [103b]
+its shop or account as it was when added, so a chat that moved to another shop or account is refused, as 102k's `crossing`. The
+list holds coding chats only, by their sessions-store id: a shop's team threads hold its customers' conversations, orders and
+payment talk, and a program outside the app sends what it reads to its own model's provider, so a team thread is never offered,
+never added and never reached, and one an earlier version kept is left out when the list is read back (the owner, 27 Nov 2026).
+A message goes only to a coding chat whose agent runs as the app's chat, never to an agent in its own terminal. *Test:* a number
+not on the list, a session id, a chat key or a title names nothing and opens no card; a team thread is refused at the add and
+dropped from a saved list. [103b]
 
 **M8. Every read, message and new lane is a card, settled once.** Each is its own approval-core request (as `reachAsks.ts`),
 answered only by the person's press at the Mac, shown in Needs you, and for a read or a message also in that chat. It shows
@@ -230,14 +233,18 @@ shell's error strings for a refused call hold none of the call's arguments. [103
 - Act on a press of a card whose call is gone.
 - Replace 102k's Kit may reach for the app's own chats.
 
-## Open questions for the owner
+## The owner's answers (27 Nov 2026)
 
-1. **Remembering a program.** Let in lasts one run of the program. Should a later setting remember a program by its code
-   signature (its team id), so Claude Desktop asks once? The recommendation is no for the pilot.
-2. **From a phone.** Should these cards be answered on a paired phone after its passkey, as an Allow is?
-3. **Ten chats on the list.** More, or fewer?
-4. **Team threads.** This design lets a program read a listed team thread and not send to one, as 102k does. Should a shop's
-   threads be listable for outside programs at all?
+The four open questions, answered by the owner on 27 Nov 2026 with the lead's recommendations, and recorded in
+`docs/decisions/103-mcp-threads.md`:
+
+1. **Remembering a program.** No for the pilot: a program asks each time it starts. If that grows tiresome, remember only signed
+   Mac apps by their signing team, never a command-line tool, with a list to forget them.
+2. **From a phone.** No for now. Revisit once the phone link is on in the pilot.
+3. **Ten chats on the list.** Kept.
+4. **Team threads.** No: coding chats only (rule M7). Built the same day.
+5. **The cards over every page** rather than rows in Needs you (a change made while building 103b): kept. Add them to the Needs
+   you page as well later, not instead, if one place for everything is wanted.
 
 ## What this design did not check
 

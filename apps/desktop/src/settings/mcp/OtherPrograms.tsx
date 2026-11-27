@@ -148,12 +148,13 @@ export function OtherPrograms() {
       live = false;
     };
   }, []);
-  // the chats Bring context from… offers, less the ones already listed; no chat of its own to leave out
+  // the coding chats Bring context from… offers, less the ones already listed; no chat of its own to leave out. Never a team
+  // thread: other programs reach coding chats only (the owner, 27 Nov 2026)
   const rows = useCallback(
     (query: string) => {
       const ss = getSessions();
       const listed = new Set(list.map((e) => refKey(e.ref)));
-      return bringRows(store, { list: ss.getState().list, agents: ss.getState().agents, chatKey: ss.chatKey }, query, "").filter((r) => !listed.has(refKey(r.ref)));
+      return bringRows(store, { list: ss.getState().list, agents: ss.getState().agents, chatKey: ss.chatKey }, query, "").filter((r) => r.ref.kind === "session" && !listed.has(refKey(r.ref)));
     },
     [store, list],
   );

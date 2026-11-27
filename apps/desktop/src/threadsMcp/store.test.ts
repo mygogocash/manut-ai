@@ -63,12 +63,15 @@ class Mem {
 
 const CLAUDE = { name: "Claude", path: "/Applications/Claude.app/Contents/MacOS/Claude", callsItself: "Claude 1.0" };
 
-/** The app as a stand-in: two coding chats and a team thread, one working, one waiting on the person. */
+/** The app as a stand-in: four coding chats (one working, one waiting on the person, one of a shop, one an agent in its terminal)
+ *  and a team thread, which is never listed. */
 function make(over: Partial<McpDeps> = {}) {
   const s = stand();
-  const chats: Record<string, { key: string; title: string; shop?: string; state: "working" | "waiting" | "idle"; link?: string }> = {
+  const chats: Record<string, { key: string; title: string; shop?: string; state: "working" | "waiting" | "idle"; link?: string; term?: boolean }> = {
     "session:a": { key: "agent:a", title: "Fix the login", state: "working", link: "L1" },
     "session:b": { key: "agent:b", title: "Write the menu", state: "waiting" },
+    "session:c": { key: "agent:c", title: "Weekly prices", shop: "s1", state: "idle" },
+    "session:t": { key: "agent:t", title: "Deploy script", state: "idle", term: true },
     "thread:kit:t1": { key: "fold:kit:t1", title: "Weekly prices", shop: "s1", state: "idle" },
   };
   const notified: string[] = [];
@@ -88,7 +91,7 @@ function make(over: Partial<McpDeps> = {}) {
     whoOf: (ref) => (ref.kind === "session" ? "Claude Code" : "Kit"),
     link: (ref) => chats[refKey(ref)]?.link,
     reader: () => readerOf(chats),
-    sendable: (ref) => ref.kind === "session" && !!chats[refKey(ref)],
+    sendable: (ref) => ref.kind === "session" && !!chats[refKey(ref)] && !chats[refKey(ref)].term,
     route: async (session, text) => {
       if (!running.has(session)) return false;
       routed.push({ session, text });
@@ -117,6 +120,8 @@ const settle = () => new Promise((r) => setTimeout(r, 0));
 
 const A: ThreadRef = { kind: "session", id: "a" };
 const B: ThreadRef = { kind: "session", id: "b" };
+const C: ThreadRef = { kind: "session", id: "c" };
+const TERM: ThreadRef = { kind: "session", id: "t" };
 const T: ThreadRef = { kind: "thread", bot: "kit", thread: "t1" };
 
 describe("a program waiting to be let in", () => {
@@ -179,15 +184,15 @@ describe("the calls of a program the person let in", () => {
     const { m, s, chats, call } = make();
     m.add(A);
     m.add(B);
-    m.add(T);
+    m.add(C);
     chats["session:a"].link = "L2"; // another chat took the same session id
     delete chats["session:b"];
-    chats["thread:kit:t1"].shop = "s2";
+    chats["session:c"].shop = "s2";
     call("tm-4", "list_chats");
     const lines = s.replies[0].text.split("\n");
     expect(lines[0]).toBe("1. Fix the login (Claude Code, no longer in Manut AI; it cannot be reached)");
     expect(lines[1]).toBe("2. Write the menu (Claude Code, no longer in Manut AI; it cannot be reached)");
-    expect(lines[2]).toBe("3. Weekly prices (Kit, now of another shop or account; it cannot be reached)");
+    expect(lines[2]).toBe("3. Weekly prices (Claude Code, now of another shop or account; it cannot be reached)");
   });
 
 });
@@ -228,9 +233,9 @@ describe("a new lane (103d)", () => {
     expect(s.replies).toEqual([{ id: "tm-41", text: "The person did not start the lane. Nothing was started.", error: true }]);
   });
 
-  it("opens no card from a team thread or for an agent this Mac cannot start", async () => {
-    const { m, s, call } = make();
-    m.add(T);
+  it("opens no card from a chat with no project folder or for an agent this Mac cannot start", async () => {
+    const { m, s, call } = make({ laneBase: (ref) => (ref.kind === "session" && ref.id === "a" ? { cwd: "/home/you/code/shop", agent: "claude" } : null) });
+    m.add(C);
     m.add(A);
     call("tm-42", "open_chat", { chat: 1, title: "t", brief: "b" });
     call("tm-43", "open_chat", { chat: 2, title: "t", brief: "b", agent: "bypassPermissions" });
@@ -298,9 +303,9 @@ describe("a read (103c)", () => {
   it("opens no card for a chat that is not listed, or that left or moved shop", async () => {
     const { m, s, chats, call } = make();
     m.add(A);
-    m.add(T);
+    m.add(C);
     call("tm-12", "read_chat", { chat: 7 });
-    chats["thread:kit:t1"].shop = "s2";
+    chats["session:c"].shop = "s2";
     call("tm-13", "read_chat", { chat: 2 });
     await settle();
     expect(m.getSnapshot().cards).toEqual([]);
@@ -372,9 +377,9 @@ describe("a message (103c)", () => {
     expect(s.replies).toEqual([{ id: "tm-21", text: "The person kept your message out of chat 1. Nothing was sent.", error: true }]);
   });
 
-  it("goes only to a coding chat whose agent runs: a team thread opens no card, a stopped agent sends nothing", async () => {
+  it("goes only to a coding chat whose agent runs as the app's chat: an agent in its terminal opens no card, a stopped agent sends nothing", async () => {
     const { m, s, routed, running, call } = make();
-    m.add(T);
+    m.add(TERM);
     m.add(B);
     call("tm-22", "send_to_chat", { chat: 1, message: "hi" });
     await settle();
@@ -395,7 +400,7 @@ describe("the list in Settings", () => {
     expect(m.add(A)).toBeNull();
     expect(m.add(A)).toBe("Fix the login is on the list already.");
     expect(m.add({ kind: "session", id: "nope" })).toBe("A chat is no longer here, so it was not added.");
-    expect(m.add(T)).toBeNull();
+    expect(m.add(C)).toBeNull();
     expect(m.getSnapshot().list.map((e) => [e.n, e.title, e.scope, e.link])).toEqual([
       [1, "Fix the login", {}, "L1"],
       [2, "Weekly prices", { shop: "s1" }, undefined],
@@ -406,6 +411,21 @@ describe("the list in Settings", () => {
     // read back by a new store, as after a restart
     const again = make({ storage });
     expect(again.m.getSnapshot().list.map((e) => e.title)).toEqual(["Weekly prices"]);
+  });
+
+  it("never takes a team thread, and leaves out one an earlier version kept (the owner, 27 Nov 2026)", () => {
+    const { m, s, storage } = make();
+    expect(m.add(T)).toBe("Weekly prices is a team thread. Other programs may reach coding chats only, so it was not added.");
+    expect(m.getSnapshot().list).toEqual([]);
+    // a list saved before this rule, holding a team thread among coding chats
+    storage.setItem(LIST_KEY, JSON.stringify([{ n: 1, ref: T, title: "Weekly prices", scope: { shop: "s1" } }, { n: 2, ref: A, title: "Fix the login", scope: {}, link: "L1" }]));
+    const again = make({ storage });
+    expect(again.m.getSnapshot().list.map((e) => e.n)).toEqual([2]);
+    again.call("tm-60", "read_chat", { chat: 1 });
+    expect(again.s.replies[0]).toEqual({ id: "tm-60", text: "Chat 1 is not on the person's list. Nothing was read.", error: true });
+    // the page holds the rule itself too: a team thread that reached the list some other way is never reached
+    expect(m.stateOf({ n: 9, ref: T, title: "x", scope: {} })).toBe("gone");
+    expect(s.replies).toEqual([]);
   });
 
   it("says when the list is full", () => {
