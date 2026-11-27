@@ -2783,7 +2783,8 @@ log under the operator's Access identity, naming the link by its id, never the a
   linking the same account again with a new code puts it there. 400 `invalid_request` for a body that is not exactly
   `{ tenant, code }` with a string `code`.
 - **Unlinking** ends every owner session of the shop in the same write, takes the shop off the account's list, and
-  answers how many sessions it ended. 404 `not_linked` when no account is linked; 400 `invalid_request` for a body that
+  answers how many sessions it ended. From then on the account cannot delete the shop, not even by finishing an account
+  deletion that stopped before the unlink (`not_owner_now`, "Deleting your own account", below). 404 `not_linked` when no account is linked; 400 `invalid_request` for a body that
   is not exactly `{ tenant }`.
 - **People.** `GET /v1/admin/people` shows the link as `owner.account`, or `null`:
 
@@ -2818,6 +2819,7 @@ on 26 Nov 2026). The app's page is Settings › General › Delete account (`doc
 | 400 | `{ error: "invalid_request" }` | The body is not exactly `{ owned }` with each entry exactly `{ shop, name }`: an account, a role, a tenant or anything else is refused, not dropped |
 | 409 | `{ error: "owned_changed", owned: [{ id, name }] }` | `owned` is not exactly the shops the account owns now; `owned` in the answer is the list as it is. Nothing is deleted |
 | 409 | `{ error: "name_mismatch", shop }` | A name is not the shop's (outer spaces and how an accent was typed do not count, as for the operator's `confirmName`). Nothing is deleted |
+| 409 | `{ error: "not_owner_now", shop }` | A shop a stopped deletion still covers is not the account's now: an operator unlinked the account from it, or linked another, after the stop (item 140). That shop is left as it is: no confirmation is opened or decided for it, nothing goes to its log and nothing is wiped. The shops the account no longer owns are taken first, so nothing it owns now has been touched either. The record stops covering the shop, so the same request sent again is answered `owned_changed` with the list as it now is |
 | 409 | `{ error: "deletion_running" }` | Another request for the same account is running (a lease of 5 minutes). Nothing more is done |
 | 503 | `{ error: "account_unavailable" }`, `{ error: "audit_unavailable" }` | The person's shops, or the record of the deletion, could not be read or written. Nothing is deleted |
 | 500 | `{ error: "deletion_incomplete", step, failed }` | It stopped part way: `step` is `shops`, `helping` or `account`, `failed` what stopped it. The record is kept, and the same request finishes the same deletion |
@@ -2837,7 +2839,8 @@ on 26 Nov 2026). The app's page is Settings › General › Delete account (`doc
 - **For an owner: their account and their shop's data.** Each shop they own is deleted through the very record and wipe the
   operator's request and the owner's link use ("Export and deletion", above): one owner confirmation opened (or the one
   already waiting answered) and decided in AuthObject by approval-core as `owner`, `decidedBy` the linked account's id,
-  before anything is wiped; then the tenant deletion, and the record completed. The shop's deletion record has
+  before anything is wiped; then the tenant deletion, and the record completed. All of it only while the shop's people
+  record links that very account (`ownerDeletesShop` in `pilot.ts` reads it first; "A shop that is not theirs now", below). The shop's deletion record has
   `deletedBy: null` and `askedBy`, the account's id; the shop's log gets `deletion.requested` and `deletion.decided`
   (`approved`) by the owner's account, which go with the shop, as the link's do. So the shop's messages, replies, both
   kinds of payment, the LINE connection, its people and every helper session, its memory, routines, vault, Google
@@ -2861,6 +2864,17 @@ on 26 Nov 2026). The app's page is Settings › General › Delete account (`doc
   person's session still works, and the same request, naming the same shops (the ones already deleted are still accepted,
   from the record), finishes the same deletion, keeping when it was first asked for. Only a stop in the very last step,
   after the sessions ended, cannot be sent again from that session; signing in again and asking again finishes it.
+- **A shop that is not theirs now** (item 140, the sixth security read's M1). The record keeps each shop it covers with
+  the account it was first asked under, so without a check a former owner could finish a stopped deletion of a shop an
+  operator had since unlinked them from, and the confirmation would be decided in their name. So before anything is
+  opened, decided or wiped for a shop that is still there, its people record must link the account: the link the account
+  has now, which is a new one if the operator unlinked the person and linked them again. Otherwise the answer is 409
+  `not_owner_now` naming the shop, which is left as it is, and the record stops covering it, so the person can still
+  delete their account without it. A shop that is gone (a stopped wipe took its records, people and all) has nobody left
+  to own it, and what its wipe left is finished as before. The check is in `ownerDeletesShop`, the one path that decides
+  an owner's deletion of a shop, so every caller has it; an unfinished make (step 2) decides nothing and is not checked.
+  It is not one transaction with the decision, which AuthObject keeps apart from the shop's people: an unlink in the
+  moment between the check and the decision is not seen.
 - **Sign in with Apple.** Apple's REST API needs a token Apple gave us: "In order to revoke authorization for a user, you
   must obtain a valid refresh token or access token. If you don't have either token for the user, you can generate tokens
   when validating an authorization code" (Token revocation). Until this item the sign-in kept none: `POST
