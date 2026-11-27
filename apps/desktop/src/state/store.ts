@@ -31,11 +31,11 @@ import { askOpen, selectAsks } from "./selectors";
 import type { Action } from "./reducer";
 import { createStore, type Actions, type Store } from "./createStore";
 
-export { BUBBLE_STYLES, PALETTES, MENU_PAGES, isMenuPage } from "./types";
+export { BUBBLE_STYLES, CHAT_WIDTHS, PALETTES, MENU_PAGES, isMenuPage } from "./types";
 export type {
   PanelTabId, Step, Turn, SubagentRow, Fanout, MessageItem, SentFile, OutFile, ActivityItem, AskExpiry, ApprovalItem,
   ClarifyItem, RoutineItem, RoutineAddedItem, PluginAddedItem, BriefNoticeItem, SystemItem, ThreadLinkItem,
-  ThreadRouteItem, HelpersAskItem, ReachAskItem, ChatItem, TimelineItem, Chat, ReplyChip, Peek, Theme, Palette, BubbleStyle, TextSize, Look,
+  ThreadRouteItem, HelpersAskItem, ReachAskItem, ChatItem, TimelineItem, Chat, ReplyChip, Peek, Theme, Palette, BubbleStyle, TextSize, ChatWidth, Look,
   MenuPage, Ui, FocusAsk, ShopsState, AppState,
 } from "./types";
 export { activityText, WORKING, THINKING, PENDING_TURN_MS, THINKING_MAX, parsePlan, liveLabel, answerSoFar, turnHasActivity } from "./activity";

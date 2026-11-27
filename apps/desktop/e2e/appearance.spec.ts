@@ -1,4 +1,5 @@
-// Appearance: colour sets, bubble styles and text size change the chat live and are remembered.
+// Appearance: bubble styles and text size change the chat live and are remembered; a colour set the old picker saved reads
+// as the brand's. Themes of the person's own and the chat width: e2e/themes.spec.ts.
 import { expect, test, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -86,7 +87,7 @@ test("a look saved before the board's: its old defaults read as today's, a real 
   await expect(html).toHaveAttribute("data-text", "medium");
 });
 
-test("no colour to pick: the brand's colours are everyone's, and a set the picker once saved reads as the brand's (item 85i)", async ({ page }) => {
+test("a set the old picker saved reads as the brand's (item 85i); the colours are the brand's look or the person's own themes (item 99b)", async ({ page }) => {
   await page.addInitScript(() => {
     if (!sessionStorage.getItem("kept")) localStorage.setItem("manut.look", JSON.stringify({ palette: "ocean", bubbles: "solid", text: "large" }));
   });
@@ -96,10 +97,11 @@ test("no colour to pick: the brand's colours are everyone's, and a set the picke
   await expect(page.locator("html")).toHaveAttribute("data-bubbles", "solid");
   await expect(page.locator("html")).toHaveAttribute("data-text", "large");
   expect(await css(page, "bubble-user", "background-image")).toContain("linear-gradient");
-  // Settings, General has no colour picker: the audit's first rule, "no accent for the person to pick"
+  // Settings, General: the old sets are not offered again; the colours are the brand's look until the person makes or
+  // imports a theme (e2e/themes.spec.ts)
   await appearance(page);
-  await expect(page.getByTestId("appearance")).toBeVisible();
-  await expect(page.getByTestId("appearance").getByRole("radiogroup", { name: "Colour" })).toHaveCount(0);
+  await expect(page.getByTestId("theme-pick")).toHaveValue("manut");
+  await expect(page.getByTestId("theme-pick").locator("option")).toHaveText(["Manut AI"]);
   await expect(page.locator("[data-testid^=palette-manut], [data-testid^=palette-ocean], .ap-sw")).toHaveCount(0);
   await expect(page.getByTestId("appearance")).not.toContainText("Graphite");
 });
@@ -149,6 +151,7 @@ test("text size moves answers, messages and the composer a step along the board'
     palette: "manut",
     bubbles: "soft",
     text: "large",
+    width: "medium",
     v: 2,
   });
   await page.evaluate(() => sessionStorage.setItem("kept", "1"));
