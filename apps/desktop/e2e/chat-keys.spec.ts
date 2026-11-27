@@ -61,6 +61,7 @@ test.describe("Home's box", () => {
   });
 
   test("Cmd+Enter sends and stays on Home, with one line that says where it went and opens it", async ({ page }) => {
+    await page.getByTestId("home-mode-pick").click();
     await page.getByTestId("home-mode-chat").click();
     await ask(page).fill("Translate a message");
     await ask(page).press(CMD);
@@ -371,7 +372,8 @@ test.describe("shots", () => {
         await ask(page).fill(words);
         await ask(page).press("ControlOrMeta+s");
       }
-      await page.getByTestId("home-mode-chat").click();
+      await page.getByTestId("home-mode-pick").click();
+    await page.getByTestId("home-mode-chat").click();
       await ask(page).fill("Translate a message");
       await ask(page).press(CMD);
       await expect(page.getByTestId("home-started")).toBeVisible();

@@ -166,7 +166,10 @@ test.describe("lists arrive once", () => {
     await still(page);
     const home = page.getByTestId("page-home");
     await page.getByTestId("home-ask").fill("hello");
+    await page.getByTestId("home-mode-pick").click().catch(() => {});
     await page.getByTestId("home-mode-chat").click().catch(() => {});
+    // the mode menu (ModePicker.tsx) rises and fades on its own; what is measured is that Home does not rise again
+    await expect(page.getByRole("menu")).toHaveCount(0);
     await expect(home.locator(".mo-rise")).toHaveCount(0);
     expect(await arrivals(home)).toBe(0);
   });

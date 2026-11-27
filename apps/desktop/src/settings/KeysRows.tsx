@@ -22,6 +22,7 @@ export const ACTION_WORDS: Record<KeyAction, Key> = {
   "session-prev": "key.sessionPrev",
   graph: "key.graph",
   terminal: "key.terminal",
+  sidebar: "key.sidebar",
 };
 
 export interface KeysRowsViewProps {

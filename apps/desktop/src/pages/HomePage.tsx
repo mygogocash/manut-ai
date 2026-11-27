@@ -25,6 +25,7 @@ import { BrandMark } from "../sidebar/menuIcons";
 import { SessionFace } from "../sessions/SessionFace";
 import { Avatar } from "../ui";
 import { MenuPageFrame } from "./MenuPage";
+import { ModePicker } from "./ModePicker";
 import { RecentWorkList, recentRows, useJobs, type RecentRow } from "./RecentWork";
 import {
   askLines,
@@ -149,6 +150,9 @@ export function HomeView(p: HomeViewProps) {
     <MenuPageFrame
       page="home"
       title={t("home.title")}
+      // the mode at the top left, as ChatGPT names its model there (the owner, 27 Nov 2026); "Home" stays for screen readers
+      lead={<ModePicker mode={p.mode} modes={p.modes} onMode={p.onMode} />}
+      hideTitle
       acts={
         p.automations && (
           <button type="button" className="btn" onClick={p.automations.open} data-testid="home-automations">
@@ -210,13 +214,7 @@ export function HomeView(p: HomeViewProps) {
             data-testid="home-ask"
           />
           <div className="askrow">
-            <div className="ui-modes" role="group" aria-label={t("home.where")}>
-              {p.modes.map((m) => (
-                <button key={m} type="button" className="ui-mode" aria-pressed={m === p.mode} onClick={() => p.onMode(m)} data-testid={`home-mode-${m}`}>
-                  {t(MODE_WORDS[m].label)}
-                </button>
-              ))}
-            </div>
+            {/* the mode is picked at the top left (ModePicker.tsx); the box's words already say where this goes */}
             <button type="submit" className="send" aria-label={t("cmp.send")} title={t(p.stays ? "home.sendStays" : "home.sendOpens", { mod: modLabel() })} disabled={!p.canSend} data-testid="home-send">
               <SendGlyph />
             </button>

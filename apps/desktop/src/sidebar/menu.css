@@ -64,6 +64,10 @@
   background: var(--hov);
   color: var(--ink);
 }
+/* Hide sits right beside Search (the owner's ask of 27 Nov 2026), both on the row's right */
+.sb .ib + .ib {
+  margin-left: 0;
+}
 
 /* A menu row. New is always lit, as the canvas's first row is. */
 .sb .nav {

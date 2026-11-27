@@ -137,17 +137,15 @@ test("the text is on the scale, groups are grey bands in sentence case, and rows
   expect(look.page).toBeLessThanOrEqual(696);
 });
 
-test("Settings' segmented switches are Home's 28px pill", async ({ page }) => {
+test("Settings' segmented switches are the kit's 28px pill", async ({ page }) => {
+  // Home's mode was this pill until it moved to the top left (ModePicker.tsx, 27 Nov 2026); Settings' switches keep it
   await fresh(page);
-  await page.getByTestId("menu-home").click();
   const pill = (el: Element) => {
     const cs = getComputedStyle(el);
     return { height: Math.round(el.getBoundingClientRect().height), size: cs.fontSize, weight: cs.fontWeight, radius: parseFloat(cs.borderTopLeftRadius) > 100 };
   };
-  const home = await page.getByTestId("home-mode-team").evaluate(pill);
   await settings(page);
   const theme = await page.getByTestId("theme-seg").getByRole("radio", { name: "System" }).evaluate(pill);
-  expect(theme).toEqual(home);
   expect(theme).toEqual({ height: 28, size: "13px", weight: "500", radius: true });
 });
 

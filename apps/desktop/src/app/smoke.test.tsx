@@ -59,8 +59,7 @@ describe("the app on its default runtime", () => {
     expect(text).toContain("Nothing is running right now.");
     // Home's ask box, on the canvas's first mode, with all three modes: the demo team has Kit for Code
     expect(html).toContain('data-testid="page-home"');
-    expect(html).toMatch(/aria-pressed="true"[^>]*data-testid="home-mode-team"/);
-    for (const m of ["chat", "team", "code"]) expect(html, m).toContain(`data-testid="home-mode-${m}"`);
+    expect(html).toMatch(/data-testid="home-mode-now"[^>]*>Team</);
 
     // Buddy's greeting is in Buddy's chat, a press away: it says Buddy answers through the person's own coding agent, which
     // the chat's model line names (the stand-in Claude Code of a page outside the app here)
