@@ -79,10 +79,11 @@ const NOTE_HEAD = "[Manut AI: a note to Buddy]";
 const NOTE_END = "[End of the Manut AI note]";
 const NOTE_LINE = "[Manut AI:";
 /// The longest note, in characters (code points). The desktop's own is shorter (1,900).
-export const NOTE_MAX_CHARS = 2_000;
-/// Every way a reader could take a line to end: the line feed, the carriage return and the two together, the vertical tab
-/// and form feed, the next line character, and the line and paragraph separators.
-const LINE_BREAK = /\r\n|[\n\r\v\f\u0085\u2028\u2029]/;
+const NOTE_MAX_CHARS = 2_000;
+/// Every way a reader could take a line to end: the line feed, the carriage return (so a pair of them is two ends, with an
+/// empty line between that no rule here minds), the vertical tab and form feed, the next line character, and the line and
+/// paragraph separators.
+const LINE_BREAK = /[\n\r\v\f\u0085\u2028\u2029]/;
 /// What the shop's object answers to a chat write it understood. Anything else is the object failing.
 const ANSWERED = new Set([200, 404, 409, 429]);
 /// Every chat answer holds the owner's words or Buddy's, so no browser or proxy keeps a copy.
@@ -109,12 +110,13 @@ function isWholeNote(note: unknown): note is string {
 
 /// The title of the conversation a message was sent on from, as it is kept and given to the model: the request's own title
 /// trimmed, checked (`isSentOnFrom`: 1 to MAX_FROM_CHARS characters, one line, no double quote), masked by the app's one
-/// masker, and cut to MAX_FROM_CHARS again, since a mask can be longer than what it hides. Null for a title that is none, so
-/// the request is refused before anything is counted or called.
+/// masker, and cut to MAX_FROM_CHARS again, since a mask can be longer than what it hides (`token=a` becomes `token=••••`).
+/// A mask only puts its own text in place of what it hides, so what comes out is still one line with no quote, and is never
+/// empty. Null for a title that is none, so the request is refused before anything is counted or called.
 function sentOnFromOf(value: unknown): string | null {
-  if (typeof value !== "string" || !isSentOnFrom(value.trim())) return null;
-  const masked = [...maskSecrets(value.trim())].slice(0, MAX_FROM_CHARS).join("").trim();
-  return isSentOnFrom(masked) ? masked : null;
+  const title = typeof value === "string" ? value.trim() : "";
+  if (!isSentOnFrom(title)) return null;
+  return [...maskSecrets(title)].slice(0, MAX_FROM_CHARS).join("").trim();
 }
 
 function chatWrite(env: Pick<ChatEnv, "TENANT">, tenant: string, path: string, body: Record<string, unknown>): Promise<Response> {

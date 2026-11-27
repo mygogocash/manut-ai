@@ -9,7 +9,7 @@ import { createStore, selectAsks, type ReachAskItem } from "../state/store";
 import { appReader } from "../chat/box/contextReader";
 import { setCarryStorage, type Scope } from "../chat/box/carry";
 import type { ContextReader } from "../chat/box/threadContext";
-import { threadKey } from "../threads/types";
+import { firstWords, threadKey } from "../threads/types";
 import { ShopCache } from "../runtime/http/cache";
 import { CHAT_MESSAGES_PATH } from "../runtime/http/chat";
 import { HttpHost } from "../runtime/http/host";
@@ -399,6 +399,9 @@ describe("a new conversation (R10 on Connected)", () => {
     expect(made.title).toBe("Plan the Songkran sale: which items, what discount, from whi");
     expect(r.posts().at(-1)).toEqual({ text: "Plan the Songkran sale: which items, what discount, from which day.", sentOnFrom: "Can we plan a sale?" });
     expect(r.cards()[1]).toMatchObject({ done: "yes", thread: expect.any(String) });
+    // the row it shows at once, before the list is read again, is the brief's first words: nothing of the mark or the bubble is in it
+    const row = (r.store.getState().threads.buddy ?? []).find((x) => x.thread === r.cards()[1].thread);
+    expect(row?.title).toBe(firstWords("Plan the Songkran sale: which items, what discount, from which day."));
     // it is listed with the others, and read back with the mark in front
     const back = { messages: await r.store.actions.readThread("buddy", made.id) };
     expect(back.messages[0].text).toBe(fromChatText("Can we plan a sale?", "Plan the Songkran sale: which items, what discount, from which day."));

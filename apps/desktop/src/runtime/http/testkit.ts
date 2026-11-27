@@ -905,7 +905,7 @@ function ownerChatRoutes(api: FakeApi, served: ServedShops, owned: Owned, now: (
   // what the API would refuse fails against this stand-in as it would against the API.
   const wholeNote = (v: unknown): v is string => {
     if (typeof v !== "string" || [...v].length > 2_000) return false;
-    const lines = v.split(/\r\n|[\n\r\v\f\u0085\u2028\u2029]/);
+    const lines = v.split(/[\n\r\v\f\u0085\u2028\u2029]/);
     const end = "[End of the Manut AI note]";
     return lines[0].startsWith("[Manut AI: a note to Buddy]") && lines[lines.length - 1] === end &&
       lines.slice(1, -1).every((l) => !l.trimStart().startsWith("[Manut AI:") && l.trim() !== end);

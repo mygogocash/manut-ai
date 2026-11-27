@@ -105,6 +105,12 @@ describe("the title a mark names, and the title the API keeps as sentOnFrom (ite
     expect(masked).toContain("••••");
     expect(masked).toContain("'x'");
     expect(markTitle("Price\n\n  list\tfor   March")).toBe("Price list for March");
+    expect(markTitle("  Price list \n")).toBe("Price list");
+    // a title of exactly 120 characters is as it was; one more is cut to 120 with the ellipsis
+    expect(markTitle("ก".repeat(ENTRY_TITLE_MAX))).toBe("ก".repeat(ENTRY_TITLE_MAX));
+    expect(markTitle("ก".repeat(ENTRY_TITLE_MAX + 1))).toBe(`${"ก".repeat(ENTRY_TITLE_MAX - 1)}…`);
+    // a cut that lands after a blank leaves none before the ellipsis
+    expect(markTitle(`${"a".repeat(ENTRY_TITLE_MAX - 2)} bbb`)).toBe(`${"a".repeat(ENTRY_TITLE_MAX - 2)}…`);
     expect(markTitle("ก".repeat(300))).toBe(`${"ก".repeat(ENTRY_TITLE_MAX - 1)}…`);
     // an emoji takes two UTF-16 units: the cut is at the 120th character, never in the middle of one
     const emoji = markTitle("😀".repeat(300));

@@ -119,8 +119,8 @@ export function buddyNote(entries: readonly BuddyNoteEntry[], grammar: ReachGram
 export const BUDDY_NOTE_MAX = 1_900;
 
 /** Every way a reader could take a line to end, as the API reads them (apps/api chat.ts `LINE_BREAK`): the line feed, the carriage
- *  return and the two together, the vertical tab and form feed, the next line character, and the line and paragraph separators. */
-const LINE_BREAK = /\r\n|[\n\r\v\f\u0085\u2028\u2029]/;
+ *  return, the vertical tab and form feed, the next line character, and the line and paragraph separators. */
+const LINE_BREAK = /[\n\r\v\f\u0085\u2028\u2029]/;
 
 /** Whether `note` is a whole note `buddyNote` made, as the API takes one (apps/api chat.ts `isWholeNote`): its first line starts with
  *  `BUDDY_NOTE_HEAD`, its last line is exactly `BUDDY_NOTE_END`, no line between starts with `[Manut AI:` (a second note, or a mark) or
