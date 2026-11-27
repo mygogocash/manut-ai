@@ -14,9 +14,11 @@
   // every OFC-21 sharing route refuses until officeSharing is turned on.
   // SHOP_FEED is unset too: GET /v1/feed, a shop's live feed, answers 403
   // feature_disabled until the operator turns shopFeed on (docs/turning-on.md).
-  // RELAY_ENABLED is deliberately unset in every environment: until the owner
-  // turns the relay on at gate G3, every /relay/ route answers 503
-  // relay_disabled (docs/relay-protocol-v1.md, the kill switch).
+  // RELAY_ENABLED is set in dev only (the owner, 27 Nov 2026, for item 78d: the
+  // relay on in dev, to try the phone link and its push). It stays unset in
+  // staging and production, where every /relay/ route answers 503
+  // relay_disabled until the owner turns the relay on there
+  // (docs/relay-protocol-v1.md, the kill switch).
   // The relay's Web Push key (item 78d, src/web-push.ts) is two Wrangler
   // secrets, never in this file: WEB_PUSH_PRIVATE_KEY (base64url of the P-256
   // scalar) and WEB_PUSH_PUBLIC_KEY (base64url of the 65-byte point), put
@@ -102,6 +104,9 @@
       "vars": {
         "WEB_ORIGIN": "https://dev.manut.xyz",
         "PUBLIC_API_ORIGIN": "https://dev.manut.xyz",
+        // The phone relay's kill switch, on in dev only (the owner, 27 Nov
+        // 2026, item 78d). Exactly "1" turns it on; anything else is off.
+        "RELAY_ENABLED": "1",
         // The audience of the Access application "Manut AI dev console"
         // (dev.manut.xyz/ops and dev.manut.xyz/v1/admin, allowing only the
         // owner's email). An audience tag identifies the application and is
