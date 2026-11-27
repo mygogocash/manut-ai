@@ -41,6 +41,22 @@ export interface LaneBranch {
   worktree?: string;
 }
 
+/** What a landing did (src-tauri/src/lane_land.rs `Landed`, item 102g): `landed` (conflicts included), `nothing`, or `kept` with
+ *  `why` and the patch's path; the files, the conflicts, build output cut, and the files an added line of which holds a key. */
+export interface LaneLanded {
+  outcome: "landed" | "nothing" | "kept";
+  files: string[];
+  filesTotal: number;
+  conflicts: string[];
+  cut: string[];
+  cutTotal: number;
+  keys: string[];
+  patch: string;
+  why: "" | "outside" | "bad_path" | "other_repo" | "would_not_apply";
+  outside: string[];
+  error: string;
+}
+
 /** What the shell made (`lane_worktree`): `left` is how many changed files of the developer's folder did not come along. */
 export interface LaneMade {
   branch: string;

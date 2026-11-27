@@ -357,7 +357,8 @@ describe("rounds for one message of the person's (R4)", () => {
     // a third: no card, a line, nothing handed over
     await t.turn(id, block({ brief: "One more." }));
     expect(t.cards(id)).toHaveLength(2);
-    expect(t.lines(id).at(-1)).toBe("Kit asked for helper lanes again. This message has had its 2 rounds, so none start and Kit finishes by itself.");
+    // the line says so (the helpers' reports, item 102j, may have gone to Kit since, with their own note)
+    expect(t.lines(id)).toContain("Kit asked for helper lanes again. This message has had its 2 rounds, so none start and Kit finishes by itself.");
     expect(t.handed).toHaveLength(2);
     // the person writes again: a new message gets its own rounds
     await t.ss.send(id, "Now the receipts");

@@ -430,8 +430,14 @@ describe("the person's Stop (R5) and what comes back", () => {
     t.emit(h2, { event: "turn.end", outcome: "interrupted" });
     await settle();
     expect(t.helperStarts()).toHaveLength(2);
-    expect(t.ss.helperRounds(t.ss.getState().list.find((r) => r.id === h1)!.helperOf!.lead).rounds[0]).toMatchObject({ back: true, dropped: { breaker: 0, person: 1 } });
     expect(t.backs.map((b) => b.report.ended)).toEqual(["stopped", "stopped"]);
+    // the round, every helper back, went to the lead in one message (item 102j) counting the third as stopped by the person
+    const leadId = t.ss.getState().list.find((r) => r.id === h1)!.helperOf!.lead;
+    expect(t.ss.helperRounds(leadId).rounds).toEqual([]);
+    const reports = t.of(leadId, "send").map((i) => (i.input as { text: string }).text).filter((x) => x.includes("your helper lanes reported"));
+    expect(reports).toHaveLength(1);
+    expect(reports[0]).toContain("One helper never started, because the person stopped the round");
+    expect(reports[0]).not.toContain("two in a row could not run");
   });
 
   it("a round's idle processes are ended once it is done, but one still working in the background, or asking, is left running", async () => {
@@ -513,5 +519,42 @@ describe("names and what is kept", () => {
     const h = t.ss.getState().list.find((r) => r.id === "s4")!;
     expect(h.paused).toBe(true);
     expect(h.helperOf).toEqual({ lead: "s3", job: "jabcdefghij", round: "r1", index: 0 });
+  });
+});
+
+describe("safety: the helpers' report is the app's, not the person's (R4, R9; item 102j)", () => {
+  const FENCE = "your helper lanes reported";
+  it("opens no new rounds, shows no bubble of the person's, and its quiet line opens every word that was sent", async () => {
+    const t = await setup();
+    const two = ask([{ title: "A", brief: "Do A." }, { title: "B", brief: "Do B." }]);
+    const { id } = await t.lead(two);
+    const cards = () => (t.chat(id)?.items ?? []).filter((i) => i.kind === "helpersAsk");
+    const reports = () => t.of(id, "send").map((i) => (i.input as { text: string }).text).filter((x) => x.includes(FENCE));
+    const finish = async () => {
+      for (const h of t.helperIds().filter((h) => t.ss.getState().list.find((r) => r.id === h)?.helperOf?.round === cards().at(-1)!.id)) await t.turn(h, "Done.");
+      await settle();
+    };
+    await finish();
+    expect(reports()).toHaveLength(1);
+    // the person's message's rounds are counted on: the report did not reset them as a message of the person's would
+    expect(t.ss.helperRounds(id).roundsThisMessage).toBe(1);
+    const items = t.chat(id)?.items ?? [];
+    expect(items.some((i) => i.kind === "user" && i.text.includes(FENCE))).toBe(false);
+    const line = items.find((i) => i.kind === "system" && !!i.detail);
+    expect(line).toMatchObject({ kind: "system", text: "Helpers reported to Kit.", detail: { label: "Show what was sent" } });
+    expect(line?.kind === "system" && line.detail?.text.startsWith("[Manut AI: your helper lanes reported]")).toBe(true);
+    // with one more round open, the report says so and carries the lead's note, and the lead's next ask is a card
+    expect(reports()[0]).toContain("you may send out helpers once more");
+    await t.turn(id, ask([{ title: "C", brief: "Do what A missed." }, { title: "D", brief: "Do what B missed." }]));
+    expect(cards()).toHaveLength(2);
+    expect(await t.ss.answerHelpers(id, cards()[1].id, true)).toEqual({ ok: true });
+    await settle();
+    await finish();
+    expect(reports()).toHaveLength(2);
+    expect(t.ss.helperRounds(id).roundsThisMessage).toBe(2);
+    expect(reports()[1]).toContain("This request has had all its rounds of helpers: send out no more");
+    // a third ask, after two reports and no word from the person: no card
+    await t.turn(id, ask([{ title: "E", brief: "One more." }, { title: "F", brief: "And one more." }]));
+    expect(cards()).toHaveLength(2);
   });
 });

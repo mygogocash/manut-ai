@@ -275,8 +275,9 @@ export type RoutineAddedItem = {
 export type PluginAddedItem = { kind: "pluginAdded"; id: string; ts: number; name: string; title: string; tools: number; hooks: number };
 /** manut set up its Slack briefing for this bot: one gray line, once per bot, with Turn off (the job's pause). */
 export type BriefNoticeItem = { kind: "briefNotice"; id: string; ts: number; bot: string };
-/** One quiet line from manut itself (e.g. "Switched to Claude #2 (limit on #1)"); never sent to the bot. */
-export type SystemItem = { kind: "system"; id: string; ts: number; text: string };
+/** One quiet line from manut itself (e.g. "Switched to Claude #2 (limit on #1)"); never sent to the bot. `detail`: a longer text
+ *  the line can open, under its own label (the helpers' report the app sent the lead, item 102j: "Show what was sent"). */
+export type SystemItem = { kind: "system"; id: string; ts: number; text: string; detail?: { label: string; text: string } };
 /** "→ thread: <title>" under a main-chat answer: the bot opened `thread` (or the person sent a message there). */
 export type ThreadLinkItem = { kind: "threadLink"; id: string; ts: number; bot: string; thread: string; title: string };
 /** "Send this to <title>?" under a main-chat answer whose bot thought the person's message belongs in `thread`.

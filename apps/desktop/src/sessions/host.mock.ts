@@ -15,7 +15,7 @@ import type { DiskLevel, DiskState } from "../lib/disk";
 import type { ImportApp, ImportProfile } from "./term/import";
 import { type GitView } from "../code/moved";
 import { MOCK_MOVED, MOCK_MOVED_ROOT } from "../code/mockMoved";
-import { type KeptLane, type LaneCleaned, type LaneMade, type LaneReleased, type LaneRemoveAsk, type LaneRemoved } from "../code/laneBranch";
+import { type KeptLane, type LaneCleaned, type LaneLanded, type LaneMade, type LaneReleased, type LaneRemoveAsk, type LaneRemoved } from "../code/laneBranch";
 import { readAgentConfig, type AgentConfig } from "../settings/mcp/agentConfig";
 import { readPulled, readTools, type MergeMethod, type NewProjectMade, type Pulled, type RepoAsk, type ReviewAsk, type ReviewDone, type ReviewDraft, type SourceTools } from "../code/source";
 import { checkArgs, checkVars, homeVarOf, rulesOf, signinAgent, versionAgent, type ProviderPatch, type ProviderView, type SignIn } from "../settings/providers/model";
@@ -57,6 +57,8 @@ export interface MockCall {
     | "power.busy"
     | "lane.worktree"
     | "lane.helper"
+    | "lane.land"
+    | "lane.takeBack"
     | "lane.remove"
     | "lane.root"
     | "lane.release"
@@ -107,6 +109,8 @@ export interface MockCall {
   /** lane.helper: the lead lane's folder a helper lane was made from, and its job (item 102f) */
   lead?: string;
   job?: string;
+  /** a landing's helper lane folder (item 102i) */
+  helper?: string;
   /** lane.worktree: the branch the shell made for a lane, and the one it was made from (main.moved: the one the page named) */
   branch?: string;
   base?: string;
@@ -223,6 +227,8 @@ export type MockGlobals = MockTurnGlobals & {
   __manutMemory?: number | null;
   /** e2e: the next helper lane's folder is refused with this code, as the shell refuses one (item 102f) */
   __manutMockHelperRefused?: string;
+  __manutMockLanded?: Record<string, LaneLanded>;
+  __manutMockLandRefused?: string;
   /** e2e: what the stand-in agent does with helper lane `n`'s brief (item 102h): one of its own commands (`/work hold`, `/approve`);
    *  none: it answers the brief at once */
   __manutMockHelpers?: Record<number, string>;
@@ -923,6 +929,21 @@ export class MockHost implements SessionHost, BuddyHost {
     // says the folder has no remote
     const remoteFrom = start?.remote ? (this.g.__manutRemoteFrom?.[cwd] ?? "") : "";
     return { branch, base, dir: worktree, worktree, left: this.g.__manutLeft?.[cwd] ?? 0, from: remoteFrom, local: start?.remote && !remoteFrom ? "no_remote" : "", config: this.g.__manutConfig?.[cwd] ?? 0, stayed: this.g.__manutStayed?.[cwd] ?? 0 };
+  }
+  /** As the shell lands a helper lane's work (src-tauri/src/lane_land.rs): e2e sets `__manutMockLanded[helper]` to the answer, else
+   *  it landed one file; `__manutMockLandRefused` rejects the next landing with that code. */
+  async laneLand(helper: string): Promise<LaneLanded> {
+    this.log({ op: "lane.land", helper });
+    const refused = this.g.__manutMockLandRefused;
+    if (refused) {
+      delete this.g.__manutMockLandRefused;
+      throw new Error(refused);
+    }
+    return this.g.__manutMockLanded?.[helper] ?? { outcome: "landed", files: ["src/a.ts"], filesTotal: 1, conflicts: [], cut: [], cutTotal: 0, keys: [], patch: "", why: "", outside: [], error: "" };
+  }
+  async laneTakeBack(helper: string): Promise<{ files: string[]; filesTotal: number }> {
+    this.log({ op: "lane.takeBack", helper });
+    return { files: ["src/a.ts"], filesTotal: 1 };
   }
   /** As the shell does it (src-tauri/src/lane_helper.rs, item 102f): only for a lane folder the mock shell made that is not itself a
    *  helper lane's, on the first `<lead>-help-<n>` no branch has, in a folder beside the lead's, its record naming the job and the

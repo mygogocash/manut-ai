@@ -163,7 +163,7 @@ export type Action =
   | { type: "ui.look"; look: Partial<Look> }
   | { type: "ui.settings"; page?: string }
   | { type: "ui.closeSettings" }
-  | { type: "system.note"; bot: string; text: string; now: number }
+  | { type: "system.note"; bot: string; text: string; now: number; detail?: { label: string; text: string } }
   | { type: "ui.pin"; bot: string; on: boolean }
   | { type: "ui.roster"; roster: string[] }
   /** A sidebar row moved (drag or ⌥↑/⌥↓): the pin list and roster in their new order. */
@@ -845,7 +845,7 @@ export function reduce(state: AppState, a: Action): AppState {
       return { ...state, ui: { ...state.ui, view: state.ui.back === "session" && !state.ui.session ? "chat" : state.ui.back, back: "chat" } };
     case "system.note":
       return touchChat(state, a.bot, (c) =>
-        withItems(c, [...c.items, { kind: "system", id: `system-${a.now}-${c.items.length}`, ts: a.now / 1000, text: a.text }]),
+        withItems(c, [...c.items, { kind: "system", id: `system-${a.now}-${c.items.length}`, ts: a.now / 1000, text: a.text, ...(a.detail ? { detail: a.detail } : {}) }]),
       );
     case "ui.restore": {
       const { session, runsFull, ...rest } = a.ui;

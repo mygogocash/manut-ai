@@ -8,7 +8,8 @@ import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it } from "vitest";
 import { setLang } from "../i18n";
 import type { HelperRow } from "./helperAsks";
-import { HelperRunView, runRows, type RunRow } from "./HelperRunCard";
+import { HelperRunView, landingWords, runRows, type RunRow } from "./HelperRunCard";
+import type { LandingView } from "./helperLanding";
 import type { HelperRun } from "./helperRuns";
 
 afterEach(() => setLang("en"));
@@ -116,3 +117,36 @@ describe("the card", () => {
     expect(words).toContain("모두 멈추기");
   });
 });
+
+describe("each helper's landing on its row (item 102i)", () => {
+  const view = (over: Partial<LandingView>): LandingView => ({ state: "landed", files: ["src/a.ts", "src/b.ts"], filesTotal: 2, conflicts: [], keys: [], patch: "", why: "", error: "", ...over });
+  const base: RunRow = { index: 0, title: "Tests for the QR builder", agent: "claude", state: "done", canOpen: true, canStop: false };
+  const text = (html: string) => html.replace(/<[^>]*>/g, " ").replace(/&#x27;/g, "'").replace(/\s+/g, " ");
+
+  it("says what each landing did, with its conflicts and a key it found", () => {
+    expect(landingWords(view({}))).toBe("Landed 2 files in Kit's folder.");
+    expect(landingWords(view({ files: ["src/a.ts"], filesTotal: 1 }))).toBe("Landed 1 file in Kit's folder.");
+    expect(landingWords(view({ conflicts: ["src/a.ts"], keys: ["src/b.ts"] }))).toBe("Landed 2 files in Kit's folder. Conflicts left to settle in src/a.ts. A key is in src/b.ts: Kit's next commit or push asks first.");
+    expect(landingWords(view({ state: "waiting" }))).toContain("until Kit is idle");
+    expect(landingWords(view({ state: "nothing" }))).toBe("Changed nothing.");
+    expect(landingWords(view({ state: "kept", why: "would_not_apply", patch: "/p/1.patch" }))).toContain("would not apply");
+    expect(landingWords(view({ state: "kept", why: "outside", patch: "/p/1.patch" }))).toContain("reaches outside the project");
+    expect(landingWords(view({ state: "failed", error: "busy" }))).toBe("Did not land: busy");
+    expect(landingWords(view({ state: "takenBack" }))).toContain("as it was before this landing");
+  });
+
+  it("offers Take back only on a landing that landed, and Show patch only on a kept patch", () => {
+    const landed = draw(createElement(HelperRunView, { rows: [{ ...base, landing: view({}) }], now: 0, onTakeBack: () => {}, onShowPatch: () => {} }));
+    expect(landed).toContain('data-testid="helper-run-take-back"');
+    expect(landed).not.toContain('data-testid="helper-run-show-patch"');
+    const kept = draw(createElement(HelperRunView, { rows: [{ ...base, landing: view({ state: "kept", why: "would_not_apply", patch: "/p/1.patch" }) }], now: 0, onTakeBack: () => {}, onShowPatch: () => {} }));
+    expect(kept).toContain('data-testid="helper-run-show-patch"');
+    expect(kept).not.toContain('data-testid="helper-run-take-back"');
+    const taken = draw(createElement(HelperRunView, { rows: [{ ...base, landing: view({ state: "takenBack" }) }], now: 0, onTakeBack: () => {}, onShowPatch: () => {} }));
+    expect(taken).not.toContain('data-testid="helper-run-take-back"');
+    expect(text(taken)).toContain("Taken back");
+    const none = draw(createElement(HelperRunView, { rows: [base], now: 0 }));
+    expect(none).not.toContain('data-testid="helper-run-landing"');
+  });
+});
+
