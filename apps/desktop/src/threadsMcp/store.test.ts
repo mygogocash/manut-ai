@@ -6,6 +6,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import type { ContextReader } from "../chat/box/threadContext";
 import { mcpAskRecord, resetMcpAsks } from "./asks";
+import type { OpenLane } from "../jobs/reachChats";
 import { PROGRAM_FENCE, readFromProgram } from "./list";
 import type { ThreadRef } from "../chat/box/threadContext";
 import { refKey } from "../chat/box/threadContext";
@@ -73,6 +74,7 @@ function make(over: Partial<McpDeps> = {}) {
   const notified: string[] = [];
   const storage = new Mem();
   const routed: { session: string; text: string }[] = [];
+  const opened: OpenLane[] = [];
   const running = new Set(["a", "b"]);
   const m = createMcp({
     shell: s.shell,
@@ -92,6 +94,13 @@ function make(over: Partial<McpDeps> = {}) {
       routed.push({ session, text });
       return true;
     },
+    laneBase: (ref) => (ref.kind === "session" && chats[refKey(ref)] ? { cwd: "/home/you/code/shop", agent: "claude" } : null),
+    agentFor: (name) => ({ claude: { id: "claude", label: "Claude Code" }, codex: { id: "codex", label: "Codex" } } as Record<string, { id: string; label: string }>)[name.toLowerCase()] ?? null,
+    openLane: async (p) => {
+      opened.push(p);
+      chats[`session:new${opened.length}`] = { key: `agent:new${opened.length}`, title: p.title, state: "working" };
+      return { ok: true, id: `new${opened.length}` };
+    },
     notify: (card) => notified.push(card.id),
     now: () => 1000,
     ...over,
@@ -100,7 +109,7 @@ function make(over: Partial<McpDeps> = {}) {
     s.waiting.add(id);
     m.call({ id, tool, args, program: CLAUDE });
   };
-  return { m, s, chats, notified, storage, call, routed, running };
+  return { m, s, chats, notified, storage, call, routed, running, opened };
 }
 
 /** Lets the card's text be built: a read card opens after item 97's reader is awaited. */
@@ -181,12 +190,74 @@ describe("the calls of a program the person let in", () => {
     expect(lines[2]).toBe("3. Weekly prices (Kit, now of another shop or account; it cannot be reached)");
   });
 
-  it("refuses a new lane until its slice is built", () => {
-    const { m, s, call } = make();
+});
+
+describe("a new lane (103d)", () => {
+  it("is a card with its title, agent, folder and brief whole; Start lane opens it in its agent's Ask mode and lists it", async () => {
+    const { m, s, opened, call } = make();
     m.add(A);
-    call("tm-7", "open_chat", { chat: 1, title: "t", brief: "b" });
-    expect(s.replies).toEqual([{ id: "tm-7", text: NOT_YET, error: true }]);
+    call("tm-40", "open_chat", { chat: 1, title: "Print the  shop's name", brief: `Add the name at the top. ${KEY}`, agent: "Codex" });
+    await settle();
+    const card = m.getSnapshot().cards[0];
+    expect(card.kind).toBe("open");
+    if (card.kind !== "open") return;
+    expect([card.title, card.agent, card.agentLabel, card.cwd]).toEqual(["Print the shop's name", "codex", "Codex", "/home/you/code/shop"]);
+    expect(card.brief).not.toContain("abcdefghijklmnopqrstuvwxyz0123456789");
+    expect(opened).toEqual([]);
+    expect(await m.answer("tm-40", true)).toBe(true);
+    expect(opened).toHaveLength(1);
+    expect(opened[0]).toMatchObject({ agent: "codex", cwd: "/home/you/code/shop", title: "Print the shop's name", from: "", program: "Claude" });
+    // the brief goes as the card showed it, under the program's mark
+    expect(readFromProgram(opened[0].first)).toEqual({ name: "Claude", words: card.brief });
+    expect(s.replies).toEqual([{ id: "tm-40", text: expect.stringContaining("Started the lane as chat 2."), error: false }]);
+    expect(m.getSnapshot().list.map((e) => [e.n, e.title])).toEqual([
+      [1, "Fix the login"],
+      [2, "Print the shop's name"],
+    ]);
+  });
+
+  it("takes the listed chat's own agent when none is named, and Not now starts nothing", async () => {
+    const { m, s, opened, call } = make();
+    m.add(A);
+    call("tm-41", "open_chat", { chat: 1, title: "t", brief: "b" });
+    await settle();
+    const card = m.getSnapshot().cards[0];
+    expect(card.kind === "open" && card.agent).toBe("claude");
+    await m.answer("tm-41", false);
+    expect(opened).toEqual([]);
+    expect(s.replies).toEqual([{ id: "tm-41", text: "The person did not start the lane. Nothing was started.", error: true }]);
+  });
+
+  it("opens no card from a team thread or for an agent this Mac cannot start", async () => {
+    const { m, s, call } = make();
+    m.add(T);
+    m.add(A);
+    call("tm-42", "open_chat", { chat: 1, title: "t", brief: "b" });
+    call("tm-43", "open_chat", { chat: 2, title: "t", brief: "b", agent: "bypassPermissions" });
+    await settle();
     expect(m.getSnapshot().cards).toEqual([]);
+    expect(s.replies.map((r) => [r.id, r.error])).toEqual([
+      ["tm-42", true],
+      ["tm-43", true],
+    ]);
+    expect(s.replies[1].text).not.toContain("bypassPermissions");
+  });
+
+  it("whose call is gone starts nothing, and a lane that would not start says so", async () => {
+    const { m, s, opened, call } = make();
+    m.add(A);
+    call("tm-44", "open_chat", { chat: 1, title: "t", brief: "b" });
+    await settle();
+    m.gone("tm-44");
+    expect(await m.answer("tm-44", true)).toBe(false);
+    expect(opened).toEqual([]);
+    const refused = make({ openLane: async () => ({ ok: false, why: "That folder is not a repository." }) });
+    refused.m.add(A);
+    refused.call("tm-45", "open_chat", { chat: 1, title: "t", brief: "b" });
+    await settle();
+    await refused.m.answer("tm-45", true);
+    expect(refused.s.replies).toEqual([{ id: "tm-45", text: "The lane did not start: That folder is not a repository.", error: true }]);
+    expect(s.replies).toEqual([]);
   });
 });
 

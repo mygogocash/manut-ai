@@ -1,4 +1,4 @@
-// The read and message cards' asks for other programs (item 103c, `docs/mcp-threads.md`, rule M8): one approval-core request a
+// The read, message and new-lane cards' asks for other programs (items 103c and 103d, `docs/mcp-threads.md`, rule M8): one approval-core request a
 // card, opened and settled there once by approval-core's own rules (a request leaves waiting once, only an option it offered can be
 // chosen, a request whose turn is not the one running is superseded). As 102k's `reachAsks.ts`, this file is the only place such a
 // request is opened, decided or withdrawn, and nothing a program sends reaches it: the relay and the door have no verb for it.
@@ -9,7 +9,7 @@
 // the person is the owner of their own chats.
 import { InMemoryApprovalStore, type ApprovalOption, type DecideResult } from "@manut/approval-core";
 
-export type McpAskKind = "read" | "send";
+export type McpAskKind = "read" | "send" | "open";
 
 /** What each card offers: its one yes, and its no. */
 export const MCP_OPTIONS: Record<McpAskKind, readonly ApprovalOption[]> = {
@@ -20,6 +20,10 @@ export const MCP_OPTIONS: Record<McpAskKind, readonly ApprovalOption[]> = {
   send: [
     { id: "send", label: "send there", effect: "approve" },
     { id: "keep", label: "keep out", effect: "decline" },
+  ],
+  open: [
+    { id: "start", label: "start lane", effect: "approve" },
+    { id: "notNow", label: "not now", effect: "decline" },
   ],
 };
 

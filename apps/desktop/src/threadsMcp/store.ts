@@ -12,7 +12,9 @@
 // - `send_to_chat` (103c): a card showing the words whole, masked as they will go; Send there puts them in that chat through the
 //   sessions store's `route`, under a line naming the program, held while that chat works or any ask of it waits, so its words
 //   never answer anything (M9). Only a coding chat on this Mac whose agent runs as the app's chat takes one.
-// - `open_chat`: refused, plainly, until slice 103d builds its card.
+// - `open_chat` (103d): a card showing the new lane's title, agent, project folder and brief whole; Start lane makes an ordinary
+//   lane through the sessions store's `openLane`, in its agent's Ask mode, the brief its first message under the program's mark,
+//   and lists it for the program when the list has room, so the program may then read it or send it a message, each after a card.
 //
 // Every card is pressed once: it goes from the stack before anything happens, its read or message is settled once in approval-core
 // (`asks.ts`), and the chat it names is checked again at the press. A card whose call is gone reads "No longer open" and answers
@@ -23,14 +25,15 @@ import { useSyncExternalStore } from "react";
 import type { Scope } from "../chat/box/carry";
 import { gatherContext, type ContextReader, type ThreadRef } from "../chat/box/threadContext";
 import { addEntry, removeEntry, type ReachEntry } from "../jobs/reachList";
+import type { OpenLane } from "../jobs/reachChats";
 import { maskSecrets } from "../lib/secrets";
 import { t } from "../i18n";
 import { answerMcpAsk, openMcpAsk, withdrawMcpAsk, type McpAskKind } from "./asks";
 import { fromProgramText, listLines, loadList, movedScope, OUTSIDE_MAX, saveList, type ChatState } from "./list";
 import { getMcpShell, type McpCall, type McpProgram, type McpShell } from "./shell";
 
-/** What a new lane is answered until its slice is built. */
-export const NOT_YET = "Manut AI cannot start a lane for other programs yet: list_chats, read_chat and send_to_chat work in this version. Nothing was done.";
+/** What a call that is none of the four tools is answered (the door lets none through; kept for safety). */
+export const NOT_YET = "Manut AI does not know that call. Nothing was done.";
 
 interface CardBase {
   id: string;
@@ -52,7 +55,19 @@ export interface CardChat {
 export type McpCard =
   | (CardBase & { kind: "letIn" })
   | (CardBase & { kind: "read"; chat: CardChat; /** item 97's text: exactly what Let it read answers with */ text: string })
-  | (CardBase & { kind: "send"; chat: CardChat; /** the words masked as the card shows them: exactly what Send there puts in the chat */ message: string });
+  | (CardBase & { kind: "send"; chat: CardChat; /** the words masked as the card shows them: exactly what Send there puts in the chat */ message: string })
+  | (CardBase & {
+      kind: "open";
+      /** the listed chat whose project the lane is made in */
+      chat: CardChat;
+      title: string;
+      /** masked as the card shows it: exactly the new lane's first message, under the program's mark */
+      brief: string;
+      agent: string;
+      agentLabel: string;
+      /** the developer's folder the lane is made from */
+      cwd: string;
+    });
 
 /** The let-in card (103b's name for it). */
 export type LetInCard = Extract<McpCard, { kind: "letIn" }>;
@@ -80,13 +95,21 @@ export interface McpDeps {
   sendable(ref: ThreadRef): boolean;
   /** The sessions store's `route`: false when the chat's agent is not running to take it. */
   route(session: string, text: string): Promise<boolean>;
+  /** A coding chat's developer folder and agent, the base a new lane is made from; null for anything else. */
+  laneBase(ref: ThreadRef): { cwd: string; agent: string } | null;
+  /** The agent named (by its id or the name Settings shows) when Manut AI can start it here, on and installed; null when not. */
+  agentFor(name: string): { id: string; label: string } | null;
+  /** The sessions store's `openLane`: an ordinary lane in its agent's Ask mode. */
+  openLane(p: OpenLane): Promise<{ ok: true; id: string } | { ok: false; why: string }>;
   notify?(card: McpCard): void;
   now?(): number;
 }
 
 /** What a program hears when the chat it names opens no card. M13: the call's words are never echoed. */
-const notListed = (n: number, kind: McpAskKind) => `Chat ${n} is not on the person's list. Nothing was ${kind === "read" ? "read" : "sent"}.`;
-const unreachable = (n: number, kind: McpAskKind) => `Chat ${n} can no longer be reached: it left Manut AI, or it is now of another shop or account. Nothing was ${kind === "read" ? "read" : "sent"}.`;
+const nothing = (kind: McpAskKind) => (kind === "read" ? "Nothing was read." : kind === "send" ? "Nothing was sent." : "Nothing was started.");
+const notListed = (n: number, kind: McpAskKind) => `Chat ${n} is not on the person's list. ${nothing(kind)}`;
+const unreachable = (n: number, kind: McpAskKind) => `Chat ${n} can no longer be reached: it left Manut AI, or it is now of another shop or account. ${nothing(kind)}`;
+const oneLine = (t: string) => t.replace(/\s+/g, " ").trim();
 
 export function createMcp(d: McpDeps) {
   let list: ReachEntry[] = loadList(d.storage);
@@ -138,7 +161,13 @@ export function createMcp(d: McpDeps) {
     if (!reachable(e)) return reply(c.id, unreachable(n, kind), true);
     const chat: CardChat = { n: e.n, ref: e.ref, title: d.title(e.ref) };
     let card: McpCard;
-    if (kind === "send") {
+    if (kind === "open") {
+      const base = d.laneBase(e.ref);
+      if (!base) return reply(c.id, `Chat ${n} is not a coding chat with a project folder, so no lane can be made from it. Nothing was started.`, true);
+      const agent = d.agentFor(typeof c.args.agent === "string" ? c.args.agent : base.agent);
+      if (!agent) return reply(c.id, "That agent is not one Manut AI can start here: it is not installed, or it is turned off in Settings. Nothing was started.", true);
+      card = { kind: "open", id: c.id, program: c.program, at: now(), gone: false, chat, title: oneLine(String(c.args.title ?? "")), brief: maskSecrets(String(c.args.brief ?? "")), agent: agent.id, agentLabel: agent.label, cwd: base.cwd };
+    } else if (kind === "send") {
       if (!d.sendable(e.ref)) return reply(c.id, `Chat ${n} is not a coding chat whose agent runs in Manut AI, so a message cannot go there. Nothing was sent.`, true);
       card = { kind: "send", id: c.id, program: c.program, at: now(), gone: false, chat, message: maskSecrets(String(c.args.message ?? "")) };
     } else {
@@ -152,7 +181,8 @@ export function createMcp(d: McpDeps) {
       card = { kind: "read", id: c.id, program: c.program, at: now(), gone: false, chat, text };
     }
     try {
-      await openMcpAsk(c.id, kind, { program: c.program, chat, ...(card.kind === "read" ? { text: card.text } : card.kind === "send" ? { message: card.message } : {}) });
+      const { id: _id, at: _at, gone: _gone, ...detail } = card;
+      await openMcpAsk(c.id, kind, detail);
     } catch {
       return reply(c.id, "That call was already asked. Nothing was done.", true);
     }
@@ -192,6 +222,7 @@ export function createMcp(d: McpDeps) {
       if (c.tool === "list_chats") return reply(c.id, listLines(list, stateOf, (e) => d.whoOf(e.ref)), false);
       if (c.tool === "read_chat") return ask(c, "read");
       if (c.tool === "send_to_chat") return ask(c, "send");
+      if (c.tool === "open_chat") return ask(c, "open");
       reply(c.id, NOT_YET, true);
     },
 
@@ -222,10 +253,25 @@ export function createMcp(d: McpDeps) {
       const settled = await answerMcpAsk(id, card.kind, yes, true);
       if (!settled.ok) return false;
       const { n } = card.chat;
-      if (!yes) return d.shell.reply(id, card.kind === "read" ? `The person did not let you read chat ${n}. Nothing was read.` : `The person kept your message out of chat ${n}. Nothing was sent.`, true);
+      if (!yes) {
+        const no = card.kind === "read" ? `The person did not let you read chat ${n}. Nothing was read.` : card.kind === "send" ? `The person kept your message out of chat ${n}. Nothing was sent.` : "The person did not start the lane. Nothing was started.";
+        return d.shell.reply(id, no, true);
+      }
       const e = listed(card.chat);
       if (!e || !reachable(e)) return d.shell.reply(id, unreachable(n, card.kind), true);
       if (card.kind === "read") return d.shell.reply(id, card.text, false);
+      if (card.kind === "open") {
+        const started = await d.openLane({ agent: card.agent, cwd: card.cwd, title: card.title, first: fromProgramText(card.program.name, card.brief), from: "", program: card.program.name });
+        if (!started.ok) return d.shell.reply(id, `The lane did not start: ${started.why}`, true);
+        // listed for the program when there is room, as the person can see on the list; each read or message still asks
+        const ref: ThreadRef = { kind: "session", id: started.id };
+        const link = d.link(ref);
+        const added = addEntry(list, { ref, ...(link ? { link } : {}), title: card.title, scope: d.where(ref)?.scope ?? e.scope }, OUTSIDE_MAX);
+        if (!added.refused) keep(added.list);
+        const num = added.refused ? null : added.list[added.list.length - 1].n;
+        const said = "It runs in its agent's Ask mode, so each step it takes asks the person.";
+        return d.shell.reply(id, num ? `Started the lane as chat ${num}. ${said}` : `Started the lane. ${said} The person's list is full, so it is not listed for you.`, false);
+      }
       if (e.ref.kind !== "session" || !d.sendable(e.ref) || !(await d.route(e.ref.id, fromProgramText(card.program.name, card.message)))) {
         return d.shell.reply(id, `Chat ${n}'s agent is not running to take the message. Nothing was sent.`, true);
       }
@@ -266,6 +312,9 @@ export function getMcp(): Mcp {
       },
       sendable: () => false,
       route: async () => false,
+      laneBase: () => null,
+      agentFor: () => null,
+      openLane: async () => ({ ok: false, why: "not ready" }),
     },
   );
   return live;

@@ -24,7 +24,14 @@ const storage = (): Storage | null => {
 function announce(card: McpCard): void {
   if (windowWatched() || !notifyEnabled()) return;
   const name = card.program.name;
-  const title = card.kind === "read" ? t("tm.read.title", { name, title: card.chat.title }) : card.kind === "send" ? t("tm.send.title", { name, title: card.chat.title }) : t("tm.note.title", { name });
+  const title =
+    card.kind === "read"
+      ? t("tm.read.title", { name, title: card.chat.title })
+      : card.kind === "send"
+        ? t("tm.send.title", { name, title: card.chat.title })
+        : card.kind === "open"
+          ? t("tm.open.title", { name, title: card.chat.title })
+          : t("tm.note.title", { name });
   void showNote({ title, body: t("tm.note.body"), bot: "", tag: `manut:threads:${card.id}` }, () => void bringToFront(), true);
 }
 
@@ -61,6 +68,18 @@ provideMcpDeps(() => {
       return !!r && r.status !== "draft" && sessionMode(getSessions().getState().agents as AgentInfo[] | null, r) === "chat";
     },
     route: (session, text) => getSessions().route(session, text),
+    laneBase: (ref) => {
+      const r = ref.kind === "session" ? rec(ref.id) : undefined;
+      return r && r.cwd ? { cwd: r.cwd, agent: r.agent } : null;
+    },
+    // an agent this Mac has and the person has not turned off, named by its id or by the name Settings shows
+    agentFor: (name) => {
+      const want = name.trim().toLowerCase();
+      const agents = getSessions().getState().agents ?? [];
+      const a = agents.find((x) => !x.off && !!x.path && (x.id.toLowerCase() === want || x.label.toLowerCase() === want || (x.name ?? "").toLowerCase() === want));
+      return a ? { id: a.id, label: agentLabel(a.id, agents) } : null;
+    },
+    openLane: (p) => getSessions().openLane(p),
     notify: announce,
   };
 });

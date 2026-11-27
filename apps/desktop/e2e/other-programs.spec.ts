@@ -165,3 +165,30 @@ test("a read shows exactly what would go and a message goes under the program's 
   expect(sent.endsWith("Also print the shop's name at the top.")).toBe(true);
 });
 
+test("a new lane starts only on Start lane, in the listed chat's project, with the brief under the program's mark (103d)", async ({ page }) => {
+  const sid = await lane(page, "claude", "Print the receipt in Thai");
+  await page.evaluate(async (id) => {
+    const m = (await import(/* @vite-ignore */ "/src/threadsMcp/store.ts" as string)) as { getMcp(): { add(ref: unknown): string | null } };
+    m.getMcp().add({ kind: "session", id });
+  }, sid);
+  await call(page, "tm-50", "let_in");
+  await page.getByTestId("tm-card").getByTestId("tm-yes").click();
+  const starts = async () => (await sessionCalls(page)).filter((c) => c.op === "chat.start").length;
+  const before = await starts();
+  await call(page, "tm-51", "open_chat", { chat: 1, title: "Print the shop's name", brief: "Add the shop's name at the top of the receipt." });
+  const card = page.locator('[data-testid="tm-card"][data-kind="open"]');
+  await expect(card).toContainText("Claude asks to start a lane in the project of “Print the receipt in Thai”");
+  await expect(card.getByTestId("tm-lane")).toContainText("/home/you/code/baanmali-preorder");
+  await expect(card.getByTestId("tm-text")).toHaveText("Add the shop's name at the top of the receipt.");
+  expect(await starts()).toBe(before);
+  await card.getByTestId("tm-yes").click();
+  await expect.poll(async () => (await replies(page)).length).toBe(2);
+  expect((await replies(page))[1]).toMatchObject({ id: "tm-51", error: false, text: expect.stringContaining("Started the lane as chat 2.") });
+  await expect.poll(starts).toBe(before + 1);
+  const calls = await sessionCalls(page);
+  const started = calls.filter((c) => c.op === "chat.start").at(-1)!;
+  const first = calls.filter((c) => c.op === "chat.input" && c.id === started.id).map((c) => c.input?.text ?? "")[0] ?? "";
+  expect(first).toContain('[Manut AI: a message from the program "Claude" outside Manut AI]');
+  expect(first.endsWith("Add the shop's name at the top of the receipt.")).toBe(true);
+});
+
