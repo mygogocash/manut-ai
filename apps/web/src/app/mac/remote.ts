@@ -17,8 +17,14 @@
 ///   answer offered, and is cleared from memory 15 minutes after the Mac last confirmed it (GoSpark's `docs/remote.md`).
 /// - **Nothing of a chat is kept.** Chats, asks and messages are in this object only: never in storage, the address, a
 ///   log or a notification.
-import { decisionChallenge, fromBase64Url } from "@manut/remote-channel";
+/// - **"Tell me when my Mac needs me"** (item 78d, notify.ts). Turned on, the phone subscribes with the API's push key and
+///   sends the Mac its push address inside the channel (`notify`), never to the API; the notification it gets says only
+///   "Your Mac needs you". At every session the phone tells the Mac its address as it is now, or none, so a Mac that
+///   missed a change, or a browser that renewed its subscription, catches up. Turned off, or Forget this Mac, ends the
+///   subscription.
+import { decisionChallenge, fromBase64Url, pushAddressOk } from "@manut/remote-channel";
 import { type SignedDecision, allowDecision, answerDecision, proofOf } from "./decision";
+import type { PhonePush } from "./notify";
 import type { PairFailure, PairResult, PairStep } from "./pair";
 import { PasskeyCancelled, type Passkeys } from "./passkeys";
 import type { Timers } from "./relay";
@@ -56,6 +62,22 @@ export interface MacBackend {
   connect(mac: PairedMac): Promise<{ ok: true; link: MacLink } | { ok: false; end: SessionEnd }>;
   now(): number;
   readonly timers: Timers;
+  /// The push key the API offers and the browser's notifications (item 78d); absent where there are none.
+  pushKey?(): Promise<string | null>;
+  readonly push?: PhonePush;
+}
+
+/// Why "Tell me when my Mac needs me" did not go as asked, or that the Mac hears it at the next session.
+export type NotifyNote = "denied" | "failed" | "refused" | "mac" | "later";
+
+/// The switch for "Tell me when my Mac needs me".
+export interface NotifyView {
+  /// `yes`: the switch is shown. `install`: the API offers a push key, but this browser cannot subscribe (Safari's own
+  /// tab on an iPhone, where only the app on the Home Screen can). `no`: nothing is shown (no push key, or no push here).
+  readonly offered: "yes" | "install" | "no";
+  readonly on: boolean;
+  readonly busy: boolean;
+  readonly note: NotifyNote | null;
 }
 
 /// What became of the person's answer to one ask, or why it waits on them. The tab says each in words.
@@ -119,6 +141,7 @@ export type MacView =
       readonly chats: readonly ChatRow[] | null;
       readonly open: OpenChat | null;
       readonly forgetting: boolean;
+      readonly notify: NotifyView;
     };
 
 type Paired = Extract<MacView, { phase: "paired" }>;
@@ -176,6 +199,11 @@ export class MacRemote {
   #online = true;
   #disposed = false;
   #generation = 0;
+  /// The API's push key, read when the tab opens; null while the relay or its push key is off.
+  #pushKey: string | null = null;
+  #notify: NotifyView = { offered: "no", on: false, busy: false, note: null };
+  /// Counts the person's turns of the switch, so the session's catch-up never sends an address read before one.
+  #notifyTurns = 0;
 
   constructor(backend: MacBackend) {
     this.#backend = backend;
@@ -206,6 +234,8 @@ export class MacRemote {
     const generation = this.#generation;
     const relay = await this.#backend.relay().catch(() => "unknown" as const);
     if (generation !== this.#generation || this.#disposed) return;
+    this.#pushKey = relay === "on" ? ((await this.#backend.pushKey?.().catch(() => null)) ?? null) : null;
+    if (generation !== this.#generation || this.#disposed) return;
     let mac: PairedMac | null = null;
     try {
       mac = await this.#backend.vault.load();
@@ -216,12 +246,85 @@ export class MacRemote {
     if (relay !== "on" && mac && !mac.tailnet) return this.#show({ phase: "unavailable" });
     if (!mac) return this.#show({ phase: "unpaired", failed: null });
     this.#mac = mac;
+    await this.#readNotify();
+    if (generation !== this.#generation || this.#disposed) return;
     this.#show(this.#fresh());
     void this.#connect();
   }
 
   #fresh(): Paired {
-    return { phase: "paired", link: "connecting", down: null, confirmedAt: null, cleared: false, forgotten: false, chats: null, open: null, forgetting: false };
+    return { phase: "paired", link: "connecting", down: null, confirmedAt: null, cleared: false, forgotten: false, chats: null, open: null, forgetting: false, notify: this.#notify };
+  }
+
+  /// Whether the switch is offered here, and whether this app holds a subscription now.
+  async #readNotify(): Promise<void> {
+    const push = this.#backend.push;
+    const offered = this.#pushKey === null || !push ? "no" : push.supported() ? "yes" : "install";
+    const on = offered === "yes" && push ? (await push.current().catch(() => null)) !== null : false;
+    this.#notify = { offered, on, busy: false, note: null };
+  }
+
+  #setNotify(change: Partial<NotifyView>): void {
+    this.#notify = { ...this.#notify, ...change };
+    this.#paired((v) => ({ ...v, notify: this.#notify }));
+  }
+
+  /// Tells the Mac this phone's push address, or none: "done", "refused" with an address the Mac will not take, "mac"
+  /// for a Mac that keeps none (one not yet updated), or "later" while no session is open.
+  async #tellMac(endpoint: string | null): Promise<"done" | "refused" | "mac" | "later"> {
+    if (!this.#link) return "later";
+    const answer = await this.#ask({ t: "notify", endpoint });
+    if (!answer) return "later";
+    if (answer.t === "done") return "done";
+    return answer.reason === "push_address" ? "refused" : "mac";
+  }
+
+  /// "Tell me when my Mac needs me" turned on. Called straight from the person's tap: the permission prompt opens
+  /// before anything awaits. The address goes to the Mac now, or at the next session.
+  async notifyOn(): Promise<void> {
+    const push = this.#backend.push;
+    const key = this.#pushKey;
+    if (this.#view.phase !== "paired" || !push || key === null || this.#notify.offered !== "yes" || this.#notify.busy) return;
+    const asked = push.subscribe(key);
+    this.#notifyTurns += 1;
+    this.#setNotify({ busy: true, note: null });
+    const result = await asked;
+    if (!result.ok) return this.#setNotify({ busy: false, on: false, note: result.why });
+    // Only the push services the relay sends to (Edge's, for one, is not among them): anything else is ended here.
+    const told = pushAddressOk(result.endpoint) ? await this.#tellMac(result.endpoint) : "refused";
+    if (told === "refused" || told === "mac") {
+      await push.unsubscribe().catch(() => undefined);
+      return this.#setNotify({ busy: false, on: false, note: told });
+    }
+    this.#setNotify({ busy: false, on: true, note: told === "later" ? "later" : null });
+  }
+
+  /// Turned off: the subscription ends, so its address reaches this phone no more, and the Mac forgets it now or at the
+  /// next session.
+  async notifyOff(): Promise<void> {
+    const push = this.#backend.push;
+    if (this.#view.phase !== "paired" || !push || this.#notify.busy) return;
+    this.#notifyTurns += 1;
+    this.#setNotify({ busy: true, note: null });
+    await push.unsubscribe().catch(() => undefined);
+    const told = await this.#tellMac(null);
+    this.#setNotify({ busy: false, on: false, note: told === "later" ? "later" : null });
+  }
+
+  /// At each session: the Mac hears this phone's push address as it is now, or none. An address it refuses is ended.
+  async #syncNotify(): Promise<void> {
+    const push = this.#backend.push;
+    if (!push || !push.supported() || this.#notify.busy) return;
+    const turned = this.#notifyTurns;
+    const endpoint = await push.current().catch(() => null);
+    // The person turned it on or off meanwhile: that told the Mac, and what was read here is old.
+    if (turned !== this.#notifyTurns || this.#notify.busy) return;
+    const told = await this.#tellMac(endpoint);
+    if (told === "refused" && endpoint !== null) {
+      await push.unsubscribe().catch(() => undefined);
+      return this.#setNotify({ on: false, note: "refused" });
+    }
+    if (told === "done") this.#setNotify({ on: endpoint !== null, note: this.#notify.note === "later" ? null : this.#notify.note });
   }
 
   /// Pairs with the code the person scanned or pasted. One try: whatever happens, this code is not used again.
@@ -234,6 +337,8 @@ export class MacRemote {
     if (this.#disposed) return;
     if (!result.ok) return this.#show({ phase: "unpaired", failed: result.why });
     this.#mac = result.mac;
+    await this.#readNotify();
+    if (this.#disposed) return;
     this.#show(this.#fresh());
     void this.#connect();
   }
@@ -276,6 +381,7 @@ export class MacRemote {
     this.#paired((v) => ({ ...v, link: "live", down: null, cleared: false, forgotten: false }));
     this.#confirmed();
     await this.#refresh();
+    if (this.#link === link) await this.#syncNotify();
   }
 
   /// The Mac said where its door over the person's tailnet is, or that it has none (item 78f-2c): kept with the paired
@@ -615,6 +721,9 @@ export class MacRemote {
     this.#stopAll();
     this.#mac = null;
     this.#cursor = null;
+    // No Mac to be told for: the subscription ends too, and the next pairing starts with notifications off.
+    if (this.#backend.push?.supported()) void this.#backend.push.unsubscribe().catch(() => undefined);
+    this.#notify = { ...this.#notify, on: false, busy: false, note: null };
     this.#show({ phase: "unpaired", failed: null });
     return true;
   }

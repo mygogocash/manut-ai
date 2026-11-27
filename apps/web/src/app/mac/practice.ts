@@ -5,6 +5,7 @@
 /// phone goes "offline" with the browser, so the greyed view can be seen. Nothing leaves the page and nothing is kept:
 /// the pairing lives in memory and goes with a reload.
 import { importSharedSecret } from "@manut/remote-channel";
+import type { PhonePush } from "./notify";
 import type { PairStep } from "./pair";
 import type { Passkeys } from "./passkeys";
 import { type Timers, systemTimers } from "./relay";
@@ -191,6 +192,9 @@ class PracticeLink implements MacLink {
         if (chat.state !== "working") return refuse("no_turn");
         this.#change(chat.chat, (view) => ({ view: { ...view, state: "done", step: null }, events: [{ k: "state", state: "done", step: null, title: view.title }] }));
         return { t: "done" };
+      case "notify":
+        // The pretend Mac keeps the pretend push address, and never pushes.
+        return { t: "done" };
       default:
         return refuse("unknown_request");
     }
@@ -203,6 +207,28 @@ const practicePasskeys: Passkeys = {
   create: async () => ({ credentialId: new Uint8Array(16).fill(1), clientDataJSON: new Uint8Array(0), authenticatorData: new Uint8Array(0) }),
   get: async () => ({ credentialId: new Uint8Array(16).fill(1), clientDataJSON: new Uint8Array(0), authenticatorData: new Uint8Array(0), signature: new Uint8Array(0) }),
 };
+
+/// Notifications that are never the browser's: practice asks for no permission and subscribes nowhere, so the switch for
+/// "Tell me when my Mac needs me" can be tried and nothing is ever sent.
+export function practicePush(): PhonePush {
+  let on = false;
+  return {
+    supported: () => true,
+    current: async () => (on ? PRACTICE_PUSH_ADDRESS : null),
+    subscribe: async () => {
+      on = true;
+      return { ok: true, endpoint: PRACTICE_PUSH_ADDRESS };
+    },
+    unsubscribe: async () => {
+      on = false;
+    },
+  };
+}
+
+/// A push address of the right form that no push service holds.
+export const PRACTICE_PUSH_ADDRESS = "https://fcm.googleapis.com/fcm/send/practice";
+/// A pretend push key: practice never subscribes with it.
+const PRACTICE_PUSH_KEY = "B".padEnd(87, "A");
 
 export interface PracticeBackend extends MacBackend {
   /// Stands for the person typing the four digits at the Mac.
@@ -222,6 +248,8 @@ export function practiceBackend(options: { relay?: "on" | "off"; paired?: boolea
       await ready;
       return options.relay ?? "on";
     },
+    pushKey: async () => PRACTICE_PUSH_KEY,
+    push: practicePush(),
     vault,
     passkeys: practicePasskeys,
     now: () => Date.now(),

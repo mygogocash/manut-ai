@@ -529,6 +529,19 @@ export const STATES: PageState[] = [
   },
   {
     page: "app",
+    name: "your Mac: told when the Mac needs you",
+    path: "/app/#mac",
+    reach: async (page) => {
+      await macPaired(page);
+      const toggle = page.getByRole("switch", { name: "Tell me when my Mac needs me" });
+      await toggle.click();
+      await page.locator('[role="switch"][aria-checked="true"]').waitFor();
+    },
+    shows: "Tell me when my Mac needs me",
+    buttons: ["Forget this Mac"],
+  },
+  {
+    page: "app",
     name: "your Mac: a chat with an approval and a question",
     path: "/app/#mac",
     reach: macChat,

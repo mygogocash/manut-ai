@@ -151,6 +151,16 @@ export class FakeRelay {
     return [...this.#phones].filter((p) => p.open && p.device !== null).length;
   }
 
+  /** Sends the Mac's socket a message of the relay's own, as the relay object's `webpush` for an address it forgot. */
+  tellMac(message: Record<string, unknown>): void {
+    this.#mac?.deliver(JSON.stringify(message));
+  }
+
+  /** The Mac's text messages of one type, in order. */
+  sent(type: string): Record<string, unknown>[] {
+    return this.fromMacText.filter((m) => m.t === type);
+  }
+
   /** Cuts the network: every socket drops with no reason. */
   cut(): void {
     this.#mac?.shut(1006, "");
