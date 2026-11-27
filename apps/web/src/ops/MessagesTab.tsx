@@ -1,10 +1,18 @@
 import { useState, type FormEvent } from "react";
-import { REPLY_MAX_LENGTH, useApi, type InboundMessage, type ProposedReply, type ReplyAction, type Shop } from "../api";
+import {
+  REPLY_MAX_LENGTH,
+  useApi,
+  type InboundMessage,
+  type OwnerCard,
+  type ProposedReply,
+  type ReplyAction,
+  type Shop,
+} from "../api";
 import { formatStamp, langOf } from "../format";
 import { ChatIcon } from "../ui/marks";
 import { CopyButton } from "./CopyButton";
 import type { Loaded } from "./useLoad";
-import { errorText, stateAdvice, stateTag } from "./words";
+import { canRetryCard, cardRetryErrorText, cardText, errorText, ownerLineWords, stateAdvice, stateTag } from "./words";
 
 /// The pilot's one team member. Operators write as Nam; the owner sees Nam's name on every request.
 const PILOT_MEMBER = "Nam";
@@ -141,8 +149,9 @@ export function MessagesTab({
                 <ActionRow
                   key={action.actionId}
                   action={action}
-                  ownerName={shop.ownerName}
+                  shop={shop}
                   customer={customerName(messageById.get(action.messageId))}
+                  onChanged={onChanged}
                 />
               ))}
             </ul>
@@ -173,7 +182,18 @@ export function MessagesTab({
   );
 }
 
-function ActionRow({ action, ownerName, customer }: { action: ReplyAction; ownerName: string; customer: string }) {
+function ActionRow({
+  action,
+  shop,
+  customer,
+  onChanged,
+}: {
+  action: ReplyAction;
+  shop: Shop;
+  customer: string;
+  onChanged: () => void;
+}) {
+  const ownerName = shop.ownerName;
   const tag = stateTag(action.state, ownerName);
   const advice = stateAdvice(action.state, ownerName);
   const steps = [`Proposed ${formatStamp(action.proposedAt)}`];
@@ -196,9 +216,67 @@ function ActionRow({ action, ownerName, customer }: { action: ReplyAction; owner
             {advice}
           </span>
         )}
+        {action.ownerCard && <CardLine card={action.ownerCard} action={action} shop={shop} onChanged={onChanged} />}
       </div>
       {action.state === "proposed" && <CopyButton text={action.approvalUrl} label="Copy link" what="approval link" />}
     </li>
+  );
+}
+
+/// Where the owner's card about this reply stands on LINE, and, while the reply still waits and the card may not have
+/// arrived, a way to send it again. Every push carries the same retry key, so LINE never shows it twice.
+function CardLine({
+  card,
+  action,
+  shop,
+  onChanged,
+}: {
+  card: OwnerCard;
+  action: ReplyAction;
+  shop: Shop;
+  onChanged: () => void;
+}) {
+  const api = useApi();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function retry() {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api.retryOwnerCard(shop.tenant, action.actionId);
+      onChanged();
+    } catch (err) {
+      setError(cardRetryErrorText(err, shop.ownerName));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <>
+      <span className="mut" style={{ fontSize: 12.5 }}>
+        {cardText(card, shop.ownerName)}
+      </span>
+      {canRetryCard(card, action.state) && (
+        <button
+          type="button"
+          className="lk"
+          style={{ alignSelf: "flex-start", fontSize: 12.5 }}
+          disabled={busy}
+          aria-busy={busy ? true : undefined}
+          onClick={() => void retry()}
+        >
+          {busy ? ownerLineWords.retrying : ownerLineWords.retry}
+        </button>
+      )}
+      {error && (
+        <span className="help err" role="alert">
+          {error}
+        </span>
+      )}
+    </>
   );
 }
 

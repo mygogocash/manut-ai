@@ -144,6 +144,7 @@ type Shop = {
   lineConnectionId?: string;
   consent: boolean;
   deletion?: DeletionRequest;   // the shop's latest deletion put to its owner, if any
+  ownerLinkedAt?: string;       // when the owner linked on LINE ("Owner messages on LINE"); never who they are
 };
 
 // A shop's latest owner confirmation. The link is re-minted on each read, same expiry.
@@ -178,6 +179,7 @@ type ReplyAction = {
   decidedAt?: string;
   dispatchedAt?: string;
   approvalUrl: string;      // re-minted on each read, same expiry
+  ownerCard?: OwnerCard;    // the owner's card about it on LINE, once one was tried ("Owner messages on LINE")
 };
 
 type Payment = {
@@ -203,9 +205,10 @@ type SubscriptionPayment = {
 };
 
 // The backend's tenant export: tasks with their histories, LINE connection metadata, schedules, consent,
-// attention items and `pilot: { shop, messages, replies, payments, subscriptionPayments, displayNames }`, where
-// `shop` carries `trialStartedAt` once the trial has started and `displayNames` is the LINE display names cached
-// for the shop's customers, `{ lineUserId, displayName }[]`. `deletedAt` is there once the shop was deleted.
+// attention items and `pilot: { shop, messages, replies, payments, subscriptionPayments, briefs, displayNames }`,
+// where `shop` carries `trialStartedAt` once the trial has started (and `ownerLineUserId` with `ownerLinkedAt` once
+// its owner linked on LINE), `briefs` is the owner's morning briefs by date, and `displayNames` is the LINE display
+// names cached for the shop's customers, `{ lineUserId, displayName }[]`. `deletedAt` is there once the shop was deleted.
 // Saved whole.
 // If any part cannot be read, the answer is 500 `{ "error": "export_incomplete", "failed": [...] }` naming
 // the parts ("index", a task id, "connections", "consent", "attention", "pilot", "model", "schedules",
@@ -245,8 +248,8 @@ type DeletedShop = {
   400 `tenant_required` without a valid tenant, 404 `shop_not_found` for a tenant that was never a pilot shop.
 - **Export and deletion.** At a shop's request an operator exports or deletes everything stored for it,
   through the same tenant export and deletion a shop's own session would use. Deletion removes the task and
-  every reply, the sealed LINE secrets and the webhook route, messages, order and subscription payments, consent
-  and the shop's registry row. The owner's approval links answer `link_invalid` afterwards and the webhook
+  every reply, the sealed LINE secrets and the webhook route, messages, order and subscription payments, consent,
+  the owner's LINE link with its cards, briefs and live link code, and the shop's registry row. The owner's approval links answer `link_invalid` afterwards and the webhook
   answers 404.
   - It cannot be undone, so the operator sends the shop's name with its id. The name matches when it differs
     only in outer spaces or in how an accented letter was composed; shop names are stored trimmed.
@@ -331,6 +334,126 @@ type GateShop = {
   lastDecisionAt?: string;        // the owner's latest decision on a reply
 };
 ```
+
+## Owner messages on LINE
+
+Manut AI's own LINE Official Account messages each shop's owner: one card for every reply waiting for the owner's
+approval, and a morning brief. The code lives in `apps/api/src/owner-line*.ts`.
+
+- **The flag.** Everything sits behind `ownerLine` (the Worker var `OWNER_LINE`, unset in every environment, and the
+  dynamic flag through `PUT /v1/admin/flags`). While it is off, Manut AI's webhook answers 404, no code is issued, no
+  card is pushed and no brief is sent. Setting the account and unlinking an owner work either way. Turning it on
+  needs the owner's go and Manut AI's LINE Official Account.
+- **What these messages are.** Notices from Manut AI to an owner who asked for them by sending a code. They send, post,
+  pay or delete nothing for the shop. A card's only action opens the owner's signed approval page, where the decision
+  is made under the rules above, once.
+- **Quota.** Every card and brief is a push from Manut AI's account, so it counts against Manut AI's LINE plan, not the
+  shop's (`docs/connectors.md`). Answers to codes use the reply token, which is free.
+
+### Public route
+
+`POST /v1/inbound/owner-line` is Manut AI's webhook. It has one fixed path, which stays the same when the account's
+token or secret is replaced. It answers like a shop's webhook:
+
+- Before anything is read: empty 404 while the flag is off or no account is set.
+- Then the signature: 401 for a bad or missing `x-line-signature`, checked with Manut AI's own channel secret.
+- 200 with no body for any correctly signed delivery.
+- 503 when storage cannot be reached, so LINE's redelivery can try again.
+
+It counts against `LINE_INBOUND_LIMITER`. Only text messages from users, addressed to Manut AI's bot, are read. A
+message that is a link code is checked: eight digits, with spaces or hyphens allowed, and Thai or full-width digits
+read as digits. Anything else is neither kept nor answered. A code is answered through the event's reply token once
+LINE has its 200.
+
+### Operator routes (all under the admin gate)
+
+| Method and path | Body | Answer |
+| --- | --- | --- |
+| `GET /v1/admin/pilot/owner-line` | none | `OwnerLineStatus` |
+| `POST /v1/admin/pilot/owner-line/account` | `{ channelId, botUserId, channelSecret, channelAccessToken, basicId? }` | `OwnerLineAccount`. 400 `invalid_request` for anything LINE could not use, 503 `not_configured` without `PUBLIC_API_ORIGIN` |
+| `POST /v1/admin/pilot/owner-line/link-codes` | `{ tenant }` | `{ code, expiresAt }`. 403 `{ "error": "feature_disabled", "feature": "ownerLine" }` while off, 409 `account_not_set` before the account exists, 503 `not_configured` without `APPROVAL_LINK_SECRET` |
+| `POST /v1/admin/pilot/owner-line/unlink` | `{ tenant }` | `{ unlinked: boolean }`: false when no owner was linked |
+| `POST /v1/admin/pilot/owner-line/cards` | `{ tenant, actionId }` | `{ ownerCard: OwnerCard }`. 403 `feature_disabled`, 404 `reply_not_found`, 409 `owner_not_linked`, `reply_not_waiting` or `card_sending` |
+
+The routes naming a shop answer 400 `tenant_required`, 404 `shop_not_found` and 404 `tenant_deleted` as the other
+operator routes do.
+
+```ts
+type OwnerLineStatus = { enabled: boolean; account: OwnerLineAccount | null };
+
+// Never a secret. `basicId` is the ID owners type to add the account ("@manutai"); it is only shown to operators.
+type OwnerLineAccount = { channelId: string; botUserId: string; basicId?: string; webhookUrl: string; connectedAt: string };
+
+// The owner's card about one reply. `reason` is why the latest push did not go through: `provider_429`,
+// `provider_unreachable`, `account_not_set` and so on.
+type OwnerCard = {
+  state: "sending" | "sent" | "failed" | "unknown";
+  attempts: number;         // pushes tried, every one under the same retry key
+  lastTriedAt: string;
+  sentAt?: string;          // when LINE took it
+  reason?: string;
+};
+
+// Added to the types above:
+//   Shop.ownerLinkedAt?: string       when the owner linked; who they are on LINE is never answered
+//   ReplyAction.ownerCard?: OwnerCard once a card was tried
+```
+
+### Rules
+
+- **Manut AI's account** is a connection in its own credential vault (`manut:owner-line`), held the way a shop's is: the
+  channel secret and access token are sealed together and never answered or logged. The connection grants no
+  actions, so no task can name it for a dispatch. Setting a new account revokes the old connection, wiping its
+  secrets.
+- **Link codes.**
+  - Eight digits, working once, for 30 minutes.
+  - One live code per shop: asking again retires the previous code.
+  - The code is answered once, and kept only as an HMAC-SHA256 under `APPROVAL_LINK_SECRET` in a domain of its own
+    (`manut-ai/owner-link-code/v1.`).
+  - The owner adds Manut AI's account as a friend and sends the code in that chat. Whoever sends a live code is linked:
+    their LINE user id goes on the shop, and a newer link replaces an older one.
+  - The same LINE user sending a used code again (LINE's redelivery) is linked again.
+  - A used, retired, expired or unknown code all get the same answer: "That code did not work. Each code works once,
+    for 30 minutes. Please ask Manut AI for a new one." So an answer never says whether a code exists, or existed,
+    for any shop.
+- **Guesses.** After five wrong codes in an hour from one LINE user, no code from them is checked, right or wrong, until
+  the hour has passed. They are answered "Too many tries". Ordinary chat never counts.
+- **Unlinking** stops cards and briefs and retires the shop's live code. Deleting a shop retires it too.
+- **Cards.**
+  - A card is pushed after a reply is proposed for a shop whose owner is linked, with the flag on. It goes out after
+    the proposal has answered, so it can never delay or fail the proposal.
+  - It is one Flex Message bubble: the shop's name, the customer's name and message, the draft, and one button that
+    opens the approval page. The texts are clipped to 500 characters, since the page shows them in full. Its
+    `altText` is plain: "{shop}: Nam drafted a reply to {customer}. It waits for your OK."
+  - Every push of one card carries one retry key, made from the shop and the action id. It is never the action id
+    itself, which the shop's own channel uses for the customer's reply.
+  - LINE's answers settle it: 2xx, or 409 with `x-line-accepted-request-id`, is `sent`; any other 4xx is `failed`
+    (nothing arrived); a 5xx, a timeout or a network error is `unknown`.
+  - The operator's retry works only while the reply still waits (proposed and unexpired). That keeps every push of a
+    card inside LINE's 24-hour retry-key window. A card already sent is answered as it stands, and one being pushed
+    holds its claim for 2 minutes (`card_sending`).
+- **The morning brief.**
+  - It runs on the API Worker's cron triggers `0 1 * * *` and `30 1 * * *` (UTC), which are 08:00 and 08:30 in
+    Bangkok, set for every environment in `apps/api/wrangler.jsonc`. A cron trigger fits better than the schedule
+    object: that object holds each tenant's own routines, which mint tasks under consent and funding, while the
+    brief is one environment-wide job over the pilot's shops.
+  - Each linked owner of a live shop gets one message about yesterday, the Bangkok calendar day before the run:
+    customer messages, replies sent (confirmed, with their send begun yesterday) and payments recorded (customers'
+    order payments). It also gives the replies waiting for the owner now, with a button to the one that has waited
+    longest, which expires first. Each waiting reply also has its own card in the chat.
+  - The brief has counts only, so it shows no money. Its `altText` is the whole summary.
+  - **A day with nothing to say sends nothing**: no messages, no replies sent, no payments and nothing waiting. The day
+    is recorded as `skipped`. Every push counts against Manut AI's monthly LINE quota, and an empty brief teaches
+    owners to skim past the ones that matter. Any waiting reply makes the day worth a message.
+  - **One brief per shop per Bangkok date**, also across retries. A brief is claimed in the shop's object before
+    anything is sent. A brief that was `sent`, refused (`failed`) or `skipped` is final for the day. One LINE never
+    answered (`unknown`), or one cut off while sending (after 2 minutes), is claimed again by a later run that day
+    (08:30). Every push of it carries one retry key, made from the shop and the date, so LINE shows it once. With
+    the flag off, or no account set, a run sends and writes nothing.
+- **Records and deletion.** The owner's LINE user id and link time live on the shop's record, each card on its reply's
+  record, and each brief by date (`pilot.briefs`). All of them are in the shop's export and deleted with the shop.
+  The daily run also drops expired codes and closed guess windows, so no LINE user id is kept longer than the guess
+  limit needs it.
 
 ## One origin
 

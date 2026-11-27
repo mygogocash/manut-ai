@@ -58,7 +58,48 @@ export type Shop = {
   lineConnectionId?: string;
   consent: boolean;
   deletion?: DeletionRequest;
+  /// When the owner linked their LINE to Manut AI's account; absent while not linked. Who they are on LINE is
+  /// never shown to operators.
+  ownerLinkedAt?: string;
 };
+
+/// Where the owner's card about one reply stands on LINE (docs/pilot-api.md, "Owner messages on LINE"): being
+/// pushed, taken by LINE, refused by LINE (nothing arrived), or not answered (it may have arrived).
+export type OwnerCardState = "sending" | "sent" | "failed" | "unknown";
+
+/// `reason` says why the latest push did not go through, as the API's code: `provider_429`, `provider_unreachable`,
+/// `account_not_set` and so on. Every push for one reply carries the same retry key, so LINE shows the card once.
+export type OwnerCard = {
+  state: OwnerCardState;
+  attempts: number;
+  lastTriedAt: string;
+  sentAt?: string;
+  reason?: string;
+};
+
+/// Manut AI's own LINE Official Account, as operators see it: never its secrets.
+export type OwnerLineAccount = {
+  channelId: string;
+  botUserId: string;
+  /// The ID owners type to add the account as a friend, like "@manutai".
+  basicId?: string;
+  webhookUrl: string;
+  connectedAt: string;
+};
+
+/// Whether owner messages on LINE are on (the `ownerLine` flag) and which account sends them.
+export type OwnerLineStatus = { enabled: boolean; account: OwnerLineAccount | null };
+
+export type NewOwnerLineAccount = {
+  channelId: string;
+  botUserId: string;
+  channelSecret: string;
+  channelAccessToken: string;
+  basicId?: string;
+};
+
+/// A one-time code for a shop's owner: eight digits, answered once, working once for 30 minutes.
+export type OwnerLinkCode = { code: string; expiresAt: string };
 
 export type InboundMessage = {
   id: string;
@@ -80,6 +121,8 @@ export type ReplyAction = {
   decidedAt?: string;
   dispatchedAt?: string;
   approvalUrl: string;
+  /// The card about this reply sent to the owner on LINE, once one was tried.
+  ownerCard?: OwnerCard;
 };
 
 export type Payment = {
@@ -241,6 +284,22 @@ export interface PilotApi {
   listSubscriptionPayments(tenant: string): Promise<SubscriptionPayment[]>;
   /// The Phase 1 gate: every shop's trial, payment and activity, and the cohort against the gate's two lines.
   getGate(): Promise<PilotGate>;
+
+  /// Owner messages on LINE (docs/pilot-api.md): whether they are on, and Manut AI's own account.
+  getOwnerLine(): Promise<OwnerLineStatus>;
+  /// Sets Manut AI's account; the secrets go into the vault and never come back.
+  setOwnerLineAccount(input: NewOwnerLineAccount): Promise<OwnerLineAccount>;
+  /// A new code for the shop's owner to send to Manut AI's account, retiring the shop's previous one. Rejects with
+  /// 403 `feature_disabled` while owner messages are off and 409 `account_not_set` before the account exists.
+  createOwnerLinkCode(tenant: string): Promise<OwnerLinkCode>;
+  /// Stops cards and briefs to the shop's owner until linked again; `unlinked` is false when nobody was linked.
+  unlinkOwner(tenant: string): Promise<{ unlinked: boolean }>;
+  /// Pushes the owner's card for a reply that still waits again, under the same retry key. Rejects with 409
+  /// `reply_not_waiting`, `owner_not_linked` or `card_sending`, and 404 `reply_not_found`.
+  retryOwnerCard(tenant: string, actionId: string): Promise<OwnerCard>;
+  /// `POST /v1/inbound/owner-line`. Called by LINE, not by these pages; here so local tools and tests can deliver a
+  /// signed webhook to Manut AI's account. Resolves on 200, rejects with 401 or 404.
+  deliverOwnerLineWebhook(rawBody: string, signature: string): Promise<void>;
 }
 
 /// What an error answer carried besides its code, kept so the screens can say exactly what happened.
