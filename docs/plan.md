@@ -215,7 +215,7 @@ Mac; each starts when a slot frees and what it waits on has merged.
 | done | 102j. Reports to the lead, once and together, fenced, masked and capped, as the app's own message (a quiet line, not a bubble), never counted as the person speaking; the second round and the closed policy. Merged 27 Nov. Owner step: one small round of two helpers on this Mac, to see a real landing | 102i | Opus |
 | done | 102j-2. The restart path: a round saved with the sessions, and after a restart its Land what they did and Report to Kit, each a press; nothing lands or is sent until then. Merged 27 Nov | 102j | Opus |
 | proposed | 102l: the rest of `docs/several-agents.md`'s slices, in its order | 102a, 102d | |
-| proposed | 102l-1. Buddy's chat on the owner's session, through the model gateway under the shop's cap, kept with the shop and gone with it (`docs/connected-chat.md`, A); deployed to dev, where it answers "not set up" until the owner's key | 102k | Opus |
+| doing | 102l-1. Buddy's chat on the owner's session, through the model gateway under the shop's cap, kept with the shop and gone with it (`docs/connected-chat.md`, A); deployed to dev, where it answers "not set up" until the owner's key | 102k | Opus |
 | proposed | 102l-2. Chat threads that are not tasks, and the Connected runtime's `chat.send` and `thread.create` over them (`docs/connected-chat.md`, B) | 102l-1 | Opus |
 | proposed | 102l-3. The reach cards (read, send, open) over Connected chat threads, R10 as it is (`docs/connected-chat.md`, C) | 102l-2 | Opus |
 | owner | 102l-4. Real answers: the owner's Anthropic key, cap and rate, in dev first | 102l-1 | |

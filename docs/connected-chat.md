@@ -1,7 +1,8 @@
 # Buddy's chat on the Connected runtime (item 102l)
 
 The design pass for item 102l, written 27 Nov 2026 after the owner chose to build it, deployed to the dev API only.
-Status: proposed. Nothing here is built yet; the phases at the end are the order to build it in.
+Status: 102l-1 (A) built on 27 Nov 2026, not yet deployed; 102l-2 and 102l-3 proposed. The phases at the end are the order
+to build it in, and "What 102l-1 built" (below) says where the build differs from this design.
 
 ## Why 102l is bigger than its row
 
@@ -85,10 +86,37 @@ On Connected, a "chat" is a chat thread of A and B, and the asking chat is Buddy
 
 | Phase | What | Needs the owner |
 | --- | --- | --- |
-| 102l-1 | The chat route and its store (A), with the stand-in provider in tests; deployed to dev, where it answers `not_configured` | Nothing to build. A key in dev to try it for real |
+| 102l-1 | The chat route and its store (A), with the stand-in provider in tests; deployed to dev, where it answers `not_configured`. **Built 27 Nov 2026**, behind its own switch, which is off everywhere; not deployed | Nothing to build. A key in dev to try it for real, and the switch turned on there |
 | 102l-2 | Chat threads (B) and the Connected runtime's `chat.send` and `thread.create` over them | Nothing |
 | 102l-3 | The reach cards over Connected chat threads (C) | Nothing |
 | 102l-4 | Real answers: the owner's key set, first in dev, then staging and production at the owner's word | The paid Anthropic account, the cap (`MODEL_DEFAULT_CAP_SATANG`) and the rate (`MODEL_SATANG_PER_USD`) |
+
+## What 102l-1 built
+
+Section A, with rules R1 to R4 and their tests (`apps/api/src/chat.ts`, `chat-store.ts`, `buildBuddyChat` in
+`packages/agent-prompts`; `apps/api/test/chat.test.ts`). The routes, bodies and refusals are in `docs/pilot-api.md`,
+"Chat". The four open questions below are answered for now by their own recommendations, as Claude's calls pending the
+owner (`docs/decisions/102l-connected-chat.md`). Where it differs from the design above:
+
+- **Its own switch.** `buddyChat` (`PUT /v1/admin/flags`, default the var `BUDDY_CHAT`), off in every environment, as the
+  other dev-only switches are: none of them is set on in `apps/api/wrangler.jsonc`. With it off a message answers 403
+  `feature_disabled`; reading and removing threads stay open.
+- **Owner only.** A helper's session answers 403 `owner_only` on every chat route, not only the message.
+- **The shop's consent.** A message also needs the shop's consent to cloud work (403 `consent_required`), which the design
+  did not name: what goes to the model holds the shop's facts and customers' words, as a worker's request does.
+- **Kept masked.** The owner's message and Buddy's answer are kept masked, not only sent masked, so a key the owner pastes is
+  never stored. The masker is the app's one (`apps/desktop/src/lib/secrets.ts`), taken by the Worker as it is; the API had
+  none of its own.
+- **Nothing kept for a refusal.** A message is let through (thread, caps and the hour) before the call, and kept with
+  Buddy's answer only after it, so a gateway refusal leaves the thread as it was. A let-through message counts against the
+  hour whatever the gateway answers.
+- **Full is refused.** At 50 threads a new one is refused (409 `threads_full`); a thread that cannot take two more messages
+  is refused the next (409 `thread_full`). Nothing is dropped to make room.
+- **Threads, as A needs them.** A message without a thread makes one, titled with its first words; the owner lists threads,
+  reads one a page at a time and removes one (`POST /v1/chat/threads/remove`, a POST as the owner's other changes are).
+  There is no `POST /v1/chat/threads` to make an empty one, and nothing in the Connected runtime yet: that is 102l-2.
+- **Not deployed.** The design's phase deploys to dev; this build is not deployed, and the switch stays off until the owner
+  says.
 
 ## Open questions for the owner
 
