@@ -5,7 +5,7 @@ its order: "must be designed first because it can act for the person"). The owne
 lists, opens and messages threads through an MCP server, with an address to copy for it, off by default, designed first
 for who may connect and so that everything asked through it is an ask the person answers, never a way round one.
 
-Status on 27 Nov 2026: design. Nothing is built. The decisions are in `docs/decisions/103-mcp-threads.md`; the slices are
+Status on 27 Nov 2026: design, with slice 103a built (the door, in the shell); the rest is not built. The decisions are in `docs/decisions/103-mcp-threads.md`; the slices are
 at the end and are in `docs/plan.md` as 103a to 103d.
 
 ## The promise this design keeps
@@ -187,8 +187,15 @@ shell's error strings for a refused call hold none of the call's arguments. [103
 - **103a. The door, in the shell.** `src-tauri/src/threads_mcp/`: the relay (`--threads-mcp` in `main.rs` and `lib.rs`), the
   socket and its folder, the peer checks through `computer::hub`'s `Peers`, the program's name, the refusal from inside, the
   switch file, the runs and their let-in state, one card at a time and the limit, the event out and the reply back with the
-  ten-minute close, behind a `Page` interface with a stand-in in the tests. No chat is reachable: with no page answering, a call
-  says nothing is listed. Safety tests: M1, M3, M5, M6, M13.
+  ten-minute close, behind a `Page` interface with a stand-in in the tests. No chat is reachable: until the page listens, a
+  call is answered that the window is not ready. Safety tests: M1, M3, M5, M6, M13.
+  **Built 27 Nov 2026** (`src-tauri/src/threads_mcp/`: `relay.rs`, `door.rs`, `mod.rs`; `Peers::pid_program` added to
+  `computer/hub.rs`; decisions in `docs/decisions/103-mcp-threads.md`). 31 tests, two of them on a real socket with the
+  Mac's own kernel reads. The commands `threads_mcp_settings`, `threads_mcp_set`, `threads_mcp_listen` and
+  `threads_mcp_reply` are there for 103b; nothing on the page calls them yet, so the switch cannot be turned on from the
+  app. What changed from the design: the page is handed a call only after it says it listens, so a window that is not
+  ready answers at once rather than leaving a call to wait ten minutes; a call's arguments are checked whole in the relay
+  as well as by tool name in the door.
 - **103b. Settings, the list and the let-in card.** The Other programs section (the switch through the shell, the list from
   item 97's picker, the two lines to copy), `list_chats`, and the let-in card in Needs you with a notification. Safety test: a
   name that is not a number on the list opens nothing.

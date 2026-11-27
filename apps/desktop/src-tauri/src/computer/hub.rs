@@ -91,6 +91,11 @@ pub trait Peers: Send + Sync {
     fn own_program(&self) -> Option<PathBuf>;
     /// The parent of process `pid`.
     fn parent(&self, pid: i32) -> Option<i32>;
+    /// The program file process `pid` runs now, read by its pid alone. Only for naming a program to the person (item 103's
+    /// card names the program that started its relay); never for deciding who may call, which takes an audit token.
+    fn pid_program(&self, _pid: i32) -> Option<PathBuf> {
+        None
+    }
 }
 
 /// The Mac's answers, from the kernel: the socket's peer, a program by audit token, a process's parent.
@@ -160,6 +165,12 @@ pub mod system {
             let n = unsafe { libc::proc_pidinfo(pid, libc::PROC_PIDTBSDINFO, 0, &mut info as *mut _ as *mut c_void, size) };
             (n == size).then_some(info.pbi_ppid as i32)
         }
+
+        fn pid_program(&self, pid: i32) -> Option<PathBuf> {
+            let mut buf = vec![0u8; libc::PROC_PIDPATHINFO_MAXSIZE as usize];
+            let n = unsafe { libc::proc_pidpath(pid, buf.as_mut_ptr() as *mut c_void, buf.len() as u32) };
+            path_of(&buf, n)
+        }
     }
 }
 
@@ -218,8 +229,8 @@ pub fn base64(bytes: &[u8]) -> String {
     out
 }
 
-/// Makes `dir` this user's alone, refusing one that is a link.
-fn private_dir(dir: &Path) -> Result<(), String> {
+/// Makes `dir` this user's alone, refusing one that is a link. Item 103's socket folder is made the same way.
+pub(crate) fn private_dir(dir: &Path) -> Result<(), String> {
     if dir.is_symlink() {
         return Err(format!("{} is a link", dir.display()));
     }
