@@ -40,10 +40,12 @@ describe("the in-process runtime", () => {
     await expect(rt.request("bots.list")).rejects.toMatchObject({ code: "disconnected" });
   });
 
-  it("has none of the optional feature groups, and still answers their reads", async () => {
+  it("has none of the optional feature groups but the models it names, and still answers their reads", async () => {
     const { rt } = await open();
     expect(rt.kind).toBe("mock");
-    expect(Object.values(rt.capabilities)).toEqual([false, false, false, false, false]);
+    expect(rt.capabilities).toEqual({ elsewhere: false, automations: false, plugins: false, restart: false, accounts: false, models: true });
+    // it names models for a member, which is what the chat box's model menu lists
+    expect((await rt.request("models.options", { bot: "buddy" })).providers.length).toBeGreaterThan(0);
     expect(await rt.request("automations.list", {})).toEqual({ automations: [] });
     expect(await rt.request("elsewhere.list", { bot: "buddy" })).toEqual({ sessions: [] });
     expect(await rt.request("plugins.list", { bot: "buddy" })).toEqual({ plugins: [] });

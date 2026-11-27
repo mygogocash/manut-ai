@@ -28,6 +28,7 @@ import { ReachAskCard } from "../../jobs/ReachCards";
 import { BriefNotice, WatchLine } from "../../routines/WatchLine";
 import { t } from "../../i18n";
 import { useBotReady } from "../connect/ready";
+import { can } from "../../runtime";
 import { isMac } from "../../app/shortcuts";
 import { JumpPill, PinnedOwn, useTimelineNav } from "./TimelineJump";
 import { useArrivals } from "./arrival";
@@ -289,8 +290,9 @@ export function Timeline({
         </div>
       )}
       {/* A Hermes installed from the setup screen has no model yet: the first chat screen says where to pick one,
-          never a terminal command. */}
-      {chat?.loaded && !chat.openError && !(chat.model || bot.model) && !(connectionNotice && notReady) && (
+          never a terminal command. Only on a runtime with a model menu to pick from: Connected answers with the API's
+          model, so no model named there is nothing missing. */}
+      {can("models") && chat?.loaded && !chat.openError && !(chat.model || bot.model) && !(connectionNotice && notReady) && (
         <div className="day note" data-testid="chat-no-model">
           {t("tl.noModel", { bot: bot.display_name })}
         </div>

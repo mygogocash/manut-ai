@@ -161,7 +161,8 @@ The protocol ops are answered from the latest read (`src/runtime/http/host.ts`, 
 | every other write (`chat.steer`, `thread.remove`, `automations.add`, …) | refused with `not_yet` and a translated "Not yet: Connected mode answers approvals, looks after what your team knows and its routines, and manages Connections and People for now." Nothing is sent to the API. |
 
 The runtime's capabilities are `automations` only, so the Automations page shows and the screens that need a runtime on
-this computer (other places, plugins, restarts, coding-CLI logins) stay hidden.
+this computer (other places, plugins, restarts, coding-CLI logins) stay hidden. So does the chat box's model menu, and the
+line that says a member has no model yet (`models`): the API chooses the model Buddy answers with, so there is none to pick.
 
 While anyone is connected the shop is read again every minute, and a list asked for more than 15 seconds after the
 last read is read again first. What changed between two reads becomes the events the store already follows: a new
@@ -644,8 +645,9 @@ words in `src/threads/kind.ts`), the desktop's half of `docs/connected-chat.md`,
 - **Buddy's answer** is the turn's events, `turn.start`, the answer as a `message` (id `<conversation>/<message>`), `turn.end` with
   `done`, tagged with the conversation (`session`) for a conversation, and only once the API answered. A turn that started before the
   API let the message through would end Failed for a refusal (a Failed line, a sound, a notification), where a refused message is a
-  message not sent; so while Buddy answers, the person's message shows as sent and nothing more, and the turn's line then reads "Worked
-  for 0s". An answer the provider refused with nothing said says "Buddy did not answer this one.", and one cut at its length says so
+  message not sent; so while Buddy answers, the person's message shows as sent and nothing more. The turn says when its work began
+  (`turn.start`'s `since`: the moment the message went), so its line reads how long Buddy took, "Worked for 6s", not "0s". A line that
+  shows Buddy is answering while the API works needs a turn that can be taken back without a Failed line, which is not built. An answer the provider refused with nothing said says "Buddy did not answer this one.", and one cut at its length says so
   after it.
 - **Refusals**, each in the person's words, so the store marks the message "Not sent" with the reason, as any failed send; nothing is
   queued, retried or sent again from here, and the API keeps nothing for any of them. `feature_disabled` (and the 404 of an API from
@@ -675,9 +677,8 @@ words in `src/threads/kind.ts`), the desktop's half of `docs/connected-chat.md`,
   this run knows are in memory only, and go at sign-out.
 - **What it does not do.** Buddy only talks: nothing here starts, sends, posts, pays or decides anything of the shop's, and approvals
   still settle only through the decide route; nothing is deleted. Older messages than a conversation's newest 50 are not read yet.
-  Buddy's main chat still shows the hint that Buddy has no model yet and a "Pick a model" button, as it did before this item: the
-  runtime names no model (`models.options` lists none, and the API chooses Buddy's), and what the box should show for it is left for
-  later. The reach cards over conversations are item 102l-3.
+  Buddy's chat has no model menu and never says a model is missing: the runtime names no model (`models.options` lists none, and the
+  API chooses Buddy's), so its `models` capability is off and the chat shows neither. The reach cards over conversations are item 102l-3.
 - **Tests.** `chat.test.ts` (each op over the fake API: the session, the body, the turn, the conversation listed and opened, two at
   once, every refusal in words with one request and no turn, blank and too long, signed out, the store marking a refused message
   "Not sent", offline, a helper's shop, a task told from a conversation, the shop after the switcher moved, removal not offered, and
