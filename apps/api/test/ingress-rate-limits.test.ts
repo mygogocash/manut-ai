@@ -13,6 +13,8 @@ const routes = [
   ["/v1/auth/refresh", "POST", "AUTH_SESSION_LIMITER"],
   ["/v1/auth/session", "DELETE", "AUTH_SESSION_LIMITER"],
   ["/v1/inbound/linear", "POST", "LINEAR_INBOUND_LIMITER"],
+  // Manut AI's own LINE webhook (owner-line.ts) shares the shops' LINE limit.
+  ["/v1/inbound/owner-line", "POST", "LINE_INBOUND_LIMITER"],
 ] as const;
 
 function fixture(limit: (key: string) => Promise<boolean> = async () => true) {
@@ -24,6 +26,7 @@ function fixture(limit: (key: string) => Promise<boolean> = async () => true) {
   } } as RateLimit;
   const target: LimitedEnv = { ...bindings,
     AUTH_EXCHANGE_LIMITER: limiter, AUTH_SESSION_LIMITER: limiter, LINEAR_INBOUND_LIMITER: limiter,
+    LINE_INBOUND_LIMITER: limiter,
     AUTH: { idFromName: (name: string) => bindings.AUTH.idFromName(name),
       get: () => ({ fetch: async () => { calls++; return Response.json({ fixture: true }); } }),
     } as unknown as DurableObjectNamespace,

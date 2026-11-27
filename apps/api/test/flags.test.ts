@@ -91,6 +91,18 @@ describe("capability flags and kill switches", () => {
     expect(((await (await adminGet()).json()) as { officeInbound?: boolean }).officeInbound).toBe(false);
   });
 
+  it("keeps ownerLine off by default, and only the operator turns it on", async () => {
+    // wrangler.test.json sets no OWNER_LINE, and scripts/one-origin-contract.mjs checks that no deployed
+    // environment does, so nothing reaches a shop's owner on LINE until the operator turns it on.
+    const initial = (await (await adminGet()).json()) as { ownerLine?: boolean };
+    expect(initial.ownerLine).toBe(false);
+    expect((await admin({ ownerLine: "yes" } as unknown as Record<string, unknown>)).status).toBe(400);
+    expect((await admin({ ownerLine: true })).status).toBe(200);
+    expect(((await (await adminGet()).json()) as { ownerLine?: boolean }).ownerLine).toBe(true);
+    expect((await admin({ ownerLine: false })).status).toBe(200);
+    expect(((await (await adminGet()).json()) as { ownerLine?: boolean }).ownerLine).toBe(false);
+  });
+
   it("reads back routine and write flags", async () => {
     expect((await admin({ officeRoutines: false, officeExternalWrites: false })).status).toBe(200);
     const view = (await (await adminGet()).json()) as {
