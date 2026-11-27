@@ -14,8 +14,22 @@ import { memoryVault } from "./vault";
 import type { AskView, ChatEvent, ChatView } from "./wire";
 
 export const PRACTICE_DIGITS = "4821";
-/// `/app/?demo=mac-off` shows the tab as it is wherever the relay is off.
+/// `/app/?demo=mac-off` shows the tab as it is for a phone paired before, with the relay off and no door over the person's
+/// tailnet: the one case left with no way to its Mac (item 78f-2d), since an unpaired phone is still offered the code.
 export const PRACTICE_MAC_OFF = "demo=mac-off";
+
+/// The pretend Mac as the phone keeps it once paired, with no door over the person's tailnet.
+async function practiceMac() {
+  return {
+    hostId: "P".repeat(43),
+    deviceId: "0B6A2C1E-4D5F-4A6B-8C7D-9E0F1A2B3C4D",
+    doorToken: new Uint8Array(32),
+    k: await importSharedSecret(crypto.getRandomValues(new Uint8Array(32))),
+    credentialId: new Uint8Array(16).fill(1),
+    rpId: typeof location === "undefined" ? "localhost" : location.hostname,
+    pairedAt: Date.now(),
+  };
+}
 
 /// The pretend Mac's chats, as the real Mac would show them, timed a little before `now` (seconds, as the Mac's are).
 function sampleChats(now: number): ChatView[] {
@@ -198,11 +212,16 @@ export interface PracticeBackend extends MacBackend {
 export function practiceBackend(options: { relay?: "on" | "off"; timers?: Timers } = {}): PracticeBackend {
   const timers = options.timers ?? systemTimers;
   const vault = memoryVault();
+  // With the relay off the phone is one paired before, so the tab shows what such a phone sees.
+  const ready = options.relay === "off" ? practiceMac().then((mac) => vault.save(mac)) : Promise.resolve();
   const chats = sampleChats(Date.now());
   let typed: (() => void) | null = null;
   const wait = (ms: number) => new Promise<void>((resolve) => timers.set(resolve, ms));
   return {
-    relay: async () => options.relay ?? "on",
+    relay: async () => {
+      await ready;
+      return options.relay ?? "on";
+    },
     vault,
     passkeys: practicePasskeys,
     now: () => Date.now(),
@@ -218,15 +237,7 @@ export function practiceBackend(options: { relay?: "on" | "off"; timers?: Timers
       await new Promise<void>((resolve) => onStep({ step: "passkey", make: resolve, cancelled: false }));
       onStep({ step: "finishing" });
       await wait(300);
-      const mac = {
-        hostId: "P".repeat(43),
-        deviceId: "0B6A2C1E-4D5F-4A6B-8C7D-9E0F1A2B3C4D",
-        doorToken: new Uint8Array(32),
-        k: await importSharedSecret(crypto.getRandomValues(new Uint8Array(32))),
-        credentialId: new Uint8Array(16).fill(1),
-        rpId: typeof location === "undefined" ? "localhost" : location.hostname,
-        pairedAt: Date.now(),
-      };
+      const mac = await practiceMac();
       await vault.save(mac);
       return { ok: true, mac };
     },
