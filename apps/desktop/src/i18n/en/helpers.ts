@@ -108,6 +108,7 @@ export const helpers = {
   "helpers.land.unfinished": "Not landed: only finished work lands, so its work stays in its own folder",
   "helpers.land.takenBack": "Taken back: Kit's folder is as it was before this landing",
   "helpers.land.keys": "A key is in {files}. It is hidden here, and Kit's next commit or push asks you first.",
+  "helpers.land.keysKept": "A key is in {files}. It is hidden here and in Show patch.",
   "helpers.land.err.busy": "git is partway through something in Kit's folder or the helper lane's",
   "helpers.land.err.no_snapshot": "the copy it started from is gone",
   "helpers.land.err.no_lead": "its lead lane is gone",

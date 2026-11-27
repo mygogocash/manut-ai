@@ -63,6 +63,8 @@ export interface LandRow {
   readonly detail?: string;
   /** the files a key is in, named only */
   readonly keys: readonly string[];
+  /** where that key is now: in the lead's folder (its next commit or push asks), or only in the kept patch */
+  readonly keysIn?: "lead" | "patch";
   /** a patch is kept: Show patch */
   readonly canShowPatch: boolean;
   /** the landing is in the lead's folder: Take back this landing */
@@ -121,6 +123,7 @@ export function landRow(v: HelperLanding, leadBusy: boolean): LandRow {
       return {
         ...base,
         keys,
+        keysIn: "lead",
         tone: l.conflicts.length ? "waiting" : "done",
         line: l.conflicts.length ? t("helpers.land.conflicts", { landed: files, n: l.conflicts.length, files: paths(l.conflicts) }) : files,
         canTakeBack: true,
@@ -129,12 +132,12 @@ export function landRow(v: HelperLanding, leadBusy: boolean): LandRow {
         ...(v.takeBackError ? { takeBackError: takeBackWords(v.takeBackError) } : {}),
       };
     case "keptPatch":
-      return { ...base, keys, tone: "failed", line: t("helpers.land.kept"), canShowPatch: true, ...(l.error && l.error !== "would_not_apply" ? { detail: landError(l.error) } : {}) };
+      return { ...base, keys, keysIn: "patch", tone: "failed", line: t("helpers.land.kept"), canShowPatch: true, ...(l.error && l.error !== "would_not_apply" ? { detail: landError(l.error) } : {}) };
     case "keptOutside": {
       const named = paths(l.outside ?? []);
       const line =
         l.refusal === "other_repo" ? t("helpers.land.otherRepo") : l.refusal === "bad_path" ? t("helpers.land.badPath", { files: named }) : t("helpers.land.outside", { files: named });
-      return { ...base, keys, tone: "failed", line, canShowPatch: true };
+      return { ...base, keys, keysIn: "patch", tone: "failed", line, canShowPatch: true };
     }
     default:
       return { ...base, tone: "failed", line: t("helpers.land.failed", { why: landError(l.error ?? "") }) };
@@ -267,7 +270,7 @@ function LandLine({ r, shown, onPatch, onTakeBack }: { r: RunRow & { land: LandR
       )}
       {l.keys.length > 0 && (
         <span className="hr-land-keys" data-testid="helper-landing-keys">
-          {t("helpers.land.keys", { files: paths(l.keys) })}
+          {t(l.keysIn === "patch" ? "helpers.land.keysKept" : "helpers.land.keys", { files: paths(l.keys) })}
         </span>
       )}
       {(l.canShowPatch || l.canTakeBack) && (

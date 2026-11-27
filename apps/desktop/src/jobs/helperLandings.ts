@@ -157,6 +157,8 @@ export function createHelperLandings(deps: LandDeps) {
   /** Helper `index` of `round` is settled: its row says so, the round's report carries it, and a round now whole is handed over. */
   const settle = (lead: string, round: string, index: number, landing: Landing | null, extra: Partial<HelperLanding> = {}) => {
     patch(round, index, { step: "settled", landing, ...extra });
+    // a lead closed while its landing was written has no rounds left to carry it (its row still says what happened)
+    if (closing.has(lead)) return;
     deps.setRounds(lead, settleLanding(deps.rounds(lead), round, index, landing));
     roundCheck(lead, round);
   };
@@ -217,9 +219,13 @@ export function createHelperLandings(deps: LandDeps) {
           // it is in line or being written: that landing settles its report again
         } else if (prev?.step === "settled" && prev.landing && landed(prev.landing)) {
           settle(b.lead, b.round, b.index, prev.landing);
-        } else if (b.report.ended !== "done" || !worktree) {
+        } else if (b.report.ended !== "done") {
           views.set(k, view);
           settle(b.lead, b.round, b.index, null, { skipped: "unfinished" });
+        } else if (!worktree) {
+          // no folder of its own to name: nothing the shell could land
+          views.set(k, view);
+          settle(b.lead, b.round, b.index, refusedLanding("not_a_lane"));
         } else {
           views.set(k, view);
           emit();

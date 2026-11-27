@@ -110,6 +110,7 @@ export const helpers: Record<keyof typeof en, string> = {
   "helpers.land.unfinished": "反映していません: 反映するのは終わった作業だけなので、作業は専用フォルダに残っています",
   "helpers.land.takenBack": "取り消しました: Kit のフォルダはこの反映の前の状態です",
   "helpers.land.keys": "{files} にキーがあります。ここでは隠され、Kit の次のコミットやプッシュの前にあなたに確認します。",
+  "helpers.land.keysKept": "{files} にキーがあります。ここでもパッチの表示でも隠されます。",
   "helpers.land.err.busy": "Kit のフォルダかヘルパーレーンのフォルダで git が途中の作業をしています",
   "helpers.land.err.no_snapshot": "開始時のコピーがなくなっています",
   "helpers.land.err.no_lead": "リードレーンがありません",

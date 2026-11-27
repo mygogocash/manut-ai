@@ -110,6 +110,7 @@ export const helpers: Record<keyof typeof en, string> = {
   "helpers.land.unfinished": "未并入：只有完成的工作才会并入，所以它的工作留在自己的文件夹里",
   "helpers.land.takenBack": "已撤回：Kit 的文件夹回到这次并入之前的样子",
   "helpers.land.keys": "{files} 中有密钥。这里已隐藏，Kit 下一次提交或推送前会先问你。",
+  "helpers.land.keysKept": "{files} 中有密钥。这里和显示补丁中都已隐藏。",
   "helpers.land.err.busy": "git 在 Kit 的文件夹或助手泳道的文件夹中还有未完成的操作",
   "helpers.land.err.no_snapshot": "它启动时的副本已不在",
   "helpers.land.err.no_lead": "它的主泳道已不在",

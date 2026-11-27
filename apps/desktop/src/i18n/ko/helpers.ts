@@ -110,6 +110,7 @@ export const helpers: Record<keyof typeof en, string> = {
   "helpers.land.unfinished": "반영되지 않음: 끝난 작업만 반영되므로 작업은 전용 폴더에 남아 있습니다",
   "helpers.land.takenBack": "되돌림: Kit의 폴더가 이 반영 전 상태입니다",
   "helpers.land.keys": "{files}에 키가 있습니다. 여기서는 가려지며, Kit의 다음 커밋이나 푸시 전에 먼저 묻습니다.",
+  "helpers.land.keysKept": "{files}에 키가 있습니다. 여기서도 패치 보기에서도 가려집니다.",
   "helpers.land.err.busy": "Kit의 폴더나 도우미 레인의 폴더에서 git이 하던 일이 끝나지 않았습니다",
   "helpers.land.err.no_snapshot": "시작할 때의 사본이 없습니다",
   "helpers.land.err.no_lead": "리드 레인이 없습니다",

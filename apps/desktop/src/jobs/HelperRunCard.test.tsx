@@ -177,7 +177,7 @@ describe("the rows' landings (landRow, item 102i)", () => {
     const key = `ghp_${"a".repeat(36)}`;
     const landings = [
       lv(0, { landing: { files: [{ path: "src/qr.test.ts" }], conflicts: [], keys: ["src/config.ts"] } }),
-      lv(1, { landing: { files: [{ path: "src/line.ts" }], conflicts: [], patchPath: "/w/.manut/patches/j/h.patch", error: "would_not_apply" } }),
+      lv(1, { landing: { files: [{ path: "src/line.ts" }], conflicts: [], patchPath: "/w/.manut/patches/j/h.patch", error: "would_not_apply", keys: ["src/line.ts"] } }),
     ];
     const rows = runRows([backRun(0), backRun(1)], chat, landings);
     const patch = `diff --git a/src/line.ts b/src/line.ts\n--- a/src/line.ts\n+++ b/src/line.ts\n@@ -1 +1,2 @@\n-old\n+new\n+token = "${key}"\n`;
@@ -193,6 +193,8 @@ describe("the rows' landings (landRow, item 102i)", () => {
     const words = text(html);
     expect(words).toContain("Landed 1 file");
     expect(words).toContain("A key is in src/config.ts. It is hidden here, and Kit's next commit or push asks you first.");
+    // a key in a patch that was only kept is not in Kit's folder: the row says it is hidden, and nothing about a commit
+    expect(words).toContain("A key is in src/line.ts. It is hidden here and in Show patch.");
     expect(words).toContain("Take back this landing");
     expect(words).toContain("Hide patch");
     expect(words).toContain("Kept at /w/.manut/patches/j/h.patch");
