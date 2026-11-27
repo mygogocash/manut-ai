@@ -142,6 +142,9 @@ export function createLeadLanes(deps: LeadDeps) {
       const r = deps.rec(id);
       return r && active(id) ? withHelperPolicy(text, agentsFor(r)) : text;
     },
+    /** Whether lead `id` may still start a round for the person's current message (R4): the app's report says so, and only then
+     *  is the lead's note, with its block, put in front of it (GoSpark's closed policy leaves the block out once rounds are spent). */
+    roundsLeft: (id: string): boolean => mayStartRound(rounds.get(id) ?? noRounds()),
     /** A message of the person's went to session `id`'s agent: it gets its own rounds (R4). */
     personSpoke(id: string): void {
       const r = rounds.get(id);

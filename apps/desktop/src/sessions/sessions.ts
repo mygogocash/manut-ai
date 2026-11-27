@@ -75,6 +75,7 @@ import { t as tr, type Key } from "../i18n";
 import { recordError } from "../report/errors";
 import { notesSaid } from "./projectNotes";
 import { createLeadLanes } from "../jobs/leadLanes";
+import { createHelperLandings } from "../jobs/helperLanding";
 import { createHelperRuns, type StartHelper } from "../jobs/helperRuns";
 import type { LaneMade } from "../code/laneBranch";
 import { createReach, type OpenLane } from "../jobs/reachChats";
@@ -233,6 +234,37 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     every: (ms, fn) => clock.every(ms, fn),
   });
   leads.whenRoundApproved((r) => runs.approved(r));
+  /** Landings and the hand-over (items 102i and 102j, src/jobs/helperLanding.ts): each helper lane that came back in its round has
+   *  its work landed in its lead lane's folder by the shell, one at a time and only while the lead is idle, and once everything is
+   *  settled the reports go to the lead in one message. Nothing of it answers an ask. */
+  const landings = createHelperLandings({
+    laneDir: (id) => {
+      const lane = rec(id)?.lane;
+      return lane?.worktree ?? lane?.dir ?? null;
+    },
+    working: (id) => working(id),
+    asks: (id) => {
+      const key = keys.get(id);
+      return key ? selectAsks(store().getState()).filter((a) => a.bot === key).map((a) => a.item.request_id) : [];
+    },
+    personWaiting: (id) => {
+      const key = keys.get(id);
+      return !!(key && chatOf(key)?.queue?.length);
+    },
+    rounds: (lead) => leads.roundsOf(lead),
+    setRounds: (lead, r) => leads.setRounds(lead, r),
+    helperSessions: (lead) => state.list.filter((r) => r.helperOf?.lead === lead).map((r) => r.id),
+    land: (dir) => (host.laneLand ? host.laneLand(dir) : Promise.reject(new Error("no_shell"))),
+    takeBack: (dir) => (host.laneTakeBack ? host.laneTakeBack(dir) : Promise.reject(new Error("no_shell"))),
+    send: (id, text) => sendFromApp(id, text),
+    note: (id, text, detail) => {
+      const key = keys.get(id);
+      if (key) store().dispatch({ type: "system.note", bot: key, text, now: Date.now(), ...(detail ? { detail } : {}) });
+    },
+    words: () => ({ reported: tr("helpers.reported"), failed: tr("helpers.reportFailed"), showSent: tr("helpers.showSent"), showUnsent: tr("helpers.showUnsent") }),
+    every: (ms, fn) => clock.every(ms, fn),
+  });
+  runs.whenBack((b) => landings.back(b));
   /** The session whose chat has app-store key `key`. */
   const byKey = (key: string) => {
     for (const [id, k] of keys) if (k === key) return rec(id) ?? null;
@@ -891,6 +923,8 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     }
   };
 
+  /** The local ids of messages the app itself sends (the helpers' report, item 102j), which are not the person speaking. */
+  const fromApp = new Set<string>();
   const input = async (id: string, i: ChatInput) => {
     const proc = procs.get(id);
     const r = rec(id);
@@ -903,10 +937,13 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
       if (i.kind === "send" && i.id && REWINDS.includes(r.agent) && !(key && store().getState().chats[key]?.turn)) await turns.beforeSend(id, workDir(r), i.id);
       if (i.kind === "send") {
         // a message of the person's reaches the agent: it gets its own rounds of helper lanes, and while Helpers is on the lead's
-        // note goes in front of it, never into the bubble (item 102e)
-        leads.personSpoke(id);
+        // note goes in front of it, never into the bubble (item 102e). The app's own report (item 102j) is not the person's: it
+        // gives no new rounds (R4), and carries the lead's note only while one more round is open.
+        const app = !!i.id && fromApp.delete(i.id);
+        if (!app) leads.personSpoke(id);
         // and while chats are on its "Kit may reach" list, the note naming them goes in front too (item 102k)
-        i = { ...i, text: leads.wire(id, reach.wire(id, i.text)) };
+        const reached = reach.wire(id, i.text);
+        i = { ...i, text: !app || leads.roundsLeft(id) ? leads.wire(id, reached) : reached };
       }
       await host.chatInput(proc.hostId, i);
       return;
@@ -1053,6 +1090,23 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
       st.dispatch({ type: "queue.take", bot: key, id: lid, now: Date.now() });
     } catch {
       st.dispatch({ type: "queue.front", bot: key, id: lid });
+    }
+  };
+
+  /** The app's own message to a session (the helpers' report, item 102j): it goes to the agent with no bubble (the chat shows a
+   *  quiet line instead, `system.note`), and it is not the person speaking, so it gives the lead no new rounds (R4). Sent only
+   *  when the session is idle and nothing of the person's waits (`takeHandOver`), so it never queues. False when it did not go. */
+  const sendFromApp = async (id: string, text: string): Promise<boolean> => {
+    const t = text.trim();
+    if (!t || !keys.get(id) || waitsFor(id)) return false;
+    const lid = `local-a${++localSeq}`;
+    fromApp.add(lid);
+    try {
+      await input(id, { kind: "send", text: t, id: lid });
+      return true;
+    } catch {
+      fromApp.delete(lid);
+      return false;
     }
   };
 
@@ -3193,6 +3247,13 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     stopHelpers: (round: string) => runs.stopAll(round),
     /** Item 102h's hand-off to 102i and 102j: each helper lane that comes back, with its report bound to its round. */
     whenHelperBack: (fn: Parameters<typeof runs.whenBack>[0]) => runs.whenBack(fn),
+    /** Helper `index` of round `round`'s landing, as its row on the Helpers card shows it (item 102i). */
+    helperLanding: (round: string, index: number) => landings.viewOf(round, index),
+    /** Take back this landing (item 102i): the lead's folder as it was before it. */
+    takeBackLanding: (round: string, index: number) => landings.takeBack(round, index),
+    subscribeLandings: (fn: () => void) => landings.subscribe(fn),
+    /** Every helper's landing, by `round:index`: the same value until one changes (the Helpers card). */
+    landingSnapshot: () => landings.snapshot(),
     /** The budget's clock, read now (tests drive it with their own clock). */
     helperTick: () => runs.tick(),
     /** Helper session `id`'s budget as it stands (tests). */

@@ -3,6 +3,9 @@
 // brief is answered as `__manutMockHelpers` says (`/work hold` keeps working, `/ask` waits on a question of the person's). The mock
 // shell reads this Mac as 8 GB, so two run at once and the third waits. The safety rules are pinned here as in the app: every helper
 // `chat.start` carries its agent's asking mode, and a helper's question stays the person's after its lead's next turn says "Allow".
+// Items 102i and 102j: helper lanes that did their task have their work landed in the lead's folder while it is idle, each row says
+// how, Take back puts one landing back, and the reports go to the lead once as the app's own message, its chat showing a quiet
+// "Helpers reported to Kit" line that opens what was sent, never a bubble of the person's.
 // Pictures of the Helpers card (two running, one queued) and of the Lanes band with the helper rows indented under their lead, light
 // and dark, go to HELPERS_SHOTS (else Playwright's ignored test-results).
 import { join } from "node:path";
@@ -29,7 +32,7 @@ async function resetMock(): Promise<void> {
   ws.close();
 }
 const SHOTS = process.env.HELPERS_SHOTS || "test-results";
-type Call = { op: string; agent?: string; cwd?: string; mode?: string; session?: string; lead?: string; job?: string; input?: { kind: string; text?: string } };
+type Call = { op: string; id?: number; agent?: string; cwd?: string; mode?: string; session?: string; lead?: string; job?: string; input?: { kind: string; text?: string } };
 const calls = (page: Page) => page.evaluate(() => ((window as unknown as { __manutSessionCalls?: Call[] }).__manutSessionCalls ?? []));
 const helperStarts = async (page: Page) => (await calls(page)).filter((c) => c.op === "chat.start" && (c.cwd ?? "").includes("-help-"));
 
@@ -185,4 +188,43 @@ test("the person's Stop on a running helper gives its place to the one waiting, 
   await expect(runs.getByTestId("helper-run-stop")).toHaveCount(0);
   // the round is done: each helper lane's idle agent process was ended, its chat and folder kept
   await expect.poll(async () => (await calls(page)).filter((c) => c.op === "chat.close").length).toBe(3);
+});
+
+test("each helper's work lands in Kit's folder while it is idle, Take back puts one back, and the reports go to Kit once as a quiet line (102i, 102j)", async ({ page }) => {
+  // every helper lane does its task at once
+  await page.addInitScript(() => ((window as any).__manutMockHelpers = {}));
+  await page.reload();
+  const lead = await round(page);
+  const runs = page.getByTestId("helper-run-card");
+  const rows = runs.getByTestId("helper-run-row");
+  await expect(rows).toHaveCount(3);
+  await expect(runs.getByTestId("helper-run-landing")).toHaveText(Array(3).fill("Landed 1 file in Kit's folder.Take back"));
+  // the shell was asked once for each helper lane's folder
+  const lands = (await calls(page)).filter((c) => c.op === "lane.land");
+  expect(lands).toHaveLength(3);
+
+  // the reports went to Kit once, as the app's: a quiet line that opens them, and no bubble of the person's carrying them
+  const line = page.getByTestId("system-line").filter({ hasText: "Helpers reported to Kit." });
+  await expect(line).toHaveCount(1);
+  await expect(page.getByTestId("bubble-user").filter({ hasText: "your helper lanes reported" })).toHaveCount(0);
+  const all = await calls(page);
+  const leadHost = all.filter((c) => c.op === "chat.start" && c.session === lead).map((c) => c.id);
+  const toLead = all.filter((c) => c.op === "chat.input" && leadHost.includes(c.id) && (c.input?.text ?? "").includes("[Manut AI: your helper lanes reported]"));
+  expect(toLead).toHaveLength(1);
+  await line.getByTestId("system-line-detail").click();
+  await expect(line.locator(".sys-detail-text")).toContainText("Helper 1, Helper 2 and Helper 3 finished.");
+  await expect(line.getByTestId("system-line-detail")).toHaveAttribute("aria-expanded", "true");
+  // pictures: the rows' landings and the opened line, light and dark
+  await page.setViewportSize({ width: 1280, height: 1000 });
+  for (const th of ["light", "dark"] as const) {
+    await theme(page, th);
+    await runs.screenshot({ path: join(SHOTS, `helper-landings-card-${th}.png`), animations: "disabled" });
+    await line.screenshot({ path: join(SHOTS, `helper-reported-line-${th}.png`), animations: "disabled" });
+  }
+
+  // Take back on the first row: the shell puts Kit's folder back, and the row says so
+  await rows.nth(0).getByTestId("helper-run-take-back").click();
+  await expect(rows.nth(0).getByTestId("helper-run-landing")).toHaveText("Taken back: Kit's folder is as it was before this landing.");
+  expect((await calls(page)).filter((c) => c.op === "lane.takeBack")).toHaveLength(1);
+  await expect(rows.nth(1).getByTestId("helper-run-take-back")).toBeVisible();
 });

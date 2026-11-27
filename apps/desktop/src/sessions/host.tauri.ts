@@ -9,7 +9,7 @@ import type { ImportApp, ImportProfile } from "./term/import";
 import { readLaneFolder } from "../code/laneFolder";
 import { savedKeys } from "../code/secrets";
 import { readView } from "../code/moved";
-import { readCleaned, readKept, readMade, readReleased, readRemoved, type LaneRemoveAsk } from "../code/laneBranch";
+import { readCleaned, readKept, readMade, readReleased, readRemoved, type LaneLanded, type LaneRemoveAsk } from "../code/laneBranch";
 import { readAgentConfig } from "../settings/mcp/agentConfig";
 import { readInstallAsk, readInstallDone, readLinkRead, readSkillReads } from "../runtime/skillBundle";
 import { readAsk, readDone, readDraft, readMadeProject, readPulled, readRepoAsk, readTools, type MergeMethod } from "../code/source";
@@ -261,6 +261,18 @@ export class TauriHost implements SessionHost, BuddyHost {
     if (!made) throw new Error("no_folder");
     return made;
   }
+  async laneLand(helper: string) {
+    const { invoke } = await this.core();
+    const landed = readLanded(await invoke<unknown>("lane_land", { helper }));
+    if (!landed) throw new Error("unreadable");
+    return landed;
+  }
+  async laneTakeBack(helper: string) {
+    const { invoke } = await this.core();
+    const r = (await invoke<unknown>("lane_take_back", { helper })) as { files?: unknown; files_total?: unknown } | null;
+    const files = Array.isArray(r?.files) ? r.files.filter((f): f is string => typeof f === "string") : [];
+    return { files, filesTotal: typeof r?.files_total === "number" ? r.files_total : files.length };
+  }
   async machineMemory() {
     const { invoke } = await this.core();
     const n = await invoke<unknown>("machine_memory");
@@ -448,3 +460,28 @@ export class TauriHost implements SessionHost, BuddyHost {
   }
 }
 
+/** The shell's `Landed`, read field by field: anything not of the expected shape is left empty, and an outcome it does not know is
+ *  none at all. */
+function readLanded(v: unknown): LaneLanded | null {
+  if (!v || typeof v !== "object") return null;
+  const r = v as Record<string, unknown>;
+  const strings = (x: unknown) => (Array.isArray(x) ? x.filter((s): s is string => typeof s === "string") : []);
+  const outcome = r.outcome === "landed" || r.outcome === "nothing" || r.outcome === "kept" ? r.outcome : null;
+  if (!outcome) return null;
+  const why = r.why === "outside" || r.why === "bad_path" || r.why === "other_repo" || r.why === "would_not_apply" ? r.why : "";
+  const files = strings(r.files);
+  const cut = strings(r.cut);
+  return {
+    outcome,
+    files,
+    filesTotal: typeof r.files_total === "number" ? r.files_total : files.length,
+    conflicts: strings(r.conflicts),
+    cut,
+    cutTotal: typeof r.cut_total === "number" ? r.cut_total : cut.length,
+    keys: strings(r.keys),
+    patch: typeof r.patch === "string" ? r.patch : "",
+    why,
+    outside: strings(r.outside),
+    error: typeof r.error === "string" ? r.error : "",
+  };
+}

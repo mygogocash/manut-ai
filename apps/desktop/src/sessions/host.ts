@@ -13,7 +13,7 @@ import type { ImportApp, ImportProfile } from "./term/import";
 import { type LaneFolder } from "../code/laneFolder";
 import { savedKeys, type SavedKeys } from "../code/secrets";
 import { type GitView } from "../code/moved";
-import { type KeptLane, type LaneCleaned, type LaneMade, type LaneReleased, type LaneRemoveAsk, type LaneRemoved } from "../code/laneBranch";
+import { type KeptLane, type LaneCleaned, type LaneLanded, type LaneMade, type LaneReleased, type LaneRemoveAsk, type LaneRemoved } from "../code/laneBranch";
 import { type AgentConfig } from "../settings/mcp/agentConfig";
 import { type InstallAsk, type InstallDone, type LinkRead, type ReadSkill } from "../runtime/skillBundle";
 import { type MergeMethod, type NewProjectMade, type Pulled, type RepoAsk, type ReviewAsk, type ReviewDone, type ReviewDraft, type SourceTools } from "../code/source";
@@ -184,6 +184,12 @@ export interface SessionHost extends HistoryHost {
    *  (`bad_job`, `not_a_lane`, `lead_is_helper`, `busy`, `no_commit`, `taken`, `no_folder`, `git_missing`) or git's own line, with
    *  nothing made. Absent in a shell older than helper lanes: none then starts. */
   laneHelperWorktree?(lead: string, job: string): Promise<LaneMade>;
+  /** Lands the work of the helper lane whose folder is `helper` in its lead lane's folder (item 102g, src-tauri/src/lane_land.rs;
+   *  item 102i calls it): one at a time per lead folder, a snapshot first for Take back, build output cut, a patch outside the
+   *  project kept untried, a patch that will not apply kept at 0600. Rejects with a short code or git's own line. */
+  laneLand?(helper: string): Promise<LaneLanded>;
+  /** Take back this landing (item 102g): the lead's folder as it was before the landing of the helper lane `helper`. */
+  laneTakeBack?(helper: string): Promise<{ files: string[]; filesTotal: number }>;
   /** This computer's memory in bytes (item 102h, src-tauri/src/machine.rs; docs/several-agents.md R7), read once by the shell with no
    *  program run, so the page can tell how many helper lanes run at once. Null when it could not be read. */
   machineMemory?(): Promise<number | null>;

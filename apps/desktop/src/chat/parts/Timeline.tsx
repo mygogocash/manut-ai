@@ -15,6 +15,7 @@ export interface SessionQueue {
   pick(id: string, c: QueueChoice): void;
 }
 import { quoteFor } from "./answers";
+import { SystemDetail } from "./SystemDetail";
 import { LiveFace, TypingRow, awaitingFirstToken } from "./Typing";
 import { liveFaceRow } from "./liveFace";
 import { ActivityFallback, CardFallback, RoutineFallback } from "./fallbacks";
@@ -199,7 +200,9 @@ export function Timeline({
       case "briefNotice":
         return <BriefNotice bot={bot} />;
       case "system":
-        return (
+        return it.detail ? (
+          <SystemDetail text={it.text} detail={it.detail} />
+        ) : (
           <div className="line sys" data-testid="system-line">
             <span className="line-t">{it.text}</span>
           </div>
