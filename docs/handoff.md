@@ -335,7 +335,8 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    "Your Mac needs you"; the relay is on in dev only), 137 (the side menu slides, sizes and hides; Home's mode at the top
    left) and the designs of 108 (`docs/multi-machine.md`) and 102l (`docs/connected-chat.md`) merged; 102l-1 (Buddy's chat on
    the API, off, waiting on the owner's Anthropic key) merged, and 102l-2 (the desktop's side of it: Buddy's main chat and conversations on Connected, `runtime/http/chat.ts`)
-   merged too; 102l-3 (the reach cards over those conversations) is being built on `feat/connected-reach`. Dev was deployed
+   merged too; 102l-3 (the reach cards over those conversations, `jobs/buddyReach.ts`) merged as well, so item 102 is built but for
+   102l-4, the owner's key. Dev was deployed
    again on 27 Nov with the chat route, which stays off there until the operator turns `buddyChat` on. The 38 unused names
    `pnpm lint` found outside tests are removed.
    After 102l-2: on Connected, Buddy's chat has no model menu and no "no model yet" line (the runtime's `models` capability is
