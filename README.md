@@ -134,7 +134,7 @@ The longer reads: [`docs/code-editor.md`](docs/code-editor.md), [`docs/remote-ac
 
 ## Credits
 
-Manut AI stands on good open-source shoulders: GoSpark (our own), Oh My Hermes, Orca, T3 Code, dtinth/promptpay-qr, Lobe Icons and more. Every one, with what we took and its licence, is in [`CREDITS.md`](CREDITS.md).
+Manut AI stands on good open-source shoulders: GoSpark (our own), Oh My Hermes, Orca, T3 Code, Paradev, dtinth/promptpay-qr, Lobe Icons and more. Every one, with what we took and its licence, is in [`CREDITS.md`](CREDITS.md).
 
 There's no licence file yet; that one is the owner's call. The code we borrowed keeps its own licence.
 
