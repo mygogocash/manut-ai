@@ -32,7 +32,7 @@ import { ActivityPage } from "../pages/ActivityPage";
 import { Onboarding } from "../onboarding/Onboarding";
 import { isFirstRunOpen } from "../onboarding/flow";
 import { ImportPast, useImportOffer } from "../importPast/ImportPast";
-import { LetInCards } from "../threadsMcp/Cards";
+import { McpCards } from "../threadsMcp/Cards";
 import { startMcp } from "../threadsMcp/start";
 import { useLookAttributes, useThemeAttribute } from "./theme";
 import { useShortcuts } from "./shortcuts";
@@ -166,8 +166,8 @@ export function App() {
       <Palette />
       {/* Bring over's offer, over whatever is showing: once on a first launch, then from History */}
       <ImportPast />
-      {/* a program outside Manut AI waiting to be let in, over whatever is showing (item 103) */}
-      <LetInCards />
+      {/* a program outside Manut AI asking to be let in, to read a chat or to send one a message, over whatever is showing (item 103) */}
+      <McpCards />
     </div>
     </MentionContext.Provider>
   );

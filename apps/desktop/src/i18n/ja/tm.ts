@@ -31,4 +31,13 @@ export const tm: Record<keyof typeof en, string> = {
   "tm.close": "閉じる",
   "tm.note.title": "{name} がチャットへのアクセスを求めています",
   "tm.note.body": "Manut AI を開いて、許可するか断ってください。",
+  "tm.read.title": "{name} が「{title}」を読みたいと求めています",
+  "tm.read.what": "プログラムに渡るのはこの内容だけです。チャットのタイトル、最初のメッセージ、最後の回答、変更したファイル、待っている確認で、キーは隠してあります。",
+  "tm.read.yes": "読ませる",
+  "tm.read.no": "許可しない",
+  "tm.send.title": "{name} がこの内容を「{title}」に送りたいと求めています",
+  "tm.send.what": "この言葉は、{name} からであなたが転送したものとして、そのチャットのエージェントに届きます。チャットが作業中かあなたを待っている間は待機し、質問や許可の確認に答えることはできません。",
+  "tm.send.yes": "そこへ送る",
+  "tm.send.no": "送らない",
+  "tm.from": "Manut AI の外の {name} から、あなたが転送",
 };

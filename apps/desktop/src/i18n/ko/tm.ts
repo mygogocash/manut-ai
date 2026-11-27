@@ -31,4 +31,13 @@ export const tm: Record<keyof typeof en, string> = {
   "tm.close": "닫기",
   "tm.note.title": "{name}이(가) 채팅에 접근하려고 합니다",
   "tm.note.body": "Manut AI를 열어 허락하거나 거절하세요.",
+  "tm.read.title": "{name}이(가) “{title}”을(를) 읽으려고 합니다",
+  "tm.read.what": "프로그램이 받는 것은 정확히 이 내용입니다. 채팅 제목, 첫 메시지, 마지막 답변, 바뀐 파일, 기다리는 요청이며, 키는 가려져 있습니다.",
+  "tm.read.yes": "읽게 하기",
+  "tm.read.no": "허락 안 함",
+  "tm.send.title": "{name}이(가) 이 내용을 “{title}”에 보내려고 합니다",
+  "tm.send.what": "이 말은 {name}에게서 왔고 당신이 전달한 것으로 표시되어 그 채팅의 에이전트에게 갑니다. 채팅이 작업 중이거나 당신을 기다리는 동안에는 대기하며, 질문이나 권한 요청에 답할 수 없습니다.",
+  "tm.send.yes": "거기로 보내기",
+  "tm.send.no": "보내지 않기",
+  "tm.from": "Manut AI 밖의 {name}에게서, 당신이 전달함",
 };

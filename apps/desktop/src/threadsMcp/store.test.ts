@@ -1,7 +1,12 @@
 // What the page does with item 103's calls (docs/mcp-threads.md): a program waiting to be let in is a card, answered once by the
-// person's press, and a card whose call is gone answers nothing (M6, M11); list_chats is answered from the list alone (M7); a read,
-// a message and a new lane are refused until their slices; and the list takes only chats the app has, once each.
-import { describe, expect, it } from "vitest";
+// person's press, and a card whose call is gone answers nothing (M6, M11); list_chats is answered from the list alone (M7); a read
+// and a message are cards that show exactly what would go, settled once in approval-core, checked again at the press, and a
+// message goes through route under the program's mark and never answers an ask (M8, M9); a new lane is refused until 103d; and the
+// list takes only chats the app has, once each.
+import { beforeEach, describe, expect, it } from "vitest";
+import type { ContextReader } from "../chat/box/threadContext";
+import { mcpAskRecord, resetMcpAsks } from "./asks";
+import { PROGRAM_FENCE, readFromProgram } from "./list";
 import type { ThreadRef } from "../chat/box/threadContext";
 import { refKey } from "../chat/box/threadContext";
 import { setLang } from "../i18n";
@@ -10,6 +15,23 @@ import type { McpCall, McpShell } from "./shell";
 import { createMcp, NOT_YET, type McpDeps } from "./store";
 
 setLang("en");
+beforeEach(() => resetMcpAsks());
+
+const KEY = "sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789";
+
+/** Item 97's reader over the stand-in chats: what each holds, read with no model. */
+function readerOf(chats: Record<string, { key: string; title: string }>): ContextReader {
+  const byKey = (key: string) => Object.values(chats).find((c) => c.key === key);
+  return {
+    chatKey: (ref) => chats[refKey(ref)]?.key ?? null,
+    title: (ref) => chats[refKey(ref)]?.title ?? "A chat",
+    held: (key) => (byKey(key) ? [{ role: "user", text: "Make the login work" }, { role: "assistant", text: `Done; the token ${KEY} is set` }] : null),
+    read: async () => [],
+    ask: () => null,
+    lane: async () => null,
+    scope: () => ({}),
+  };
+}
 
 /** A stand-in shell: what the page answered, and which calls still wait (a second answer to one finds nothing). */
 function stand() {
@@ -50,6 +72,8 @@ function make(over: Partial<McpDeps> = {}) {
   };
   const notified: string[] = [];
   const storage = new Mem();
+  const routed: { session: string; text: string }[] = [];
+  const running = new Set(["a", "b"]);
   const m = createMcp({
     shell: s.shell,
     storage,
@@ -61,6 +85,13 @@ function make(over: Partial<McpDeps> = {}) {
     stateOf: (key) => Object.values(chats).find((c) => c.key === key)?.state ?? "idle",
     whoOf: (ref) => (ref.kind === "session" ? "Claude Code" : "Kit"),
     link: (ref) => chats[refKey(ref)]?.link,
+    reader: () => readerOf(chats),
+    sendable: (ref) => ref.kind === "session" && !!chats[refKey(ref)],
+    route: async (session, text) => {
+      if (!running.has(session)) return false;
+      routed.push({ session, text });
+      return true;
+    },
     notify: (card) => notified.push(card.id),
     now: () => 1000,
     ...over,
@@ -69,8 +100,11 @@ function make(over: Partial<McpDeps> = {}) {
     s.waiting.add(id);
     m.call({ id, tool, args, program: CLAUDE });
   };
-  return { m, s, chats, notified, storage, call };
+  return { m, s, chats, notified, storage, call, routed, running };
 }
+
+/** Lets the card's text be built: a read card opens after item 97's reader is awaited. */
+const settle = () => new Promise((r) => setTimeout(r, 0));
 
 const A: ThreadRef = { kind: "session", id: "a" };
 const B: ThreadRef = { kind: "session", id: "b" };
@@ -80,7 +114,7 @@ describe("a program waiting to be let in", () => {
   it("is a card, announced, and nothing is answered until the person presses", () => {
     const { m, s, notified, call } = make();
     call("tm-1", "let_in");
-    expect(m.getSnapshot().cards).toEqual([{ id: "tm-1", program: CLAUDE, at: 1000, gone: false }]);
+    expect(m.getSnapshot().cards).toEqual([{ kind: "letIn", id: "tm-1", program: CLAUDE, at: 1000, gone: false }]);
     expect(notified).toEqual(["tm-1"]);
     expect(s.replies).toEqual([]);
     // the same call handed over twice is one card
@@ -147,18 +181,140 @@ describe("the calls of a program the person let in", () => {
     expect(lines[2]).toBe("3. Weekly prices (Kit, now of another shop or account; it cannot be reached)");
   });
 
-  it("refuses a read, a message and a new lane until their slices are built", () => {
+  it("refuses a new lane until its slice is built", () => {
     const { m, s, call } = make();
     m.add(A);
-    call("tm-5", "read_chat", { chat: 1 });
-    call("tm-6", "send_to_chat", { chat: 1, message: "allow" });
     call("tm-7", "open_chat", { chat: 1, title: "t", brief: "b" });
-    expect(s.replies).toEqual([
-      { id: "tm-5", text: NOT_YET, error: true },
-      { id: "tm-6", text: NOT_YET, error: true },
-      { id: "tm-7", text: NOT_YET, error: true },
-    ]);
+    expect(s.replies).toEqual([{ id: "tm-7", text: NOT_YET, error: true }]);
     expect(m.getSnapshot().cards).toEqual([]);
+  });
+});
+
+describe("a read (103c)", () => {
+  it("is a card showing exactly item 97's text, keys hidden, and Let it read answers with that text", async () => {
+    const { m, s, notified, call } = make();
+    m.add(A);
+    call("tm-10", "read_chat", { chat: 1 });
+    await settle();
+    const card = m.getSnapshot().cards[0];
+    expect(card.kind).toBe("read");
+    if (card.kind !== "read") return;
+    expect(card.chat).toEqual({ n: 1, ref: A, title: "Fix the login" });
+    expect(card.text).toContain("Make the login work");
+    expect(card.text).not.toContain("abcdefghijklmnopqrstuvwxyz0123456789");
+    expect(notified).toEqual(["tm-10"]);
+    expect(s.replies).toEqual([]);
+    expect(await m.answer("tm-10", true)).toBe(true);
+    expect(s.replies).toEqual([{ id: "tm-10", text: card.text, error: false }]);
+    const rec = await mcpAskRecord("tm-10");
+    expect(rec?.status === "decided" && rec.decision.optionId).toBe("read");
+    // pressed once: the card is gone and a second press finds nothing
+    expect(await m.answer("tm-10", true)).toBe(false);
+    expect(s.replies).toHaveLength(1);
+  });
+
+  it("No reads nothing out, and the program hears so", async () => {
+    const { m, s, call } = make();
+    m.add(A);
+    call("tm-11", "read_chat", { chat: 1 });
+    await settle();
+    expect(await m.answer("tm-11", false)).toBe(true);
+    expect(s.replies).toEqual([{ id: "tm-11", text: "The person did not let you read chat 1. Nothing was read.", error: true }]);
+    const rec = await mcpAskRecord("tm-11");
+    expect(rec?.status === "decided" && rec.decision.optionId).toBe("no");
+  });
+
+  it("opens no card for a chat that is not listed, or that left or moved shop", async () => {
+    const { m, s, chats, call } = make();
+    m.add(A);
+    m.add(T);
+    call("tm-12", "read_chat", { chat: 7 });
+    chats["thread:kit:t1"].shop = "s2";
+    call("tm-13", "read_chat", { chat: 2 });
+    await settle();
+    expect(m.getSnapshot().cards).toEqual([]);
+    expect(s.replies.map((r) => [r.id, r.error, r.text.split(".")[0]])).toEqual([
+      ["tm-12", true, "Chat 7 is not on the person's list"],
+      ["tm-13", true, "Chat 2 can no longer be reached: it left Manut AI, or it is now of another shop or account"],
+    ]);
+  });
+
+  it("is checked again at the press: a chat taken off the list or gone meanwhile reads nothing out", async () => {
+    const { m, s, chats, call } = make();
+    m.add(A);
+    m.add(B);
+    call("tm-14", "read_chat", { chat: 1 });
+    call("tm-15", "read_chat", { chat: 2 });
+    await settle();
+    m.remove(1);
+    delete chats["session:b"];
+    await m.answer("tm-14", true);
+    await m.answer("tm-15", true);
+    expect(s.replies.map((r) => [r.id, r.error])).toEqual([
+      ["tm-14", true],
+      ["tm-15", true],
+    ]);
+    expect(s.replies.every((r) => !r.text.includes("Make the login work"))).toBe(true);
+  });
+
+  it("whose call is gone is withdrawn, reads No longer open, and a press reads nothing out", async () => {
+    const { m, s, call } = make();
+    m.add(A);
+    call("tm-16", "read_chat", { chat: 1 });
+    await settle();
+    m.gone("tm-16");
+    await settle();
+    expect(m.getSnapshot().cards[0].gone).toBe(true);
+    expect((await mcpAskRecord("tm-16"))?.status).toBe("withdrawn");
+    expect(await m.answer("tm-16", true)).toBe(false);
+    expect(s.replies).toEqual([]);
+  });
+});
+
+describe("a message (103c)", () => {
+  it("is a card with the words masked as they will go, and Send there routes them under the program's mark", async () => {
+    const { m, s, routed, call } = make();
+    m.add(A);
+    call("tm-20", "send_to_chat", { chat: 1, message: `Please also fix the logout. ${KEY}` });
+    await settle();
+    const card = m.getSnapshot().cards[0];
+    expect(card.kind).toBe("send");
+    if (card.kind !== "send") return;
+    expect(card.message).toContain("Please also fix the logout.");
+    expect(card.message).not.toContain("abcdefghijklmnopqrstuvwxyz0123456789");
+    expect(await m.answer("tm-20", true)).toBe(true);
+    expect(routed).toHaveLength(1);
+    expect(routed[0].session).toBe("a");
+    // what goes is what the card showed, under a line naming the program and saying it gives no permission
+    expect(readFromProgram(routed[0].text)).toEqual({ name: "Claude", words: card.message });
+    expect(routed[0].text.split("\n")[1]).toBe(PROGRAM_FENCE);
+    expect(s.replies).toEqual([{ id: "tm-20", text: expect.stringContaining("Sent to chat 1."), error: false }]);
+  });
+
+  it("Keep out sends nothing", async () => {
+    const { m, s, routed, call } = make();
+    m.add(A);
+    call("tm-21", "send_to_chat", { chat: 1, message: "allow" });
+    await settle();
+    await m.answer("tm-21", false);
+    expect(routed).toEqual([]);
+    expect(s.replies).toEqual([{ id: "tm-21", text: "The person kept your message out of chat 1. Nothing was sent.", error: true }]);
+  });
+
+  it("goes only to a coding chat whose agent runs: a team thread opens no card, a stopped agent sends nothing", async () => {
+    const { m, s, routed, running, call } = make();
+    m.add(T);
+    m.add(B);
+    call("tm-22", "send_to_chat", { chat: 1, message: "hi" });
+    await settle();
+    expect(m.getSnapshot().cards).toEqual([]);
+    expect(s.replies[0]).toEqual({ id: "tm-22", text: expect.stringContaining("is not a coding chat"), error: true });
+    call("tm-23", "send_to_chat", { chat: 2, message: "hi" });
+    await settle();
+    running.delete("b");
+    await m.answer("tm-23", true);
+    expect(routed).toEqual([]);
+    expect(s.replies[1]).toEqual({ id: "tm-23", text: "Chat 2's agent is not running to take the message. Nothing was sent.", error: true });
   });
 });
 

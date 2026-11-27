@@ -29,4 +29,13 @@ export const tm = {
   "tm.close": "Close",
   "tm.note.title": "{name} wants to reach your chats",
   "tm.note.body": "Open Manut AI to let it in or say no.",
+  "tm.read.title": "{name} asks to read “{title}”",
+  "tm.read.what": "This is exactly what it would get: the chat's title, first message, last answer, changed files and any ask it waits on, with keys hidden.",
+  "tm.read.yes": "Let it read",
+  "tm.read.no": "No",
+  "tm.send.title": "{name} asks to send this to “{title}”",
+  "tm.send.what": "These words would go to that chat's agent, marked as from {name} and sent on by you. They wait while the chat works or waits on you, and they cannot answer its questions or permission asks.",
+  "tm.send.yes": "Send there",
+  "tm.send.no": "Keep out",
+  "tm.from": "From {name}, outside Manut AI, sent on by you",
 };

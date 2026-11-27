@@ -1,28 +1,38 @@
-// What the page does with item 103's calls (`docs/mcp-threads.md`): the list of chats other programs may reach, and the card
-// that lets a program in for one run of it. The shell decides who may ask (`src-tauri/src/threads_mcp/door.rs`); this decides
-// what a chat is and what an answer says, and only the person's press lets a program in.
+// What the page does with item 103's calls (`docs/mcp-threads.md`): the list of chats other programs may reach, the card that
+// lets a program in for one run of it, and the cards for a read and a message. The shell decides who may ask
+// (`src-tauri/src/threads_mcp/door.rs`); this decides what a chat is and what an answer says, and only the person's press lets a
+// program in, reads a chat out to it or puts its words into a chat.
 //
 // - `let_in`: a card over whatever is showing (`Cards.tsx`), counted on the Dock's badge and announced by a notification while
-//   the window is not in front. Let in while it runs, or No; pressed once, and a card whose call is gone reads "No longer
-//   open" and answers nothing.
+//   the window is not in front. Let in while it runs, or No.
 // - `list_chats`: answered at once from the list (`listLines`): number, title, who answers there and where it stands. The
 //   shell sends it only for a program the person let in.
-// - `read_chat`, `send_to_chat` and `open_chat`: refused, plainly, until slices 103c and 103d build their cards.
+// - `read_chat` (103c): a card showing item 97's text of that chat, built with no model, masked and capped when the card opens;
+//   Let it read answers the program with exactly that text.
+// - `send_to_chat` (103c): a card showing the words whole, masked as they will go; Send there puts them in that chat through the
+//   sessions store's `route`, under a line naming the program, held while that chat works or any ask of it waits, so its words
+//   never answer anything (M9). Only a coding chat on this Mac whose agent runs as the app's chat takes one.
+// - `open_chat`: refused, plainly, until slice 103d builds its card.
+//
+// Every card is pressed once: it goes from the stack before anything happens, its read or message is settled once in approval-core
+// (`asks.ts`), and the chat it names is checked again at the press. A card whose call is gone reads "No longer open" and answers
+// nothing. A chat that is not on the list, left, moved shop or account, or cannot take a message opens no card at all.
 //
 // `createMcp` takes everything it reads as `McpDeps`, so a test drives it with stand-ins; `getMcp` is the app's own.
 import { useSyncExternalStore } from "react";
 import type { Scope } from "../chat/box/carry";
-import type { ThreadRef } from "../chat/box/threadContext";
+import { gatherContext, type ContextReader, type ThreadRef } from "../chat/box/threadContext";
 import { addEntry, removeEntry, type ReachEntry } from "../jobs/reachList";
+import { maskSecrets } from "../lib/secrets";
 import { t } from "../i18n";
-import { listLines, loadList, movedScope, OUTSIDE_MAX, saveList, type ChatState } from "./list";
+import { answerMcpAsk, openMcpAsk, withdrawMcpAsk, type McpAskKind } from "./asks";
+import { fromProgramText, listLines, loadList, movedScope, OUTSIDE_MAX, saveList, type ChatState } from "./list";
 import { getMcpShell, type McpCall, type McpProgram, type McpShell } from "./shell";
 
-/** What a read, a message or a new lane is answered until their slices are built. */
-export const NOT_YET = "Manut AI cannot do that for other programs yet: only list_chats works in this version. Nothing was done.";
+/** What a new lane is answered until its slice is built. */
+export const NOT_YET = "Manut AI cannot start a lane for other programs yet: list_chats, read_chat and send_to_chat work in this version. Nothing was done.";
 
-/** A program waiting to be let in. */
-export interface LetInCard {
+interface CardBase {
   id: string;
   program: McpProgram;
   /** ms */
@@ -31,9 +41,25 @@ export interface LetInCard {
   gone: boolean;
 }
 
+/** The chat a read or message card names, as the list and the app had it when the card opened. */
+export interface CardChat {
+  n: number;
+  ref: ThreadRef;
+  title: string;
+}
+
+/** A card waiting on the person. */
+export type McpCard =
+  | (CardBase & { kind: "letIn" })
+  | (CardBase & { kind: "read"; chat: CardChat; /** item 97's text: exactly what Let it read answers with */ text: string })
+  | (CardBase & { kind: "send"; chat: CardChat; /** the words masked as the card shows them: exactly what Send there puts in the chat */ message: string });
+
+/** The let-in card (103b's name for it). */
+export type LetInCard = Extract<McpCard, { kind: "letIn" }>;
+
 export interface McpSnapshot {
   list: readonly ReachEntry[];
-  cards: readonly LetInCard[];
+  cards: readonly McpCard[];
 }
 
 export interface McpDeps {
@@ -48,13 +74,23 @@ export interface McpDeps {
   whoOf(ref: ThreadRef): string;
   /** A coding chat's link id now, so a later chat that took the same session id is not the one listed. */
   link(ref: ThreadRef): string | undefined;
-  notify?(card: LetInCard): void;
+  /** Item 97's reader, for a read card's text. */
+  reader(): ContextReader;
+  /** Whether `ref` can take a message: a coding chat on this Mac, started, whose agent runs as the app's chat (102k's rule). */
+  sendable(ref: ThreadRef): boolean;
+  /** The sessions store's `route`: false when the chat's agent is not running to take it. */
+  route(session: string, text: string): Promise<boolean>;
+  notify?(card: McpCard): void;
   now?(): number;
 }
 
+/** What a program hears when the chat it names opens no card. M13: the call's words are never echoed. */
+const notListed = (n: number, kind: McpAskKind) => `Chat ${n} is not on the person's list. Nothing was ${kind === "read" ? "read" : "sent"}.`;
+const unreachable = (n: number, kind: McpAskKind) => `Chat ${n} can no longer be reached: it left Manut AI, or it is now of another shop or account. Nothing was ${kind === "read" ? "read" : "sent"}.`;
+
 export function createMcp(d: McpDeps) {
   let list: ReachEntry[] = loadList(d.storage);
-  let cards: LetInCard[] = [];
+  let cards: McpCard[] = [];
   let snap: McpSnapshot = { list, cards };
   const subs = new Set<() => void>();
   const emit = () => {
@@ -66,6 +102,8 @@ export function createMcp(d: McpDeps) {
     saveList(d.storage, list);
     emit();
   };
+  const now = () => (d.now ?? Date.now)();
+  const reply = (id: string, text: string, error: boolean) => void d.shell.reply(id, text, error);
 
   /** Where listed chat `e` stands now; `gone` and `moved` are never reached. */
   const stateOf = (e: ReachEntry): ChatState => {
@@ -74,6 +112,51 @@ export function createMcp(d: McpDeps) {
     if (e.ref.kind === "session" && e.link && d.link(e.ref) !== e.link) return "gone";
     if (movedScope(e.scope, w.scope)) return "moved";
     return d.stateOf(w.key);
+  };
+  const reachable = (e: ReachEntry) => {
+    const s = stateOf(e);
+    return s !== "gone" && s !== "moved";
+  };
+  /** The listed chat a card names, as it is now: the same chat (by its reference) still on the list. */
+  const listed = (chat: CardChat) => list.find((e) => e.n === chat.n && JSON.stringify(e.ref) === JSON.stringify(chat.ref));
+
+  const push = (card: McpCard) => {
+    cards = [...cards, card];
+    emit();
+    d.notify?.(card);
+  };
+  const take = (id: string) => {
+    cards = cards.filter((x) => x.id !== id);
+    emit();
+  };
+
+  /** A read or a message: its card, or the line that says why there is none. */
+  const ask = async (c: McpCall, kind: McpAskKind) => {
+    const n = Number(c.args.chat);
+    const e = list.find((x) => x.n === n);
+    if (!e) return reply(c.id, notListed(n, kind), true);
+    if (!reachable(e)) return reply(c.id, unreachable(n, kind), true);
+    const chat: CardChat = { n: e.n, ref: e.ref, title: d.title(e.ref) };
+    let card: McpCard;
+    if (kind === "send") {
+      if (!d.sendable(e.ref)) return reply(c.id, `Chat ${n} is not a coding chat whose agent runs in Manut AI, so a message cannot go there. Nothing was sent.`, true);
+      card = { kind: "send", id: c.id, program: c.program, at: now(), gone: false, chat, message: maskSecrets(String(c.args.message ?? "")) };
+    } else {
+      let text: string;
+      try {
+        // item 97's text, built with no model, masked and capped: shown whole on the card, and exactly what Let it read answers
+        text = (await gatherContext(e.ref, d.reader())).text;
+      } catch {
+        return reply(c.id, `Chat ${n} could not be read just now. Nothing was read.`, true);
+      }
+      card = { kind: "read", id: c.id, program: c.program, at: now(), gone: false, chat, text };
+    }
+    try {
+      await openMcpAsk(c.id, kind, { program: c.program, chat, ...(card.kind === "read" ? { text: card.text } : card.kind === "send" ? { message: card.message } : {}) });
+    } catch {
+      return reply(c.id, "That call was already asked. Nothing was done.", true);
+    }
+    push(card);
   };
 
   return {
@@ -97,32 +180,27 @@ export function createMcp(d: McpDeps) {
       return null;
     },
 
-    /** Takes chat `n` off the list. */
+    /** Takes chat `n` off the list. A card still open that names it can no longer be taken: its press finds the chat gone. */
     remove(n: number): void {
       keep(removeEntry(list, n));
     },
 
-    /** A call the shell handed over. */
-    call(c: McpCall): void {
-      if (c.tool === "let_in") {
-        if (cards.some((x) => x.id === c.id)) return;
-        const card: LetInCard = { id: c.id, program: c.program, at: (d.now ?? Date.now)(), gone: false };
-        cards = [...cards, card];
-        emit();
-        d.notify?.(card);
-        return;
-      }
-      if (c.tool === "list_chats") {
-        void d.shell.reply(c.id, listLines(list, stateOf, (e) => d.whoOf(e.ref)), false);
-        return;
-      }
-      void d.shell.reply(c.id, NOT_YET, true);
+    /** A call the shell handed over. Resolves once its card is up, or it is answered. */
+    async call(c: McpCall): Promise<void> {
+      if (cards.some((x) => x.id === c.id)) return;
+      if (c.tool === "let_in") return push({ kind: "letIn", id: c.id, program: c.program, at: now(), gone: false });
+      if (c.tool === "list_chats") return reply(c.id, listLines(list, stateOf, (e) => d.whoOf(e.ref)), false);
+      if (c.tool === "read_chat") return ask(c, "read");
+      if (c.tool === "send_to_chat") return ask(c, "send");
+      reply(c.id, NOT_YET, true);
     },
 
-    /** Call `id` is gone: its card stays, reading "No longer open", until the person closes it. */
+    /** Call `id` is gone: its card stays, reading "No longer open", until the person closes it; its request is taken back. */
     gone(id: string): void {
-      if (!cards.some((x) => x.id === id && !x.gone)) return;
+      const card = cards.find((x) => x.id === id && !x.gone);
+      if (!card) return;
       cards = cards.map((x) => (x.id === id ? { ...x, gone: true } : x));
+      if (card.kind !== "letIn") void withdrawMcpAsk(id);
       emit();
     },
 
@@ -130,17 +208,34 @@ export function createMcp(d: McpDeps) {
      *  True when the shell took the answer; false for a card that is gone or already answered. */
     async letIn(id: string, yes: boolean): Promise<boolean> {
       const card = cards.find((x) => x.id === id);
-      if (!card || card.gone) return false;
-      cards = cards.filter((x) => x.id !== id);
-      emit();
+      if (!card || card.gone || card.kind !== "letIn") return false;
+      take(id);
       return d.shell.reply(id, "", !yes);
+    },
+
+    /** The person's press on a read or message card, once. The card goes first; approval-core settles its request (refused when
+     *  the call is gone); the chat is checked again; only then is anything read out or sent. True when the program was answered. */
+    async answer(id: string, yes: boolean): Promise<boolean> {
+      const card = cards.find((x) => x.id === id);
+      if (!card || card.gone || card.kind === "letIn") return false;
+      take(id);
+      const settled = await answerMcpAsk(id, card.kind, yes, true);
+      if (!settled.ok) return false;
+      const { n } = card.chat;
+      if (!yes) return d.shell.reply(id, card.kind === "read" ? `The person did not let you read chat ${n}. Nothing was read.` : `The person kept your message out of chat ${n}. Nothing was sent.`, true);
+      const e = listed(card.chat);
+      if (!e || !reachable(e)) return d.shell.reply(id, unreachable(n, card.kind), true);
+      if (card.kind === "read") return d.shell.reply(id, card.text, false);
+      if (e.ref.kind !== "session" || !d.sendable(e.ref) || !(await d.route(e.ref.id, fromProgramText(card.program.name, card.message)))) {
+        return d.shell.reply(id, `Chat ${n}'s agent is not running to take the message. Nothing was sent.`, true);
+      }
+      return d.shell.reply(id, `Sent to chat ${n}. It waits there while that chat works or waits on the person, and its words answer nothing there.`, false);
     },
 
     /** Closes a card that reads "No longer open". */
     dismiss(id: string): void {
       if (!cards.some((x) => x.id === id && x.gone)) return;
-      cards = cards.filter((x) => x.id !== id);
-      emit();
+      take(id);
     },
   };
 }
@@ -166,6 +261,11 @@ export function getMcp(): Mcp {
       stateOf: () => "idle",
       whoOf: () => "",
       link: () => undefined,
+      reader: () => {
+        throw new Error("no reader");
+      },
+      sendable: () => false,
+      route: async () => false,
     },
   );
   return live;

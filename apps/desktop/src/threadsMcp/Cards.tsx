@@ -1,70 +1,101 @@
-// A program outside Manut AI asks to reach the chats the person listed (item 103, `docs/mcp-threads.md`, rule M6): one card
-// for each program waiting, over whatever is showing, as Bring over's offer and the snapshot's notice are. It names the
-// program as the shell read it from the kernel, with its whole path, and what the program calls itself only as its own words.
-// Let in lasts while that program runs; No holds for the rest of its run. A card whose call is gone reads "No longer open".
+// A program outside Manut AI asks something of the person (item 103, `docs/mcp-threads.md`): one card for each ask waiting, over
+// whatever is showing, as Bring over's offer and the snapshot's notice are. Every card names the program as the shell read it
+// from the kernel, with its whole path; what the program calls itself is shown only as its own words.
 //
-// `LetInCardsView` draws from props alone, so a test renders it; `LetInCards` is the app's, over `store.ts`.
+// - Let in (M6): it may reach the chats the person listed while it runs. Let in while it runs, or No.
+// - A read (103c): exactly the text that would go, item 97's, masked and capped. Let it read, or No.
+// - A message (103c): the words whole, masked as they will go, and the chat they would go to. Send there, or Keep out.
+//
+// A card whose call is gone reads "No longer open", with Close and nothing to answer.
+//
+// `McpCardsView` draws from props alone, so a test renders it; `McpCards` is the app's, over `store.ts`.
 import { t } from "../i18n";
 import { Icon } from "../ui/icons";
 import { revealHidden } from "../lib/secrets";
-import { getMcp, useMcp, type LetInCard } from "./store";
+import { getMcp, useMcp, type McpCard } from "./store";
 import "./threadsMcp.css";
 
-export interface LetInCardsViewProps {
-  cards: readonly LetInCard[];
-  onAnswer: (id: string, yes: boolean) => void;
+export interface McpCardsViewProps {
+  cards: readonly McpCard[];
+  onAnswer: (card: McpCard, yes: boolean) => void;
   onDismiss: (id: string) => void;
 }
 
-export function LetInCardsView({ cards, onAnswer, onDismiss }: LetInCardsViewProps) {
+function words(c: McpCard): { title: string; yes: string; no: string } {
+  const name = revealHidden(c.program.name);
+  if (c.kind === "read") return { title: t("tm.read.title", { name, title: revealHidden(c.chat.title) }), yes: t("tm.read.yes"), no: t("tm.read.no") };
+  if (c.kind === "send") return { title: t("tm.send.title", { name, title: revealHidden(c.chat.title) }), yes: t("tm.send.yes"), no: t("tm.send.no") };
+  return { title: t("tm.letIn.title", { name }), yes: t("tm.letIn.yes"), no: t("tm.letIn.no") };
+}
+
+export function McpCardsView({ cards, onAnswer, onDismiss }: McpCardsViewProps) {
   if (!cards.length) return null;
   return (
     <div className="tm-cards" role="region" aria-label={t("tm.cards")} data-testid="tm-cards">
-      {cards.map((c) => (
-        <div key={c.id} className={`tm-card${c.gone ? " gone" : ""}`} role="alertdialog" aria-labelledby={`tm-${c.id}`} data-testid="tm-card" data-id={c.id}>
-          <div className="tm-head">
-            <Icon name="plug" size={14} />
-            <b id={`tm-${c.id}`}>{t("tm.letIn.title", { name: revealHidden(c.program.name) })}</b>
-          </div>
-          {c.program.path && (
-            <div className="tm-path" title={revealHidden(c.program.path)} data-testid="tm-path">
-              {revealHidden(c.program.path)}
+      {cards.map((c) => {
+        const w = words(c);
+        return (
+          <div key={c.id} className={`tm-card${c.gone ? " gone" : ""}`} role="alertdialog" aria-labelledby={`tm-${c.id}`} data-testid="tm-card" data-id={c.id} data-kind={c.kind}>
+            <div className="tm-head">
+              <Icon name="plug" />
+              <b id={`tm-${c.id}`}>{w.title}</b>
             </div>
-          )}
-          {c.program.callsItself && (
-            <div className="tm-own" data-testid="tm-own">
-              {t("tm.letIn.callsItself", { words: revealHidden(c.program.callsItself) })}
-            </div>
-          )}
-          {c.gone ? (
-            <div className="tm-row">
-              <span className="tm-note" role="status">
-                {t("tm.gone")}
-              </span>
-              <button type="button" className="st-btn" onClick={() => onDismiss(c.id)} data-testid="tm-dismiss">
-                {t("tm.close")}
-              </button>
-            </div>
-          ) : (
-            <>
-              <div className="tm-note">{t("tm.letIn.what")}</div>
+            {c.program.path && (
+              <div className="tm-path" title={revealHidden(c.program.path)} data-testid="tm-path">
+                {revealHidden(c.program.path)}
+              </div>
+            )}
+            {c.program.callsItself && (
+              <div className="tm-own" data-testid="tm-own">
+                {t("tm.letIn.callsItself", { words: revealHidden(c.program.callsItself) })}
+              </div>
+            )}
+            {c.kind === "read" && (
+              <pre className="tm-text" data-testid="tm-text">
+                {revealHidden(c.text)}
+              </pre>
+            )}
+            {c.kind === "send" && (
+              <pre className="tm-text" data-testid="tm-text">
+                {revealHidden(c.message)}
+              </pre>
+            )}
+            {c.gone ? (
               <div className="tm-row">
-                <button type="button" className="st-btn" onClick={() => onAnswer(c.id, false)} data-testid="tm-no">
-                  {t("tm.letIn.no")}
-                </button>
-                <button type="button" className="st-btn dark" onClick={() => onAnswer(c.id, true)} data-testid="tm-yes">
-                  {t("tm.letIn.yes")}
+                <span className="tm-note" role="status">
+                  {t("tm.gone")}
+                </span>
+                <button type="button" className="st-btn" onClick={() => onDismiss(c.id)} data-testid="tm-dismiss">
+                  {t("tm.close")}
                 </button>
               </div>
-            </>
-          )}
-        </div>
-      ))}
+            ) : (
+              <>
+                <div className="tm-note">{c.kind === "read" ? t("tm.read.what") : c.kind === "send" ? t("tm.send.what", { name: revealHidden(c.program.name) }) : t("tm.letIn.what")}</div>
+                <div className="tm-row">
+                  <button type="button" className="st-btn" onClick={() => onAnswer(c, false)} data-testid="tm-no">
+                    {w.no}
+                  </button>
+                  <button type="button" className="st-btn dark" onClick={() => onAnswer(c, true)} data-testid="tm-yes">
+                    {w.yes}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
 
-export function LetInCards() {
+export function McpCards() {
   const { cards } = useMcp();
-  return <LetInCardsView cards={cards} onAnswer={(id, yes) => void getMcp().letIn(id, yes)} onDismiss={(id) => getMcp().dismiss(id)} />;
+  return (
+    <McpCardsView
+      cards={cards}
+      onAnswer={(c, yes) => void (c.kind === "letIn" ? getMcp().letIn(c.id, yes) : getMcp().answer(c.id, yes))}
+      onDismiss={(id) => getMcp().dismiss(id)}
+    />
+  );
 }

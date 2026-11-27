@@ -31,4 +31,13 @@ export const tm: Record<keyof typeof en, string> = {
   "tm.close": "关闭",
   "tm.note.title": "{name} 想访问你的聊天",
   "tm.note.body": "打开 Manut AI 允许或拒绝。",
+  "tm.read.title": "{name} 请求读取“{title}”",
+  "tm.read.what": "它得到的正是这些内容：聊天的标题、第一条消息、最后的回答、改动的文件和正在等待的请求，密钥已隐藏。",
+  "tm.read.yes": "允许读取",
+  "tm.read.no": "不允许",
+  "tm.send.title": "{name} 请求把这段内容发到“{title}”",
+  "tm.send.what": "这些话会标明来自 {name}、由你转发，交给那个聊天的智能体。聊天正在工作或在等你时，它会等待；它无法回答聊天中的问题或权限请求。",
+  "tm.send.yes": "发到那里",
+  "tm.send.no": "不发送",
+  "tm.from": "来自 Manut AI 之外的 {name}，由你转发",
 };

@@ -3162,6 +3162,10 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     addReach: (id: string, ref: ThreadRef): string | null => reach.add(id, ref),
     /** Takes listed chat `n` off session `id`'s list; a card still open that names it is taken back. */
     removeReach: (id: string, n: number): void => reach.remove(id, n),
+    /** Puts `text` in session `id`'s chat as a message from elsewhere, held while its turn runs, while messages wait ahead of it or
+     *  while any ask or question of it waits, and never steered in, so its words never answer anything. For a message the person
+     *  sent on from a card that showed it whole (item 102k's Send there, item 103c's); false when the chat's agent cannot take it. */
+    route: (id: string, text: string): Promise<boolean> => route(id, text),
     /** The person's yes (`yes`) or no on reach card `askId` of session `id`: checked again, settled once in approval-core, and only
      *  then read, sent or opened (item 102k). */
     answerReach: (id: string, askId: string, yes: boolean) => reach.answer(id, askId, yes),
