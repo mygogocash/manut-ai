@@ -73,7 +73,7 @@ describe("what was found", () => {
   });
 
   it("says what was skipped and why, in one line", () => {
-    expect(text(html(pick()))).toContain("Skipped: 2 folders no longer on this Mac, 14 compressed Codex conversations, which cannot be read yet, 1 file that could not be read.");
+    expect(text(html(pick()))).toContain("Skipped: 2 folders no longer on this Mac, 14 compressed Codex conversations that could not be unpacked, 1 file that could not be read.");
     expect(skippedLine(NO_SKIPS)).toBe("");
     expect(skippedLine({ ...NO_SKIPS, over_limit: 1 })).toBe("Skipped: 1 older conversation not looked at.");
   });

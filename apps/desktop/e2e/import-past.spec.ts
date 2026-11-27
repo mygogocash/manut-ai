@@ -85,7 +85,7 @@ test("on a first launch the offer shows what was found, nothing picked, and adds
   await expect(row(page, SITE).getByTestId("imp-here")).toHaveText("Already a project");
   await expect(row(page, SITE).getByTestId("imp-pick")).toHaveCount(0);
   await expect(page.getByTestId("imp-skipped")).toHaveText(
-    "Skipped: 2 folders no longer on this Mac, 14 compressed Codex conversations, which cannot be read yet, 1 file that could not be read.",
+    "Skipped: 2 folders no longer on this Mac, 14 compressed Codex conversations that could not be unpacked, 1 file that could not be read.",
   );
   // nothing is picked, and the button waits for a pick
   for (const box of await dialog(page).getByTestId("imp-pick").all()) await expect(box).not.toBeChecked();

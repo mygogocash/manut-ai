@@ -12,7 +12,8 @@
 //!
 //! What is skipped is counted, never an error that stops the rest:
 //! * `gone`: a folder that is no longer on this Mac (counted once per folder);
-//! * `compressed`: a Codex rollout written compressed (`.jsonl.zst`), which no reader here opens (item 106b);
+//! * `compressed`: a Codex rollout written compressed (`.jsonl.zst`) that could not be unpacked (corrupt or cut short); the
+//!   ones that unpack are read like a plain rollout, through zst.rs (item 106b);
 //! * `unreadable`: a link under the agents' folders, a file that cannot be opened, or one that is not JSON lines;
 //! * `over_limit`: files past the bounds ([`Limits`]), oldest first, and then the answer is `partial`.
 //!
@@ -218,9 +219,7 @@ fn codex(root: &Path, l: &Limits, t: &mut Tally) {
         t.skipped.unreadable += 1;
         return;
     }
-    let mut zst = 0u32;
-    let files = past_chats::codex_rollouts_seen(root, l.walk, &mut zst);
-    t.skipped.compressed += zst;
+    let files = past_chats::codex_rollouts_in(root, l.walk);
     let mut bytes = 0u64;
     for (i, p) in files.iter().enumerate() {
         if i >= l.files || bytes >= l.bytes {
@@ -244,9 +243,12 @@ fn codex(root: &Path, l: &Limits, t: &mut Tally) {
             typed = past_chats::codex_user_text(o).is_some();
             typed
         });
+        // a compressed rollout that cannot be unpacked is counted apart, so the offer can say so
+        let packed = crate::zst::is_zst(&real);
+        let broke = |t: &mut Tally| if packed { t.skipped.compressed += 1 } else { t.skipped.unreadable += 1 };
         match (read, meta) {
-            (None, _) => t.skipped.unreadable += 1,
-            (Some(0), _) if size > 0 => t.skipped.unreadable += 1,
+            (None, _) => broke(t),
+            (Some(0), _) if size > 0 => broke(t),
             (_, Some((_, cwd))) if typed && !cwd.is_empty() => t.add(&cwd, Agent::Codex, past_chats::mtime(&real)),
             _ => {}
         }
@@ -400,7 +402,7 @@ mod tests {
         std::fs::write(cdir(&web).join(format!("{}.jsonl", uuid(4))), "this is not json\nnor this\n").unwrap();
         // the gone folder's conversation: counted as one gone folder
         write(&cdir(&gone).join(format!("{}.jsonl", uuid(5))), &claude_file(&gone, true));
-        // Codex: one in shop-api, newest of all; a subagent's thread and a compressed rollout
+        // Codex: one in shop-api, newest of all; a subagent's thread and a compressed rollout that cannot be unpacked
         let day = codex_root.join("sessions/2026/11/20");
         let x1 = "01a1d060-4ab7-72b2-b02b-1dbee1d5f52c";
         write(&day.join(format!("rollout-2026-11-20T10-00-00-{x1}.jsonl")), &codex_file(x1, &api));
@@ -430,6 +432,38 @@ mod tests {
         assert_eq!(snapshot(h), before);
         // a second look finds the same
         assert_eq!(scan(h, Some(&claude_root), Some(&codex_root), &Limits::default()), found);
+    }
+
+    /// A Codex home with the fixture rollout (cwd `/Users/you/code/api`, which is not on this machine), stored as `name`.
+    fn codex_home_with(tag: &str, name: &str, bytes: &[u8]) -> Tmp {
+        let home = Tmp::new(tag);
+        let day = home.0.join(".codex/sessions/2026/11/20");
+        std::fs::create_dir_all(&day).unwrap();
+        std::fs::write(day.join(name), bytes).unwrap();
+        home
+    }
+
+    #[test]
+    fn a_compressed_rollout_is_read_like_its_plain_twin_and_a_damaged_one_is_counted() {
+        use crate::zst::tests::{PLAIN, ZST};
+        let id = "11111111-2222-4333-8444-555555555555";
+        let look = |h: &Tmp| scan(&h.0, None, Some(&h.0.join(".codex")), &Limits::default());
+        let plain = codex_home_with("zst-plain", &format!("rollout-2026-11-20T11-50-00-{id}.jsonl"), PLAIN);
+        let packed = codex_home_with("zst-ok", &format!("rollout-2026-11-20T11-50-00-{id}.jsonl.zst"), ZST);
+        let (a, b) = (look(&plain), look(&packed));
+        // read, so its folder is known; the folder is not on this machine, so it is one gone folder in both
+        assert_eq!(a.skipped, Skipped { gone: 1, ..Skipped::default() });
+        assert_eq!(b, a);
+        // cut short or not zstd: counted as compressed (could not be unpacked), nothing else
+        for (tag, bytes) in [("zst-cut", ZST[..ZST.len() / 2].to_vec()), ("zst-cut2", ZST[..ZST.len() - 1].to_vec()), ("zst-junk", b"plain text".to_vec()), ("zst-empty", Vec::new())] {
+            let h = codex_home_with(tag, &format!("rollout-2026-11-20T11-50-00-{id}.jsonl.zst"), &bytes);
+            let f = look(&h);
+            assert_eq!((f.projects.len(), f.skipped), (0, Skipped { compressed: 1, ..Skipped::default() }), "{tag}");
+        }
+        // the look wrote nothing
+        let before = snapshot(&packed.0);
+        look(&packed);
+        assert_eq!(snapshot(&packed.0), before);
     }
 
     #[test]
