@@ -36,4 +36,7 @@ export const thread = {
   "thread.cmdHint": "New thread with {name}",
   "thread.cmdFiles": "Files cannot start a thread. Send ./thread first, then add them in the thread.",
   "thread.newWith": "New thread with {name}",
+  // a thread the connected runtime marks (item 102l-2): a conversation with Buddy, or the team's work on a task
+  "thread.kind.chat": "Conversation",
+  "thread.kind.task": "Team's work",
 };

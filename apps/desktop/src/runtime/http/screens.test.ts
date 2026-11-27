@@ -141,7 +141,9 @@ async function screens(rt: HttpRuntime, events: BridgeEvent[]) {
     // each row is read without it here; view.test.ts holds that field.
     schedule[name] = (await req("routines.list", { bot: name })).routines.map(({ time_zone: _zone, ...rest }: { time_zone?: string }) => rest);
   }
-  const { threads } = await req("thread.list", { bot: "buddy" });
+  // The export predates a row's `kind` (item 102l-2: the team's work, or a conversation with Buddy), so each row is read without it
+  // here; view.test.ts and chat.test.ts hold that field.
+  const threads = (await req("thread.list", { bot: "buddy" })).threads.map(({ kind: _kind, ...row }: { kind?: string }) => row);
   const notes: Record<string, unknown> = {};
   for (const row of threads) notes[row.thread] = (await req("thread.open", { bot: "buddy", thread: row.thread })).messages.map((m: { text: string; ts: number }) => [m.text, m.ts]);
   const { jobs } = await req("jobs.list");

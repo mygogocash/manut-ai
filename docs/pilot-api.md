@@ -3387,6 +3387,9 @@ each removal `chat.thread_deleted` naming the thread, never a word of either. No
 `DELETE /v1/tenant/data`, the owner's yes on the deletion link, the operator's deletion of a shop that never went live, and the
 owner's deletion of their own account, all of which run the same wipe (`tenantDelete`).
 
-**Not built yet.** Chat threads in the Connected runtime (`chat.send`, `thread.create`: 102l-2), the reach cards over them
-(102l-3), and real answers, which wait for the owner's key (102l-4). The live feed is not pinged by a chat write, since no
-screen reads chats yet.
+**The desktop.** The Connected runtime's `chat.send`, `thread.create`, `thread.list` and `thread.open` use these routes with the owner
+session of the chat's shop (item 102l-2; `docs/runtime-adapter.md`, "Buddy's chat on Connected"): a conversation the desktop makes is made
+by its first message, as above. The removal route is not called yet: no screen of the desktop offers to remove a thread.
+
+**Not built yet.** The reach cards over conversations (102l-3), and real answers, which wait for the owner's key (102l-4). The live
+feed is not pinged by a chat write: the desktop reads the conversations each time their list is asked for.

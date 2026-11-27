@@ -17,6 +17,10 @@ export interface ThreadRow {
   preview?: string;
   /** seconds since epoch of the last thing that happened in it (set by the app as events arrive) */
   last?: number;
+  /** What the thread is, where a runtime lists two kinds (the connected runtime, item 102l-2): a conversation with the bot
+   *  (`chat`), or the team's work on one of the shop's tasks, which the bot keeps as its notes (`task`). Absent where every
+   *  thread is a conversation, as in Practice. The screens say which, so a conversation is never taken for work the team does. */
+  kind?: "chat" | "task";
 }
 
 export interface ThreadOpenResult {

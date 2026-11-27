@@ -23,7 +23,9 @@ that left the open approvals on its own closes saying whether it was approved or
 The live feed (below) is built and tested on `feat/live-feed`, 25 Nov 2026 (December item 61), and switched off: while the API says
 it is on, a change at a shop the person is in shows within seconds instead of at the next minute's read. A shop the person helps at
 (below) is built and tested on `feat/helper-session`, 25 Nov 2026 (December item 69), the same way: it is marked as theirs to help at, its
-asks are answered with their helper session, and each page that is the owner's says so instead of an empty list.
+asks are answered with their helper session, and each page that is the owner's says so instead of an empty list. Buddy's chat on
+Connected (below) is built and tested on `feat/connected-chat-desktop`, 27 Nov 2026 (item 102l-2), the same way: a message to Buddy
+goes to the API's chat with the owner session of the shop the chat is of, and the shop's conversations are listed beside its tasks.
 
 ## Choosing it
 
@@ -110,8 +112,8 @@ signed in, a Claude Code too old for Buddy's start, or the agent's own words. Th
 or "No coding agent". In a plain browser the stand-in Claude Code of `src/sessions/host.ts` answers, saying it is one, and lists
 its stand-in models (`e2e/chat-box.spec.ts` walks the box on it).
 
-Practice therefore reaches the shell for Buddy (which agents are installed, and Buddy's chat) and for nothing else. Connected is
-unchanged: its `chat.send` is still refused, as below.
+Practice therefore reaches the shell for Buddy (which agents are installed, and Buddy's chat) and for nothing else. Connected's
+Buddy answers through the API's chat instead, on the shop owner's session (Buddy's chat on Connected, below).
 
 ## What it reads, and how each call maps to the API
 
@@ -137,8 +139,10 @@ The protocol ops are answered from the latest read (`src/runtime/http/host.ts`, 
 | --- | --- |
 | `hello` | the runtime itself (`bridge: "real"`) |
 | `bots.list` | for a shop the person owns, Buddy and the members it has on (A shop the person owns, below); otherwise Buddy alone, standing for the team: online once the shop has been read, working while any task is `running`, `verifying` or `recovering`, or its newest run can still act |
-| `thread.list` (Buddy) | every task as one of Buddy's threads, newest activity first; `needs` marks a task with a request waiting for an answer. History and Recent list them. A member has none: their work is their jobs. |
-| `thread.open` | the task as Buddy's notes: what it is for, each action it asked for and how that settled, the draft a member wrote on it (saying nothing was sent), and where it stands now, in the app's language |
+| `thread.list` (Buddy) | every task as one of Buddy's threads, marked the team's work (`kind: "task"`), and beside them, for a shop the person owns, the shop's conversations with Buddy, marked conversations (`kind: "chat"`), read from `GET /v1/chat/threads` with that shop's owner session each time the list is asked for (Buddy's chat on Connected, below); newest activity first, and `needs` marks a task with a request waiting for an answer. History and Recent list them. A member has none: their work is their jobs. |
+| `thread.open` | a task: the task as Buddy's notes, what it is for, each action it asked for and how that settled, the draft a member wrote on it (saying nothing was sent), and where it stands now, in the app's language. A conversation: its newest 50 messages, oldest first, from `GET /v1/chat/threads/{id}` with the owner session of its shop; one made here and not sent to yet has none, and nothing is read for it |
+| `chat.send` (Buddy) | for a shop the person owns, one message to `POST /v1/chat/messages`, exactly `{ text }` for a new conversation or `{ thread, text }`, with the owner session of the shop the chat is of: Buddy's main chat is the shop it was opened for, a conversation the shop it was made or listed for, never the one the switcher shows by then. Buddy's answer is the turn's events, `turn.start`, `message`, `turn.end`, once the API answered. A refusal is refused in the person's words, so the store marks the message not sent with its reason; nothing is queued or sent again. A helper's shop is refused `owner_only` and a person in no shop `no_shop`, with nothing sent; a task (`task_thread`) and a member (`not_yet`) are said nothing |
+| `thread.create` (Buddy) | a conversation prepared here for the shop the switcher shows, with nothing sent (the API makes one only with its first message); the same `key` gives the same one. Refused as `chat.send` is for a helper's shop and a person in no shop; `not_yet` for a member |
 | `chat.open` (Buddy) | the attention items as notes ("A Linear issue was changed (ISS-9)"), then, as a runtime replays asks, one approval ask per request still open, oldest first, naming the exact action ("Send on LINE: “…”"). The answers offered are yes once and no. Needs you and Home show them. |
 | `routines.list`, `automations.list` | the schedules, under Buddy, their days and time as cron and their next run exact; a schedule that is off shows as paused. For a shop the person owns, also each team routine under its member |
 | `bots.info` | counts from the read |
@@ -154,7 +158,7 @@ The protocol ops are answered from the latest read (`src/runtime/http/host.ts`, 
 | `connections.add`, `connections.password`, `connections.members`, `connections.rename`, `connections.remove` | the owner's change, to `POST /v1/vault/sign-ins`, `/v1/vault/sign-ins/password`, `/v1/vault/sign-ins/members`, `/v1/vault/outposts/rename` or `/remove` (below) |
 | `people.list` | who can use Manut AI for the shop the switcher shows, `GET /v1/people`, for Settings › People (below) |
 | `people.invite`, `people.cancelInvite`, `people.remove`, `people.setAway`, `people.clearAway` | the owner's change, to `POST /v1/people/invites`, `/invites/revoke`, `/remove`, `/away` or `/away/clear` (below) |
-| every other write (`chat.send`, `thread.create`, `automations.add`, …) | refused with `not_yet` and a translated "Not yet: Connected mode answers approvals, looks after what your team knows and its routines, and manages Connections and People for now." Nothing is sent to the API. Buddy's chat needs a model, the owner's key. |
+| every other write (`chat.steer`, `thread.remove`, `automations.add`, …) | refused with `not_yet` and a translated "Not yet: Connected mode answers approvals, looks after what your team knows and its routines, and manages Connections and People for now." Nothing is sent to the API. |
 
 The runtime's capabilities are `automations` only, so the Automations page shows and the screens that need a runtime on
 this computer (other places, plugins, restarts, coding-CLI logins) stay hidden.
@@ -523,8 +527,8 @@ asks, Mission Control showed Buddy alone, and every write but an answer was "not
   change that got no answer is never sent again from here ("No reply from the API. Checking whether it changed."): the read
   that follows says, and is waited for before the refusal is thrown, so the list the page asks for next is that read. None of
   these sends, posts, pays or deletes anything, and approvals still settle only through the decide route. Making and removing
-  a routine and the owner's say over what the team knows are Customize › Memory and routines, below. A schedule of the shop's
-  own, Buddy's chat (which needs a model, the owner's key) and every other write stay "not yet".
+  a routine and the owner's say over what the team knows are Customize › Memory and routines, below. Buddy's chat is Buddy's
+  chat on Connected, below. A schedule of the shop's own and every other write stay "not yet".
 - **Pause everyone's words.** apps/api's pause holds the team's routines and nothing else: a job already running finishes
   and a request keeps its own expiry. The page's canvas words ("stop at the next safe point", "Nothing expires while the
   team is paused") would promise the owner what the API does not do, so `TeamState.holds` says which pause it is and the
@@ -583,6 +587,8 @@ drew an empty list for it ("No team yet", "Nothing here yet", "Nobody is working
   The runtime's own refusals stay underneath, in case a page or the palette asks anyway: `team.state`, `team.pause`, `team.resume`, every
   `routine.*`, `jobs.older` (`rt.ownerOnly`, in the owner's and the shop's names), `memory.*`, `connections.*`, `google.*` and `people.*`
   answer `owner_only` with nothing sent, and `jobs.list`, `activity.list`, `automations.list` and `thread.list` list nothing for the shop.
+  So do `chat.send` and `thread.create` (Buddy's chat on Connected, below): "Only Noi can chat with Buddy at Ran Pa Noi", since a helper's
+  message would spend the owner's money, and the API refuses a helper's session on every chat route.
 - **What a helper sees of an ask**, as `docs/people.md` says a helper may: every request that waits there, in Needs you with every other
   shop's and naming its shop; the exact action as its request carries it (a reply's own words; a browser write's sentence; for a worker's
   request, the operation and where it goes, since a helper's session reads no tasks; for Ton's books, that they wait for the owner, with the
@@ -620,6 +626,63 @@ drew an empty list for it ("No team yet", "Nothing here yet", "Nobody is working
   switcher and the row's mark, Home, Team and History in the owner's words, a reply approved with the helper's own session and money left
   for Noi with nothing sent, and nothing else sent with that session) and `e2e/shops.spec.ts` (the row's mark, and a person who only helps
   at one shop).
+
+## Buddy's chat on Connected
+
+Built on `feat/connected-chat-desktop` (item 102l-2, 27 Nov 2026; `src/runtime/http/chat.ts`, `host.ts`, `view.ts`; the screens'
+words in `src/threads/kind.ts`), the desktop's half of `docs/connected-chat.md`, B, over the API's chat of item 102l-1 (`docs/pilot-api.md`,
+"Chat"). Before it `chat.send` and `thread.create` answered `not_yet`.
+
+- **A message.** Buddy's main chat, and each conversation, sends one message at a time to `POST /v1/chat/messages`: exactly `{ text }`
+  when it makes a new conversation, `{ thread, text }` after, trimmed, with the owner session of the shop the chat is of. Buddy's main
+  chat is the shop the switcher showed when the chat was opened (`chat.open`), whichever it shows by the time the person presses Send;
+  a chat sent to without being opened (Home's ask box) is the shop shown. A conversation is the shop it was made or listed for. The
+  main chat's first message makes a conversation, which is then listed with the others (`thread.added`), and its next messages go to it
+  until the chat is opened again (a restart, a switch of shop, a reconnect), when the next message starts another: the chat the person
+  sees then holds none of the earlier one, which stays in the list. Two messages sent at once go one after the other, so a message
+  sent while the first is making a conversation goes to that conversation, never to a second new one.
+- **Buddy's answer** is the turn's events, `turn.start`, the answer as a `message` (id `<conversation>/<message>`), `turn.end` with
+  `done`, tagged with the conversation (`session`) for a conversation, and only once the API answered. A turn that started before the
+  API let the message through would end Failed for a refusal (a Failed line, a sound, a notification), where a refused message is a
+  message not sent; so while Buddy answers, the person's message shows as sent and nothing more, and the turn's line then reads "Worked
+  for 0s". An answer the provider refused with nothing said says "Buddy did not answer this one.", and one cut at its length says so
+  after it.
+- **Refusals**, each in the person's words, so the store marks the message "Not sent" with the reason, as any failed send; nothing is
+  queued, retried or sent again from here, and the API keeps nothing for any of them. `feature_disabled` (and the 404 of an API from
+  before the chat): "Buddy's chat is not on for this shop yet." `not_configured`: "Buddy cannot answer yet: the team's model is not set
+  up." `budget_exceeded`: the shop's spending limit for the month is reached. `not_counted_in`: the Manut AI team has not added the shop
+  to the pilot. `owner_only`: only the owner chats there. `consent_required`: the shop must allow cloud work first. `rate_limited`: at
+  most 60 an hour, and the time to try again (`retryAfter`). `thread_full`, `threads_full`, `text_too_long` with the API's limits;
+  `thread_not_found`. The gateway's other 5xx (`provider_error`, `meter_unavailable`, `chat_unavailable`): Buddy could not answer, and
+  nothing was kept. No answer at all: it is not known whether Buddy got it, and it was not sent again. Offline and signed out: the
+  runtime's own words. Refused here first, with nothing sent: a blank message, one over 8,000 characters once trimmed (counted by
+  character), a shop the person helps at (`owner_only`), a person in no shop (`no_shop`), a task (`task_thread`: "This is the team's
+  work, kept as Buddy's notes"), a member (`not_yet`), and anything while only a kept read is shown (`offline`).
+- **Conversations and tasks.** `thread.list` lists both for the shop the switcher shows, each row marked: `kind: "chat"` for a
+  conversation, `kind: "task"` for the team's work. The thread's header says "Conversation" or "Team's work" (`src/threads/kind.ts`).
+  History already lists each task once, as its job (Team), so a conversation is the one listed under Chat. A conversation's list is read each
+  time the list is asked for; a read that fails lists what this run last knew of them, and nothing is listed while only a kept read is
+  shown. A conversation's second line is its title, the owner's first words, until its messages are read.
+- **A new conversation** (`thread.create`) is prepared here, with nothing sent: the API makes a conversation only with a message (it
+  has no route that makes an empty one, and a model call needs a message), and the store asks for the conversation before the person
+  has typed anything. Its first message makes it. It keeps the id the screens gave it (`chat-new-…`) for the rest of the run, and is
+  listed by the API's id from the next start.
+- **Removal is left out.** The API can delete a conversation (`POST /v1/chat/threads/remove`), but no screen offers to remove a thread
+  now: the thread tree with its x (`ThreadTree.tsx`) is no longer drawn, and History's Archive only hides a row on this computer. So
+  `thread.remove` stays `not_yet`, for a conversation as for a task. When a screen offers it again, its question must say the conversation
+  is deleted for good, where Practice's threads are archived and can be restored.
+- **What it keeps.** Nothing on disk: the read kept for offline use holds no chat, and the ids, titles and counts of the conversations
+  this run knows are in memory only, and go at sign-out.
+- **What it does not do.** Buddy only talks: nothing here starts, sends, posts, pays or decides anything of the shop's, and approvals
+  still settle only through the decide route; nothing is deleted. Older messages than a conversation's newest 50 are not read yet.
+  Buddy's main chat still shows the hint that Buddy has no model yet and a "Pick a model" button, as it did before this item: the
+  runtime names no model (`models.options` lists none, and the API chooses Buddy's), and what the box should show for it is left for
+  later. The reach cards over conversations are item 102l-3.
+- **Tests.** `chat.test.ts` (each op over the fake API: the session, the body, the turn, the conversation listed and opened, two at
+  once, every refusal in words with one request and no turn, blank and too long, signed out, the store marking a refused message
+  "Not sent", offline, a helper's shop, a task told from a conversation, the shop after the switcher moved, removal not offered, and
+  nothing kept),
+  `src/threads/kind.test.ts` (the words), and `ownerChatRoutes` in `testkit.ts`, which answers as apps/api's chat does.
 
 ## Older tasks
 
