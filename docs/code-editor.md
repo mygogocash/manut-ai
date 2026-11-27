@@ -1197,7 +1197,11 @@ another's files or the developer's folder.
   it writes are kept first, byte for byte, under `refs/manut/landings/<job>/<folder>`, and `lane_take_back` puts them back
   while nothing in the lead's folder changed since. A patch that will not apply, comes from another repository or names a
   file outside the lead's project is kept at `~/.manut/patches/<job>/<folder>.patch` (0600) and the lead is not written. A
-  repository whose own config names a clean filter or a merge driver is not landed in.
+  repository whose own config names a clean filter or a merge driver is not landed in. Item 102i calls it from the page
+  (`jobs/helperLandings.ts`) when a helper lane reports finished work, one at a time per lead in the order they reported and
+  only while the lead is idle (no turn running, no ask or question waiting); a message to the lead waits while a landing
+  writes its folder. Its row in the Helpers card says how the work landed; Show patch reads a kept patch through
+  `lane_patch` (masked, at most 256 KiB), and Take back this landing calls `lane_take_back` once the lead is idle.
 - **When a folder goes.** When its session is closed (the chat is deleted), once its agent stopped, and Settings › Worktrees'
   "Remove the folder when its chat is deleted" is on (it is, by default), `lane_release` removes it only if nothing in it is
   changed or new, git is not partway through a rebase, merge, cherry-pick, revert or bisect there, every commit on its branch
