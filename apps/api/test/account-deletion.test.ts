@@ -13,6 +13,7 @@ import {
   emailSignIn,
   failingWhere,
   joinHelper,
+  linkAccount,
   linkedOwner,
   setFlags,
   setupShop,
@@ -182,6 +183,50 @@ async function ownedShop(name = "Baan Mali"): Promise<{ shop: Shop; owner: Await
   return { shop, owner: { ...owner, person } };
 }
 
+/// A source address of its own, so a test's tries never share the limit on deleting one's own data with another test's.
+function freshAddress(): string {
+  const groups = crypto.randomUUID().replaceAll("-", "").slice(0, 24).match(/.{4}/g)!;
+  return `2001:db8:${groups.join(":")}`;
+}
+
+/// A deletion request through bindings with one object failing, as `callWith` sends it.
+function deleteThrough(target: Parameters<typeof callWith>[0], person: { headers: { authorization: string } },
+  owned: { shop: string; name: string }[]) {
+  return callWith(target, PATH, { method: "POST",
+    headers: { ...person.headers, "cf-connecting-ip": freshAddress() } as { authorization: string }, body: { owned } });
+}
+
+/// An owner's deletion that stops at their decision, as the sixth security read's M1 starts: AuthObject cannot settle it,
+/// so the first shop's confirmation is open and waiting, and the account's record covers every shop named.
+async function stopAtDecision(person: { headers: { authorization: string } }, owned: { shop: string; name: string }[]) {
+  const failing = failingWhere("AUTH", (request) => new URL(request.url).pathname === "/pilot-deletions/decide");
+  const stopped = await deleteThrough(failing, person, owned);
+  expect(stopped.status).toBe(500);
+  expect(stopped.body).toMatchObject({ error: "deletion_incomplete", step: "shops" });
+}
+
+type Confirmation = { status: string; request: { id: string }; decision?: { decidedBy: string; role: string } };
+
+/// The shop's current owner confirmation, which outlives the shop as its deletion record does.
+async function shopConfirmation(tenant: string): Promise<Confirmation | null> {
+  const response = await authStub().fetch(`https://auth/pilot-deletions?tenant=${encodeURIComponent(tenant)}`);
+  return ((await response.json()) as { confirmation: Confirmation | null }).confirmation;
+}
+
+/// The shop is whole: on the console's list, and its export answers with its record and its LINE connection.
+async function expectWhole(shop: Shop): Promise<void> {
+  expect(await listedShops()).toContain(shop.tenant);
+  const exported = await admin<{ pilot: { shop: { name: string; lineConnectionId?: string } | null };
+    connections: unknown[] }>("GET", `/v1/admin/pilot/export?tenant=${encodeURIComponent(shop.tenant)}`);
+  expect(exported.status).toBe(200);
+  expect(exported.body.pilot.shop).toMatchObject({ name: shop.name, lineConnectionId: shop.connectionId });
+  expect(exported.body.connections).toHaveLength(1);
+}
+
+function unlink(tenant: string) {
+  return admin("POST", "/v1/admin/shops/owner/unlink", { tenant });
+}
+
 describe("who may ask", () => {
   it("answers no session, the operator key and a shop session 401, before the method, and deletes nothing", async () => {
     const { shop, owner } = await ownedShop();
@@ -321,6 +366,163 @@ describe("an owner", () => {
     expect(await listedShops()).not.toContain(shop.tenant);
     expect(await stillSignedIn(owner.person)).toBe(false);
     expect((await accountRecord(owner.person.tenant))?.requestedAt).toBe(kept?.requestedAt);
+  });
+});
+
+// Item 140, the sixth security read's M1: a deletion that stopped part way keeps the shops it covered, each with the
+// account it was asked under, and sending it again finishes it. A shop is deleted that way only while that person owns it
+// now (pilot.ts, `ownerDeletesShop`), or finished once it is gone.
+describe("a shop the account no longer owns", () => {
+  it("is refused to its former owner after the operator unlinked them: whole, with nothing decided in their name", async () => {
+    const { shop, owner } = await ownedShop("Stale Shop");
+    const owned = [{ shop: shop.tenant, name: shop.name }];
+    await stopAtDecision(owner.person, owned);
+    const waiting = await shopConfirmation(shop.tenant);
+    expect(waiting?.status).toBe("pending");
+    expect(await listedShops()).toContain(shop.tenant);
+    // The operator unlinks the owner: the account no longer owns the shop, though its stopped deletion still covers it.
+    expect((await unlink(shop.tenant)).status).toBe(200);
+
+    // The same person asks again and names the shop they were shown the first time.
+    const refused = await deleteAccount(owner.person, owned);
+    expect(refused).toEqual({ status: 409, body: { error: "not_owner_now", shop: shop.tenant } });
+    await expectWhole(shop);
+    // Nothing was decided in the former owner's name: the confirmation waits as it did, and the shop's log holds only
+    // the first request, made while they owned it.
+    expect(await shopConfirmation(shop.tenant)).toEqual(waiting);
+    const actions = (await auditEntries(shop.tenant)).map((entry) => entry.action);
+    expect(actions.filter((action) => action === "deletion.requested")).toHaveLength(1);
+    expect(actions).not.toContain("deletion.decided");
+    expect(await stillSignedIn(owner.person)).toBe(true);
+
+    // The record stops covering the shop, so the person can still delete their account: the same request is told the
+    // list as it now is, and their account goes without the shop, which stays whole.
+    expect((await accountRecord(owner.person.tenant))?.owned).toEqual([]);
+    expect(await deleteAccount(owner.person, owned)).toEqual({ status: 409, body: { error: "owned_changed", owned: [] } });
+    expect(await deleteAccount(owner.person, [])).toEqual({ status: 200, body: { deleted: true, shops: [], left: [],
+      apple: "revoked" } });
+    await expectWhole(shop);
+    expect(await stillSignedIn(owner.person)).toBe(false);
+  });
+
+  it("linked to a new owner since: the former owner is refused, and the new owner's own deletion still works", async () => {
+    const { shop, owner } = await ownedShop("Baan Mai");
+    const owned = [{ shop: shop.tenant, name: shop.name }];
+    await stopAtDecision(owner.person, owned);
+    const waiting = await shopConfirmation(shop.tenant);
+    expect((await unlink(shop.tenant)).status).toBe(200);
+    const next = await linkedOwner(shop, await appleSignIn());
+
+    // The shop has an owner again, and it is not them.
+    expect(await deleteAccount(owner.person, owned)).toEqual({ status: 409, body: { error: "not_owner_now", shop: shop.tenant } });
+    await expectWhole(shop);
+    expect(await shopConfirmation(shop.tenant)).toEqual(waiting);
+    expect((await asSession(next.headers, "GET", "/v1/people")).status).toBe(200);
+
+    // The new owner deletes their account and the shop with it: the confirmation waiting is decided in their name.
+    const answer = await deleteAccount(next.person, owned);
+    expect(answer.status).toBe(200);
+    expect(answer.body).toMatchObject({ deleted: true, shops: [{ id: shop.tenant, name: shop.name }], left: [] });
+    expect(await listedShops()).not.toContain(shop.tenant);
+    const decided = await shopConfirmation(shop.tenant);
+    expect(decided?.request.id).toBe(waiting?.request.id);
+    expect(decided).toMatchObject({ status: "decided", decision: { decidedBy: next.accountId, role: "owner" } });
+    // Who asked stays the request that opened the confirmation, as the deletion record's rule is (pilot-store.ts,
+    // `openConfirmation`): the former owner asked while they owned the shop, and the new owner decided.
+    expect(await shopDeletion(shop.tenant)).toMatchObject({ askedBy: owner.accountId, deletedBy: null });
+  });
+
+  it("a stopped deletion is finished by the owner who still owns the shop, decided in their name", async () => {
+    const { shop, owner } = await ownedShop();
+    const owned = [{ shop: shop.tenant, name: shop.name }];
+    await stopAtDecision(owner.person, owned);
+    expect(await deleteAccount(owner.person, owned)).toEqual({ status: 200, body: { deleted: true,
+      shops: [{ id: shop.tenant, name: shop.name }], left: [], apple: "revoked" } });
+    expect(await listedShops()).not.toContain(shop.tenant);
+    expect(await shopConfirmation(shop.tenant)).toMatchObject({ status: "decided",
+      decision: { decidedBy: owner.accountId, role: "owner" } });
+  });
+
+  it("unlinked and linked again, the same person finishes their deletion under the link they have now", async () => {
+    const { shop, owner } = await ownedShop();
+    const owned = [{ shop: shop.tenant, name: shop.name }];
+    await stopAtDecision(owner.person, owned);
+    expect((await unlink(shop.tenant)).status).toBe(200);
+    const relinked = await linkAccount(shop, owner.person);
+    expect(relinked).not.toBe(owner.accountId);
+    // The record still names the first link, which the shop no longer has; the person owns the shop all the same.
+    expect((await accountRecord(owner.person.tenant))?.owned).toEqual([{ ...owned[0], account: owner.accountId }]);
+    const answer = await deleteAccount(owner.person, owned);
+    expect(answer.status).toBe(200);
+    expect(answer.body.shops).toEqual([{ id: shop.tenant, name: shop.name }]);
+    expect(await listedShops()).not.toContain(shop.tenant);
+    expect(await shopConfirmation(shop.tenant)).toMatchObject({ status: "decided",
+      decision: { decidedBy: relinked, role: "owner" } });
+  });
+
+  it("a shop already gone is finished from the record, though its people went with it", async () => {
+    const { shop, owner } = await ownedShop();
+    const owned = [{ shop: shop.tenant, name: shop.name }];
+    // The wipe stops at its very last step, taking the shop off the console's list: its records, people and all, are gone.
+    const lastStep = failingWhere("AUTH", (request) => request.method === "DELETE" &&
+      new URL(request.url).pathname === "/pilot-shops");
+    const stopped = await deleteThrough(lastStep, owner.person, owned);
+    expect(stopped).toEqual({ status: 500, body: { error: "deletion_incomplete", step: "shops", failed: [shop.tenant] } });
+    expect(await listedShops()).toContain(shop.tenant);
+    const { readPeople, readShop } = await import("../src/people");
+    expect(await readShop(bindings, shop.tenant)).toBeNull();
+    expect((await readPeople(bindings, shop.tenant))?.ownerAccount).toBeNull();
+
+    // Nobody owns a shop that is gone, and that is no reason to refuse finishing it.
+    const answer = await deleteAccount(owner.person, owned);
+    expect(answer.status).toBe(200);
+    expect(answer.body.shops).toEqual([{ id: shop.tenant, name: shop.name }]);
+    expect(await listedShops()).not.toContain(shop.tenant);
+  });
+
+  it("is refused before a shop the account still owns is touched", async () => {
+    const first = await ownedShop("Khao Hom");
+    const person = first.owner.person;
+    const other = await setupShop("Baan Mali");
+    await linkedOwner(other, person);
+    const both = [{ shop: first.shop.tenant, name: first.shop.name }, { shop: other.tenant, name: other.name }];
+    await stopAtDecision(person, both);
+    // The record covers both, in the order it takes them. The operator unlinks the person from the second, so in that
+    // order the shop they still own would be decided and wiped before the refusal came.
+    const [kept, unlinked] = (await accountRecord(person.tenant))!.owned.map((one) => one.shop) as [string, string];
+    expect([kept, unlinked].sort()).toEqual(both.map((one) => one.shop).sort());
+    expect((await unlink(unlinked)).status).toBe(200);
+    expect(await deleteAccount(person, both)).toEqual({ status: 409, body: { error: "not_owner_now", shop: unlinked } });
+    expect(await listedShops()).toEqual(expect.arrayContaining([kept, unlinked]));
+    expect((await shopConfirmation(kept))?.status).toBe("pending");
+
+    // The person goes on with the shop they own now, and only that one goes.
+    const now = both.filter((one) => one.shop === kept);
+    expect(await deleteAccount(person, both)).toEqual({ status: 409, body: { error: "owned_changed",
+      owned: now.map((one) => ({ id: one.shop, name: one.name })) } });
+    expect((await deleteAccount(person, now)).status).toBe(200);
+    expect(await listedShops()).not.toContain(kept);
+    expect(await listedShops()).toContain(unlinked);
+  });
+
+  it("a people record that cannot be read stops the deletion, and is never taken for a shop with no owner", async () => {
+    const { shop, owner } = await ownedShop();
+    const owned = [{ shop: shop.tenant, name: shop.name }];
+    // The person's list reads the shop's people first; the deletion's own read, before anything is opened, fails.
+    let reads = 0;
+    const second = failingWhere("TENANT", (request) => {
+      const url = new URL(request.url);
+      return request.method === "GET" && url.pathname === "/people" && url.searchParams.get("tenant") === shop.tenant &&
+        ++reads === 2;
+    });
+    expect(await deleteThrough(second, owner.person, owned))
+      .toEqual({ status: 500, body: { error: "deletion_incomplete", step: "shops", failed: [shop.tenant] } });
+    expect(await shopConfirmation(shop.tenant)).toBeNull();
+    await expectWhole(shop);
+    // The record still covers the shop, and the same request finishes the deletion.
+    expect((await accountRecord(owner.person.tenant))?.owned.map((one) => one.shop)).toEqual([shop.tenant]);
+    expect((await deleteAccount(owner.person, owned)).status).toBe(200);
+    expect(await listedShops()).not.toContain(shop.tenant);
   });
 });
 

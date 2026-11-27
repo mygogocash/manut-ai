@@ -32,6 +32,10 @@
 ///   record, and the same request finishes the same deletion. The person's sessions go last of all, so until the very end
 ///   they can press again; a stop after that (only the sign-in's own empty records left) is finished by signing in again
 ///   and asking again. While a request runs a second answers 409 `deletion_running`.
+/// - **A shop that is not theirs now** (item 140). A shop the record covers is deleted only while the account owns it now,
+///   or finished once it is gone. One an operator unlinked from the account after a stop, or linked to someone else, is
+///   answered 409 `not_owner_now` naming it: it is left as it is, with nothing decided in the account's name, and the
+///   record stops covering it, so the person can still delete their account without it.
 ///
 /// Every try counts against the address's limit on deleting one's own data (`TENANT_DELETE_LIMITER`, index.ts) before the
 /// session is read.
@@ -184,10 +188,25 @@ async function deleteAccount(env: AccountEnv, person: SignedInPerson, asked: { s
     return json({ error: "deletion_incomplete", step, failed }, 500);
   };
 
-  // 1. The shops they own, each through its own deletion record and wipe.
-  for (const shop of record.owned) {
-    const done: OwnerShopDeletion = await ownerDeletesShop(env, shop.shop, shop.account).catch(() =>
-      ({ ok: false, error: "shop_unavailable" }));
+  // 1. The shops they own, each through its own deletion record and wipe, and only while the account owns it now
+  //    (pilot.ts, `ownerDeletesShop`; item 140). Each goes under the link the account has to it now: the record keeps the
+  //    link it was first asked under, and an operator who unlinked the person and linked them again gave them a new one.
+  //    The shops the record covers that the account no longer owns (gone already, or linked to nobody or to someone else
+  //    since) come first, so a refusal comes before anything the account owns now is touched.
+  const ownsNow = new Map(standing.owned.map((one) => [one.shop, one.account]));
+  const shops = [...record.owned.filter((one) => !ownsNow.has(one.shop)),
+    ...record.owned.filter((one) => ownsNow.has(one.shop))];
+  for (const shop of shops) {
+    const done: OwnerShopDeletion = await ownerDeletesShop(env, shop.shop, ownsNow.get(shop.shop) ?? shop.account)
+      .catch(() => ({ ok: false, error: "shop_unavailable" }));
+    if (!done.ok && done.error === "not_owner_now") {
+      // Not theirs to delete now, and left as it is. The record stops covering it in the write that gives the lease back,
+      // so the same request sent again is answered `owned_changed` with the list as it now is, and the person can go on
+      // deleting their account without it.
+      const released = await authWrite(env, "/account-deletion/release", { subject: person.tenant, notOwned: shop.shop });
+      await released?.body?.cancel();
+      return json({ error: "not_owner_now", shop: shop.shop }, 409);
+    }
     if (!done.ok) return stop("shops", [shop.shop]);
   }
   // 2. Shops they began to make and never finished.
