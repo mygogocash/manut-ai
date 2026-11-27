@@ -13,6 +13,8 @@ import { fromStore, storeActions } from "./fromStore";
 import { healthProbe, pageSocket, shellKeyring } from "./fromShell";
 import { RemoteMac, type RemoteMacDeps, type RemoteSnapshot } from "./host";
 import { changes } from "../lib/changes";
+import { inTauri } from "../lib/tauri";
+import type { DoorEvent, DoorShell } from "./door";
 
 export const REMOTE_KEY = "manut.remote";
 /** The version of the consent sheet's words. Raise it whenever their promise changes. */
@@ -52,6 +54,50 @@ export function consentCovers(choice: RemoteChoice, version = CONSENT_VERSION): 
   return choice.consent !== null && choice.consent.version >= version;
 }
 
+/** The Tailscale road's own choice (item 78f-2b): on or off, and the version of its consent sheet the person accepted. */
+export const TAILSCALE_KEY = "manut.remote.tailscale";
+/** Raise it whenever the Tailscale sheet's promise changes. */
+export const TAILSCALE_CONSENT_VERSION = 1;
+
+export function readTailscaleChoice(store: Storage | undefined = browserStore()): RemoteChoice {
+  try {
+    const raw = store?.getItem(TAILSCALE_KEY);
+    const saved = raw ? (JSON.parse(raw) as { on?: unknown; consent?: { at?: unknown; version?: unknown } | null }) : null;
+    const consent = saved?.consent;
+    const given = consent && typeof consent.at === "number" && typeof consent.version === "number" ? { at: consent.at, version: consent.version } : null;
+    return { on: saved?.on === true, consent: given };
+  } catch {
+    return { on: false, consent: null };
+  }
+}
+
+function writeTailscaleChoice(choice: RemoteChoice, store: Storage | undefined = browserStore()): void {
+  try {
+    store?.setItem(TAILSCALE_KEY, JSON.stringify(choice));
+  } catch {
+    // Not kept: the road reads as off at the next launch, which opens nothing it should not.
+  }
+}
+
+/** The shell's door (src-tauri/src/remote_door.rs), in the desktop app only. */
+function shellDoor(): DoorShell | undefined {
+  if (!inTauri()) return undefined;
+  const invoke = async <T>(cmd: string, args?: Record<string, unknown>) => (await import("@tauri-apps/api/core")).invoke<T>(cmd, args);
+  return {
+    async on(hostId, origin, onEvent) {
+      const { Channel } = await import("@tauri-apps/api/core");
+      const channel = new Channel<DoorEvent>();
+      channel.onmessage = onEvent;
+      return invoke<{ name: string; port: number }>("tailscale_door_on", { hostId, origin, onEvent: channel });
+    },
+    off: () => invoke<void>("tailscale_door_off"),
+    devices: (devices) => invoke<boolean>("door_devices", { devices }),
+    status: (state) => invoke<boolean>("door_status", { state }),
+    send: (stream, data) => invoke<boolean>("door_send", { stream, data }),
+    close: (stream) => invoke<boolean>("door_close", { stream }),
+  };
+}
+
 let remote: RemoteMac | null = null;
 let snapshot: RemoteSnapshot | null = null;
 const listeners = changes();
@@ -73,6 +119,7 @@ export function remoteMac(deps?: RemoteMacDeps): RemoteMac {
       chats: fromStore(store),
       actions: storeActions(store),
       now: () => Date.now(),
+      door: shellDoor(),
     });
     // Phones watching a chat hear what moved, a quarter of a second at most after the store changed.
     let pending: ReturnType<typeof setTimeout> | null = null;
@@ -120,10 +167,35 @@ export function turnOff(): void {
   remote?.turnOff();
 }
 
-/** At launch: turns the switch back on only for a person who turned it on, under the sheet as it reads now. */
+/** The person accepted the Tailscale sheet and turned the road on. */
+export async function acceptTailscaleAndTurnOn(now = Date.now()): Promise<boolean> {
+  writeTailscaleChoice({ on: true, consent: { at: now, version: TAILSCALE_CONSENT_VERSION } });
+  return remoteMac().turnTailscaleOn();
+}
+
+/** The Tailscale road went on with its consent already given; refused (false) without it, and the page shows the sheet. */
+export async function turnTailscaleOn(): Promise<boolean> {
+  const choice = readTailscaleChoice();
+  if (!consentCovers(choice, TAILSCALE_CONSENT_VERSION)) return false;
+  writeTailscaleChoice({ ...choice, on: true });
+  return remoteMac().turnTailscaleOn();
+}
+
+export function turnTailscaleOff(): void {
+  writeTailscaleChoice({ ...readTailscaleChoice(), on: false });
+  remote?.turnTailscaleOff();
+}
+
+/** At launch: turns the switch back on only for a person who turned it on, under the sheet as it reads now, and then the
+ *  Tailscale road only for a person who turned that on too, under its own sheet. */
 export function resumeRemote(): void {
   const choice = readChoice();
-  if (choice.on && consentCovers(choice)) void remoteMac().turnOn();
+  if (!(choice.on && consentCovers(choice))) return;
+  const ts = readTailscaleChoice();
+  void remoteMac()
+    .turnOn()
+    .then(() => (ts.on && consentCovers(ts, TAILSCALE_CONSENT_VERSION) ? remoteMac().turnTailscaleOn() : false))
+    .catch(() => undefined);
 }
 
 function subscribe(listener: () => void): () => void {

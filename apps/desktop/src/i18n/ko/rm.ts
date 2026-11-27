@@ -50,4 +50,17 @@ export const rm: Record<keyof typeof en, string> = {
   "rm.pairedAt": "{paired}에 페어링",
   "rm.pairedSeen": "{paired}에 페어링, 마지막 접속 {seen}",
   "rm.unpair": "페어링 해제",
+  // item 78f-2b: the Tailscale road under the main switch; English first (the owner, 27 Nov 2026), the same English in every language until translated
+  "rm.ts.title": "Reach it over Tailscale too",
+  "rm.ts.off": "Off. Phones on your tailnet would reach this Mac at {name}, without the relay.",
+  "rm.ts.starting": "Starting: Tailscale is serving this Mac's door.",
+  "rm.ts.on": "On. Phones on your tailnet reach this Mac at {name}, port {port}.",
+  "rm.ts.failed": "It did not start: {why}",
+  "rm.ts.consent.title": "Reach this Mac over Tailscale",
+  "rm.ts.consent.serve": "Manut AI adds one entry to your Tailscale's serve settings, on port 47100 under {name}, and removes it when you turn this off. Your other serve entries are not touched.",
+  "rm.ts.consent.who": "Any device on your tailnet can reach the door, and only a paired phone gets in. Pairing, the encryption and Face ID for each Allow are the same as on the relay.",
+  "rm.ts.consent.tls": "Tailscale holds the certificate for this Mac's name and ends the connection's TLS; what crosses it is still sealed end to end, so Tailscale cannot read it.",
+  "rm.ts.consent.public": "Turning on HTTPS for your tailnet published this Mac's name in public certificate logs.",
+  "rm.ts.consent.accept": "Turn on",
+  "rm.ts.consent.decline": "Not now",
 };
