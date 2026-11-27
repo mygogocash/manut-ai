@@ -16,6 +16,7 @@ import type { Quote } from "./answers";
 import { Icon } from "../../ui/icons";
 import { splitSent } from "../box/carry";
 import { readFromChat } from "../../jobs/reachList";
+import { readFromProgram } from "../../threadsMcp/list";
 import "../box/carry.css";
 
 /** Messenger bubble, filled on both sides. Bot text renders markdown; user text stays plain. Files the bot
@@ -249,6 +250,19 @@ function SentText({ text, skills }: { text: string; skills?: string[] }) {
           {t("reach.from", { title: from.title })}
         </span>
         <SkillText text={from.words} skills={skills} />
+      </>
+    );
+  }
+  // a message a program outside Manut AI asked to send and the person sent on (item 103c): the program above its words
+  const program = readFromProgram(text);
+  if (program) {
+    return (
+      <>
+        <span className="msg-reached" data-testid="bubble-from-program">
+          <Icon name="plug" size={12} />
+          {t("tm.from", { name: program.name })}
+        </span>
+        <SkillText text={program.words} skills={skills} />
       </>
     );
   }

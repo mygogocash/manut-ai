@@ -6,10 +6,10 @@ import { bringToFront, showNote, windowWatched } from "../lib/notify";
 import { getStore, notifyEnabled, selectAsks } from "../state/store";
 import { getSessions } from "../sessions/sessions";
 import { getHost } from "../sessions/host";
-import { agentLabel } from "../sessions/agents";
+import { agentLabel, sessionMode, type AgentInfo } from "../sessions/agents";
 import { t } from "../i18n";
 import { getMcpShell } from "./shell";
-import { getMcp, provideMcpDeps, type LetInCard } from "./store";
+import { getMcp, provideMcpDeps, type McpCard } from "./store";
 
 const storage = (): Storage | null => {
   try {
@@ -19,10 +19,13 @@ const storage = (): Storage | null => {
   }
 };
 
-/** A notification for a program that waits, while the person is not looking at the window. */
-function announce(card: LetInCard): void {
+/** A notification for a program that asks, while the person is not looking at the window. It names the program and the chat,
+ *  never what would be read or sent. */
+function announce(card: McpCard): void {
   if (windowWatched() || !notifyEnabled()) return;
-  void showNote({ title: t("tm.note.title", { name: card.program.name }), body: t("tm.note.body"), bot: "", tag: `manut:threads:${card.id}` }, () => void bringToFront(), true);
+  const name = card.program.name;
+  const title = card.kind === "read" ? t("tm.read.title", { name, title: card.chat.title }) : card.kind === "send" ? t("tm.send.title", { name, title: card.chat.title }) : t("tm.note.title", { name });
+  void showNote({ title, body: t("tm.note.body"), bot: "", tag: `manut:threads:${card.id}` }, () => void bringToFront(), true);
 }
 
 provideMcpDeps(() => {
@@ -50,6 +53,14 @@ provideMcpDeps(() => {
       return getStore().getState().bots.find((b) => b.name === ref.bot)?.display_name ?? ref.bot;
     },
     link: (ref) => (ref.kind === "session" ? rec(ref.id)?.linkId : undefined),
+    reader,
+    // a message goes only to a coding chat on this Mac whose agent runs as the app's chat, as 102k's `locate` holds
+    sendable: (ref) => {
+      if (ref.kind !== "session") return false;
+      const r = rec(ref.id);
+      return !!r && r.status !== "draft" && sessionMode(getSessions().getState().agents as AgentInfo[] | null, r) === "chat";
+    },
+    route: (session, text) => getSessions().route(session, text),
     notify: announce,
   };
 });

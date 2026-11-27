@@ -5,7 +5,7 @@ its order: "must be designed first because it can act for the person"). The owne
 lists, opens and messages threads through an MCP server, with an address to copy for it, off by default, designed first
 for who may connect and so that everything asked through it is an ask the person answers, never a way round one.
 
-Status on 27 Nov 2026: design, with slices 103a (the door, in the shell) and 103b (Settings, the list and the let-in card) built; reads, messages and new lanes are not built. The decisions are in `docs/decisions/103-mcp-threads.md`; the slices are
+Status on 27 Nov 2026: design, with slices 103a (the door, in the shell), 103b (Settings, the list and the let-in card) and 103c (reads and messages) built; a new lane (103d) is not built. The decisions are in `docs/decisions/103-mcp-threads.md`; the slices are
 at the end and are in `docs/plan.md` as 103a to 103d.
 
 ## The promise this design keeps
@@ -209,6 +209,11 @@ shell's error strings for a refused call hold none of the call's arguments. [103
   `list_chats` works in this version.
 - **103c. Read and message.** The two cards in Needs you and in the chat, acting through `gatherContext` and `route`, the
   reply, the closed card. An e2e spec on the mock bridge with the stand-in program. Safety tests: M8, M9, M11.
+  **Built 27 Nov 2026** (`src/threadsMcp/asks.ts`, the read and message cards in `store.ts` and `Cards.tsx`,
+  `fromProgramText` and `readFromProgram` in `list.ts`, the mark in `chat/parts/Bubble.tsx`, `route` on the sessions store;
+  the last test of `e2e/other-programs.spec.ts`). What changed from the design: the cards are drawn in the stack over every
+  page with the let-in card, not also in the chat they name; a card's approval-core turn is its call, so a press after the
+  program gave up is refused as superseded.
 - **103d. A new lane.** `open_chat` through `startOpenedLane`, in the listed chat's project, in its agent's Ask mode, the card
   showing the brief whole. Safety test: an unanswered card starts nothing.
 - **Later, each the owner's to want:** the cards on a paired phone after its passkey (item 115's rule); Linux through
