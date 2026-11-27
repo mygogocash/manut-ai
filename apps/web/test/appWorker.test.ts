@@ -6,6 +6,9 @@ import appPage from "../app/index.html?raw";
 import manifestText from "../public/app/manifest.webmanifest?raw";
 import offlinePage from "../public/app/offline.html?raw";
 import { WORKER } from "../src/app/register";
+import workerSource from "../src/app/sw.ts?raw";
+import { en } from "../src/app/strings";
+import { MAC_URL, PUSH_TITLE, pushNotice, windowToOpen } from "../src/app/swPush";
 import {
   APP_FILES,
   builtFilesIn,
@@ -116,5 +119,32 @@ describe("the app as a phone installs it", () => {
     // The offline page stands alone: no script and nothing it would have to fetch, but the app it links back to.
     expect(offlinePage).not.toMatch(/<script|<link/);
     expect([...offlinePage.matchAll(/(?:href|src)="([^"]+)"/g)].map((match) => match[1])).toEqual(["/app/"]);
+  });
+});
+
+describe("what a push shows (item 78d)", () => {
+  it("is always the same few words, the strings table's own, with nothing from the push and no body", () => {
+    expect(PUSH_TITLE).toBe(en.mac.pushTitle);
+    expect(PUSH_TITLE).toBe("Your Mac needs you");
+    const notice = pushNotice();
+    expect(notice).toEqual({ tag: "manut-mac", renotify: true, icon: "/app/icons/icon-192.png" });
+    expect(Object.keys(notice)).not.toContain("body");
+    expect(Object.keys(notice)).not.toContain("data");
+    // Its icon is one of the app's own files, kept for offline.
+    expect(APP_FILES).toContain(notice.icon);
+  });
+
+  it("opens the Your Mac tab, in a window of the app when one is open", () => {
+    expect(MAC_URL).toBe(`${SW_SCOPE}#mac`);
+    expect(windowToOpen([`${ORIGIN}/ops`, `${ORIGIN}/app/#today`, `${ORIGIN}/app/`], ORIGIN)).toBe(1);
+    expect(windowToOpen([`${ORIGIN}/approve/x`, "https://other.example/app/", "not a url"], ORIGIN)).toBe(-1);
+    expect(windowToOpen([], ORIGIN)).toBe(-1);
+  });
+
+  it("is wired in the worker to the push and the click, and reads nothing a push carries", () => {
+    expect(workerSource).toContain('addEventListener("push"');
+    expect(workerSource).toContain('addEventListener("notificationclick"');
+    expect(workerSource).toContain("showNotification(PUSH_TITLE, pushNotice())");
+    expect(workerSource).not.toMatch(/\.data\b/);
   });
 });

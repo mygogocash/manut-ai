@@ -5,8 +5,9 @@ settings: network access, a tunnel, new devices approved first, permissions, age
 linked environments, a preview tunnel, webhooks held while offline. It was written by a read-only design pass over
 this repository and GoSpark's remote access, which the relay in `apps/api` was lifted from. Built so far: that relay,
 the channel (78a, `packages/remote-channel`), the Mac's side with Settings › Sharing and access, switched off (78b,
-below), the phone's Your Mac tab (78c, below), and the read of Tailscale's state (78f's first part, below). The plan's
-rows are 78a to 78f.
+below), the phone's Your Mac tab (78c, below), the read of Tailscale's state (78f's first part, below), and the push
+with no content, "Your Mac needs you" (78d, below; the owner chose on 27 Nov 2026 to build it with the relay on in the
+dev environment only). The plan's rows are 78a to 78f.
 
 ## The first version
 
@@ -44,7 +45,8 @@ no server to the Mac.
 **On Cloudflare.** `apps/api/src/relay.ts`, `relay-object.ts`, the two relay limiters in `index.ts` and `RELAY_ENABLED`
 stay as they are for phases 1 to 3. They already check the Mac's key signature and each phone's token hash, and
 forward binary frames without reading them. Phase 4 adds one message from the Mac (`webpush`: a device id and its push
-address) and makes the relay act on `push`, which does nothing today. No new route or object.
+address) and makes the relay act on `push`, which did nothing before. No new route or object (built: "What building 78d
+added", below).
 
 **On the Mac: in the desktop's page, not the Rust shell.** The page's WebSocket is the desktop's only socket, the
 app's content policy already lets it reach `wss://*.manut.xyz`, and the store and `settleApproval`
@@ -269,6 +271,66 @@ needs a QR reader, which the repository does not have: the browser's own is used
   (`e2e/states.ts`, every Your Mac state on four phones, light and dark, three text sizes); and the IndexedDB vault in each
   real engine (`e2e/mac-vault.spec.ts`).
 
+**What building 78d added** ("Your Mac needs you", 27 Nov 2026; built so it does nothing while the relay is off or its
+push key is unset; the owner chose to turn it on in dev only):
+
+- **The phone** (`apps/web/src/app/mac/notify.ts`, `remote.ts`, `MacTab.tsx`, `src/app/sw.ts`, `swPush.ts`). Once
+  paired, the Your Mac tab's list offers a switch, "Tell me when my Mac needs me", with one line saying what it does: the
+  notification says "Your Mac needs you" and nothing more, and the relay keeps this phone's push address. It is offered
+  only while the API's public health answer carries the push key (`webPush`, given only while the relay is on and both
+  halves of the key are set) and the browser has the Push API; Safari's own tab on an iPhone has not, so there one line
+  says to open Manut AI from the Home Screen. The tap asks for notification permission before anything awaits (Safari
+  asks only from a tap) and subscribes with that key (`userVisibleOnly`). The subscription's endpoint, its push address,
+  goes to the Mac inside the encrypted channel as the seventh request, `notify`, never to the API in the clear; an
+  address on any push service but Apple's, Google's or Mozilla's (Edge's, for one) is ended at once and the phone says
+  to use Safari or Chrome. At every session the phone tells the Mac its address as it is now, or none, so a Mac that
+  missed a change, or a browser that renewed its subscription, catches up. Turning it off, and Forget this Mac, end the
+  subscription. The service worker shows, for every push, the same title and nothing else (no body, no data, nothing the
+  push carried, which is nothing), tagged so a newer one replaces the older, and opening it brings the app forward on
+  the Your Mac tab.
+- **The Mac** (`apps/desktop/src/remote/push.ts`, `serve.ts`, `host.ts`, `link.ts`, `roads.ts`). `notify` keeps the
+  phone's address, by device id, in this computer's local storage (`manut.remote.push`, as the switch is kept; not the
+  keychain: the address is no secret, since a push to it needs the relay's signed key) and hands it to the relay as
+  `webpush`, now and again at every `ready`. It takes only the same three push services, by the package's
+  `pushAddressOk`. When the store changes and an ask opened that was not open before, and no paired phone has a session
+  open by either road, the Mac sends the relay `push` naming every paired phone with an address, at most once for that
+  ask and never twice within two minutes (`PUSH_GAP_MS`); an ask that opens inside the gap is not pushed for later, since
+  the notification from before still stands; asks open when the switch turns on are never pushed for. Unpair forgets
+  the address, and the relay's `revoke` deletes it there. Settings, Sharing and access says under a phone that it gets a
+  notification when this Mac needs the person.
+- **The relay** (`apps/api/src/web-push.ts`, `relay-object.ts`). `webpush` is taken only from the Mac's authenticated
+  socket and only for a device that Mac registered (a phone's text closes it with 4400; another Mac's device id is
+  ignored), and only an https address on `web.push.apple.com`, `fcm.googleapis.com` or
+  `updates.push.services.mozilla.com` (anything else answers `push_address` and keeps nothing). Only the address is
+  stored, beside the device's token hash. `push` sends each named device with an address an empty POST: no payload, so
+  no encryption; `TTL` an hour, `Urgency: high`, `Topic: manut-mac`, and a VAPID header (RFC 8292) whose ES256 JWT is
+  signed with WebCrypto by `WEB_PUSH_PRIVATE_KEY`, with `WEB_PUSH_PUBLIC_KEY` as `k` and `PUBLIC_API_ORIGIN` as `sub`
+  (the signed token is kept in memory and reused for up to 11 hours; Apple asks for a new one no more than hourly). At
+  most 30 `push` messages a clock hour per Mac (`push_limit` past that). A 404 or 410 forgets the address and tells the
+  Mac. Nothing happens while `RELAY_ENABLED` is off: every socket is closed with 4503 as before.
+- **Tested.** In workerd (`apps/api/test/relay-push.test.ts`): `webpush` kept, removed and revoked; refused from a
+  phone and for another Mac's device; unknown push hosts refused; `push` sending one request each, with no body and a
+  VAPID header the test verifies with its own throwaway key; 404 and 410 forgetting the address; the hourly limit; no
+  key and the relay off sending nothing; the health answer's key. Through the real relay (`remote-phone.test.ts`): the
+  web app's own code turns notifications on with the desktop's `RemoteMac`, the address crosses only sealed from the
+  phone (the one message that carries it readable is the Mac's own `webpush`), and once the phone leaves a new ask makes
+  the Mac send `push` naming it. The desktop's `push.test.ts`, `serve.test.ts` and `link.test.ts`, and the web app's
+  `macNotify.test.ts`, `MacTab.test.tsx` and `appWorker.test.ts` (the notification's words, the strings table's own).
+- **Making the push key** (the lead, for dev only). One command makes a P-256 pair, prints the public half (the same
+  value the health answer then offers) and pipes both halves as JSON straight into `wrangler secret bulk`, which prints
+  only the secrets' names, so the private half is never shown or written to a file:
+
+  ```sh
+  node -e 'const {generateKeyPairSync}=require("node:crypto");const {privateKey}=generateKeyPairSync("ec",{namedCurve:"prime256v1"});const j=privateKey.export({format:"jwk"});const pub=Buffer.concat([Buffer.from([4]),Buffer.from(j.x,"base64url"),Buffer.from(j.y,"base64url")]).toString("base64url");console.error("WEB_PUSH_PUBLIC_KEY="+pub);process.stdout.write(JSON.stringify({WEB_PUSH_PRIVATE_KEY:j.d,WEB_PUSH_PUBLIC_KEY:pub}))' | pnpm --filter @manut/api exec wrangler secret bulk --env dev
+  ```
+
+  Changing the key later makes every phone's subscription useless (the push service refuses a token signed by another
+  key); each phone turns the switch off and on again.
+- **Not observed.** No real push service has been sent to, and no real phone has shown the notification: the key pair
+  is made by the lead and the relay is turned on in dev by the lead. Apple's page asks a server behind a firewall to
+  allow `*.push.apple.com`; only `web.push.apple.com` is taken, the host Safari's subscriptions are on, and an Apple
+  subscription on another host would be refused as `push_address`.
+
 **What only a real phone shows, and what the owner should try** (with the dev relay on, which is the owner's call):
 
 1. On the iPhone, open `https://dev.manut.xyz/app/` in Safari, Share, Add to Home Screen, and open Manut AI from the Home
@@ -288,6 +350,13 @@ needs a QR reader, which the repository does not have: the browser's own is used
 8. Unpair the phone on the Mac: the iPhone says the Mac no longer knows it. Press Forget this Mac. In Settings,
    Passwords, the passkey for `dev.manut.xyz` is still there until deleted.
 9. On an Android phone with Chrome: install from the menu, press Scan, allow the camera, and pair from the QR code.
+10. Notifications (78d, once the lead has made the push key and turned the dev relay on): on the iPhone, in the app
+    opened from the Home Screen, Your Mac, turn on "Tell me when my Mac needs me" and allow notifications. The Mac's
+    Settings, Sharing and access says the phone gets a notification. Close the app on the iPhone (swipe it away), start
+    a chat on the Mac that asks for an approval: within a few seconds the iPhone shows "Your Mac needs you" and nothing
+    more. Tap it: the app opens on Your Mac. Open a second ask within two minutes: no second notification. Turn the
+    switch off: no more notifications. In Safari's own tab the switch is not offered, and a line says to use the Home
+    Screen app.
 
 Only a real phone shows: Face ID and the passcode prompt, and whether Safari opens it straight after the Mac's challenge
 or needs Confirm; the camera and Chrome's QR reading; the installed app's own storage partition on iOS (that a pairing
@@ -475,7 +544,7 @@ installed iPhone web app opens the socket, what Android Chrome asks, and how fas
 | 78a | `packages/remote-channel`: pairing, the session, the decision challenge, each with its refusals tested (a wrong K, swapped keys, a changed, repeated or reordered message, a challenge used twice or late, a passkey answer with the wrong origin or no Face ID) | Nothing |
 | 78b | The Mac side and Settings, Sharing and access: consent, the QR code, the Allow card, the phone list, Unpair; tested against a fake socket, and through the real relay object in the API's tests, where no readable text may cross | Nothing |
 | 78c | The phone's Your Mac tab, with catch-up from the journal and the greyed view; two browsers against a local relay | The dev relay turned on, and a real iPhone check |
-| 78d | A push with no content ("Your Mac needs you") when an ask opens and no phone is connected | The relay on, and a push key made as a Wrangler secret |
+| 78d | A push with no content ("Your Mac needs you") when an ask opens and no phone is connected. Built (above), on in dev only (the owner, 27 Nov 2026) | The lead makes the push key as Wrangler secrets and turns the dev relay on; the owner tries it on an iPhone from the Home Screen |
 | 78f | The Tailscale road. First the read-only `tailscale.rs` and Settings' four states, tested with a stand-in CLI whose call log shows only `status --json`. Then `remote_door.rs`, the serve entry, the phone's second road and the 1.5 second race | The first part, nothing. The door: a tailnet, an iPhone and an Android phone |
 
 ## What the owner decides or provides

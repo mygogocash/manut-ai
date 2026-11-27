@@ -17,6 +17,11 @@
   // RELAY_ENABLED is deliberately unset in every environment: until the owner
   // turns the relay on at gate G3, every /relay/ route answers 503
   // relay_disabled (docs/relay-protocol-v1.md, the kill switch).
+  // The relay's Web Push key (item 78d, src/web-push.ts) is two Wrangler
+  // secrets, never in this file: WEB_PUSH_PRIVATE_KEY (base64url of the P-256
+  // scalar) and WEB_PUSH_PUBLIC_KEY (base64url of the 65-byte point), put
+  // together with `wrangler secret bulk` (docs/remote-access.md). Until both
+  // are set the relay sends no push and /v1/health offers no key.
   // Manut AI pilot (docs/pilot-api.md): three settings, none of them in this
   // file. APPROVAL_LINK_SECRET signs the owner's approval links and is a
   // Wrangler secret (`wrangler secret put APPROVAL_LINK_SECRET`, at least 32

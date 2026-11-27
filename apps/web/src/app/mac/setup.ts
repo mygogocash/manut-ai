@@ -4,7 +4,8 @@
 /// host and the relay lives beside it: the Mac names the same host for both (apps/desktop/src/remote/host.ts,
 /// `relyingParty`). A page served from anywhere else says "not available yet", as the tab does while the relay is off.
 import type { ApiMode } from "../../api";
-import { liveBackend, relayFromHealth } from "./live";
+import { healthOf, liveBackend } from "./live";
+import { browserPush } from "./notify";
 import { phoneName } from "./pair";
 import { browserPasskeys } from "./passkeys";
 import { PRACTICE_MAC_OFF, practiceBackend, type PracticeBackend } from "./practice";
@@ -45,12 +46,18 @@ export function macSetup(mode: ApiMode, label: string, apiOrigin: string | undef
   const origin = window.location.origin;
   const api = apiOrigin?.trim() === "same-origin" ? origin : apiOrigin?.trim();
   const here = api === origin;
+  // One read of the health answer serves both the relay's switch and the push key: the tab asks for the switch first.
+  let health: ReturnType<typeof healthOf> | null = null;
+  const readHealth = () => (health = here ? healthOf(origin) : Promise.resolve({ relay: "off" as const, webPush: null }));
+  const push = browserPush();
   const backend = liveBackend({
     origin,
     connect: browserConnect,
     vault: here && typeof indexedDB !== "undefined" ? indexedDbVault() : memoryVault(),
     passkeys: browserPasskeys(),
-    relay: async () => (here ? relayFromHealth(origin) : "off"),
+    relay: async () => (await readHealth()).relay,
+    pushKey: async () => (await (health ?? readHealth())).webPush,
+    push,
     name: phoneName(navigator.userAgent),
     label,
   });
