@@ -36,7 +36,6 @@ export const CONFIRM_PATH = "/v1/memory/confirm";
 export const CORRECT_PATH = "/v1/memory/correct";
 export const FORGET_PATH = "/v1/memory/forget";
 
-type Obj = Record<string, unknown>;
 /** A time or a count from the API: a finite number, else null. */
 const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
 

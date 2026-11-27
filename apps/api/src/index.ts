@@ -427,9 +427,6 @@ export type FeatureFlags = {
   buddyChat: boolean;
 };
 
-const FLAG_KEYS = ["officeCloud", "officeRoutines", "officeExternalWrites", "officeInbound", "officeSharing", "shopFeed",
-  "artifactLinks", "skillLinks", "buddyChat"] as const;
-
 async function featureFlags(env: Env): Promise<FeatureFlags> {
   const defaults: FeatureFlags = {
     officeCloud: env.OFFICE_CLOUD === "1",

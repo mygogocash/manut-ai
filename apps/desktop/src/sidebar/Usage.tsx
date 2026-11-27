@@ -30,7 +30,7 @@ export function Ring({ p }: { p: UsageProvider }) {
   );
 }
 
-function Card({ p, now, caret, cardRef, named }: { p: UsageProvider; now: number; caret: number; cardRef: Ref<HTMLDivElement>; named: boolean }) {
+function Card({ p, now, caret, cardRef }: { p: UsageProvider; now: number; caret: number; cardRef: Ref<HTMLDivElement> }) {
   const plan = planText(p.plan);
   return (
     <div ref={cardRef} className="usage-card ui-pop ui-pop-top ui-pop-left" role="dialog" aria-label={t("use.card", { name: PROVIDER_NAME[p.id] ?? p.id })}
@@ -179,7 +179,7 @@ export function Usage({ named = false }: { named?: boolean } = {}) {
           {meterDot(p) && <span className={`usage-dot st-${meterDot(p)}`} aria-hidden="true" />}
         </button>
       ))}
-      {shown && <Card p={shown} now={now} caret={caret} cardRef={cardRef} named={named} />}
+      {shown && <Card p={shown} now={now} caret={caret} cardRef={cardRef} />}
     </div>
   );
 }

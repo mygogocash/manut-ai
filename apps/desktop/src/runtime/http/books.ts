@@ -66,7 +66,6 @@ export interface HelperBooks {
 
 export type BooksDetail = OwnerBooks | HelperBooks;
 
-type Obj = Record<string, unknown>;
 const CONTROL = /[\u0000-\u001f\u007f]/;
 const ISO_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/;
 

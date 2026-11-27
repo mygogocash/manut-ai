@@ -1,7 +1,7 @@
 // One-line plain fallbacks used until a feature node registers its slot.
 import { useEffect, useState } from "react";
 import type { ActivitySlotProps, CardsSlotProps, RoutineLineSlotProps } from "../../features";
-import { SourceIcon, Spinner } from "../../ui";
+import { Spinner } from "../../ui";
 import { elapsed, hhmm } from "../../app/time";
 import { t as tr } from "../../i18n";
 import { WORKING } from "../../state/store";

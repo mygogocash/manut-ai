@@ -1,6 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import { readJsonBody } from "./body";
-import { keyTag, openSecret, sealSecret, type SealedSecret } from "./cred-crypto";
+import { openSecret, sealSecret, type SealedSecret } from "./cred-crypto";
 import { GOOGLE_PROVIDER, googleFlowKeys, googleVaultRoute, isGoogleVaultPath, type GoogleFields } from "./google-vault";
 import { resealStore, sameSeal, type ResealStore } from "./reseal";
 import { isSignInVaultPath, signInVaultRoute, wipeSignInVault } from "./sign-in-vault";

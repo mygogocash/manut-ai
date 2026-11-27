@@ -172,10 +172,10 @@ describe("the Archive (item 76)", () => {
     const { store, key } = await withThreads();
     const marks: RowMarks = { [key("Weekend sale post")]: { archived: 5 } };
     expect(titles(historyDays(store.getSnapshot(), "", Date.now(), [], "all", marks))).toEqual(["Discount for a bulk order"]);
-    expect(historyArchive(store.getSnapshot(), marks, Date.now()).map((r) => r.title)).toEqual(["Weekend sale post"]);
+    expect(historyArchive(store.getSnapshot(), marks).map((r) => r.title)).toEqual(["Weekend sale post"]);
     // with no marks (a list saved before them) everything is listed and the Archive is empty
     expect(titles(historyDays(store.getSnapshot(), "", Date.now()))).toEqual(["Discount for a bulk order", "Weekend sale post"]);
-    expect(historyArchive(store.getSnapshot(), {}, Date.now())).toEqual([]);
+    expect(historyArchive(store.getSnapshot(), {})).toEqual([]);
   });
 
   it("keeps a snoozed, settled or pinned chat in History, tagged, so it can always be found", async () => {
@@ -188,7 +188,7 @@ describe("the Archive (item 76)", () => {
   it("draws the Archive under the days with its count, and no Archive when nothing is archived", async () => {
     const { store, key } = await withThreads();
     const marks: RowMarks = { [key("Weekend sale post")]: { archived: 5 } };
-    const archive = historyArchive(store.getSnapshot(), marks, Date.now());
+    const archive = historyArchive(store.getSnapshot(), marks);
     const withIt = renderToString(<HistoryView days={historyDays(store.getSnapshot(), "", Date.now(), [], "all", marks)} archive={archive} query="" hasThreads onQuery={noop} />);
     expect(withIt).toContain('data-testid="history-archive"');
     expect(words(withIt)).toContain("Archive (1)");

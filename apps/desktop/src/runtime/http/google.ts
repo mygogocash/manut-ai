@@ -30,7 +30,6 @@ export const CONNECT_PATH = "/v1/google/connect";
 export const DISCONNECT_PATH = "/v1/google/disconnect";
 export const BOOKS_PATH = "/v1/google/books";
 
-type Obj = Record<string, unknown>;
 const notNull = <T>(v: T | null): v is T => v !== null;
 
 /** An ISO time from the API in seconds, as the protocol counts; undefined for anything that is not one. */

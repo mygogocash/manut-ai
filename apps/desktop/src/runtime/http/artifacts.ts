@@ -41,7 +41,6 @@ import { isObj } from "../../lib/guards";
 export const ARTIFACTS_PATH = "/v1/artifacts";
 export const ARTIFACTS_REMOVE_PATH = "/v1/artifacts/remove";
 
-type Obj = Record<string, unknown>;
 const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
 const PUBLISHING: readonly Publishing[] = ["on", "feature_disabled", "artifact_origin_not_configured"];
 

@@ -72,7 +72,7 @@ function refit(p: PanelTerm): void {
   }
 }
 
-function create([{ Terminal }, { FitAddon }]: Xterm, key: number, want: string | null): PanelTerm {
+function create([{ Terminal }, { FitAddon }]: Xterm, key: number): PanelTerm {
   const settings = readTermSettings();
   const theme = termTheme(look, settings);
   const el = document.createElement("div");
@@ -217,7 +217,7 @@ export function attachTerm(key: number, want: string | null, box: HTMLElement, m
   const mount = (m: Xterm) => {
     let p = terms.get(key);
     const fresh = !p;
-    if (!p) p = create(m, key, want);
+    if (!p) p = create(m, key);
     const pt = p;
     box.appendChild(pt.el);
     if (fresh) {

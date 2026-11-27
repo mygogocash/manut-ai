@@ -4,7 +4,7 @@
 import { useLanded } from "../parts/arrival";
 import { useState, type KeyboardEvent } from "react";
 import type { SlotProps } from "../../features";
-import { activityText, getStore, liveLabel, subagentEnded, THINKING, WORKING, type Step, type Turn } from "../../state/store";
+import { getStore, liveLabel, subagentEnded, THINKING, WORKING, type Step } from "../../state/store";
 import { ChevronRight, Spinner } from "../../ui";
 import { elapsed } from "../../app/time";
 import { useClock } from "../../app/clock";

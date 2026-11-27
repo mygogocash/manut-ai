@@ -214,7 +214,6 @@ function approvalOf(a: ShopApproval) {
   };
 }
 
-type Obj = Record<string, unknown>;
 const isStr = (v: unknown): v is string => typeof v === "string";
 const isId = (v: unknown): v is string => typeof v === "string" && v.length > 0;
 const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);

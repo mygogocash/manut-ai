@@ -5,6 +5,7 @@
     "typescript/no-floating-promises": "warn",
     "typescript/no-misused-promises": "warn",
     "react/exhaustive-deps": "warn",
+    "eslint/no-unused-vars": ["warn", { "ignoreRestSiblings": true, "argsIgnorePattern": "^_", "varsIgnorePattern": "^_", "caughtErrorsIgnorePattern": "^_" }],
     "react/rules-of-hooks": "error"
   },
   "ignorePatterns": ["**/dist/**", "**/node_modules/**", "**/target/**", "**/gen/**", "**/.wrangler/**"]

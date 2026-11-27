@@ -23,13 +23,11 @@
 // message by its saved copy's path. An oh-my-hermes session takes no files: the bridge attaches files to a bot's
 // main chat only.
 import { useSyncExternalStore } from "react";
-import type { Terminal } from "@xterm/xterm";
-import { live } from "./term/engine";
 import { readTermSettings } from "./term/settings";
 import { forgetHistory, pruneHistory, watchHistorySetting } from "./term/history";
 import { savedPanelKeys } from "../terminal/state";
 import { LINK_COPIED_EVENT, newLinkId, termLinkUrl } from "./termLink";
-import { acpRow, agentDef, agentLabel, continues, draftAgent, draftFolder, draftOpen, hermesOnly, installLine, isBuiltin, isGone, isShell, isTerminalRec, SHELL, OPEN_KEY, opensAs, pushRecent, savedOpen, RECENT_KEY, registerAcp, sessionMode, folderName, type AgentId, type OpenAs, type Unseen, type SessionRec } from "./agents";
+import { acpRow, agentDef, agentLabel, continues, draftAgent, draftFolder, draftOpen, hermesOnly, installLine, isBuiltin, isGone, isShell, isTerminalRec, OPEN_KEY, opensAs, pushRecent, savedOpen, RECENT_KEY, registerAcp, sessionMode, folderName, type AgentId, type OpenAs, type Unseen, type SessionRec } from "./agents";
 import { clearSuggestion, noteSuggestion } from "../chat/suggestion";
 import { suggestOn, suggestWorks } from "../lib/suggest";
 import { acceptTitle, chatMaterial, titleRequest, wantsTitle, whyKey } from "./titleWords";
@@ -83,7 +81,7 @@ import { getSplit, groupOf, leaveIn, setSplit } from "./splitState";
 import { folderGroups, getFolderPrefs, orderFolders, pathKey } from "./folders";
 import { broughtBackNote, REWINDS, rewoundNote, TurnBook, turnTitle } from "./rewind";
 import { NO_RULES, signedOutSaid, errText } from "./sessionErrors";
-import { ACCOUNT_CLI, accountFor, RESIZE_SETTLE_MS, newConversationId, TERM_REOPENS, termComesBack } from "./sessionPure";
+import { accountFor, TERM_REOPENS, termComesBack } from "./sessionPure";
 export { ACCOUNT_CLI, accountFor, RESIZE_SETTLE_MS, newConversationId } from "./sessionPure";
 import { readRecent, readTitles, titleKey, TITLED, readOpens } from "./sessionBooks";
 export { NO_RULES, signedOutSaid } from "./sessionErrors";
@@ -1828,7 +1826,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     termAgain,
     histBack,
   });
-  const { termRuns, startTerm, pressed, disposeTerm, attach, mount, previewHistory, typeAllowed, dropOnTerminal, setLook } = terminals;
+  const { termRuns, disposeTerm, attach, mount, previewHistory, typeAllowed, dropOnTerminal, setLook } = terminals;
 
   const stopChat = async (id: string) => {
     const p = procs.get(id);
