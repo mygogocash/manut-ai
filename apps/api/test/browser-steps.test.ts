@@ -6,7 +6,7 @@ import type { AuditEntry } from "../src/audit-log";
 import { sha256Hex } from "../src/auth";
 import type { Env } from "../src/index";
 import { startAttempt, workerPort, type JobFlags, type WorkerPort } from "../src/job-flow";
-import type { BrowserStepView, NewBrowserStep } from "../src/sign-in-vault";
+import { stepOrder, type BrowserStepView, type NewBrowserStep } from "../src/sign-in-vault";
 import type { AttemptJSON, TaskEventJSON } from "../src/task-object";
 import { tenantCall } from "../src/tenant-data";
 
@@ -255,6 +255,20 @@ describe("an outpost's events in the attempt's log", () => {
     expect(ended.status).toBe(409);
     expect(await ended.json()).toEqual({ error: "stale_attempt" });
     expect((await exported(s)).events.filter((entry) => entry.via === `attempt:outpost:${attemptId}`)).toHaveLength(1);
+  });
+});
+
+describe("the order steps are handed out in", () => {
+  it("is the order they were asked for, also for steps queued in the same millisecond, never their random ids' order", () => {
+    const at = "2026-11-27T05:00:00.000Z";
+    const steps = [
+      { queuedAt: at, seq: 7, id: "00000000-0000-4000-8000-000000000000" },
+      { queuedAt: at, seq: 6, id: "ffffffff-ffff-4fff-bfff-ffffffffffff" },
+      { queuedAt: "2026-11-27T04:59:59.999Z", seq: 8, id: "88888888-8888-4888-8888-888888888888" },
+    ];
+    expect([...steps].sort(stepOrder).map((step) => step.seq)).toEqual([8, 6, 7]);
+    // a step queued before the order existed sorts first among its millisecond, then by its id as before
+    expect([{ queuedAt: at, seq: 1, id: "a" }, { queuedAt: at, id: "b" }].sort(stepOrder).map((step) => step.id)).toEqual(["b", "a"]);
   });
 });
 
