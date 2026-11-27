@@ -139,8 +139,11 @@ exit "\${WAIT_VERDICT:-0}"
     chmodSync(join(bin, "ci-wait.sh"), 0o755);
     const message = join(home, "message");
     writeFileSync(message, "Merge item 1\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n");
+    // The lead's worktree is named each time (LEAD_WORKTREE); `extra` may take it away or point it elsewhere, and `at`
+    // may hand the script another folder as the item's.
     const finish = (extra = {}, ...args) => {
-      const out = spawnSync("bash", [join(bin, "finish-item.sh"), ...args, item, message], { env: { ...env, ...extra }, encoding: "utf8" });
+      const at = extra.ITEM ?? item;
+      const out = spawnSync("bash", [join(bin, "finish-item.sh"), ...args, at, message], { env: { ...env, LEAD_WORKTREE: lead, ...extra }, encoding: "utf8" });
       return { status: out.status, out: out.stdout + out.stderr };
     };
     const asked = () => (existsSync(join(bin, "asked")) ? readFileSync(join(bin, "asked"), "utf8") : "");
@@ -195,5 +198,47 @@ exit "\${WAIT_VERDICT:-0}"
     assert.equal(status, 1);
     assert.match(out, /merge feat\/continue-pilot-week-1 into feat\/x, push, and let CI \(or the gate\) check it again first/);
     assert.equal(w.asked(), "");
+  });
+
+  it("refuses without the lead's worktree named, merging and removing nothing", () => {
+    const w = world("no-lead");
+    const before = w.leadHead();
+    const unset = w.finish({ LEAD_WORKTREE: "" }, "--ci");
+    assert.equal(unset.status, 1);
+    assert.match(unset.out, /set LEAD_WORKTREE to the lead's worktree/);
+    const gone = w.finish({ LEAD_WORKTREE: join(w.repo, "no-such-folder") }, "--ci");
+    assert.equal(gone.status, 1);
+    assert.match(gone.out, /set LEAD_WORKTREE/);
+    assert.equal(w.asked(), "");
+    assert.equal(w.leadHead(), before);
+    assert.ok(existsSync(w.item));
+  });
+
+  it("never takes the lead's own worktree as the item, so it is never removed", () => {
+    const w = world("lead-as-item");
+    const before = w.leadHead();
+    const { status, out } = w.finish({ ITEM: w.lead }, "--ci");
+    assert.equal(status, 1);
+    assert.match(out, /the item's worktree is the lead's: nothing merged or removed/);
+    assert.equal(w.asked(), "");
+    assert.ok(existsSync(w.lead));
+    assert.equal(w.leadHead(), before);
+  });
+
+  it("takes only a helper's worktree that start-item.sh made, never a session's shared one", () => {
+    const w = world("shared");
+    // A worktree a lead session works in, elsewhere than ~/.t3/worktrees/manut-ai/cc-item…, on a branch GitHub has.
+    const shared = join(dirname(w.repo), "..", ".paradev", "worktrees", "manut-ai", "continue-session");
+    git(w.env, w.repo, "worktree", "add", "-q", "-b", "feat/shared", shared, "feat/continue-pilot-week-1");
+    commit(w.env, shared, "shared.txt", "shared\n");
+    git(w.env, shared, "push", "-q", "-u", "origin", "feat/shared");
+    const before = w.leadHead();
+    const { status, out } = w.finish({ ITEM: shared }, "--ci");
+    assert.equal(status, 1);
+    assert.match(out, /is not a helper's worktree from start-item.sh/);
+    assert.equal(w.asked(), "");
+    assert.ok(existsSync(shared));
+    assert.notEqual(git(w.env, w.repo, "ls-remote", "origin", "refs/heads/feat/shared"), "");
+    assert.equal(w.leadHead(), before);
   });
 });

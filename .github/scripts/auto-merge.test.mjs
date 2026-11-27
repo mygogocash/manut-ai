@@ -71,7 +71,7 @@ describe("auto-merge.sh", () => {
     const msg = join(home, "message");
     writeFileSync(msg, message);
     const merge = (extra = {}, ...args) => {
-      const out = spawnSync("bash", [join(bin, "auto-merge.sh"), ...args, item, msg], { env: { ...env, ...extra }, encoding: "utf8" });
+      const out = spawnSync("bash", [join(bin, "auto-merge.sh"), ...args, item, msg], { env: { ...env, LEAD_WORKTREE: lead, ...extra }, encoding: "utf8" });
       return { status: out.status, out: out.stdout + out.stderr };
     };
     const asked = () => (existsSync(join(bin, "asked")) ? readFileSync(join(bin, "asked"), "utf8") : "");
@@ -202,6 +202,17 @@ describe("auto-merge.sh", () => {
     assert.equal(status, 1);
     assert.equal(w.leadHead(), before);
   });
+
+  it("refuses without the lead's worktree named: no classifier read, no CI asked, nothing merged", () => {
+    const w = world("no-lead", { "docs/a.md": "two\n" });
+    const before = w.leadHead();
+    const { status, out } = w.merge({ LEAD_WORKTREE: "" });
+    assert.equal(status, 1);
+    assert.match(out, /auto-merge refused: set LEAD_WORKTREE to the lead's worktree/);
+    assert.equal(w.asked(), "");
+    assert.equal(w.leadHead(), before);
+    assert.ok(existsSync(w.item));
+  });
 });
 
 /** A stand-in gh for the Dependabot script: lists pull requests from prs.json, answers run list and run view from files
@@ -281,7 +292,7 @@ describe("auto-merge-dependabot.sh", () => {
     const calls = () => (existsSync(join(bin, "calls")) ? readFileSync(join(bin, "calls"), "utf8") : "");
     const run = (extra = {}, ...args) => {
       const out = spawnSync("bash", [join(scriptDir, "auto-merge-dependabot.sh"), ...args], {
-        env: { ...env, ...extra, PATH: `${bin}:${env.PATH}`, CI_WAIT_POLL: "0", AUTO_MERGE_POLL: "0", AUTO_MERGE_POLL_TRIES: "5" }, encoding: "utf8",
+        env: { ...env, LEAD_WORKTREE: lead, ...extra, PATH: `${bin}:${env.PATH}`, CI_WAIT_POLL: "0", AUTO_MERGE_POLL: "0", AUTO_MERGE_POLL_TRIES: "5" }, encoding: "utf8",
       });
       return { status: out.status, out: out.stdout + out.stderr };
     };
@@ -412,6 +423,14 @@ describe("auto-merge-dependabot.sh", () => {
     const { out } = w.run({}, "--yes");
     assert.match(out, /review {3}#1 Bump minor: its head could not be fetched, or moved while listing/);
     assert.deepEqual(merges(w.calls()), []);
+  });
+
+  it("refuses without the lead's worktree named, whose classifier is the only one trusted", () => {
+    const w = world("dep-no-lead", [{ ...minor }]);
+    const { status, out } = w.run({ LEAD_WORKTREE: "" }, "--yes");
+    assert.equal(status, 1);
+    assert.match(out, /set LEAD_WORKTREE to the lead's worktree/);
+    assert.equal(w.calls(), "");
   });
 
   it("says so when there is nothing to do, and reads only Dependabot's pull requests into pilot/week-1", () => {

@@ -1,6 +1,6 @@
 #!/bin/bash
 # Merges an item the classifier calls low-risk, once CI is green on its exact head, without the lead's review.
-# Usage: auto-merge.sh [--dry-run] [--no-push] <item worktree> <merge message file>
+# Usage: LEAD_WORKTREE=<the lead's worktree> auto-merge.sh [--dry-run] [--no-push] <item worktree> <merge message file>
 #
 # Why: the owner agreed on 26 Nov 2026 that low-risk work (documentation, a refactor that changes nothing visible, minor
 # and patch dependency bumps) merges on a green CI run, and the lead keeps reviewing features and security work. GitHub's
@@ -31,8 +31,10 @@ done
 wt=${1:?usage: auto-merge.sh [--dry-run] [--no-push] <item worktree> <merge message file>}
 msg=${2:?merge message file}
 here=$(cd "$(dirname "$0")" && pwd)
-lead="$HOME/.t3/worktrees/manut-ai/t3-0c461873-e8dd6bc2489b4766"
 refuse() { echo "auto-merge refused: $*"; exit 1; }
+# The lead's worktree, named each time (finish-item.sh says why), and handed on to finish-item.sh in the environment.
+lead=${LEAD_WORKTREE:-}
+[ -n "$lead" ] && [ -d "$lead" ] || refuse "set LEAD_WORKTREE to the lead's worktree, the one that pushes HEAD:pilot/week-1"
 
 [ -d "$wt" ] || refuse "no worktree at $wt"
 [ -f "$msg" ] || refuse "no merge message file at $msg"

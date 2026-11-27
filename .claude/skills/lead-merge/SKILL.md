@@ -8,7 +8,9 @@ description: The lead's routine for one plan item in Manut AI - start a helper's
 One item is one branch in one worktree, built by a helper, merged by the lead. `docs/handoff.md` says what runs now and
 `docs/plan.md` has the items. The owner merges to `main`; the lead never does.
 
-Scripts are in `scripts/` beside this file. Section 4 says when the lead need not review an item at all. Run them from anywhere; they know the paths on the owner's Mac.
+Scripts are in `scripts/` beside this file. Section 4 says when the lead need not review an item at all. Run them from anywhere; they know the paths on the owner's Mac but one: the lead's own worktree, which the merging scripts take in `LEAD_WORKTREE` (since 27 Nov 2026 each lead session works in a worktree of its own, a Paradev workspace for one, rather than T3 Code's one fixed folder).
+
+**One lead at a time.** On 27 Nov two lead sessions were started in the same Paradev worktree and merged the same pull request seconds apart, one switching the worktree's branch under the other. Before leading, look for another session there (`ListAgents`, and `lsof -d cwd | grep <worktree>`), agree by message who leads, and let the other step back before either merges or pushes.
 
 ## 1. Start an item
 
@@ -44,8 +46,8 @@ Read its report for what it did NOT do or could not check, then:
 1. Read the risky part of the diff yourself: anything that removes, sends, pays, runs a command, starts a program, or
    keeps a secret. Check a flag it used against the tool's own `--help`.
 2. Make sure the item's branch holds the lead's newest commit. The helper merged it in before pushing; if the lead's
-   branch has moved since, merge it again in the item's worktree (`git merge --no-edit feat/continue-pilot-week-1`) and
-   push. Conflicts are nearly always two items adding at one place:
+   branch has moved since, merge it again in the item's worktree (`git fetch origin && git merge --no-edit
+   origin/pilot/week-1`, since the lead pushes each merge there) and push. Conflicts are nearly always two items adding at one place:
    ```bash
    .claude/skills/lead-merge/scripts/keep-both.py $(git diff --name-only --diff-filter=U -- apps/desktop/src/i18n)
    ```
@@ -95,7 +97,9 @@ life the item changed (`apps/desktop`, `pnpm exec playwright test e2e/<spec>`). 
 1. Write the merge message to a file (what it does for a person, the safety rule if it has one, what the lead checked,
    what is not verified, the CI run it merged on; `Co-Authored-By` for the helper's model and for the lead).
    `git commit -F -` cannot read stdin in this shell, so always a file.
-2. `.claude/skills/lead-merge/scripts/finish-item.sh --ci <item worktree> <message file>`: requires the item's head to be
+2. `LEAD_WORKTREE=<the lead's worktree> .claude/skills/lead-merge/scripts/finish-item.sh --ci <item worktree> <message file>`:
+   refuses unless the item is a helper's worktree `start-item.sh` made (`~/.t3/worktrees/manut-ai/cc-item…`), never the
+   lead's own or a session's shared one, since it removes the item's worktree at the end; requires the item's head to be
    the branch's head on GitHub, waits for CI's run of exactly that commit and refuses unless it is green, merges that
    commit `--no-ff`, checks the merged tree is the checked one, and removes the worktree and the branch. A push while it
    waits, or a lead's branch that moved, refuses the merge. Without `--ci` (when CI is down) it trusts the gate and
@@ -132,8 +136,8 @@ Which to use:
 
 | When | Run |
 | --- | --- |
-| A helper reports a docs item, or a refactor the lead has read and means to merge on CI alone (write `Risk: refactor` as the last paragraph of the merge message) | `auto-merge.sh [--dry-run] [--no-push] <item worktree> <message file>` instead of `finish-item.sh --ci` |
-| Dependabot's pull requests into `pilot/week-1` are waiting | `auto-merge-dependabot.sh` (a dry run: lists what it would merge and what is left for the lead), then `auto-merge-dependabot.sh --yes` |
+| A helper reports a docs item, or a refactor the lead has read and means to merge on CI alone (write `Risk: refactor` as the last paragraph of the merge message) | `LEAD_WORKTREE=<the lead's worktree> auto-merge.sh [--dry-run] [--no-push] <item worktree> <message file>` instead of `finish-item.sh --ci` |
+| Dependabot's pull requests into `pilot/week-1` are waiting | `LEAD_WORKTREE=<the lead's worktree> auto-merge-dependabot.sh` (a dry run: lists what it would merge and what is left for the lead), then the same with `--yes` |
 | A feature, anything that touches security, a Settings page, words, a permission, CI or these rules | `finish-item.sh --ci` after the lead's own review, as in section 3 |
 
 `auto-merge.sh` refuses, and prints why, unless both worktrees are clean, the lead's branch is in the item's, the message
