@@ -10,8 +10,9 @@
 //!   originator}`), and `event_msg` / `token_count` lines carry a running `info.total_token_usage` (`input_tokens`,
 //!   `cached_input_tokens`, `cache_write_input_tokens`, `output_tokens`). What a line adds is its total minus the
 //!   total before it. Codex's `input_tokens` includes the cached ones (`total_tokens` is input plus output), so the
-//!   scan keeps the cached part apart. Rollouts that Codex wrote as `.jsonl.zst` are not read (no decompressor is in
-//!   the app); they are counted as skipped, compressed.
+//!   scan keeps the cached part apart. Rollouts that Codex wrote as `.jsonl.zst` are read the same way, decompressed as
+//!   a stream through zst.rs and capped at `Limits::file_bytes` of output; one that inflates past that is counted
+//!   `too_big`, one that is corrupt or cut short is counted `compressed` (could not be unpacked) and adds nothing.
 //!
 //! What leaves a scan: dates, token counts and a project folder's NAME (the last part of a `cwd`), never a path above
 //! the name, a message, or a key. A link, a file over the size cap and a file that is not JSON lines are skipped and
@@ -55,7 +56,8 @@ pub struct Limits {
     pub files: usize,
     /// Bytes read a scan (a cached file reads none).
     pub total_bytes: u64,
-    /// A file over this is skipped, not read.
+    /// A file over this is skipped, not read. A compressed rollout is held to it twice: its size on disk, and what it
+    /// inflates to (zst.rs), the same budget for a rollout whichever way it is stored.
     pub file_bytes: u64,
     /// Directory entries visited a scan.
     pub walk: usize,
@@ -91,6 +93,10 @@ impl Tokens {
 enum Skip {
     Link,
     NotJson,
+    /// A compressed rollout that is corrupt or cut short.
+    Unpacked,
+    /// A compressed rollout that inflates past the cap.
+    TooBig,
 }
 
 /// What one file holds once read: who it belongs to, and its tokens per quarter hour.
@@ -103,6 +109,11 @@ struct FileUse {
 }
 
 type Parsed = Result<FileUse, Skip>;
+
+/// How much a compressed rollout's size is multiplied by when charged to a scan's `total_bytes`: JSON lines of this kind
+/// compress about tenfold (the test fixture, 61 times, is the easy end), so eight keeps the budget meaningful without
+/// reading the file twice to know.
+const ZST_RATIO: u64 = 8;
 
 /// Results by file, valid while a file's size and modified time (ns) are the same.
 #[derive(Default)]
@@ -122,6 +133,7 @@ pub struct Skipped {
     pub links: u32,
     pub too_big: u32,
     pub not_json: u32,
+    /// Compressed Codex rollouts that could not be unpacked (corrupt or cut short); the ones that unpack are read.
     pub compressed: u32,
     /// Sessions Manut AI started (it counts those itself).
     pub app_started: u32,
@@ -336,9 +348,21 @@ fn codex_totals(t: &Value) -> Tokens {
 }
 
 /// Codex's rollout: the growth of its running total, by quarter hour.
-fn parse_codex(path: &Path, id_from_name: String) -> Parsed {
-    let Ok(f) = File::open(path) else { return Err(Skip::NotJson) };
-    let mut r = BufReader::new(f);
+///
+/// A `.jsonl.zst` one is decompressed as a stream capped at `cap` bytes (zst.rs). A failure part-way (corrupt, cut
+/// short, over the cap) drops everything read so far: a half-read session would count too little without saying so.
+fn parse_codex(path: &Path, id_from_name: String, cap: u64) -> Parsed {
+    let zst = crate::zst::is_zst(path);
+    let mut r: Box<dyn BufRead> = if zst {
+        match crate::zst::open(path, cap) {
+            Ok(z) => Box::new(z),
+            Err(crate::zst::Fail::OverCap) => return Err(Skip::TooBig),
+            Err(crate::zst::Fail::Corrupt) => return Err(Skip::Unpacked),
+        }
+    } else {
+        let Ok(f) = File::open(path) else { return Err(Skip::NotJson) };
+        Box::new(BufReader::new(f))
+    };
     let (mut buf, mut first, mut first_ok, mut good, mut bad) = (Vec::new(), true, false, 0u32, 0u32);
     let (mut project, mut session, mut app) = (String::new(), id_from_name, false);
     let mut buckets: BTreeMap<i64, Tokens> = BTreeMap::new();
@@ -346,8 +370,15 @@ fn parse_codex(path: &Path, id_from_name: String) -> Parsed {
     loop {
         buf.clear();
         match r.read_until(b'\n', &mut buf) {
-            Ok(0) | Err(_) => break,
+            Ok(0) => break,
             Ok(_) => {}
+            Err(e) if zst => {
+                return Err(match crate::zst::classify(&e) {
+                    crate::zst::Fail::OverCap => Skip::TooBig,
+                    crate::zst::Fail::Corrupt => Skip::Unpacked,
+                })
+            }
+            Err(_) => break,
         }
         let line = buf.trim_ascii();
         if line.is_empty() {
@@ -571,10 +602,6 @@ pub fn scan(tool: &str, homes: &[PathBuf], o: &Opts, cache: &mut Cache) -> Repor
             break;
         }
         live.insert(c.path.clone());
-        if c.compressed {
-            skipped.compressed += 1;
-            continue;
-        }
         if c.size > o.limits.file_bytes {
             skipped.too_big += 1;
             continue;
@@ -586,18 +613,20 @@ pub fn scan(tool: &str, homes: &[PathBuf], o: &Opts, cache: &mut Cache) -> Repor
                 p
             }
             None => {
-                if bytes.saturating_add(c.size) > o.limits.total_bytes {
+                // a compressed file's cost is what it will inflate to, not what it takes on disk
+                let cost = if c.compressed { c.size.saturating_mul(ZST_RATIO) } else { c.size };
+                if bytes.saturating_add(cost) > o.limits.total_bytes {
                     skipped.over_limit += 1;
                     partial = true;
                     continue;
                 }
-                bytes += c.size;
+                bytes += cost;
                 files_read += 1;
                 // the file is opened only now, after a last look that it is still a plain file (not swapped for a link)
                 let p = match std::fs::symlink_metadata(&c.path) {
                     Ok(m) if m.is_file() && !m.file_type().is_symlink() => match tool {
                         "claude" => parse_claude(&c.path, c.session.clone()),
-                        _ => parse_codex(&c.path, c.session.clone()),
+                        _ => parse_codex(&c.path, c.session.clone(), o.limits.file_bytes),
                     },
                     _ => Err(Skip::Link),
                 };
@@ -608,6 +637,8 @@ pub fn scan(tool: &str, homes: &[PathBuf], o: &Opts, cache: &mut Cache) -> Repor
         match parsed {
             Err(Skip::Link) => skipped.links += 1,
             Err(Skip::NotJson) => skipped.not_json += 1,
+            Err(Skip::Unpacked) => skipped.compressed += 1,
+            Err(Skip::TooBig) => skipped.too_big += 1,
             Ok(fu) => {
                 if fu.app_started || o.exclude.contains(&fu.session) || o.exclude.contains(&c.session) {
                     skipped.app_started += 1;
@@ -881,13 +912,93 @@ mod tests {
         assert_eq!(run("codex", &t.0, &ex, &utc, &mut Cache::default()).today, 0);
     }
 
+    /// A rollout's bytes, with the modified time every test file here has.
+    fn put(path: &Path, bytes: &[u8]) {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, bytes).unwrap();
+        File::options().write(true).open(path).unwrap().set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(NOW as u64)).unwrap();
+    }
+
+    fn zst_home(tag: &str, name: &str, bytes: &[u8]) -> Tmp {
+        let t = Tmp::new(tag);
+        put(&t.0.join("sessions/2026/11/20").join(name), bytes);
+        t
+    }
+
     #[test]
-    fn a_compressed_rollout_is_counted_skipped_not_read() {
-        let t = Tmp::new("zst");
-        let p = t.0.join("sessions/2026/11/20").join(format!("rollout-z-{SID}.jsonl.zst"));
-        write(&p, &["not readable".to_string()]);
-        let r = run("codex", &t.0, &HashSet::new(), &utc, &mut Cache::default());
-        assert_eq!((r.skipped.compressed, r.files_read, r.rows.len()), (1, 0, 0));
+    fn a_compressed_rollout_is_read_like_its_plain_twin() {
+        use crate::zst::tests::{PLAIN, ZST};
+        let plain = zst_home("twin-plain", &format!("rollout-z-{SID}.jsonl"), PLAIN);
+        let packed = zst_home("twin-zst", &format!("rollout-z-{SID}.jsonl.zst"), ZST);
+        let a = run("codex", &plain.0, &HashSet::new(), &utc, &mut Cache::default());
+        let b = run("codex", &packed.0, &HashSet::new(), &utc, &mut Cache::default());
+        // the fixture: totals 1000/400/50, 2500/1900/120, 2600/1950/200 (input, cached, output)
+        assert_eq!(a.rows.len(), 1);
+        assert_eq!((a.rows[0].project.as_str(), a.rows[0].tokens), ("api", Tokens { input: 650, output: 200, cache_read: 1950, cache_write: 0 }));
+        assert_eq!(b.rows, a.rows);
+        assert_eq!((b.today, b.week, b.files_read), (a.today, a.week, 1));
+        assert_eq!(b.skipped, Skipped::default());
+        // the session id inside the file counts as Manut AI's own when the page names it, as for a plain file
+        let ex: HashSet<String> = [SID.to_string()].into();
+        let c = run("codex", &packed.0, &ex, &utc, &mut Cache::default());
+        assert_eq!((c.rows.len(), c.skipped.app_started), (0, 1));
+    }
+
+    #[test]
+    fn a_corrupt_or_cut_compressed_rollout_is_skipped_and_counted_and_adds_nothing() {
+        use crate::zst::tests::ZST;
+        let name = format!("rollout-z-{SID}.jsonl.zst");
+        let cases: [(&str, Vec<u8>); 4] = [
+            ("junk", b"not a zstd frame at all\n".to_vec()),
+            ("empty", Vec::new()),
+            ("cut-early", ZST[..ZST.len() / 2].to_vec()),
+            ("cut-late", ZST[..ZST.len() - 1].to_vec()),
+        ];
+        for (tag, bytes) in cases {
+            let t = zst_home(tag, &name, &bytes);
+            let r = run("codex", &t.0, &HashSet::new(), &utc, &mut Cache::default());
+            assert_eq!((r.skipped.compressed, r.rows.len(), r.today), (1, 0, 0), "{tag}");
+            assert_eq!((r.skipped.too_big, r.skipped.not_json, r.skipped.links), (0, 0, 0), "{tag}");
+        }
+        // a second look at the same unchanged file is answered from the cache, with the same count
+        let t = zst_home("cached", &name, &ZST[..100]);
+        let mut cache = Cache::default();
+        assert_eq!(run("codex", &t.0, &HashSet::new(), &utc, &mut cache).skipped.compressed, 1);
+        let again = run("codex", &t.0, &HashSet::new(), &utc, &mut cache);
+        assert_eq!((again.skipped.compressed, again.files_cached), (1, 1));
+    }
+
+    #[test]
+    fn a_compressed_rollout_that_inflates_past_the_cap_is_counted_too_big() {
+        use crate::zst::tests::{PLAIN, ZST};
+        let t = zst_home("over", &format!("rollout-z-{SID}.jsonl.zst"), ZST);
+        let ex = HashSet::new();
+        let cancel = AtomicBool::new(false);
+        let mut o = opts(&ex, &cancel, &utc);
+        // the file on disk is small and passes the size check; only its output is over the cap
+        o.limits.file_bytes = PLAIN.len() as u64 - 1;
+        assert!((ZST.len() as u64) < o.limits.file_bytes);
+        let r = scan("codex", &[t.0.clone()], &o, &mut Cache::default());
+        assert_eq!((r.skipped.too_big, r.skipped.compressed, r.rows.len()), (1, 0, 0));
+        // at exactly the plain size it is read
+        o.limits.file_bytes = PLAIN.len() as u64;
+        let r = scan("codex", &[t.0.clone()], &o, &mut Cache::default());
+        assert_eq!((r.skipped.too_big, r.today), (0, 2800));
+    }
+
+    #[test]
+    fn a_link_named_like_a_compressed_rollout_is_refused_not_followed() {
+        #[cfg(unix)]
+        {
+            use crate::zst::tests::ZST;
+            let away = zst_home("zlink-out", &format!("rollout-z-{SID}.jsonl.zst"), ZST);
+            let t = Tmp::new("zlink");
+            let day = t.0.join("sessions/2026/11/20");
+            std::fs::create_dir_all(&day).unwrap();
+            std::os::unix::fs::symlink(away.0.join(format!("sessions/2026/11/20/rollout-z-{SID}.jsonl.zst")), day.join(format!("rollout-z-{SID2}.jsonl.zst"))).unwrap();
+            let r = run("codex", &t.0, &HashSet::new(), &utc, &mut Cache::default());
+            assert_eq!((r.skipped.links, r.rows.len(), r.files_read), (1, 0, 0));
+        }
     }
 
     #[test]
