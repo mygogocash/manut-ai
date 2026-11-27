@@ -1,7 +1,7 @@
 // Settings › Worktrees' saved choices (src/lib/worktrees.ts): the defaults, what a damaged or hand-edited value becomes, and when
 // a merged clean-up is due.
 import { beforeEach, describe, expect, it } from "vitest";
-import { CLEAN_EVERY_MS, cleanupDue, lastCleanup, markCleanup, parseWorktrees, prefixProblem, setWorktreeSettings, startOf, WORKTREE_DEFAULTS, worktreeSettings } from "./worktrees";
+import { CLEAN_EVERY_MS, cleanupDue, lastCleanup, markCleanup, parseProjectWorktrees, parseWorktrees, prefixProblem, projectsWithOwnWorktrees, projectWorktrees, setProjectWorktrees, setWorktreeSettings, startOf, WORKTREE_DEFAULTS, worktreeSettings } from "./worktrees";
 
 const store = new Map<string, string>();
 beforeEach(() => {
@@ -52,5 +52,39 @@ describe("when a merged clean-up runs", () => {
     markCleanup("/w/a", 10);
     markCleanup("/w/b", 20);
     expect([lastCleanup("/w/a"), lastCleanup("/w/b")]).toEqual([10, 20]);
+  });
+});
+
+describe("one project's own choices (item 99)", () => {
+  it("override every project's where set, follow them elsewhere, and keep where lanes are made one choice", () => {
+    setWorktreeSettings({ root: "/w/lanes", prefix: "team/", remote: false });
+    setProjectWorktrees("/w/shop/", { prefix: "shop/", remote: true });
+    // the same folder however its path is spelled
+    expect(worktreeSettings("/w/shop")).toEqual({ ...worktreeSettings(), prefix: "shop/", remote: true });
+    expect(worktreeSettings("/w/shop").root).toBe("/w/lanes");
+    expect(worktreeSettings("/w/other")).toEqual(worktreeSettings());
+    expect(projectsWithOwnWorktrees()).toEqual(["/w/shop"]);
+  });
+
+  it("go back to every project's choice one at a time, and the project is forgotten once it sets none", () => {
+    setProjectWorktrees("/w/shop", { prefix: "shop/", cleanMerged: true });
+    setProjectWorktrees("/w/shop", { prefix: null });
+    expect(projectWorktrees("/w/shop")).toEqual({ cleanMerged: true });
+    setProjectWorktrees("/w/shop", { cleanMerged: null });
+    expect(projectWorktrees("/w/shop")).toEqual({});
+    expect(projectsWithOwnWorktrees()).toEqual([]);
+  });
+
+  it("read as the very same object while nothing changed, so a view reading them does not draw itself without end", () => {
+    expect(projectWorktrees("/w/none")).toBe(projectWorktrees("/w/none"));
+    setProjectWorktrees("/w/shop", { remote: true });
+    expect(projectWorktrees("/w/shop")).toBe(projectWorktrees("/w/shop"));
+  });
+
+  it("read back only what can be used: a bad prefix, a relative folder or a damaged value follows every project's", () => {
+    expect(parseProjectWorktrees(JSON.stringify({ "/w/a": { prefix: "Bad Prefix", remote: true }, "rel/b": { remote: true }, "/w/c": "x" }))).toEqual({ "/w/a": { remote: true } });
+    expect(parseProjectWorktrees("{not json")).toEqual({});
+    setProjectWorktrees("/w/a", { prefix: "Bad Prefix" });
+    expect(projectWorktrees("/w/a")).toEqual({});
   });
 });

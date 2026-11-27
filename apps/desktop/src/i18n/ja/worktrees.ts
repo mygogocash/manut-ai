@@ -24,4 +24,13 @@ export const worktrees: Record<keyof typeof en, string> = {
   "worktrees.deleted.hint": "フォルダの中に変更や新しいものがなく、ブランチのすべてのコミットがリモートにあるときだけ削除します。そうでなければフォルダを残し、レーンの下に表示します。ブランチは必ず残ります。",
   "worktrees.merged.title": "プルリクエストがマージされたらフォルダを削除",
   "worktrees.merged.hint": "プロジェクトを開くとき、1 時間に 1 回まで gh または glab でプルリクエストを読みます。コミットが既定のブランチにあり、フォルダの中に変更や新しいものがなく、そのフォルダで作業中のチャットがないときだけ削除します。gh または glab にサインインしていなければ、確認できないと伝えて何もしません。",
+  "worktrees.project.title": "For one project",
+  "worktrees.project.hint": "A project can start from the remote, name its branches and clean up its own way. Where it says as all projects, it follows the choices above.",
+  "worktrees.project.pick": "Project",
+  "worktrees.project.none": "No projects yet: they come from your coding chats.",
+  "worktrees.project.asAll": "As all projects ({value})",
+  "worktrees.project.on": "On",
+  "worktrees.project.off": "Off",
+  "worktrees.project.prefixHint": "Leave it empty to use all projects' prefix, {prefix}",
+  "worktrees.project.prefixClear": "Use all projects'",
 };

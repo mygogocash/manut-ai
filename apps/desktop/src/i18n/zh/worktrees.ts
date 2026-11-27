@@ -24,4 +24,13 @@ export const worktrees: Record<keyof typeof en, string> = {
   "worktrees.deleted.hint": "只有当里面没有更改或新文件，且分支上的每个提交都在远程里时才删除。否则保留文件夹，并列在泳道下面。分支始终保留。",
   "worktrees.merged.title": "拉取请求合并后删除它的文件夹",
   "worktrees.merged.hint": "打开项目时通过 gh 或 glab 读取你的拉取请求，每小时最多一次。只有当提交已在默认分支里、文件夹里没有更改或新文件、且没有聊天还在里面工作时才删除。如果 gh 或 glab 没有登录，它会说无法确认，并且什么都不做。",
+  "worktrees.project.title": "For one project",
+  "worktrees.project.hint": "A project can start from the remote, name its branches and clean up its own way. Where it says as all projects, it follows the choices above.",
+  "worktrees.project.pick": "Project",
+  "worktrees.project.none": "No projects yet: they come from your coding chats.",
+  "worktrees.project.asAll": "As all projects ({value})",
+  "worktrees.project.on": "On",
+  "worktrees.project.off": "Off",
+  "worktrees.project.prefixHint": "Leave it empty to use all projects' prefix, {prefix}",
+  "worktrees.project.prefixClear": "Use all projects'",
 };

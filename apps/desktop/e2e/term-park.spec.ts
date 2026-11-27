@@ -360,7 +360,9 @@ test("a parked terminal whose CLI ends goes on as the shell in the remade xterm,
   await expect(row.getByTestId("term-row-mark")).toHaveAttribute("data-agent", "shell");
   await expect.poll(async () => (await ptyOf(page, a)) !== pa).toBe(true);
   const sp = await ptyOf(page, a);
-  await expect.poll(() => hasXterm(page, a)).toBe(true);
+  // the shell's xterm is made again once the shell has started: on a loaded CI runner that took past the default five seconds
+  // (twice in item 99a's run 45963102546, while it passed every time on a Mac), so this one wait has fifteen
+  await expect.poll(() => hasXterm(page, a), { timeout: 15_000 }).toBe(true);
   await page.evaluate(() => (window as unknown as { __manutPark: { set(l: object): void } }).__manutPark.set({ hiddenMs: 999_999, idleMs: 999_999, sweepMs: 1000 }));
   await out(page, sp, "shell output after the CLI ended\r\n");
   await show(page, a);

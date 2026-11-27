@@ -384,14 +384,15 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     if (!r?.cwd || !host.laneWorktree) return false;
     try {
       const current = await host.branch(r.cwd);
-      const ws = worktreeSettings();
+      // the project's own choices where it set them (item 99), every project's elsewhere
+      const ws = worktreeSettings(r.cwd);
       const plan = planLaneBranch({ title: r.title || r.promptTitle || "", current, prefix: ws.prefix });
       if (plan.kind === "none") return false;
       // a workflow's lane made with nobody there is the app's own doing (item 114): the shell reads the repository's config first
       const made = await host.laneWorktree(r.cwd, plan.names, unattended.has(id) ? { ...startOf(ws), unattended: true } : startOf(ws));
       if (!rec(id)) {
         // closed while its folder was made: the folder goes as a close takes it (nothing is in it yet)
-        void letLaneGo({ name: made.branch, base: made.base, dir: made.dir, worktree: made.worktree });
+        void letLaneGo({ name: made.branch, base: made.base, dir: made.dir, worktree: made.worktree }, r.cwd);
         return false;
       }
       patchRec(id, { lane: { name: made.branch, base: made.base, dir: made.dir, worktree: made.worktree } });
@@ -425,10 +426,10 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
 
   /** A closed session's lane folder goes when nothing in it would be lost: the shell keeps it when git says a file in it is
    *  changed or new (the Code page then lists it with Remove, which asks first), and the branch always stays. */
-  const letLaneGo = async (lane: LaneBranch | undefined) => {
+  const letLaneGo = async (lane: LaneBranch | undefined, project?: string) => {
     if (!lane?.worktree || !host.laneRemove) return;
-    // Settings › Worktrees: off keeps every folder of a deleted chat, listed with the kept ones
-    if (!worktreeSettings().cleanDeleted) return;
+    // Settings › Worktrees (the project's own choice, item 99): off keeps every folder of a deleted chat, listed with the kept ones
+    if (!worktreeSettings(project).cleanDeleted) return;
     try {
       // the shell's clean-up also leaves a folder whose branch has commits on no remote; an older shell only knows Remove
       if (host.laneRelease) await host.laneRelease(lane.worktree);
@@ -1414,7 +1415,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     const lane = { name: made.branch, base: made.base, dir: made.dir, worktree: made.worktree };
     if (!rec(p.lead)) {
       // the lead was closed while the folder was made: nothing is in it yet, so it goes as a close takes it
-      void letLaneGo(lane);
+      void letLaneGo(lane, lead.cwd);
       return { ok: false, why: tr("helpers.run.why.noLead") };
     }
     const agent = p.row.agent as AgentId;
@@ -2293,7 +2294,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     // the lane's folder goes once its agent has stopped, when nothing in it would be lost
     // a lane two chats share (Continue with, item 97) keeps its folder until the last of them is closed
     const free = !r || laneFree(state.list, r);
-    void stopChat(id).then(() => Promise.all([host.removeFiles(id).catch(() => undefined), free ? letLaneGo(r?.lane) : undefined]));
+    void stopChat(id).then(() => Promise.all([host.removeFiles(id).catch(() => undefined), free ? letLaneGo(r?.lane, r?.cwd) : undefined]));
     turns.forget(id);
     sentFiles.forget(id);
     // a helper lane that had not reported is back as stopped by the person; a lead's helper lanes stop and land nothing (item 102h)

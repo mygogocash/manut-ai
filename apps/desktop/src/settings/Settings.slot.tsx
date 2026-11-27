@@ -37,6 +37,7 @@ import { modLabel, setAfterSend, setFollowUp, useAfterSend, usePickedFollowUp, t
 import { QUIET_DAYS, setInbox, useInbox } from "../sidebar/inbox";
 import { TITLE_EFFORTS, TITLE_MODELS, setTitleModel, useTitleModel } from "../lib/titleModel";
 import { Icon, type IconName } from "../ui/icons";
+import { KeysRows } from "./KeysRows";
 
 export const slot = "settings";
 
@@ -437,13 +438,9 @@ function BotCard({ bot }: { bot: Bot }) {
 }
 
 const MOD = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+";
+/** The fixed keys, listed after the ones the person sets (KeysRows.tsx, item 99): set by the terminal, the split panes and the
+ *  cards themselves, so they are shown, not changed, here. */
 const SHORTCUTS: [string, Key][] = [
-  [`${MOD}1 … ${MOD}9`, "key.openBot"],
-  [`${MOD}K`, "key.search"],
-  [`${MOD}.`, "key.details"],
-  [`${MOD},`, "key.settings"],
-  [`${MOD}J`, "key.nextAsk"],
-  [MOD === "⌘" ? `${MOD}N · ${MOD}T` : `${MOD}N`, "key.newSession"],
   [MOD === "⌘" ? "⌘D · ⌘⇧D" : "Ctrl+Shift+D · Alt+Shift+D", "key.splitPane"],
   [MOD === "⌘" ? "⌘W" : "Ctrl+Shift+W", "key.closePane"],
   [MOD === "⌘" ? "⌘⌥ ←↑↓→" : "Ctrl+Alt+ ←↑↓→", "key.focusPane"],
@@ -851,7 +848,14 @@ function GeneralPage() {
         )}
       </div>
       <div className="st-gh">{t("set.keyboard")}</div>
+      <div className="st-note">{t("key.ownHint")}</div>
       <div className="st-grp" data-testid="shortcuts">
+        <Row title={t("key.openBot")}>
+          <Value>
+            <kbd className="st-kbd">{`${MOD}1 … ${MOD}9`}</kbd>
+          </Value>
+        </Row>
+        <KeysRows />
         {SHORTCUTS.map(([keys, what]) => (
           <Row key={keys} title={t(what)}>
             <Value>

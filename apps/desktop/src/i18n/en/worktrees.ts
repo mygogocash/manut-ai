@@ -22,4 +22,13 @@ export const worktrees = {
   "worktrees.deleted.hint": "Only when nothing in it is changed or new and every commit on its branch is on a remote. Otherwise the folder is kept and listed under the lanes. The branch always stays.",
   "worktrees.merged.title": "Remove the folder when its pull request has merged",
   "worktrees.merged.hint": "Reads your pull requests through gh or glab when a project opens, at most once an hour. Only when the commits are in the default branch, nothing in the folder is changed or new and no chat still works in it. Without gh or glab signed in, it says it cannot tell and does nothing.",
+  "worktrees.project.title": "For one project",
+  "worktrees.project.hint": "A project can start from the remote, name its branches and clean up its own way. Where it says as all projects, it follows the choices above.",
+  "worktrees.project.pick": "Project",
+  "worktrees.project.none": "No projects yet: they come from your coding chats.",
+  "worktrees.project.asAll": "As all projects ({value})",
+  "worktrees.project.on": "On",
+  "worktrees.project.off": "Off",
+  "worktrees.project.prefixHint": "Leave it empty to use all projects' prefix, {prefix}",
+  "worktrees.project.prefixClear": "Use all projects'",
 };
