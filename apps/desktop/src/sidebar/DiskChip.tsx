@@ -4,7 +4,7 @@ import { useEffect } from "react";
 import { t } from "../i18n";
 import { showNote } from "../lib/notify";
 import { gb, startDiskWatch, useDisk, type DiskState } from "../lib/disk";
-import { notifyEnabled, useStore } from "../state/store";
+import { getStore, notifyEnabled, useStore } from "../state/store";
 import { getHost } from "../sessions/host";
 import { Icon } from "../ui/icons";
 
@@ -30,8 +30,9 @@ export function DiskChip() {
   const s = useStore();
   const d = useDisk();
   useEffect(() => {
+    // started once; the note's press reads the store as it is then, not as it was when the watch began
     startDiskWatch(getHost(), (n) => {
-      if (notifyEnabled()) void showNote(n, () => s.openSettings("general"), true);
+      if (notifyEnabled()) void showNote(n, () => getStore().actions.openSettings("general"), true);
     });
   }, []);
   return <DiskChipView d={d} onOpen={() => s.openSettings("general")} />;

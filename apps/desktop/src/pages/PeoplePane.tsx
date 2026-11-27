@@ -602,12 +602,14 @@ export function usePeople(shop: string | null, row: ShopRow | null, shopName: st
   // The list is read again when the window comes back to the front: a helper may have joined through the link while the owner was
   // away (Mint opens the invite on their phone), and the page must not go on saying Invited. It is read quietly, as after a
   // refusal that says the list moved on, and never over a change that began meanwhile.
+  // followed by whether the page says "helper only", not by the words it says it with
+  const helperOnly = !!only;
   useEffect(() => {
-    if (!offered || only) return;
+    if (!offered || helperOnly) return;
     const onFocus = () => again.current();
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
-  }, [offered, shop, only === null]);
+  }, [offered, shop, helperOnly]);
 
   const ask = async <K extends Op>(op: K, params: OpParams<K>): Promise<OpResult<K>> => {
     const own = client.current;

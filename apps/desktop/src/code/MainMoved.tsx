@@ -5,7 +5,7 @@
 // it under Kit's dial, read for the project's default base. `MainMovedView` takes everything it shows as props and uses no
 // hooks, so a test can draw it; `MainMoved` reads the git and sends the ask, to the row's own lane first (`lane`).
 import "./kit.css";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { t } from "../i18n";
 import { DiffView } from "../chat/activity/Work";
 import { getHost } from "../sessions/host";
@@ -110,15 +110,19 @@ export function MainMoved({ root, dir, base, branch, lane, off }: MainMovedWhere
   const key = moved ? `${moved.branch}\n${moved.base}\n${moved.files.join("\n")}` : "";
 
   // Another project, or the state is gone: the two sides close. While they are open they are read again when the files change.
-  useEffect(() => setOpen(false), [at, moved === null]);
+  const gone = moved === null;
+  useEffect(() => setOpen(false), [at, gone]);
+  // the files as the newest read has them: the effect below follows `key`, their names, not the object a new read makes
+  const files = useRef<readonly string[]>([]);
+  files.current = moved?.files ?? [];
   useEffect(() => {
-    if (!open || !moved) {
+    if (!open || gone) {
       setBoth({ state: "closed" });
       return;
     }
     let live = true;
     setBoth((was) => (was.state === "open" ? was : { state: "loading" }));
-    readSides(getHost(), at, moved.files, base).then(
+    void readSides(getHost(), at, [...files.current], base).then(
       (sides) => {
         if (live) setBoth(sides ? { state: "open", sides } : { state: "failed" });
       },
@@ -130,7 +134,7 @@ export function MainMoved({ root, dir, base, branch, lane, off }: MainMovedWhere
       live = false;
     };
     // `key` stands for `moved`: the files, not the object a new read makes
-  }, [open, at, base, key]);
+  }, [open, gone, at, base, key]);
 
   if (!moved) return null;
   return (

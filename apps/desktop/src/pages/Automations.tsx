@@ -56,7 +56,8 @@ export function deliverParts(a: Automation, bots: Bot[]): { source: string | nul
 
 export function AutomationsPage() {
   const s = useStore();
-  const list = s.automations ?? [];
+  // one array while there are none, so what is counted from it is counted once, not at every render
+  const list = useMemo(() => s.automations ?? [], [s.automations]);
   const bots = s.bots;
   const [askBot, setAskBot] = useState<string | null>(null);
   const [text, setText] = useState("");

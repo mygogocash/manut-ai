@@ -191,6 +191,10 @@ function onSweptPress(e: PointerEvent) {
 /** Records the tab row's free space every frame while maximise / restore slides it (`max` flips), see above. */
 export function usePanelRowSweep(row: () => HTMLElement | null, max: boolean) {
   const first = useRef(true);
+  // the caller's way to the row as it is now: the sweep follows `max` alone, and a new function at each render must not
+  // start it again
+  const rowNow = useRef(row);
+  rowNow.current = row;
   useLayoutEffect(() => {
     if (first.current) {
       first.current = false;
@@ -201,7 +205,7 @@ export function usePanelRowSweep(row: () => HTMLElement | null, max: boolean) {
     swept = [];
     sweepEnd = start + SWEEP_MS;
     const sample = () => {
-      const r = row();
+      const r = rowNow.current();
       const b = r && freeBox(r);
       if (b) swept.push(b);
       if (performance.now() - start < SWEEP_MS) frame = requestAnimationFrame(sample);

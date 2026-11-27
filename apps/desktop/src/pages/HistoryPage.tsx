@@ -481,14 +481,16 @@ export function HistoryPage() {
   const [query, setQuery] = useState("");
   const box = useRef<HTMLInputElement>(null);
   const find = s.ui.findSeq;
+  const findQuery = s.ui.findQuery;
   useEffect(() => {
+    // a new search from the palette is a new `find`; its words alone changing brings nothing here
     if (find <= focusedFind) return;
     focusedFind = find;
     // the palette's "Search History for ..." brings its words
-    setQuery(s.ui.findQuery);
+    setQuery(findQuery);
     box.current?.focus();
     box.current?.select();
-  }, [find]);
+  }, [find, findQuery]);
   const { jobs, older, reload } = useJobList();
   const more = useShowOlder(reload);
   // the conversations of the folders brought over from Claude Code and Codex (item 101e)

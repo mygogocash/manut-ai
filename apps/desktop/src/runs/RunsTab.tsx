@@ -130,11 +130,17 @@ function RunRow({ r, on, nowS, onPick, testId = "run-row" }: { r: AgentRunSummar
 function useDetail(bot: string, summary: AgentRunSummary | null) {
   const [detail, setDetail] = useState<RunDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // What the detail is read again for, as plain values: the run, and that the list shows it changed (its time, or its
+  // counts, since a fan-out's task that finishes moves no time of the run). The summary object itself is new at every
+  // read of the list, so it is not what the effect follows.
+  const id = summary?.id;
+  const updated = summary?.updated;
+  const counts = summary ? JSON.stringify(summary.counts) : null;
   useEffect(() => {
-    if (!summary) return;
+    if (id === undefined) return;
     let live = true;
-    act()
-      .runsGet(bot, summary.id)
+    void act()
+      .runsGet(bot, id)
       .then(
         (d) => live && setDetail(d),
         (e) => live && setError(String(e?.message ?? e)),
@@ -142,9 +148,7 @@ function useDetail(bot: string, summary: AgentRunSummary | null) {
     return () => {
       live = false;
     };
-    // re-read when the list shows the run changed: its time, or its counts (a fan-out's task that finishes moves
-    // no time of the run)
-  }, [bot, summary?.id, summary?.updated, summary && JSON.stringify(summary.counts)]);
+  }, [bot, id, updated, counts]);
   // the PRs' GitHub states come apart from the run (the bridge asks `gh`, cached, 3 s at most): the graph is drawn
   // with the numbers first and takes their state marks when they come; a bridge that cannot say leaves them plain
   const [prs, setPrs] = useState<{ run: string; prs: Record<string, NodePr> } | null>(null);
