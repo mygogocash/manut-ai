@@ -129,8 +129,8 @@ const LINE_BREAK = /\r\n|[\n\r\v\f\u0085\u2028\u2029]/;
 export const isBuddyNote = (note: unknown): note is string => {
   if (typeof note !== "string" || [...note].length > BUDDY_NOTE_MAX) return false;
   const lines = note.split(LINE_BREAK);
+  // one line cannot both start with the head and be the end line, so a note has at least two
   return (
-    lines.length >= 2 &&
     lines[0].startsWith(BUDDY_NOTE_HEAD) &&
     lines[lines.length - 1] === BUDDY_NOTE_END &&
     lines.slice(1, -1).every((line) => !line.trimStart().startsWith("[Manut AI:") && line.trim() !== BUDDY_NOTE_END)

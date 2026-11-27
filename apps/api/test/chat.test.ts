@@ -752,6 +752,23 @@ describe("Manut AI's own lines, apart from the owner's words (item 102l-5)", () 
     expect(await message(owner.headers, body)).toMatchObject({ status: 200, body: { message: { sentOnFrom: "ก".repeat(MAX_FROM_CHARS), noted: true } } });
   });
 
+  it("cuts a title back to 120 characters when its mask came out longer than what it hid, and still takes the message the model is to answer", async () => {
+    const { shop, owner } = await chattingShop();
+    const model = quiet();
+    // 120 characters, and the mask of `token=a` is `token=••••`, three longer
+    const title = `${"a".repeat(112)} token=a`;
+    expect([...title]).toHaveLength(MAX_FROM_CHARS);
+    const sent = await direct(owner.headers, { text: "Hi", sentOnFrom: title }, { provider: model.provider });
+    expect(sent.status).toBe(200);
+    const kept = `${"a".repeat(112)} token=•`;
+    expect(sent.body.message.sentOnFrom).toBe(kept);
+    // the model's mark is masked once more, on its way in, as every text is: a mask cut in half is masked again, to its full length
+    expect(model.requests[0]!.messages).toEqual([{ role: "user", content: `Hi\n\n${markOf(`${"a".repeat(112)} token=••••`)}` }]);
+    // the title never failed the commit after the model was called: the exchange is kept
+    expect((await usage(shop.tenant)).counts).toMatchObject({ ok: 1 });
+    expect((await send<{ threads: Thread[] }>(owner.headers, "GET", "/v1/chat/threads")).body.threads).toHaveLength(1);
+  });
+
   it("keeps, through the shop's object, only a title it could have kept and noted: true, whatever the Worker sends it", async () => {
     const { shop, owner } = await chattingShop();
     const commit = (over: Record<string, unknown>) => tenantCall(bindings, shop.tenant, "/chat/commit", { method: "POST",

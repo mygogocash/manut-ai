@@ -102,7 +102,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function isWholeNote(note: unknown): note is string {
   if (typeof note !== "string" || [...note].length > NOTE_MAX_CHARS) return false;
   const lines = note.split(LINE_BREAK);
-  if (lines.length < 2 || !lines[0]!.startsWith(NOTE_HEAD) || lines[lines.length - 1] !== NOTE_END) return false;
+  // one line cannot both start with the head and be the end line, so a note has at least two
+  if (!lines[0]!.startsWith(NOTE_HEAD) || lines[lines.length - 1] !== NOTE_END) return false;
   return lines.slice(1, -1).every((line) => !line.trimStart().startsWith(NOTE_LINE) && line.trim() !== NOTE_END);
 }
 
