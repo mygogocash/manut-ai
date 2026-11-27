@@ -1,12 +1,12 @@
 /// Buddy's chat with the shop's owner on the API (docs/connected-chat.md, A; docs/pilot-api.md, "Chat"): the one route that
 /// makes a model call from outside the Worker's own code, and the owner's reads and deletion of what it kept.
 ///
-/// - `POST /v1/chat/messages` with `{ thread?, text }`: one message to Buddy, answered by one call through the model gateway
-///   (model-gateway.ts, `callModel`), priced, held against the shop's monthly cap and settled at what the provider bills,
-///   exactly as a worker's call is. The model gateway's rule was that no route makes a model call, because a route would let
-///   anyone holding the operator key spend from outside. This route keeps what that rule protected: only the shop's owner,
-///   from their own session, spends, only on their own shop, inside its own cap, and the operator key, a helper, a link and
-///   an outpost are each refused before the gateway is asked. Its own switch (`buddyChat`) is off by default.
+/// - `POST /v1/chat/messages` with `{ thread?, text, note?, sentOnFrom? }`: one message to Buddy, answered by one call through
+///   the model gateway (model-gateway.ts, `callModel`), priced, held against the shop's monthly cap and settled at what the
+///   provider bills, exactly as a worker's call is. The model gateway's rule was that no route makes a model call, because a
+///   route would let anyone holding the operator key spend from outside. This route keeps what that rule protected: only the
+///   shop's owner, from their own session, spends, only on their own shop, inside its own cap, and the operator key, a helper,
+///   a link and an outpost are each refused before the gateway is asked. Its own switch (`buddyChat`) is off by default.
 /// - `GET /v1/chat/threads`, `GET /v1/chat/threads/{id}` and `POST /v1/chat/threads/remove` with `{ id }`: the owner's
 ///   threads, one thread's messages a page at a time, and the owner's deletion of a thread (a POST with a JSON body, as the
 ///   owner's other changes are, Forget and an artifact link's removal among them). These stay open with the switch off: the
@@ -21,6 +21,14 @@
 /// usable facts fenced and marked (a customer's words as a customer's, never instructions), the thread's latest turns and
 /// the owner's message, all masked by the app's one masker. The owner's message and Buddy's answer are kept masked too, so
 /// a key the owner pastes is never kept or sent. Nothing about a message is logged, and the audit log names only ids.
+///
+/// Manut AI's own lines are fields of the request, never part of the owner's words (item 102l-5). `note` is Manut AI's note
+/// to Buddy for this one message (which conversations Buddy may reach, and that the note is not the owner speaking): it is
+/// accepted only as a whole note, given to the model after the words and never kept, so the record says only `noted: true`.
+/// `sentOnFrom` is the title of the conversation whose words Buddy wrote there and the owner sent on to this one: the
+/// model is given the mark after those words, and, because it is kept on the message, in every later turn too, so words
+/// that came from another conversation never read as the owner speaking (rule R10 of docs/several-agents.md). The kept
+/// text, the thread's title and the export hold the owner's words alone.
 
 import { buildBuddyChat } from "@manut/agent-prompts";
 // The app's one masker for keys (item 113 and item 121), the package the desktop and its shell's twin read too, so a key is
@@ -29,7 +37,9 @@ import { maskSecrets } from "@manut/mask-secrets";
 import { emptyState } from "@manut/shop-memory";
 import { readJsonBody } from "./body";
 import {
+  isSentOnFrom,
   MAX_ANSWER_CHARS,
+  MAX_FROM_CHARS,
   MAX_TEXT_CHARS,
   MESSAGE_ID,
   PAGE_MAX,
@@ -57,8 +67,22 @@ export const CHAT_MESSAGES_PATH = "/v1/chat/messages";
 export const CHAT_THREADS_PATH = "/v1/chat/threads";
 export const CHAT_REMOVE_PATH = "/v1/chat/threads/remove";
 const THREAD_PATH = /^\/v1\/chat\/threads\/([^/]+)$/;
-/// The owner's message is at most MAX_TEXT_CHARS characters, and JSON can write one character as six bytes.
+/// The words are at most MAX_TEXT_CHARS characters, a note at most NOTE_MAX_CHARS and a title MAX_FROM_CHARS, and JSON can
+/// write one character as six bytes: 8,000, 2,000 and 120 of them come to 60,720 bytes, so the three fit with the rest.
 const MAX_BODY_BYTES = 64 * 1024;
+/// The keys a message may carry: `text` always, and any of the others.
+const MESSAGE_KEYS = ["thread", "text", "note", "sentOnFrom"];
+/// The first line of a whole note starts with this, and its last line is exactly the end line: the lines Manut AI writes
+/// (the desktop's `buddyNote`, apps/desktop/src/jobs/reachMarks.ts). No other line may begin a second note, a mark, or any
+/// line that says Manut AI wrote it, so a note is one whole note and nothing else.
+const NOTE_HEAD = "[Manut AI: a note to Buddy]";
+const NOTE_END = "[End of the Manut AI note]";
+const NOTE_LINE = "[Manut AI:";
+/// The longest note, in characters (code points). The desktop's own is shorter (1,900).
+export const NOTE_MAX_CHARS = 2_000;
+/// Every way a reader could take a line to end: the line feed, the carriage return and the two together, the vertical tab
+/// and form feed, the next line character, and the line and paragraph separators.
+const LINE_BREAK = /\r\n|[\n\r\v\f\u0085\u2028\u2029]/;
 /// What the shop's object answers to a chat write it understood. Anything else is the object failing.
 const ANSWERED = new Set([200, 404, 409, 429]);
 /// Every chat answer holds the owner's words or Buddy's, so no browser or proxy keeps a copy.
@@ -70,6 +94,26 @@ function json(data: unknown, status = 200, headers: Record<string, string> = {})
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+/// Whether `note` is one whole note: text of at most NOTE_MAX_CHARS characters whose first line starts with NOTE_HEAD, whose
+/// last line is exactly NOTE_END, and with no line between that starts with `[Manut AI:` or is the end line (leading blanks
+/// do not hide either). Anything else is refused, so what rides with a message is never more or less than a note.
+function isWholeNote(note: unknown): note is string {
+  if (typeof note !== "string" || [...note].length > NOTE_MAX_CHARS) return false;
+  const lines = note.split(LINE_BREAK);
+  if (lines.length < 2 || !lines[0]!.startsWith(NOTE_HEAD) || lines[lines.length - 1] !== NOTE_END) return false;
+  return lines.slice(1, -1).every((line) => !line.trimStart().startsWith(NOTE_LINE) && line.trim() !== NOTE_END);
+}
+
+/// The title of the conversation a message was sent on from, as it is kept and given to the model: the request's own title
+/// trimmed, checked (`isSentOnFrom`: 1 to MAX_FROM_CHARS characters, one line, no double quote), masked by the app's one
+/// masker, and cut to MAX_FROM_CHARS again, since a mask can be longer than what it hides. Null for a title that is none, so
+/// the request is refused before anything is counted or called.
+function sentOnFromOf(value: unknown): string | null {
+  if (typeof value !== "string" || !isSentOnFrom(value.trim())) return null;
+  const masked = [...maskSecrets(value.trim())].slice(0, MAX_FROM_CHARS).join("").trim();
+  return isSentOnFrom(masked) ? masked : null;
 }
 
 function chatWrite(env: Pick<ChatEnv, "TENANT">, tenant: string, path: string, body: Record<string, unknown>): Promise<Response> {
@@ -127,9 +171,11 @@ async function shopOf(env: ChatEnv, shop: string): Promise<{ name: string } | nu
   }
 }
 
-/// `POST /v1/chat/messages` with exactly `{ text }` or `{ thread, text }`. After the checks every route makes: the switch,
-/// the shop, its consent and what the team knows; then the shop's object lets the message through (the thread is there
-/// and has room, the hour has room) and counts it; then one call through the gateway; then the exchange is kept.
+/// `POST /v1/chat/messages` with `{ text }` or `{ thread, text }`, each with `note` and `sentOnFrom` if it has them. After
+/// the checks every route makes: the switch, the shop, its consent and what the team knows; then the shop's object lets the
+/// message through (the thread is there and has room, the hour has room) and counts it; then one call through the gateway;
+/// then the exchange is kept. The request's own shape is checked first of all, so a note that is not a whole note and a title
+/// that is none are refused before the switch, and nothing is counted or called for them.
 async function sendMessage(request: Request, url: URL, env: ChatEnv, flags: ChatFlags, caller: Owner, options: ChatOptions):
   Promise<Response> {
   if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
@@ -137,11 +183,15 @@ async function sendMessage(request: Request, url: URL, env: ChatEnv, flags: Chat
   const parsed = await readJsonBody<unknown>(request, MAX_BODY_BYTES);
   if (!parsed.ok) return json({ error: parsed.error }, parsed.status);
   const body = parsed.value;
-  if (!isRecord(body) || !(hasExactly(body, ["text"]) || hasExactly(body, ["thread", "text"]))) {
+  if (!isRecord(body) || !Object.keys(body).every((key) => MESSAGE_KEYS.includes(key)) || !("text" in body)) {
     return json({ error: "invalid_request" }, 400);
   }
   const thread = body.thread === undefined || body.thread === null ? null : body.thread;
   if (thread !== null && (typeof thread !== "string" || !THREAD_ID.test(thread))) return json({ error: "invalid_request" }, 400);
+  // `note` and `sentOnFrom` are left out when there is none, never null: a field that is there must be a whole note, or a title.
+  if (body.note !== undefined && !isWholeNote(body.note)) return json({ error: "invalid_request" }, 400);
+  const sentOnFrom = body.sentOnFrom === undefined ? undefined : sentOnFromOf(body.sentOnFrom);
+  if (sentOnFrom === null) return json({ error: "invalid_request" }, 400);
   if (typeof body.text !== "string" || body.text.trim() === "") return json({ error: "invalid_text" }, 400);
   const text = body.text.trim();
   if ([...text].length > MAX_TEXT_CHARS) return json({ error: "text_too_long", maxChars: MAX_TEXT_CHARS }, 400);
@@ -167,12 +217,14 @@ async function sendMessage(request: Request, url: URL, env: ChatEnv, flags: Chat
     const retryAfter = admitted.headers.get("retry-after");
     return json(await admitted.json(), admitted.status, retryAfter ? { "retry-after": retryAfter } : {});
   }
-  const { history } = (await admitted.json()) as { history: { from: "owner" | "buddy"; text: string }[] };
+  const { history } = (await admitted.json()) as { history: { from: "owner" | "buddy"; text: string; sentOnFrom?: string }[] };
   const built = buildBuddyChat({
     shop: { name: shop.name },
     memory: { ...emptyState(), facts: facts.facts },
     history,
     newest: text,
+    ...(sentOnFrom !== undefined ? { sentOnFrom } : {}),
+    ...(body.note !== undefined ? { note: body.note } : {}),
     model: CHAT_MODEL,
     maxOutputTokens: CHAT_MAX_OUTPUT_TOKENS,
     mask: maskSecrets,
@@ -183,9 +235,13 @@ async function sendMessage(request: Request, url: URL, env: ChatEnv, flags: Chat
   const answered = await callModel(env, caller.shop, built.request, options);
   if (!answered.ok) return gatewayRefusal(answered);
 
+  // What is kept of the message: the owner's words alone, masked, with the title of the conversation they were sent on from if
+  // they were, and, if a note went with it, only that it did. The note is not kept anywhere.
   const kept = await chatWrite(env, caller.shop, "/chat/commit", {
     thread,
     owner: maskSecrets(text),
+    ...(sentOnFrom !== undefined ? { sentOnFrom } : {}),
+    ...(body.note !== undefined ? { noted: true } : {}),
     sentAtMs,
     answer: [...maskSecrets(answered.text)].slice(0, MAX_ANSWER_CHARS).join(""),
     stopReason: answered.stopReason,
