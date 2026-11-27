@@ -5,6 +5,7 @@ import type { BridgeStatus } from "../lib/bridge";
 import type { Lang } from "../i18n";
 import type { FlowState } from "../onboarding/flow";
 import type { ShopProfile } from "../onboarding/shop";
+import type { ThemeId } from "../theme/themes";
 import type {
   Away,
   ApprovalChoice,
@@ -388,19 +389,26 @@ export interface Peek {
 }
 
 export type Theme = "system" | "dark" | "light";
-/** The colour set: the brand's, for everyone (item 85i: "no accent for the person to pick"). A look saved with one of the
- *  five sets the app once offered (graphite, ocean, forest, sunset, rose) is read, found not to be one, and read as this. */
-export type Palette = "manut";
+/** The look's colours: the brand's ("manut", the default) or one of the person's own themes, by its id (item 99b: the owner
+ *  chose full themes on 27 Nov 2026, lifting item 85i's "no accent for the person to pick"; src/theme/themes.ts). A look
+ *  saved with one of the five sets the app once offered (graphite, ocean, forest, sunset, rose) is read, found not to be
+ *  either, and read as the brand's. */
+export type Palette = "manut" | ThemeId;
 /** soft = both sides in tinted bubbles; solid = your bubble in the accent colour; open = the bot writes on the page
  *  and only your messages are bubbles (the default since item 85f: the Chat board's look). */
 export type BubbleStyle = "soft" | "solid" | "open";
 export const BUBBLE_STYLES: BubbleStyle[] = ["soft", "solid", "open"];
 export type TextSize = "small" | "medium" | "large";
+/** How wide the conversation's column runs (item 99b): medium is the Chat board's 696px, the default. */
+export type ChatWidth = "narrow" | "medium" | "wide";
+export const CHAT_WIDTHS: ChatWidth[] = ["narrow", "medium", "wide"];
 export interface Look {
   palette: Palette;
   bubbles: BubbleStyle;
   text: TextSize;
+  width: ChatWidth;
 }
+/** The looks the app itself has: the brand's. The person's own themes are kept beside it on this Mac (src/theme/library.ts). */
 export const PALETTES: Palette[] = ["manut"];
 
 /** The pages of the side menu (src/sidebar/menu.ts) that fill the main column, in the menu's order: Home, which the New
