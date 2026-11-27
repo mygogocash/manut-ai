@@ -182,6 +182,9 @@ const keys = {
   grants: "signin-grant:",
   step: (id: string) => `browser-step:${id}`,
   steps: "browser-step:",
+  /// The last number given in the order steps were queued (`StepRecord.seq`); outside the steps' prefix, so a list of the
+  /// steps never reads it.
+  stepSeq: "browser-step-seq",
 };
 
 function json(data: unknown, status = 200): Response {
@@ -526,7 +529,8 @@ export async function wipeSignInVault(storage: DurableObjectStorage):
   const outposts = await doomed(keys.outposts);
   const grants = await doomed(keys.grants);
   const steps = await doomed(keys.steps);
-  const all = [...signIns, ...outposts, ...grants, ...steps];
+  // the steps' counter goes with them: it holds no one's data, but a wiped vault keeps nothing
+  const all = [...signIns, ...outposts, ...grants, ...steps, keys.stepSeq];
   for (let i = 0; i < all.length; i += STORAGE_BATCH) await storage.delete(all.slice(i, i + STORAGE_BATCH));
   return { signInsWiped: signIns.length, outpostsWiped: outposts.length, grantsWiped: grants.length,
     stepsWiped: steps.length };
@@ -874,6 +878,9 @@ type StepRecord = {
   /// The attempt's member, as the task object recorded it.
   member: string;
   queuedAt: string;
+  /// Its place in the order this vault queued steps, so two queued in the same millisecond keep the order they were asked
+  /// in. Absent on steps queued before it existed, which sort as 0.
+  seq?: number;
   expiresAt: string;
   takenAt: string | null;
   reportedAt: string | null;
@@ -1010,10 +1017,24 @@ async function workingOrigins(storage: DurableObjectStorage, tenant: string, mem
   return [...origins];
 }
 
+/// Oldest first: by when it was queued, then by its place in the vault's order, so steps queued in the same millisecond
+/// (a worker asks for open, sign in and read one after the other) are handed out in the order they were asked for, not in
+/// the order of their random ids. An outpost that signed in before it opened the page would sign in on the wrong page.
+export function stepOrder(a: { queuedAt: string; seq?: number; id: string }, b: { queuedAt: string; seq?: number; id: string }): number {
+  return a.queuedAt.localeCompare(b.queuedAt) || (a.seq ?? 0) - (b.seq ?? 0) || a.id.localeCompare(b.id);
+}
+
 async function stepsOf(storage: DurableObjectStorage, tenant: string): Promise<StepRecord[]> {
   const records = [...(await storage.list<StepRecord>({ prefix: keys.steps })).values()]
     .filter((record) => record.tenant === tenant);
-  return records.sort((a, b) => a.queuedAt.localeCompare(b.queuedAt) || a.id.localeCompare(b.id));
+  return records.sort(stepOrder);
+}
+
+/// The next place in the order this vault queues steps. A Durable Object lets no other request's storage call in while one
+/// of its own is in flight, so with nothing but storage calls between this and the put that keeps it, no two steps share a
+/// number.
+async function nextStepSeq(storage: DurableObjectStorage): Promise<number> {
+  return ((await storage.get<number>(keys.stepSeq)) ?? 0) + 1;
 }
 
 /// A step of `tenant` by its id, or null for a malformed id, one never made, one pruned, or another tenant's.
@@ -1124,12 +1145,13 @@ async function queueStep(storage: DurableObjectStorage, tenant: string, body: Re
     nowMs < Date.parse(step.expiresAt));
   if (open.length >= MAX_OPEN_STEPS) return json({ error: "too_many_steps" }, 409);
   await pruneSteps(storage, nowMs);
+  const seq = await nextStepSeq(storage);
   const step: StepRecord = { id: crypto.randomUUID(), tenant, kind, url, selector, grantId: carried?.grant.id ?? null,
     signInId: carried?.signIn.id ?? null, site: carried?.signIn.site ?? null, outpostId: outpost.id, taskId, attemptId,
-    member, queuedAt: new Date(nowMs).toISOString(), expiresAt: new Date(expiresMs).toISOString(), takenAt: null,
+    member, queuedAt: new Date(nowMs).toISOString(), seq, expiresAt: new Date(expiresMs).toISOString(), takenAt: null,
     reportedAt: null, settledAt: null, state: "queued", outcome: null, code: null, text: null, requestId: null,
     revision: null, action: null };
-  await storage.put({ [keys.step(step.id)]: step,
+  await storage.put({ [keys.step(step.id)]: step, [keys.stepSeq]: seq,
     ...(carried ? { [keys.grant(carried.grant.id)]: { ...carried.grant, stepId: step.id } satisfies GrantRecord } : {}) });
   return json({ step: workerView(step, nowMs) });
 }
@@ -1405,12 +1427,13 @@ async function queueSubmit(storage: DurableObjectStorage, tenant: string, body: 
     return json({ error: "too_many_steps" }, 409);
   }
   await pruneSteps(storage, nowMs);
+  const seq = await nextStepSeq(storage);
   const step: StepRecord = { id: crypto.randomUUID(), tenant, kind: "submit", url: page.href, selector: null,
     grantId: null, signInId: signIn.id, site, outpostId: outpost.id, taskId, attemptId, member,
-    queuedAt: new Date(nowMs).toISOString(), expiresAt: new Date(nowMs + STEP_TTL_MS).toISOString(), takenAt: null,
+    queuedAt: new Date(nowMs).toISOString(), seq, expiresAt: new Date(nowMs + STEP_TTL_MS).toISOString(), takenAt: null,
     reportedAt: null, settledAt: null, state: "queued", outcome: null, code: null, text: null, requestId, revision,
     action };
-  await storage.put(keys.step(step.id), step);
+  await storage.put({ [keys.step(step.id)]: step, [keys.stepSeq]: seq });
   return json({ step: workerView(step, nowMs) });
 }
 
