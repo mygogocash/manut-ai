@@ -11,6 +11,7 @@ import { steersOf } from "./controls";
 import { withoutHelperPolicy } from "../jobs/helperPolicy";
 import { withoutReachNote } from "../jobs/reachList";
 import { readHelperBrief } from "../jobs/helperBrief";
+import { readLanded } from "../jobs/landingWire";
 import type { DiskLevel, DiskState } from "../lib/disk";
 import type { ImportApp, ImportProfile } from "./term/import";
 import { type GitView } from "../code/moved";
@@ -57,6 +58,9 @@ export interface MockCall {
     | "power.busy"
     | "lane.worktree"
     | "lane.helper"
+    | "lane.land"
+    | "lane.takeBack"
+    | "lane.patch"
     | "lane.remove"
     | "lane.root"
     | "lane.release"
@@ -223,6 +227,15 @@ export type MockGlobals = MockTurnGlobals & {
   __manutMemory?: number | null;
   /** e2e: the next helper lane's folder is refused with this code, as the shell refuses one (item 102f) */
   __manutMockHelperRefused?: string;
+  /** e2e: what the shell answers for helper lane `n`'s landing (item 102i), by the number its folder ends in (`-help-<n>`): its
+   *  `lane_land` answer, or `{ refuse: "<code>" }` for a refusal; none: one file landed cleanly */
+  __manutMockLandings?: Record<number, unknown>;
+  /** e2e: what the shell refuses Take back of helper lane `n`'s landing with (`changed`, ...); none: it is taken back */
+  __manutMockTakeBack?: Record<number, string>;
+  /** e2e: the text of the patch kept for helper lane `n` (item 102i's Show patch), as the shell gives it, masked */
+  __manutMockPatches?: Record<number, string>;
+  /** e2e: how long the mock shell takes to land, in ms (none: at once) */
+  __manutMockLandMs?: number;
   /** e2e: what the stand-in agent does with helper lane `n`'s brief (item 102h): one of its own commands (`/work hold`, `/approve`);
    *  none: it answers the brief at once */
   __manutMockHelpers?: Record<number, string>;
@@ -949,6 +962,45 @@ export class MockHost implements SessionHost, BuddyHost {
     lanes.unshift({ worktree, dir: worktree, branch, base: rec.branch, project: rec.project, made: Math.floor(Date.now() / 1000), helper: { job, lead } });
     this.log({ op: "lane.helper", lead, job, branch, path: worktree });
     return { branch, base: rec.branch, dir: worktree, worktree, left: 0, from: "", local: "", config: 0, stayed: 0 };
+  }
+  /** The number a helper lane's folder ends in (`<lead>-help-<n>`), which e2e names its answers by; 0 for no helper lane the mock
+   *  shell made. */
+  private helperNumber(helper: string): number {
+    const rec = (this.g.__manutLanes ?? []).find((l) => l.worktree === helper);
+    if (!rec) throw new Error("not_a_lane");
+    if (!rec.helper) throw new Error("not_a_helper");
+    return Number(/-help-(\d+)$/.exec(helper)?.[1] ?? 0);
+  }
+  /** As the shell lands a helper lane's work (item 102g, called by item 102i): what e2e set for its number, else one file landed. */
+  async laneLand(helper: string) {
+    const n = this.helperNumber(helper);
+    this.log({ op: "lane.land", path: helper });
+    const ms = this.g.__manutMockLandMs ?? 0;
+    if (ms > 0) await new Promise((r) => setTimeout(r, ms));
+    const said = this.g.__manutMockLandings?.[n] as { refuse?: string } | undefined;
+    if (said?.refuse) throw new Error(said.refuse);
+    const got = readLanded(said ?? { outcome: "landed", files: ["src/qr.test.ts"], files_total: 1, conflicts: [], keys: [], patch: "", why: "", outside: [], error: "" });
+    if (!got) throw new Error("unread");
+    return got;
+  }
+  /** As the shell takes a landing back: refused with what e2e set for its number, else every file the landing named. */
+  async laneTakeBack(helper: string) {
+    const n = this.helperNumber(helper);
+    this.log({ op: "lane.takeBack", path: helper });
+    const refused = this.g.__manutMockTakeBack?.[n];
+    if (refused) throw new Error(refused);
+    const said = readLanded(this.g.__manutMockLandings?.[n]);
+    const files = said?.files ?? ["src/qr.test.ts"];
+    return { files: [...files], filesTotal: files.length };
+  }
+  /** As the shell reads a kept patch for Show patch: what e2e set for its number, else none is kept. */
+  async lanePatch(helper: string) {
+    const n = this.helperNumber(helper);
+    this.log({ op: "lane.patch", path: helper });
+    const text = this.g.__manutMockPatches?.[n];
+    if (text === undefined) throw new Error("no_patch");
+    const said = readLanded(this.g.__manutMockLandings?.[n]);
+    return { text, bytes: text.length, cut: false, path: said?.patch || `/home/you/.manut/patches/job/${helper.split("/").pop()}.patch` };
   }
   /** As the shell reads `hw.memsize` (item 102h): what e2e set, else an 8 GB Mac. */
   async machineMemory(): Promise<number | null> {

@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { setLang } from "../i18n";
 import type { HelperRow } from "./helperAsks";
 import { HelperRunView, runRows, type RunRow } from "./HelperRunCard";
+import type { HelperLanding } from "./helperLandings";
 import type { HelperRun } from "./helperRuns";
 
 afterEach(() => setLang("en"));
@@ -114,5 +115,99 @@ describe("the card", () => {
     const words = text(draw(createElement(HelperRunView, { rows: live, atOnce: 2, now: NOW, onStop: () => {}, onStopAll: () => {} })));
     expect(words).toContain("도우미 1: Tests for the QR builder");
     expect(words).toContain("모두 멈추기");
+  });
+});
+
+// Item 102i: each row's landing, from the landings the sessions store keeps (helperLandings.ts), and Show patch's view.
+describe("the rows' landings (landRow, item 102i)", () => {
+  const lv = (index: number, p: Partial<HelperLanding>): HelperLanding => ({ lead: "s1", round: "r1", index, worktree: `/w/lead-help-${index + 1}`, step: "settled", ...p });
+  const backRun = (index: number) => run(index, { state: "back", session: `s${index + 2}`, report: { round: "r1", index, title: "x", ended: "done", words: "Did it.", landing: "pending" } });
+
+  it("says how each landed, names conflicts and each key's file, and offers Show patch or Take back where each applies", () => {
+    const landings = [
+      lv(0, { landing: { files: [{ path: "src/qr.test.ts" }, { path: "src/qr.ts" }, { path: "src/x.ts" }], conflicts: [], keys: ["src/config.ts"] } }),
+      lv(1, { landing: { files: [{ path: "src/receipt.tsx" }, { path: "src/qr.ts" }], conflicts: ["src/qr.ts"] } }),
+      lv(2, { landing: { files: [{ path: "src/line.ts" }], conflicts: [], patchPath: "/w/.manut/patches/j/h.patch", error: "error: src/line.ts: does not exist in index" } }),
+      lv(3, { landing: { files: [{ path: "../x.ts" }], conflicts: [], patchPath: "/p", refusal: "outside", outside: ["../x.ts"] } }),
+      lv(4, { landing: { files: [], conflicts: [] } }),
+      lv(5, { landing: { files: [], conflicts: [], error: "config:filter.lfs.clean" } }),
+      lv(6, { landing: null, skipped: "unfinished" }),
+      lv(7, { step: "waiting" }),
+      lv(8, { landing: { files: [{ path: "a" }], conflicts: [], takenBack: true } }),
+    ];
+    const rows = runRows(Array.from({ length: 9 }, (_, i) => backRun(i)), chat, landings);
+    expect(rows.map((r) => [r.land?.tone, r.land?.line])).toEqual([
+      ["done", "Landed 3 files"],
+      ["waiting", "Landed 2 files, 1 with conflicts: src/qr.ts"],
+      ["failed", "Kept as a patch: it would not apply"],
+      ["failed", "Kept as a patch, not tried: it names a file outside this project (../x.ts)"],
+      ["stopped", "Changed nothing"],
+      ["failed", "Not landed: the repository's own settings name a program git would run (filter.lfs.clean)"],
+      ["stopped", "Not landed: only finished work lands, so its work stays in its own folder"],
+      ["queued", "Lands once Kit is idle"],
+      ["stopped", "Taken back: Kit's folder is as it was before this landing"],
+    ]);
+    expect(rows.map((r) => [r.land?.canShowPatch, r.land?.canTakeBack])).toEqual([
+      [false, true],
+      [false, true],
+      [true, false],
+      [true, false],
+      [false, false],
+      [false, false],
+      [false, false],
+      [false, false],
+      [false, false],
+    ]);
+    expect(rows[0].land?.keys).toEqual(["src/config.ts"]);
+    expect(rows[2].land?.detail).toBe("error: src/line.ts: does not exist in index");
+    // a helper not back yet has no landing line
+    expect(runRows([run(0, { state: "running", session: "s2" })], chat, [lv(0, { step: "waiting" })])[0].land).toBeUndefined();
+  });
+
+  it("Take back waits while the lead works, and says the shell's reason when refused", () => {
+    const landings = [lv(0, { landing: { files: [{ path: "a" }], conflicts: [] }, takeBackError: "changed" })];
+    const [row] = runRows([backRun(0)], chat, landings, true);
+    expect(row.land).toMatchObject({ canTakeBack: true, takeBackWaits: true, takeBackError: "Not taken back: Kit's folder changed since this landing." });
+    const html = draw(createElement(HelperRunView, { rows: [row], now: NOW, onTakeBack: () => {} }));
+    expect(html).toMatch(/disabled=""[^>]*title="Take back waits until Kit&#x27;s turn ends[^"]*"[^>]*data-testid="helper-landing-take-back"/);
+    expect(text(html)).toContain("Not taken back: Kit's folder changed since this landing.");
+  });
+
+  it("draws the landing under the row: its line, the key's file named and never the key, and Show patch's view of the kept patch", () => {
+    const key = `ghp_${"a".repeat(36)}`;
+    const landings = [
+      lv(0, { landing: { files: [{ path: "src/qr.test.ts" }], conflicts: [], keys: ["src/config.ts"] } }),
+      lv(1, { landing: { files: [{ path: "src/line.ts" }], conflicts: [], patchPath: "/w/.manut/patches/j/h.patch", error: "would_not_apply" } }),
+    ];
+    const rows = runRows([backRun(0), backRun(1)], chat, landings);
+    const patch = `diff --git a/src/line.ts b/src/line.ts\n--- a/src/line.ts\n+++ b/src/line.ts\n@@ -1 +1,2 @@\n-old\n+new\n+token = "${key}"\n`;
+    const html = draw(
+      createElement(HelperRunView, {
+        rows,
+        now: NOW,
+        patches: { 1: { state: "shown", patch: { text: patch, bytes: patch.length, cut: false, path: "/w/.manut/patches/j/h.patch" } } },
+        onPatch: () => {},
+        onTakeBack: () => {},
+      }),
+    );
+    const words = text(html);
+    expect(words).toContain("Landed 1 file");
+    expect(words).toContain("A key is in src/config.ts. It is hidden here, and Kit's next commit or push asks you first.");
+    expect(words).toContain("Take back this landing");
+    expect(words).toContain("Hide patch");
+    expect(words).toContain("Kept at /w/.manut/patches/j/h.patch");
+    expect(html).toContain('data-testid="landing-patch-view"');
+    expect(html.match(/data-kind="add"/g)).toHaveLength(2);
+    // the patch's key is masked in the view, whatever the shell sent
+    expect(html).not.toContain(key);
+    // an unreadable patch says why
+    const gone = draw(createElement(HelperRunView, { rows, now: NOW, patches: { 1: { state: "error", why: "no_patch" } }, onPatch: () => {} }));
+    expect(text(gone)).toContain("The patch could not be read: it is no longer kept");
+  });
+
+  it("reads in the person's language", () => {
+    setLang("ja");
+    const rows = runRows([backRun(0)], chat, [lv(0, { landing: { files: [{ path: "a" }, { path: "b" }], conflicts: ["b"] } })]);
+    expect(rows[0].land?.line).toBe("2 ファイルを反映しました。うち 1 つに競合があります: b");
   });
 });

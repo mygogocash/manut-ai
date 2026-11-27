@@ -562,6 +562,8 @@ describe("how a landing reads", () => {
     ["a landing that failed", landing({ error: "patch did not apply" }), false, false, "failed"],
     // GoSpark: BuddyLanding.refusal (`reportMessage` tells the lead never to apply it here); R8's patch outside the project
     ["a patch kept untried", landing({ files: [{ path: "../x", added: 1, removed: 0 }], patchPath: "/p/2.patch", refusal: "outside" }), false, false, "keptOutside"],
+    // item 102i: the person took the landing back, so none of it is in the lead's folder now
+    ["a landing taken back", landing({ files: [{ path: "a.ts" }], takenBack: true }), false, false, "takenBack"],
   ];
 
   it.each(cases)("%s: empty %s, landed %s, %s", (_what, l, empty, isLanded, outcome) => {

@@ -76,6 +76,7 @@ import { recordError } from "../report/errors";
 import { notesSaid } from "./projectNotes";
 import { createLeadLanes } from "../jobs/leadLanes";
 import { createHelperRuns, type StartHelper } from "../jobs/helperRuns";
+import { createHelperLandings } from "../jobs/helperLandings";
 import type { LaneMade } from "../code/laneBranch";
 import { createReach, type OpenLane } from "../jobs/reachChats";
 import { appReader } from "../chat/box/contextReader";
@@ -233,6 +234,24 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     every: (ms, fn) => clock.every(ms, fn),
   });
   leads.whenRoundApproved((r) => runs.approved(r));
+  /** Landings (item 102i, src/jobs/helperLandings.ts): each helper lane that reports finished work lands in its lead lane's folder
+   *  through the shell, one at a time per lead and only while the lead is idle; `input` asks it before each message to an agent, so
+   *  no turn of a lead starts while a landing writes its folder. Nothing of it sends a word to the lead (item 102j's). */
+  const landings = createHelperLandings({
+    rec,
+    working: (id) => working(id),
+    asks: (id) => {
+      const key = keys.get(id);
+      return key ? selectAsks(store().getState()).filter((a) => a.bot === key).map((a) => a.item.request_id) : [];
+    },
+    rounds: (lead) => leads.roundsOf(lead),
+    setRounds: (lead, r) => leads.setRounds(lead, r),
+    land: (helper) => (host.laneLand ? host.laneLand(helper) : Promise.reject(new Error("no_shell"))),
+    takeBack: (helper) => (host.laneTakeBack ? host.laneTakeBack(helper) : Promise.reject(new Error("no_shell"))),
+    patch: (helper) => (host.lanePatch ? host.lanePatch(helper) : Promise.reject(new Error("no_shell"))),
+    watch: (fn) => store().subscribe(fn),
+  });
+  runs.whenBack((b) => landings.back(b));
   /** The session whose chat has app-store key `key`. */
   const byKey = (key: string) => {
     for (const [id, k] of keys) if (k === key) return rec(id) ?? null;
@@ -897,18 +916,34 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     if (!proc || !r) throw new Error(tr("ss.agentNotRunning", { agent: r ? agentDef(r.agent).label : tr("ss.theAgent") }));
     if (proc.kind === "agent") {
       if (proc.hostId === undefined) throw new Error(tr("ss.stillStarting"));
-      // a message that starts a turn of a coding session: its files are kept first, so the turn can be rewound
-      // (rewind.ts); a message that joins a running turn starts none
-      const key = keys.get(id);
-      if (i.kind === "send" && i.id && REWINDS.includes(r.agent) && !(key && store().getState().chats[key]?.turn)) await turns.beforeSend(id, workDir(r), i.id);
-      if (i.kind === "send") {
-        // a message of the person's reaches the agent: it gets its own rounds of helper lanes, and while Helpers is on the lead's
-        // note goes in front of it, never into the bubble (item 102e)
-        leads.personSpoke(id);
-        // and while chats are on its "Kit may reach" list, the note naming them goes in front too (item 102k)
-        i = { ...i, text: leads.wire(id, reach.wire(id, i.text)) };
+      // a lead lane's helper's work being landed in its folder is written whole before the lead's agent can start a turn there,
+      // and no landing starts from here until this message's turn shows (item 102i)
+      const hold = i.kind === "send" ? landings.beforeSend(id) : null;
+      if (hold) {
+        await hold;
+        if (procs.get(id) !== proc) {
+          landings.afterSend(id, false);
+          throw new Error(tr("ss.agentNotRunning", { agent: agentDef(r.agent).label }));
+        }
       }
-      await host.chatInput(proc.hostId, i);
+      let sent = false;
+      try {
+        // a message that starts a turn of a coding session: its files are kept first, so the turn can be rewound
+        // (rewind.ts); a message that joins a running turn starts none
+        const key = keys.get(id);
+        if (i.kind === "send" && i.id && REWINDS.includes(r.agent) && !(key && store().getState().chats[key]?.turn)) await turns.beforeSend(id, workDir(r), i.id);
+        if (i.kind === "send") {
+          // a message of the person's reaches the agent: it gets its own rounds of helper lanes, and while Helpers is on the lead's
+          // note goes in front of it, never into the bubble (item 102e)
+          leads.personSpoke(id);
+          // and while chats are on its "Kit may reach" list, the note naming them goes in front too (item 102k)
+          i = { ...i, text: leads.wire(id, reach.wire(id, i.text)) };
+        }
+        await host.chatInput(proc.hostId, i);
+        sent = true;
+      } finally {
+        if (i.kind === "send") landings.afterSend(id, sent);
+      }
       return;
     }
     const a = store().actions;
@@ -2894,6 +2929,8 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
   /** Stop the program(s) and remove the session. A row that waited out its undo window is no longer listed: its
    *  kept row says what it was. */
   const close = (id: string) => {
+    // a lead's helper lanes still waiting to land land nothing (item 102i), before its turn's end as it stops could read as idle
+    landings.closed(id);
     const r = rec(id) ?? heldRecs.get(id);
     heldRecs.delete(id);
     picked.delete(id);
@@ -3185,6 +3222,16 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     stopHelpers: (round: string) => runs.stopAll(round),
     /** Item 102h's hand-off to 102i and 102j: each helper lane that comes back, with its report bound to its round. */
     whenHelperBack: (fn: Parameters<typeof runs.whenBack>[0]) => runs.whenBack(fn),
+    /** The landings of round `round` (each helper row's outcome, item 102i), and how to hear them change. */
+    helperLandings: (round: string) => landings.roundLandings(round),
+    onHelperLandings: (fn: () => void) => landings.subscribe(fn),
+    /** The person's Take back this landing on helper `index` of round `round`: only while the lead is idle; the shell refuses when
+     *  the lead's folder changed since (item 102i). */
+    takeBackLanding: (round: string, index: number) => landings.takeBack(round, index),
+    /** Show patch on helper `index` of round `round`: the text of the patch its landing kept, masked. */
+    landingPatch: (round: string, index: number) => landings.patch(round, index),
+    /** Item 102i's hand-off to 102j: each round whose helpers are all back and whose landings are all settled. Nothing was sent. */
+    whenHelperRoundLanded: (fn: Parameters<typeof landings.whenRoundLanded>[0]) => landings.whenRoundLanded(fn),
     /** The budget's clock, read now (tests drive it with their own clock). */
     helperTick: () => runs.tick(),
     /** Helper session `id`'s budget as it stands (tests). */

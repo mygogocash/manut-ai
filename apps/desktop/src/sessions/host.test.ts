@@ -144,3 +144,39 @@ describe("TauriHost.pickFolder", () => {
     expect(dialog.calls[0]).toMatchObject({ canCreateDirectories: true });
   });
 });
+
+// TauriHost's landing calls (item 102i): each names only the helper lane's folder, and an answer that is not the shell's shape is
+// refused rather than read as a landing.
+describe("TauriHost landings", () => {
+  class Shell extends TauriHost {
+    calls: { cmd: string; args: unknown }[] = [];
+    answers: Record<string, unknown> = {};
+    protected override async core() {
+      const invoke = async (cmd: string, args: unknown) => {
+        this.calls.push({ cmd, args });
+        return this.answers[cmd];
+      };
+      return { invoke, Channel: class {} } as unknown as Awaited<ReturnType<TauriHost["core"]>>;
+    }
+  }
+
+  it("lands, takes back and reads a kept patch through lane_land, lane_take_back and lane_patch", async () => {
+    const h = new Shell();
+    h.answers = {
+      lane_land: { outcome: "landed", files: ["a.txt"], files_total: 1, conflicts: [], cut: [], cut_total: 0, keys: [], patch: "", why: "", outside: [], error: "" },
+      lane_take_back: { files: ["a.txt"], files_total: 1 },
+      lane_patch: { text: "diff --git a/a.txt b/a.txt\n", bytes: 27, cut: false, path: "/u/.manut/patches/j/h.patch" },
+    };
+    const helper = "/u/.manut/lanes/app/lead-help-1";
+    expect((await h.laneLand(helper)).files).toEqual(["a.txt"]);
+    expect(await h.laneTakeBack(helper)).toEqual({ files: ["a.txt"], filesTotal: 1 });
+    expect((await h.lanePatch(helper)).path).toBe("/u/.manut/patches/j/h.patch");
+    expect(h.calls).toEqual([
+      { cmd: "lane_land", args: { helper } },
+      { cmd: "lane_take_back", args: { helper } },
+      { cmd: "lane_patch", args: { helper } },
+    ]);
+    h.answers = { lane_land: { outcome: "merged" } };
+    await expect(h.laneLand(helper)).rejects.toThrow("unread");
+  });
+});

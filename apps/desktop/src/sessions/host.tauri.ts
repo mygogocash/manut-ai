@@ -11,6 +11,7 @@ import { savedKeys } from "../code/secrets";
 import { readView } from "../code/moved";
 import { readCleaned, readKept, readMade, readReleased, readRemoved, type LaneRemoveAsk } from "../code/laneBranch";
 import { readAgentConfig } from "../settings/mcp/agentConfig";
+import { readLanded, readPatch, readTakenBack } from "../jobs/landingWire";
 import { readInstallAsk, readInstallDone, readLinkRead, readSkillReads } from "../runtime/skillBundle";
 import { readAsk, readDone, readDraft, readMadeProject, readPulled, readRepoAsk, readTools, type MergeMethod } from "../code/source";
 import { type ProviderPatch, type ProviderView, type SignIn } from "../settings/providers/model";
@@ -260,6 +261,24 @@ export class TauriHost implements SessionHost, BuddyHost {
     const made = readMade(await invoke<unknown>("lane_helper_worktree", { lead, job }));
     if (!made) throw new Error("no_folder");
     return made;
+  }
+  async laneLand(helper: string) {
+    const { invoke } = await this.core();
+    const got = readLanded(await invoke<unknown>("lane_land", { helper }));
+    if (!got) throw new Error("unread");
+    return got;
+  }
+  async laneTakeBack(helper: string) {
+    const { invoke } = await this.core();
+    const got = readTakenBack(await invoke<unknown>("lane_take_back", { helper }));
+    if (!got) throw new Error("unread");
+    return got;
+  }
+  async lanePatch(helper: string) {
+    const { invoke } = await this.core();
+    const got = readPatch(await invoke<unknown>("lane_patch", { helper }));
+    if (!got) throw new Error("unread");
+    return got;
   }
   async machineMemory() {
     const { invoke } = await this.core();

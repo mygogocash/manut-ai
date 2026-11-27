@@ -246,8 +246,9 @@ export function failureKindOf(words: string): FailureKind {
 
 export interface LandedFile {
   readonly path: string;
-  readonly added: number;
-  readonly removed: number;
+  /** lines added and removed; the shell's landing (item 102g) names files only, so a landing from it carries no counts */
+  readonly added?: number;
+  readonly removed?: number;
 }
 
 /** Where a helper lane's work went (GoSpark's `BuddyLanding`). */
@@ -256,11 +257,20 @@ export interface Landing {
   readonly files: readonly LandedFile[];
   /** files the three-way apply left conflict markers in */
   readonly conflicts: readonly string[];
+  /** how many more files the patch changed than `files` names (the shell names at most 500) */
+  readonly more?: number;
+  /** files an added line of which holds a key the masker hides, named and never shown: the lead's next commit or push asks first
+   *  (item 117) */
+  readonly keys?: readonly string[];
   /** where the patch was kept when it would not apply, or when it was kept without being tried */
   readonly patchPath?: string;
   readonly error?: string;
   /** why the patch was kept without being tried: it names a file outside the lead's project, or comes from another repository */
   readonly refusal?: string;
+  /** with `refusal`, the first of the files it named that the lead's project cannot take */
+  readonly outside?: readonly string[];
+  /** the person took this landing back (item 102i): nothing of it is in the lead's folder now */
+  readonly takenBack?: boolean;
 }
 
 /** The helper changed nothing. */
@@ -268,15 +278,16 @@ export const landingEmpty = (l: Landing): boolean => !l.files.length && !l.patch
 
 /** The work is in the lead's folder, conflict markers or not: the markers are there, so the lead settles them rather than having
  *  the helper run again. */
-export const landed = (l: Landing): boolean => l.files.length > 0 && !l.patchPath && !l.error && !l.refusal;
+export const landed = (l: Landing): boolean => l.files.length > 0 && !l.patchPath && !l.error && !l.refusal && !l.takenBack;
 
 /** How a landing reads on its row and to the lead: "Landed 3 files", "Changed nothing", "Kept as a patch: it would not apply",
- *  kept without being tried because it reaches outside the project, or a landing that failed. Conflicts are a landing's, named
- *  from `conflicts`. */
-export type LandingOutcome = "landed" | "changedNothing" | "keptPatch" | "keptOutside" | "failed";
+ *  kept without being tried because it reaches outside the project, a landing that failed, or one the person took back. Conflicts
+ *  are a landing's, named from `conflicts`. */
+export type LandingOutcome = "landed" | "changedNothing" | "keptPatch" | "keptOutside" | "failed" | "takenBack";
 
 export function landingOutcome(l: Landing | null): LandingOutcome {
   if (!l || landingEmpty(l)) return "changedNothing";
+  if (l.takenBack) return "takenBack";
   if (l.refusal) return "keptOutside";
   if (l.patchPath) return "keptPatch";
   if (l.error) return "failed";
@@ -301,7 +312,8 @@ export interface HelperReport {
   readonly failure?: FailureKind;
   readonly budgetSpent?: boolean;
   readonly steps?: number;
-  /** where its work went; null when it had nothing to land; "pending" until its landing is settled */
+  /** where its work went; null when nothing was tried: it never started, or it did not finish (stopped or failed: its `ended`
+   *  says which), and only finished work lands (item 102i, as GoSpark's `buddyHeadTurnFinished`); "pending" until settled */
   readonly landing: Landing | null | "pending";
 }
 

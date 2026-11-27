@@ -15,6 +15,7 @@ import { savedKeys, type SavedKeys } from "../code/secrets";
 import { type GitView } from "../code/moved";
 import { type KeptLane, type LaneCleaned, type LaneMade, type LaneReleased, type LaneRemoveAsk, type LaneRemoved } from "../code/laneBranch";
 import { type AgentConfig } from "../settings/mcp/agentConfig";
+import { type LaneLanded, type LanePatch, type LaneTakenBack } from "../jobs/landingWire";
 import { type InstallAsk, type InstallDone, type LinkRead, type ReadSkill } from "../runtime/skillBundle";
 import { type MergeMethod, type NewProjectMade, type Pulled, type RepoAsk, type ReviewAsk, type ReviewDone, type ReviewDraft, type SourceTools } from "../code/source";
 import { type ProviderPatch, type ProviderView, type SignIn } from "../settings/providers/model";
@@ -184,6 +185,20 @@ export interface SessionHost extends HistoryHost {
    *  (`bad_job`, `not_a_lane`, `lead_is_helper`, `busy`, `no_commit`, `taken`, `no_folder`, `git_missing`) or git's own line, with
    *  nothing made. Absent in a shell older than helper lanes: none then starts. */
   laneHelperWorktree?(lead: string, job: string): Promise<LaneMade>;
+  /** Land a helper lane's work in its lead lane's folder (item 102g's `lane_land`, src-tauri/src/lane_land.rs; item 102i calls it
+   *  when the helper lane reported and its lead is idle): `helper` is the helper lane's `worktree`, and the shell finds its lead, job
+   *  and snapshot from its record. Into the lead's working tree only, one at a time per lead folder, with what was there kept for
+   *  Take back; a patch that will not apply, or names a file outside the lead's project, is kept (0600) and nothing is written.
+   *  Rejects with a short code (`not_a_lane`, `not_a_helper`, `no_lead`, `landed`, `busy`, `no_snapshot`, `no_commit`,
+   *  `config:<setting>`, `git_missing`) or git's own line. Absent in a shell older than landings: nothing lands. */
+  laneLand?(helper: string): Promise<LaneLanded>;
+  /** Take back this landing (item 102g's `lane_take_back`): the files the landing of helper lane `helper` wrote go back as they
+   *  were, only while nothing in the lead's folder changed since. Rejects with a short code (`not_landed`, `changed`, `no_lead`,
+   *  ...) or the system's words. */
+  laneTakeBack?(helper: string): Promise<LaneTakenBack>;
+  /** Show patch (item 102i's `lane_patch`): the patch a landing of helper lane `helper` kept, every line masked by the shell, at most
+   *  256 KiB of it. Only reads. Rejects with `no_patch`, `not_a_lane` or `not_a_helper`. */
+  lanePatch?(helper: string): Promise<LanePatch>;
   /** This computer's memory in bytes (item 102h, src-tauri/src/machine.rs; docs/several-agents.md R7), read once by the shell with no
    *  program run, so the page can tell how many helper lanes run at once. Null when it could not be read. */
   machineMemory?(): Promise<number | null>;
