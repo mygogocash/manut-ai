@@ -313,7 +313,10 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    own threads. Then 135, 102k (chats that reach other chats), 102g (landing, shell) and 102b (the job's side-by-side
    view). Then 102c (gathered answers) and 102h (running helper lanes:
    approving a round starts it; the owner should run one small round of two helpers). Next: 102i (landings in the
-   chat), 102j (reports to the lead). Needs the owner from 101b: Grok signed in and `permission_mode = "ask"`
+   chat), 102j (reports to the lead). On 27 Nov the owner merged pull request #33 into `main`, which deleted
+   `pilot/week-1` on GitHub; it was made again from `main` (f64363e4). Then the design of 103 (other programs reach chats
+   through an MCP server, `docs/mcp-threads.md`; four open questions for the owner) and 103a (the door, in the shell;
+   off, and nothing on the page reaches it until 103b) merged. Next: 103b (Settings, the list and the let-in card). Needs the owner from 101b: Grok signed in and `permission_mode = "ask"`
    under `[ui]` in `~/.grok/config.toml` (it says always-approve, so Grok chats are refused), and Muse Code's CLI. From 101e: all 325 Codex sessions on the owner's Mac are compressed, so
    only Claude Code's conversations are offered until 106b. Needs the owner from 101a: Cursor's Approval mode set to Allowlist (it is Run Everything, so Cursor
    chats are refused), and a Cursor plan with messages left to record a real tool call. GitHub reported 7 Dependabot alerts on `main` (2 critical) at that push, for the owner to look at.
