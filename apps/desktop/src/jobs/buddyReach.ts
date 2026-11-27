@@ -1,9 +1,13 @@
 // The reach cards over Buddy's chats on the Connected runtime (item 102l-3; `docs/connected-chat.md`, C; rule R10 of
 // `docs/several-agents.md`, kept as it is). On Connected a "chat" is one of the shop's conversations with Buddy (102l-2), and the asking
 // chat is the one the person is in: Buddy's main chat, or a conversation opened from History. This keeps the "Buddy may reach" list of
-// each, tells Buddy what is on it with each message (`outgoing`, which puts the note beside the message for the runtime to post after
-// it; `buddyReachBridge.ts` puts these hooks in the store's way), reads Buddy's answer when its turn ends, and turns a reach block into
+// each, tells Buddy what is on it with each message (`outgoing`, which puts the note beside the message for the runtime to post as a field
+// of its own; `buddyReachBridge.ts` puts these hooks in the store's way), reads Buddy's answer when its turn ends, and turns a reach block into
 // a card, or into a line that says why there is none.
+//
+// Manut AI's own lines are fields of the message, never part of its words (item 102l-5): a message sent on and a new conversation's first
+// message post their words as `text` and the asking chat's name as `sentOnFrom`, and Buddy's note goes as `note`. The API gives the model
+// the mark and the note and keeps the words alone, so a conversation is named by the words and the export holds nothing of ours.
 //
 // It reuses item 102k's parts with what differs on Connected handed in: the block grammar (`reachBlocks.ts`, `BUDDY_GRAMMAR`), the
 // list (`reachList.ts`: `addEntry`, `findEntry`, `removeEntry`, `REACH_MAX`), the asks (`reachAsks.ts`, the one approval-core store),
@@ -18,8 +22,8 @@
 //   not asked anything (`findEntry` reads the list alone).
 // - Never across shops: a list is the shop's it was made in, a card is the shop's it opened in, and a press while another shop is shown
 //   is refused with nothing sent. So is a press on a conversation that is gone, or after the person stopped owning the shop.
-// - A message sent on is posted as words and nothing else (`postFromCard`, then the runtime's `chat.send`), so it has no way to answer,
-//   allow, deny or dismiss any ask or approval: approvals settle only through the decide route.
+// - A message sent on is posted as words and the name of the chat they came from, and nothing else (`postFromCard`, then the runtime's
+//   `chat.send`), so it has no way to answer, allow, deny or dismiss any ask or approval: approvals settle only through the decide route.
 // - Each press posts once. A refusal, or a request that got no answer, marks the card with the reason; nothing is sent again from here.
 // - Nothing typed or answered is written to disk: the lists, the cards and what a turn said are held in memory for this run.
 // - Only the shop's owner chats on Connected (102l-2), so only an owner is offered the list, and only an owner's press is taken.
@@ -38,7 +42,7 @@ import { changes } from "../lib/changes";
 import { BUDDY_GRAMMAR, BUDDY_MESSAGE_MAX, reachOutcome, reachReply, type ReachKind, type ReachRefusal } from "./reachBlocks";
 import { answerReachAsk, isBuddyAsk, openReachAsk, withdrawReachAsk, type BuddyAsk, type ReachTarget } from "./reachAsks";
 import { addEntry, findEntry, removeEntry, type ReachEntry } from "./reachList";
-import { buddyNote, fromChatAfter, fromChatText } from "./reachMarks";
+import { buddyNote, fromChatText, markTitle } from "./reachMarks";
 import { crossing, refusalWords, type ReachAnswer } from "./reachChats";
 
 /** Why a listed conversation cannot be reached now. */
@@ -209,26 +213,29 @@ export function createBuddyReach(deps: BuddyReachDeps) {
     return { ok: true, scope: where.scope };
   };
 
-  /** What a yes does, once its card is settled: the only place anything moves between Buddy's conversations. Each is one post. */
+  /** What a yes does, once its card is settled: the only place anything moves between Buddy's conversations. Each is one post. The bubble
+   *  shows a message sent on with the mark in front, as on this Mac (`fromChatText`); the wire carries the words and, as `sentOnFrom`,
+   *  the title the mark names (`markTitle`: masked, one line, cut and free of a quote, exactly as the bubble's mark has it). */
   const act = async (ask: BuddyAsk, scope: Scope | undefined): Promise<{ thread?: string; error?: string }> => {
     const actions = deps.store().actions;
     const from = titleOf(ask.asker);
     if (ask.kind === "read") {
-      const error = await actions.postFromCard(ask.asker, ask.text, ask.text);
+      const error = await actions.postFromCard(ask.asker, ask.text, { text: ask.text });
       if (error !== null) return { error };
       // the asking chat now holds that conversation's content: its chips carry that shop on (item 121)
       tookIn(ask.asker, [passed(scope ?? ask.target.scope)]);
       return {};
     }
     if (ask.kind === "send") {
-      // after the words on the wire, so the API's kept text reads as it was written; in front in the bubble, as on this Mac
-      const error = await actions.postFromCard(ask.target.key, fromChatText(from, ask.message), fromChatAfter(from, ask.message));
+      // the words alone as the message and the asking chat's name beside them, for the API to give the model as the mark: in front in the
+      // bubble, as on this Mac
+      const error = await actions.postFromCard(ask.target.key, fromChatText(from, ask.message), { text: ask.message, sentOnFrom: markTitle(from) });
       return error === null ? {} : { error };
     }
     // a conversation is made by its first message (102l-2): prepared here, with nothing sent, then posted once
     const thread = await actions.newThread(TEAM, true);
     if (!thread) return { error: t("reach.buddy.notStarted") };
-    const error = await actions.postFromCard(threadKey(TEAM, thread), fromChatText(from, ask.brief), fromChatAfter(from, ask.brief));
+    const error = await actions.postFromCard(threadKey(TEAM, thread), fromChatText(from, ask.brief), { text: ask.brief, sentOnFrom: markTitle(from) });
     return error === null ? { thread } : { thread, error };
   };
 
@@ -282,8 +289,8 @@ export function createBuddyReach(deps: BuddyReachDeps) {
       if (!next.length) withdrawOpen(key);
       else withdrawOpen(key, refKey(e.ref));
     },
-    /** A request on its way to the runtime: a message to a chat with a list carries Buddy's note beside it, for the runtime to post
-     *  after the words; Buddy's main chat opened again posts to a new conversation from its next message. */
+    /** A request on its way to the runtime: a message to a chat with a list carries Buddy's note beside it, for the runtime to post as
+     *  the message's `note`, apart from its words; Buddy's main chat opened again posts to a new conversation from its next message. */
     outgoing<K extends Op>(op: K, params: OpParams<K> | undefined): OpParams<K> | undefined {
       if (op === "chat.open" && (params as OpParams<"chat.open"> | undefined)?.bot === TEAM) mainConv = null;
       if (op !== "chat.send" || !params) return params;

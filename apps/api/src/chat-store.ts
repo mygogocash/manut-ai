@@ -25,6 +25,14 @@
 /// the gateway leaves nothing in the thread. The checks run again at the commit, since the owner may have deleted the
 /// thread while Buddy answered.
 ///
+/// What a message record keeps (item 102l-5). The owner's message is the owner's words alone, masked: Manut AI's own lines
+/// are never inside them. Two optional fields say what else was true of the message. `sentOnFrom` is the title of the
+/// conversation whose words, written by Buddy there, the owner sent on to this one (a reach card's Send there, or the brief
+/// of a conversation a card started), so the model is given the mark after those words in this turn and in every later one
+/// (`admit` hands it back with the history), and an export says where the words came from. `noted: true` says the message
+/// went with a note from Manut AI to Buddy, and nothing of the note: it is given to the model for that one message and kept
+/// nowhere. A thread's title is made from the words alone, so a conversation is named by what the owner wrote.
+///
 /// What is never stored or logged. A message's words live only in its record and a thread's title in the thread's record;
 /// the audit entries name the thread and the owner's message by their ids (audit-log.ts). chat.ts masks keys before any
 /// text reaches here.
@@ -55,6 +63,12 @@ export const PAGE_DEFAULT = 50;
 export const PAGE_MAX = 200;
 /// A thread's title: its first message's first words, on one line.
 const TITLE_CHARS = 60;
+/// The longest title of a conversation that a message names as the one its words were sent on from, in characters (code points).
+export const MAX_FROM_CHARS = 120;
+/// What such a title never holds, so the line that names it in the model's request can neither end nor split: any control
+/// character (every line break among them, and the C1 controls), a line or paragraph separator, and the double quote that
+/// would end the mark's own.
+const FROM_REFUSED = /[\p{Cc}\p{Zl}\p{Zp}"]/u;
 /// The owner's text as the Worker sends it, masked, is at most 8,000 characters, and Buddy's at most MAX_ANSWER_CHARS:
 /// JSON can write a character as six bytes, so this is room for both with the rest of the body.
 const MAX_BODY_BYTES = 256 * 1024;
@@ -68,11 +82,29 @@ export const THREAD_ID = /^cht-[0-9a-z]{9}-[0-9a-z]{3}-[0-9a-f]{8}$/;
 export const MESSAGE_ID = /^m([1-9][0-9]{0,5})$/;
 
 export type ThreadRecord = { id: string; title: string; createdAt: number; updatedAt: number; count: number; next: number };
-export type MessageRecord = { id: string; from: "owner" | "buddy"; text: string; at: number; stopReason?: string };
+export type MessageRecord = {
+  id: string;
+  from: "owner" | "buddy";
+  text: string;
+  at: number;
+  stopReason?: string;
+  /// An owner's message only: the title of the conversation its words were sent on from.
+  sentOnFrom?: string;
+  /// An owner's message only: it went with Manut AI's note to Buddy (the note itself is not kept).
+  noted?: true;
+};
 
 /// What a route answers for a thread and a message: ISO times, as the rest of the API answers them.
 export type ThreadView = { id: string; title: string; createdAt: string; updatedAt: string; messageCount: number };
-export type MessageView = { id: string; from: "owner" | "buddy"; text: string; at: string; stopReason?: string };
+export type MessageView = {
+  id: string;
+  from: "owner" | "buddy";
+  text: string;
+  at: string;
+  stopReason?: string;
+  sentOnFrom?: string;
+  noted?: true;
+};
 
 const enc = encodeURIComponent;
 const keys = {
@@ -106,7 +138,17 @@ export function threadView(thread: ThreadRecord): ThreadView {
 
 export function messageView(message: MessageRecord): MessageView {
   return { id: message.id, from: message.from, text: message.text, at: iso(message.at),
-    ...(message.stopReason !== undefined ? { stopReason: message.stopReason } : {}) };
+    ...(message.stopReason !== undefined ? { stopReason: message.stopReason } : {}),
+    ...(message.sentOnFrom !== undefined ? { sentOnFrom: message.sentOnFrom } : {}),
+    ...(message.noted === true ? { noted: true as const } : {}) };
+}
+
+/// Whether `title` can be kept as the conversation a message was sent on from: text of 1 to MAX_FROM_CHARS characters with
+/// nothing to trim, on one line, with no double quote. The route trims, masks and cuts a title into this shape first.
+export function isSentOnFrom(title: unknown): title is string {
+  if (typeof title !== "string" || title !== title.trim()) return false;
+  const length = [...title].length;
+  return length >= 1 && length <= MAX_FROM_CHARS && !FROM_REFUSED.test(title);
 }
 
 /// A thread's title: the first words of the owner's first message, on one line, cut at TITLE_CHARS characters.
@@ -184,7 +226,8 @@ export async function chatTenantRoute(storage: DurableObjectStorage, request: Re
 /// Whether one more message may go to the model: the thread named is there and can take two more messages (the owner's
 /// and Buddy's), or, for a new thread, the shop has room for one; and the hour has room, in which case this message is
 /// counted in it. Answers the thread's newest messages, for the model's context. A message refused here never reaches
-/// the gateway and is not counted.
+/// the gateway and is not counted. An owner's message that was sent on from another conversation comes back with its title
+/// (`sentOnFrom`), so every later request gives the model the mark after those words; no note ever comes back, because none is kept.
 function admit(kv: SyncKvStorage, tenant: string, id: string | null, nowMs: number):
   { status: number; body: unknown; headers?: Record<string, string> } {
   const threads = readThreads(kv, tenant);
@@ -203,20 +246,34 @@ function admit(kv: SyncKvStorage, tenant: string, id: string | null, nowMs: numb
   }
   kv.put(keys.hour(tenant), [...hour, nowMs]);
   const history = thread ? lastMessages(kv, tenant, thread.id, HISTORY_READ) : [];
-  return { status: 200, body: { history: history.map((message) => ({ from: message.from, text: message.text })) } };
+  return { status: 200, body: { history: history.map((message) => ({ from: message.from, text: message.text,
+    ...(message.sentOnFrom !== undefined ? { sentOnFrom: message.sentOnFrom } : {}) })) } };
 }
 
-type Exchange = { owner: string; sentAtMs: number; answer: string; stopReason: string; nowMs: number };
+type Exchange = {
+  owner: string;
+  sentOnFrom?: string;
+  noted?: true;
+  sentAtMs: number;
+  answer: string;
+  stopReason: string;
+  nowMs: number;
+};
 
-/// The exchange a commit keeps, checked: the owner's words (1 to MAX_TEXT_CHARS characters), Buddy's (empty for a refusal
-/// that said nothing, up to MAX_ANSWER_CHARS), the stop reason as a code, and the two times. Null for anything else.
+/// The exchange a commit keeps, checked: the owner's words (1 to MAX_TEXT_CHARS characters), the title of the conversation
+/// they were sent on from if they were (`isSentOnFrom`), whether the message went with a note (only `true`, never the note),
+/// Buddy's words (empty for a refusal that said nothing, up to MAX_ANSWER_CHARS), the stop reason as a code, and the two
+/// times. Null for anything else.
 function keptExchange(body: Record<string, unknown>): Exchange | null {
-  const { owner, sentAtMs, answer, stopReason, nowMs } = body;
+  const { owner, sentOnFrom, noted, sentAtMs, answer, stopReason, nowMs } = body;
   if (typeof owner !== "string" || owner.trim() === "" || [...owner].length > MAX_TEXT_CHARS) return null;
+  if (sentOnFrom !== undefined && !isSentOnFrom(sentOnFrom)) return null;
+  if (noted !== undefined && noted !== true) return null;
   if (typeof answer !== "string" || [...answer].length > MAX_ANSWER_CHARS) return null;
   if (typeof stopReason !== "string" || !STOP_REASON.test(stopReason)) return null;
   if (!isTime(sentAtMs) || !isTime(nowMs) || sentAtMs > nowMs) return null;
-  return { owner, sentAtMs, answer, stopReason, nowMs };
+  return { owner, ...(sentOnFrom !== undefined ? { sentOnFrom } : {}), ...(noted === true ? { noted } : {}), sentAtMs, answer,
+    stopReason, nowMs };
 }
 
 /// Keeps one exchange: the owner's message and Buddy's answer, in the thread named or a new one, with the thread's record
@@ -235,7 +292,8 @@ function commit(kv: SyncKvStorage, tenant: string, id: string | null, kept: Exch
     thread = { id: sortableId("cht", kept.sentAtMs, 0), title: titleOf(kept.owner), createdAt: kept.sentAtMs,
       updatedAt: kept.sentAtMs, count: 0, next: 1 };
   }
-  const mine: MessageRecord = { id: `m${thread.next}`, from: "owner", text: kept.owner, at: kept.sentAtMs };
+  const mine: MessageRecord = { id: `m${thread.next}`, from: "owner", text: kept.owner, at: kept.sentAtMs,
+    ...(kept.sentOnFrom !== undefined ? { sentOnFrom: kept.sentOnFrom } : {}), ...(kept.noted ? { noted: true as const } : {}) };
   const buddys: MessageRecord = { id: `m${thread.next + 1}`, from: "buddy", text: kept.answer, at: kept.nowMs,
     stopReason: kept.stopReason };
   kv.put(keys.message(tenant, thread.id, thread.next), mine);

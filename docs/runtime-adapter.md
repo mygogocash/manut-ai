@@ -683,15 +683,16 @@ words in `src/threads/kind.ts`), the desktop's half of `docs/connected-chat.md`,
   still settle only through the decide route; nothing is deleted. Older messages than a conversation's newest 50 are not read yet.
   Buddy's chat has no model menu and never says a model is missing: the runtime names no model (`models.options` lists none, and the
   API chooses Buddy's), so its `models` capability is off and the chat shows neither.
-- **The reach cards' lines** (item 102l-3, `docs/connected-chat.md`, "What 102l-3 built"; `src/jobs/reachMarks.ts`). `chat.send` takes
-  `note`, Buddy's note naming the conversations it may reach, which the store's reach cards put beside a message while the chat's list
-  holds one (`src/jobs/buddyReach.ts`). It is posted after the words and a blank line, so the API names a new conversation by the words;
-  anything but a whole note is refused `invalid_request` with nothing sent, and words that leave it no room inside 8,000 characters are
-  refused `text_too_long`, saying how many characters they may have. A message sent on from another conversation, and a new
-  conversation's first message from a Start card, come with their mark after the words. `thread.open` reads a conversation back as the
-  screens draw it: the note off, a sent-on mark turned into the one in front (`fromChatText`, as on this Mac), and the reach block of an
-  answer to a message that carried the note hidden (an answer that was only the block is left out). A conversation's name is shown without
-  the start of those lines after a short first message (`shownTitle`).
+- **The reach cards' lines** (items 102l-3 and 102l-5, `docs/connected-chat.md`, "What 102l-3 built" and "What 102l-5 changed";
+  `src/jobs/reachMarks.ts`). `chat.send` takes `note`, Buddy's note naming the conversations it may reach, which the store's reach cards
+  put beside a message while the chat's list holds one (`src/jobs/buddyReach.ts`), and `sent_on_from`, the title of the conversation the
+  words were sent on from, which a Send there or Start conversation card sets. The runtime posts each as a field of its own, `note` and
+  `sentOnFrom`, beside the words and never joined to them, so the API names a new conversation by the words and the words have all 8,000
+  characters (a longer message is refused `text_too_long` as without a note). Anything the API would refuse of either, a note that is not a
+  whole note or a title it would not keep (1 to 120 characters once trimmed, one line, no double quote), is refused `invalid_request` with
+  nothing sent. `thread.open` reads a conversation back as the screens draw it: a message with `sentOnFrom` with its mark in front
+  (`fromChatText`, as on this Mac), and the reach block of an answer to a message with `noted: true` hidden (an answer that was only the
+  block is left out). A conversation's name is the API's.
 - **Tests.** `chat.test.ts` (each op over the fake API: the session, the body, the turn, the conversation listed and opened, two at
   once, every refusal in words with one request and no turn, blank and too long, signed out, the store marking a refused message
   "Not sent", offline, a helper's shop, a task told from a conversation, the shop after the switcher moved, removal not offered, and

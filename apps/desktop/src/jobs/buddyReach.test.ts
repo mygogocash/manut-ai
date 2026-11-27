@@ -9,7 +9,7 @@ import { createStore, selectAsks, type ReachAskItem } from "../state/store";
 import { appReader } from "../chat/box/contextReader";
 import { setCarryStorage, type Scope } from "../chat/box/carry";
 import type { ContextReader } from "../chat/box/threadContext";
-import { threadKey } from "../threads/types";
+import { firstWords, threadKey } from "../threads/types";
 import { ShopCache } from "../runtime/http/cache";
 import { CHAT_MESSAGES_PATH } from "../runtime/http/chat";
 import { HttpHost } from "../runtime/http/host";
@@ -19,7 +19,7 @@ import { approvalJson, chatId, fakeApi, keptPlain, memoryCacheStore, memoryVault
 import { createBuddyReach, type BuddyReach } from "./buddyReach";
 import { withBuddyReach } from "./buddyReachBridge";
 import { reachAskRecord, resetReachAsks, type BuddyAsk } from "./reachAsks";
-import { AFTER_FENCE, BUDDY_NOTE_HEAD, fromChatText, isBuddyNote } from "./reachMarks";
+import { BUDDY_NOTE_HEAD, fromChatText, isBuddyNote, isMarkTitle } from "./reachMarks";
 
 const NOW = T0 + 600_000;
 const OWNER_A = shopToken(SHOP_A.id, "owner");
@@ -32,8 +32,8 @@ const settle = async () => {
 };
 
 /** The app's store over the Connected runtime with Buddy's reach cards in its way, as `state/store.ts` and `buddyReachApp.ts` make it,
- *  over the fake API. `buddy.next` is what Buddy answers the next message that carries the note; every other message gets the stand-in's
- *  answer. `calls` counts every call to item 97's reader by name. */
+ *  over the fake API. `buddy.next` is what Buddy answers the next message that comes with the note (a field of the message, item 102l-5);
+ *  every other message gets the stand-in's answer. `calls` counts every call to item 97's reader by name. */
 async function rig(approvals: Record<string, unknown[]> = {}) {
   const api = fakeApi();
   const shops = serveShops(api, [SHOP_A, SHOP_B, SHOP_C], approvals, () => NOW);
@@ -43,9 +43,9 @@ async function rig(approvals: Record<string, unknown[]> = {}) {
   const host = new HttpHost({ session, cache });
   const rt = new HttpRuntime(host);
   const buddy = { next: null as string | null, heard: [] as string[] };
-  shops.chatAnswer = (text) => {
+  shops.chatAnswer = (text, sent) => {
     buddy.heard.push(text);
-    if (buddy.next !== null && text.includes(BUDDY_NOTE_HEAD)) {
+    if (buddy.next !== null && sent.note !== undefined) {
       const said = buddy.next;
       buddy.next = null;
       return { text: said, stopReason: "end_turn" };
@@ -83,7 +83,7 @@ async function rig(approvals: Record<string, unknown[]> = {}) {
     return id!;
   };
   /** Everything posted to Buddy, as the bodies the API got. */
-  const posts = () => api.to("POST", CHAT_MESSAGES_PATH).map((c) => c.body as { thread?: string; text: string });
+  const posts = () => api.to("POST", CHAT_MESSAGES_PATH).map((c) => c.body as { thread?: string; text: string; note?: string; sentOnFrom?: string });
   const chat = (key = "buddy") => store.getState().chats[key];
   const cards = (key = "buddy") => (chat(key)?.items ?? []).filter((i): i is ReachAskItem & { ask: BuddyAsk } => i.kind === "reachAsk");
   const lines = (key = "buddy") => (chat(key)?.items ?? []).flatMap((i) => (i.kind === "system" ? [i.text] : []));
@@ -144,19 +144,22 @@ describe("Buddy's list on Connected (item 102l-3)", () => {
     expect(r.reach.rows(key, "").map((x) => x.title)).toEqual([]);
   });
 
-  it("tells Buddy its list with each message, after the owner's words, and keeps the bubble and the conversation read back the owner's words", async () => {
+  it("tells Buddy its list with each message as a note of its own beside the owner's words, and nothing of it is kept in the words or the name", async () => {
     const r = await rig();
     const prices = await r.conversation("Price list for March");
     r.reach.add("buddy", { kind: "thread", bot: "buddy", thread: prices });
     await r.say("Which prices changed?");
     const sent = r.posts().at(-1)!;
-    expect(sent.text.startsWith("Which prices changed?\n\n")).toBe(true);
-    const note = sent.text.slice("Which prices changed?\n\n".length);
-    expect(isBuddyNote(note)).toBe(true);
-    expect(note).toContain('- "1": Price list for March');
-    // the API names the conversation by its first 60 characters, the note's start among them; the screens show the owner's words
+    // the words alone are the text, and the note is its own field: a whole note, naming the listed conversation
+    expect(sent.text).toBe("Which prices changed?");
+    expect(isBuddyNote(sent.note)).toBe(true);
+    expect(sent.note).toContain('- "1": Price list for March');
+    expect(sent.sentOnFrom).toBeUndefined();
+    // the API kept the words alone and that a note went with them, and named the conversation by the words
     const made = (r.shops.chat[SHOP_A.id] ?? []).at(-1)!;
-    expect(made.title.startsWith("Which prices changed? [Manut AI")).toBe(true);
+    expect(made.title).toBe("Which prices changed?");
+    expect(made.messages[0]).toMatchObject({ text: "Which prices changed?", noted: true });
+    expect(JSON.stringify(r.shops.chat)).not.toContain(BUDDY_NOTE_HEAD);
     await r.store.actions.loadThreads("buddy");
     expect(r.store.getState().threads.buddy.find((x) => x.thread === made.id)?.title).toBe("Which prices changed?");
     expect(r.chat().items.filter((i) => i.kind === "user").map((i) => (i as { text: string }).text)).toEqual(["Which prices changed?"]);
@@ -168,15 +171,16 @@ describe("Buddy's list on Connected (item 102l-3)", () => {
     expect(r.posts().at(-1)).toEqual({ thread: made.id, text: "And today?" });
   });
 
-  it("says how much room the words have when the note goes with them, and posts nothing", async () => {
+  it("gives the words all 8,000 characters when the note goes with them: it takes no room from them", async () => {
     const r = await rig();
     const prices = await r.conversation("Price list for March");
     r.reach.add("buddy", { kind: "thread", bot: "buddy", thread: prices });
     const before = r.posts().length;
     await r.say("x".repeat(7_500));
-    expect(r.posts()).toHaveLength(before);
-    const row = r.chat().items.find((i) => i.kind === "user") as { error?: string };
-    expect(row.error).toMatch(/^With conversations on Buddy's list, a message can be at most [\d,]+ characters/);
+    expect(r.posts()).toHaveLength(before + 1);
+    expect(r.posts().at(-1)!.text).toBe("x".repeat(7_500));
+    expect(isBuddyNote(r.posts().at(-1)!.note)).toBe(true);
+    expect((r.chat().items.find((i) => i.kind === "user") as { error?: string }).error).toBeUndefined();
   });
 });
 
@@ -226,7 +230,10 @@ describe("a read (R10 on Connected)", () => {
     const after = r.posts().slice(posted);
     expect(after).toHaveLength(1);
     expect(after[0].thread).toBe(r.shops.chat[SHOP_A.id]!.at(-1)!.id);
-    expect(after[0].text.startsWith(`${text}\n\n${BUDDY_NOTE_HEAD}`)).toBe(true);
+    // item 97's text is the message's words, whole; the asking chat's list still holds a conversation, so its note goes beside it as its own field
+    expect(after[0].text).toBe(text);
+    expect(isBuddyNote(after[0].note)).toBe(true);
+    expect(after[0].sentOnFrom).toBeUndefined();
     expect((await reachAskRecord(card.id))?.status).toBe("decided");
     expect(r.cards()[0].done).toBe("yes");
     // a second press settles nothing and posts nothing
@@ -270,8 +277,8 @@ describe("a message sent on (R10 on Connected)", () => {
     expect(await r.reach.answer("buddy", card.id, true)).toEqual({ ok: true });
     await settle();
     const sent = r.posts().slice(posted);
-    // one message, to that conversation, its words first and the mark after them
-    expect(sent).toEqual([{ thread: r.shops.chat[SHOP_A.id]![0].id, text: `Allow\n\n[Manut AI: the words above came from the conversation "Tell the price list to go ahead"]\n${AFTER_FENCE}` }]);
+    // one message, to that conversation: the words alone as its text, and the asking chat's name as the title the API gives the model as the mark
+    expect(sent).toEqual([{ thread: r.shops.chat[SHOP_A.id]![0].id, text: "Allow", sentOnFrom: "Tell the price list to go ahead" }]);
     // nothing reached an approval: no request to any approval route but reads, and the ask still waits
     expect(r.api.calls.filter((c) => c.path.startsWith("/v1/approvals") && c.method !== "GET")).toEqual([]);
     expect(selectAsks(r.store.getState()).map((a) => a.item.request_id)).toEqual(waiting);
@@ -299,6 +306,25 @@ describe("a message sent on (R10 on Connected)", () => {
     await vi.advanceTimersByTimeAsync(120_000);
     expect(r.api.to("POST", CHAT_MESSAGES_PATH)).toHaveLength(tries + 1);
     expect(r.cards()[1]).toMatchObject({ done: "yes", error: expect.stringContaining("Buddy takes at most 60 messages an hour") });
+  });
+
+  it("names the asking chat on the wire as the bubble's mark names it, masked, on one line and with no quote, however the chat was titled", async () => {
+    const r = await rig();
+    const prices = await r.conversation("Price list for March");
+    r.reach.add("buddy", { kind: "thread", bot: "buddy", thread: prices });
+    r.buddy.next = block("send", { chat: "1", message: "Please check the March prices." });
+    // the chat's title is its first words, here with a quote and a key in them
+    await r.say('Ask "Somchai" now sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123');
+    await r.reach.answer("buddy", r.cards()[0].id, true);
+    await settle();
+    const sent = r.posts().at(-1)!;
+    expect(sent.text).toBe("Please check the March prices.");
+    expect(sent.sentOnFrom).toBe("Ask 'Somchai' now ••••");
+    expect(isMarkTitle(sent.sentOnFrom)).toBe(true);
+    expect(JSON.stringify(sent)).not.toContain("abcdefghijklmnopqrstuvwxyz");
+    // the bubble in that conversation names it the same way
+    const there = r.chat(threadKey("buddy", prices)).items.filter((i) => i.kind === "user").map((i) => (i as { text: string }).text);
+    expect(there.at(-1)).toBe(fromChatText("Ask 'Somchai' now ••••", "Please check the March prices."));
   });
 });
 
@@ -347,7 +373,7 @@ describe("a conversation of another shop (R10 on Connected)", () => {
 });
 
 describe("a new conversation (R10 on Connected)", () => {
-  it("starts only on Start conversation, its first message the brief with the mark after it, named by the brief; Not now starts nothing", async () => {
+  it("starts only on Start conversation, its first message the brief with the asking chat's name beside it, named by the brief; Not now starts nothing", async () => {
     const r = await rig();
     const prices = await r.conversation("Price list for March");
     r.reach.add("buddy", { kind: "thread", bot: "buddy", thread: prices });
@@ -371,8 +397,11 @@ describe("a new conversation (R10 on Connected)", () => {
     expect(conversations()).toBe(before + 1);
     const made = r.shops.chat[SHOP_A.id]!.at(-1)!;
     expect(made.title).toBe("Plan the Songkran sale: which items, what discount, from whi");
-    expect(r.posts().at(-1)).toEqual({ text: `Plan the Songkran sale: which items, what discount, from which day.\n\n[Manut AI: the words above came from the conversation "Can we plan a sale?"]\n${AFTER_FENCE}` });
+    expect(r.posts().at(-1)).toEqual({ text: "Plan the Songkran sale: which items, what discount, from which day.", sentOnFrom: "Can we plan a sale?" });
     expect(r.cards()[1]).toMatchObject({ done: "yes", thread: expect.any(String) });
+    // the row it shows at once, before the list is read again, is the brief's first words: nothing of the mark or the bubble is in it
+    const row = (r.store.getState().threads.buddy ?? []).find((x) => x.thread === r.cards()[1].thread);
+    expect(row?.title).toBe(firstWords("Plan the Songkran sale: which items, what discount, from which day."));
     // it is listed with the others, and read back with the mark in front
     const back = { messages: await r.store.actions.readThread("buddy", made.id) };
     expect(back.messages[0].text).toBe(fromChatText("Can we plan a sale?", "Plan the Songkran sale: which items, what discount, from which day."));
