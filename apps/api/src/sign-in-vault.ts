@@ -57,6 +57,7 @@ import { readJsonBody } from "./body";
 import { isValidTenant } from "./companies";
 import { openSecret, sealSecret, type SealedSecret } from "./cred-crypto";
 import { resealStore, type ResealStore } from "./reseal";
+import { timingSafeEqual } from "./timing-safe";
 import { credStub, type TenantDataEnv } from "./tenant-data";
 
 export type SignInVaultKeys = { CRED_KEY?: string; CRED_KEY_PREVIOUS?: string };
@@ -201,14 +202,6 @@ export function isSignInVaultPath(pathname: string): boolean {
     pathname === "/browser-steps" || pathname.startsWith("/browser-steps/");
 }
 
-/// Whether two hex digests are the same, in time that does not depend on where they differ.
-function sameDigest(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return diff === 0;
-}
-
 /// Online while its last beat is under 90 seconds old; asleep otherwise, and before its first beat.
 function outpostStatus(lastHeartbeatAt: string | null, nowMs: number): "online" | "asleep" {
   if (lastHeartbeatAt === null) return "asleep";
@@ -237,7 +230,8 @@ async function authenticated(storage: DurableObjectStorage, tenant: string, outp
   }
   const record = await storage.get<OutpostRecord>(keys.outpost(outpostId));
   if (!record || record.tenant !== tenant) return null;
-  return sameDigest(record.credentialHash, credentialHash) ? record : null;
+  // in time that does not depend on where the two digests differ
+  return timingSafeEqual(record.credentialHash, credentialHash) ? record : null;
 }
 
 const UNAUTHORIZED = { error: "unauthorized" };
@@ -1030,9 +1024,16 @@ export function stepOrder(a: { queuedAt: string; seq?: number; id: string }, b: 
   return a.queuedAt.localeCompare(b.queuedAt) || (a.seq ?? 0) - (b.seq ?? 0) || a.id.localeCompare(b.id);
 }
 
-async function stepsOf(storage: DurableObjectStorage, tenant: string): Promise<StepRecord[]> {
-  const records = [...(await storage.list<StepRecord>({ prefix: keys.steps })).values()]
-    .filter((record) => record.tenant === tenant);
+/// Every step this vault keeps, by key: read once by a request that both checks the steps and prunes them, so the prefix is
+/// listed once, not twice (`stepsOf` and `pruneSteps` take what it returns).
+type StepList = Map<string, StepRecord>;
+async function listSteps(storage: DurableObjectStorage): Promise<StepList> {
+  return storage.list<StepRecord>({ prefix: keys.steps });
+}
+
+/// `tenant`'s steps, oldest first, from `listed` when the request already read them.
+async function stepsOf(storage: DurableObjectStorage, tenant: string, listed?: StepList): Promise<StepRecord[]> {
+  const records = [...(listed ?? (await listSteps(storage))).values()].filter((record) => record.tenant === tenant);
   return records.sort(stepOrder);
 }
 
@@ -1146,11 +1147,13 @@ async function queueStep(storage: DurableObjectStorage, tenant: string, body: Re
     carried = found;
     expiresMs = Math.min(expiresMs, Date.parse(found.grant.expiresAt));
   }
-  const open = (await stepsOf(storage, tenant)).filter((step) => step.outpostId === outpost.id &&
+  // listed once for the check and the prune: nothing else runs on this vault in between
+  const listed = await listSteps(storage);
+  const open = (await stepsOf(storage, tenant, listed)).filter((step) => step.outpostId === outpost.id &&
     (step.state === "queued" || step.state === "taken" || step.state === "reported") &&
     nowMs < Date.parse(step.expiresAt));
   if (open.length >= MAX_OPEN_STEPS) return json({ error: "too_many_steps" }, 409);
-  await pruneSteps(storage, nowMs);
+  await pruneSteps(storage, nowMs, listed);
   const seq = await nextStepSeq(storage);
   const step: StepRecord = { id: crypto.randomUUID(), tenant, kind, url, selector, grantId: carried?.grant.id ?? null,
     signInId: carried?.signIn.id ?? null, site: carried?.signIn.site ?? null, outpostId: outpost.id, taskId, attemptId,
@@ -1186,9 +1189,9 @@ async function grantToCarry(storage: DurableObjectStorage, tenant: string, grant
 /// Deletes the steps that ran out of time ten minutes before, ended or not: long enough for a worker to read how its
 /// step went, and no longer, since what a read brought back is the shop's own data. Their history is in the audit log,
 /// and a landed outcome in the task's events.
-async function pruneSteps(storage: DurableObjectStorage, nowMs: number): Promise<void> {
+async function pruneSteps(storage: DurableObjectStorage, nowMs: number, listed?: StepList): Promise<void> {
   const dead: string[] = [];
-  for (const [key, step] of await storage.list<StepRecord>({ prefix: keys.steps })) {
+  for (const [key, step] of listed ?? (await listSteps(storage))) {
     if (Date.parse(step.expiresAt) + GRANT_KEEP_MS < nowMs) dead.push(key);
   }
   for (let i = 0; i < dead.length; i += STORAGE_BATCH) await storage.delete(dead.slice(i, i + STORAGE_BATCH));
@@ -1425,14 +1428,16 @@ async function queueSubmit(storage: DurableObjectStorage, tenant: string, body: 
   const refused = unusable(signIn, member);
   if (refused || !signIn) return json({ error: refused?.error ?? "sign_in_not_found" }, refused?.status ?? 404);
   if (!signIn.origins.includes(page.origin)) return json({ error: "origin_not_allowed" }, 403);
-  const steps = await stepsOf(storage, tenant);
+  // listed once for the checks and the prune: nothing else runs on this vault in between
+  const listed = await listSteps(storage);
+  const steps = await stepsOf(storage, tenant, listed);
   const live = (step: StepRecord) => (step.state === "queued" || step.state === "taken" || step.state === "reported") &&
     nowMs < Date.parse(step.expiresAt);
   if (steps.some((step) => step.requestId === requestId && live(step))) return json({ error: "request_queued" }, 409);
   if (steps.filter((step) => step.outpostId === outpost.id && live(step)).length >= MAX_OPEN_STEPS) {
     return json({ error: "too_many_steps" }, 409);
   }
-  await pruneSteps(storage, nowMs);
+  await pruneSteps(storage, nowMs, listed);
   const seq = await nextStepSeq(storage);
   const step: StepRecord = { id: crypto.randomUUID(), tenant, kind: "submit", url: page.href, selector: null,
     grantId: null, signInId: signIn.id, site, outpostId: outpost.id, taskId, attemptId, member,

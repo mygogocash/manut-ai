@@ -33,6 +33,7 @@ import type { PilotShopRecord } from "./pilot-store";
 import { sessionOpenRefusal, type SessionLimitEnv } from "./session-limits";
 import { indexShop } from "./shops-store";
 import { authCall, tenantCall, type TenantDataEnv } from "./tenant-data";
+import { timingSafeEqual } from "./timing-safe";
 
 export type PeopleEnv = Pick<TenantDataEnv, "AUTH" | "TENANT"> & SessionLimitEnv & {
   /// Where the web app lives: an invite's link is `${WEB_ORIGIN}/join/{token}`.
@@ -75,15 +76,6 @@ const iso = (ms: number) => new Date(ms).toISOString();
 export function bearer(request: Request): string {
   const header = request.headers.get("authorization") ?? "";
   return header.startsWith("Bearer ") ? header.slice("Bearer ".length) : "";
-}
-
-/// Constant-time comparison, as index.ts compares the operator key. Email sign-in compares a code's HMAC with it too
-/// (auth-object.ts).
-export function timingSafeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return diff === 0;
 }
 
 function base64url(text: string): string {

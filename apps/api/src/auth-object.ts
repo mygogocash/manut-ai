@@ -11,7 +11,7 @@ import {
 } from "./email-code";
 import { deliver } from "./email-sender";
 import { modelAlertsRoute } from "./model-alerts";
-import { timingSafeEqual } from "./people";
+import { timingSafeEqual } from "./timing-safe";
 import { pilotDeletionRoute, pilotRegistryKey, pilotRegistryRoute } from "./pilot-store";
 import { sessionIndexKey, sweepSessions, wipeGeneration, wipeTenantSessions, type SessionIndexRow } from "./session-index";
 import { shopsAuthRoute, wipeShopsTenant } from "./shops-store";

@@ -1,7 +1,7 @@
 // Files in a SESSIONS chat: the pure helpers (which pictures go to the agent as its image input, the message that
 // names the other files, the shell quoting of a dropped path, the restart book), and the sessions store sending
 // files with the mock host, in a running chat and in a draft, failing without sending, and closing removing them.
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { bytesOf, inlinePicture, INLINE_MAX, parseSentFiles, pathsTyped, putSentFiles, shellQuote, wireText } from "./attach";
 import { MockHost, type MockCall } from "./host";
 import { createSessions } from "./sessions";
@@ -163,6 +163,27 @@ describe("files in a session chat", () => {
     await wait(20);
     expect(calls().some((c) => c.op === "file.remove" && c.session === id)).toBe(true);
     expect(JSON.parse(storage.get("manut.sessions.files")!)[id]).toBeUndefined();
+  });
+
+  it("closing a session lets go of its pictures' previews, and only its own", async () => {
+    const { ss, store } = setup();
+    const id = await running(ss, "claude", store);
+    const other = await running(ss, "claude", store);
+    await ss.sendFiles(id, "look", [out("a.png", "PNG", "image")]);
+    await ss.sendFiles(other, "and this", [out("b.png", "PNG", "image")]);
+    const urlOf = (sid: string) => (store.getState().chats[ss.chatKey(sid)!].items.filter((i) => i.kind === "user").pop() as { files: { url: string }[] }).files[0].url;
+    const mine = urlOf(id);
+    const theirs = urlOf(other);
+    const revoked: string[] = [];
+    const revoke = vi.spyOn(URL, "revokeObjectURL").mockImplementation((u) => void revoked.push(u));
+    try {
+      ss.close(id);
+      await wait(20);
+      expect(revoked).toEqual([mine]);
+      expect(revoked).not.toContain(theirs);
+    } finally {
+      revoke.mockRestore();
+    }
   });
 
   it("after a restart a sent bubble shows its files again; folders of sessions that are gone are pruned", async () => {

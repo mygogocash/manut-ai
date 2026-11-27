@@ -1,6 +1,6 @@
 // A thread of a bot in the main column: the bot's own header, timeline and composer, fed by the thread's chat
 // (`fold:<bot>:<thread>`). Same Chat parts as the main chat; only where the words go differs.
-import { selectAsks, useStore } from "../state/store";
+import { asksIn, useStore } from "../state/store";
 import type { Bot } from "../lib/protocol";
 import { Timeline } from "../chat/parts/Timeline";
 import { Composer } from "../chat/parts/Composer";
@@ -56,7 +56,7 @@ export function ThreadChat({ bot, thread }: { bot: Bot; thread: string }) {
           key={key}
           bot={as}
           running={!!chat?.turn}
-          asking={selectAsks(s).some((a) => a.bot === key)}
+          asking={asksIn(s, key).length > 0}
           history={promptsOf(chat?.items)}
           offline={bot.status === "offline" || away}
           offlineText={away ? t("chat.connecting") : undefined}

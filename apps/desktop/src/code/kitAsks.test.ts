@@ -17,7 +17,7 @@ const FAKE_KEY = "sk-FAKE0000000000000000TEST";
 /** What the stand-in shell's read of the session's folder finds in what a commit or a push would save (`SessionHost.laneKeys`). */
 type Saved = () => Promise<SavedKeys | null>;
 
-async function session(saved: Saved = async () => ({ files: [], unread: false, history: { files: [], unread: false } }), branch: () => string = () => "kit/promptpay-qr") {
+async function session(saved: Saved = async () => ({ files: [], unread: false, history: { files: [], unread: false } }), branch: () => string = () => "kit/promptpay-qr", over: { refuseAnswers?: boolean } = {}) {
   (globalThis as { localStorage?: unknown }).localStorage = { getItem: () => null, setItem: () => {}, removeItem: () => {} };
   const sinks = new Map<number, (e: ChatEvent) => void>();
   const inputs: ChatInput[] = [];
@@ -38,6 +38,8 @@ async function session(saved: Saved = async () => ({ files: [], unread: false, h
       return 1;
     },
     chatInput: async (_id: number, i: ChatInput) => {
+      // an agent that went away as Kit answered: the runtime does not take the answer
+      if (over.refuseAnswers && i.kind === "approve") throw new Error("the agent is gone");
       inputs.push(i);
       if (i.kind === "send") sinks.get(1)!({ event: "turn.start" });
     },
@@ -84,6 +86,14 @@ describe("Kit's dial on a coding session's asks", () => {
     expect(s.answers()).toEqual([{ kind: "approve", request_id: "r1", choice: "once" }]);
     expect(kitAnswered(s.key, "r1")).toEqual({ by: "reads" });
     expect(s.told.some((e) => e.event === "approval.request")).toBe(false);
+  });
+
+  it("an answer of Kit's the runtime did not take leaves the ask open, and the person is told of it as of any ask", async () => {
+    const s = await session(undefined, undefined, { refuseAnswers: true });
+    const card = await s.ask("r9", "Run this command?", "pnpm test");
+    expect(card.resolved).toBeFalsy();
+    expect(s.answers()).toEqual([]);
+    expect(s.told.filter((e) => e.event === "approval.request").map((e) => (e as EventOf<"approval.request">).request_id)).toEqual(["r9"]);
   });
 
   it("asks the person before an install, with what it does and the rule it would keep", async () => {

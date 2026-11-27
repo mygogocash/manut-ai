@@ -47,8 +47,9 @@ import { NAME_MAX, pickTitle, promptTitle, putTitle, TITLES_KEY } from "./titles
 import { getDraft, setDraft as setUnsent } from "../app/drafts";
 import { getHost, type ChatEvent, type ChatInput, type ConvState, type PastChat, type SessionHost } from "./host";
 import { localBot } from "../peers/peerKey";
-import { askOpen, folderKey, getStore, notifySessionEvent, notifySessionNote, onBridgeEvent, selectAsks, setChatRoute, setSessionKeyLookup, type ApprovalItem, type OutFile, type SentFile, type Store } from "../state/store";
-import { blobType, bytesOf, inlinePicture, pathsTyped, putSentFiles, SENT_FILES_KEY, shellQuote, wireText, type SavedFile, type SentFilesBook } from "./attach";
+import { askOpen, folderKey, getStore, notifySessionEvent, notifySessionNote, onBridgeEvent, asksIn, setChatRoute, setSessionKeyLookup, type ApprovalItem, type OutFile, type SentFile, type Store } from "../state/store";
+import { pathsTyped, shellQuote } from "./attach";
+import { createSentFiles, type Prepared } from "./sentFiles";
 import type { AccountGroup, ApprovalChoice, BridgeEvent, ClarifyAnswers, DiffFile, EventOf, Msg } from "../lib/protocol";
 import { settleApproval } from "../chat/cards/respond";
 import { afterBranchRead, beforeBranchRead, kitAnswer, noteChange, savesAlone } from "../code/kitAsks";
@@ -92,7 +93,7 @@ import { broughtBackNote, REWINDS, rewoundNote, TurnBook, turnTitle } from "./re
 import { NO_RULES, signedOutSaid, errText } from "./sessionErrors";
 import { ACCOUNT_CLI, accountFor, SAID_MAX, OUT_MARK_MS, RESIZE_SETTLE_MS, utf8, newConversationId, TERM_CONTINUES, TERM_REOPENS, termComesBack, CODEX_ID_FIRST_MS, CODEX_ID_EVERY_MS } from "./sessionPure";
 export { ACCOUNT_CLI, accountFor, RESIZE_SETTLE_MS, newConversationId } from "./sessionPure";
-import { readRecent, readSentFiles, readTitles, titleKey, TITLED, readOpens } from "./sessionBooks";
+import { readRecent, readTitles, titleKey, TITLED, readOpens } from "./sessionBooks";
 export { NO_RULES, signedOutSaid } from "./sessionErrors";
 import type { ModelOption, SessionsState, AgentLive, Term, TermIo, ChatProc } from "./sessionTypes";
 export type { ModelOption, SessionsState, AgentLive } from "./sessionTypes";
@@ -200,7 +201,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     rec,
     asks: (id) => {
       const key = keys.get(id);
-      return key ? selectAsks(store().getState()).filter((a) => a.bot === key).map((a) => a.item.request_id) : [];
+      return key ? asksIn(store().getState(), key).map((a) => a.item.request_id) : [];
     },
     working: (id) => working(id),
     lastAnswer: (id) => {
@@ -250,7 +251,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     },
     asks: (id) => {
       const key = keys.get(id);
-      return key ? selectAsks(store().getState()).filter((a) => a.bot === key).map((a) => a.item.request_id) : [];
+      return key ? asksIn(store().getState(), key).map((a) => a.item.request_id) : [];
     },
     personWaiting: (id) => {
       const key = keys.get(id);
@@ -532,6 +533,18 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     const careful = !!r.workflow || (!!r.helperOf && !!rec(r.helperOf.lead)?.workflow);
     const ctx = { chat: key, root: workDir(r), project: r.cwd, home: state.home, branch: state.live[id]?.branch, ...(careful ? { careful: true } : {}) };
     const card = { id: `approval-${ask.request_id}`, request_id: ask.request_id };
+    // the ask was added quietly, as Kit means to answer it: one Kit leaves, or whose answer the runtime did not take, is the
+    // person's again, and they are told of it as of any ask, so the agent never waits on a card nobody heard of
+    const tellIfOpen = () => {
+      const items = store().getState().chats[key]?.items ?? [];
+      const item = items.find((i): i is ApprovalItem => i.kind === "approval" && i.request_id === ask.request_id);
+      if (item && askOpen(items, item)) notify?.({ ...ev, bot: key } as unknown as BridgeEvent);
+    };
+    const settle = async (choice: Parameters<typeof settleApproval>[3]) => {
+      const why = await settleApproval(store(), key, card, choice).catch((e: unknown) => errText(e));
+      if (why !== null) tellIfOpen();
+      return why;
+    };
     if (savesAlone(ask, ctx)) {
       // a commit or a push the dial would let go alone: what it saves is read first (item 117), and a key there, or a read not
       // made whole and in time, leaves it to the person, who is then told of it as of any ask
@@ -541,14 +554,12 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
         // code switched since the last read is the one a push that names no branch sends
         const [saved, branch] = await Promise.all([readSaved(() => (host.laneKeys ? host.laneKeys(dir) : Promise.resolve(null))), branchNow(dir)]);
         const a = kitAnswer(ask, { ...ctx, branch }, Date.now(), saved);
-        if (a) return settleApproval(store(), key, card, a.choice);
-        const items = store().getState().chats[key]?.items ?? [];
-        const item = items.find((i): i is ApprovalItem => i.kind === "approval" && i.request_id === ask.request_id);
-        if (item && askOpen(items, item)) notify?.({ ...ev, bot: key } as unknown as BridgeEvent);
+        if (a) return settle(a.choice);
+        tellIfOpen();
       };
     }
     const a = kitAnswer(ask, ctx);
-    return a ? () => settleApproval(store(), key, card, a.choice) : null;
+    return a ? () => settle(a.choice) : null;
   };
 
   /** The chat's program is gone (it exited, or manut stopped it): a turn the chat still shows ends with it. The
@@ -560,7 +571,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     if (store().getState().chats[key]?.turn) store().dispatch({ type: "event", ev: { event: "turn.end", bot: key, outcome } as BridgeEvent, now: Date.now() });
     // nobody is left to take an answer: an ask still open (a background subagent's, which outlives its turn) reads
     // "Not answered"
-    for (const a of selectAsks(store().getState()).filter((x) => x.bot === key))
+    for (const a of asksIn(store().getState(), key))
       store().dispatch({ type: "event", ev: { event: "prompt.expired", bot: key, request_id: a.item.request_id, reason: "cancelled" } as BridgeEvent, now: Date.now() });
   };
 
@@ -1160,7 +1171,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     const key = keys.get(id);
     const t = text.trim();
     if (!key || !t || procs.get(id)?.kind !== "agent") return false;
-    const asks = selectAsks(store().getState()).some((a) => a.bot === key);
+    const asks = asksIn(store().getState(), key).length > 0;
     if (mustHoldHere(id, key) || asks) {
       const lid = `local-s${++localSeq}`;
       hold(id, key, lid, { kind: "send", text: t, id: lid }, () => store().dispatch({ type: "local.user", bot: key, id: lid, text: t, now: Date.now(), held: true }));
@@ -1171,57 +1182,17 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
 
   // ---- files --------------------------------------------------------------------------------
 
-  let sentFiles = readSentFiles();
-  const saveSentFiles = (next: SentFilesBook) => {
-    sentFiles = next;
-    try {
-      localStorage.setItem(SENT_FILES_KEY, JSON.stringify(next));
-    } catch {
-      /* no storage */
-    }
-  };
-  const forgetSentFiles = (id: string) => {
-    if (!sentFiles[id]) return;
-    const next = { ...sentFiles };
-    delete next[id];
-    saveSentFiles(next);
-  };
-
-  /** The bubble's own preview of a file (the composer lets go of its chips' copies when it goes). */
-  const preview = (name: string, kind: SentFile["kind"], bytes: Uint8Array) =>
-    kind === "file" ? null : URL.createObjectURL(new Blob([bytes as BlobPart], { type: blobType(name) }));
-
-  /** A message with files, ready for the agent: each file saved under the session's own folder (pictures the agent
-   *  reads itself listed apart), the text naming the others. Throws on the first file that cannot be saved; then
-   *  nothing is sent. */
-  const prepare = async (id: string, text: string, files: OutFile[]) => {
-    const images: string[] = [];
-    const named: string[] = [];
-    const saved: SavedFile[] = [];
-    const shown: SentFile[] = [];
-    for (const f of files) {
-      let path: string;
-      let bytes: Uint8Array;
-      try {
-        bytes = bytesOf(await f.read());
-        path = await host.saveFile(id, f.name, bytes);
-      } catch (e) {
-        throw new Error(tr("att.failed", { name: f.name, error: errText(e) }));
-      }
-      (inlinePicture(f.name, f.size) ? images : named).push(path);
-      saved.push({ name: f.name, size: f.size, kind: f.kind, path });
-      shown.push({ name: f.name, size: f.size, kind: f.kind, url: preview(f.name, f.kind, bytes) });
-    }
-    return { input: { kind: "send" as const, text: wireText(text, named), ...(images.length ? { images } : {}) }, saved, shown };
-  };
+  /** The files messages carried: saved before they go, kept for a restart, their previews let go on close (sentFiles.ts). */
+  const sentFiles = createSentFiles({ saveFile: (sid, name, bytes) => host.saveFile(sid, name, bytes), readFile: (path) => host.readFile(path) });
+  const prepare = sentFiles.prepare;
 
   /** The bubble for a message with files, kept on this computer so it shows them again after a restart. */
-  const showWithFiles = (id: string, key: string, text: string, p: Awaited<ReturnType<typeof prepare>>) => {
+  const showWithFiles = (id: string, key: string, text: string, p: Prepared) => {
     const t = text.trim();
     const now = Date.now();
     const lid = `local-s${++localSeq}`;
     store().dispatch({ type: "local.user", bot: key, id: lid, text: t, now, files: p.shown });
-    saveSentFiles(putSentFiles(sentFiles, id, String(now), { ts: now / 1000, text: t, files: p.saved }));
+    sentFiles.keep(id, t, p.saved, now);
     const r = rec(id);
     const pt = t ? promptTitle(bareText(t)) : "";
     if (r && !r.promptTitle && pt) patchRec(id, { promptTitle: pt });
@@ -1253,10 +1224,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
         { ...p.input, id: lid },
         () => store().dispatch({ type: "local.user", bot: key, id: lid, text: text.trim(), now: Date.now(), files: p.shown, held: true }),
         // kept for a restart only once it went out (as showWithFiles does for a message sent at once)
-        () => {
-          const now = Date.now();
-          saveSentFiles(putSentFiles(sentFiles, id, String(now), { ts: now / 1000, text: text.trim(), files: p.saved }));
-        },
+        () => sentFiles.keep(id, text.trim(), p.saved),
       );
       return;
     }
@@ -1273,22 +1241,9 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
    *  them over; one sent with files and no text stays as it is. */
   const openWithFiles = async (id: string, model: string, msgs: Msg[]) => {
     const key = keys.get(id)!;
-    const entries = Object.entries(sentFiles[id] ?? {});
-    const oldest = msgs.length ? msgs[0].ts : -Infinity;
-    for (const [mid, e] of entries) {
-      if (e.ts < oldest - 1) continue; // older than what the chat kept
-      const shown: SentFile[] = await Promise.all(
-        e.files.map(async (f) => {
-          if (f.kind === "file") return { name: f.name, size: f.size, kind: f.kind, url: null };
-          try {
-            return { name: f.name, size: f.size, kind: f.kind, url: preview(f.name, f.kind, await host.readFile(f.path)) };
-          } catch {
-            return { name: f.name, size: f.size, kind: "file" as const, url: null };
-          }
-        }),
-      );
+    for await (const e of sentFiles.shownBack(id, msgs.length ? msgs[0].ts : -Infinity)) {
       if (store().getState().chats[key]?.loaded) return;
-      store().dispatch({ type: "local.user", bot: key, id: `local-f${mid}`, text: e.text, now: e.ts * 1000, files: shown });
+      store().dispatch({ type: "local.user", bot: key, id: `local-f${e.mid}`, text: e.text, now: e.ts * 1000, files: e.files });
     }
     openChat(id, model, msgs);
   };
@@ -1879,7 +1834,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     const text = first?.trim() ?? "";
     // the first message's files are saved before anything starts: one that cannot be leaves the draft as it was
     // (its chips stay)
-    let withFiles: Awaited<ReturnType<typeof prepare>> | null = null;
+    let withFiles: Prepared | null = null;
     if (files.length && mode === "chat") {
       try {
         withFiles = await prepare(id, text, files);
@@ -2663,7 +2618,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
       void ready().then(() => host.pruneFiles(draftFolders()).catch(() => undefined));
       void ready().then(() => turns.prune([]));
       void ready().then(() => pruneHistory(host, savedPanelKeys()));
-      saveSentFiles({});
+      sentFiles.keepOnly([]);
       return;
     }
     const list: SessionRec[] = [];
@@ -2780,7 +2735,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
         keys.set(s.id, `agent:${s.id}`);
         // fresh ids: the agent's own message ids start over in its new process
         const msgs: Msg[] = (s.messages ?? []).map((m) => ({ id: `r-${m.id}`, role: m.role, text: m.text, ts: m.ts }));
-        if (sentFiles[s.id]) void openWithFiles(s.id, s.model ?? "", msgs);
+        if (sentFiles.has(s.id)) void openWithFiles(s.id, s.model ?? "", msgs);
         else openChat(s.id, s.model ?? "", msgs);
       }
       if (auto) again.push({ id: s.id, resume: s.agentSession! });
@@ -2807,7 +2762,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     void ready().then(() => turns.prune(ids));
     // the kept history of terminals that are gone goes (the bottom panel's tabs keep theirs)
     void ready().then(() => pruneHistory(host, [...ids, ...savedPanelKeys()]));
-    saveSentFiles(Object.fromEntries(Object.entries(sentFiles).filter(([sid]) => ids.includes(sid))));
+    sentFiles.keepOnly(ids);
     // a lead's helper rounds open when the app closed come back held, with their card (item 102j-2)
     for (const s of saved) if (s.helperRounds && rec(s.id) && keys.has(s.id)) restoreHelperRounds(s.id, s.helperRounds, saved);
 
@@ -2999,7 +2954,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     const free = !r || laneFree(state.list, r);
     void stopChat(id).then(() => Promise.all([host.removeFiles(id).catch(() => undefined), free ? letLaneGo(r?.lane) : undefined]));
     turns.forget(id);
-    forgetSentFiles(id);
+    sentFiles.forget(id);
     // a helper lane that had not reported is back as stopped by the person; a lead's helper lanes stop and land nothing (item 102h)
     runs.closed(id);
     leads.forget(id);

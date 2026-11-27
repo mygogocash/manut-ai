@@ -9,7 +9,7 @@
 import type { ReactNode } from "react";
 import type { Bot } from "../lib/protocol";
 import { cliName, isRepaired, lengthOf, span, type AgentRun, type AgentRunSummary } from "../lib/runs";
-import { getStore, selectAsks, useStore } from "../state/store";
+import { getStore, asksIn, useStore } from "../state/store";
 import { t } from "../i18n";
 import { AgentIcon, ModelIcon } from "../ui";
 import { modelName, runName } from "./format";
@@ -46,7 +46,7 @@ export function PlanHeader({
   const name = runName(summary.id);
   const prefill = (text: string) => getStore().actions.prefill(text);
   // what waits on the person in this bot's chat while the plan runs: the newest opens, as from the sidebar's strip
-  const asks = summary.agent || summary.state !== "running" ? [] : selectAsks(s).filter((a) => a.bot === bot.name);
+  const asks = summary.agent || summary.state !== "running" ? [] : asksIn(s, bot.name);
   const newest = asks.reduce<(typeof asks)[number] | null>((a, b) => (!a || b.ts > a.ts ? b : a), null);
   // who runs it: the bot's own runs name the main agent's model and the effort it thinks at; a CLI session's names
   // the CLI and the folder it ran in

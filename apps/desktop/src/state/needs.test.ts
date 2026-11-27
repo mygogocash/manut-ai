@@ -1,6 +1,6 @@
 // Needs you: open asks across bots, expiry, interview answers, ⌘J order, the roster and pinned sidebar order.
 import { describe, expect, it } from "vitest";
-import { askFrom, askOpen, askText, folderKey, initialState, reduce, seedRoster, selectAsks, selectSidebarBots, selectUnlisted, setChatRoute, type Action, type AppState } from "./store";
+import { askFrom, askOpen, askText, asksIn, folderKey, initialState, reduce, seedRoster, selectAsks, selectSidebarBots, selectUnlisted, setChatRoute, type Action, type AppState } from "./store";
 import type { Bot, BridgeEvent } from "../lib/protocol";
 import { answerOf } from "../chat/cards/answers";
 import { nextAsk, shortcutFor } from "../app/shortcuts";
@@ -53,6 +53,26 @@ describe("selectAsks", () => {
     expect(selectAsks(s)).toEqual([]);
     const c1 = s.chats.default.items.find((i) => i.kind === "clarify");
     expect(c1 && c1.kind === "clarify" && c1.expired).toBe("timeout");
+  });
+
+  it("one chat's asks: the same list while its items are unchanged, read again only for the chat that changed, in the same order", () => {
+    let s = run(initialState(), [
+      { event: "turn.start", bot: "friren" },
+      approval("friren", "a1"),
+      approval("friren", "a2"),
+      { event: "turn.start", bot: "default" },
+      { event: "clarify.request", bot: "default", request_id: "c1", question: "Which env?", choices: ["a", "b"] },
+    ]);
+    const friren = asksIn(s, "friren");
+    expect(friren.map((a) => a.item.request_id)).toEqual(["a1", "a2"]);
+    expect(asksIn(s, "nobody")).toEqual([]);
+    // an event in another chat leaves this chat's list as it was, the very same array
+    s = run(s, [{ event: "delta", bot: "default", text: "thinking" }], T0 + 20_000);
+    expect(asksIn(s, "friren")).toBe(friren);
+    // the whole list is the chats' lists in time order, as before
+    expect(selectAsks(s).map((a) => a.item.request_id)).toEqual(["a1", "a2", "c1"]);
+    s = reduce(s, { type: "approval.resolved", bot: "friren", request_id: "a1", choice: "deny" });
+    expect(asksIn(s, "friren").map((a) => a.item.request_id)).toEqual(["a2"]);
   });
 
   it("an ask whose turn ended unanswered is no longer open; a replayed ask is not added twice", () => {

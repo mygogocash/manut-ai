@@ -103,6 +103,8 @@ const VALUES = [
   "askFrom",
   "askOpen",
   "askText",
+  // one chat's open asks, cached per chat (the refactor of 27 Nov 2026)
+  "asksIn",
   "briefNoticed",
   "BUBBLE_STYLES",
   "chatRoute",

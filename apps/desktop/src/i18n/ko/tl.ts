@@ -9,4 +9,5 @@ export const tl: Record<keyof typeof en, string> = {
   "tl.jumpNew": "새 메시지 {n}개",
   "tl.pinnedOwn": "내 메시지: {text}",
   "tl.sayHi": "{bot}에게 인사해 보세요",
+  "tl.rowFailed": "This part of the chat could not be shown.",
 };

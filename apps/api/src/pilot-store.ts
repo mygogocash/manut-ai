@@ -626,7 +626,7 @@ async function readContext(storage: DurableObjectStorage, tenant: string, action
 /// records are both ledgers, customers' order payments and the shop's own subscription payments, because the
 /// deletion takes both.
 async function readSummary(storage: DurableObjectStorage, tenant: string) {
-  const count = async (prefix: string) => (await storage.list({ prefix })).size;
+  const count = (prefix: string) => countPrefix(storage, prefix);
   return json({
     shop: (await storage.get<PilotShopRecord>(keys.shop(tenant))) ?? null,
     messages: await count(keys.messages(tenant)),
@@ -685,9 +685,31 @@ export async function wipePilotTenant(storage: DurableObjectStorage, tenant: str
   const doomed: string[] = [keys.shop(tenant)];
   for (const prefix of [keys.messages(tenant), keys.events(tenant), keys.names(tenant), keys.replies(tenant),
     keys.payments(tenant), keys.subscriptions(tenant)]) {
-    doomed.push(...(await storage.list({ prefix })).keys());
+    for await (const page of keyPages(storage, prefix)) doomed.push(...page);
   }
   await deleteAll(storage, doomed);
+}
+
+/// How many keys a page of a listing holds. A shop's payments stay until the shop is deleted, so its history is listed a page
+/// at a time to be counted or deleted, never read whole into memory at once with every record's value.
+export const LIST_PAGE = 500;
+
+/// The keys under `prefix`, a page at a time, in key order.
+export async function* keyPages(storage: Pick<DurableObjectStorage, "list">, prefix: string): AsyncGenerator<string[]> {
+  let startAfter: string | undefined;
+  for (;;) {
+    const page = [...(await storage.list({ prefix, limit: LIST_PAGE, ...(startAfter ? { startAfter } : {}) })).keys()];
+    if (page.length) yield page;
+    if (page.length < LIST_PAGE) return;
+    startAfter = page[page.length - 1];
+  }
+}
+
+/// How many keys are under `prefix`, counted a page at a time.
+export async function countPrefix(storage: Pick<DurableObjectStorage, "list">, prefix: string): Promise<number> {
+  let n = 0;
+  for await (const page of keyPages(storage, prefix)) n += page.length;
+  return n;
 }
 
 /// The AuthObject registry row for a pilot shop.

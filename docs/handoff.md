@@ -324,7 +324,9 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    trying the tailnet first, and a pairing code that names the tailnet so the relay can stay off) merged. Needs the owner
    from 78f: try it with a tailnet, an iPhone and an Android phone. 102i, 102j and 102j-2 (landings, the reports to the lead, and a
    round open when the app closed coming back held with Land what they did and Report to Kit) merged, so item 102 is built but
-   for 102l (the owner's). The owner chose on 27 Nov to leave iOS for now; a refactor pass follows. From 27 Nov the owner asked for English first: new words are English, copied into ja, ko and zh. Needs the owner from 101b: Grok signed in and `permission_mode = "ask"`
+   for 102l (the owner's). The owner chose on 27 Nov to leave iOS for now. Then a fix (the sign-in
+   vault hands browser steps out in the order they were asked for) merged, and refactor pass 1
+   (`docs/decisions/2026-11-27-refactor-pass-1.md`) is in its pull request, for the review together. From 27 Nov the owner asked for English first: new words are English, copied into ja, ko and zh. Needs the owner from 101b: Grok signed in and `permission_mode = "ask"`
    under `[ui]` in `~/.grok/config.toml` (it says always-approve, so Grok chats are refused), and Muse Code's CLI. From 101e: all 325 Codex sessions on the owner's Mac are compressed, so
    only Claude Code's conversations are offered until 106b. Needs the owner from 101a: Cursor's Approval mode set to Allowlist (it is Run Everything, so Cursor
    chats are refused), and a Cursor plan with messages left to record a real tool call. GitHub reported 7 Dependabot alerts on `main` (2 critical) at that push, for the owner to look at.

@@ -25,6 +25,8 @@ use std::io::ErrorKind;
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
+
+use crate::lock::LockOrRecover;
 use std::time::{Duration, Instant};
 
 use serde::Deserialize;
@@ -256,8 +258,8 @@ impl Door {
     /// closed with 4403, as the relay closes a revoked device. Entries that cannot be read are left out.
     pub fn set_devices(&self, list: &[DeviceEntry]) {
         let next: HashMap<String, [u8; 32]> = list.iter().filter(|d| device_ok(&d.id)).filter_map(|d| Some((d.id.clone(), bytes32(&d.token_hash)?))).collect();
-        let mut devices = self.inner.devices.lock().unwrap();
-        for p in self.inner.phones.lock().unwrap().values() {
+        let mut devices = self.inner.devices.lock_or_recover();
+        for p in self.inner.phones.lock_or_recover().values() {
             let kept = next.get(&p.device);
             if kept.is_none() || kept != devices.get(&p.device) {
                 let _ = p.tx.send(Out::Close(close::REVOKED, "revoked"));
@@ -268,9 +270,9 @@ impl Door {
 
     /// What a new phone is told. `Off` also closes every phone, each after a `host` message (relay protocol, section 8).
     pub fn set_status(&self, state: HostState) {
-        *self.inner.state.lock().unwrap() = (state, now_secs());
+        *self.inner.state.lock_or_recover() = (state, now_secs());
         if state == HostState::Off {
-            for p in self.inner.phones.lock().unwrap().values() {
+            for p in self.inner.phones.lock_or_recover().values() {
                 let _ = p.tx.send(Out::Text(json!({"t": "host", "v": 1, "state": "off", "at": now_secs()}).to_string()));
                 let _ = p.tx.send(Out::Close(close::HOST_UNAVAILABLE, "off"));
             }
@@ -282,12 +284,12 @@ impl Door {
         if payload.len() > MAX_PAYLOAD {
             return false;
         }
-        self.inner.phones.lock().unwrap().get(&stream).is_some_and(|p| p.tx.send(Out::Frame(payload)).is_ok())
+        self.inner.phones.lock_or_recover().get(&stream).is_some_and(|p| p.tx.send(Out::Frame(payload)).is_ok())
     }
 
     /// The page closes `stream` (1000); it is not told again.
     pub fn close_stream(&self, stream: u32) -> bool {
-        let phones = self.inner.phones.lock().unwrap();
+        let phones = self.inner.phones.lock_or_recover();
         let Some(p) = phones.get(&stream) else { return false };
         p.quiet.store(true, Ordering::SeqCst);
         p.tx.send(Out::Close(close::NORMAL, "closed")).is_ok()
@@ -296,7 +298,7 @@ impl Door {
     /// Closes every phone and stops listening.
     pub fn stop(&self) {
         self.inner.stop.store(true, Ordering::SeqCst);
-        for p in self.inner.phones.lock().unwrap().values() {
+        for p in self.inner.phones.lock_or_recover().values() {
             let _ = p.tx.send(Out::Close(close::NORMAL, "closed"));
         }
     }
@@ -369,7 +371,7 @@ fn serve(inner: &Arc<Inner>, tcp: TcpStream) {
                 let _ = ws.send(Message::Text("pong".into()));
             }
             Ok(Message::Ping(_)) | Ok(Message::Pong(_)) => {}
-            Ok(Message::Text(t)) => match hello_ok(t.as_str(), &inner.devices.lock().unwrap()) {
+            Ok(Message::Text(t)) => match hello_ok(t.as_str(), &inner.devices.lock_or_recover()) {
                 Some(d) => break d,
                 None => return close_with(&mut ws, close::UNAUTHENTICATED, "unauthenticated"),
             },
@@ -382,7 +384,7 @@ fn serve(inner: &Arc<Inner>, tcp: TcpStream) {
     };
 
     // the Mac takes phones only while available; otherwise the phone is told why, as the relay tells it
-    let (state, at) = *inner.state.lock().unwrap();
+    let (state, at) = *inner.state.lock_or_recover();
     if state != HostState::Available {
         let _ = ws.send(Message::Text(json!({"t": "host", "v": 1, "state": state.word(), "at": at}).to_string().into()));
         return close_with(&mut ws, close::HOST_UNAVAILABLE, "host_unavailable");
@@ -392,7 +394,7 @@ fn serve(inner: &Arc<Inner>, tcp: TcpStream) {
     let (tx, rx) = mpsc::channel::<Out>();
     let quiet = Arc::new(AtomicBool::new(false));
     let stream = {
-        let mut phones = inner.phones.lock().unwrap();
+        let mut phones = inner.phones.lock_or_recover();
         let old: Vec<u32> = phones.iter().filter(|(_, p)| p.device == device).map(|(s, _)| *s).collect();
         for s in old {
             if let Some(p) = phones.remove(&s) {
@@ -474,7 +476,7 @@ fn serve(inner: &Arc<Inner>, tcp: TcpStream) {
 
 /// The phone on `stream` is gone: it leaves the door, and the page hears it unless the page or a newer socket closed it.
 fn finish(inner: &Arc<Inner>, stream: u32, quiet: &AtomicBool, reason: &str) {
-    let mut phones = inner.phones.lock().unwrap();
+    let mut phones = inner.phones.lock_or_recover();
     let ours = phones.get(&stream).is_some_and(|p| std::ptr::eq(p.quiet.as_ref(), quiet));
     if ours {
         phones.remove(&stream);
@@ -522,7 +524,7 @@ pub async fn tailscale_door_on(host_id: String, origin: String, on_event: tauri:
             return Err("Tailscale is not ready on this Mac".to_string());
         };
         let port = crate::tailscale_serve::DOOR_PORT;
-        let mut slot = DOOR.lock().unwrap();
+        let mut slot = DOOR.lock_or_recover();
         if let Some(old) = slot.take() {
             old.stop();
         }
@@ -549,7 +551,7 @@ pub async fn tailscale_door_on(host_id: String, origin: String, on_event: tauri:
 pub async fn tailscale_door_off() -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(|| {
         let served = crate::tailscale_serve::serve_off(crate::tailscale_serve::DOOR_PORT);
-        if let Some(door) = DOOR.lock().unwrap().take() {
+        if let Some(door) = DOOR.lock_or_recover().take() {
             door.stop();
         }
         served
@@ -560,24 +562,24 @@ pub async fn tailscale_door_off() -> Result<(), String> {
 
 #[tauri::command]
 pub fn door_devices(devices: Vec<DeviceEntry>) -> bool {
-    DOOR.lock().unwrap().as_ref().map(|d| d.set_devices(&devices)).is_some()
+    DOOR.lock_or_recover().as_ref().map(|d| d.set_devices(&devices)).is_some()
 }
 
 #[tauri::command]
 pub fn door_status(state: HostState) -> bool {
-    DOOR.lock().unwrap().as_ref().map(|d| d.set_status(state)).is_some()
+    DOOR.lock_or_recover().as_ref().map(|d| d.set_status(state)).is_some()
 }
 
 /// A frame for the phone on `stream`, its payload in standard base64.
 #[tauri::command]
 pub fn door_send(stream: u32, data: String) -> bool {
     let Ok(payload) = data_encoding::BASE64.decode(data.as_bytes()) else { return false };
-    DOOR.lock().unwrap().as_ref().is_some_and(|d| d.send(stream, payload))
+    DOOR.lock_or_recover().as_ref().is_some_and(|d| d.send(stream, payload))
 }
 
 #[tauri::command]
 pub fn door_close(stream: u32) -> bool {
-    DOOR.lock().unwrap().as_ref().is_some_and(|d| d.close_stream(stream))
+    DOOR.lock_or_recover().as_ref().is_some_and(|d| d.close_stream(stream))
 }
 
 #[cfg(test)]

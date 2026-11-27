@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useLayoutEffect, useRef, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, type ReactNode } from "react";
 import { RestartAction, RestartLine } from "../../sidebar/RestartLine";
 import type { Bot } from "../../lib/protocol";
 import { answerSlot, answerSoFar, askOpen, selectTimeline, turnHasActivity, useStore, type TimelineItem } from "../../state/store";
@@ -16,6 +16,7 @@ export interface SessionQueue {
 }
 import { quoteFor } from "./answers";
 import { SystemDetail } from "./SystemDetail";
+import { ErrorBoundary } from "../../ui/ErrorBoundary";
 import { LiveFace, TypingRow, awaitingFirstToken } from "./Typing";
 import { liveFaceRow } from "./liveFace";
 import { ActivityFallback, CardFallback, RoutineFallback } from "./fallbacks";
@@ -132,8 +133,10 @@ export function Timeline({
     else s.queueDelete(id, bot.name);
   };
 
-  // a quote's click: the message it answers, brought into view and lit for a moment
-  const showMessage = (id: string) => {
+  // a quote's click: the message it answers, brought into view and lit for a moment. One function for the timeline's life (it
+  // reads only the ref), so the memoized bubbles it is handed to are not drawn again on every store change, a streamed token
+  // included (Bubble.tsx).
+  const showMessage = useCallback((id: string) => {
     const el = ref.current?.querySelector<HTMLElement>(`[data-item="${CSS.escape(id)}"]`);
     if (!el) return;
     el.scrollIntoView({ block: "center", behavior: "smooth" });
@@ -141,7 +144,7 @@ export function Timeline({
     void el.offsetWidth;
     el.classList.add("lit");
     window.setTimeout(() => el.classList.remove("lit"), 1400);
-  };
+  }, []);
 
   const render = (it: TimelineItem, prev?: TimelineItem, at = -1): ReactNode => {
     switch (it.kind) {
@@ -310,7 +313,10 @@ export function Timeline({
             <div
               className={`row row-${it.kind}${liveLine ? " live-line" : ""}${fresh.has(it.id) && !liveLine ? (it.kind === "approval" || it.kind === "clarify" ? " arrived-ask" : " mo-rise") : ""}`} data-kind={it.kind} {...(it.kind === "user" ? { "data-item": it.id } : {})}>
               {liveFace && <LiveFace bot={bot.name} face={face} />}
-              {render(it, label ? undefined : items[i - 1], i)}
+              {/* one row that cannot be drawn says so in its place; the rest of the chat, and the app, stay */}
+              <ErrorBoundary source="chat" fallback={(_e, retry) => <RowFailed retry={retry} />}>
+                {render(it, label ? undefined : items[i - 1], i)}
+              </ErrorBoundary>
             </div>
           </Fragment>
         );
@@ -318,6 +324,18 @@ export function Timeline({
       {!slotId && writingRow}
       {!slotId && !aboveLine && typingRow}
       <JumpPill nav={nav} />
+    </div>
+  );
+}
+
+/** A chat row whose drawing threw: one quiet line in its place, with Try again for once what it read has changed. */
+function RowFailed({ retry }: { retry: () => void }) {
+  return (
+    <div className="line sys" data-testid="row-failed" role="alert">
+      <span className="line-t">{t("tl.rowFailed")}</span>
+      <button type="button" className="sys-detail-toggle" onClick={retry}>
+        {t("failed.retry")}
+      </button>
     </div>
   );
 }

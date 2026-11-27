@@ -17,7 +17,7 @@ import { revealHidden } from "../lib/secrets";
 import { AgentMark } from "../sessions/AgentMark";
 import type { AgentId } from "../sessions/agents";
 import { getSessions } from "../sessions/sessions";
-import { getStore, selectAsks, useStore } from "../state/store";
+import { getStore, asksIn, selectAsks, useStore } from "../state/store";
 import { Spinner } from "../ui";
 import type { HelperRun } from "./helperRuns";
 import type { LandingView } from "./helperLanding";
@@ -270,7 +270,7 @@ export function HelperRunCard({ round }: { round: string }) {
       onAnswer={(i) => {
         const id = session(i);
         const key = id ? ss.chatKey(id) : null;
-        const first = key ? selectAsks(getStore().getState()).find((a) => a.bot === key) : undefined;
+        const first = key ? asksIn(getStore().getState(), key)[0] : undefined;
         if (key && first) void getStore().actions.jumpToAsk(key, first.item.id);
         else if (id) getStore().actions.openSession(id);
       }}

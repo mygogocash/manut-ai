@@ -13,6 +13,7 @@ import { peopleTenantRoute, wipePeopleTenant } from "./people-store";
 import { pilotTenantRoute, wipePilotTenant } from "./pilot-store";
 import { routineTenantRoute, wipeRoutineTenant } from "./routine-store";
 import type { TenantDataEnv } from "./tenant-data";
+import { errorCode } from "./log-safe";
 
 const MAX_BODY_BYTES = 256 * 1024;
 /// The alarm is never set sooner than this from now, so work that is already late (a hold whose expiry passed with no
@@ -124,7 +125,8 @@ export class TenantObject extends DurableObject {
       try {
         await job.run(nowMs);
       } catch (error) {
-        console.error("tenant alarm job failed", job.name, error);
+        // its code, never its free text (log-safe.ts)
+        console.error("tenant alarm job failed", job.name, errorCode(error));
       }
     }
     await this.arm();
