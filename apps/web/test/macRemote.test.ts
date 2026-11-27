@@ -19,6 +19,7 @@ class FakeLink implements MacLink {
   readonly sent: Message[] = [];
   onEvent: ((message: Message) => void) | null = null;
   onEnd: ((end: SessionEnd) => void) | null = null;
+  onRoad: ((road: { name: string; port: number } | null) => void) | null = null;
   closed = false;
   answer: (message: Message) => Message | null | Promise<Message | null>;
 
@@ -389,3 +390,19 @@ describe("Forget this Mac", () => {
     expect(remote.view).toEqual({ phase: "unpaired", failed: null });
   });
 });
+
+describe("the Mac's tailnet door (item 78f-2c)", () => {
+  it("is kept with the paired Mac when the Mac says it, and dropped when the Mac says it has none", async () => {
+    const { remote, vault, link } = await setup();
+    await remote.start();
+    await settle();
+    link().onRoad?.({ name: "mac.tail1234.ts.net", port: 47100 });
+    await settle();
+    expect((await vault.load())?.tailnet).toEqual({ name: "mac.tail1234.ts.net", port: 47100 });
+    link().onRoad?.(null);
+    await settle();
+    expect((await vault.load())?.tailnet).toBeUndefined();
+    expect((await vault.load())?.deviceId).toBe(DEVICE);
+  });
+});
+

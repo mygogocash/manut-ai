@@ -158,6 +158,8 @@ export class PhoneSession {
   readonly inbox: Inbox;
   readonly channel: Channel;
   readonly #pushed: Record<string, unknown>[] = [];
+  /** The Mac's `road` messages (item 78f-2c), kept apart so a test that waits for an event still waits for one. */
+  readonly roads: Record<string, unknown>[] = [];
   #nextId = 1;
 
   constructor(socket: PhoneSocket, inbox: Inbox, channel: Channel) {
@@ -192,7 +194,8 @@ export class PhoneSession {
       const reply = await this.receive(ms);
       if (reply === null) throw new Error("closed");
       if (reply.id === id) return reply;
-      this.#pushed.push(reply);
+      if (reply.t === "road") this.roads.push(reply);
+      else this.#pushed.push(reply);
     }
   }
 
@@ -201,9 +204,21 @@ export class PhoneSession {
     while (this.#pushed.length < count) {
       const message = await this.receive(ms);
       if (message === null) break;
-      this.#pushed.push(message);
+      if (message.t === "road") this.roads.push(message);
+      else this.#pushed.push(message);
     }
     return this.#pushed.splice(0, count);
+  }
+
+  /** Waits until the Mac has sent `count` road messages; the ones received. */
+  async roadsHeard(count: number, ms = 5_000): Promise<Record<string, unknown>[]> {
+    while (this.roads.length < count) {
+      const message = await this.receive(ms);
+      if (message === null) break;
+      if (message.t === "road") this.roads.push(message);
+      else this.#pushed.push(message);
+    }
+    return this.roads.slice(0, count);
   }
 
   close(): void {

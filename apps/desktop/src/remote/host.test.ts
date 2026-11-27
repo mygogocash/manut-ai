@@ -328,3 +328,32 @@ describe("the Tailscale road (item 78f-2b)", () => {
     expect(h3.remote.snapshot().tailscale).toMatchObject({ state: "failed" });
   });
 });
+
+describe("the road message (item 78f-2c)", () => {
+  function servingDoor(): DoorShell {
+    return {
+      on: async () => ({ name: "mac.tail1234.ts.net", port: 47100 }),
+      off: async () => {},
+      devices: async () => true,
+      status: async () => true,
+      send: async () => true,
+      close: async () => true,
+    };
+  }
+
+  it("tells a phone at each session where the Mac's tailnet door is, or that it has none, and again when that changes", async () => {
+    const h = macHarness({ door: servingDoor() });
+    await turnOn(h);
+    const { phone } = await pairPhone(h);
+    const session = await phone.connect();
+    expect(await session.roadsHeard(1)).toEqual([{ t: "road", name: null }]);
+    await h.remote.turnTailscaleOn();
+    expect((await session.roadsHeard(2))[1]).toEqual({ t: "road", name: "mac.tail1234.ts.net", port: 47100 });
+    // a new session hears it at once
+    const next = await phone.connect();
+    expect(await next.roadsHeard(1)).toEqual([{ t: "road", name: "mac.tail1234.ts.net", port: 47100 }]);
+    // off: the open session hears there is none any more
+    h.remote.turnTailscaleOff();
+    expect((await next.roadsHeard(2))[1]).toEqual({ t: "road", name: null });
+  });
+});

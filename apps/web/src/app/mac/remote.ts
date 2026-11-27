@@ -23,7 +23,7 @@ import type { PairFailure, PairResult, PairStep } from "./pair";
 import { PasskeyCancelled, type Passkeys } from "./passkeys";
 import type { Timers } from "./relay";
 import type { MacLink, Message, SessionEnd } from "./session";
-import type { PairedMac, PhoneVault } from "./vault";
+import type { PairedMac, PhoneVault, Road } from "./vault";
 import {
   type AskView,
   type ChatRow,
@@ -265,6 +265,7 @@ export class MacRemote {
     const link = opened.link;
     this.#link = link;
     link.onEvent = (message) => this.#onEvent(message);
+    link.onRoad = (road) => this.#onRoad(road);
     link.onEnd = (end) => {
       if (this.#link !== link) return;
       this.#link = null;
@@ -273,6 +274,19 @@ export class MacRemote {
     this.#paired((v) => ({ ...v, link: "live", down: null, cleared: false, forgotten: false }));
     this.#confirmed();
     await this.#refresh();
+  }
+
+  /// The Mac said where its door over the person's tailnet is, or that it has none (item 78f-2c): kept with the paired
+  /// Mac, so the next session tries that road first. Saved only when it changed.
+  #onRoad(road: Road | null): void {
+    const mac = this.#mac;
+    if (!mac) return;
+    const had = mac.tailnet ?? null;
+    if (had?.name === road?.name && had?.port === road?.port) return;
+    const { tailnet: _old, ...rest } = mac;
+    const next: PairedMac = road ? { ...rest, tailnet: road } : rest;
+    this.#mac = next;
+    void this.#backend.vault.save(next).catch(() => undefined);
   }
 
   /// The Mac answered: what is shown is current now.

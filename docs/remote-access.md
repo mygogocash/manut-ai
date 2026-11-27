@@ -410,6 +410,15 @@ away closing only its streams), `turnTailscaleOn` and `turnTailscaleOff` on the 
 ready, with its own consent sheet, kept on this Mac and resumed at launch only for a person who turned it on under that
 sheet. Pairing, the server and the sessions are unchanged: they talk to the roads as they talked to the relay's link.
 
+**Built: the phone's road choice (78f-2c, first part, 27 Nov 2026).** The Mac tells each phone, inside the channel at each
+session, where its tailnet door is (`{"t":"road","name","port"}`) or that it has none (`"name": null`), and tells every
+open session again when the road turns on or off. The phone keeps a name the desktop itself would accept on the door's one
+port with its paired Mac (`mac.tailnet`, docs/web-app.md) and from then on dials that door first and the relay after 1.5
+seconds, or at once when the tailnet turns it away; the first road to say `ready` carries the session and the other is
+closed when it comes; turned away by both, the relay's reason is said. `APP_POLICY` gains `wss://*.ts.net:47100` and
+nothing wider; no other page's policy changes. Not built: the pairing code carrying the Mac's tailnet name, so a phone
+still learns it over the relay's first session, and pairing with the relay switched off is not yet possible.
+
 Left: **78f-2c**, the phone: the pairing code and the encrypted channel carry the Mac's tailnet
 name, the phone tries the tailnet first and starts the relay after 1.5 seconds, and `APP_POLICY` gains
 `wss://*.ts.net:47100` and nothing wider.

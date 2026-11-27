@@ -9,7 +9,9 @@
 /// by what each page loads, each in the same order:
 ///
 /// - `APP_POLICY`, the owner's web app (`/app/`, docs/web-app.md): the brand's fonts from Google's two hosts, and its
-///   manifest and service worker from this origin.
+///   manifest and service worker from this origin. Its sockets may also reach a paired Mac's own door over the person's
+///   tailnet, `wss://*.ts.net:47100` and nothing wider (item 78f-2c, docs/remote-access.md, "The second road"): one port,
+///   only `wss`, only Tailscale's names, and what crosses it is the channel's sealed records, as on the relay.
 /// - `PAGE_POLICY`, every other page but one: the operator console at `/ops`, the owner's approval and deletion pages
 ///   (`/approve/`, `/delete/`), the practice home and the rest of apps/web's one page, with the brand's fonts.
 /// - `JOIN_POLICY`, the page an invite link opens (`/join/`): nothing from any other origin, fonts included, since its
@@ -22,7 +24,7 @@ function policy(page: { fonts: boolean; app: boolean }): string {
     page.fonts ? "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com" : "style-src 'self' 'unsafe-inline'",
     page.fonts ? "font-src 'self' https://fonts.gstatic.com" : "font-src 'self'",
     "img-src 'self' data:",
-    "connect-src 'self'",
+    page.app ? "connect-src 'self' wss://*.ts.net:47100" : "connect-src 'self'",
     ...(page.app ? ["manifest-src 'self'", "worker-src 'self'"] : []),
     "object-src 'none'",
     "base-uri 'none'",

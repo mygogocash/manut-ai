@@ -7,8 +7,24 @@
 /// the channel closes it, and so does the relay closing the stream; the next session is a new handshake. A session that
 /// ended may have missed messages, which is what the journal's cursors are for (remote.ts).
 import { startSession, toBase64Url, type Channel } from "@manut/remote-channel";
-import { type PhoneConnect, type RelayEnd, type RelayPipe, type Timers, dialRelay, relayUrl, systemTimers } from "./relay";
-import type { PairedMac } from "./vault";
+import { type PhoneConnect, type RelayEnd, type RelayPipe, type Timers, dialRelay, relayUrl, systemTimers, tailnetNameOk, tailnetUrl, TAILNET_PORT } from "./relay";
+import type { PairedMac, Road } from "./vault";
+
+/// How long the tailnet has before the relay is tried too (docs/remote-access.md, "Which road"): a phone on the tailnet
+/// gets there first, and one that is not loses at most this long.
+export const TAILNET_HEAD_START_MS = 1_500;
+
+/// The Mac's `road` message (item 78f-2c): its door over the tailnet, null when its Tailscale road is off, or undefined for
+/// a message that does not read, which changes nothing. Only a name the desktop itself would accept and the door's one port
+/// are taken, since that is all this page's content policy lets a socket reach.
+export function readRoad(message: unknown): Road | null | undefined {
+  if (message === null || typeof message !== "object") return undefined;
+  const m = message as { t?: unknown; name?: unknown; port?: unknown };
+  if (m.t !== "road") return undefined;
+  if (m.name === null) return null;
+  if (typeof m.name !== "string" || !tailnetNameOk(m.name) || m.port !== TAILNET_PORT) return undefined;
+  return { name: m.name, port: TAILNET_PORT };
+}
 
 /// How long the Mac has to answer the session's handshake, and each request.
 export const WELCOME_MS = 10_000;
@@ -31,6 +47,8 @@ export interface MacLink {
   close(): void;
   onEvent: ((message: Message) => void) | null;
   onEnd: ((end: SessionEnd) => void) | null;
+  /// The Mac said where its door over the tailnet is, or that it has none (item 78f-2c).
+  onRoad?: ((road: Road | null) => void) | null;
 }
 
 const encoder = new TextEncoder();
@@ -46,6 +64,7 @@ export class MacSession implements MacLink {
   #sending: Promise<void> = Promise.resolve();
   #ended: SessionEnd | null = null;
   onEvent: ((message: Message) => void) | null = null;
+  onRoad: ((road: Road | null) => void) | null = null;
   onEnd: ((end: SessionEnd) => void) | null = null;
 
   constructor(pipe: RelayPipe, channel: Channel, timers: Timers) {
@@ -85,6 +104,10 @@ export class MacSession implements MacLink {
       return;
     }
     if (message.t === "event") this.onEvent?.(message);
+    else if (message.t === "road") {
+      const road = readRoad(message);
+      if (road !== undefined) this.onRoad?.(road);
+    }
   }
 
   /// Sends one request and resolves with the Mac's answer to it, or null when the session ended or the Mac did not
@@ -129,12 +152,58 @@ export class MacSession implements MacLink {
   }
 }
 
-/// Opens a session with the paired Mac: the relay's door with this phone's token, then the handshake proved with K.
+/// The door to the paired Mac by either road (docs/remote-access.md, "Which road"): with a tailnet door known, it is
+/// dialled first and the relay after `TAILNET_HEAD_START_MS`, or at once if the tailnet turns the phone away first; the
+/// first to say `ready` carries the session and the other is closed when it comes. The same hello, token and channel go
+/// down either road. Turned away by both, the relay's reason is the one said, since it names what the Mac decided.
+export function dialRoads(deps: SessionDeps, mac: PairedMac, timers: Timers): Promise<{ ok: true; pipe: RelayPipe } | { ok: false; end: RelayEnd }> {
+  const relay = relayUrl(deps.origin, mac.hostId);
+  const tail = mac.tailnet ? tailnetUrl(mac.tailnet, mac.hostId) : null;
+  const dial = (url: string) => dialRelay({ connect: deps.connect, url, device: mac.deviceId, token: toBase64Url(mac.doorToken), timers });
+  if (!tail) return relay ? dial(relay) : Promise.resolve({ ok: false, end: { why: "lost" } });
+  if (!relay) return dial(tail);
+  return new Promise((resolve) => {
+    let done = false;
+    let relayStarted = false;
+    let pending = 0;
+    let tailEnd: RelayEnd | null = null;
+    let relayEnd: RelayEnd | null = null;
+    const startRelay = () => {
+      if (relayStarted || done) return;
+      relayStarted = true;
+      pending += 1;
+      void dial(relay).then((r) => settle(r, "relay"));
+    };
+    const head = timers.set(startRelay, TAILNET_HEAD_START_MS);
+    const settle = (r: { ok: true; pipe: RelayPipe } | { ok: false; end: RelayEnd }, road: "tail" | "relay") => {
+      pending -= 1;
+      if (r.ok) {
+        if (done) return r.pipe.close();
+        done = true;
+        timers.clear(head);
+        return resolve(r);
+      }
+      if (road === "tail") tailEnd = r.end;
+      else relayEnd = r.end;
+      if (done) return;
+      if (!relayStarted) {
+        timers.clear(head);
+        return startRelay();
+      }
+      if (pending === 0) {
+        done = true;
+        resolve({ ok: false, end: relayEnd ?? tailEnd ?? { why: "lost" } });
+      }
+    };
+    pending += 1;
+    void dial(tail).then((r) => settle(r, "tail"));
+  });
+}
+
+/// Opens a session with the paired Mac: the door by either road with this phone's token, then the handshake proved with K.
 export async function openSession(deps: SessionDeps, mac: PairedMac): Promise<{ ok: true; session: MacSession } | { ok: false; end: SessionEnd }> {
-  const url = relayUrl(deps.origin, mac.hostId);
-  if (!url) return { ok: false, end: { why: "lost" } };
   const timers = deps.timers ?? systemTimers;
-  const dialled = await dialRelay({ connect: deps.connect, url, device: mac.deviceId, token: toBase64Url(mac.doorToken), timers });
+  const dialled = await dialRoads(deps, mac, timers);
   if (!dialled.ok) return { ok: false, end: dialled.end };
   const pipe = dialled.pipe;
   try {

@@ -97,6 +97,23 @@ export function relayUrl(origin: string, hostId: string): string | null {
   return null;
 }
 
+/// The one port the Mac's door has, and the only one this page's content policy lets a socket reach over a tailnet.
+export const TAILNET_PORT = 47100;
+
+/// A Mac's name on a tailnet as the desktop reads it (tailscale.rs `name_ok`): lowercase DNS labels of 1 to 63 letters,
+/// digits and hyphens, none starting or ending with one, at most 253 characters, under ts.net with a label of its own.
+export function tailnetNameOk(name: string): boolean {
+  const labels = name.split(".");
+  return name.length <= 253 && name.endsWith(".ts.net") && labels.length >= 3 && labels.every((l) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(l));
+}
+
+/// The Mac's own door over the tailnet (item 78f-2c): the same phone route as the relay's, at the Mac's tailnet name and
+/// its door's one port, `wss` only. Null for a name or port this page does not take.
+export function tailnetUrl(road: { name: string; port: number }, hostId: string): string | null {
+  if (!HOST_ID.test(hostId) || !tailnetNameOk(road.name) || road.port !== TAILNET_PORT) return null;
+  return `wss://${road.name}:${road.port}/relay/v1/hosts/${hostId}/phone`;
+}
+
 /// The reason a close code gives, with the `host` message that came before a 4404, if any.
 export function endOf(code: number, host: string | null): RelayEnd {
   switch (code) {
