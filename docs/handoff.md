@@ -322,8 +322,8 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    from a phone, ten chats, coding chats only, cards over every page); coding chats only is built. Then 125e (the dial's reader split by program family,
    moves only) merged; 78f-2a, 78f-2b, 78f-2c and 78f-2d (the Tailscale road: the door in the shell, its switch, the phone
    trying the tailnet first, and a pairing code that names the tailnet so the relay can stay off) merged. Needs the owner
-   from 78f: try it with a tailnet, an iPhone and an Android phone. 102i and 102j (landings, and the reports to the lead) are in
-   pull request #44. From 27 Nov the owner asked for English first: new words are English, copied into ja, ko and zh. Needs the owner from 101b: Grok signed in and `permission_mode = "ask"`
+   from 78f: try it with a tailnet, an iPhone and an Android phone. 102i and 102j (landings, and the reports to the lead) merged;
+   102j-2 (a round open when the app closed comes back held, with Land what they did and Report to Kit) is next. From 27 Nov the owner asked for English first: new words are English, copied into ja, ko and zh. Needs the owner from 101b: Grok signed in and `permission_mode = "ask"`
    under `[ui]` in `~/.grok/config.toml` (it says always-approve, so Grok chats are refused), and Muse Code's CLI. From 101e: all 325 Codex sessions on the owner's Mac are compressed, so
    only Claude Code's conversations are offered until 106b. Needs the owner from 101a: Cursor's Approval mode set to Allowlist (it is Run Everything, so Cursor
    chats are refused), and a Cursor plan with messages left to record a real tool call. GitHub reported 7 Dependabot alerts on `main` (2 critical) at that push, for the owner to look at.
