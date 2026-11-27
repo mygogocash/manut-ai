@@ -658,8 +658,9 @@ export interface ServedShops {
   chat: Record<string, FakeChatThread[]>;
   /** what every message is answered with instead of Buddy's answer, keeping nothing, as apps/api refuses one; null to answer */
   chatRefusal: FakeAnswer | null;
-  /** Buddy's answer to a message, as the stand-in provider gives it */
-  chatAnswer: (text: string) => { text: string; stopReason?: string };
+  /** Buddy's answer to a message, as the stand-in provider gives it: the owner's words, and what else came with them (`note`: Manut AI's
+   *  note to Buddy, which the API gives the model and does not keep; `sentOnFrom`: the title the API gives the model as the mark) */
+  chatAnswer: (text: string, sent: { note?: string; sentOnFrom?: string }) => { text: string; stopReason?: string };
 }
 
 /** One conversation as apps/api's chat keeps it (chat-store.ts), its times as the API answers them. */
@@ -668,7 +669,7 @@ export interface FakeChatThread {
   title: string;
   createdAt: string;
   updatedAt: string;
-  messages: { id: string; from: "owner" | "buddy"; text: string; at: string; stopReason?: string }[];
+  messages: { id: string; from: "owner" | "buddy"; text: string; at: string; stopReason?: string; sentOnFrom?: string; noted?: true }[];
 }
 
 /** What a shop's team has learned: each text with where it came from, in the order given, as the package's `propose` keeps them
@@ -891,16 +892,31 @@ function ownerMemoryRoutes(api: FakeApi, served: ServedShops, owned: Owned, now:
 /** A conversation's id as apps/api makes them (`cht-…`, chat-store.ts `THREAD_ID`), numbered so a test can tell one from the next. */
 export const chatId = (n: number) => `cht-${String(n).padStart(9, "0")}-abc-${n.toString(16).padStart(8, "0")}`;
 
-/** What apps/api's chat answers an owner session (docs/pilot-api.md, "Chat"): a message (`POST /v1/chat/messages`, exactly `{ text }` or
- *  `{ thread, text }`) makes a conversation titled by its first words when it names none, and is kept with Buddy's answer; or, with
- *  `served.chatRefusal`, is answered that instead and nothing is kept. The shop's conversations (`GET /v1/chat/threads`, newest written
+/** What apps/api's chat answers an owner session (docs/pilot-api.md, "Chat"): a message (`POST /v1/chat/messages`: `{ text }` or
+ *  `{ thread, text }`, each with `note` and `sentOnFrom` if it has them and no other key, a note only as a whole note and a title only as the API
+ *  keeps one, item 102l-5) makes a conversation titled by its first words when it names none, and is kept with Buddy's answer: the words alone as
+ *  its text, with `sentOnFrom` and `noted: true` beside them, and nothing of the note; or, with `served.chatRefusal`, is answered that instead
+ *  and nothing is kept. The shop's conversations (`GET /v1/chat/threads`, newest written
  *  first) and one conversation (`GET /v1/chat/threads/{id}`, its newest 50 messages, oldest first). A conversation of another shop is
  *  404 `thread_not_found`; a helper's session is 403 `owner_only`. */
 function ownerChatRoutes(api: FakeApi, served: ServedShops, owned: Owned, now: () => number): void {
   let made = 0;
+  // The API's own checks of the two fields (apps/api chat.ts `isWholeNote` and `sentOnFromOf`), written out again here so a desktop that posts
+  // what the API would refuse fails against this stand-in as it would against the API.
+  const wholeNote = (v: unknown): v is string => {
+    if (typeof v !== "string" || [...v].length > 2_000) return false;
+    const lines = v.split(/\r\n|[\n\r\v\f\u0085\u2028\u2029]/);
+    const end = "[End of the Manut AI note]";
+    return lines.length >= 2 && lines[0].startsWith("[Manut AI: a note to Buddy]") && lines[lines.length - 1] === end &&
+      lines.slice(1, -1).every((l) => !l.trimStart().startsWith("[Manut AI:") && l.trim() !== end);
+  };
+  const keptTitle = (v: unknown): v is string => {
+    if (typeof v !== "string") return false;
+    const title = v.trim();
+    const n = [...title].length;
+    return n >= 1 && n <= 120 && !/[\p{Cc}\p{Zl}\p{Zp}"]/u.test(title);
+  };
   const view = (c: FakeChatThread) => ({ id: c.id, title: c.title, createdAt: c.createdAt, updatedAt: c.updatedAt, messageCount: c.messages.length });
-  const exact = (body: unknown, keys: readonly string[]): body is Record<string, unknown> =>
-    !!body && typeof body === "object" && !Array.isArray(body) && Object.keys(body).length === keys.length && keys.every((k) => k in (body as object));
   const threadRoute = (id: string) =>
     api.on("GET", `/v1/chat/threads/${id}`, (req) =>
       owned(req, (shop) => {
@@ -911,9 +927,15 @@ function ownerChatRoutes(api: FakeApi, served: ServedShops, owned: Owned, now: (
     );
   api.on("POST", "/v1/chat/messages", (req) =>
     owned(req, (shop) => {
-      if (!exact(req.body, ["text"]) && !exact(req.body, ["thread", "text"])) return { status: 400, json: { error: "invalid_request" } };
-      const body = req.body as { thread?: unknown; text: unknown };
+      const KEYS = ["thread", "text", "note", "sentOnFrom"];
+      if (!req.body || typeof req.body !== "object" || Array.isArray(req.body) || !("text" in req.body) || !Object.keys(req.body).every((k) => KEYS.includes(k))) {
+        return { status: 400, json: { error: "invalid_request" } };
+      }
+      const body = req.body as { thread?: unknown; text: unknown; note?: unknown; sentOnFrom?: unknown };
+      if (body.note !== undefined && !wholeNote(body.note)) return { status: 400, json: { error: "invalid_request" } };
+      if (body.sentOnFrom !== undefined && !keptTitle(body.sentOnFrom)) return { status: 400, json: { error: "invalid_request" } };
       if (typeof body.text !== "string" || !body.text.trim()) return { status: 400, json: { error: "invalid_text" } };
+      if ([...body.text.trim()].length > 8_000) return { status: 400, json: { error: "text_too_long", maxChars: 8_000 } };
       if (served.chatRefusal) return served.chatRefusal;
       const threads = (served.chat[shop] ??= []);
       const at = iso(now());
@@ -926,8 +948,10 @@ function ownerChatRoutes(api: FakeApi, served: ServedShops, owned: Owned, now: (
         threads.push(c);
         threadRoute(c.id);
       }
-      const answered = served.chatAnswer(text);
-      const message = { id: `m${c.messages.length + 1}`, from: "owner" as const, text, at };
+      // what is kept is the words, with the title (trimmed) and that a note went with them; the note itself is given to the answer and kept nowhere
+      const sent = { ...(body.note !== undefined ? { note: body.note } : {}), ...(body.sentOnFrom !== undefined ? { sentOnFrom: body.sentOnFrom.trim() } : {}) };
+      const answered = served.chatAnswer(text, sent);
+      const message = { id: `m${c.messages.length + 1}`, from: "owner" as const, text, at, ...(sent.sentOnFrom !== undefined ? { sentOnFrom: sent.sentOnFrom } : {}), ...(sent.note !== undefined ? { noted: true as const } : {}) };
       const answer = { id: `m${c.messages.length + 2}`, from: "buddy" as const, text: answered.text, at, ...(answered.stopReason ? { stopReason: answered.stopReason } : {}) };
       c.messages.push(message, answer);
       c.updatedAt = at;
