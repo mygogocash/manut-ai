@@ -330,7 +330,11 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    queue and terminals out of sessions.ts, one money rule, the approvals index cached, and `pnpm lint`) merged too. The owner
    merged pilot/week-1 into main (#49, then #48, both squashed); pilot/week-1 was made again from main. 99a (the person's own
    keys, and worktree choices for one project) and 136 (more contrast when the system asks, a hidden window draws nothing)
-   merged; themes, chat width and fonts stay 99, the owner's. From 27 Nov the owner asked for English first: new words are English, copied into ja, ko and zh. Needs the owner from 101b: Grok signed in and `permission_mode = "ask"`
+   merged. Then, on the owner's answers of 27 Nov: 106b (Codex's compressed sessions, ruzstd), 111a to 111d (the MIT licence,
+   Linux and Windows releases, a nightly channel; no workflow has run yet), 99b (full themes and chat width), 78d (the push
+   "Your Mac needs you"; the relay is on in dev only), 137 (the side menu slides, sizes and hides; Home's mode at the top
+   left) and the designs of 108 (`docs/multi-machine.md`) and 102l (`docs/connected-chat.md`) merged; 102l-1 (Buddy's chat on
+   the API, off, waiting on the owner's Anthropic key) is in pull request #60. Fonts stay 99, the owner's. From 27 Nov the owner asked for English first: new words are English, copied into ja, ko and zh. Needs the owner from 101b: Grok signed in and `permission_mode = "ask"`
    under `[ui]` in `~/.grok/config.toml` (it says always-approve, so Grok chats are refused), and Muse Code's CLI. From 101e: all 325 Codex sessions on the owner's Mac are compressed, so
    only Claude Code's conversations are offered until 106b. Needs the owner from 101a: Cursor's Approval mode set to Allowlist (it is Run Everything, so Cursor
    chats are refused), and a Cursor plan with messages left to record a real tool call. GitHub reported 7 Dependabot alerts on `main` (2 critical) at that push, for the owner to look at.
