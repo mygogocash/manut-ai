@@ -49,6 +49,7 @@ import {
 } from "./connectors/line";
 import { readConnectionSecret } from "./cred-broker";
 import type { FeatureFlags } from "./index";
+import type { OwnerAccount, PeopleView } from "./people-store";
 import { pilotGate, type GateShopInput } from "./pilot-gate";
 import {
   approvedDeletion,
@@ -1029,6 +1030,9 @@ async function wiped(env: PilotEnv, record: PilotDeletionRecord): Promise<OwnerS
 /// A deletion already approved, by the link or by an earlier try of this one, is finished without opening another. A shop
 /// whose own record a stopped wipe already removed is finished as the operator's same request finishes it. A shop that is
 /// gone already is done.
+///
+/// Only while `accountId` is the shop's owner now (item 140): a shop whose people record links no account, or another
+/// one, is answered `not_owner_now` and left as it is, with nothing opened, decided, logged or wiped.
 export async function ownerDeletesShop(env: PilotEnv, tenant: string, accountId: string): Promise<OwnerShopDeletion> {
   const stored = await readDeletionState(env, tenant);
   if (!stored) return { ok: false, error: "audit_unavailable" };
@@ -1041,6 +1045,15 @@ export async function ownerDeletesShop(env: PilotEnv, tenant: string, accountId:
     if (listed === null) return { ok: false, error: "shops_unavailable" };
     return listed ? wiped(env, started) : { ok: true, summary: {} };
   }
+  // The caller's account must be the one the shop's people record links now. An account deletion that stopped part way
+  // keeps the shops it covered, each with the account it was asked under, and finishes them when it is sent again; an
+  // operator may have unlinked that account meanwhile, or linked someone else. Without this check the former owner would
+  // decide the confirmation as `owner` and wipe a shop that is no longer theirs. The wipe takes the shop's record and its
+  // people together, so a shop still here still has the record that says who owns it; one already gone (above) has
+  // nobody left to ask, and only what its stopped wipe left is finished.
+  const owner = await linkedOwnerOf(env, tenant);
+  if (owner === undefined) return { ok: false, error: "people_unavailable" };
+  if (owner?.id !== accountId) return { ok: false, error: "not_owner_now" };
   if (stored.deletion && approvedDeletion(stored.confirmation) &&
       stored.deletion.confirmationId === stored.confirmation?.request.id) {
     return wiped(env, stored.deletion);
@@ -1077,6 +1090,20 @@ export async function ownerDeletesShop(env: PilotEnv, tenant: string, accountId:
   }
   const record = decided.deletion ?? opened.deletion;
   return wiped(env, record);
+}
+
+/// The account linked as the shop's owner, from its people record (people-store.ts): null when none is linked, and
+/// undefined when the record cannot be read, so no deletion takes an unreadable record for a shop with no owner. The same
+/// read as people.ts's `readPeople`, which this file does not import: people.ts imports this one, and the two would then
+/// import each other.
+async function linkedOwnerOf(env: PilotEnv, tenant: string): Promise<OwnerAccount | null | undefined> {
+  const response = await tenantCall(env, tenant, `/people?tenant=${encodeURIComponent(tenant)}`).catch(() => null);
+  if (!response?.ok) {
+    await response?.body?.cancel();
+    return undefined;
+  }
+  const people = (await response.json().catch(() => null)) as Pick<PeopleView, "ownerAccount"> | null;
+  return people ? people.ownerAccount ?? null : undefined;
 }
 
 /// A shop the person began to make themselves and never finished (shops-store.ts, `personMakes`), deleted with their

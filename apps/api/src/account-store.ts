@@ -201,7 +201,9 @@ type Ops = {
 /// - `POST /begin` `{ subject, owned, helping }`: writes the record and takes the lease, or answers 409 `deletion_running`
 ///   while another request holds it. A record that has not finished is the same deletion: what it covers is kept and the new
 ///   request's shops are added. The answer is the record, with `makes`, the person's unfinished makes, filled in.
-/// - `POST /release` `{ subject }`: gives the lease back, after a stop.
+/// - `POST /release` `{ subject, notOwned? }`: gives the lease back, after a stop. `notOwned` names a shop the record covers
+///   that the account does not own now (item 140, account-deletion.ts), which the record stops covering in the same write:
+///   `begin` keeps what an unfinished record covers, so without this every later request would be refused for it again.
 /// - `POST /forget` `{ subject }`: in one transaction, every row of the person's index of shops (shops-store.ts), and their
 ///   Apple token moved from kept to pending revoke, with the alarm brought forward to try it.
 /// - `POST /revoke` `{ subject }`: one try at the pending revoke now, and what it came to.
@@ -245,11 +247,14 @@ export async function accountDeletionRoute(storage: DurableObjectStorage, reques
       return answer ? json({ record: answer }) : json({ error: "deletion_running" }, 409);
     }
     case "/account-deletion/release": {
+      const notOwned = body.notOwned;
+      if (notOwned !== undefined && !isValidTenant(notOwned)) return json({ error: "invalid_request" }, 400);
       storage.transactionSync(() => {
         const kept = storage.kv.get<AccountDeletionRecord>(key);
         if (kept?.runningUntil !== undefined) {
           const { runningUntil: _released, ...rest } = kept;
-          storage.kv.put(key, rest);
+          storage.kv.put(key, notOwned === undefined ? rest
+            : { ...rest, owned: rest.owned.filter((one) => one.shop !== notOwned) });
         }
       });
       return json({ released: true });
