@@ -844,6 +844,35 @@
   background: var(--g-accent);
   font-size: 13px;
 }
+/* Appearance's colours (item 99b): Make my own and Import beside what the last press did, then the person's own theme's
+   name, its six colours and Delete, as rows of the same group. A refusal is in the danger colour, as Developer's are. */
+.ap-acts .st-pair {
+  flex: none;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.ap-note {
+  min-width: 0;
+  font-size: 13px;
+  color: var(--aui-muted);
+}
+.ap-note.bad {
+  color: var(--danger);
+}
+.ap-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ap-colour {
+  width: 44px;
+  height: 30px;
+  padding: 2px;
+  border-radius: var(--rad-sm);
+  border: 1px solid var(--aui-border-strong);
+  background: var(--aui-surface);
+  cursor: pointer;
+}
 /* "Soon" tag for features that are not in this version yet, and keyboard keys */
 .st-soon {
   padding: 1px 6px;

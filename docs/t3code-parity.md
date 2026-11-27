@@ -18,8 +18,9 @@ keeps them:
 
 - Whatever an agent, a webhook, another app or another machine starts still asks the person as it would in a chat.
   No feature below adds a way round the ask.
-- The look is the brand's one look (`docs/design-audit.md`: no accent to pick). Themes for the whole app are a
-  decision for the owner, not a default.
+- The brand's look is the default (`docs/design-audit.md`). The owner chose full themes for the whole app on 27 Nov
+  2026 (item 99b): a person may make a theme of their own or import a VS Code theme, and every theme keeps text at 4.5
+  to 1.
 - Other machines, a tunnel and a public address cost money or open the Mac to the network, so each is built switched
   off and the owner turns it on.
 
@@ -119,7 +120,7 @@ keeps them:
 | Use across accounts and machines, outside sessions too | part: what Manut AI starts and, with a switch, what Claude Code and Codex write for sessions run outside it, this Mac (item 106; Codex's compressed sessions are read too, item 106b; other Macs are item 108) | 106 |
 | Limits left for each account | has | |
 | Send when the limit resets | has (item 95): a coding chat on a limited account offers Send at <time>; sent once when the account is usable, within the hour, else it asks first | 95 |
-| Themes, VS Code themes, chat width and fonts | part: light and dark, text size; item 85i removes the six palettes as the brand asks | 99 (owner) |
+| Themes, VS Code themes, chat width and fonts | part (item 99b, the owner's choice of 27 Nov): light and dark, text size, chat width (narrow, medium, wide), themes of the person's own (made from the look in force, six main colours edited, renamed, deleted, kept on this Mac) and VS Code themes imported from their JSON file, the terminal's colours included; each refused with why when its text reads under 4.5 to 1. Fonts not done | 99b |
 | Keybindings you set | has (item 99a): the nine app-wide shortcuts set in Settings › General › Keyboard, kept on this Mac | 99 |
 | Settings for a project or an environment | part: Kit's level, rules and folders for a project, and its worktree choices (item 99a) | 99 |
 | A command that gathers what is wrong for an agent to fix | no | 105 |

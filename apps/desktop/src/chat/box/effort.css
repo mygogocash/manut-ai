@@ -1,8 +1,9 @@
 /* The effort card (item 132, EffortCard.tsx): GoSpark's `EffortSliderCard` and `EffortSlider` in this app's tokens. Its
    sizes are GoSpark's: a 330px card padded 14 / 16 / 16 with 16 between its parts, a 17px title over a 13px model line,
    a 30px round Reset, a 34px track with a 5px dot per stop and a 42px knob, and 34px rows in the model list. Its colour
-   is the brand's one look: the ink and its greys below the top level, and at the top level the provider's own colour
-   (--ef-brand, read from its mark), which is the only colour the card ever takes. Its moves are motion.css's: the knob
+   is the look's: the ink and its greys below the top level (a theme's, item 99b, when one is picked), and at the top
+   level the provider's own colour (--ef-brand, read from its mark), which is the only colour the card ever takes. Its
+   moves are motion.css's: the knob
    and the fill slide with the Switch, colours fade as a switch's track does, and a view comes in with Arrive's fade.
    With reduced motion they all land at once (motion.css). */
 

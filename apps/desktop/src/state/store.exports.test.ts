@@ -107,6 +107,8 @@ const VALUES = [
   "asksIn",
   "briefNoticed",
   "BUBBLE_STYLES",
+  // the chat column's widths (item 99b)
+  "CHAT_WIDTHS",
   "chatRoute",
   "chatTarget",
   "createStore",

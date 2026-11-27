@@ -3,7 +3,8 @@
 // the model under it (both one button, which opens the model list); Reset, back to the default level; a slider with one
 // stop for each level the agent reported, which a drag, a click or the arrow keys move; and, in a Claude Code chat, the
 // one-click Ultrathink row. At the top level the title and the track take the provider's colour, as GoSpark's
-// `EffortBrand` paints them; below it they are the ink, since the brand has no accent for a person to pick.
+// `EffortBrand` paints them; below it they are the ink, since the brand's look has no accent of its own (a theme of the
+// person's own, item 99b, reaches the card through the ink and its greys).
 //
 // What GoSpark adds at the top level and in fast mode (drifting particles, speed streaks, lightning, a sweeping sheen)
 // is left out: the Motion board lets only work in progress loop (docs/motion.md). No agent reports a fast mode, so the

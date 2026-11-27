@@ -8,6 +8,7 @@ import { startTermLinks } from "./sessions/termLinkOpen";
 import { startTermShare } from "./sessions/termShare";
 import { startSnapshots } from "./computer/snapshot";
 import { resolveTheme } from "./app/theme";
+import { bootTheme } from "./theme/apply";
 import { readTheme } from "./state/store";
 import { learnThisHost } from "./terminal/host";
 import { watchPageErrors } from "./report/errors";
@@ -15,8 +16,10 @@ import { ErrorBoundary } from "./ui/ErrorBoundary";
 import { LoadFailed } from "./pages/MenuPage";
 import { maskSecrets } from "./lib/secrets";
 
-// The theme is set before <App> mounts, so the first paint is already in the person's theme.
+// The theme is set before <App> mounts, so the first paint is already in the person's theme: dark or light, and the
+// person's own colours when they picked a theme of their own (item 99b).
 document.documentElement.dataset.theme = resolveTheme(readTheme());
+bootTheme();
 
 // the page's own uncaught errors, kept in memory for Settings › Report a problem and nowhere else
 watchPageErrors();
