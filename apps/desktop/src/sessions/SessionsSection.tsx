@@ -18,8 +18,7 @@
 import { ProjectIcon } from "../code/ProjectIcon";
 import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
 import { getStore, useStore } from "../state/store";
-import { CloseIcon, LiveRing, PlusIcon, Popover, TypingDots } from "../ui";
-import { busyFor, shortTime } from "../app/time";
+import { CloseIcon, PlusIcon, Popover } from "../ui";
 import { t } from "../i18n";
 import { composing } from "../lib/ime";
 import { AgentMark } from "./AgentMark";
@@ -1421,27 +1420,6 @@ function StateSign({ mark }: { mark: RowMark }) {
   return (
     <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
       <path d="M2 6.4 4.8 9.2 10 3.2" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
-/** The row's compact view mark. The terminal is a solid window with the prompt cut out of it, the chat an outlined
- *  bubble; the original 16 by 13 geometry scales together inside a 12 by 10 box. */
-function ViewMark({ view }: { view: "chat" | "terminal" }) {
-  return view === "terminal" ? (
-    <svg width="12" height="10" viewBox="0 0 16 13" aria-hidden="true">
-      <rect width="16" height="13" rx="3" fill="currentColor" />
-      <path d="M4 4 6.5 6.5 4 9M8.3 9.2h3.9" fill="none" stroke="var(--ss-cut)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  ) : (
-    <svg width="12" height="10" viewBox="0 0 16 13" aria-hidden="true">
-      <path
-        d="M3 .8h10a2.2 2.2 0 0 1 2.2 2.2v4.2A2.2 2.2 0 0 1 13 9.4H7.6l-3.1 2.8V9.4H3A2.2 2.2 0 0 1 .8 7.2V3A2.2 2.2 0 0 1 3 .8Z"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.4"
-        strokeLinejoin="round"
-      />
     </svg>
   );
 }

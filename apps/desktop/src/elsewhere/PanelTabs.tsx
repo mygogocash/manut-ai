@@ -4,7 +4,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactElemen
 import type { Bot, Routine, TerminalRun, Worktree, WorktreeDiff } from "../lib/protocol";
 import { getStore, useStore } from "../state/store";
 import { shortTime } from "../app/time";
-import { t, tx, type Key } from "../i18n";
+import { t, type Key } from "../i18n";
 import { SourceIcon, Spinner } from "../ui";
 import { withZone } from "../lib/zone";
 import { cadence, isFailure, nextRun, sourceName, statusText } from "./format";

@@ -6,7 +6,6 @@ import { MockTurnFiles, type MockTurnGlobals, type TurnFilesHost } from "./turnF
 import { botRefusal, mockCheck, mockNewId, type CustomEntry, type CustomList, type CustomPreview, type CustomWhy } from "./custom";
 import { withMine, type RegistryList } from "../settings/agents/acpRegistry";
 import type { AskTool } from "../lib/protocol";
-import { t } from "../i18n";
 import { steersOf } from "./controls";
 import { withoutHelperPolicy } from "../jobs/helperPolicy";
 import { withoutReachNote } from "../jobs/reachList";

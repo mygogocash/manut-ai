@@ -54,7 +54,6 @@ export const OUTPOSTS_PATH = "/v1/vault/outposts";
 export const RENAME_PATH = "/v1/vault/outposts/rename";
 export const REMOVE_PATH = "/v1/vault/outposts/remove";
 
-type Obj = Record<string, unknown>;
 const text = (v: unknown, max: number): v is string => typeof v === "string" && v.length > 0 && v.length <= max;
 /** An ISO time from the API in seconds, as the protocol counts; null for null, undefined for anything else. */
 function seconds(v: unknown): number | null | undefined {

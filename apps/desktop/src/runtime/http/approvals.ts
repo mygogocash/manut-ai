@@ -67,7 +67,6 @@ export interface ShopApproval {
   raw: unknown;
 }
 
-type Obj = Record<string, unknown>;
 const str = (v: unknown): string => (typeof v === "string" ? v : "");
 const ms = (v: unknown): number | null => {
   if (typeof v === "number") return Number.isFinite(v) ? v : null;

@@ -37,7 +37,6 @@ const MAX_LISTED = 50;
 /** The most ids kept for one shop: room for a list that shifts under the app, and a bound on what is written. */
 const KEEP_IDS = 200;
 
-type Obj = Record<string, unknown>;
 const isId = (v: unknown): v is string => typeof v === "string" && v.length > 0 && v.length <= 256;
 
 /** The sign-ins of a `GET /v1/people/devices` answer, oldest first, once each; null when the answer is not this route's. */

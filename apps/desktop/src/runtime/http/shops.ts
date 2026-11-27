@@ -84,7 +84,6 @@ function workOf(a: ShopAnswers, unreadable: unknown[]): ShopWork | null | ReadFa
 /** A shop session is opened again this long before it ends, so an ending one is never sent. */
 export const SHOP_EARLY_MS = 60_000;
 
-type Obj = Record<string, unknown>;
 const text = (v: unknown, max: number): v is string => typeof v === "string" && v.length > 0 && v.length <= max;
 const ms = (v: unknown): number | null => {
   const t = typeof v === "string" ? Date.parse(v) : NaN;

@@ -204,7 +204,7 @@ export function historyDays(
 
 /** The chats the person archived, newest first, as History's Archive lists them (item 76): the one place an archived chat is found, and
  *  from which it is brought back. A chat's archive stays whatever happens in it; the ask of an archived chat is still in Needs you. */
-export function historyArchive(s: AppState & Actions, marks: RowMarks, nowMs: number): HistoryRowView[] {
+export function historyArchive(s: AppState & Actions, marks: RowMarks): HistoryRowView[] {
   const members = selectSidebarBots(s).map((b) => b.name);
   const names = new Map(s.bots.map((b) => [b.name, b.display_name]));
   const untitled = t("thread.untitled");
@@ -510,7 +510,7 @@ export function HistoryPage() {
     <HistoryView
       select={select}
       days={days}
-      archive={historyArchive(s, marks, Date.now())}
+      archive={historyArchive(s, marks)}
       query={query}
       hasThreads={hasThreads}
       onQuery={setQuery}

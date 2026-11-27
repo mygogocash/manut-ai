@@ -26,8 +26,6 @@ import { isObj } from "../../lib/guards";
  *  asked for), decided, expired or ended, newest asked first. */
 export const RECENT_PATH = "/v1/approvals?state=recent";
 
-type Obj = Record<string, unknown>;
-
 /** The records of a `state=recent` answer, or null for anything that is not that list: a refusal, no answer, a body of another
  *  kind (an answer that says `open` is the open list, not this one), or one with no list in it. An entry this build cannot read
  *  whole is left out, as in every read of the shop's approvals. */

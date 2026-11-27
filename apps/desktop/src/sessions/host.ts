@@ -11,7 +11,7 @@ import type { ApprovalChoice, ClarifyAnswers } from "../lib/protocol";
 import type { DiskState } from "../lib/disk";
 import type { ImportApp, ImportProfile } from "./term/import";
 import { type LaneFolder } from "../code/laneFolder";
-import { savedKeys, type SavedKeys } from "../code/secrets";
+import type { SavedKeys } from "../code/secrets";
 import { type GitView } from "../code/moved";
 import { type KeptLane, type LaneCleaned, type LaneLanded, type LaneMade, type LaneReleased, type LaneRemoveAsk, type LaneRemoved } from "../code/laneBranch";
 import { type AgentConfig } from "../settings/mcp/agentConfig";

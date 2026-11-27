@@ -47,8 +47,6 @@ export function decisionPath(requestId: string): string {
   return `/v1/approvals/${encodeURIComponent(requestId)}/decision`;
 }
 
-type Obj = Record<string, unknown>;
-
 const NOT_PERMITTED: Partial<Record<ApprovalKind, Key>> = {
   money: "rt.no.money",
   public_post: "rt.no.public_post",

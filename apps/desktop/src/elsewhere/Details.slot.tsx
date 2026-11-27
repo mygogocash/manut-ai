@@ -22,7 +22,6 @@ import {
   TABS,
   TerminalTab,
   WorktreesTab,
-  type PanelTab,
 } from "./PanelTabs";
 import { useNow } from "./useNow";
 import { RunsTab } from "../runs/RunsTab";
