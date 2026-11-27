@@ -132,10 +132,15 @@ test("a message to Buddy goes to the shop's chat with its owner session, Buddy a
   await page.goto("/");
   await expect(page.getByTestId("page-home")).toBeVisible();
   await openChat(page, "buddy", "Buddy");
+  // Connected answers with the API's model: the chat has no model menu, and never says a model is missing
+  await expect(page.getByTestId("composer")).toBeVisible();
+  await expect(page.getByTestId("model-pill")).toHaveCount(0);
+  await expect(page.getByTestId("chat-no-model")).toHaveCount(0);
 
   await page.getByTestId("composer").fill("How were sales today?");
   await page.getByTestId("send").click();
   await expect(page.getByTestId("bubble-bot").filter({ hasText: "Sales were ฿4,250 from 12 orders today." })).toBeVisible();
+  await expect(page.getByTestId("chat-no-model")).toHaveCount(0);
 
   await page.getByTestId("composer").fill("And again?");
   await page.getByTestId("send").click();

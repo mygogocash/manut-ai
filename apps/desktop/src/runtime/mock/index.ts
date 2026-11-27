@@ -30,8 +30,9 @@ function refusal(e: unknown): BridgeError {
   return { code: "internal", message: String(e) };
 }
 
-/** What the demo runtime can do beyond chat: none of the optional feature groups (it answers their reads empty). */
-export const MOCK_CAPABILITIES: RuntimeCapabilities = NO_CAPABILITIES;
+/** What the demo runtime can do beyond chat: none of the optional feature groups (it answers their reads empty), but it
+ *  names models for its members, as a runtime on this computer does. */
+export const MOCK_CAPABILITIES: RuntimeCapabilities = { ...NO_CAPABILITIES, models: true };
 
 export class MockRuntime implements RuntimeAdapter {
   readonly kind = "mock" as const;

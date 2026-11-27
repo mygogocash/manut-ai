@@ -33,6 +33,11 @@ export interface RuntimeCapabilities {
   /** Coding-CLI logins and their subscription usage, which the runtime reads from this computer (`accounts.*`,
    *  `usage.read`). */
   accounts: boolean;
+  /** The models a member can answer with, named by the runtime and picked by the person: the model menu in the chat box
+   *  and the first chat's "no model yet" line (`models.options`, `chat.set_model`). Off for a runtime that answers with a
+   *  model the person does not pick: on Connected the API chooses it, under the shop's cap, so there is nothing to pick
+   *  and nothing missing. */
+  models: boolean;
 }
 
 /** A capability by name, for `can()`. */
@@ -55,5 +60,5 @@ export interface RuntimeAdapter {
   onStatus(handler: (s: RuntimeStatus) => void): () => void;
 }
 
-export const ALL_CAPABILITIES: RuntimeCapabilities = { elsewhere: true, automations: true, plugins: true, restart: true, accounts: true };
-export const NO_CAPABILITIES: RuntimeCapabilities = { elsewhere: false, automations: false, plugins: false, restart: false, accounts: false };
+export const ALL_CAPABILITIES: RuntimeCapabilities = { elsewhere: true, automations: true, plugins: true, restart: true, accounts: true, models: true };
+export const NO_CAPABILITIES: RuntimeCapabilities = { elsewhere: false, automations: false, plugins: false, restart: false, accounts: false, models: false };

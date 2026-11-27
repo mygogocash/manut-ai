@@ -241,6 +241,9 @@ function askingReach(t: Turn): Turn {
   return t.status === status ? t : { ...t, status };
 }
 
+/** The longest a `turn.start` may say its work began before it (`since`): well past the longest a model call is waited for. */
+const SINCE_MAX_MS = 10 * 60_000;
+
 function reduceEvent(state: AppState, ev: BridgeEvent, now: number): AppState {
   if (ev.session && ev.event !== "folder.closed") {
     if (ev.event === "bot.status") return state; // a folder chat's turn never moves the bot's own status
@@ -260,7 +263,11 @@ function reduceEvent(state: AppState, ev: BridgeEvent, now: number): AppState {
         // a lead lane's turn with Helpers on: its helper blocks are hidden and read by the app (item 102e)
         // a coding chat's turn with chats on its "Kit may reach" list: its reach blocks likewise (item 102k)
         const marks = { ...(ev.helpers === true ? { helpers: true as const } : {}), ...(ev.reach === true ? { reach: true as const } : {}) };
-        const turn = marks.helpers || marks.reach ? patchTurn(started, (t) => ({ ...t, ...marks })) : started;
+        const marked = marks.helpers || marks.reach ? patchTurn(started, (t) => ({ ...t, ...marks })) : started;
+        // the work began before the runtime could say a turn had (`since`): the line counts from then. Only a time just
+        // behind this one is taken, so a wrong clock can never show a turn that ran for a day or one that ends before it began.
+        const since = typeof ev.since === "number" && ev.since < now && now - ev.since <= SINCE_MAX_MS ? ev.since : null;
+        const turn = since === null ? marked : patchTurn(marked, (t) => ({ ...t, startedAt: since }));
         return { ...turn, early: null, pendingTurn: null, steeredUnread: undefined, steerAck: null };
       });
     case "status": {

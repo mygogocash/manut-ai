@@ -749,8 +749,10 @@ export type ComputerAsk = {
 
 export type BridgeEvent =
   /** `helpers`: set by the app (never by an agent) on a lead lane's turn that starts with Helpers on (item 102e, src/jobs/). `reach`:
-   *  set by the app on a coding chat's turn that starts with chats on its "Kit may reach" list (item 102k). */
-  | (EventBase & { event: "turn.start"; helpers?: true; reach?: true })
+   *  set by the app on a coding chat's turn that starts with chats on its "Kit may reach" list (item 102k). `since` (ms): when the work
+   *  this turn shows began, from a runtime that learns there is a turn only once its answer came (Connected's chat: the API answers
+   *  a message whole, and a refused message is no turn), so the line says how long the answer took, not "0s". */
+  | (EventBase & { event: "turn.start"; helpers?: true; reach?: true; since?: number })
   /** `retry`: the agent tries the turn again by itself (OmO's `auto_retry_start`); the line says which try. */
   | (EventBase & { event: "status"; text: string; retry?: { attempt: number; max: number } })
   /** The agent is thinking; `text` is what it thought, when the agent sends it (SESSIONS agents). */

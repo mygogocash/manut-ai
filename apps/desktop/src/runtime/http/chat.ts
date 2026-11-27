@@ -330,6 +330,7 @@ export class BuddyChat {
 
   private async post(shop: ShopRow, target: Target, text: string): Promise<{ input_id: string }> {
     const api = target.main ? target.main.api : target.conv.api;
+    const asked = this.link.now();
     const answer = await this.link.write(shop.id, CHAT_MESSAGES_PATH, api === null ? { text } : { thread: api, text });
     if (answer.kind !== "ok") {
       // a conversation removed elsewhere: the next message to the main chat starts a new one
@@ -341,7 +342,8 @@ export class BuddyChat {
     const conv = this.remember(shop.id, exchange.thread, target.conv?.id);
     if (target.main) target.main.api = exchange.thread.id;
     const at = { bot: TEAM, ...(target.conv ? { session: target.conv.id } : {}) };
-    this.link.emit({ event: "turn.start", ...at });
+    // the turn is said only now, and began when the message went: its line says how long Buddy took (`since`)
+    this.link.emit({ event: "turn.start", ...at, since: asked });
     this.link.emit({ event: "message", ...at, id: `${exchange.thread.id}/${exchange.answer.id}`, text: answerText(exchange.answer) });
     this.link.emit({ event: "turn.end", ...at, outcome: "done" });
     // The main chat's first message made a conversation: it is listed with the others from now on.

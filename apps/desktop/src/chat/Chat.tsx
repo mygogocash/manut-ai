@@ -65,8 +65,9 @@ export function Chat() {
           reply={s.replyTo[bot.name] ?? null}
           onClearReply={() => s.setReplyTo(null, bot.name)}
           onNewThread={bot.host || bot.status === "offline" ? undefined : (first) => void s.newThreadWith(bot.name, first)}
-          // a member with no box of its own (once the runtime said so, so Buddy's box does not flash a second model first)
-          tools={box ? <AgentBoxTools bot={bot.name} box={box} /> : Picker && s.agentBox[bot.name] === null ? <Picker bot={bot} chat={chat} inBox /> : undefined}
+          // a member with no box of its own (once the runtime said so, so Buddy's box does not flash a second model first),
+          // on a runtime whose models the person picks: Connected answers with the API's, so its box has no model menu
+          tools={box ? <AgentBoxTools bot={bot.name} box={box} /> : Picker && can("models") && s.agentBox[bot.name] === null ? <Picker bot={bot} chat={chat} inBox /> : undefined}
           onFolder={box ? pickFolder : undefined}
           mentions={box ? teammates(s.bots, bot.name) : undefined}
           actions={!!box}
