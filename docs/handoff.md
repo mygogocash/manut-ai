@@ -717,10 +717,10 @@ Every switch that turns a built part on, and what each needs from the owner, is 
 ## Known flaky tests (they fail only under heavy load)
 
 - `apps/desktop/e2e/term-park.spec.ts:340` ("a parked terminal whose CLI ends goes on as the shell in the remade
-  xterm"): passed on its retry in item 99a's first run and failed both tries in its second (27 Nov), each time waiting
-  for the shell's xterm to be made again; it passed three times running on this Mac. That wait has 15 seconds since. If
-  it fails again, read how long the remade xterm takes under load before raising it further.
-
+  xterm"): failed in three CI runs on 27 Nov, twice on both tries, and passed every time on this Mac. Found and fixed the
+  same day: the spec left its short parking thresholds on, so the xterm the shell's first lines remade was parked again a
+  few hundred milliseconds later, and a loaded runner looked for it only after that. It now stops parking once the
+  terminal is parked and before the CLI ends. If it fails again it is a new cause.
 - `apps/desktop/e2e/term-link.spec.ts:202` ("a link to a terminal it does not have says so over an open terminal
   too"): failed once and passed on its retry in item 102h's two runs on 27 Nov (and showed in several runs before).
   If it fails twice in one run, fix it.

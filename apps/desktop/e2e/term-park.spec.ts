@@ -349,21 +349,25 @@ test("a parked terminal whose CLI ends goes on as the shell in the remade xterm,
   // the CLI ends while parked (mock `after <ms> exit`, typed through the host as the person would have)
   await page.evaluate(async (p) => {
     const m = (await import("/src/sessions/host.ts" as string)) as { getHost(): { write(id: number, d: string): Promise<void> } };
-    await m.getHost().write(p, "after 1500 exit\r");
+    await m.getHost().write(p, "after 4000 exit\r");
   }, pa);
   // the echo of that line made it again; it parks again before the CLI ends
   await expect.poll(() => parkedCount(page)).toBe(0);
   await expect.poll(() => parkedCount(page)).toBe(1);
   expect(await ptyOf(page, a)).toBe(pa);
+  // Parked, with the CLI still running: from here nothing parks again. With the short thresholds left on, the xterm the
+  // shell's first lines remake was parked once more a few hundred milliseconds later, and a loaded CI runner often looked
+  // for it only after that, when nothing would ever remake it (it failed both tries in two runs of 27 Nov). The CLI ends
+  // four seconds after it was told to, so this is set well before.
+  await page.evaluate(() => (window as unknown as { __manutPark: { set(l: object): void } }).__manutPark.set({ hiddenMs: 999_999, idleMs: 999_999, sweepMs: 1000 }));
+  expect(await parkedCount(page)).toBe(1);
   const row = page.getByTestId(`session-${a}`);
   await openCode(page);
   await expect(row.getByTestId("term-row-mark")).toHaveAttribute("data-agent", "shell");
   await expect.poll(async () => (await ptyOf(page, a)) !== pa).toBe(true);
   const sp = await ptyOf(page, a);
-  // the shell's xterm is made again once the shell has started: on a loaded CI runner that took past the default five seconds
-  // (twice in item 99a's run 45963102546, while it passed every time on a Mac), so this one wait has fifteen
+  // the shell's first lines made the xterm again, and it stays (nothing parks since the thresholds above)
   await expect.poll(() => hasXterm(page, a), { timeout: 15_000 }).toBe(true);
-  await page.evaluate(() => (window as unknown as { __manutPark: { set(l: object): void } }).__manutPark.set({ hiddenMs: 999_999, idleMs: 999_999, sweepMs: 1000 }));
   await out(page, sp, "shell output after the CLI ended\r\n");
   await show(page, a);
   const rows = page.locator('[data-testid="terminal"] .xterm-rows');
