@@ -145,6 +145,7 @@ import { time } from "./zh/time";
 import { titles } from "./zh/titles";
 import { tl } from "./zh/tl";
 import { tlink } from "./zh/tlink";
+import { tm } from "./zh/tm";
 import { tmenu } from "./zh/tmenu";
 import { tray } from "./zh/tray";
 import { tshare } from "./zh/tshare";
@@ -308,6 +309,7 @@ export const zh: Record<Key, string> = {
   ...titles,
   ...tl,
   ...tlink,
+  ...tm,
   ...tmenu,
   ...tray,
   ...tshare,

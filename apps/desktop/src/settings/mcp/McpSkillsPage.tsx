@@ -15,6 +15,7 @@ import { agentLabel } from "../../sessions/agents";
 import { Row } from "../DevRow";
 import { mcpSeen, useMcpSeenVersion, type AgentConfig, type ConfigItem, type SeenStatus } from "./agentConfig";
 import { InstallSkills } from "./InstallSkills";
+import { OtherPrograms } from "./OtherPrograms";
 
 type AgentKey = AgentConfig["agent"];
 
@@ -41,6 +42,8 @@ export interface McpSkillsViewProps {
   onClear: () => void;
   /** Install skills from a link, drawn below the lists (absent in a test that draws the lists alone) */
   install?: ReactNode;
+  /** Other programs (item 103), drawn above "where else these reach" whatever the lists say (absent in a test of the lists) */
+  others?: ReactNode;
 }
 
 function fromWords(i: { from: ConfigItem["from"] | "seen"; plugin?: string }): string {
@@ -156,6 +159,7 @@ export function McpSkillsView(p: McpSkillsViewProps) {
           {p.install}
         </>
       )}
+      {p.others}
       <div className="st-gh">{t("mcp.where")}</div>
       {(["mcp.where.lanes", "mcp.where.codex", "mcp.where.claude", "mcp.where.other", "mcp.where.acp", "mcp.where.asks"] as const).map((k) => (
         <div key={k} className="st-note">
@@ -204,6 +208,7 @@ export function McpSkillsPage() {
       onChoose={() => void choose()}
       onClear={() => setProject("")}
       install={<InstallSkills />}
+      others={<OtherPrograms />}
     />
   );
 }

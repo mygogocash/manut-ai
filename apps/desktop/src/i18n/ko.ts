@@ -145,6 +145,7 @@ import { time } from "./ko/time";
 import { titles } from "./ko/titles";
 import { tl } from "./ko/tl";
 import { tlink } from "./ko/tlink";
+import { tm } from "./ko/tm";
 import { tmenu } from "./ko/tmenu";
 import { tray } from "./ko/tray";
 import { tshare } from "./ko/tshare";
@@ -308,6 +309,7 @@ export const ko: Record<Key, string> = {
   ...titles,
   ...tl,
   ...tlink,
+  ...tm,
   ...tmenu,
   ...tray,
   ...tshare,

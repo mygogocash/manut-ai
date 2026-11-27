@@ -145,6 +145,7 @@ import { time } from "./ja/time";
 import { titles } from "./ja/titles";
 import { tl } from "./ja/tl";
 import { tlink } from "./ja/tlink";
+import { tm } from "./ja/tm";
 import { tmenu } from "./ja/tmenu";
 import { tray } from "./ja/tray";
 import { tshare } from "./ja/tshare";
@@ -308,6 +309,7 @@ export const ja: Record<Key, string> = {
   ...titles,
   ...tl,
   ...tlink,
+  ...tm,
   ...tmenu,
   ...tray,
   ...tshare,

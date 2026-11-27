@@ -5,7 +5,7 @@ its order: "must be designed first because it can act for the person"). The owne
 lists, opens and messages threads through an MCP server, with an address to copy for it, off by default, designed first
 for who may connect and so that everything asked through it is an ask the person answers, never a way round one.
 
-Status on 27 Nov 2026: design, with slice 103a built (the door, in the shell); the rest is not built. The decisions are in `docs/decisions/103-mcp-threads.md`; the slices are
+Status on 27 Nov 2026: design, with slices 103a (the door, in the shell) and 103b (Settings, the list and the let-in card) built; reads, messages and new lanes are not built. The decisions are in `docs/decisions/103-mcp-threads.md`; the slices are
 at the end and are in `docs/plan.md` as 103a to 103d.
 
 ## The promise this design keeps
@@ -75,7 +75,8 @@ program before the press that named it. It is item 102k's promise ("chats that r
    and two lines to copy: one for Claude Code (`claude mcp add manut-threads -- "<app>/Contents/MacOS/manut" --threads-mcp`)
    and one block of JSON for programs that keep an `mcpServers` file (Claude Desktop, Cursor and others). When the app does not
    run from `/Applications`, a line says the address changes if the app is moved.
-2. **A program asks for the first time.** A card in Needs you, and a notification when the window is not in front: "Claude
+2. **A program asks for the first time.** A card over whatever page shows, counted on the Dock's badge, and a notification
+   when the window is not in front: "Claude
    (/Applications/Claude.app) wants to reach the chats you listed", with the name the program gives itself on a second line,
    marked as its own words. Let in while it runs, or No.
 3. **A read.** "Claude asks to read <chat>", showing exactly the text that would go. Let it read, or No. The card is in Needs
@@ -199,6 +200,13 @@ shell's error strings for a refused call hold none of the call's arguments. [103
 - **103b. Settings, the list and the let-in card.** The Other programs section (the switch through the shell, the list from
   item 97's picker, the two lines to copy), `list_chats`, and the let-in card in Needs you with a notification. Safety test: a
   name that is not a number on the list opens nothing.
+  **Built 27 Nov 2026** (`src/threadsMcp/`: `list.ts`, `shell.ts`, `store.ts`, `start.ts`, `Cards.tsx`;
+  `src/settings/mcp/OtherPrograms.tsx`; the `tm` words in four languages; `e2e/other-programs.spec.ts`; decisions in
+  `docs/decisions/103-mcp-threads.md`). What changed from the design: the let-in card is drawn over whatever page shows and
+  counted on the Dock's badge, not as a row in Home's Needs you list, which lists the asks inside chats; the list is kept in
+  this Mac's local storage; `list_chats` says who answers in each chat and whether it is working, waiting on the person or
+  idle, and that a chat that left or moved shop cannot be reached; reads, messages and new lanes answer that only
+  `list_chats` works in this version.
 - **103c. Read and message.** The two cards in Needs you and in the chat, acting through `gatherContext` and `route`, the
   reply, the closed card. An e2e spec on the mock bridge with the stand-in program. Safety tests: M8, M9, M11.
 - **103d. A new lane.** `open_chat` through `startOpenedLane`, in the listed chat's project, in its agent's Ask mode, the card
