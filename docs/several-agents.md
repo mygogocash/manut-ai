@@ -538,7 +538,14 @@ the screens are built on tested ground.
   in one message, fenced, masked and capped, taken from the rounds in one step so a later report is late. It goes with no bubble:
   the chat shows "Helpers reported to Kit." with Show what was sent. It is not the person speaking, so it opens no new rounds; the
   second round's card shows, and a third ask after two reports has none. Split off as 102j-2: the restart path (Land what they
-  did, Report to Kit), since rounds are not saved yet; until then a restart lands and sends nothing.
+  did, Report to Kit).
+  **102j-2 built 27 Nov 2026** (`src/jobs/helperRestore.ts`, `src/jobs/HelpersRestartCard.tsx`, `restore`, `landRestored` and
+  `reportRestored` in `helperLanding.ts`, `helperRounds` in `app/resume.ts`, their tests, and a spec in
+  `e2e/helper-runs.spec.ts` that reloads the page mid-round). Each lead's open rounds are saved with it; after a restart they come
+  back all back and held, a helper that was still out reporting as failed with its last saved answer, and the lead's chat shows a
+  card with Land what they did and Report to Kit. Nothing lands, starts or is sent until a press, however long it waits. What
+  changed on the way: the reports wait for a lead whose agent runs (they were lost when sent to a paused one), and Report to Kit
+  starts a lead the restart left paused.
 
 ### Phase 3: chats that reach other chats
 

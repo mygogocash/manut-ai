@@ -22,6 +22,7 @@ import { ActivityFallback, CardFallback, RoutineFallback } from "./fallbacks";
 import { PluginAddedCard, RoutineAddedCard } from "../../pages/ChatCards";
 import { ThreadLinkLine, ThreadRouteCard } from "../cards/ThreadNotes";
 import { HelpersAskCard } from "../../jobs/HelpersCard";
+import { HelpersRestartCard } from "../../jobs/HelpersRestartCard";
 import { ReachAskCard } from "../../jobs/ReachCards";
 import { BriefNotice, WatchLine } from "../../routines/WatchLine";
 import { t } from "../../i18n";
@@ -194,6 +195,9 @@ export function Timeline({
       case "helpersAsk":
         // a lead lane's Start helpers card (item 102e)
         return <HelpersAskCard item={it} />;
+      case "helpersRestart":
+        // a lead's helper rounds put back after a restart, with Land what they did and Report to Kit (item 102j-2)
+        return <HelpersRestartCard lead={it.lead} />;
       case "reachAsk":
         // a coding chat's read, send or open card (item 102k)
         return <ReachAskCard item={it} />;
