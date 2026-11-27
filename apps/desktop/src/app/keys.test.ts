@@ -25,6 +25,9 @@ describe("the defaults", () => {
     expect(keysText(defaultKeys(true).terminal, true)).toBe("⌃`");
     expect(keysText(defaultKeys(true).graph, true)).toBe("⇧⌘G");
     expect(keysText(defaultKeys(false)["session-next"], false)).toBe("Ctrl+Shift+]");
+    // the side menu, as ChatGPT's
+    expect(keysText(defaultKeys(true).sidebar, true)).toBe("⇧⌘S");
+    expect(keysText(defaultKeys(false).sidebar, false)).toBe("Ctrl+Shift+S");
   });
 });
 

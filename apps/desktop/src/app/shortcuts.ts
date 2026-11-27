@@ -29,6 +29,7 @@ import { isFirstRunOpen } from "../onboarding/flow";
 import { listenMenuClose } from "./menuClose";
 import { paletteOpen, togglePalette } from "../palette/state";
 import { currentKeys, keysRecording, matches, type KeyAction, type Keys } from "./keys";
+import { toggleSide } from "../sidebar/sideState";
 
 export const isMac = () => typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
 
@@ -38,7 +39,7 @@ export function shortcutFor(
   e: { key: string; code?: string; metaKey: boolean; ctrlKey: boolean; altKey: boolean; shiftKey: boolean; isComposing?: boolean; keyCode?: number },
   mac: boolean,
   keys: Keys = currentKeys(mac),
-): { kind: "bot"; index: number } | { kind: "session"; step: 1 | -1 } | { kind: "search" | "details" | "settings" | "stop" | "next-ask" | "graph" | "new-session" | "terminal" } | null {
+): { kind: "bot"; index: number } | { kind: "session"; step: 1 | -1 } | { kind: "search" | "details" | "settings" | "stop" | "next-ask" | "graph" | "new-session" | "terminal" | "sidebar" } | null {
   if (composing(e)) return null;
   const hit = (a: KeyAction) => keys[a].some((c) => matches(c, e));
   // the bottom terminal panel first: its key is taken before a terminal sees it (onTerminalKey)
@@ -46,6 +47,7 @@ export function shortcutFor(
   const mod = mac ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
   if (mod && !e.altKey && !e.shiftKey && /^[1-9]$/.test(e.key)) return { kind: "bot", index: Number(e.key) - 1 };
   if (hit("graph")) return { kind: "graph" };
+  if (hit("sidebar")) return { kind: "sidebar" };
   if (hit("session-next")) return { kind: "session", step: 1 };
   if (hit("session-prev")) return { kind: "session", step: -1 };
   if (hit("search")) return { kind: "search" };
@@ -185,6 +187,8 @@ export function onShortcutKey(e: KeyboardEvent): void {
     // a SESSIONS chat has its own panel (its Plans); anywhere else the bot's chat comes back first
     if (s.ui.view !== "chat" && s.ui.view !== "session") a.closeSettings();
     a.togglePanel();
+  } else if (hit.kind === "sidebar") {
+    toggleSide();
   } else if (hit.kind === "settings") {
     if (s.ui.view === "settings") a.closeSettings();
     else a.openSettings();

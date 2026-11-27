@@ -44,4 +44,6 @@ export const home: Record<keyof typeof en, string> = {
   "home.sendStays": "发送并留在这里（{mod}Enter 发送并打开聊天）",
   "home.started": "已发给 {name}：{words}",
   "home.open": "打开",
+  "home.brand": "Manut AI",
+  "home.modePick": "模式：{mode}。更改模式",
 };

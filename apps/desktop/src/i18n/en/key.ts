@@ -39,4 +39,5 @@ export const key = {
   "key.reserved.editing": "{keys} is for editing text.",
   "key.reserved.members": "{keys} opens a team member.",
   "key.ownHint": "Press Change and then the keys you want. Your shortcuts are kept on this Mac only.",
+  "key.sidebar": "Show or hide the side menu",
 };

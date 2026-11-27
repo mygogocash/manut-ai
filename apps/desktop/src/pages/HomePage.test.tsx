@@ -74,10 +74,11 @@ describe("Home's ask box", () => {
     expect(html).toMatch(/<input[^>]*placeholder="What should the team work on next\?"[^>]*data-testid="home-ask"/);
     // the box is named for what it does
     expect(html).toMatch(/<label[^>]*for="home-ask"[^>]*>Give the team a job<\/label>/);
-    expect(html).toMatch(/role="group" aria-label="Where this goes"/);
-    expect(text).toMatch(/Chat Team Code/);
-    expect(html).toMatch(/aria-pressed="true"[^>]*data-testid="home-mode-team"/);
-    expect(html).toMatch(/aria-pressed="false"[^>]*data-testid="home-mode-chat"/);
+    // the mode at the top left, as ChatGPT names its model there: the brand and the mode in use, a menu behind it
+    expect(html).toMatch(/aria-haspopup="menu"[^>]*aria-expanded="false"[^>]*aria-label="Mode: Team. Change the mode"[^>]*data-testid="home-mode-pick"/);
+    expect(html).toMatch(/data-testid="home-mode-now"[^>]*>Team</);
+    // the title stays for screen readers
+    expect(html).toMatch(/<h1[^>]*class="vh"[^>]*>Home<\/h1>/);
     expect(html).toMatch(/<button type="submit"[^>]*aria-label="Send"[^>]*disabled=""[^>]*data-testid="home-send"/);
   });
 

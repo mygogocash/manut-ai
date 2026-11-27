@@ -44,4 +44,6 @@ export const home: Record<keyof typeof en, string> = {
   "home.sendStays": "보내고 여기 머물기 ({mod}Enter는 보내고 채팅을 엽니다)",
   "home.started": "{name}에게 보냈습니다: {words}",
   "home.open": "열기",
+  "home.brand": "Manut AI",
+  "home.modePick": "모드: {mode}. 모드 바꾸기",
 };

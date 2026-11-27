@@ -41,4 +41,5 @@ export const key: Record<keyof typeof en, string> = {
   "key.reserved.editing": "{keys} は文字の編集に使われます。",
   "key.reserved.members": "{keys} はチームメンバーを開きます。",
   "key.ownHint": "「変更」を押してから、使いたいキーを押してください。ショートカットはこの Mac にだけ保存されます。",
+  "key.sidebar": "サイドメニューを表示または非表示",
 };
