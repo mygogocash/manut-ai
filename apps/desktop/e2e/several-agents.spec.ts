@@ -205,7 +205,11 @@ test("SAFETY: an ask answered in a column is decided in Needs you and in the lan
 // ---- the gathered answers (item 102c) ------------------------------------------------------------------------------------
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
-/** The calls the stand-in bridge has logged for `op` (member and thread chats go through it). */
+/**
+ * The calls the stand-in bridge has logged for `op` (member and thread chats go through it). The bridge is the worker's
+ * for the whole run and this file never resets it, so its log also holds what earlier spec files in the same worker
+ * sent: a test counts only the calls made after it started.
+ */
 async function bridgeCalls(op: string): Promise<unknown[]> {
   const ws = new WebSocket(`ws://127.0.0.1:${MOCK}/?token=e2e`);
   await new Promise<void>((res, rej) => {
@@ -225,6 +229,8 @@ async function bridgeCalls(op: string): Promise<unknown[]> {
 const sends = async (page: Page) => (await calls(page)).filter((c) => c.op === "chat.input" && c.input?.kind === "send").length;
 
 test("the Gathered block under the columns: each lane's last answer whole, its files and its tests, once all three answered", async ({ page }) => {
+  // On 27 Nov CI ran prompt-history's two sends in this worker just before this file, and an empty log was expected.
+  const bridgeBefore = (await bridgeCalls("chat.send")).length;
   await jobPage(page, "/kit pass", { width: 1280 });
   await watch(page);
   const ids = await laneIds(page);
@@ -241,7 +247,7 @@ test("the Gathered block under the columns: each lane's last answer whole, its f
     await expect(lane.getByTestId(`gt-result-${id}`)).toHaveAttribute("data-tone", "ok");
   }
   // nothing was started or sent by looking at it
-  expect(await bridgeCalls("chat.send")).toEqual([]);
+  expect((await bridgeCalls("chat.send")).slice(bridgeBefore)).toEqual([]);
 });
 
 test("a lane waiting on an ask is shown as waiting, not answered, with Answer, which brings its column forward", async ({ page }) => {

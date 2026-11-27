@@ -742,6 +742,12 @@ Every switch that turns a built part on, and what each needs from the owner, is 
 - `apps/desktop/e2e/term-link.spec.ts:202` ("a link to a terminal it does not have says so over an open terminal
   too"): failed once and passed on its retry in item 102h's two runs on 27 Nov (and showed in several runs before).
   If it fails twice in one run, fix it.
+- `apps/desktop/e2e/several-agents.spec.ts:231` ("the Gathered block under the columns"): failed on both tries in
+  `pilot/week-1`'s run of c528a62 and in pull request 68's push run on 27 Nov. Not load: the stand-in bridge is a
+  worker's for the whole run and this file never resets it, and the shard plan (the file has no measured time yet) put
+  `prompt-history.spec.ts` just before it in one worker, so that file's two sends were still in the log the test expected
+  empty. Fixed the same day: the test counts only what is sent after it starts, as the file's Compare test does. A spec
+  that reads the bridge's log either resets it (`mock.reset`) or counts from its own start.
 - Rust `a_grok_chat_reads_its_accounts_own_home_for_its_asks` (item 101d): failed in three loaded runs by 27 Nov and
   passed alone each time; it slept a fixed 300 ms for a stand-in process. Fixed 27 Nov: it waits for the process's file.
 - Rust `threads_mcp::door::tests::a_call_goes_through_the_real_socket_and_back` (item 103): failed once on CI's macOS
