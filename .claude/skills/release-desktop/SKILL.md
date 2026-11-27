@@ -15,7 +15,8 @@ is pushed, so push one only when the owner asked for a build.
    `cargo check --locked`. Run the gate (the `lead-merge` skill's `gate.sh`), commit, push, and let CI pass on that
    commit (the `ci-read` skill).
 2. **Tag** exactly `desktop-v<version>` on that commit, with a message in a file, and push the tag. The run refuses a
-   tag that is not the app's version. It builds Apple silicon, then Intel, about ten minutes each, into one draft.
+   tag that is not the app's version. It builds Apple silicon, then Intel, about ten minutes each, then Linux (AppImage and .deb) and Windows (the
+   unsigned NSIS installer), into one draft.
 3. **Check the draft** before anything else:
    ```bash
    dir=$(mktemp -d) && gh release download desktop-v<version> --repo mygogocash/manut-ai --dir "$dir"
@@ -23,7 +24,7 @@ is pushed, so push one only when the owner asked for a build.
    node .claude/skills/release-desktop/scripts/verify-release.mjs "$dir" apps/desktop/src-tauri/tauri.conf.json "$dir.assets.json"
    ```
    It verifies every update file's signature against the key pinned in the app, and that `latest.json` names both
-   chips. Since tauri-action 1.0 `latest.json` names each file by its asset id, so the asset list is what says which
+   Mac chips, and `linux-x86_64` and `windows-x86_64` when the draft holds their files. Since tauri-action 1.0 `latest.json` names each file by its asset id, so the asset list is what says which
    file that is (`release-assets.mjs`). Then open each `.dmg` read-only (`hdiutil attach -nobrowse -readonly`), and check the app's version, chip
    (`lipo -archs`), identifier and `codesign --verify --deep --strict`. Look at the icon. Start the Apple silicon app
    once from a copy and see that it stays up with no crash report.
@@ -40,5 +41,8 @@ What went wrong before, so it does not again:
 - A tag that is already public is not moved: a corrected build takes the next version.
 - macOS ties the microphone, speech, Accessibility and screen capture grants to the app's signature. An unsigned build
   loses them at every update: say so in the notes until builds are signed (five Apple secrets, `docs/releasing.md`).
+- Windows SmartScreen warns on the unsigned installer until the owner buys a code-signing certificate: say so in the
+  notes (`docs/release-notes-template.md`). The nightly channel (`nightly-desktop.yml`) is not cut by hand; its feed
+  `nightly.json` can be checked with the same script, pointing at the `nightly-<date>` release's folder.
 - What a person sees when they download in a browser (the quarantine warning) is not what a copy fetched with `gh`
   shows. Only a person can check that.

@@ -1,12 +1,13 @@
 {
   "name": "manut-ai",
   "private": true,
+  "license": "MIT",
   "packageManager": "pnpm@12.23.0",
   "engines": {
     "node": ">=26.0.0"
   },
   "scripts": {
-    "test": "pnpm -r --if-present test && node --test .github/scripts/playwright-summary.test.mjs .github/scripts/check-dev-deploys.test.mjs .github/scripts/release-desktop.test.mjs .github/scripts/changed-areas.test.mjs .github/scripts/e2e-shards.test.mjs .github/scripts/e2e-timings.test.mjs .github/scripts/lead-merge.test.mjs .github/scripts/merge-risk.test.mjs .github/scripts/auto-merge.test.mjs",
+    "test": "pnpm -r --if-present test && node --test .github/scripts/playwright-summary.test.mjs .github/scripts/check-dev-deploys.test.mjs .github/scripts/release-desktop.test.mjs .github/scripts/nightly.test.mjs .github/scripts/changed-areas.test.mjs .github/scripts/e2e-shards.test.mjs .github/scripts/e2e-timings.test.mjs .github/scripts/lead-merge.test.mjs .github/scripts/merge-risk.test.mjs .github/scripts/auto-merge.test.mjs",
     "typecheck": "pnpm -r --if-present typecheck",
     "lint": "oxlint --type-aware apps/desktop/src apps/web/src apps/api/src packages"
   },

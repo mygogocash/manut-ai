@@ -38,6 +38,7 @@ import { QUIET_DAYS, setInbox, useInbox } from "../sidebar/inbox";
 import { TITLE_EFFORTS, TITLE_MODELS, setTitleModel, useTitleModel } from "../lib/titleModel";
 import { Icon, type IconName } from "../ui/icons";
 import { KeysRows } from "./KeysRows";
+import { parseChannel, setUpdateChannel, updateChannel, type UpdateChannel } from "../sidebar/updateChannel";
 
 export const slot = "settings";
 
@@ -629,6 +630,27 @@ function CloseSeg() {
   );
 }
 
+/** Settings › General › Updates: Stable (what the owner publishes) or Nightly (a build of the work in progress). */
+function UpdateChannelSeg() {
+  const [channel, setChannel] = useState<UpdateChannel>(updateChannel());
+  return (
+    <Modes
+      label={t("set.updatesChannel")}
+      value={channel}
+      options={[
+        { value: "stable", label: t("set.channelStable") },
+        { value: "nightly", label: t("set.channelNightly") },
+      ]}
+      onChange={(v) => {
+        const next = parseChannel(v);
+        setUpdateChannel(next);
+        setChannel(next);
+      }}
+      testId="update-channel-seg"
+    />
+  );
+}
+
 function AwakeToggle() {
   const [on, setOn] = useState(awakeEnabled());
   return (
@@ -841,9 +863,15 @@ function GeneralPage() {
         </Row>
         {/* the App Store edition's updates come from the store, so it says so where a person looks for updates
             (docs/app-store.md); the GitHub build's own updater shows itself in the side menu when one is found */}
-        {isAppStore() && (
+        {isAppStore() ? (
           <Row title={t("set.updates")} hint={t("set.updatesHint")}>
             <Value>{t("set.updatesValue")}</Value>
+          </Row>
+        ) : (
+          // the channel is kept on this Mac and read at every check (src/sidebar/updateChannel.ts); the App Store
+          // edition has none, since the store updates it
+          <Row title={t("set.updates")} hint={t("set.updatesChannelNote")}>
+            <UpdateChannelSeg />
           </Row>
         )}
       </div>

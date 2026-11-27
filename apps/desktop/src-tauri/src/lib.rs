@@ -70,6 +70,7 @@ mod this_host;
 mod threads_mcp;
 mod tray;
 mod turn_files;
+mod update_channel;
 mod voice;
 mod workflows;
 
@@ -2085,6 +2086,7 @@ fn commands(invoke: tauri::ipc::Invoke) -> bool {
         window_close,
         power_busy,
         window_prefs,
+        update_channel::check_update_channel,
         api_request,
         api_session_read,
         api_session_write,
