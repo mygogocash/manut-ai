@@ -1,6 +1,6 @@
-// The colour picker is gone (item 85i, docs/design-audit.md: "no accent for the person to pick"), and the brand's colours
-// are everyone's. A look saved while the picker was there still opens: its colour set is read, found not to be one the
-// app has, and read as the brand's, silently, with the rest of the look kept. Nothing saved can stop the app opening.
+// The look's colours: the brand's, or a theme of the person's own (item 99b; the owner chose full themes on 27 Nov 2026,
+// lifting item 85i's single colour set). The five sets the old picker offered are still gone: a look saved with one still
+// opens, its set read as the brand's, silently, with the rest of the look kept. Nothing saved can stop the app opening.
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { initialState, PALETTES } from "./store";
 
@@ -11,14 +11,15 @@ function startWith(saved: string | null) {
   return initialState().ui.look;
 }
 
-describe("the colour set, after the picker left", () => {
+describe("the look's colours", () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  it("has one set, the brand's", () => {
+  it("has one built in, the brand's; the person's own themes are kept beside it", () => {
     expect(PALETTES).toEqual(["manut"]);
+    expect(startWith(JSON.stringify({ palette: "mine-ab12cd34", bubbles: "open", text: "medium" })).palette).toBe("mine-ab12cd34");
   });
 
-  it("reads a set the picker once saved as the brand's, and keeps the rest of the look", () => {
+  it("reads a set the old picker saved as the brand's, and keeps the rest of the look", () => {
     for (const old of ["graphite", "ocean", "forest", "sunset", "rose"]) {
       const look = startWith(JSON.stringify({ palette: old, bubbles: "solid", text: "large" }));
       expect(look.palette, old).toBe("manut");
@@ -28,7 +29,7 @@ describe("the colour set, after the picker left", () => {
   });
 
   it("never fails to open on what was saved: no look, junk, a wrong type, or a set it never had", () => {
-    for (const saved of [null, "{not json", '"forest"', "null", "[]", '{"palette":42}', '{"palette":"neon"}', '{"palette":{"name":"ocean"}}']) {
+    for (const saved of [null, "{not json", '"forest"', "null", "[]", '{"palette":42}', '{"palette":"neon"}', '{"palette":{"name":"ocean"}}', '{"palette":"mine-"}']) {
       expect(() => startWith(saved), String(saved)).not.toThrow();
       expect(startWith(saved).palette, String(saved)).toBe("manut");
     }

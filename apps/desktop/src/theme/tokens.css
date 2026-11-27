@@ -192,9 +192,20 @@
   --spin: var(--aui-info);
 }
 
-/* ---- colour set ------------------------------------------------------------------------------
-   The brand's colours above are everyone's: the five other sets the app once offered are gone (item 85i), and a look
-   saved with one reads as the brand's (state/store.ts `PALETTES`). */
+/* ---- colours ---------------------------------------------------------------------------------
+   The brand's colours above are the default look and stay the kit's own. The owner chose full themes on 27 Nov 2026
+   (item 99b, lifting item 85i's one look with no accent to pick): a theme of the person's own, or one imported from VS
+   Code, is a stylesheet laid after this file and contrast.css that changes only the first layer's colour values
+   (src/theme/themes.ts, src/theme/apply.ts). The five sets the app once offered are still gone, and a look saved with
+   one reads as the brand's (state/prefs.ts `parseLook`). */
+
+/* the chat column's width (Settings › General › Appearance, item 99b): medium is the Chat board's 696px above */
+[data-chat-width="narrow"] {
+  --thread-w: 600px;
+}
+[data-chat-width="wide"] {
+  --thread-w: 880px;
+}
 
 /* each a step of the Type board's scale (12, 12.5, 13, 14, 15, 17, 20); "medium" is the default above. Large keeps its
    headings at 20px and lets weight carry them, as the next step (28px) is a figure's size, not a heading's. */

@@ -5,17 +5,21 @@ import { readLang } from "../i18n";
 import { firstRunEntry, ONBOARDED_KEY, startFlow } from "../onboarding/flow";
 import { parseShop, SHOP_KEY } from "../onboarding/shop";
 import type { Bot } from "../lib/protocol";
-import { BUBBLE_STYLES, PALETTES, type Theme, type Palette, type BubbleStyle, type Look, type AppState } from "./types";
+import { isThemeId } from "../theme/themes";
+import { BUBBLE_STYLES, CHAT_WIDTHS, PALETTES, type Theme, type Palette, type BubbleStyle, type ChatWidth, type Look, type AppState } from "./types";
 
 /** The Chat board's look (item 85f): an answer on the page with only the person's message in a bubble ("open"), at
- *  the board's sizes ("medium": a 17px answer, a 15px message). */
-export const DEFAULT_LOOK: Look = { palette: "manut", bubbles: "open", text: "medium" };
+ *  the board's sizes ("medium": a 17px answer, a 15px message), in the brand's colours and the board's 696px column. */
+export const DEFAULT_LOOK: Look = { palette: "manut", bubbles: "open", text: "medium", width: "medium" };
 /** Saved looks carry this from item 85f on. A look saved before it held the old defaults (soft bubbles, small text)
  *  whenever the person changed anything else, since the whole look is saved at once: those two values meant "as the
  *  app draws it" and read as today's defaults. A choice made since is kept as it is. */
 export const LOOK_VERSION = 2;
 
-/** A saved look (`manut.look`), read tolerantly: an unknown value falls back to the default. */
+/** A saved look (`manut.look`), read tolerantly: an unknown value falls back to the default. The colours are the brand's
+ *  or a theme id of the person's own (whether that theme is still kept is the theme's business: src/theme/apply.ts draws
+ *  the brand's for one that is gone); a colour set the old picker saved is neither. The chat width was added without a
+ *  new version: a look saved before it has none and reads as the medium it always drew. */
 export function parseLook(raw: string | null): Look {
   try {
     const v = raw ? (JSON.parse(raw) as Partial<Look> & { v?: unknown }) : {};
@@ -23,9 +27,10 @@ export function parseLook(raw: string | null): Look {
     const bubbles = BUBBLE_STYLES.includes(v.bubbles as BubbleStyle) && !(before && v.bubbles === "soft") ? (v.bubbles as BubbleStyle) : DEFAULT_LOOK.bubbles;
     const text = v.text === "small" || v.text === "medium" || v.text === "large" ? (before && v.text === "small" ? DEFAULT_LOOK.text : v.text) : DEFAULT_LOOK.text;
     return {
-      palette: PALETTES.includes(v.palette as Palette) ? (v.palette as Palette) : DEFAULT_LOOK.palette,
+      palette: PALETTES.includes(v.palette as Palette) || isThemeId(v.palette) ? (v.palette as Palette) : DEFAULT_LOOK.palette,
       bubbles,
       text,
+      width: CHAT_WIDTHS.includes(v.width as ChatWidth) ? (v.width as ChatWidth) : DEFAULT_LOOK.width,
     };
   } catch {
     return { ...DEFAULT_LOOK };

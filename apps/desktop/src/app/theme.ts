@@ -22,14 +22,16 @@ export function useResolvedTheme(theme: Theme): "dark" | "light" {
   return resolveTheme(theme);
 }
 
-/** Writes the look (colour set, bubble style, text size) to <html data-palette|data-bubbles|data-text>. */
+/** Writes the look (bubble style, text size, chat width) to <html data-bubbles|data-text|data-chat-width>. The colours
+ *  are src/theme/apply.ts's: it writes data-palette with the theme it draws, which is the brand's when the one saved is
+ *  gone. */
 export function useLookAttributes(look: Look) {
   useEffect(() => {
     const d = document.documentElement.dataset;
-    d.palette = look.palette;
     d.bubbles = look.bubbles;
     d.text = look.text;
-  }, [look.palette, look.bubbles, look.text]);
+    d.chatWidth = look.width;
+  }, [look.bubbles, look.text, look.width]);
 }
 
 /** Writes the resolved theme to <html data-theme>; "system" follows the OS live. */

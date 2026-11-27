@@ -38,6 +38,7 @@ import { ImportPast, useImportOffer } from "../importPast/ImportPast";
 import { McpCards } from "../threadsMcp/Cards";
 import { startMcp } from "../threadsMcp/start";
 import { useLookAttributes, useThemeAttribute } from "./theme";
+import { useThemeSheet } from "../theme/apply";
 import { useShortcuts } from "./shortcuts";
 import { useAsksBadge } from "./badge";
 import { startPower } from "../lib/power";
@@ -65,6 +66,8 @@ export function App() {
   const s = useStore();
   useThemeAttribute(s.ui.theme);
   useLookAttributes(s.ui.look);
+  // the person's own theme, or the brand's look (item 99b): a stylesheet after tokens.css and contrast.css
+  useThemeSheet(s.ui.look.palette);
   useShortcuts();
   useAsksBadge();
   const term = useTermPanel();
