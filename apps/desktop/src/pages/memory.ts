@@ -133,14 +133,52 @@ export function refusalText(code: string, message: string): string {
   return key ? t(key, { max: code === "full" ? MAX_FACTS : MAX_TEXT }) : message;
 }
 
-export type MemoryResult<T> = { ok: true; value: T } | { ok: false; message: string };
+export type MemoryResult<T> = { ok: true; value: T } | { ok: false; code: string; message: string };
 
-/** Asks the runtime to act and says how the page moves on: what it answered, or the words to show when it would not. */
+/** Asks the runtime to act and says how the page moves on: what it answered, or the words to show when it would not, with
+ *  the runtime's code so a caller can tell a fact that is gone from one that was refused. */
 export async function memoryStep<T>(call: () => Promise<T>): Promise<MemoryResult<T>> {
   try {
     return { ok: true, value: await call() };
   } catch (e) {
     const why = unavailable(e);
-    return { ok: false, message: why.kind === "unavailable" ? refusalText(why.code, why.message) : "" };
+    return why.kind === "unavailable" ? { ok: false, code: why.code, message: refusalText(why.code, why.message) } : { ok: false, code: "internal", message: "" };
   }
+}
+
+/** The store's own actions that reach the runtime, which is all the page's steps need of it. */
+export interface MemoryCalls {
+  memoryRemember(text: string): Promise<{ fact: MemoryFact }>;
+  memoryConfirm(fact: string): Promise<{ fact: MemoryFact }>;
+  memoryCorrect(fact: string, text: string): Promise<{ fact: MemoryFact }>;
+  memoryForget(fact: string): Promise<{ fact: string }>;
+}
+
+/** What the owner did: said something to remember, said "It's true", corrected a fact's words, or forgot a fact. */
+export type MemoryDo =
+  | { what: "remember"; text: string }
+  | { what: "confirm"; fact: string }
+  | { what: "correct"; fact: string; text: string }
+  | { what: "forget"; fact: string };
+
+/** Asks the runtime to do it, and says what the list is now and how the page moves on. The list is the runtime's answer put
+ *  in its place, never a guess: a fact that was forgotten is gone from it, words and id, and one the runtime refused leaves
+ *  the list as it was. A fact the runtime says is gone is dropped too, since the owner is looking at a list that went out of
+ *  date. */
+export async function memoryDo(calls: MemoryCalls, facts: readonly MemoryFact[], todo: MemoryDo): Promise<{ facts: MemoryFact[]; action: MemoryAction }> {
+  const done = await memoryStep(async () => {
+    switch (todo.what) {
+      case "remember":
+        return withFact(facts, (await calls.memoryRemember(todo.text)).fact);
+      case "confirm":
+        return withFact(facts, (await calls.memoryConfirm(todo.fact)).fact);
+      case "correct":
+        return withFact(facts, (await calls.memoryCorrect(todo.fact, todo.text)).fact);
+      case "forget":
+        return withoutFact(facts, (await calls.memoryForget(todo.fact)).fact);
+    }
+  });
+  if (done.ok) return { facts: done.value, action: { type: "done", what: todo.what } };
+  const gone = done.code === "not_found" && todo.what !== "remember";
+  return { facts: gone ? withoutFact(facts, todo.fact) : [...facts], action: { type: "failed", message: done.message } };
 }

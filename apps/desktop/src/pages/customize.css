@@ -1,0 +1,360 @@
+/* Customize: memory and routines (CustomizePage.tsx): the design canvas's Brain.dc.html. The canvas's rules from
+   packages/ui-kit/app.css (.btn, .lk, .tag, .box, .askin, .vh, .split, .pane, .side2, .h2, .hint, .tr, .sw, .field, .input,
+   .help, .chips) are copied and scoped under .brain, as home.css scopes Home's, so the page does not depend on which other
+   page's sheet the window has loaded. menuPages.css gives the frame, the bands, the rows, the tags and the empty state under
+   .mpage. The canvas's short token names map onto the desktop's (src/theme/tokens.css): --bg is --aui-surface, --band is
+   --aui-subtle, --mut is --aui-muted, --pri and --onpri are --aui-primary and --aui-on-primary, and --oki and --erri are
+   --aui-success and --aui-danger. Lines that are the desktop's own rather than the canvas's say so. */
+
+.brain {
+  display: flex;
+  flex-wrap: wrap;
+  min-height: 100%;
+}
+.brain .mut {
+  color: var(--aui-muted);
+}
+.brain .strong {
+  font-weight: 500;
+}
+.brain .small {
+  font-size: 13px;
+}
+/* A label for screen readers only. */
+.brain .vh {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+
+/* ---- what the team knows -------------------------------------------------------------------------------------------- */
+
+/* The canvas's .pane beside its aside: the facts take the wider share. */
+.brain .pane {
+  flex: 3 1 440px;
+  min-width: 0;
+}
+/* The desktop's own: a band over its rows, 12px from the one before, as History's days are. */
+.brain .part {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.brain .part + .part {
+  margin-top: 12px;
+}
+/* What waits for the owner's OK sits on the canvas's warm ground, and its tag on the page's. */
+.brain .waits {
+  background: var(--warnbg);
+}
+.brain .waits .tag {
+  background: var(--aui-surface);
+}
+/* The desktop's own: a row holding a field (the Correct editor) lets the field take what the buttons leave. */
+.brain .fact .grow {
+  flex: 1 1 220px;
+}
+.brain .fact p {
+  margin: 0;
+}
+
+/* The box to tell Buddy something to remember. */
+.brain .box {
+  border: 1px solid var(--line);
+  border-radius: var(--rad-lg);
+  background: var(--aui-surface);
+}
+.brain .remember {
+  margin-top: 14px;
+  padding: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+/* The desktop's own: the focus ring goes round the box, not the borderless field inside it, as Home's does. */
+.brain .remember:focus-within {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.brain .askin {
+  flex: 1 1 220px;
+  width: auto;
+  min-height: 44px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: var(--rad);
+  background: transparent;
+  font-size: 15px;
+  /* The desktop's own: the field takes the page's ink and drops its own outline for the box's. */
+  color: var(--ink);
+  outline: 0;
+}
+.brain .askin::placeholder {
+  color: var(--aui-placeholder);
+}
+
+/* A field the owner types in. The canvas has no field of its own; this takes the Activity page's. */
+.brain .input {
+  width: 100%;
+  min-height: 36px;
+  padding: 0 8px;
+  border: 1px solid var(--aui-border-strong);
+  border-radius: var(--rad);
+  background: var(--aui-surface);
+  color: var(--ink);
+  font-size: 14px;
+}
+.brain .input:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* ---- buttons and the quiet link ------------------------------------------------------------------------------------- */
+
+.brain .btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 12px;
+  border-radius: var(--rad);
+  border: 1px solid var(--line);
+  background: var(--aui-surface);
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: background 0.15s;
+}
+.brain .btn:hover {
+  background: var(--hov);
+}
+.brain .btn.dark {
+  border-color: var(--aui-primary);
+  background: var(--aui-primary);
+  color: var(--aui-on-primary);
+}
+.brain .btn.dark:hover {
+  opacity: 0.88;
+}
+.brain .btn.danger.solid,
+.brain .btn.danger.solid:hover {
+  border-color: var(--aui-danger);
+  background: var(--aui-danger);
+  color: var(--aui-surface);
+}
+.brain .btn.danger.solid:hover {
+  opacity: 0.88;
+}
+.brain .btn:disabled,
+.brain .lk:disabled {
+  opacity: 0.45;
+  pointer-events: none;
+}
+.brain .lk {
+  position: relative;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--aui-muted);
+  text-decoration: underline;
+}
+/* The canvas's larger touch targets: each control reaches a few pixels past its top and bottom. */
+.brain .btn::after,
+.brain .lk::after {
+  content: "";
+  position: absolute;
+  inset: -5px 0;
+}
+
+/* The desktop's own: one line that says why something did not go, as the Team page's banner does. */
+.brain .msg {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: var(--rad);
+  font-size: 13px;
+}
+.brain .msg.err {
+  background: var(--errbg);
+  color: var(--aui-danger);
+}
+.brain .none {
+  margin: 0;
+}
+
+/* ---- the routines --------------------------------------------------------------------------------------------------- */
+
+.brain .side2 {
+  flex: 2 1 340px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 16px;
+  border-left: 1px solid var(--line);
+}
+.brain .rhead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.brain .h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: 0;
+}
+.brain .hint {
+  margin: 2px 0 8px;
+  color: var(--aui-muted);
+  font-size: 12.5px;
+}
+/* A routine: its timing, what it does, and its switch. The canvas aligns them on the first line; with the 44px switch beside
+   them the desktop centres them. */
+.brain .tr {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+}
+.brain .tr:first-of-type {
+  border-top: 0;
+}
+
+/* The switch: a 44px target around a 40 by 24 track, as the canvas draws it. The track is the desktop's toggle colours; the
+   knob is white, and dark on a lit track in the dark theme, where the lit track is pale. */
+.brain .sw {
+  position: relative;
+  flex: none;
+  width: 44px;
+  height: 44px;
+}
+.brain .sw::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 10px;
+  width: 40px;
+  height: 24px;
+  border-radius: var(--rad-pill);
+  background: var(--toggle-off);
+  box-shadow: inset 0 0 0 1px var(--toggle-off-line);
+  transition: background 0.2s;
+}
+.brain .sw::after {
+  content: "";
+  position: absolute;
+  left: 5px;
+  top: 13px;
+  width: 18px;
+  height: 18px;
+  border-radius: var(--rad-pill);
+  background: #ffffff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  transition: transform 0.25s;
+}
+.brain .sw[aria-checked="true"]::before {
+  background: var(--aui-primary);
+}
+.brain .sw[aria-checked="true"]::after {
+  transform: translateX(16px);
+}
+:root:not([data-theme="light"]) .brain .sw[aria-checked="true"]::after {
+  background: #111110;
+}
+.brain .sw:disabled {
+  opacity: 0.45;
+  pointer-events: none;
+}
+.brain .sw:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: var(--rad);
+}
+@media (prefers-reduced-motion: reduce) {
+  .brain .sw::before,
+  .brain .sw::after {
+    transition: none;
+  }
+}
+
+/* The New routine form: a boxed set of short fields, in the routines column. */
+.brain .rform {
+  margin: 4px 0 10px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.brain .field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.brain .field > label,
+.brain .field > legend {
+  padding: 0;
+  font-size: 13px;
+  font-weight: 500;
+}
+.brain .pair {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.brain .pair .field {
+  flex: 1 1 140px;
+}
+.brain .chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.brain .help {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--aui-muted);
+}
+.brain .daychip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--rad-pill);
+  font-size: 13px;
+  color: var(--aui-muted);
+  cursor: pointer;
+}
+.brain .daychip.on {
+  background: var(--aui-subtle);
+  color: var(--ink);
+  font-weight: 500;
+}
+.brain .daychip:focus-within {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* Automations and Plugins, offered under the routines when the runtime has them. */
+.brain .entries {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}

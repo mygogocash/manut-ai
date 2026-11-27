@@ -6,7 +6,7 @@ import { setLang } from "../i18n";
 import { NeedsView, needRows, newestFirst, type NeedRow } from "./NeedsPage";
 import { TeamView, teamRows, type TeamRow } from "./TeamPage";
 import { HistoryView, historyDays, type HistoryDayView } from "./HistoryPage";
-import { CustomizeView } from "./CustomizePage";
+import { CustomizePage } from "./CustomizePage";
 import { ArtifactsPage } from "./ArtifactsPage";
 import { CodePage } from "./CodePage";
 import { createStore, getStore, selectAsks, type Ask } from "../state/store";
@@ -158,25 +158,22 @@ describe("Artifacts", () => {
 });
 
 describe("Customize", () => {
-  it("offers no Automations or Plugins when the runtime has neither, only its empty state", () => {
-    const html = draw(<CustomizeView />);
+  // The page reads what the team knows and its routines when it opens, so the first draw is the waiting one; the board itself
+  // (the facts, the routines, the form, every state) is drawn from data in CustomizePage.test.tsx.
+  it("is the page of memory and routines, and says it is reading while it waits", () => {
+    const html = draw(<CustomizePage />);
+    const text = words(html);
     expect(html).toContain('data-testid="page-customize"');
-    expect(html).not.toContain('data-testid="nav-automations"');
-    expect(html).not.toContain('data-testid="nav-plugins"');
-    expect(words(html)).toContain("Nothing remembered yet");
+    expect(text).toContain("What your team knows");
+    expect(text).toContain("Routines");
+    expect(html).toContain('data-testid="memory-loading"');
+    expect(html).toContain('data-testid="routines-loading"');
   });
 
-  it("offers Automations and Plugins as entries when the runtime has them, with how many jobs there are", () => {
-    const html = draw(<CustomizeView automations={{ count: 3, open: () => {} }} plugins={{ open: () => {} }} />);
-    const text = words(html);
-    expect(html).toContain('data-testid="nav-automations"');
-    expect(html).toContain('data-testid="nav-plugins"');
-    expect(text).toContain("Automations");
-    expect(text).toContain("Jobs the team runs on a schedule");
-    expect(text).toContain("Plugins");
-    expect(text).toContain("Skills and tools a team member can use");
-    expect(text).toMatch(/Automations .*3/);
-    expect(text).toContain("Nothing remembered yet");
+  it("offers neither Automations nor Plugins when the runtime has neither, as the demo runtime has neither", () => {
+    const html = draw(<CustomizePage />);
+    expect(html).not.toContain('data-testid="nav-automations"');
+    expect(html).not.toContain('data-testid="nav-plugins"');
   });
 });
 

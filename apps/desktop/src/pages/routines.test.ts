@@ -5,6 +5,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createRoutine, type ActionKind } from "@manut/routine-rules";
 import { LANGS, setLang, t } from "../i18n";
+import { MockHost, MockRuntime } from "../runtime/mock";
 import type { RoutineRow } from "../runtime/routines";
 import {
   FORM_ACTIONS,
@@ -18,9 +19,11 @@ import {
   nextLine,
   problemText,
   ROUTINES_START,
+  routineDo,
   routineStep,
   routinesReduce,
   withRoutine,
+  type RoutineCalls,
   type RoutineForm,
   type RoutinesUi,
 } from "./routines";
@@ -349,11 +352,88 @@ describe("turning a call into words the page can show", () => {
       await routineStep(async () => {
         throw { code: "not_yet", message: "Not yet: Connected mode only reads for now." };
       }),
-    ).toEqual({ ok: false, message: "Not yet: Connected mode only reads for now." });
+    ).toEqual({ ok: false, code: "not_yet", message: "Not yet: Connected mode only reads for now." });
     expect(
       await routineStep(async () => {
         throw new Error("the socket closed");
       }),
-    ).toEqual({ ok: false, message: "the socket closed" });
+    ).toEqual({ ok: false, code: "internal", message: "the socket closed" });
+  });
+});
+
+describe("an action the owner takes, applied to the routines the page shows", () => {
+  /** The demo runtime, as the store's own actions reach it, with its clock pinned to Sunday 22 November, 10:00 in Bangkok. */
+  async function demo(): Promise<{ calls: RoutineCalls; rows: RoutineRow[] }> {
+    const rt = new MockRuntime(new MockHost({ now: () => NOW / 1000 }));
+    await rt.connect();
+    const calls: RoutineCalls = {
+      routineCreate: (params) => rt.request("routine.create", params),
+      routinePause: (routine) => rt.request("routine.pause", { routine }),
+      routineResume: (routine) => rt.request("routine.resume", { routine }),
+    };
+    return { calls, rows: (await rt.request("routine.list", {})).routines };
+  }
+  const refuses = (code: string, message: string): RoutineCalls => {
+    const no = async (): Promise<never> => {
+      throw { code, message };
+    };
+    return { routineCreate: no, routinePause: no, routineResume: no };
+  };
+  const filled = (over: Partial<RoutineForm> = {}): RoutineForm => ({ ...FORM_START, name: "Remind me about parcels", ...over });
+
+  it("adds the routine the form describes at the end of the list, and ends the form", async () => {
+    const { calls, rows } = await demo();
+    const step = await routineDo(calls, rows, { what: "save", form: filled({ when: "weekly", weekdays: [1, 4], at: "09:30" }) });
+    expect(step.rows.map((r) => r.name)).toEqual([...rows.map((r) => r.name), "Remind me about parcels"]);
+    expect(step.rows.at(-1)).toMatchObject({ when: "Every Monday and Thursday at 09:30", enabled: true, asksFirst: false });
+    expect(step.action).toEqual({ type: "done", what: "save" });
+  });
+
+  it("adds a routine that replies or sends with Asks first, which the runtime and the package decide, not the form", async () => {
+    const { calls, rows } = await demo();
+    for (const action of ["reply", "send"] as const) {
+      const step = await routineDo(calls, rows, { what: "save", form: filled({ action }) });
+      expect(step.rows.at(-1), action).toMatchObject({ action, asksFirst: true });
+    }
+  });
+
+  it("keeps the list, and says the runtime's own words, when the runtime says not yet", async () => {
+    const { rows } = await demo();
+    const calls = refuses("not_yet", "Not yet: Connected mode only reads for now.");
+    for (const todo of [
+      { what: "save", form: filled() },
+      { what: "switch", row: rows[0] },
+    ] as const) {
+      const step = await routineDo(calls, rows, todo);
+      expect(step.rows, todo.what).toEqual(rows);
+      expect(step.action, todo.what).toEqual({ type: "failed", message: "Not yet: Connected mode only reads for now." });
+    }
+  });
+
+  it("pauses a routine that is on, where it stands, and resumes one that is off", async () => {
+    const { calls, rows } = await demo();
+    const paused = await routineDo(calls, rows, { what: "switch", row: rows[0] });
+    expect(paused.rows.map((r) => r.id)).toEqual(rows.map((r) => r.id));
+    expect(paused.rows[0]).toMatchObject({ id: rows[0].id, enabled: false, next: null });
+    expect(paused.rows.slice(1)).toEqual(rows.slice(1));
+    expect(paused.action).toEqual({ type: "done", what: "switch" });
+    const resumed = await routineDo(calls, paused.rows, { what: "switch", row: paused.rows[0] });
+    expect(resumed.rows).toEqual(rows);
+  });
+
+  it("drops a routine the runtime says is gone, and says so", async () => {
+    const { calls, rows } = await demo();
+    const ghost: RoutineRow = { ...rows[0], id: "no-such-routine", name: "A routine that is already gone" };
+    const step = await routineDo(calls, [...rows, ghost], { what: "switch", row: ghost });
+    expect(step.rows).toEqual(rows);
+    expect(step.action).toMatchObject({ type: "failed" });
+  });
+
+  it("does not change the list it was given", async () => {
+    const { calls, rows } = await demo();
+    const before = JSON.stringify(rows);
+    await routineDo(calls, rows, { what: "switch", row: rows[0] });
+    await routineDo(calls, rows, { what: "save", form: filled() });
+    expect(JSON.stringify(rows)).toBe(before);
   });
 });

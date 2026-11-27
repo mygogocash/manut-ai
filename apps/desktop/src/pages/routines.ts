@@ -6,6 +6,7 @@
 // disagree with the runtime, and nothing here runs a routine.
 import { createRoutine, mustAskFirst, type RoutineRefusal, type Trigger } from "@manut/routine-rules";
 import { lang, locale, t, type Key } from "../i18n";
+import type { OpParams } from "../lib/protocol";
 import type { RoutineRow } from "../runtime/routines";
 import { unavailable } from "./load";
 
@@ -187,16 +188,38 @@ export function routinesReduce(s: RoutinesUi, a: RoutinesAction): RoutinesUi {
   }
 }
 
-export type RoutineResult<T> = { ok: true; value: T } | { ok: false; message: string };
+export type RoutineResult<T> = { ok: true; value: T } | { ok: false; code: string; message: string };
 
 /** Asks the runtime to act and says how the page moves on: what it answered, or the runtime's own words when it would not
- *  (the connected runtime's "Not yet"). The form has already been checked against the package, so a refusal here is the
- *  runtime's, not the owner's. */
+ *  (the connected runtime's "Not yet"), with its code. The form has already been checked against the package, so a refusal
+ *  here is the runtime's, not the owner's. */
 export async function routineStep<T>(call: () => Promise<T>): Promise<RoutineResult<T>> {
   try {
     return { ok: true, value: await call() };
   } catch (e) {
     const why = unavailable(e);
-    return { ok: false, message: why.kind === "unavailable" ? why.message : "" };
+    return why.kind === "unavailable" ? { ok: false, code: why.code, message: why.message } : { ok: false, code: "internal", message: "" };
   }
+}
+
+/** The store's own actions that reach the runtime, which is all the page's steps need of it. */
+export interface RoutineCalls {
+  routineCreate(params: OpParams<"routine.create">): Promise<{ routine: RoutineRow }>;
+  routinePause(routine: string): Promise<{ routine: RoutineRow }>;
+  routineResume(routine: string): Promise<{ routine: RoutineRow }>;
+}
+
+/** What the owner did: added the routine the form describes, or flipped a routine's switch. */
+export type RoutineDo = { what: "save"; form: RoutineForm } | { what: "switch"; row: RoutineRow };
+
+/** Asks the runtime to do it, and says what the routines are now and how the page moves on. The list is the runtime's answer
+ *  put in its place, never a guess; a refusal leaves it as it was, and a routine the runtime says is gone is dropped. */
+export async function routineDo(calls: RoutineCalls, rows: readonly RoutineRow[], todo: RoutineDo): Promise<{ rows: RoutineRow[]; action: RoutinesAction }> {
+  const done = await routineStep(async () => {
+    if (todo.what === "save") return (await calls.routineCreate(formParams(todo.form))).routine;
+    return (await (todo.row.enabled ? calls.routinePause(todo.row.id) : calls.routineResume(todo.row.id))).routine;
+  });
+  if (done.ok) return { rows: withRoutine(rows, done.value), action: { type: "done", what: todo.what } };
+  const gone = done.code === "not_found" && todo.what === "switch";
+  return { rows: gone ? rows.filter((r) => r.id !== todo.row.id) : [...rows], action: { type: "failed", message: done.message } };
 }
