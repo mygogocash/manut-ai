@@ -39,9 +39,10 @@ export interface ReachGrammar {
 /** A coding chat's blocks (item 102k): a new lane takes a helper's five keys. */
 export const MAC_GRAMMAR: ReachGrammar = { keys: REACH_KEYS, max: MESSAGE_MAX };
 
-/** The longest message or brief a block of Buddy's takes on Connected. Each goes to the API's chat as one message, which takes at
- *  most 8,000 characters (apps/api chat-store.ts): this leaves room for the line saying where it came from and for the note of the
- *  conversation it reaches (`reachMarks.ts`). */
+/** The longest message or brief a block of Buddy's takes on Connected. Each goes to the API's chat as one message of at most 8,000
+ *  characters (apps/api chat-store.ts). It was set under that to leave room for the line saying where it came from and for the note of
+ *  the conversation it reaches, which then rode inside the text; since item 102l-5 both are fields of their own and take no room, so
+ *  the words could have all 8,000. It stays at 5,000, a size a card shows whole, until someone wants longer (`reachMarks.ts`). */
 export const BUDDY_MESSAGE_MAX = 5_000;
 
 /** Buddy's blocks on Connected (item 102l-3): a new conversation takes only its first message, its brief. The API names a

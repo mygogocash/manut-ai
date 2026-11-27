@@ -157,6 +157,4 @@ export const rt: Record<keyof typeof en, string> = {
   "rt.chat.unreadable": "This version of the app cannot read the API's answer. Open the conversation again to see it.",
   "rt.chat.answerRefused": "Buddy did not answer this one.",
   "rt.chat.answerCut": "(The answer was cut short.)",
-  // item 102l-3: the note naming the conversations Buddy may reach goes with each message while the list holds one
-  "rt.chat.tooLongNoted": "With conversations on Buddy's list, a message can be at most {max} characters: the note naming them goes with it.",
 };

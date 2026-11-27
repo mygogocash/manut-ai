@@ -10,8 +10,9 @@
 //   shop their list was read for. A shop the person helps at is refused here (`owner_only`) with nothing sent, as the API refuses a
 //   helper's session: a helper's message would spend the owner's money. A person in no shop has no chat (`no_shop`): the API answers
 //   a person's own sign-in 404, since a chat is a shop's.
-// - What the API would refuse for a message's words is refused here first, with nothing sent: a blank message, and one of more than
-//   8,000 characters once trimmed, counted by character as the API counts them (Thai as any other).
+// - What the API would refuse for a message is refused here first, with nothing sent: a blank message, one of more than 8,000
+//   characters once trimmed, counted by character as the API counts them (Thai as any other), a note that is not a whole note, and a
+//   title for the conversation the words were sent on from that the API would not keep.
 // - A message is posted once. A refusal, and a request that got no answer, mark the message not sent with the reason, in the
 //   person's words; nothing is queued, retried or sent again from here (the store keeps the row with its reason, as for any send that
 //   failed). The messages of one chat go one at a time, in the order they were sent, so a second message to a conversation the first
@@ -24,17 +25,19 @@
 // - Nothing typed or answered is kept on disk or in the read of the shop kept for offline use: what this module holds (the
 //   conversations' ids, titles and counts) is in memory for this run, and goes when the person signs out. While only a kept read is
 //   shown, nothing here is sent or read: the kept read holds no chat.
-// - The reach cards' lines (item 102l-3, docs/connected-chat.md, C; src/jobs/reachMarks.ts): a message may carry Buddy's note naming the
-//   conversations Buddy may reach (`note`, a whole note and nothing else), posted after the owner's words so the API names a new
-//   conversation by them. Reading a conversation back takes the note off, draws a message sent on from another conversation with its
-//   mark in front, and hides the reach block of an answer to a message that carried the note, since its card was the place for it.
+// - The reach cards' lines (items 102l-3 and 102l-5, docs/connected-chat.md, C; src/jobs/reachMarks.ts) are fields of the message, never
+//   part of its words: a message may carry Buddy's note naming the conversations Buddy may reach (`note`, a whole note and nothing
+//   else), and words sent on from another conversation carry that conversation's title (`sent_on_from`, posted as `sentOnFrom`). The API
+//   gives the model both and keeps the words alone, so it names a new conversation by them and the export holds nothing of ours; the
+//   words have all of the 8,000 characters. Reading a conversation back draws a message sent on with its mark in front, from its
+//   `sentOnFrom`, and hides the reach block of an answer to a message that carried the note (`noted`), since its card was the place for it.
 import { dayTime } from "../../app/time";
 import { t } from "../../i18n";
 import { isObj } from "../../lib/guards";
 import type { BridgeEvent, ShopRole, ShopRow } from "../../lib/protocol";
 import type { ThreadEvent, ThreadOpenResult, ThreadRow } from "../../threads/types";
 import { hideReachBlocks } from "../../jobs/reachBlocks";
-import { isBuddyNote, keptAsShown, shownTitle, withBuddyNote } from "../../jobs/reachMarks";
+import { fromChatText, isBuddyNote, isMarkTitle } from "../../jobs/reachMarks";
 import { OpError } from "../mock/host";
 import type { Departure, ShopAnswer } from "./shops";
 import { TEAM } from "./view";
@@ -68,13 +71,17 @@ export interface ChatThreadView {
   messageCount: number;
 }
 
-/** One message of a conversation (`Message`), its time in ms. `stopReason` is on Buddy's, as the provider gave it. */
+/** One message of a conversation (`Message`), its time in ms. `stopReason` is on Buddy's, as the provider gave it. `sentOnFrom` and
+ *  `noted` are on an owner's message only (item 102l-5): the title of the conversation its words were sent on from, and that it went
+ *  with Buddy's note (the note itself is not kept). */
 export interface ChatMessageView {
   id: string;
   from: "owner" | "buddy";
   text: string;
   at: number;
   stopReason?: string;
+  sentOnFrom?: string;
+  noted?: true;
 }
 
 const msOf = (v: unknown): number | null => {
@@ -92,11 +99,23 @@ export function decodeChatThread(v: unknown): ChatThreadView | null {
   return { id: v.id, title: v.title, createdAt, updatedAt, messageCount };
 }
 
+/** A message of a conversation, or null when its id, author, words or time cannot be read. `sentOnFrom` and `noted` are read strictly and
+ *  only on an owner's message: a title that is not text with something in it, a `noted` that is not `true`, and either on Buddy's
+ *  message, are left out and the message is still read, as an unknown thing about a message is no reason to lose the message. */
 export function decodeChatMessage(v: unknown): ChatMessageView | null {
   if (!isObj(v) || typeof v.id !== "string" || !API_ID.test(v.id) || (v.from !== "owner" && v.from !== "buddy") || typeof v.text !== "string") return null;
   const at = msOf(v.at);
   if (at === null || (v.stopReason !== undefined && typeof v.stopReason !== "string")) return null;
-  return { id: v.id, from: v.from, text: v.text, at, ...(typeof v.stopReason === "string" ? { stopReason: v.stopReason } : {}) };
+  const mine = v.from === "owner";
+  return {
+    id: v.id,
+    from: v.from,
+    text: v.text,
+    at,
+    ...(typeof v.stopReason === "string" ? { stopReason: v.stopReason } : {}),
+    ...(mine && typeof v.sentOnFrom === "string" && v.sentOnFrom.trim() !== "" ? { sentOnFrom: v.sentOnFrom } : {}),
+    ...(mine && v.noted === true ? { noted: true as const } : {}),
+  };
 }
 
 /** The shop's conversations (`GET /v1/chat/threads`), each one this build can read, in the API's order; null when the answer is no
@@ -235,17 +254,20 @@ export class BuddyChat {
   }
 
   /** `chat.send` to Buddy: one message, posted once with the owner session of the chat's shop, and Buddy's answer as one turn. `note`:
-   *  Buddy's note naming the conversations it may reach (item 102l-3), posted after the words; anything but a whole note is refused
-   *  with nothing sent, so nothing rides after a message that reading it back would hide. */
-  async send(p: { text?: unknown; session?: unknown; note?: unknown }): Promise<{ input_id: string }> {
+   *  Buddy's note naming the conversations it may reach (item 102l-3), and `sent_on_from`: the title of the conversation the words were
+   *  sent on from (item 102l-5). Each is posted as a field of its own, `note` and `sentOnFrom`, and never joined to the words, which have
+   *  all 8,000 characters; anything the API would refuse of either (a note that is not whole, a title it would not keep) is refused with
+   *  nothing sent. */
+  async send(p: { text?: unknown; session?: unknown; note?: unknown; sent_on_from?: unknown }): Promise<{ input_id: string }> {
     this.link.live();
     const target = this.target(p.session);
     const shop = this.owned(target.main ? target.main.shop : target.conv.shop);
     if (p.note !== undefined && !isBuddyNote(p.note)) throw new OpError("invalid_request", t("rt.chat.refused"));
-    const note = p.note === undefined ? null : p.note;
-    const text = this.words(p.text, note);
+    if (p.sent_on_from !== undefined && !isMarkTitle(p.sent_on_from)) throw new OpError("invalid_request", t("rt.chat.refused"));
+    const lines = { ...(p.note !== undefined ? { note: p.note } : {}), ...(p.sent_on_from !== undefined ? { sentOnFrom: p.sent_on_from.trim() } : {}) };
+    const text = this.words(p.text);
     if (target.main) this.mainSent += 1;
-    return this.inTurn(target.main ?? target.conv, () => this.post(shop, target, note === null ? text : withBuddyNote(text, note)));
+    return this.inTurn(target.main ?? target.conv, () => this.post(shop, target, text, lines));
   }
 
   /** `thread.create` for Buddy: a conversation prepared here, for the shop the switcher shows, with nothing sent. The API makes a
@@ -342,13 +364,12 @@ export class BuddyChat {
     return row;
   }
 
-  /** A message's words, trimmed as the API keeps them; what the API would refuse is refused here first. With Buddy's note after them,
-   *  the words have that much less room, and the refusal says how much they have. */
-  private words(v: unknown, note: string | null): string {
+  /** A message's words, trimmed as the API keeps them; what the API would refuse is refused here first. The note and the mark's title are
+   *  fields of their own and take no room from them. */
+  private words(v: unknown): string {
     const text = typeof v === "string" ? v.trim() : "";
     if (!text) throw new OpError("invalid_text", t("rt.chat.empty"));
-    const room = note === null ? MAX_CHAT_TEXT : MAX_CHAT_TEXT - characters(note) - 2;
-    if (characters(text) > room) throw new OpError("text_too_long", note === null ? t("rt.chat.tooLong", { max: MAX_CHAT_TEXT }) : t("rt.chat.tooLongNoted", { max: room }));
+    if (characters(text) > MAX_CHAT_TEXT) throw new OpError("text_too_long", t("rt.chat.tooLong", { max: MAX_CHAT_TEXT }));
     return text;
   }
 
@@ -360,10 +381,12 @@ export class BuddyChat {
     return mine;
   }
 
-  private async post(shop: ShopRow, target: Target, text: string): Promise<{ input_id: string }> {
+  /** Posts the words once, with `note` and `sentOnFrom` beside them when there are any: the body is `{ text }` or `{ thread, text }`, and
+   *  those two fields only when present, as the API takes them. */
+  private async post(shop: ShopRow, target: Target, text: string, lines: { note?: string; sentOnFrom?: string }): Promise<{ input_id: string }> {
     const api = target.main ? target.main.api : target.conv.api;
     const asked = this.link.now();
-    const answer = await this.link.write(shop.id, CHAT_MESSAGES_PATH, api === null ? { text } : { thread: api, text });
+    const answer = await this.link.write(shop.id, CHAT_MESSAGES_PATH, { ...(api === null ? {} : { thread: api }), text, ...lines });
     if (answer.kind !== "ok") {
       // a conversation removed elsewhere: the next message to the main chat starts a new one
       if (answer.kind === "refused" && answer.code === "thread_not_found" && target.main) target.main.api = null;
@@ -385,10 +408,10 @@ export class BuddyChat {
 
   /** Keeps what the API said of a conversation of `shop`, under the id the screens already call it (`id`), else the one they called
    *  it by before, else its own. A conversation already known is updated in place: a message waiting behind the one that made it
-   *  holds that same record (`inTurn`), and must see the API's id. Its name is the API's without the start of Manut AI's lines after a
-   *  short first message (`shownTitle`, item 102l-3). */
+   *  holds that same record (`inTurn`), and must see the API's id. Its name is the API's, the owner's first words (a started conversation's
+   *  brief), since Manut AI's lines are fields of their own and never part of them (item 102l-5). */
   private remember(shop: string, view: ChatThreadView, id = this.byApi.get(view.id) ?? view.id): Conversation {
-    const said = { shop, api: view.id, title: shownTitle(view.title), createdAt: view.createdAt, updatedAt: view.updatedAt, count: view.messageCount };
+    const said = { shop, api: view.id, title: view.title, createdAt: view.createdAt, updatedAt: view.updatedAt, count: view.messageCount };
     const was = this.convs.get(id);
     const conv: Conversation = was ? Object.assign(was, said) : { id, key: null, ...said };
     this.convs.set(id, conv);
@@ -467,9 +490,10 @@ function rowOf(conv: Conversation): ThreadRow {
   };
 }
 
-/** A conversation's messages as the screens draw them (item 102l-3): an owner's message without Buddy's note and with a sent-on mark in
- *  front; Buddy's answer to a message that carried the note without its reach block, which its card stood for while the app ran (an
- *  answer that was only the block leaves no message, as it left no bubble then). Any other answer keeps every word Buddy wrote. */
+/** A conversation's messages as the screens draw them (items 102l-3 and 102l-5): an owner's message that was sent on from another
+ *  conversation with its mark in front, from its `sentOnFrom`, as on this Mac, and any other as the words it kept; Buddy's answer to a
+ *  message that carried the note (`noted`) without its reach block, which its card stood for while the app ran (an answer that was only
+ *  the block leaves no message, as it left no bubble then). Any other answer keeps every word Buddy wrote. */
 function shownMessages(api: string, messages: ChatMessageView[]): ThreadOpenResult["messages"] {
   const out: ThreadOpenResult["messages"] = [];
   let noted = false;
@@ -477,9 +501,8 @@ function shownMessages(api: string, messages: ChatMessageView[]): ThreadOpenResu
     const id = `${api}/${m.id}`;
     const ts = m.at / 1000;
     if (m.from === "owner") {
-      const kept = keptAsShown(m.text);
-      noted = kept.noted;
-      out.push({ id, role: "user", text: kept.text, ts });
+      noted = m.noted === true;
+      out.push({ id, role: "user", text: m.sentOnFrom === undefined ? m.text : fromChatText(m.sentOnFrom, m.text), ts });
       continue;
     }
     const text = noted ? hideReachBlocks(answerText(m)) : answerText(m);

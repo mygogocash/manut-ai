@@ -38,6 +38,10 @@ case "$(cd "$wt" && pwd -P)" in
 esac
 branch=$(git -C "$wt" branch --show-current)
 lead_branch=$(git -C "$lead" branch --show-current)
+# The branch is deleted on GitHub at the end, so it must be an item's own, never main or a pilot branch (the sixth
+# security read, 27 Nov 2026, L6; auto-merge.sh has the same guard).
+[ -n "$branch" ] || { echo "the item's worktree is not on a branch: nothing merged or removed"; exit 1; }
+case "$branch" in main|pilot/*) echo "$branch is not an item branch: nothing merged or removed"; exit 1 ;; esac
 
 [ -z "$(git -C "$wt" status --porcelain)" ] || { echo "the item's worktree has uncommitted files"; exit 1; }
 [ -z "$(git -C "$lead" status --porcelain)" ] || { echo "the lead's worktree has uncommitted files"; exit 1; }
