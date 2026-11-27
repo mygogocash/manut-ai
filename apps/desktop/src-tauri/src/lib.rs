@@ -29,6 +29,7 @@ mod lane_config;
 mod lane_diff;
 mod lane_helper;
 mod lane_land;
+mod lock;
 mod machine;
 mod outside_use;
 mod past_chats;
