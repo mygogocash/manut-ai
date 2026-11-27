@@ -85,7 +85,7 @@ describe("a message to Buddy", () => {
     expect(posts(api)).toEqual([[OWNER_A, { text: "How were sales today?" }]]);
     // the turn as the mock runtime's simple answer gives it, in the main chat (no `session`); the conversation the message made is listed
     expect(turn(events)).toEqual([
-      { event: "turn.start", bot: "buddy" },
+      { event: "turn.start", bot: "buddy", since: expect.any(Number) },
       { event: "message", bot: "buddy", id: `${chatId(1)}/m2`, text: answerTo("How were sales today?") },
       { event: "turn.end", bot: "buddy", outcome: "done" },
       { event: "thread.added", bot: "buddy", thread: chatId(1), title: "How were sales today?" },
@@ -95,6 +95,24 @@ describe("a message to Buddy", () => {
     await req("chat.send", { bot: "buddy", text: "And yesterday?" });
     expect(posts(api)[1]).toEqual([OWNER_A, { thread: chatId(1), text: "And yesterday?" }]);
     expect(turn(events).map((e) => e.event)).toEqual(["turn.start", "message", "turn.end"]);
+  });
+
+  it("says its turn began when the message went, so the line counts the time Buddy took and not the moment the answer came", async () => {
+    // the API takes six seconds over the answer
+    const slow = (path: string) => (path === CHAT_MESSAGES_PATH ? new Promise<void>((done) => setTimeout(done, 6_000)) : null);
+    const { req, events } = await opened({}, slow);
+    await req("chat.open", { bot: "buddy" });
+    events.length = 0;
+    const went = Date.now();
+    const sent = req("chat.send", { bot: "buddy", text: "How were sales today?" });
+    await vi.advanceTimersByTimeAsync(5_999);
+    // no turn while the answer is on its way: a refusal would be a message not sent, never a turn that failed
+    expect(turn(events)).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1);
+    await sent;
+    const start = events.find((e) => e.event === "turn.start") as Extract<BridgeEvent, { event: "turn.start" }>;
+    expect(Date.now() - went).toBe(6_000);
+    expect(start.since).toBe(went);
   });
 
   it("lists the conversation it made as a conversation, and opens it with both messages from GET /v1/chat/threads/{id}", async () => {
@@ -147,7 +165,7 @@ describe("a conversation made with New thread", () => {
     expect(posts(api)).toEqual([[OWNER_A, { text: "Plan next week's posts" }]]);
     // the turn is the conversation's (`session`), and it is listed already, so nothing says it was added
     expect(turn(events)).toEqual([
-      { event: "turn.start", bot: "buddy", session: row.thread },
+      { event: "turn.start", bot: "buddy", session: row.thread, since: expect.any(Number) },
       { event: "message", bot: "buddy", session: row.thread, id: `${chatId(1)}/m2`, text: answerTo("Plan next week's posts") },
       { event: "turn.end", bot: "buddy", session: row.thread, outcome: "done" },
     ]);

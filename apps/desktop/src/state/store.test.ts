@@ -1241,3 +1241,30 @@ describe("a reopened chat keeps the words before a question once", () => {
     expect(said(again)).toEqual([note]);
   });
 });
+
+describe("a turn that says when its work began (`since`, Connected's chat)", () => {
+  const turnOf = (s: AppState) => selectTimeline(s, "buddy").flatMap((i) => (i.kind === "activity" ? [i.turn] : []))[0]!;
+  const answered = (since: number | undefined) =>
+    run(initialState(), [
+      { event: "turn.start", bot: "buddy", ...(since === undefined ? {} : { since }) },
+      { event: "message", bot: "buddy", id: "c1/m2", text: "Sales were fine." },
+      { event: "turn.end", bot: "buddy", outcome: "done" },
+    ]);
+
+  it("counts from then, so an answer the API took six seconds over says so, not 0s", () => {
+    const t = turnOf(answered(T0 - 6_000));
+    expect(t.startedAt).toBe(T0 - 6_000);
+    // the three events came half a second apart (run): the turn ended a second after it was said
+    expect(t.endedAt! - t.startedAt).toBe(7_000);
+  });
+
+  it("counts from when it was said when no time is given, as every other runtime's turn does", () => {
+    expect(turnOf(answered(undefined)).startedAt).toBe(T0);
+  });
+
+  it("takes no time ahead of this one, and none from long ago: a wrong clock never shows a turn of a day or one that ends before it began", () => {
+    expect(turnOf(answered(T0 + 5_000)).startedAt).toBe(T0);
+    expect(turnOf(answered(T0 - 11 * 60_000)).startedAt).toBe(T0);
+    expect(turnOf(answered(Number.NaN)).startedAt).toBe(T0);
+  });
+});

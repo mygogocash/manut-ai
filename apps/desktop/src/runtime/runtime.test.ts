@@ -31,7 +31,7 @@ describe("the runtime this computer chose", () => {
   });
 
   it("shows the shop's schedules when connected, and none of the groups only a runtime on this computer has", () => {
-    expect(HTTP_CAPABILITIES).toEqual({ elsewhere: false, automations: true, plugins: false, restart: false, accounts: false });
+    expect(HTTP_CAPABILITIES).toEqual({ elsewhere: false, automations: true, plugins: false, restart: false, accounts: false, models: false });
   });
 
   it("is still the WebSocket adapter when the page names a URL (the e2e suite), whatever was chosen", () => {
@@ -76,8 +76,10 @@ describe("createRuntime", () => {
   });
 
   it("hides the feature groups the in-process runtime does not have, and shows them for a full runtime", () => {
-    expect(runtimeCapabilities()).toEqual(NO_CAPABILITIES);
+    expect(runtimeCapabilities()).toEqual({ ...NO_CAPABILITIES, models: true });
     for (const f of ["elsewhere", "automations", "plugins", "restart", "accounts"] as const) expect(can(f), f).toBe(false);
+    // the demo names models for its members, so its chat box has the model menu
+    expect(can("models")).toBe(true);
     win.window = { __MANUT_BRIDGE_URL__: async () => "ws://127.0.0.1:1/?token=x" };
     expect(runtimeCapabilities()).toEqual(ALL_CAPABILITIES);
     expect(can("plugins")).toBe(true);
