@@ -1,0 +1,38 @@
+# How Paradev prepares a local workspace, a git worktree of its own, for Manut AI
+# (https://docs.paradev.com/setup-teardown-scripts). Personal changes go in .paradev/config.local.toml in the main
+# checkout, which git ignores and Paradev merges over this file.
+
+# Each worktree gets its own node_modules, cloned from the shared pnpm store, so this takes seconds and downloads only
+# what the store lacks. The lockfile is never rewritten: a branch whose lockfile is out of step fails here, loudly.
+[install]
+run = ["pnpm install --frozen-lockfile --prefer-offline"]
+
+# Copies the main checkout's ignored env files into the new worktree; the script says which and why.
+[setup]
+run = ["./.paradev/setup.sh"]
+
+# The Run button starts this one: the Mac app's front end in a browser at http://localhost:5207, in Practice mode,
+# which needs no backend and no Rust. Its port is fixed (strictPort), so one workspace at a time can run it.
+[terminals.desktop]
+run = "pnpm --filter @manut/desktop dev"
+default = true
+
+# The real Mac app. It compiles src-tauri first (stable Rust, minutes the first time in a worktree) and starts its own
+# Vite on 5207, so stop the desktop terminal before starting this one.
+[terminals.tauri]
+run = "pnpm --filter @manut/desktop tauri dev"
+
+# The owner's web app against an in-memory fake of the API, on Vite's port (5173, or the next free one).
+[terminals.web]
+run = "pnpm --filter @manut/web dev"
+
+# Both Workers, the API and the web app on one origin, at http://localhost:8787, the address the README and the
+# desktop's Connected setting use. Wrangler builds the web app itself (apps/api/wrangler.web.jsonc) and reads its local
+# secrets from apps/api/.dev.vars, which setup copies over. When another program holds 8787, Wrangler stops with
+# "Address already in use" rather than move, so a Mac where that is so sets this terminal's run, with `--port`, in its
+# own config.local.toml.
+[terminals.api]
+run = "pnpm --filter @manut/api dev"
+
+# No [archive] table: setup starts nothing outside the worktree (no containers, no databases; Wrangler keeps its local
+# state in apps/api/.wrangler/), and Paradev itself stops the terminals and deletes the worktree.

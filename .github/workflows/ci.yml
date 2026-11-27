@@ -221,8 +221,10 @@ jobs:
       # The release workflow's rules (it never publishes, and the app's updater is tied to it), the Playwright summary's
       # counts, the spec timings, the lead's merge on CI and its automatic merge of low-risk work (the classifier and the two
       # scripts, item 130): they read the workflows, the desktop's config and the
-      # lead-merge skill's scripts, so they run where a change to any of them does.
-      - run: node --test .github/scripts/release-desktop.test.mjs .github/scripts/playwright-summary.test.mjs .github/scripts/e2e-timings.test.mjs .github/scripts/lead-merge.test.mjs .github/scripts/merge-risk.test.mjs .github/scripts/auto-merge.test.mjs
+      # lead-merge skill's scripts, so they run where a change to any of them does. The script Paradev runs in each new
+      # workspace (.paradev/setup.sh) is here too: no rule in changed-areas.mjs names .paradev/, so a change there runs
+      # every job, this one included.
+      - run: node --test .github/scripts/release-desktop.test.mjs .github/scripts/playwright-summary.test.mjs .github/scripts/e2e-timings.test.mjs .github/scripts/lead-merge.test.mjs .github/scripts/merge-risk.test.mjs .github/scripts/auto-merge.test.mjs .paradev/setup.test.mjs
 
   packages:
     name: Package tests
