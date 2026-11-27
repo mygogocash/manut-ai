@@ -45,4 +45,6 @@ export const home = {
   "home.sendStays": "Send and stay here ({mod}Enter sends and opens the chat)",
   "home.started": "Sent to {name}: {words}",
   "home.open": "Open",
+  "home.brand": "Manut AI",
+  "home.modePick": "Mode: {mode}. Change the mode",
 };

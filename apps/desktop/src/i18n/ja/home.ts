@@ -44,4 +44,6 @@ export const home: Record<keyof typeof en, string> = {
   "home.sendStays": "送ってここにとどまる（{mod}Enter で送ってチャットを開く）",
   "home.started": "{name} に送りました：{words}",
   "home.open": "開く",
+  "home.brand": "Manut AI",
+  "home.modePick": "モード：{mode}。モードを変更",
 };

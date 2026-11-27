@@ -12,10 +12,10 @@
 // Pure but for the small store at the end, so a test reads every rule without a DOM.
 import { changes } from "../lib/changes";
 
-export type KeyAction = "search" | "details" | "settings" | "next-ask" | "graph" | "new-session" | "session-next" | "session-prev" | "terminal";
+export type KeyAction = "search" | "details" | "settings" | "next-ask" | "graph" | "new-session" | "session-next" | "session-prev" | "terminal" | "sidebar";
 
 /** In the order Settings lists them. */
-export const KEY_ACTIONS: readonly KeyAction[] = ["search", "details", "settings", "next-ask", "new-session", "session-next", "session-prev", "graph", "terminal"];
+export const KEY_ACTIONS: readonly KeyAction[] = ["search", "details", "settings", "next-ask", "new-session", "session-next", "session-prev", "sidebar", "graph", "terminal"];
 
 export interface Chord {
   readonly meta: boolean;
@@ -71,6 +71,8 @@ export function defaultKeys(mac: boolean): Keys {
     "session-prev": [chord("BracketLeft", { ...m, shift: true })],
     // Ctrl on macOS too, as in VS Code
     terminal: [chord("Backquote", { ctrl: true })],
+    // the side menu, shown or hidden, as ChatGPT's ⌘⇧S (the owner, 27 Nov 2026)
+    sidebar: [chord("KeyS", { ...m, shift: true })],
   };
 }
 

@@ -44,6 +44,7 @@ import { ModeLine } from "./ModeLine";
 import { ShopSwitcher } from "./ShopSwitcher";
 import { UpdateButton } from "./UpdateButton";
 import { satangText } from "../pages/job";
+import { setSideHidden, useSide } from "./sideState";
 
 const LABEL: Record<MenuRow, Key> = {
   new: "menu.new",
@@ -120,6 +121,8 @@ export function SideMenu({
   onRow,
   onSearch,
   onAccount,
+  onHide,
+  hidden = false,
   foot,
   budget = null,
 }: {
@@ -143,6 +146,10 @@ export function SideMenu({
   onRow: (row: MenuRow) => void;
   onSearch: () => void;
   onAccount: () => void;
+  /** Hide the whole menu (the owner, 27 Nov 2026); SideShow at the top left brings it back */
+  onHide?: () => void;
+  /** the menu is hidden: off screen, it takes no focus and no clicks */
+  hidden?: boolean;
   /** what the runtime and this computer add above the account row: the disk chip, an update, which data this is */
   foot?: ReactNode;
   /** the shop's AI spend this month against its cap, in integer satang, when the runtime gives them; none draws no pill */
@@ -153,7 +160,7 @@ export function SideMenu({
   const select = useRowSelect("recent", order);
   useSelectionEscape();
   return (
-    <nav className="sb" aria-label={t("menu.label")} data-testid="sidebar" data-select-scope="recent">
+    <nav className="sb" aria-label={t("menu.label")} data-testid="sidebar" data-select-scope="recent" inert={hidden} aria-hidden={hidden || undefined}>
       <div className="brand">
         {/* The mark leads where New does, as the canvas's mark links to Home. */}
         <button type="button" className="sb-home" aria-label={t("menu.home")} onClick={() => onRow("new")} data-testid="menu-home">
@@ -162,6 +169,11 @@ export function SideMenu({
         <button type="button" className="ib" aria-label={t("nav.search")} title={t("nav.search")} onClick={onSearch} data-testid="menu-search">
           <SearchGlyph />
         </button>
+        {onHide && (
+          <button type="button" className="ib" aria-label={t("side.hide")} title={t("side.hide")} onClick={onHide} data-testid="menu-hide">
+            <Icon name="panel-left" />
+          </button>
+        )}
       </div>
       {MENU_ROWS.map((row) => (
         <button
@@ -269,6 +281,7 @@ export function shopNotice(shops: Pick<ShopsState, "left" | "dismissed">, dismis
 }
 
 export function Sidebar() {
+  const side = useSide();
   const s = useStore();
   const members = selectSidebarBots(s).map((b) => b.name);
   const untitled = t("thread.untitled");
@@ -303,6 +316,8 @@ export function Sidebar() {
       notice={shopNotice(s.shops, s.dismissShopNotice)}
       onRow={go}
       onSearch={() => togglePalette()}
+      onHide={() => setSideHidden(true)}
+      hidden={side.hidden}
       onAccount={() => s.openSettings()}
       foot={
         <>

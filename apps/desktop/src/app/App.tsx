@@ -11,6 +11,7 @@ import { MentionContext, type Mentions } from "../chat/parts/Mention";
 import { botResolver } from "../chat/parts/mentions";
 import { slots } from "../features";
 import { Sidebar } from "../sidebar/Sidebar";
+import { SideResizer, SideShow, useSideDrag, useSideOnWindow } from "../sidebar/SideEdge";
 import { Chat } from "../chat/Chat";
 import { DetailsFallback } from "./DetailsFallback";
 import { PanelResizer } from "./PanelResizer";
@@ -114,6 +115,10 @@ export function App() {
   const close = () => s.togglePanel(false);
   const MenuPageView = isMenuPage(s.ui.view) ? MENU_PAGE_VIEWS[s.ui.view] : null;
 
+  // the side menu's width and whether it shows, on the window (sidebar/SideEdge.tsx)
+  const [sideDrag, setSideDrag] = useSideDrag();
+  useSideOnWindow(sideDrag);
+
   // The first-run setup fills the window, as the canvas's Welcome and Onboarding boards have no side menu. The store
   // still starts behind it (the effect above), so Home and the team are ready when it ends.
   if (firstRun) return <Onboarding />;
@@ -122,6 +127,8 @@ export function App() {
     <MentionContext.Provider value={mentions}>
     <div className={`window${panelOpen ? " panel-open" : ""}${panelMax ? " panel-max" : ""}`} data-testid="window" lang={s.ui.lang}>
       <Sidebar />
+      <SideResizer drag={sideDrag} onDrag={setSideDrag} />
+      <SideShow />
       <main className="main" inert={panelMax} aria-hidden={panelMax || undefined}>
         {MenuPageView ? <MenuPageView /> : s.ui.view === "settings" ? <SettingsView /> : s.ui.view === "automations" ? (
           <AutomationsPage />

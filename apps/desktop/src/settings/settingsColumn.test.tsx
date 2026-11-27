@@ -114,12 +114,12 @@ describe("the one segmented switch", () => {
     expect(html).toContain('role="radio" aria-checked="true" class="ui-mode">Dark<');
   });
 
-  it("is the only one Settings and Home use: no page of Settings imports the old one, and Home draws the same classes", () => {
+  it("is the only one Settings uses: no page of Settings imports the old one; Home's mode is the top-left picker now", () => {
     for (const f of ["settings/Settings.slot.tsx", "settings/Appearance.tsx", "settings/VoicePage.tsx", "settings/DeveloperPage.tsx", "settings/terminal/TerminalPage.tsx"]) {
       expect(read(f), f).not.toMatch(/chat\/model\/Seg|<Seg\b/);
     }
-    expect(read("pages/HomePage.tsx")).toContain('className="ui-modes"');
-    expect(read("pages/HomePage.tsx")).toContain('className="ui-mode"');
+    // Home's mode moved to the top left, as ChatGPT names its model there (ModePicker.tsx, the owner's ask of 27 Nov 2026)
+    expect(read("pages/HomePage.tsx")).toContain("<ModePicker");
     expect(read("pages/home.css")).not.toMatch(/\.mode\b|\.modes\b/);
     const ui = parseCss(read("ui/ui.css")).rules;
     const decl = (sel: string, prop: string) => ui.find((r) => r.selector === sel)?.decls.find((d) => d.prop === prop)?.value;

@@ -97,7 +97,68 @@
   align-items: center;
   gap: 6px;
 }
-/* The modes are the one segmented switch, ui.css's .ui-modes (item 85h). */
+/* The mode at the top left, as ChatGPT names its model there (ModePicker.tsx, the owner's ask of 27 Nov 2026): the brand,
+   the mode in the second-line grey and a chevron, in one quiet button; its menu names each mode with what it does. */
+.mpick {
+  position: relative;
+}
+.mpick-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 8px;
+  margin-left: -8px;
+  border: 0;
+  border-radius: var(--rad);
+  background: transparent;
+  color: var(--ink);
+  font-size: 17px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.mpick-btn:hover,
+.mpick-btn[aria-expanded="true"] {
+  background: var(--hov);
+}
+.mpick-mode {
+  color: var(--muted);
+  font-weight: 500;
+}
+.mpick-menu {
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+}
+.mpick-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: var(--rad);
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+.mpick-item:hover {
+  background: var(--hov);
+}
+.mpick-text {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+.mpick-name {
+  font-size: 14px;
+  font-weight: 500;
+}
+.mpick-what {
+  font-size: 12.5px;
+  color: var(--muted);
+}
 .home .send {
   display: inline-flex;
   align-items: center;

@@ -43,6 +43,16 @@ describe("the side menu", () => {
     expect(html).toMatch(/class="nav new"[^>]*data-testid="menu-new"/);
   });
 
+  it("has Hide beside Search, and a hidden menu takes no focus and no clicks (the owner's ask of 27 Nov 2026)", () => {
+    const shown = renderToString(<SideMenu current="new" needs={0} recent={[]} settings={false} onRow={noop} onSearch={noop} onAccount={noop} onHide={noop} />);
+    expect(shown).toMatch(/data-testid="menu-search"[\s\S]*aria-label="Hide the side menu"[^>]*data-testid="menu-hide"/);
+    expect(shown).not.toMatch(/data-testid="sidebar"[^>]*inert/);
+    const hidden = renderToString(<SideMenu current="new" needs={0} recent={[]} settings={false} onRow={noop} onSearch={noop} onAccount={noop} onHide={noop} hidden />);
+    expect(hidden).toMatch(/<nav[^>]*inert=""[^>]*aria-hidden="true"|<nav[^>]*aria-hidden="true"[^>]*inert=""/);
+    // without the action, no button
+    expect(menu()).not.toContain("menu-hide");
+  });
+
   it("marks exactly the current row, or none", () => {
     for (const row of ["new", "needs", "team", "code", "artifacts", "customize", "history"] as const) {
       const html = menu({ current: row });
