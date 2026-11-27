@@ -1,0 +1,61 @@
+// Harbor Night: a VS Code colour theme written for Manut AI's tests (item 99b), the way VS Code's own theme files are
+// written: JSON with comments, trailing commas, see-through colours, a terminal palette and token colours. Only the
+// colours under "colors" are read; the rest is here to show it is left alone.
+{
+  "$schema": "vscode://schemas/color-theme",
+  "name": "Harbor Night",
+  "type": "dark",
+  /* another file VS Code would merge in: Manut AI never reads a second file */
+  "include": "./harbor-base.json",
+  "colors": {
+    // the page and the side menu
+    "editor.background": "#1b2330",
+    "editor.foreground": "#d8dee9",
+    "foreground": "#c8ced8",
+    "sideBar.background": "#161d28",
+    "activityBar.background": "#121822",
+    "descriptionForeground": "#d8dee9b3", // 70 percent: laid over the background
+    "input.placeholderForeground": "#7a8494",
+    "panel.border": "#2c3647",
+    "input.border": "#5a6578",
+    "editorWidget.background": "#212a38",
+    "menu.background": "#1f2836",
+    "list.hoverBackground": "#ffffff14",
+    "textLink.foreground": "#7fb4ff",
+    "focusBorder": "#5e9cff",
+    "button.background": "#3d6fd6",
+    "button.foreground": "#ffffff",
+    "statusBar.background": "#1b2330",
+    // values that are not colours Manut AI accepts: each is skipped, never put on a page
+    "editor.lineHighlightBackground": "rgba(255, 255, 255, 0.05)",
+    "button.hoverBackground": "url(https://example.invalid/x.png)",
+    "badge.background": "red",
+    "badge.foreground": "#fff; } body { display: none",
+    // the terminal
+    "terminal.background": "#141a24",
+    "terminal.foreground": "#d8dee9",
+    "terminalCursor.foreground": "#f0c674",
+    "terminal.selectionBackground": "#3d6fd666",
+    "terminal.ansiBlack": "#1b2330",
+    "terminal.ansiRed": "#e06c75",
+    "terminal.ansiGreen": "#98c379",
+    "terminal.ansiYellow": "#e5c07b",
+    "terminal.ansiBlue": "#61afef",
+    "terminal.ansiMagenta": "#c678dd",
+    "terminal.ansiCyan": "#56b6c2",
+    "terminal.ansiWhite": "#d8dee9",
+    "terminal.ansiBrightBlack": "#5c6370",
+    "terminal.ansiBrightRed": "#ff7a85",
+    "terminal.ansiBrightGreen": "#b5e890",
+    "terminal.ansiBrightYellow": "#ffd68a",
+    "terminal.ansiBrightBlue": "#7cc4ff",
+    "terminal.ansiBrightMagenta": "#de95f0",
+    "terminal.ansiBrightCyan": "#6fd3df",
+    "terminal.ansiBrightWhite": "#ffffff",
+  },
+  "tokenColors": [
+    { "scope": ["comment"], "settings": { "foreground": "#5c6370", "fontStyle": "italic" } },
+    { "scope": ["string"], "settings": { "foreground": "#98c379" } },
+  ],
+  "semanticHighlighting": true,
+}

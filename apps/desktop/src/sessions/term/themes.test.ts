@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { TERM_DEFAULTS } from "./settings";
+import { onTermSettings, TERM_DEFAULTS } from "./settings";
+import { setAppTermColors } from "./appColors";
 import { ANSI_BRIGHT, ANSI_NORMAL, brightIsBrighter, isLightBackground, luminance, TERM_THEMES, termTheme, termThemeById, termThemePick } from "./themes";
 import { ORCA_TERM_THEMES } from "./themes-orca";
 
@@ -95,6 +96,31 @@ describe("terminal theme catalog", () => {
     expect(termThemePick("dark", { ...s, themeDark: "gone" }).id).toBe("manut-dark");
     expect(termThemePick("light", { ...s, themeLight: "gone" }).id).toBe("manut-light");
     expect(termThemeById("gone")).toBeUndefined();
+  });
+
+  it("takes the app theme's terminal colours for manut's own pick under the kinds it has, and leaves another pick alone (item 99b)", () => {
+    const told: unknown[] = [];
+    const off = onTermSettings((s) => told.push(s));
+    try {
+      setAppTermColors({ name: "Harbor Night", kinds: ["dark"], colors: { background: "#141a24", foreground: "#d8dee9", red: "#e06c75" } });
+      // every open terminal is told to take its look again
+      expect(told).toHaveLength(1);
+      const picked = termThemePick("dark", TERM_DEFAULTS);
+      expect(picked).toMatchObject({ id: "manut-dark", name: "Harbor Night", kind: "dark" });
+      expect(picked.theme).toMatchObject({ background: "#141a24", foreground: "#d8dee9", red: "#e06c75", cursorAccent: "#141a24" });
+      // a slot the theme does not say keeps manut's own colour
+      expect(picked.theme.green).toBe(termTheme("light", { ...TERM_DEFAULTS, themeLight: "manut-dark" }).green);
+      // the kind the theme does not have, and a terminal theme the person picked, are as they were
+      expect(termThemePick("light", TERM_DEFAULTS).name).toBe("manut Light");
+      expect(termTheme("dark", { ...TERM_DEFAULTS, themeDark: "dracula" }).background).toBe("#282a36");
+      // the same colours again change nothing
+      setAppTermColors({ name: "Harbor Night", kinds: ["dark"], colors: { background: "#141a24", foreground: "#d8dee9", red: "#e06c75" } });
+      expect(told).toHaveLength(1);
+    } finally {
+      setAppTermColors(null);
+      off();
+    }
+    expect(termThemePick("dark", TERM_DEFAULTS).name).toBe("manut Dark");
   });
 
   it("reads luminance from 3, 6 and 8 digit hex and nothing else", () => {

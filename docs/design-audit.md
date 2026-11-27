@@ -9,7 +9,9 @@ The fixes are items 85e to 85i in `docs/plan.md`; the motion is items 85a to 85c
 ## What "quiet luxury" means here, as rules
 
 - **Colour:** one black main button a view, and colour only for its four meanings (working, needs you, checked,
-  failed). No accent for the person to pick (the colour picker left Settings in item 85i).
+  failed). No accent for the person to pick (the colour picker left Settings in item 85i). The owner lifted this on 27
+  Nov 2026 (item 99b): the brand's look stays the default and everyone's first look, and a person may make a theme of
+  their own or import one from VS Code, held to the same 4.5 to 1 for text (`apps/desktop/src/theme/themes.ts`).
 - **Type:** sizes only from the scale, nothing under 12px. Weight 600 is the only emphasis: no capitals, no
   letter-spacing. Anything read at length is serif.
 - **Rhythm:** rows 44px, buttons 34px, fields 40px, 16 to 24px between groups, text never wider than 696px. Space is
