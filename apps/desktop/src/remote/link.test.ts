@@ -69,6 +69,7 @@ async function setup(probe: "on" | "off" | "unknown" = "on") {
       onFrame: (stream, payload) => frames.push([stream, [...payload]]),
       onClose: (stream, reason) => events.push(`close ${stream} ${reason}`),
       onState: (state) => events.push(state),
+      onPushGone: (device) => events.push(`gone ${device}`),
     },
   });
   const last = () => sockets.at(-1)!;
@@ -119,6 +120,42 @@ describe("the relay link", () => {
     expect(s.last().texts().at(-1)).toEqual({ t: "revoke", v: 1, id: DEVICE });
     // Messages in the vectors' own words.
     expect(vectors.messages.hostOutbound).toContainEqual({ t: "device", v: 1, id: DEVICE, tokenHash: HASH });
+  });
+
+  it("gives each phone's push address again at every ready, pushes only while up, and hears an address the relay lost", async () => {
+    const APPLE = "https://web.push.apple.com/abc";
+    const s = await setup();
+    s.link.allowDevice(DEVICE, HASH);
+    s.link.setWebPush(DEVICE, APPLE);
+    // Not up yet: a push is news of now, and is not kept for later.
+    expect(s.link.push([DEVICE])).toBe(false);
+    s.link.start();
+    await s.handshake([DEVICE]);
+    expect(s.last().texts().slice(1)).toEqual([
+      { t: "device", v: 1, id: DEVICE, tokenHash: HASH },
+      { t: "webpush", v: 1, id: DEVICE, endpoint: APPLE },
+    ]);
+    expect(s.link.push([DEVICE, "not a device"])).toBe(true);
+    expect(s.last().texts().at(-1)).toEqual({ t: "push", v: 1, kind: "decision", devices: [DEVICE] });
+    // The relay forgot it: it is not given again at the next ready.
+    s.last().receive({ t: "webpush", v: 1, id: DEVICE, endpoint: null });
+    expect(s.events.at(-1)).toBe(`gone ${DEVICE}`);
+    s.last().drop(1006);
+    s.clock.advance(1_000);
+    await s.handshake([DEVICE]);
+    expect(s.last().texts().slice(1).map((m) => m.t)).toEqual(["device"]);
+    // Taken away by the Mac, or with the device's revoke, it is never sent again either.
+    s.link.setWebPush(DEVICE, APPLE);
+    s.link.revokeDevice(DEVICE);
+    expect(s.last().texts().slice(-2)).toEqual([
+      { t: "webpush", v: 1, id: DEVICE, endpoint: APPLE },
+      { t: "revoke", v: 1, id: DEVICE },
+    ]);
+    s.link.allowDevice(DEVICE, HASH);
+    s.last().drop(1006);
+    s.clock.advance(1_000);
+    await s.handshake([DEVICE]);
+    expect(s.last().texts().slice(1).map((m) => m.t)).toEqual(["device"]);
   });
 
   it("pings every 50 seconds while up", async () => {

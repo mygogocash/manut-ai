@@ -1,6 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { base64UrlDecode } from "./auth";
 import { RELAY_DIGEST, base64url, relayEnabled, verifyHostHello } from "./relay";
+import { type WebPushEnv, sendWebPush, webPushAddress, webPushConfig } from "./web-push";
 
 /// One Mac's relay, named `relay:<hostID>` (docs/relay-protocol-v1.md). It holds the Mac's socket
 /// (its challenge and hello, its devices and its status) and up to eight phone sockets, and
@@ -9,8 +10,14 @@ import { RELAY_DIGEST, base64url, relayEnabled, verifyHostHello } from "./relay"
 ///
 /// Sockets hibernate between messages, so everything a socket needs lives in its attachment and
 /// never in a field of this instance. Storage keeps only what the threat model's section 6 lists:
-/// `hostKey`, `devices`, `status`, `lastHostSeen` and `usage:<YYYY-MM-DD>`. The object logs
-/// nothing, so no key, token, nonce, signature or frame can reach a log.
+/// `hostKey`, `devices`, `status`, `lastHostSeen` and `usage:<YYYY-MM-DD>`, and since item 78d each
+/// device's push address inside `devices` and the hour's count of pushes, `pushes`. The object logs
+/// nothing, so no key, token, nonce, signature, frame or push address can reach a log.
+///
+/// Push (item 78d, docs/remote-access.md): the Mac's `webpush` gives one of its own devices a push
+/// address on a known push service, or takes it away, and its `push` wakes the devices it names with
+/// a Web Push that carries nothing (web-push.ts), at most `pushesPerHour` times an hour. A push
+/// service that says the address is gone (404, 410) makes the relay forget it and tell the Mac.
 
 type Presence = "available" | "paused" | "sleeping" | "off";
 
@@ -37,7 +44,10 @@ type Attachment = {
   ended?: boolean;
 };
 
-type Devices = Record<string, { tokenHash: string; pushToken?: string; pushEnv?: string }>;
+/// `webPush` is the device's push address (item 78d), the endpoint of its Web Push subscription. `pushToken` and
+/// `pushEnv` are GoSpark's APNs fields, which this relay never sets.
+type Devices = Record<string, { tokenHash: string; pushToken?: string; pushEnv?: string; webPush?: string }>;
+type Pushes = { hour: number; count: number };
 type Status = { state: Presence; at: number };
 type Usage = { day: string; stored: number; unflushed: number };
 
@@ -74,8 +84,11 @@ const DAY_MS = 86_400_000;
 /// A device id exactly as Swift writes a UUID: upper case, 8-4-4-4-12.
 const DEVICE_ID = /^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$/;
 const PRESENCE: ReadonlySet<string> = new Set<Presence>(["available", "paused", "sleeping", "off"]);
+/// What a `push` may say woke the phone (spec section 4). The push carries none of it: the phone hears no content.
+const PUSH_KINDS: ReadonlySet<string> = new Set(["decision", "finished", "failed"]);
+const HOUR_MS = 60 * 60_000;
 
-type RelayEnv = { RELAY_ENABLED?: string };
+type RelayEnv = { RELAY_ENABLED?: string } & WebPushEnv;
 
 function nowSeconds(): number {
   return Math.floor(Date.now() / 1000);
@@ -113,6 +126,9 @@ export class RelayObject extends DurableObject {
   static authTimeoutMs = 10_000;
   static dailyBudgetBytes = 1 << 30;
   static idleRetentionMs = 30 * DAY_MS;
+  /// The most `push` messages one Mac may have sent on in a clock hour (item 78d). The Mac sends at most one an ask and
+  /// waits two minutes between two (apps/desktop/src/remote/host.ts), so an honest Mac never reaches it.
+  static pushesPerHour = 30;
 
   /// Today's byte count: what storage holds, and what arrived since it was written. It goes with
   /// the instance, so the count is approximate by design (section 9).
@@ -407,8 +423,12 @@ export class RelayObject extends DurableObject {
         return this.recordStatus(ws, message);
       case "close":
         return this.closeStream(ws, message);
+      case "webpush":
+        return this.setWebPush(ws, message);
+      case "push":
+        return this.push(ws, message);
       default:
-        // `push` and `pushToken` wait for push support (A7).
+        // `pushToken` (GoSpark's APNs token) is accepted and does nothing: this relay pushes by Web Push alone.
         return;
     }
   }
@@ -459,6 +479,76 @@ export class RelayObject extends DurableObject {
     delete devices[id];
     await this.ctx.storage.put("devices", devices);
     this.endDevice(id, CLOSE.revoked, "revoked");
+  }
+
+  /// Gives one of this Mac's devices a push address, or takes it away with `endpoint: null` (item 78d). Only a device
+  /// the Mac registered here: an id this object does not hold, another Mac's included, is ignored, as `revoke` ignores
+  /// one. An address that is not on a known push service is not kept, and the Mac hears `push_address`. Only the
+  /// address is kept, beside the device's token hash.
+  private async setWebPush(ws: WebSocket, message: Record<string, unknown>): Promise<void> {
+    const { id, endpoint } = message;
+    if (typeof id !== "string" || !DEVICE_ID.test(id) || (endpoint !== null && typeof endpoint !== "string")) {
+      return ws.close(CLOSE.badRequest, "bad_request");
+    }
+    if (endpoint !== null && !webPushAddress(endpoint)) {
+      ws.send(JSON.stringify({ t: "error", v: 1, code: "push_address" }));
+      return;
+    }
+    const devices = (await this.ctx.storage.get<Devices>("devices")) ?? {};
+    const known = devices[id];
+    if (!known || (known.webPush ?? null) === endpoint) return;
+    const { webPush: _old, ...rest } = known;
+    devices[id] = endpoint === null ? rest : { ...rest, webPush: endpoint };
+    await this.ctx.storage.put("devices", devices);
+  }
+
+  /// Wakes the devices the Mac names (all of its devices with a push address when it names none) with a push that
+  /// carries nothing (web-push.ts). It does nothing while no push key is configured, and at most `pushesPerHour` times a
+  /// clock hour: past that the Mac hears `push_limit` and nothing is sent. A push service that says an address is gone
+  /// has it forgotten, if it is still the device's, and the Mac hears `webpush` for that device with no address.
+  private async push(ws: WebSocket, message: Record<string, unknown>): Promise<void> {
+    const { kind, devices: named } = message;
+    const names = named === undefined ? null : Array.isArray(named) ? named : [null];
+    if (typeof kind !== "string" || !PUSH_KINDS.has(kind) || (names !== null &&
+        (names.length > MAX_DEVICES || !names.every((d) => typeof d === "string" && DEVICE_ID.test(d))))) {
+      return ws.close(CLOSE.badRequest, "bad_request");
+    }
+    const config = webPushConfig(this.relayEnv);
+    if (config === null) return;
+    const devices = (await this.ctx.storage.get<Devices>("devices")) ?? {};
+    const targets = Object.entries(devices).flatMap(([id, device]) =>
+      device.webPush !== undefined && (names === null || names.includes(id)) ? [{ id, address: device.webPush }] : []);
+    if (targets.length === 0) return;
+    if (!(await this.spendPush())) {
+      ws.send(JSON.stringify({ t: "error", v: 1, code: "push_limit" }));
+      return;
+    }
+    const outcomes = await Promise.all(targets.map(async (target) => ({ ...target, outcome: await sendWebPush(config, target.address) })));
+    const gone = outcomes.filter((o) => o.outcome === "gone");
+    if (gone.length === 0) return;
+    // Read again: the Mac may have changed an address while the pushes were out.
+    const now = (await this.ctx.storage.get<Devices>("devices")) ?? {};
+    const forgotten: string[] = [];
+    for (const { id, address } of gone) {
+      const device = now[id];
+      if (device?.webPush !== address) continue;
+      const { webPush: _gone, ...rest } = device;
+      now[id] = rest;
+      forgotten.push(id);
+    }
+    if (forgotten.length === 0) return;
+    await this.ctx.storage.put("devices", now);
+    for (const id of forgotten) this.tellHost({ t: "webpush", v: 1, id, endpoint: null });
+  }
+
+  /// Counts one `push` against this clock hour's allowance, and says whether it was within it.
+  private async spendPush(): Promise<boolean> {
+    const hour = Math.floor(Date.now() / HOUR_MS);
+    const kept = await this.ctx.storage.get<Pushes>("pushes");
+    const count = kept?.hour === hour ? kept.count : 0;
+    if (count >= RelayObject.pushesPerHour) return false;
+    await this.ctx.storage.put("pushes", { hour, count: count + 1 } satisfies Pushes);
+    return true;
   }
 
   /// Records the Mac's presence. The Mac never sends `offline`, the relay's word for no Mac socket.

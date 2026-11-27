@@ -290,17 +290,21 @@ export function RemoteView(props: RemoteViewProps) {
         {snapshot.phones.length === 0 ? (
           <Row hint={t("rm.none")} />
         ) : (
-          snapshot.phones.map((phone) => (
-            <Row
-              key={phone.id}
-              title={phone.name}
-              hint={phone.lastSeen && phone.lastSeen !== phone.pairedAt ? t("rm.pairedSeen", { paired: when(phone.pairedAt), seen: when(phone.lastSeen) }) : t("rm.pairedAt", { paired: when(phone.pairedAt) })}
-            >
-              <button type="button" className="btn" onClick={() => props.onUnpair(phone.id)} data-testid="remote-unpair">
-                {t("rm.unpair")}
-              </button>
-            </Row>
-          ))
+          snapshot.phones.map((phone) => {
+            const line = phone.lastSeen && phone.lastSeen !== phone.pairedAt ? t("rm.pairedSeen", { paired: when(phone.pairedAt), seen: when(phone.lastSeen) }) : t("rm.pairedAt", { paired: when(phone.pairedAt) });
+            return (
+              <Row
+                key={phone.id}
+                title={phone.name}
+                // a phone that turned on "Tell me when my Mac needs me" on its Your Mac tab says so (item 78d)
+                hint={phone.push ? t("rm.pushOn", { line }) : line}
+              >
+                <button type="button" className="btn" onClick={() => props.onUnpair(phone.id)} data-testid="remote-unpair">
+                  {t("rm.unpair")}
+                </button>
+              </Row>
+            );
+          })
         )}
       </div>
     </div>

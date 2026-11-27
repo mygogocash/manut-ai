@@ -13,8 +13,18 @@
 > - **Decisions.** A passkey that needs Face ID or the phone's passcode answers a one-use challenge bound to the device,
 >   the ask, its revision and Allow once (`apps/desktop/src/remote/serve.ts`), where GoSpark's phone signed with a Secure
 >   Enclave key.
-> - **Push (section 5.4), commands and CLI updates (5.5), the A9 opt-in (7).** Not in this app yet; push is item 78d,
->   with Web Push instead of APNs. The Swift tests, plan tasks and gates named below are GoSpark's.
+> - **Push (section 5.4).** Built as item 78d with Web Push instead of APNs (`apps/api/src/web-push.ts`;
+>   `docs/remote-access.md`, "What building 78d added"). RT-11: a push carries no payload at all, not even a kind's fixed
+>   text; the phone's service worker shows the same words, "Your Mac needs you", for every push. RT-12: the Mac pushes
+>   at most once an ask and never twice within two minutes, only when no paired phone has a session open; the relay
+>   takes at most 30 `push` messages a clock hour from one Mac, only to devices that Mac registered, and only to an
+>   address on Apple's, Google's or Mozilla's push service; a 404 or 410 forgets the address; revoke deletes it; a tap
+>   opens only the Your Mac tab. RT-13: the key is ours (a VAPID pair, both halves Wrangler secrets), and the signed
+>   token is kept only in the isolate's memory, reused for up to 11 hours. Section 6 gains one row: each device's push
+>   address, in `devices`, from the Mac's `webpush` until the Mac takes it away, the push service says it is gone, the
+>   device is revoked, or deletion; and `pushes`, the hour's count.
+> - **Commands and CLI updates (5.5), the A9 opt-in (7).** Not in this app. The Swift tests, plan tasks and gates named
+>   below are GoSpark's.
 
 **Date:** 9 Nov 2026 · **Revision:** v1.1 · **Task:** A0.1 (M0) in [`phase1-track-a-remote-2026-11-09.md`](../plans/phase1-track-a-remote-2026-11-09.md)
 **Status:** Draft for the owner's security sign-off (gate G6). Nothing it describes is built yet unless a line says **Existing**, and none of it has been audited.

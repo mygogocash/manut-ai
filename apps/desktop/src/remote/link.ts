@@ -1,7 +1,8 @@
 // The Mac's one socket to the relay (docs/remote-access.md, "The architecture"; docs/relay-protocol-v1.md, sections 5 to
 // 11). It dials `/relay/v1/hosts/<hostID>/socket` on the API origin the app is already connected to, signs the relay's
 // challenge with the Mac's relay key as `apps/api/test/fixtures/relay-v1-vectors.json` pins it, and then carries three
-// things only: the Mac's own messages (`device`, `revoke`, `status`, `close`), the relay's (`open`, `close`, `error`), and
+// things only: the Mac's own messages (`device`, `revoke`, `status`, `close`, and since item 78d `webpush` and `push`), the
+// relay's (`open`, `close`, `error`, `webpush`), and
 // binary stream frames, whose first four bytes are the stream number. It reads no frame: the channel inside each one is
 // the package's (`@manut/remote-channel`), and the relay cannot read it either.
 //
@@ -14,6 +15,10 @@
 // any open pairing door is registered (the relay ignores a hash it already holds), and every device the relay lists that
 // the Mac no longer has is revoked. That is how Unpair works while the relay cannot be reached: the Mac forgets the phone
 // at once, and the relay hears `revoke` the next time the socket is up.
+//
+// Push (item 78d): each phone's push address goes to the relay as `webpush`, now while the socket is up and again at every
+// `ready`, as the devices do; `push` asks the relay to wake the phones it names; and the relay's own `webpush` with no
+// address says it forgot one whose push service said it is gone.
 //
 // Nothing here touches the DOM, the store or the shell, so the API's tests run it against the real relay object in
 // workerd, and the desktop's tests against a fake socket.
@@ -70,6 +75,8 @@ export interface LinkEvents {
   /** The relay ended a stream, or the socket went down with every stream on it. */
   onClose(stream: number, reason: string): void;
   onState(state: LinkState): void;
+  /** The relay forgot a device's push address because its push service said it is gone (item 78d). */
+  onPushGone?(device: string): void;
 }
 
 /** The relay's own messages and limits (docs/relay-protocol-v1.md; `apps/api/src/relay-object.ts`). */
@@ -135,6 +142,8 @@ export class RelayLink {
   readonly #events: LinkEvents;
   /** Every device the relay should let in, with its token hash: the paired phones and an open pairing door. */
   readonly #wanted = new Map<string, string>();
+  /** Each paired phone's push address the relay should hold (item 78d). */
+  readonly #webPush = new Map<string, string>();
   readonly #streams = new Set<number>();
   #socket: RelaySocket | null = null;
   #state: LinkState = "stopped";
@@ -191,7 +200,27 @@ export class RelayLink {
   revokeDevice(id: string): void {
     if (!DEVICE_ID.test(id)) return;
     this.#wanted.delete(id);
+    // The relay's `revoke` deletes the device with its push address, so nothing is sent for it again.
+    this.#webPush.delete(id);
     if (this.#ready) this.#sendJson({ t: "revoke", v: 1, id });
+  }
+
+  /** Gives `id` its push address, or takes it away with null: sent now while the socket is up, and an address again at
+   *  every `ready`. The relay keeps it only on a known push service. */
+  setWebPush(id: string, endpoint: string | null): void {
+    if (!DEVICE_ID.test(id)) return;
+    if (endpoint === null) this.#webPush.delete(id);
+    else this.#webPush.set(id, endpoint);
+    if (this.#ready) this.#sendJson({ t: "webpush", v: 1, id, endpoint });
+  }
+
+  /** Asks the relay to wake `devices` with a push that carries nothing. Only while the socket is up: a push is news of
+   *  now, so one that cannot go is not kept for later. */
+  push(devices: readonly string[]): boolean {
+    const named = devices.filter((d) => DEVICE_ID.test(d));
+    if (!this.#ready || named.length === 0) return false;
+    this.#sendJson({ t: "push", v: 1, kind: "decision", devices: named });
+    return true;
   }
 
   /** The Mac's presence, kept and sent again at every `ready`. */
@@ -320,6 +349,7 @@ export class RelayLink {
     this.#failures = 0;
     for (const [id, tokenHash] of this.#wanted) this.#sendJson({ t: "device", v: 1, id, tokenHash });
     for (const id of listed) if (!this.#wanted.has(id)) this.#sendJson({ t: "revoke", v: 1, id });
+    for (const [id, endpoint] of this.#webPush) if (this.#wanted.has(id)) this.#sendJson({ t: "webpush", v: 1, id, endpoint });
     if (this.#presence) this.#sendJson({ t: "status", v: 1, ...this.#presence });
     this.#ping = this.#timers.set(() => this.#pingNow(), PING_MS);
     this.#setState("ready");
@@ -341,8 +371,13 @@ export class RelayLink {
       this.#events.onOpen(message.stream, message.device);
     } else if (message.t === "close" && isStream(message.stream)) {
       if (this.#streams.delete(message.stream)) this.#events.onClose(message.stream, typeof message.reason === "string" ? message.reason : "closed");
+    } else if (message.t === "webpush" && message.endpoint === null && typeof message.id === "string" && DEVICE_ID.test(message.id)) {
+      // The relay forgot this address because its push service said it is gone: it is not sent again.
+      this.#webPush.delete(message.id);
+      this.#events.onPushGone?.(message.id);
     }
-    // `error` (`device_limit`) and anything newer are not acted on: the Mac keeps at most seven phones and a door.
+    // `error` (`device_limit`, `push_address`, `push_limit`) and anything newer are not acted on: the Mac keeps at most
+    // seven phones and a door, checks an address before it sends one, and pushes far less often than the relay allows.
   }
 
   #frame(bytes: Uint8Array): void {

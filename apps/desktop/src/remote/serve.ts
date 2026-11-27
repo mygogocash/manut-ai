@@ -1,5 +1,5 @@
 // The only code that turns a paired phone's request into something the Mac does (docs/remote-access.md, "The first
-// version"). A phone may ask for exactly six things, and anything else is refused by name:
+// version"). A phone may ask for exactly seven things, and anything else is refused by name:
 //
 //   list      the chats, each Working, Needs you or Done
 //   open      one chat: its messages, its current step and its asks, with a cursor into its journal
@@ -11,6 +11,9 @@
 //             challenge bound to the exact answer (the package's `answerOption`), since an answer steers the agent as much
 //             as an Allow does. A stolen unlocked phone can say No and Stop, and nothing else.
 //   stop      stop the chat's running turn
+//   notify    this phone's push address, or null to take it away (item 78d): the relay may then wake this same phone
+//             with a push that carries nothing. It needs no passkey: it acts on nothing of the Mac's and reaches no one
+//             but the phone that asked, and only an address on a known push service is taken (`push_address`).
 //
 // Always allow, Allow for the session, Kit's dial, pairing, Unpair and the switch stay on the Mac whatever a phone sends
 // (`STAYS_ON_MAC`), and an ask the card marks as needing an app update is answered by nothing. Who is speaking is always
@@ -21,6 +24,7 @@
 //                  {"t":"reply","id",chat,ask,revision,"no":true}
 //                  {"t":"reply","id",chat,ask,revision,"answer":<text>} or with "answers":{<question id>:<text or null>}
 //                  for an interview, then again with the same answer and "passkey":<passkey answer>
+//                  {"t":"notify","id","endpoint":<push address or null>}
 //                  where a passkey answer is {challengeId,credentialId,clientDataJSON,authenticatorData,signature}
 //                  (base64url, challengeId being the challenge's nonce)
 //   Mac -> phone   {"t":"chats","id",chats} | {"t":"chat","id",view,cursor} | {"t":"events","id",chat,events,cursor}
@@ -41,8 +45,8 @@ import {
 import { type Cursor, EventJournal } from "./journal";
 import { type AskView, type ChatEvent, type ChatSource, type ChatView, Projector, askBinding, chatEvents, chatRow } from "./project";
 
-/** The six requests a phone may make. */
-export const REQUESTS = ["list", "open", "catchup", "allow", "reply", "stop"] as const;
+/** The seven requests a phone may make. */
+export const REQUESTS = ["list", "open", "catchup", "allow", "reply", "stop", "notify"] as const;
 export type RequestName = (typeof REQUESTS)[number];
 
 /** Asked for by name from a phone, and refused as staying on the Mac. */
@@ -97,6 +101,9 @@ export interface ServeDeps {
   readonly journal?: EventJournal<ChatEvent>;
   /** The revisions and what each phone was shown, kept by the RemoteMac across this server's life (project.ts). */
   readonly projector?: Projector;
+  /** Keeps a device's push address, or forgets it with null (item 78d, host.ts); null when taken, otherwise why not.
+   *  Without it `notify` is not offered. */
+  notify?(deviceId: string, endpoint: string | null): Refusal | null;
 }
 
 type Message = Record<string, unknown>;
@@ -181,7 +188,19 @@ export class Server {
         return this.#reply(deviceId, id, request, refuse);
       case "stop":
         return this.#stop(deviceId, id, request, refuse);
+      case "notify":
+        return this.#notify(deviceId, id, request, refuse);
     }
+  }
+
+  /** This phone's push address, or null to take it away: only ever for the device the channel proved. */
+  #notify(deviceId: string, id: number, request: Message, refuse: (r: Refusal) => Message[]): Message[] {
+    const endpoint = request.endpoint;
+    if (endpoint !== null && typeof endpoint !== "string") return refuse("malformed");
+    if (!this.#deps.notify) return refuse("not_offered");
+    if (!this.#mayAct(deviceId)) return refuse("unknown_device");
+    const why = this.#deps.notify(deviceId, endpoint);
+    return why === null ? [{ t: "done", id }] : refuse(why);
   }
 
   #watch(deviceId: string, source: ChatSource): { view: ChatView; cursor: Cursor } {
