@@ -124,8 +124,12 @@ function allProjectWorktrees(): Record<string, ProjectWorktrees> {
   return projectsCache.value;
 }
 
+/** A project with none of its own: one object, so a view that reads it (`useSyncExternalStore`) sees the same value each time
+ *  and does not draw itself again without end. */
+const NONE: ProjectWorktrees = Object.freeze({});
+
 /** Project `project`'s own choices (none: it follows every project's). */
-export const projectWorktrees = (project: string): ProjectWorktrees => allProjectWorktrees()[pathKey(project)] ?? {};
+export const projectWorktrees = (project: string): ProjectWorktrees => allProjectWorktrees()[pathKey(project)] ?? NONE;
 
 /** The projects that set any of their own. */
 export const projectsWithOwnWorktrees = (): string[] => Object.keys(allProjectWorktrees());

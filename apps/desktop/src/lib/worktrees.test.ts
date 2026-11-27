@@ -75,6 +75,12 @@ describe("one project's own choices (item 99)", () => {
     expect(projectsWithOwnWorktrees()).toEqual([]);
   });
 
+  it("read as the very same object while nothing changed, so a view reading them does not draw itself without end", () => {
+    expect(projectWorktrees("/w/none")).toBe(projectWorktrees("/w/none"));
+    setProjectWorktrees("/w/shop", { remote: true });
+    expect(projectWorktrees("/w/shop")).toBe(projectWorktrees("/w/shop"));
+  });
+
   it("read back only what can be used: a bad prefix, a relative folder or a damaged value follows every project's", () => {
     expect(parseProjectWorktrees(JSON.stringify({ "/w/a": { prefix: "Bad Prefix", remote: true }, "rel/b": { remote: true }, "/w/c": "x" }))).toEqual({ "/w/a": { remote: true } });
     expect(parseProjectWorktrees("{not json")).toEqual({});
