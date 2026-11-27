@@ -2426,8 +2426,9 @@ list), `src/importPast/offer.ts` (the rules and what this computer keeps), `Impo
   person typed something in it, and a Codex subagent's thread or a fork is not one. Each file is read from its start
   only until its folder and a typed line are found (at most 256 KiB), the newest 3,000 of each agent and 256 MiB in all.
   A link anywhere under those folders is refused. Nothing is written, and only folders and counts reach the page.
-- **What is skipped, and said.** A folder no longer on this Mac, a Codex rollout written compressed (`.jsonl.zst`,
-  item 106b), a file that cannot be read or is not JSON lines, and files past the bounds are each counted, and the offer
+- **What is skipped, and said.** A folder no longer on this Mac, a Codex rollout written compressed (`.jsonl.zst`)
+  that cannot be unpacked (corrupt or cut short; the others are read like plain ones, item 106b), a file that cannot be
+  read or is not JSON lines, and files past the bounds are each counted, and the offer
   says how many of each in one line. Never offered: the home folder itself, the disk's root, and folders under the app's
   own `~/.manut` (its lanes and account homes).
 - **The offer.** Each folder newest first, with its conversations of each agent and how long ago the newest changed;

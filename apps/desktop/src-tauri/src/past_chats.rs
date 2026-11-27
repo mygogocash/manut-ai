@@ -109,6 +109,10 @@ pub(crate) fn mtime(p: &Path) -> f64 {
 
 /// Whole lines from `[start, start + len)` of `path`: a line cut by either edge is dropped.
 fn lines_in(path: &Path, start: u64, len: u64) -> Vec<Value> {
+    if crate::zst::is_zst(path) {
+        // a compressed rollout cannot be sought: its start is decoded and dropped. A damaged one reads as nothing.
+        return crate::zst::range(path, crate::zst::CAP, start, len).map(|(buf, more)| split_lines(&buf, start > 0, more)).unwrap_or_default();
+    }
     let Ok(mut f) = File::open(path) else { return Vec::new() };
     let size = f.metadata().map(|m| m.len()).unwrap_or(0);
     let start = start.min(size);
@@ -119,12 +123,18 @@ fn lines_in(path: &Path, start: u64, len: u64) -> Vec<Value> {
     if f.take(len).read_to_end(&mut buf).is_err() {
         return Vec::new();
     }
+    split_lines(&buf, start > 0, start + (buf.len() as u64) < size)
+}
+
+/// The JSON lines of `buf`, a slice of a file: the first line is dropped when the slice begins mid-line, the last when it
+/// ends mid-line.
+fn split_lines(buf: &[u8], starts_mid: bool, ends_mid: bool) -> Vec<Value> {
     let mut parts: Vec<&[u8]> = buf.split(|b| *b == b'\n').collect();
-    if start > 0 && !parts.is_empty() {
-        parts.remove(0); // begins mid-line
+    if starts_mid && !parts.is_empty() {
+        parts.remove(0);
     }
-    if start + (buf.len() as u64) < size {
-        parts.pop(); // ends mid-line
+    if ends_mid {
+        parts.pop();
     }
     parts.into_iter().filter(|l| !l.is_empty()).filter_map(|l| serde_json::from_slice(l).ok()).collect()
 }
@@ -144,6 +154,9 @@ fn tail(path: &Path) -> Vec<Value> {
 
 /// All of a file when small, else its tail: where the last messages are.
 fn last_part(path: &Path) -> Vec<Value> {
+    if crate::zst::is_zst(path) {
+        return crate::zst::tail(path, crate::zst::CAP, TAIL).map(|(buf, at)| split_lines(&buf, at > 0, false)).unwrap_or_default();
+    }
     let size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
     lines_in(path, size.saturating_sub(TAIL), TAIL)
 }
@@ -154,8 +167,12 @@ fn last_part(path: &Path) -> Vec<Value> {
 /// lines were JSON, so a caller can tell a file that is not JSON lines from one that holds nothing it wants.
 pub(crate) fn head_until(path: &Path, cap: u64, each: &mut dyn FnMut(&Value) -> bool) -> Option<u32> {
     use std::io::BufRead;
-    let f = File::open(path).ok()?;
-    let mut r = std::io::BufReader::new(f.take(cap));
+    // a compressed rollout is decoded as a stream; one that cannot be (corrupt, cut short) is `None`, as one that cannot be opened
+    let mut r: Box<dyn BufRead> = if crate::zst::is_zst(path) {
+        Box::new(crate::zst::open(path, crate::zst::CAP).ok()?.take(cap))
+    } else {
+        Box::new(std::io::BufReader::new(File::open(path).ok()?.take(cap)))
+    };
     let (mut buf, mut json, mut read) = (Vec::new(), 0u32, 0u64);
     loop {
         buf.clear();
@@ -350,12 +367,12 @@ pub fn claude_messages(root: &Path, id: &str, cwd: &str) -> Result<Vec<PastMsg>,
 /// Codex rollout files, newest day first (names carry the time, so newest first within a day too), at most
 /// `max`. Links are skipped at every level.
 fn codex_rollouts(root: &Path, max: usize) -> Vec<PathBuf> {
-    codex_rollouts_seen(root, max, &mut 0)
+    codex_rollouts_in(root, max)
 }
 
-/// [`codex_rollouts`], also counting into `compressed` the rollouts Codex wrote compressed (`rollout-*.jsonl.zst`), which
-/// no reader here opens (item 106b). Bringing work over (import_past.rs) says how many it left out.
-pub(crate) fn codex_rollouts_seen(root: &Path, max: usize, compressed: &mut u32) -> Vec<PathBuf> {
+/// [`codex_rollouts`] when the caller walks as far as `max` files: plain rollouts (`rollout-*.jsonl`) and the ones Codex
+/// wrote compressed (`rollout-*.jsonl.zst`, read through zst.rs, item 106b), a day's files newest first.
+pub(crate) fn codex_rollouts_in(root: &Path, max: usize) -> Vec<PathBuf> {
     let sessions = root.join("sessions");
     if !plain_dir(&sessions) {
         return Vec::new();
@@ -378,10 +395,7 @@ pub(crate) fn codex_rollouts_seen(root: &Path, max: usize, compressed: &mut u32)
                             .map(|e| e.path())
                             .filter(|p| {
                                 let name = p.file_name().and_then(|x| x.to_str()).unwrap_or("");
-                                if name.starts_with("rollout-") && name.ends_with(".jsonl.zst") {
-                                    *compressed += 1;
-                                }
-                                name.starts_with("rollout-") && name.ends_with(".jsonl")
+                                name.starts_with("rollout-") && (name.ends_with(".jsonl") || crate::zst::is_zst_name(name))
                             })
                             .collect()
                     })
@@ -502,10 +516,10 @@ pub fn codex_messages(root: &Path, id: &str, cwd: &str) -> Result<Vec<PastMsg>, 
     if !is_uuid(id) {
         return Err("not a conversation id".into());
     }
-    let suffix = format!("-{id}.jsonl");
+    let (plain, packed) = (format!("-{id}.jsonl"), format!("-{id}.jsonl.zst"));
     let path = codex_rollouts(root, usize::MAX)
         .into_iter()
-        .find(|p| p.file_name().and_then(|x| x.to_str()).is_some_and(|x| x.ends_with(&suffix)))
+        .find(|p| p.file_name().and_then(|x| x.to_str()).is_some_and(|x| x.ends_with(&plain) || x.ends_with(&packed)))
         .and_then(|p| inside(root, &p))
         .ok_or("no such conversation")?;
     match codex_meta(&head(&path)) {
@@ -1094,15 +1108,73 @@ mod tests {
         assert_eq!(head_until(&p, 20, &mut |v| { seen.push(v["n"].as_u64().unwrap()); false }), Some(1));
         assert_eq!(seen, [1]);
         assert_eq!(head_until(&root.join("missing.jsonl"), 1_000, &mut |_| false), None);
-        // Codex's compressed rollouts are counted by name, never opened
+        // Codex's compressed rollouts are walked with the plain ones (a damaged one fails when it is read, not here)
         let day = root.join("sessions/2026/11/12");
         std::fs::create_dir_all(&day).unwrap();
         std::fs::write(day.join(format!("rollout-2026-11-12T00-00-00-{X1}.jsonl.zst")), [0u8; 4]).unwrap();
         write(&day.join(format!("rollout-2026-11-12T00-00-01-{X2}.jsonl")), &codex_file(X2, "/w"));
-        let mut zst = 0;
-        assert_eq!(codex_rollouts_seen(&root, 10, &mut zst).len(), 1);
-        assert_eq!(zst, 1);
+        std::fs::write(day.join(format!("rollout-2026-11-12T00-00-02-{X2}.jsonl.zstd")), b"x").unwrap();
+        assert_eq!(codex_rollouts_in(&root, 10).len(), 2);
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A Codex home holding the fixture rollout, plain in one and compressed in the other.
+    fn codex_twins(tag: &str) -> (PathBuf, PathBuf) {
+        use crate::zst::tests::{PLAIN, ZST};
+        let (plain, packed) = (tmp(&format!("{tag}-plain")), tmp(&format!("{tag}-zst")));
+        let day = |r: &Path| r.join("sessions/2026/11/20");
+        std::fs::create_dir_all(day(&plain)).unwrap();
+        std::fs::create_dir_all(day(&packed)).unwrap();
+        std::fs::write(day(&plain).join(format!("rollout-2026-11-20T11-50-00-{C1}.jsonl")), PLAIN).unwrap();
+        std::fs::write(day(&packed).join(format!("rollout-2026-11-20T11-50-00-{C1}.jsonl.zst")), ZST).unwrap();
+        (plain, packed)
+    }
+
+    #[test]
+    fn a_compressed_codex_rollout_is_listed_and_read_like_its_plain_twin() {
+        let (plain, packed) = codex_twins("zst-list");
+        let cwds = ["/Users/you/code/api".to_string()];
+        let (a, b) = (codex_list(&plain, &cwds), codex_list(&packed, &cwds));
+        assert_eq!(a.len(), 1);
+        assert_eq!((a[0].id.as_str(), a[0].title.as_str()), (C1, "Remember COBALT please"));
+        // the same row, but for the file's own modified time
+        assert_eq!((&b[0].id, &b[0].title, &b[0].cwd), (&a[0].id, &a[0].title, &a[0].cwd));
+        // the last messages come from the compressed file's end
+        let (ma, mb) = (codex_messages(&plain, C1, &cwds[0]).unwrap(), codex_messages(&packed, C1, &cwds[0]).unwrap());
+        assert_eq!(ma.len(), 2);
+        assert_eq!(mb.iter().map(|m| (m.role, m.text.clone(), m.ts)).collect::<Vec<_>>(), ma.iter().map(|m| (m.role, m.text.clone(), m.ts)).collect::<Vec<_>>());
+        for d in [plain, packed] {
+            let _ = std::fs::remove_dir_all(d);
+        }
+    }
+
+    #[test]
+    fn a_damaged_compressed_codex_rollout_lists_nothing_and_reads_nothing() {
+        use crate::zst::tests::ZST;
+        let root = tmp("zst-damaged");
+        let day = root.join("sessions/2026/11/20");
+        std::fs::create_dir_all(&day).unwrap();
+        let p = day.join(format!("rollout-2026-11-20T11-50-00-{C1}.jsonl.zst"));
+        let cwds = ["/Users/you/code/api".to_string()];
+        for bytes in [&ZST[..ZST.len() / 2], &ZST[..ZST.len() - 1], b"junk, not zstd", &[]] {
+            std::fs::write(&p, bytes).unwrap();
+            assert!(codex_list(&root, &cwds).is_empty());
+            assert!(codex_messages(&root, C1, &cwds[0]).is_err());
+        }
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn the_walk_finds_compressed_rollouts_only_in_the_day_folders() {
+        // a rollout outside sessions/YYYY/MM/DD is not found, compressed or not
+        use crate::zst::tests::ZST;
+        let root = tmp("zst-walk");
+        std::fs::create_dir_all(root.join("sessions/2026/11/20")).unwrap();
+        for stray in ["sessions/rollout-a.jsonl.zst", "sessions/2026/rollout-b.jsonl.zst", "sessions/2026/11/rollout-c.jsonl.zst", "rollout-d.jsonl.zst"] {
+            std::fs::write(root.join(stray), ZST).unwrap();
+        }
+        assert!(codex_rollouts_in(&root, 10).is_empty());
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
