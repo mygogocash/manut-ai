@@ -36,7 +36,7 @@ keeps them:
 | Linux | part: the code and CI tests are there, no build is released | 111 |
 | Windows, Windows ARM | part: an installer builds by hand and is not published; no ARM | 111 |
 | Stable and nightly channels | part: a signed in-app updater, one channel | 111 |
-| Imports your threads and projects on first launch | has (item 101e): the first launch after the setup offers the folders Claude Code and Codex worked in that are still on this Mac, with their conversations counted; the picked ones join the Code page and their conversations show in History, where they continue. History's Bring over… offers it again. Read-only; Codex's compressed sessions are skipped and counted (106b) | 101 |
+| Imports your threads and projects on first launch | has (item 101e): the first launch after the setup offers the folders Claude Code and Codex worked in that are still on this Mac, with their conversations counted; the picked ones join the Code page and their conversations show in History, where they continue. History's Bring over… offers it again. Read-only; Codex's compressed sessions are read like plain ones, and one that cannot be unpacked is skipped and counted (106b) | 101 |
 | Thread switching on a bad connection | no (only the phone link's catch-up) | 108 |
 
 ## Agents and models
@@ -117,7 +117,7 @@ keeps them:
 | --- | --- | --- |
 | HTML an agent draws, with scripts | part (item 98): an html or svg block of an answer shows as a drawing on Show drawing, in a closed box, without its scripts: in WebKit a sandboxed script can reach the network in ways no policy covers (`docs/security/chat-drawings.md`) | 98 |
 | Files land where the agent can use them | has | |
-| Use across accounts and machines, outside sessions too | part: what Manut AI starts and, with a switch, what Claude Code and Codex write for sessions run outside it, this Mac (item 106; Codex only when not compressed; other Macs are item 108) | 106 |
+| Use across accounts and machines, outside sessions too | part: what Manut AI starts and, with a switch, what Claude Code and Codex write for sessions run outside it, this Mac (item 106; Codex's compressed sessions are read too, item 106b; other Macs are item 108) | 106 |
 | Limits left for each account | has | |
 | Send when the limit resets | has (item 95): a coding chat on a limited account offers Send at <time>; sent once when the account is usable, within the hour, else it asks first | 95 |
 | Themes, VS Code themes, chat width and fonts | part (item 99b, the owner's choice of 27 Nov): light and dark, text size, chat width (narrow, medium, wide), themes of the person's own (made from the look in force, six main colours edited, renamed, deleted, kept on this Mac) and VS Code themes imported from their JSON file, the terminal's colours included; each refused with why when its text reads under 4.5 to 1. Fonts not done | 99b |

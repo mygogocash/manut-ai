@@ -33,6 +33,7 @@ mod lock;
 mod machine;
 mod outside_use;
 mod past_chats;
+mod zst;
 mod import_past;
 mod new_project;
 mod project_icon;
