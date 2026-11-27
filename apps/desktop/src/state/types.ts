@@ -316,8 +316,13 @@ export type ReachAskItem = {
   lane?: string;
   error?: string;
 };
+/** A lead lane's helper rounds put back after a restart (item 102j-2, src/jobs/HelpersRestartCard.tsx): Land what they did and
+ *  Report to Kit, each a press; what became of them is the sessions store's (`restartOf`). Never saved itself: the rounds are, and
+ *  the card is made again from them at the next restart. */
+export type HelpersRestartItem = { kind: "helpersRestart"; id: string; ts: number; lead: string };
 export type ChatItem =
   | MessageItem
+  | HelpersRestartItem
   | ActivityItem
   | ApprovalItem
   | ClarifyItem

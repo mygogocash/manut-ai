@@ -508,6 +508,15 @@ describe("names and what is kept", () => {
     }
   });
 
+  it("a lead lane's open helper rounds are saved with it, and only a lead lane with a folder of its own, not a helper, reads them back", () => {
+    const rounds = { roundsThisMessage: 1, rounds: [{ id: "r1", dropped: { breaker: 0, person: 0 }, helpers: [{ index: 0, title: "A" }] }] };
+    const lane = { name: "kit/a", base: "main", dir: "/w/l/a", worktree: "/w/l/a" };
+    const snap = (s: Record<string, unknown>) => JSON.stringify({ v: 1, at: 1, bot: null, view: "chat", session: null, panelOpen: false, panelTab: "details", runsFull: false, runId: null, drafts: {}, sessions: [{ id: "s3", agent: "claude", cwd: DEV, startedAt: 1, view: "chat", running: false, ...s }] });
+    expect(parseResume(snap({ lane, helperRounds: rounds }))?.sessions[0].helperRounds).toEqual(rounds);
+    expect(parseResume(snap({ helperRounds: rounds }))?.sessions[0].helperRounds).toBeUndefined();
+    expect(parseResume(snap({ lane, helperRounds: rounds, helperOf: { lead: "s2", job: "jabc", round: "r0", index: 0 } }))?.sessions[0].helperRounds).toBeUndefined();
+  });
+
   it("a helper lane saved while it ran comes back paused under its lead: its round did not survive the restart, so nothing starts by itself", async () => {
     const t = await setup();
     t.ss.restore([
@@ -556,5 +565,99 @@ describe("safety: the helpers' report is the app's, not the person's (R4, R9; it
     // a third ask, after two reports and no word from the person: no card
     await t.turn(id, ask([{ title: "E", brief: "One more." }, { title: "F", brief: "And one more." }]));
     expect(cards()).toHaveLength(2);
+  });
+});
+
+describe("safety: a round open when the app closed (R11; item 102j-2)", () => {
+  const leadLane = { name: "kit/a", base: "main", dir: `${LANES}/a`, worktree: `${LANES}/a` };
+  const helperLane = (n: number) => ({ name: `kit/a-help-${n}`, base: "kit/a", dir: `${LANES}/a-help-${n}`, worktree: `${LANES}/a-help-${n}` });
+  const saved = () =>
+    parseResume(
+      JSON.stringify({
+        v: 1,
+        at: 1,
+        bot: null,
+        view: "chat",
+        session: null,
+        panelOpen: false,
+        panelTab: "details",
+        runsFull: false,
+        runId: null,
+        drafts: {},
+        sessions: [
+          {
+            id: "s3",
+            agent: "claude",
+            cwd: DEV,
+            startedAt: 1,
+            view: "chat",
+            running: false,
+            lane: leadLane,
+            helpers: true,
+            helperRounds: {
+              roundsThisMessage: 1,
+              rounds: [{ id: "r1", dropped: { breaker: 0, person: 0 }, helpers: [{ index: 0, title: "Tests", ended: "done", words: "Added the tests." }, { index: 1, title: "Thai date" }] }],
+            },
+          },
+          { id: "s4", agent: "claude", cwd: DEV, startedAt: 2, view: "chat", running: false, lane: helperLane(1), helperOf: { lead: "s3", job: "jabcdefghij", round: "r1", index: 0 } },
+          {
+            id: "s5",
+            agent: "claude",
+            cwd: DEV,
+            startedAt: 3,
+            view: "chat",
+            running: true,
+            agentSession: "c-help-2",
+            lane: helperLane(2),
+            helperOf: { lead: "s3", job: "jabcdefghij", round: "r1", index: 1 },
+            messages: [{ id: "m1", role: "assistant", text: "Half of the date is done.", ts: 5 }],
+          },
+        ],
+      }),
+    )!.sessions;
+  const detailLines = (t: Awaited<ReturnType<typeof setup>>) => (t.chat("s3")?.items ?? []).flatMap((i) => (i.kind === "system" && i.detail ? [i] : []));
+
+  it("comes back held with its card: nothing starts, lands or goes to the lead, however long it waits, and the rounds are saved again", async () => {
+    const t = await setup();
+    t.ss.restore(saved());
+    await settle();
+    for (let i = 0; i < 5; i++) {
+      for (const fn of t.timers) fn();
+      await settle();
+    }
+    expect(t.starts).toEqual([]);
+    expect(t.inputs).toEqual([]);
+    expect(detailLines(t)).toEqual([]);
+    expect((t.chat("s3")?.items ?? []).filter((i) => i.kind === "helpersRestart")).toEqual([expect.objectContaining({ lead: "s3" })]);
+    expect(t.ss.restartOf("s3")).toMatchObject({ state: "offered", canLand: true });
+    expect(t.ss.helperRounds("s3").roundsThisMessage).toBe(1);
+    // a second restart before the person pressed keeps them as they are
+    expect(t.ss.savedHelperRounds("s3")?.rounds[0].helpers.map((h) => [h.index, h.ended ?? "out"])).toEqual([
+      [0, "done"],
+      [1, "failed"],
+    ]);
+  });
+
+  it("Report to Kit starts the lead the restart left ended and tells it how each ended, the one cut off by its last answer, with nothing landed", async () => {
+    const t = await setup();
+    t.ss.restore(saved());
+    await settle();
+    expect(t.ss.reportRestored("s3")).toBe(true);
+    await settle();
+    // the press started the lead again (only the lead: no helper lane), and once it runs the reports go to it, once
+    expect(t.starts.map((s) => s.session)).toEqual(["s3"]);
+    for (const fn of t.timers) fn();
+    await settle();
+    const sent = t.of("s3", "send").map((i) => (i.input as { text: string }).text);
+    expect(sent.filter((x) => x.includes("[Manut AI: your helper lanes reported]"))).toHaveLength(1);
+    const [line] = detailLines(t);
+    expect(line?.text).toBe("Helpers reported to Kit.");
+    expect(line?.detail?.text).toContain("[Manut AI: your helper lanes reported]");
+    expect(line?.detail?.text).toContain("Half of the date is done.");
+    expect(line?.detail?.text).toContain("The app closed while it worked");
+    expect(line?.detail?.text).toContain("the person reported without landing it");
+    expect(t.ss.restartOf("s3")?.state).toBe("reported");
+    expect(t.ss.helperRounds("s3").rounds).toEqual([]);
+    expect(t.ss.savedHelperRounds("s3")).toBeNull();
   });
 });

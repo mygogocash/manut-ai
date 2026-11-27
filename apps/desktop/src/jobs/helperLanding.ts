@@ -12,21 +12,25 @@
 // - A late report (a helper the person stopped, back after its round was handed over) is shown on its row and nothing of it lands
 //   or is sent.
 //
-// Rounds live in memory only (items 102e and 102h), so after a restart nothing lands and nothing is sent: the helper lanes stay as
-// ordinary lanes the person can open.
+// After a restart (item 102j-2, rule R11) the rounds the snapshot kept come back all back (helperRestore.ts), and `restore` holds
+// them: nothing lands and nothing goes to the lead until the person presses Land what they did (`landRestored`, the same landing
+// as above, one at a time while the lead is idle) or Report to Kit (`reportRestored`, which settles any landing still not done as
+// not landed and lets the hand-over go as above). Each press is the person's, once.
 //
 // `createHelperLandings` takes everything it reads as `LandingDeps`, so a test drives it with stand-ins.
 import type { LaneLanded } from "../code/laneBranch";
 import type { HelperRow } from "./helperAsks";
 import type { HelperBack } from "./helperRuns";
 import { reportMessage } from "./helperReports";
-import { settleLanding, takeHandOver, type Landing, type Rounds } from "./rules";
+import { landingOutcome, settleLanding, takeHandOver, type HelperReport, type Landing, type Rounds } from "./rules";
 
 export interface LandingDeps {
   /** The folder a session's lane works in, or null when it has none. */
   laneDir(id: string): string | null;
   /** A turn of session `id` runs. */
   working(id: string): boolean;
+  /** Session `id`'s agent runs and can take a message: the reports wait for it (a lead paused by a restart, or closed). */
+  ready(id: string): boolean;
   /** The asks and questions of session `id` that wait on the person. */
   asks(id: string): string[];
   /** A message of the person's waits to go to session `id`. */
@@ -49,7 +53,8 @@ export interface LandingDeps {
 
 /** A helper's landing as its row shows it. */
 export interface LandingView {
-  readonly state: "waiting" | "landing" | "landed" | "nothing" | "kept" | "failed" | "takenBack";
+  /** `held`: back from before a restart and not landed; it lands only on the person's Land what they did (item 102j-2) */
+  readonly state: "waiting" | "landing" | "landed" | "nothing" | "kept" | "failed" | "takenBack" | "held";
   readonly files: readonly string[];
   readonly filesTotal: number;
   readonly conflicts: readonly string[];
@@ -91,6 +96,47 @@ const viewOf = (l: LaneLanded): LandingView => ({
   error: l.error,
 });
 
+/** A landing settled before a restart, as its row shows it. Its files are known; whether a key was in them is not kept. */
+export function viewFromLanding(l: Landing | null): LandingView {
+  if (!l) return { ...WAITING, state: "nothing" };
+  const files = l.files.map((f) => f.path);
+  const base = { ...WAITING, files, filesTotal: files.length, conflicts: l.conflicts, patch: l.patchPath ?? "" };
+  switch (landingOutcome(l)) {
+    case "changedNothing":
+      return { ...base, state: "nothing" };
+    case "keptOutside":
+      return { ...base, state: "kept", why: "outside" };
+    case "keptPatch":
+      return { ...base, state: "kept", why: "would_not_apply" };
+    case "failed":
+      return { ...base, state: "failed", error: l.error ?? "" };
+    default:
+      return { ...base, state: "landed" };
+  }
+}
+
+/** A helper of a round put back after a restart (item 102j-2). */
+export interface RestoredHelper {
+  readonly round: string;
+  readonly index: number;
+  readonly title: string;
+  /** its lane's session, when it started and is still listed */
+  readonly session: string | null;
+  readonly report: HelperReport;
+}
+
+/** Where a lead's put-back rounds are: offered (nothing pressed), landing (Land what they did pressed), reporting (Report to Kit
+ *  pressed, the reports waiting for the landings and an idle lead), reported. */
+export interface RestartView {
+  readonly state: "offered" | "landing" | "reporting" | "reported";
+  readonly helpers: readonly { readonly round: string; readonly index: number; readonly title: string }[];
+  /** a helper's work still waits for Land what they did */
+  readonly canLand: boolean;
+}
+
+/** Why a put-back helper's work did not land, in the lead's words, when the person reported without landing it. */
+export const NOT_LANDED = "the app closed before it landed, and the person reported without landing it; its work is still in its own lane";
+
 export function createHelperLandings(d: LandingDeps) {
   /** Helpers back and waiting to land, by lead, in the order they came back. */
   const queues = new Map<string, HelperBack[]>();
@@ -99,10 +145,24 @@ export function createHelperLandings(d: LandingDeps) {
   const views = new Map<string, LandingView>();
   const dirs = new Map<string, string>();
   const leads = new Set<string>();
+  /** Leads whose put-back rounds wait for the person's press: no hand-over goes for them (item 102j-2). */
+  const held = new Set<string>();
+  const restarts = new Map<string, { state: RestartView["state"]; helpers: RestoredHelper[] }>();
+  let restartSnap: ReadonlyMap<string, RestartView> = new Map();
   const listeners = new Set<() => void>();
   let snap: ReadonlyMap<string, LandingView> = new Map();
   const changed = () => {
     snap = new Map(views);
+    restartSnap = new Map(
+      [...restarts].map(([lead, r]) => [
+        lead,
+        {
+          state: r.state,
+          helpers: r.helpers.map(({ round, index, title }) => ({ round, index, title })),
+          canLand: r.state === "offered" && r.helpers.some((h) => views.get(keyOf(h.round, h.index))?.state === "held"),
+        },
+      ]),
+    );
     for (const f of listeners) f();
   };
   const keyOf = (round: string, index: number) => `${round}:${index}`;
@@ -117,6 +177,9 @@ export function createHelperLandings(d: LandingDeps) {
   const leadIdle = (lead: string) => !d.working(lead) && d.asks(lead).length === 0;
 
   const handOver = async (lead: string): Promise<void> => {
+    // rounds put back after a restart go only once the person pressed Report to Kit, and none go to a lead whose agent is not
+    // running: they wait for it, rather than being taken and lost
+    if (held.has(lead) || !d.ready(lead)) return;
     const r = d.rounds(lead);
     if (!r.rounds.length) return;
     const helperAsks = d.helperSessions(lead).reduce((n, s) => n + d.asks(s).length, 0);
@@ -130,6 +193,11 @@ export function createHelperLandings(d: LandingDeps) {
     // the person reads every word that went in their chat's name, and, when it could not go, the reports are still theirs to read
     if (await d.send(lead, text)) d.note(lead, w.reported, { label: w.showSent, text });
     else d.note(lead, w.failed, { label: w.showUnsent, text });
+    const restart = restarts.get(lead);
+    if (restart) {
+      restarts.set(lead, { ...restart, state: "reported" });
+      changed();
+    }
   };
 
   const pump = async (lead: string): Promise<void> => {
@@ -184,6 +252,51 @@ export function createHelperLandings(d: LandingDeps) {
       set(key, WAITING);
       void pump(b.lead);
     },
+    /** A lead's rounds put back after a restart (item 102j-2): shown, held, and nothing of them lands or goes until a press. */
+    restore(lead: string, helpers: readonly RestoredHelper[]): void {
+      leads.add(lead);
+      held.add(lead);
+      for (const h of helpers) {
+        const l = h.report.landing;
+        set(keyOf(h.round, h.index), l === "pending" ? { ...WAITING, state: "held" } : viewFromLanding(l));
+      }
+      restarts.set(lead, { state: "offered", helpers: [...helpers] });
+      changed();
+    },
+    /** Land what they did: each put-back helper's work not landed yet lands as any landing does, while the lead is idle. Once. */
+    landRestored(lead: string): boolean {
+      const r = restarts.get(lead);
+      if (!r || r.state !== "offered") return false;
+      restarts.set(lead, { ...r, state: "landing" });
+      for (const h of r.helpers) {
+        const key = keyOf(h.round, h.index);
+        if (views.get(key)?.state !== "held") continue;
+        queues.set(lead, [...(queues.get(lead) ?? []), { lead, round: h.round, index: h.index, session: h.session, report: h.report, kept: true }]);
+        set(key, WAITING);
+      }
+      changed();
+      void pump(lead);
+      return true;
+    },
+    /** Report to Kit: what was not landed is settled as not landed (its work stays in its lane), and the reports go to the lead as
+     *  any hand-over does, after the landings Land what they did started have settled. Once. */
+    reportRestored(lead: string): boolean {
+      const r = restarts.get(lead);
+      if (!r || r.state === "reported" || !held.has(lead)) return false;
+      for (const h of r.helpers) {
+        const key = keyOf(h.round, h.index);
+        if (views.get(key)?.state !== "held") continue;
+        d.setRounds(lead, settleLanding(d.rounds(lead), h.round, h.index, { files: [], conflicts: [], error: NOT_LANDED }));
+        set(key, { ...WAITING, state: "failed", error: NOT_LANDED });
+      }
+      held.delete(lead);
+      restarts.set(lead, { ...r, state: "reporting" });
+      changed();
+      void pump(lead);
+      return true;
+    },
+    restartOf: (lead: string): RestartView | null => restartSnap.get(lead) ?? null,
+    restartSnapshot: (): ReadonlyMap<string, RestartView> => restartSnap,
     /** Tries the lead's landings and hand-over now (a turn of it ended, an ask was answered). */
     poke(lead: string): Promise<void> {
       return leads.has(lead) ? pump(lead) : Promise.resolve();

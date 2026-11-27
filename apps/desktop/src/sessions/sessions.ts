@@ -76,6 +76,7 @@ import { recordError } from "../report/errors";
 import { notesSaid } from "./projectNotes";
 import { createLeadLanes } from "../jobs/leadLanes";
 import { createHelperLandings } from "../jobs/helperLanding";
+import { restoreRounds, saveRounds, type SavedRounds } from "../jobs/helperRestore";
 import { createHelperRuns, type StartHelper } from "../jobs/helperRuns";
 import type { LaneMade } from "../code/laneBranch";
 import { createReach, type OpenLane } from "../jobs/reachChats";
@@ -243,6 +244,10 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
       return lane?.worktree ?? lane?.dir ?? null;
     },
     working: (id) => working(id),
+    ready: (id) => {
+      const p = procs.get(id);
+      return !!p && p.kind === "agent" && p.hostId !== undefined && rec(id)?.status === "running";
+    },
     asks: (id) => {
       const key = keys.get(id);
       return key ? selectAsks(store().getState()).filter((a) => a.bot === key).map((a) => a.item.request_id) : [];
@@ -2725,7 +2730,8 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
       // TERMINALS lists terminal sessions only: a saved chat-mode session is kept as it was (its files and messages
       // stay) but is not listed and never starts again
       const terminalOnly = !isTerminalRec(state.agents, { agent: s.agent, open: s.open, status: "exited" });
-      // a helper lane is not started again by itself: its round did not survive the restart, so it comes back paused (item 102h)
+      // a helper lane is not started again by itself: it comes back paused, and its round, saved with its lead, comes back held
+      // for the person's Land what they did and Report to Kit (items 102h and 102j-2)
       const auto = !terminalOnly && s.running && mode === "chat" && continuesItself(s) && !s.helperOf;
       // a TERMINALS Claude Code or Codex session that was running continues its own conversation in a fresh terminal;
       // an oh-my-hermes one starts again, and `omh` reopens what it dropped there
@@ -2802,6 +2808,8 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     // the kept history of terminals that are gone goes (the bottom panel's tabs keep theirs)
     void ready().then(() => pruneHistory(host, [...ids, ...savedPanelKeys()]));
     saveSentFiles(Object.fromEntries(Object.entries(sentFiles).filter(([sid]) => ids.includes(sid))));
+    // a lead's helper rounds open when the app closed come back held, with their card (item 102j-2)
+    for (const s of saved) if (s.helperRounds && rec(s.id) && keys.has(s.id)) restoreHelperRounds(s.id, s.helperRounds, saved);
 
     // the home folder (for `~/…` paths) and each agent's mode, as a first launch would read them; then the generic ACP
     // agents' chats whose row says they continue go on by themselves, as the others did
@@ -2838,6 +2846,34 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
         ),
       );
   };
+
+  /** A lead's rounds put back after a restart (item 102j-2, `src/jobs/helperRestore.ts`): every round back and held, a helper
+   *  that was still out reporting its last saved answer, and the Land what they did / Report to Kit card at the end of the lead's
+   *  chat. Nothing lands, starts or is sent here. */
+  const restoreHelperRounds = (lead: string, savedRounds: SavedRounds, saved: readonly SavedSession[]) => {
+    const helperOf = (round: string, index: number) => saved.find((x) => x.helperOf?.lead === lead && x.helperOf.round === round && x.helperOf.index === index);
+    const lastAnswer = (round: string, index: number) => [...(helperOf(round, index)?.messages ?? [])].reverse().find((m) => m.role === "assistant")?.text ?? "";
+    const rounds = restoreRounds(savedRounds, lastAnswer);
+    leads.setRounds(lead, rounds);
+    landings.restore(
+      lead,
+      rounds.rounds.flatMap((x) =>
+        x.reports.map((report) => {
+          const h = helperOf(x.id, report.index);
+          return { round: x.id, index: report.index, title: report.title, session: h && rec(h.id) ? h.id : null, report };
+        }),
+      ),
+    );
+    const key = keys.get(lead);
+    if (key) store().dispatch({ type: "helpers.restart", bot: key, item: { kind: "helpersRestart", id: `helpers-restart-${lead}`, ts: Date.now() / 1000, lead } });
+  };
+
+  /** What the resume snapshot keeps of lead `id`'s open helper rounds (item 102j-2), or null when it has none. */
+  const savedHelperRounds = (id: string): SavedRounds | null =>
+    saveRounds(leads.roundsOf(id), (round, index) => {
+      const h = state.list.find((r) => r.helperOf?.lead === id && r.helperOf.round === round && r.helperOf.index === index);
+      return h ? pickTitle(h, folderName(h.cwd)).title : `Helper ${index + 1}`;
+    });
 
   /** Make session `id`'s terminal and start its program without showing it: measured in a box off the page, then
    *  taken off it, as a terminal whose view the person left. Nothing happens when its view already made it. */
@@ -3236,6 +3272,19 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     whenHelperRoundApproved: (fn: Parameters<typeof leads.whenRoundApproved>[0]) => leads.whenRoundApproved(fn),
     /** Session `id`'s rounds of helper lanes, as item 102d's rules keep them. */
     helperRounds: (id: string) => leads.roundsOf(id),
+    savedHelperRounds,
+    /** The restart card's presses (item 102j-2): Land what they did, and Report to Kit, each once. */
+    landRestored: (lead: string) => landings.landRestored(lead),
+    reportRestored: (lead: string) => {
+      if (!landings.reportRestored(lead)) return false;
+      // the press asks for the reports to reach Kit: a lead the restart left paused, or one that ended, starts again for them
+      const r = rec(lead);
+      if (r?.paused) void resume(lead);
+      else if (r && !procs.has(lead) && (r.status === "exited" || r.status === "failed")) void restart(lead);
+      return true;
+    },
+    restartOf: (lead: string) => landings.restartOf(lead),
+    restartSnapshot: () => landings.restartSnapshot(),
     /** The helper lanes of round `round` (the Card's rows, item 102h), and how to hear them change. */
     helperRuns: (round: string) => runs.roundRuns(round),
     onHelperRuns: (fn: () => void) => runs.subscribe(fn),

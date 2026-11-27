@@ -36,6 +36,7 @@ import {
   type ThreadLinkItem,
   type ThreadRouteItem,
   type HelpersAskItem,
+  type HelpersRestartItem,
   type ReachAskItem,
   type Turn,
   type Chat,
@@ -193,6 +194,8 @@ export type Action =
   | { type: "helpers.ask"; bot: string; item: HelpersAskItem }
   /** What became of a Start helpers card: started, Not now, or gone (the person wrote again). Only an open card changes. */
   | { type: "helpers.done"; bot: string; id: string; done: NonNullable<HelpersAskItem["done"]> }
+  /** A lead's helper rounds put back after a restart: the Land what they did / Report to Kit card at the end of its chat (item 102j-2). */
+  | { type: "helpers.restart"; bot: string; item: HelpersRestartItem }
   /** A reach card, at the end of the asking chat (item 102k, src/jobs/reachChats.ts). */
   | { type: "reach.ask"; bot: string; item: ReachAskItem }
   /** What became of a reach card: pressed yes (then the lane it opened, or what went wrong), pressed no, or gone. Only an open card
@@ -604,6 +607,9 @@ export function reduce(state: AppState, a: Action): AppState {
       });
     case "helpers.ask":
       // a lead lane's Start helpers card, after the answer that asked (item 102e)
+      return touchChat(state, a.bot, (c) => (c.items.some((i) => i.id === a.item.id) ? c : withItems(c, [...c.items, a.item])));
+    case "helpers.restart":
+      // a lead's helper rounds put back after a restart, with their two presses (item 102j-2)
       return touchChat(state, a.bot, (c) => (c.items.some((i) => i.id === a.item.id) ? c : withItems(c, [...c.items, a.item])));
     case "helpers.done":
       return touchChat(state, a.bot, (c) =>

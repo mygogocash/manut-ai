@@ -9,6 +9,7 @@ import { isLinkId } from "../sessions/termLink";
 import { parseEntries, type ReachEntry } from "../jobs/reachList";
 import { cleanShellId } from "../sessions/term/settings";
 import { isObj } from "../lib/guards";
+import { parseSavedRounds, type SavedRounds } from "../jobs/helperRestore";
 
 export const RESUME_KEY = "manut.resume";
 export const RESUME_VERSION = 1;
@@ -89,6 +90,8 @@ export interface SavedSession {
   job?: string;
   /** A helper lane's lead, job, round and place in it (SessionRec `helperOf`, item 102h). */
   helperOf?: { lead: string; job: string; round: string; index: number };
+  /** A lead lane's helper rounds open when the app closed (item 102j-2, src/jobs/helperRestore.ts). */
+  helperRounds?: SavedRounds;
 }
 
 export interface SavedLane {
@@ -189,6 +192,9 @@ function parseSession(v: unknown): SavedSession | null {
   // a helper lane keeps what names its lead and its round (item 102h); one that cannot be read is an ordinary lane
   const helperOf = parseHelperOf(v.helperOf);
   if (helperOf && lane?.dir) out.helperOf = helperOf;
+  // a lead lane's open helper rounds, each part checked; a lane that is itself a helper has none (item 102j-2)
+  const helperRounds = lane?.dir && !out.helperOf ? parseSavedRounds(v.helperRounds) : null;
+  if (helperRounds) out.helperRounds = helperRounds;
   // the chats the person listed under its box, each checked as it is read back; one that cannot be read is left out (item 102k)
   const reach = parseEntries(v.reach);
   if (reach.length) out.reach = reach;
