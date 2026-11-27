@@ -298,6 +298,10 @@ export interface Actions {
   readThread(bot: string, thread: string): Promise<{ role: "user" | "assistant"; text: string }[]>;
   /** Send in a thread; the first message names it. `how` as `send`'s. */
   threadSend(bot: string, thread: string, text: string, how?: FollowUp): Promise<void>;
+  /** What one of Buddy's reach cards posts once the person pressed it (item 102l-3, src/jobs/buddyReach.ts): `wire` sent once to chat
+   *  `key` (a bot's main chat, or a thread's `fold:` key), its bubble showing `shown`. It is never held, steered or sent again: a
+   *  refusal, or a request that got no answer, marks the bubble not sent and is the reason this resolves with; null when it went. */
+  postFromCard(key: string, shown: string, wire: string): Promise<string | null>;
   threadInterrupt(bot: string, thread: string): Promise<void>;
   /** Stop the thread when it runs, then archive it in Hermes (hidden, kept, restorable). Rejects on refusal. */
   removeThread(bot: string, thread: string): Promise<void>;
@@ -1465,6 +1469,24 @@ export function createStore(bridge: BridgeLike, opts: StoreOptions = {}): Store 
         dispatch({ type: "send.ok", bot: key, id, now: now() });
       } catch (e) {
         dispatch({ type: "send.failed", bot: key, id, error: errText(e) });
+      }
+    },
+    async postFromCard(key, shown, wire) {
+      const to = chatTarget(key);
+      if (to.session) threadRoute(to.bot, to.session);
+      const id = `local-${++localSeq}`;
+      dispatch({ type: "local.user", bot: key, id, text: shown, now: now() });
+      const row = to.session ? (state.threads[to.bot] ?? []).find((r) => r.thread === to.session) : undefined;
+      // a conversation the card started reads its first words at once, as the API names it by them
+      if (row && !row.title) dispatch({ type: "thread.upsert", bot: to.bot, row: { ...row, title: firstWords(bareText(wire)), last: now() / 1000 } });
+      try {
+        await bridge.request("chat.send", { ...to, text: wire });
+        dispatch({ type: "send.ok", bot: key, id, now: now() });
+        return null;
+      } catch (e) {
+        const error = errText(e);
+        dispatch({ type: "send.failed", bot: key, id, error });
+        return error;
       }
     },
     async threadSendWithFiles(bot, thread, text, files, how) {

@@ -24,11 +24,17 @@
 // - Nothing typed or answered is kept on disk or in the read of the shop kept for offline use: what this module holds (the
 //   conversations' ids, titles and counts) is in memory for this run, and goes when the person signs out. While only a kept read is
 //   shown, nothing here is sent or read: the kept read holds no chat.
+// - The reach cards' lines (item 102l-3, docs/connected-chat.md, C; src/jobs/reachMarks.ts): a message may carry Buddy's note naming the
+//   conversations Buddy may reach (`note`, a whole note and nothing else), posted after the owner's words so the API names a new
+//   conversation by them. Reading a conversation back takes the note off, draws a message sent on from another conversation with its
+//   mark in front, and hides the reach block of an answer to a message that carried the note, since its card was the place for it.
 import { dayTime } from "../../app/time";
 import { t } from "../../i18n";
 import { isObj } from "../../lib/guards";
 import type { BridgeEvent, ShopRole, ShopRow } from "../../lib/protocol";
 import type { ThreadEvent, ThreadOpenResult, ThreadRow } from "../../threads/types";
+import { hideReachBlocks } from "../../jobs/reachBlocks";
+import { isBuddyNote, keptAsShown, shownTitle, withBuddyNote } from "../../jobs/reachMarks";
 import { OpError } from "../mock/host";
 import type { Departure, ShopAnswer } from "./shops";
 import { TEAM } from "./view";
@@ -177,6 +183,12 @@ type Target = { main: MainChat; conv?: undefined } | { conv: Conversation; main?
 
 type Refused = Exclude<ShopAnswer, { kind: "ok" }>;
 const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : null);
+/** How many characters `s` has as the API counts them: by code point, so Thai counts as any other and an emoji as one. */
+function characters(s: string): number {
+  let n = 0;
+  for (const _ of s) n += 1;
+  return n;
+}
 
 /** Buddy's chat over `link`: one per host. */
 export class BuddyChat {
@@ -188,6 +200,8 @@ export class BuddyChat {
   /** The last message of each chat on its way, so the next one waits for it (`inTurn`). */
   private readonly turns = new WeakMap<object, Promise<unknown>>();
   private made = 0;
+  /** How many messages Buddy's main chat has sent this run, so opening it can tell one sent while it was opening (`openingMark`). */
+  private mainSent = 0;
 
   constructor(private readonly link: ChatLink) {}
 
@@ -196,9 +210,20 @@ export class BuddyChat {
     return typeof id === "string" && this.convs.has(id);
   }
 
+  /** Taken when `chat.open` of Buddy's main chat starts, and handed back to `opened` once the shop's read it waits for is done. */
+  openingMark(): number {
+    return this.mainSent;
+  }
+
   /** Buddy's main chat was opened, for the shop the switcher shows now: its next message starts a new conversation there, as the chat
-   *  the person sees holds none of an earlier one (its earlier conversation is listed with the others). */
-  opened(): void {
+   *  the person sees holds none of an earlier one (its earlier conversation is listed with the others). `mark` (`openingMark`, taken
+   *  when the opening started): a message the person sent while the chat was opening already went, or is going, to a conversation of
+   *  the chat being opened, which goes on with it; starting another then would split what they wrote in two (item 102l-3 found it). */
+  opened(mark?: number): void {
+    if (mark !== undefined && mark !== this.mainSent && this.main) {
+      this.main.opened = true;
+      return;
+    }
     this.main = { shop: this.link.viewing(), api: null, opened: true };
   }
 
@@ -209,13 +234,18 @@ export class BuddyChat {
     this.byApi.clear();
   }
 
-  /** `chat.send` to Buddy: one message, posted once with the owner session of the chat's shop, and Buddy's answer as one turn. */
-  async send(p: { text?: unknown; session?: unknown }): Promise<{ input_id: string }> {
+  /** `chat.send` to Buddy: one message, posted once with the owner session of the chat's shop, and Buddy's answer as one turn. `note`:
+   *  Buddy's note naming the conversations it may reach (item 102l-3), posted after the words; anything but a whole note is refused
+   *  with nothing sent, so nothing rides after a message that reading it back would hide. */
+  async send(p: { text?: unknown; session?: unknown; note?: unknown }): Promise<{ input_id: string }> {
     this.link.live();
     const target = this.target(p.session);
     const shop = this.owned(target.main ? target.main.shop : target.conv.shop);
-    const text = this.words(p.text);
-    return this.inTurn(target.main ?? target.conv, () => this.post(shop, target, text));
+    if (p.note !== undefined && !isBuddyNote(p.note)) throw new OpError("invalid_request", t("rt.chat.refused"));
+    const note = p.note === undefined ? null : p.note;
+    const text = this.words(p.text, note);
+    if (target.main) this.mainSent += 1;
+    return this.inTurn(target.main ?? target.conv, () => this.post(shop, target, note === null ? text : withBuddyNote(text, note)));
   }
 
   /** `thread.create` for Buddy: a conversation prepared here, for the shop the switcher shows, with nothing sent. The API makes a
@@ -312,11 +342,13 @@ export class BuddyChat {
     return row;
   }
 
-  /** A message's words, trimmed as the API keeps them; what the API would refuse is refused here first. */
-  private words(v: unknown): string {
+  /** A message's words, trimmed as the API keeps them; what the API would refuse is refused here first. With Buddy's note after them,
+   *  the words have that much less room, and the refusal says how much they have. */
+  private words(v: unknown, note: string | null): string {
     const text = typeof v === "string" ? v.trim() : "";
     if (!text) throw new OpError("invalid_text", t("rt.chat.empty"));
-    if ([...text].length > MAX_CHAT_TEXT) throw new OpError("text_too_long", t("rt.chat.tooLong", { max: MAX_CHAT_TEXT }));
+    const room = note === null ? MAX_CHAT_TEXT : MAX_CHAT_TEXT - characters(note) - 2;
+    if (characters(text) > room) throw new OpError("text_too_long", note === null ? t("rt.chat.tooLong", { max: MAX_CHAT_TEXT }) : t("rt.chat.tooLongNoted", { max: room }));
     return text;
   }
 
@@ -353,9 +385,10 @@ export class BuddyChat {
 
   /** Keeps what the API said of a conversation of `shop`, under the id the screens already call it (`id`), else the one they called
    *  it by before, else its own. A conversation already known is updated in place: a message waiting behind the one that made it
-   *  holds that same record (`inTurn`), and must see the API's id. */
+   *  holds that same record (`inTurn`), and must see the API's id. Its name is the API's without the start of Manut AI's lines after a
+   *  short first message (`shownTitle`, item 102l-3). */
   private remember(shop: string, view: ChatThreadView, id = this.byApi.get(view.id) ?? view.id): Conversation {
-    const said = { shop, api: view.id, title: view.title, createdAt: view.createdAt, updatedAt: view.updatedAt, count: view.messageCount };
+    const said = { shop, api: view.id, title: shownTitle(view.title), createdAt: view.createdAt, updatedAt: view.updatedAt, count: view.messageCount };
     const was = this.convs.get(id);
     const conv: Conversation = was ? Object.assign(was, said) : { id, key: null, ...said };
     this.convs.set(id, conv);
@@ -434,6 +467,28 @@ function rowOf(conv: Conversation): ThreadRow {
   };
 }
 
+/** A conversation's messages as the screens draw them (item 102l-3): an owner's message without Buddy's note and with a sent-on mark in
+ *  front; Buddy's answer to a message that carried the note without its reach block, which its card stood for while the app ran (an
+ *  answer that was only the block leaves no message, as it left no bubble then). Any other answer keeps every word Buddy wrote. */
+function shownMessages(api: string, messages: ChatMessageView[]): ThreadOpenResult["messages"] {
+  const out: ThreadOpenResult["messages"] = [];
+  let noted = false;
+  for (const m of messages) {
+    const id = `${api}/${m.id}`;
+    const ts = m.at / 1000;
+    if (m.from === "owner") {
+      const kept = keptAsShown(m.text);
+      noted = kept.noted;
+      out.push({ id, role: "user", text: kept.text, ts });
+      continue;
+    }
+    const text = noted ? hideReachBlocks(answerText(m)) : answerText(m);
+    noted = false;
+    if (text.trim()) out.push({ id, role: "assistant", text, ts });
+  }
+  return out;
+}
+
 function openOf(conv: Conversation, messages: ChatMessageView[]): ThreadOpenResult {
   const api = conv.api ?? conv.id;
   return {
@@ -441,7 +496,7 @@ function openOf(conv: Conversation, messages: ChatMessageView[]): ThreadOpenResu
     session_id: conv.id,
     title: conv.title,
     cwd: "",
-    messages: messages.map((m) => ({ id: `${api}/${m.id}`, role: m.from === "owner" ? ("user" as const) : ("assistant" as const), text: m.from === "buddy" ? answerText(m) : m.text, ts: m.at / 1000 })),
+    messages: shownMessages(api, messages),
     running: false,
     model: "",
     provider: "",

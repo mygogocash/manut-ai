@@ -147,6 +147,8 @@ export const rt = {
   "rt.chat.threadFull": "This conversation holds {max} messages, the most it can. Start a new conversation to go on.",
   "rt.chat.threadsFull": "The shop keeps at most {max} conversations with Buddy. Remove one to start another.",
   "rt.chat.tooLong": "A message to Buddy can be at most {max} characters.",
+  // item 102l-3: the note naming the conversations Buddy may reach goes with each message while the list holds one
+  "rt.chat.tooLongNoted": "With conversations on Buddy's list, a message can be at most {max} characters: the note naming them goes with it.",
   "rt.chat.empty": "Write something for Buddy first.",
   "rt.chat.threadGone": "This conversation is not there any more.",
   "rt.chat.noShop": "Buddy's chat is a shop's: open your shop, or make one, first.",

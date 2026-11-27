@@ -13,6 +13,8 @@ import { rowStatus } from "./ThreadTree";
 import { StatusGlyph } from "./StatusGlyph";
 import { AgentBoxTools, pickFolder, teammates, useAgentBox } from "../chat/box/AgentBox";
 import { chatScope } from "../chat/box/scope";
+import { runtimeKind } from "../runtime";
+import { BuddyMayReach } from "../jobs/MayReach";
 
 export function ThreadChat({ bot, thread }: { bot: Bot; thread: string }) {
   const s = useStore();
@@ -82,6 +84,8 @@ export function ThreadChat({ bot, thread }: { bot: Bot; thread: string }) {
           voice={!!box}
           // a note or another chat's context made in this shop goes only to this shop's chats (item 97)
           scope={chatScope(key, s.shops.current, null, null)}
+          // on Connected, the other conversations Buddy may ask to reach from this one, each only after a card (item 102l-3)
+          foot={runtimeKind() === "http" ? <BuddyMayReach chatKey={key} /> : undefined}
         />
       </div>
     </>

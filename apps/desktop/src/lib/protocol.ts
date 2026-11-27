@@ -401,7 +401,9 @@ export interface OpMap extends MissionOps, MemoryOps, RoutineOps, ConnectionOps,
   /** `reply_to` = an elsewhere session id: the bridge adds that thread as context for the bot.
    *  manut posts nothing. */
   /** `queued`: a held message (steer queue); a still-busy Hermes runs it after its current work, never steers it. */
-  "chat.send": { params: { bot: string; text: string; session?: string; reply_to?: string; queued?: boolean }; result: { input_id: string } };
+  /** `note`: on the Connected runtime, Buddy's note naming the conversations it may reach (item 102l-3, src/jobs/reachMarks.ts), which
+   *  the runtime posts after `text`; every other runtime has no such list, and nothing sends it there. */
+  "chat.send": { params: { bot: string; text: string; session?: string; reply_to?: string; queued?: boolean; note?: string }; result: { input_id: string } };
   "chat.interrupt": { params: { bot: string; session?: string }; result: Record<string, never> };
   /** Steer the main chat's running turn (Hermes' `session.steer`): `queued` = taken, `rejected` = not (no turn runs,
    *  or Hermes refused). The bridge never sends a refused steer another way. */

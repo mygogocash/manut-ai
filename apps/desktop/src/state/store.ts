@@ -6,7 +6,8 @@
 // app's one store, its notifications and the hook, and re-exports every name it exported when it was one file, so
 // no import elsewhere changed.
 import { useSyncExternalStore } from "react";
-import { createRuntime } from "../runtime";
+import { createRuntime, runtimeKind } from "../runtime";
+import { activeBuddyReach, withBuddyReach } from "../jobs/buddyReachBridge";
 import {
   bringToFront,
   createNoteGate,
@@ -94,7 +95,9 @@ export function setNotifyErrorsEnabled(on: boolean): void {
 
 let singleton: Store | null = null;
 export function getStore(): Store {
-  return (singleton ??= createStore(createRuntime(), {
+  // On Connected, Buddy's reach cards stand in the runtime's way (item 102l-3, src/jobs/buddyReachBridge.ts); they act only once a
+  // list holds a conversation, so every other runtime is handed over as it is.
+  return (singleton ??= createStore(runtimeKind() === "http" ? withBuddyReach(createRuntime(), activeBuddyReach) : createRuntime(), {
     onEvent(ev, state) {
       notifySessionEvent(ev, state);
     },

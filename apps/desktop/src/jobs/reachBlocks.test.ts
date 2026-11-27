@@ -1,7 +1,7 @@
 // Item 102k's reach blocks (docs/several-agents.md, rule R10): a read, a send and an open, each read with item 102e's fence walk;
 // a block with a key outside its own refused whole; one request an answer; quoted examples are the agent's own words.
 import { describe, expect, it } from "vitest";
-import { MESSAGE_MAX, REACH_KEYS, endsInReachBlock, hasReachBlock, hideReachBlocks, reachOutcome, reachReply } from "./reachBlocks";
+import { BUDDY_GRAMMAR, BUDDY_MESSAGE_MAX, MAC_GRAMMAR, MESSAGE_MAX, REACH_KEYS, endsInReachBlock, hasReachBlock, hideReachBlocks, reachOutcome, reachReply } from "./reachBlocks";
 import { helperOutcome } from "./helperBlocks";
 
 const block = (word: string, o: unknown) => `\`\`\`manut-${word}\n${typeof o === "string" ? o : JSON.stringify(o)}\n\`\`\``;
@@ -99,5 +99,38 @@ describe("hiding a block while it streams", () => {
     expect(reachReply(["plain", block("read", { chat: "1" }), "after"])).toBe(1);
     expect(reachReply([block("read", {}), "x", '```manut-send\n{"chat": "2"}\n```'])).toBe(2);
     expect(reachReply(["plain"])).toBeNull();
+  });
+});
+
+// Item 102l-3: Buddy's blocks on the Connected runtime take the same fences with what differs handed in (`BUDDY_GRAMMAR`).
+describe("Buddy's blocks on Connected (item 102l-3)", () => {
+  it("reads a read and a send as a coding chat's, and a new conversation by its brief alone, named by its first words", () => {
+    expect(reachOutcome(block("read", { chat: "1" }), BUDDY_GRAMMAR)).toEqual({ kind: "request", request: { kind: "read", chat: "1" } });
+    expect(reachOutcome(block("send", { chat: "2", message: "Please confirm the price." }), BUDDY_GRAMMAR)).toEqual({
+      kind: "request",
+      request: { kind: "send", chat: "2", message: "Please confirm the price." },
+    });
+    expect(reachOutcome(block("open", { brief: "Plan the Songkran sale for next week" }), BUDDY_GRAMMAR)).toEqual({
+      kind: "request",
+      request: { kind: "open", lane: { title: "Plan the Songkran sale for next week", brief: "Plan the Songkran sale for next week" } },
+    });
+  });
+
+  it("refuses a new conversation's title, agent, model or effort whole, since the API keeps none of them", () => {
+    for (const key of ["title", "agent", "model", "effort"]) {
+      expect(reachOutcome(block("open", { brief: "Plan the sale", [key]: "x" }), BUDDY_GRAMMAR)).toEqual({ kind: "refused", refusal: { why: "key", key } });
+    }
+    // a coding chat's grammar still takes them
+    expect(reachOutcome(block("open", { brief: "Plan the sale", title: "Sale" })).kind).toBe("request");
+  });
+
+  it("refuses a message or a brief longer than one message to the API leaves room for", () => {
+    const long = "x".repeat(BUDDY_MESSAGE_MAX + 1);
+    expect(reachOutcome(block("send", { chat: "1", message: long }), BUDDY_GRAMMAR)).toEqual({ kind: "refused", refusal: { why: "long" } });
+    expect(reachOutcome(block("open", { brief: long }), BUDDY_GRAMMAR)).toEqual({ kind: "refused", refusal: { why: "long" } });
+    expect(reachOutcome(block("send", { chat: "1", message: "x".repeat(BUDDY_MESSAGE_MAX) }), BUDDY_GRAMMAR).kind).toBe("request");
+    // a coding chat takes the longer one
+    expect(reachOutcome(block("send", { chat: "1", message: long })).kind).toBe("request");
+    expect(MAC_GRAMMAR.max).toBe(MESSAGE_MAX);
   });
 });

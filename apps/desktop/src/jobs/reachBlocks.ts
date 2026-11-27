@@ -29,6 +29,26 @@ export const MESSAGE_MAX = BRIEF_MAX;
 
 export type ReachKind = keyof typeof REACH_KEYS;
 
+/** What one place's blocks take: the keys of each block, and the longest message or brief. A coding chat on this Mac takes
+ *  `MAC_GRAMMAR`; Buddy's chats on the Connected runtime take `BUDDY_GRAMMAR` (item 102l-3). The fences are the same in both. */
+export interface ReachGrammar {
+  readonly keys: { readonly [K in ReachKind]: readonly string[] };
+  readonly max: number;
+}
+
+/** A coding chat's blocks (item 102k): a new lane takes a helper's five keys. */
+export const MAC_GRAMMAR: ReachGrammar = { keys: REACH_KEYS, max: MESSAGE_MAX };
+
+/** The longest message or brief a block of Buddy's takes on Connected. Each goes to the API's chat as one message, which takes at
+ *  most 8,000 characters (apps/api chat-store.ts): this leaves room for the line saying where it came from and for the note of the
+ *  conversation it reaches (`reachMarks.ts`). */
+export const BUDDY_MESSAGE_MAX = 5_000;
+
+/** Buddy's blocks on Connected (item 102l-3): a new conversation takes only its first message, its brief. The API names a
+ *  conversation by its first words and answers every one with the same model, so a title, an agent, a model and an effort would be
+ *  promises nothing keeps. */
+export const BUDDY_GRAMMAR: ReachGrammar = { keys: { read: ["chat"], send: ["chat", "message"], open: ["brief"] }, max: BUDDY_MESSAGE_MAX };
+
 /** What one block asks. `chat` is the name the agent wrote, exactly: the list decides whether it names a chat at all. */
 export type ReachRequest =
   | { readonly kind: "read"; readonly chat: string }
@@ -51,7 +71,7 @@ export type ReachRefusal =
   | { readonly why: "message" }
   /** an open has no brief */
   | { readonly why: "brief" }
-  /** a message or a brief is longer than `MESSAGE_MAX` */
+  /** a message or a brief is longer than its grammar's `max` */
   | { readonly why: "long" }
   /** a block was never closed: the answer was cut short */
   | { readonly why: "unclosed" }
@@ -82,7 +102,7 @@ function chatOf(entry: Record<string, unknown>): string | ReachRefusal {
 
 /** One block's request, or why it cannot be one. Strict as a helper block is: an unknown key, a value that is not text, or a
  *  missing chat, message or brief refuses it. */
-function readBlock(kind: ReachKind, body: string): ReachRequest | ReachRefusal {
+function readBlock(kind: ReachKind, body: string, grammar: ReachGrammar): ReachRequest | ReachRefusal {
   let json: unknown;
   try {
     json = JSON.parse(body);
@@ -90,11 +110,11 @@ function readBlock(kind: ReachKind, body: string): ReachRequest | ReachRefusal {
     return { why: "json" };
   }
   if (!isPlainObject(json)) return { why: "shape" };
-  const keys: readonly string[] = REACH_KEYS[kind];
+  const keys: readonly string[] = grammar.keys[kind];
   for (const key of Object.keys(json)) if (!keys.includes(key)) return { why: "key", key: cut(oneLine(key), 40) };
   if (kind === "open") {
     const lane = helperFrom(json);
-    if (!isRefusal(lane)) return { kind: "open", lane };
+    if (!isRefusal(lane)) return lane.brief.length > grammar.max ? { why: "long" } : { kind: "open", lane };
     // the helper's own reasons say the same things in this block's terms
     if (lane.why === "key" || lane.why === "value") return lane;
     if (lane.why === "brief" || lane.why === "long") return { why: lane.why };
@@ -106,18 +126,19 @@ function readBlock(kind: ReachKind, body: string): ReachRequest | ReachRefusal {
   if (kind === "read") return { kind: "read", chat };
   const message = typeof json.message === "string" ? json.message.trim() : "";
   if (!message) return { why: "message" };
-  if (message.length > MESSAGE_MAX) return { why: "long" };
+  if (message.length > grammar.max) return { why: "long" };
   return { kind: "send", chat, message };
 }
 
 /** What an answer asks once its turn is over: none, one request, or why it is refused. Every top-level reach block counts, so a
- *  second one refuses the request (`many`), as does one left open at the end (a stopped or truncated answer). */
-export function reachOutcome(text: string): ReachOutcome {
+ *  second one refuses the request (`many`), as does one left open at the end (a stopped or truncated answer). `grammar` is the
+ *  place's keys and longest message: a coding chat's unless another is handed in. */
+export function reachOutcome(text: string, grammar: ReachGrammar = MAC_GRAMMAR): ReachOutcome {
   const { blocks } = fencedBlocks(text, REACH_FENCES);
   if (!blocks.length) return { kind: "none" };
   if (blocks.some((b) => !b.closed)) return { kind: "refused", refusal: { why: "unclosed" } };
   if (blocks.length > 1) return { kind: "refused", refusal: { why: "many" } };
-  const read = readBlock(kindOf(blocks[0].word), blocks[0].body);
+  const read = readBlock(kindOf(blocks[0].word), blocks[0].body, grammar);
   return "why" in read ? { kind: "refused", refusal: read } : { kind: "request", request: read };
 }
 

@@ -1317,11 +1317,13 @@ export class HttpHost {
       // their work shows as jobs, and their drafts in the task's notes.
       "chat.open": async (p) => {
         member(p);
+        // taken before the read below: a message the person sends while it is on its way belongs to the chat being opened
+        const mark = this.chat.openingMark();
         const snapshot = await this.current();
         if (p.bot !== TEAM) return { session_id: `main-${String(p.bot)}`, messages: [], running: false, model: "", provider: "", reasoning: "" };
         this.replayAsks(snapshot);
         // a message from this chat goes to the shop it was opened for, whichever the switcher shows by then
-        this.chat.opened();
+        this.chat.opened(mark);
         return { session_id: `main-${TEAM}`, messages: attentionRows(snapshot), running: false, model: "", provider: "", reasoning: "" };
       },
       // Every task is one of Buddy's threads, as before members, marked the team's work; beside them the shop's conversations with

@@ -449,7 +449,7 @@ describe("in the sessions store", () => {
     t.ss.addReach(a, { kind: "session", id: b });
     await t.turn(a, block("open", { title: "Thai date on the receipt", brief: "Show the Thai Buddhist date in src/receipt.tsx.", agent: "codex" }));
     const [card] = t.cards(a);
-    expect(card.ask.kind === "open" && card.ask.lane).toMatchObject({ title: "Thai date on the receipt", agent: "codex", own: false });
+    expect(card.ask.kind === "open" && "lane" in card.ask && card.ask.lane).toMatchObject({ title: "Thai date on the receipt", agent: "codex", own: false });
     const n = t.starts.length;
     const list = t.ss.getState().list.length;
     expect(await t.ss.answerReach(a, card.id, false)).toEqual({ ok: true });
