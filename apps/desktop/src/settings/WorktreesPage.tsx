@@ -8,13 +8,16 @@
 // - Branch prefix: free text, refused with words unless it is one or two lower case words that each end in a slash.
 // - Remove a deleted chat's folder (on) and remove a merged lane's folder (off): neither removes a folder with work of its own.
 //
+// Under them, one project can set its own (ProjectWorktrees.tsx, item 99).
+//
 // `WorktreesView` draws a given state so a test can draw each one; `WorktreesPage` keeps the form's state and acts.
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Toggle } from "../pages/kit";
 import { t, type Key } from "../i18n";
 import { getHost } from "../sessions/host";
 import { prefixProblem, setWorktreeSettings, useWorktreeSettings, WORKTREE_DEFAULTS, type WorktreeSettings } from "../lib/worktrees";
 import { Row } from "./DevRow";
+import { ProjectWorktrees } from "./ProjectWorktrees";
 
 export const DEFAULT_LANES_FOLDER = "~/.manut/lanes";
 
@@ -31,6 +34,8 @@ export interface WorktreesViewProps {
   onPrefixSave: () => void;
   onDeleted: (on: boolean) => void;
   onMerged: (on: boolean) => void;
+  /** what follows the choices for every project: the part for one project (item 99) */
+  children?: ReactNode;
 }
 
 /** What a refused folder says: the shell's code, in words; any other failure as the shell said it. */
@@ -93,6 +98,7 @@ export function WorktreesView(p: WorktreesViewProps) {
           <Toggle on={p.saved.cleanMerged} label={t("worktrees.merged.title")} onChange={p.onMerged} testId="worktrees-merged" />
         </Row>
       </div>
+      {p.children}
     </div>
   );
 }
@@ -133,6 +139,8 @@ export function WorktreesPage() {
       }}
       onDeleted={(cleanDeleted) => setWorktreeSettings({ cleanDeleted })}
       onMerged={(cleanMerged) => setWorktreeSettings({ cleanMerged })}
-    />
+    >
+      <ProjectWorktrees />
+    </WorktreesView>
   );
 }

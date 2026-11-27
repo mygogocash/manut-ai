@@ -11,8 +11,14 @@
 // - Remove a deleted chat's folder: default ON, which is what closing a chat has always done for a folder with nothing in it.
 //   Now it also leaves one whose branch has commits on no remote.
 // - Remove a merged lane's folder: default OFF. It reads pull requests through `gh` or `glab`, so it is the person's to turn on.
+//
+// One project can set its own (item 99, "settings for one project"): start from the remote, the branch prefix and both
+// clean-ups, each left out to follow every project's choice. Where lanes are made stays one choice for all projects, as it is
+// a place on this Mac, not a habit of one repository. Kept on this computer beside the rest (`manut.worktrees.projects`, by the
+// project's folder as `pathKey` spells it), and read by the lane code with the project it acts for.
 import { useSyncExternalStore } from "react";
 import { LANE_FOLDER, validPrefix } from "../code/laneBranch";
+import { pathKey } from "../sessions/folders";
 import { changes } from "./changes";
 
 export interface WorktreeSettings {
@@ -71,10 +77,78 @@ export function parseWorktrees(text: string | null): WorktreeSettings {
 const listeners = changes();
 let cache: { text: string | null; value: WorktreeSettings } | null = null;
 
-export function worktreeSettings(): WorktreeSettings {
+/** Every project's choices, or project `project`'s: its own where it set them, every project's where it did not. */
+export function worktreeSettings(project?: string): WorktreeSettings {
   const text = read(KEY);
   if (!cache || cache.text !== text) cache = { text, value: parseWorktrees(text) };
-  return cache.value;
+  if (!project) return cache.value;
+  const own = projectWorktrees(project);
+  return Object.keys(own).length ? { ...cache.value, ...own } : cache.value;
+}
+
+/** What one project sets for itself; each field it leaves out follows every project's choice. */
+export type ProjectWorktrees = Partial<Pick<WorktreeSettings, "remote" | "prefix" | "cleanDeleted" | "cleanMerged">>;
+const PROJECTS_KEY = "manut.worktrees.projects";
+/** At most this many projects keep their own choices. */
+const MAX_PROJECTS = 100;
+
+/** The projects' own choices as kept, each checked as it is read: a value that is not usable is left out, so the project
+ *  follows every project's choice there. */
+export function parseProjectWorktrees(text: string | null): Record<string, ProjectWorktrees> {
+  let v: unknown;
+  try {
+    v = text ? JSON.parse(text) : {};
+  } catch {
+    return {};
+  }
+  if (!v || typeof v !== "object" || Array.isArray(v)) return {};
+  const out: Record<string, ProjectWorktrees> = {};
+  for (const [project, o] of Object.entries(v as Record<string, unknown>).slice(0, MAX_PROJECTS)) {
+    if (!/^([/]|[A-Za-z]:[\\/])/.test(project) || !o || typeof o !== "object") continue;
+    const r = o as Record<string, unknown>;
+    const own: ProjectWorktrees = {
+      ...(typeof r.remote === "boolean" ? { remote: r.remote } : {}),
+      ...(typeof r.prefix === "string" && validPrefix(r.prefix) ? { prefix: r.prefix } : {}),
+      ...(typeof r.cleanDeleted === "boolean" ? { cleanDeleted: r.cleanDeleted } : {}),
+      ...(typeof r.cleanMerged === "boolean" ? { cleanMerged: r.cleanMerged } : {}),
+    };
+    if (Object.keys(own).length) out[project] = own;
+  }
+  return out;
+}
+
+let projectsCache: { text: string | null; value: Record<string, ProjectWorktrees> } | null = null;
+function allProjectWorktrees(): Record<string, ProjectWorktrees> {
+  const text = read(PROJECTS_KEY);
+  if (!projectsCache || projectsCache.text !== text) projectsCache = { text, value: parseProjectWorktrees(text) };
+  return projectsCache.value;
+}
+
+/** Project `project`'s own choices (none: it follows every project's). */
+export const projectWorktrees = (project: string): ProjectWorktrees => allProjectWorktrees()[pathKey(project)] ?? {};
+
+/** The projects that set any of their own. */
+export const projectsWithOwnWorktrees = (): string[] => Object.keys(allProjectWorktrees());
+
+/** Sets project `project`'s own choices: a value sets it, `null` puts it back to every project's choice. A prefix that fails
+ *  the check is not saved (the page says why before it gets here). */
+export function setProjectWorktrees(project: string, patch: { [K in keyof ProjectWorktrees]?: ProjectWorktrees[K] | null }): void {
+  const all = { ...allProjectWorktrees() };
+  const key = pathKey(project);
+  const own: Record<string, unknown> = { ...(all[key] ?? {}) };
+  for (const [k, v] of Object.entries(patch)) {
+    if (v === null || v === undefined) delete own[k];
+    else own[k] = v;
+  }
+  if (Object.keys(own).length) all[key] = own as ProjectWorktrees;
+  else delete all[key];
+  write(PROJECTS_KEY, JSON.stringify(parseProjectWorktrees(JSON.stringify(all))));
+  listeners.emit();
+}
+
+export function useProjectWorktrees(project: string): ProjectWorktrees {
+  const get = () => projectWorktrees(project);
+  return useSyncExternalStore((l) => listeners.subscribe(l), get, get);
 }
 
 /** Saves the choices in `patch`; a prefix that fails the check is not saved (the page says why before it gets here). */
@@ -85,13 +159,8 @@ export function setWorktreeSettings(patch: Partial<WorktreeSettings>): void {
 }
 
 export function useWorktreeSettings(): WorktreeSettings {
-  return useSyncExternalStore(
-    (l) => {
-      return listeners.subscribe(l);
-    },
-    worktreeSettings,
-    worktreeSettings,
-  );
+  const all = () => worktreeSettings();
+  return useSyncExternalStore((l) => listeners.subscribe(l), all, all);
 }
 
 /** What the shell is told when a lane is made. */

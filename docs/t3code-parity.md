@@ -120,8 +120,8 @@ keeps them:
 | Limits left for each account | has | |
 | Send when the limit resets | has (item 95): a coding chat on a limited account offers Send at <time>; sent once when the account is usable, within the hour, else it asks first | 95 |
 | Themes, VS Code themes, chat width and fonts | part: light and dark, text size; item 85i removes the six palettes as the brand asks | 99 (owner) |
-| Keybindings you set | no | 99 |
-| Settings for a project or an environment | part: Kit's level, rules and folders for a project | 99 |
+| Keybindings you set | has (item 99a): the nine app-wide shortcuts set in Settings › General › Keyboard, kept on this Mac | 99 |
+| Settings for a project or an environment | part: Kit's level, rules and folders for a project, and its worktree choices (item 99a) | 99 |
 | A command that gathers what is wrong for an agent to fix | no | 105 |
 | Computer use (T3 Code has none) | has, never run against a real window | |
 | Voice | has, never tried with a real microphone | |

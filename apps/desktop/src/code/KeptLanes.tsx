@@ -229,7 +229,8 @@ export function KeptLanes({ root }: { root: string }) {
     if (!host.laneCleanMerged || !root) return;
     let live = true;
     const run = () => {
-      if (!worktreeSettings().cleanMerged || !cleanupDue(Date.now(), lastCleanup(root))) return;
+      // the project's own choice where it set one (item 99)
+      if (!worktreeSettings(root).cleanMerged || !cleanupDue(Date.now(), lastCleanup(root))) return;
       markCleanup(root, Date.now());
       void host.laneCleanMerged!(root, heldRef.current).then(
         (got) => {

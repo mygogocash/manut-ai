@@ -34,10 +34,12 @@ interface Setup {
 /** The folder the fake shell makes for a lane, as lane.rs names it. */
 const laneDir = (branch: string, cwd = DEV) => `/w/.manut/lanes/${cwd.split("/").pop()}/${branch.slice(4)}`;
 
-async function setup(over: { branch?: string; left?: number; laneWorktree?: SessionHost["laneWorktree"] | null; settings?: Record<string, unknown>; release?: boolean; made?: Partial<LaneMade>; pulls?: Pick<TaskHost, "remote" | "view"> } = {}) {
+async function setup(over: { branch?: string; left?: number; laneWorktree?: SessionHost["laneWorktree"] | null; settings?: Record<string, unknown>; projects?: Record<string, unknown>; release?: boolean; made?: Partial<LaneMade>; pulls?: Pick<TaskHost, "remote" | "view"> } = {}) {
   // Settings › Worktrees are read from storage: `over.settings` is what the person saved
   const saved = over.settings ? JSON.stringify(over.settings) : null;
-  (globalThis as { localStorage?: unknown }).localStorage = { getItem: (k: string) => (k === "manut.worktrees" ? saved : null), setItem: () => {}, removeItem: () => {} };
+  // and one project's own choices (item 99)
+  const projects = over.projects ? JSON.stringify(over.projects) : null;
+  (globalThis as { localStorage?: unknown }).localStorage = { getItem: (k: string) => (k === "manut.worktrees" ? saved : k === "manut.worktrees.projects" ? projects : null), setItem: () => {}, removeItem: () => {} };
   resetKitProjects();
   resetKitAsks();
   const s: Setup = { folders: { [DEV]: over.branch ?? "main", "/w/one": "main", "/w/two": "main" }, calls: [], made: [], started: [], removed: [], released: [] };
@@ -356,6 +358,16 @@ test("makes the lane's branch under the prefix the person chose and tells the sh
   await bad.startIn("Fix the totals");
   expect(bad.s.made[0].names[0]).toBe("kit/fix-totals");
   expect(bad.s.made[0].start).toEqual({ root: "", remote: false });
+});
+
+test("a project that set its own prefix and remote makes its lanes so; another project keeps every project's choices (item 99)", async () => {
+  const t = await setup({ settings: { prefix: "team/", remote: false }, projects: { [DEV]: { prefix: "shop/", remote: true } } });
+  await t.startIn("Fix the totals");
+  expect(t.s.made[0].names[0]).toBe("shop/fix-totals");
+  expect(t.s.made[0].start).toEqual({ root: "", remote: true });
+  await t.startIn("Fix the totals", "/w/one");
+  expect(t.s.made[1].names[0]).toBe("team/fix-totals");
+  expect(t.s.made[1].start).toEqual({ root: "", remote: false });
 });
 
 test("the lane's first line says where it started when the remote was asked for", async () => {

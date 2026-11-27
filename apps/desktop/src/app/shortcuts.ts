@@ -1,4 +1,5 @@
-// App-wide keyboard shortcuts. ⌘ on macOS, Ctrl elsewhere:
+// App-wide keyboard shortcuts. ⌘ on macOS, Ctrl elsewhere. These are the defaults: every one but ⌘1…⌘9 and Esc can be set in
+// Settings › General's Keyboard list, kept on this Mac (keys.ts, item 99):
 //   ⌘1…⌘9  open team member 1 to 9 (the Team page's order)   ⌘K  the command palette (src/palette): where to go, what to
 //          do and the chats History finds; ⌘K again closes it (in a terminal on macOS it clears the terminal instead:
 //          engine-input.ts, and Ctrl+K in a terminal is the program's)
@@ -27,36 +28,31 @@ import { getTermPanel, toggleTerminal } from "../terminal/state";
 import { isFirstRunOpen } from "../onboarding/flow";
 import { listenMenuClose } from "./menuClose";
 import { paletteOpen, togglePalette } from "../palette/state";
+import { currentKeys, keysRecording, matches, type KeyAction, type Keys } from "./keys";
 
 export const isMac = () => typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
 
-/** `letter` on a Latin layout; on a non-Latin one (Korean, Japanese, Russian...) the key that stands where it does. */
-const isLetter = (e: { key: string; code?: string }, letter: string) =>
-  e.key.toLowerCase() === letter || (!/^[a-z]$/i.test(e.key) && e.code === `Key${letter.toUpperCase()}`);
-
-/** What a keydown means, or null. Pure so it can be tested without a DOM. */
+/** What a keydown means, or null. Pure so it can be tested without a DOM: the settable actions' keys come from `keys`
+ *  (the person's own on this Mac, else this system's defaults: keys.ts); ⌘1 to ⌘9 (team members) and Esc are fixed. */
 export function shortcutFor(
   e: { key: string; code?: string; metaKey: boolean; ctrlKey: boolean; altKey: boolean; shiftKey: boolean; isComposing?: boolean; keyCode?: number },
   mac: boolean,
+  keys: Keys = currentKeys(mac),
 ): { kind: "bot"; index: number } | { kind: "session"; step: 1 | -1 } | { kind: "search" | "details" | "settings" | "stop" | "next-ask" | "graph" | "new-session" | "terminal" } | null {
   if (composing(e)) return null;
-  // Ctrl+` on every OS: the key left of 1 by where it stands (a Korean or German layout prints another character there)
-  if (e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && (e.code === "Backquote" || (!e.code && e.key === "`"))) return { kind: "terminal" };
+  const hit = (a: KeyAction) => keys[a].some((c) => matches(c, e));
+  // the bottom terminal panel first: its key is taken before a terminal sees it (onTerminalKey)
+  if (hit("terminal")) return { kind: "terminal" };
   const mod = mac ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
-  if (mod && e.shiftKey && !e.altKey && e.key.toLowerCase() === "g") return { kind: "graph" };
-  // ⇧ turns ] into } on US layouts: the physical key decides, else the character
-  if (mod && e.shiftKey && !e.altKey) {
-    if (e.code === "BracketRight" || e.key === "]" || e.key === "}") return { kind: "session", step: 1 };
-    if (e.code === "BracketLeft" || e.key === "[" || e.key === "{") return { kind: "session", step: -1 };
-  }
-  if (mod && !e.altKey && !e.shiftKey) {
-    if (/^[1-9]$/.test(e.key)) return { kind: "bot", index: Number(e.key) - 1 };
-    if (e.key.toLowerCase() === "k") return { kind: "search" };
-    if (e.key === ".") return { kind: "details" };
-    if (e.key === ",") return { kind: "settings" };
-    if (e.key.toLowerCase() === "j") return { kind: "next-ask" };
-    if (isLetter(e, "n") || (mac && isLetter(e, "t"))) return { kind: "new-session" };
-  }
+  if (mod && !e.altKey && !e.shiftKey && /^[1-9]$/.test(e.key)) return { kind: "bot", index: Number(e.key) - 1 };
+  if (hit("graph")) return { kind: "graph" };
+  if (hit("session-next")) return { kind: "session", step: 1 };
+  if (hit("session-prev")) return { kind: "session", step: -1 };
+  if (hit("search")) return { kind: "search" };
+  if (hit("details")) return { kind: "details" };
+  if (hit("settings")) return { kind: "settings" };
+  if (hit("next-ask")) return { kind: "next-ask" };
+  if (hit("new-session")) return { kind: "new-session" };
   if (e.key === "Escape" && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) return { kind: "stop" };
   return null;
 }
@@ -98,8 +94,9 @@ function stepTerminal(step: 1 | -1) {
 // panel lives under the chat column, which a maximised side panel hides: showing it restores the side panel first
 export function onTerminalKey(e: KeyboardEvent): void {
   // While the first-run setup fills the window, every key is the setup's: a shortcut would open a page, a chat or
-  // the terminal behind it, where the person cannot see what changed.
-  if (isFirstRunOpen(getStore().getState().ui)) return;
+  // the terminal behind it, where the person cannot see what changed. While Settings waits for an action's new keys, they
+  // are the keys being set, not a shortcut.
+  if (isFirstRunOpen(getStore().getState().ui) || keysRecording()) return;
   const hit = shortcutFor(e, isMac());
   // Ctrl+Shift+] / [ on Windows and Linux: manut's own chord, which no shell needs; inside a terminal xterm would
   // take it (as Ctrl+] / Ctrl+[), so it is taken here first. Every other Ctrl+key in a terminal stays the program's
@@ -120,7 +117,7 @@ export function onTerminalKey(e: KeyboardEvent): void {
 
 /** Every other shortcut, as its key goes up through the page (exported so a test can press one). */
 export function onShortcutKey(e: KeyboardEvent): void {
-  if (isFirstRunOpen(getStore().getState().ui)) return;
+  if (isFirstRunOpen(getStore().getState().ui) || keysRecording()) return;
   const hit = shortcutFor(e, isMac());
   if (!hit || hit.kind === "terminal") return;
   if (!SESSIONS_ENTRY && (hit.kind === "new-session" || hit.kind === "session")) return;

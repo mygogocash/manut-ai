@@ -24,4 +24,13 @@ export const worktrees: Record<keyof typeof en, string> = {
   "worktrees.deleted.hint": "폴더 안에 바뀌거나 새로 생긴 것이 없고 브랜치의 모든 커밋이 원격에 있을 때만 삭제합니다. 그렇지 않으면 폴더를 남기고 레인 아래에 표시합니다. 브랜치는 항상 남습니다.",
   "worktrees.merged.title": "풀 리퀘스트가 병합되면 폴더 삭제",
   "worktrees.merged.hint": "프로젝트를 열 때 gh 또는 glab으로 풀 리퀘스트를 읽으며, 최대 한 시간에 한 번입니다. 커밋이 기본 브랜치에 있고, 폴더 안에 바뀌거나 새로 생긴 것이 없고, 그 폴더에서 작업하는 채팅이 없을 때만 삭제합니다. gh 또는 glab에 로그인되어 있지 않으면 알 수 없다고 말하고 아무것도 하지 않습니다.",
+  "worktrees.project.title": "For one project",
+  "worktrees.project.hint": "A project can start from the remote, name its branches and clean up its own way. Where it says as all projects, it follows the choices above.",
+  "worktrees.project.pick": "Project",
+  "worktrees.project.none": "No projects yet: they come from your coding chats.",
+  "worktrees.project.asAll": "As all projects ({value})",
+  "worktrees.project.on": "On",
+  "worktrees.project.off": "Off",
+  "worktrees.project.prefixHint": "Leave it empty to use all projects' prefix, {prefix}",
+  "worktrees.project.prefixClear": "Use all projects'",
 };
