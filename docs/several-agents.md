@@ -571,7 +571,9 @@ the screens are built on tested ground.
 
 - **102l. The same cards on the Connected runtime.** Connected refuses `chat.send` and `thread.create` today, so its
   threads can be read through item 97 and nothing more. When `apps/api` lets a chat send and open a thread, the cards of
-  R10 work there too, each still an approval settled once. Needs the owner (see the questions).
+  R10 work there too, each still an approval settled once. Needs the owner (see the questions). The owner chose to build
+  it on 27 Nov (dev only); its design is `docs/connected-chat.md`: Buddy's chat on the owner's session first, chat
+  threads that are not tasks, then the cards.
 - **Item 103** exposes these verbs as MCP tools under the same rules; its own design decides who may connect.
 
 ## What it does not do
