@@ -1036,6 +1036,15 @@ async fn lane_take_back(helper: String) -> Result<lane_land::TakenBack, String> 
     tauri::async_runtime::spawn_blocking(move || lane_land::take_back(&home, &helper)).await.map_err(|e| e.to_string())?
 }
 
+/// Show patch (item 102i, lane_land.rs): the patch a landing kept for the helper lane `helper` because it would not apply or
+/// reached outside the lead's project, read without following a link, at most 256 KiB of it, every line through the app's one
+/// masker. Only reads. A refusal is a short code (`not_a_lane`, `not_a_helper`, `no_patch`).
+#[tauri::command]
+async fn lane_patch(helper: String) -> Result<lane_land::KeptPatch, String> {
+    let home = user_home()?;
+    tauri::async_runtime::spawn_blocking(move || lane_land::kept_patch(&home, &helper)).await.map_err(|e| e.to_string())?
+}
+
 /// How much memory this computer has, in bytes (item 102h, machine.rs; docs/several-agents.md R7): read once from the kernel
 /// (`hw.memsize` on macOS), with no program run, so the page can tell how many helper lanes run at once. Null when it could not
 /// be read, which the page counts as the smallest Mac the app runs on.
@@ -1987,6 +1996,7 @@ fn commands(invoke: tauri::ipc::Invoke) -> bool {
         lane_helper_worktree,
         lane_land,
         lane_take_back,
+        lane_patch,
         machine_memory,
         lane_list,
         lane_projects,

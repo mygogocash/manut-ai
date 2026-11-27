@@ -676,6 +676,64 @@ pub(crate) fn forget(home: &Path, git: &Git, repo: &Path, job: &str, folder: &st
     let _ = git.run(repo, &["update-ref", "-d", &name]);
 }
 
+/// The most of a kept patch Show patch reads (item 102i): a larger one is shown cut, and its file keeps it whole.
+const PATCH_SHOWN: u64 = 256 << 10;
+
+/// A kept patch as Show patch reads it (item 102i): its text with every line masked (`text`), its size on disk (`bytes`),
+/// whether the text stops short of it (`cut`), and where it is kept (`path`).
+#[derive(Debug, Serialize, PartialEq)]
+pub struct KeptPatch {
+    pub text: String,
+    pub bytes: u64,
+    pub cut: bool,
+    pub path: String,
+}
+
+/// The patch [`keep`] kept for the helper lane whose folder is `helper`, read for Show patch (item 102i): opened without
+/// following a link, only while it is a plain file, at most [`PATCH_SHOWN`] bytes of it, each line through the app's one
+/// masker, so a key a helper lane wrote never reaches the page however the patch was made. Nothing is written and no lock is
+/// taken: `keep` puts the file in place with one rename. Refusals: `not_a_lane`, `not_a_helper` (as [`land`] refuses them, its
+/// lead not needed), `no_patch` (none is kept for it).
+pub fn kept_patch(home: &Path, helper: &str) -> Result<KeptPatch, String> {
+    let (hwt, _, hrec) = lane::own_lane(home, helper)?;
+    let of = hrec.helper.ok_or("not_a_helper")?;
+    let folder = hwt.file_name().and_then(|f| f.to_str()).map(str::to_string).ok_or("not_a_lane")?;
+    if !lane_helper::valid_job(&of.job) || !lane::word_ok(&folder) {
+        return Err("not_a_lane".into());
+    }
+    let path = patch_path(home, &of.job, &folder);
+    // a link anywhere on the way is not followed: the folders are the app's own, made 0700 by `keep`
+    let manut = home.join(".manut");
+    for p in [manut.clone(), manut.join("patches"), manut.join("patches").join(&of.job)] {
+        if fs::symlink_metadata(&p).map(|m| !m.is_dir()).unwrap_or(true) {
+            return Err("no_patch".into());
+        }
+    }
+    let mut o = fs::OpenOptions::new();
+    o.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        o.custom_flags(libc::O_NOFOLLOW);
+    }
+    let f = o.open(&path).map_err(|_| "no_patch".to_string())?;
+    let md = f.metadata().map_err(|e| e.to_string())?;
+    if !md.is_file() {
+        return Err("no_patch".into());
+    }
+    let mut bytes = Vec::new();
+    std::io::Read::read_to_end(&mut std::io::Read::take(f, PATCH_SHOWN), &mut bytes).map_err(|e| e.to_string())?;
+    let cut = md.len() > bytes.len() as u64;
+    if cut {
+        // a line cut in two is left out rather than shown half
+        if let Some(end) = bytes.iter().rposition(|b| *b == b'\n') {
+            bytes.truncate(end + 1);
+        }
+    }
+    let text: String = String::from_utf8_lossy(&bytes).split_inclusive('\n').map(tasks::mask_secrets).collect();
+    Ok(KeptPatch { text, bytes: md.len(), cut, path: path.to_string_lossy().into_owned() })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1112,6 +1170,45 @@ mod tests {
         assert!(lane::remove(&home, &l, &RemoveAsk { changed, ..RemoveAsk::default() }).unwrap().removed);
         assert_eq!(land(&home, &h), Err("no_lead".into()));
         assert_eq!(take_back(&home, &h), Err("no_lead".into()));
+        let _ = fs::remove_dir_all(home);
+    }
+
+    /// Show patch (item 102i) reads the patch a landing kept, masked line by line so a key in it never reaches the page, only
+    /// for a helper lane the app made, and never through a link; a large one is cut at a line's end and says so.
+    #[test]
+    fn show_patch_reads_the_kept_patch_masked_and_only_a_helper_lane_s() {
+        let Some((home, d, lwt)) = lead("ll-show") else { return };
+        let hwt = helper(&home, &lwt, "jshow");
+        let h = s(&hwt);
+        // nothing kept yet; and what is no helper lane is refused as a landing refuses it
+        assert_eq!(kept_patch(&home, &h), Err("no_patch".into()));
+        assert_eq!(kept_patch(&home, &s(&lwt)), Err("not_a_helper".into()));
+        assert_eq!(kept_patch(&home, &s(&d)), Err("not_a_lane".into()));
+        // a patch that will not apply, with a key in one added line
+        let key = format!("ghp_{}", "e".repeat(36));
+        fs::write(hwt.join("a.txt"), format!("one\ntoken = \"{key}\"\n")).unwrap();
+        fs::remove_file(lwt.join("a.txt")).unwrap();
+        let got = land(&home, &h).unwrap();
+        assert_eq!((got.outcome.as_str(), got.why.as_str(), got.keys.clone()), ("kept", "would_not_apply", names(&["a.txt"])));
+        let shown = kept_patch(&home, &h).unwrap();
+        assert_eq!(shown.path, got.patch);
+        assert!(shown.text.contains("diff --git a/a.txt b/a.txt") && shown.text.contains("\n one\n"), "{}", shown.text);
+        assert!(!shown.text.contains(&key) && shown.text.contains("\n+token = \""), "{}", shown.text);
+        assert_eq!((shown.cut, shown.bytes), (false, fs::metadata(&got.patch).unwrap().len()));
+        // the file itself is untouched: it still holds the key, at 0600, for the person to apply by hand
+        assert!(fs::read_to_string(&got.patch).unwrap().contains(&key));
+        assert_eq!(mode_of(Path::new(&got.patch)), 0o600);
+        // a larger patch is cut at the end of a line
+        let big: String = (0..30_000).map(|i| format!("line {i}\n")).collect();
+        fs::write(&got.patch, &big).unwrap();
+        let shown = kept_patch(&home, &h).unwrap();
+        assert!(shown.cut && shown.text.len() as u64 <= PATCH_SHOWN && shown.text.ends_with('\n') && shown.bytes == big.len() as u64);
+        // a link put in its place is not followed
+        fs::remove_file(&got.patch).unwrap();
+        let elsewhere = home.join("elsewhere.patch");
+        fs::write(&elsewhere, "secret\n").unwrap();
+        std::os::unix::fs::symlink(&elsewhere, &got.patch).unwrap();
+        assert_eq!(kept_patch(&home, &h), Err("no_patch".into()));
         let _ = fs::remove_dir_all(home);
     }
 }
