@@ -1,8 +1,10 @@
 # Releasing the desktop app
 
-How the Mac app is built, signed, put into a draft release and updated in place. The workflow is
+How the desktop app is built, signed, put into a draft release and updated in place. The workflow is
 `.github/workflows/release-desktop.yml`; its rules are pinned by `.github/scripts/release-desktop.test.mjs`. The first
-release is Mac only (`docs/decisions.md`, 25 Nov 2026).
+releases were Mac only (`docs/decisions.md`, 25 Nov 2026); from 27 Nov 2026 the draft also holds a Linux AppImage and
+.deb and a Windows installer, both unsigned (`docs/decisions/111-licence-and-channels.md`). The nightly channel is
+`.github/workflows/nightly-desktop.yml` (below). Release notes start from `docs/release-notes-template.md`.
 
 ## Cutting a release
 
@@ -14,7 +16,9 @@ release is Mac only (`docs/decisions.md`, 25 Nov 2026).
 3. The run builds Apple silicon and then Intel, one after the other, and makes one draft release `desktop-v<version>`
    holding a `.dmg` for each, the updater bundles, their `.sig` files and `latest.json`. Open the run's summary: it says
    "signed and notarized" or "UNSIGNED build" for each chip. The second build adds its files to the draft the first
-   one made, and its chip to that draft's `latest.json`; that is why they do not run side by side.
+   one made, and its chip to that draft's `latest.json`; that is why they do not run side by side. Then the Linux job
+   adds an `.AppImage` (with its `.sig`) and a `.deb`, and the Windows job a `-setup.exe` (with its `.sig`), and each
+   adds `linux-x86_64` or `windows-x86_64` to `latest.json`. Both are unsigned, and only run when the Mac job passed.
 4. Download a `.dmg` from the draft and check it (below).
 5. Publish the draft (Edit, Publish release). Nothing else publishes. From that moment `latest.json` is what installed
    apps are told, so Publish is the switch that sends an update to everyone.
@@ -45,12 +49,36 @@ it is 0.1.2.
   0.1.0 and 0.1.1 every one verified (Ed25519 over the file's BLAKE2b-512, and the trusted comment), which also proves
   that the key in GitHub's secrets is the one the app trusts.
 
-## Where Windows is
+## Where Linux and Windows are
 
-Nobody uses the Windows installer yet, so a release's tag does not build it (the owner, 25 Nov: skip what is not used).
-A run started by hand can tick "Also build the Windows installer": it is then kept as the run's `windows-installer`
-artifact for 14 days. It is never attached to the release, as the owner chose (25 Nov), and it is unsigned (a trusted
-one needs a paid certificate). It built on its first try, in the run for `desktop-v0.1.0`.
+Since 27 Nov 2026 (item 111, the owner's decision) every release run builds a Linux AppImage and .deb and a Windows NSIS
+installer into the same draft. Linux needs no signing. The Windows installer is unsigned until the owner buys a
+code-signing certificate, so Windows SmartScreen warns before it opens; the release notes template says so. They are
+the files the old hand-started Windows job built as a workflow artifact (it built on its first try, for
+`desktop-v0.1.0`), now released. The `.deb` is not updated in place: the updater uses the AppImage on Linux. None of
+the three jobs has been run as part of a release yet, so the first run should confirm that the draft holds all of
+them and that `latest.json` names `linux-x86_64` and `windows-x86_64`.
+
+## The nightly channel
+
+`.github/workflows/nightly-desktop.yml` builds `pilot/week-1` every night it changed since the last nightly (its first
+job compares the branch with the commit named in the feed release's body). It builds Apple silicon, Intel, Linux and
+Windows, one after another, into a published prerelease `nightly-<date>`, with the version `<next patch>-nightly.<date>`
+(so a stable Mac is offered it). Only when all four built does a last job copy that release's `latest.json` into
+`nightly.json` (checked by `.github/scripts/nightly.mjs`), upload it to the fixed prerelease tagged `nightly`, and write
+the commit into that release's body. The updater files are signed with `TAURI_SIGNING_PRIVATE_KEY` and its password,
+the same two secrets as the stable build, so the key pinned in the app verifies both. Nothing else is signed: no Apple
+secret is read, the Mac app is ad hoc, the Windows installer is unsigned.
+
+- **Choosing it.** Settings > General > Updates > Channel, Stable or Nightly, kept on this Mac. Stable reads the endpoint in
+  `tauri.conf.json`; Nightly reads `https://github.com/mygogocash/manut-ai/releases/download/nightly/nightly.json`
+  through a shell command (`src-tauri/src/update_channel.rs`), because the plugin's page API cannot name an endpoint.
+  The App Store edition has no channel.
+- **When it runs.** A `schedule` trigger runs only from the default branch, so the workflow does nothing nightly until it
+  is on `main`; "Run workflow" works from any branch that has it, and its `force` box builds an unchanged branch.
+- **Cost.** A changed night is four builds, two of them on macOS. Nothing deletes old `nightly-<date>` releases.
+- **Never stable.** A prerelease is never GitHub's `latest`, so `releases/latest/download/latest.json` is untouched.
+  Any other release in this repository must still be a prerelease or a draft.
 
 ## The secrets
 
@@ -129,7 +157,9 @@ real test.
   update bundles' names (`Manut.AI_<version>_aarch64.app.tar.gz`).
 - The app asks when it opens, every 6 hours, and when its window comes back after half an hour (`src/sidebar/updater.ts`).
 - Any other release in this repository must be marked a prerelease, or it becomes `latest` and the updater finds no
-  `latest.json` (the check fails quietly and retries).
+  `latest.json` (the check fails quietly and retries). The nightly releases are prereleases for this reason.
+- A Mac on the Nightly channel (Settings > General > Updates) reads `nightly.json` instead, from the release tagged
+  `nightly` (above); the pinned key is the same.
 - The key cannot be changed after a release ships: installed apps trust only this key (`docs/decisions.md`, 25 Nov).
 
 A local `pnpm tauri build` now makes the updater's files too and so needs `TAURI_SIGNING_PRIVATE_KEY`; for a local build

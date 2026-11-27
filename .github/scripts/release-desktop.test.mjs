@@ -1,6 +1,6 @@
 // Tests for the Release desktop workflow, run by `node --test` (the root `pnpm test` does). The workflow cannot be run
 // without spending macOS minutes and touching a real release, so these read its text and pin the rules that matter:
-// it runs only on purpose, never publishes, never releases a Windows file, and holds no secret value.
+// it runs only on purpose, never publishes, releases Mac, Linux and Windows files into one draft, and holds no secret value.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -55,26 +55,55 @@ describe("Release desktop: the release", () => {
     assert.doesNotMatch(code, /releaseId/);
   });
 
-  it("gives only the Mac job write access to the repository", () => {
+  it("gives write access only to the three jobs that put a build into the draft", () => {
     assert.match(code, /\npermissions:\n {2}contents: read\n/);
-    assert.equal([...code.matchAll(/contents: write/g)].length, 1);
-    assert.match(job("mac"), /contents: write/);
-    assert.doesNotMatch(job("windows"), /contents: write|tauri-action|GITHUB_TOKEN/);
+    assert.equal([...code.matchAll(/contents: write/g)].length, 3);
+    for (const name of ["mac", "linux", "windows"]) assert.match(job(name), /contents: write/);
   });
 
-  it("never attaches a Windows file to the release: the Windows job only uploads a workflow artifact", () => {
+  it("releases a Linux AppImage and .deb, and a Windows NSIS installer, into the same draft as the Mac builds", () => {
+    const linux = job("linux");
+    assert.match(linux, /args: --bundles appimage,deb\n/);
+    assert.match(linux, /uses: tauri-apps\/tauri-action@/);
+    assert.match(linux, /tagName: desktop-v__VERSION__/);
+    assert.match(linux, /releaseDraft: true/);
     const windows = job("windows");
-    assert.match(windows, /actions\/upload-artifact@/);
-    assert.doesNotMatch(windows, /gh release|releaseDraft|tagName|upload-release|softprops/);
-    assert.doesNotMatch(job("mac"), /windows|nsis|\.exe|\.msi/i);
-    assert.doesNotMatch(code, /windows-latest[\s\S]*tauri-apps\/tauri-action/);
+    assert.match(windows, /args: --bundles nsis\n/);
+    assert.match(windows, /uses: tauri-apps\/tauri-action@/);
+    assert.match(windows, /tagName: desktop-v__VERSION__/);
+    assert.match(windows, /releaseDraft: true/);
+    assert.doesNotMatch(job("mac"), /windows|nsis|\.exe|\.msi|appimage|\.deb/i);
+    // no workflow-artifact stand-in any more: the files are in the release
+    assert.doesNotMatch(code, /upload-artifact/);
   });
 
-  it("builds the Windows installer only when a run started by hand asks for it, never for a release's tag", () => {
+  it("builds Linux and Windows without any signing secret but the updater's, which signs their update files", () => {
+    for (const name of ["linux", "windows"]) {
+      const text = job(name);
+      assert.doesNotMatch(text, /APPLE_/);
+      assert.match(text, /TAURI_SIGNING_PRIVATE_KEY: \$\{\{ secrets\.TAURI_SIGNING_PRIVATE_KEY \}\}/);
+      assert.match(text, /TAURI_SIGNING_PRIVATE_KEY_PASSWORD: \$\{\{ secrets\.TAURI_SIGNING_PRIVATE_KEY_PASSWORD \}\}/);
+    }
+    assert.match(job("windows"), /UNSIGNED. SmartScreen warns/);
+  });
+
+  it("builds every platform on every release run, one after the other: Mac, then Linux, then Windows", () => {
     const on = code.slice(code.indexOf("\non:"), code.indexOf("\nconcurrency:"));
-    assert.match(on, /workflow_dispatch:\n {4}inputs:\n {6}windows:\n(?: {8}.*\n)*? {8}default: false\n/);
-    assert.match(job("windows"), /\n {4}if: \$\{\{ github\.event_name == 'workflow_dispatch' && inputs\.windows \}\}\n/);
-    assert.doesNotMatch(job("mac"), /inputs\.windows/);
+    assert.doesNotMatch(on, /inputs:/);
+    assert.doesNotMatch(code, /inputs\.windows/);
+    assert.match(job("linux"), /\n {4}needs: mac\n/);
+    assert.match(job("windows"), /\n {4}needs: \[mac, linux\]\n/);
+    // neither runs unless the Mac job, which checks the tag, succeeded
+    assert.match(job("linux"), /needs\.mac\.result == 'success'/);
+    assert.match(job("windows"), /needs\.mac\.result == 'success'/);
+  });
+
+  it("has a release notes template that tells Windows people SmartScreen warns until the build is code-signed", () => {
+    const template = read("docs/release-notes-template.md");
+    assert.match(template, /SmartScreen/);
+    assert.match(template, /code-sign/i);
+    assert.match(template, /AppImage/);
+    assert.match(template, /\.deb/);
   });
 
   it("builds both Mac chips", () => {
@@ -89,6 +118,8 @@ describe("Release desktop: the release", () => {
     const mac = job("mac");
     assert.match(mac, /strategy:\n(?: {6}.*\n)*? {6}max-parallel: 1\n/);
     assert.equal([...mac.matchAll(/tagName: (\S+)/g)].map((m) => m[1]).join(), "desktop-v__VERSION__,desktop-v__VERSION__");
+    // every job that adds to the draft names the same tag
+    assert.equal([...code.matchAll(/tagName: (\S+)/g)].length, 4);
   });
 });
 
@@ -117,9 +148,9 @@ describe("Release desktop: pinned actions", () => {
     for (const u of uses) assert.match(u, /@[0-9a-f]{40}$/, u);
   });
 
-  it("builds the signed and the unsigned Mac app with the same tauri-action commit", () => {
+  it("builds every platform with the same tauri-action commit", () => {
     const pins = [...code.matchAll(/uses:\s*tauri-apps\/tauri-action@([0-9a-f]{40})/g)].map((m) => m[1]);
-    assert.equal(pins.length, 2);
+    assert.equal(pins.length, 4);
     assert.equal(new Set(pins).size, 1);
   });
 });
