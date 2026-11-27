@@ -19,7 +19,8 @@ describe("a session token in a protocol entry", () => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       const path = join(dir, entry.name);
       if (entry.isDirectory()) {
-        if (!SKIP.has(entry.name)) yield* sources(path);
+        // helpers' git worktrees (`.claude/worktrees/*`) are whole other copies of the repository, not more of it
+        if (!SKIP.has(entry.name) && !(entry.name === "worktrees" && dir.endsWith(".claude"))) yield* sources(path);
       } else if (entry.isFile() && TEXT.test(entry.name) && statSync(path).size <= 2_000_000) yield path;
     }
   }
