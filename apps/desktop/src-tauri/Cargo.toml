@@ -38,6 +38,11 @@ sha2 = "0.11"
 toml = "1"
 tungstenite = { version = "0.30.0", default-features = false, features = ["handshake"] }
 data-encoding = "2.11.1"
+# Codex writes its finished sessions as `rollout-*.jsonl.zst` (zst.rs, item 106b). A pure-Rust decoder, pinned exactly.
+# `default-features = false, features = ["std"]` leaves out `hash`, which would pull in twox-hash, a crate the tree does
+# not hold: the hash only checks a frame's optional content checksum, and a damaged file is refused here by its decoding
+# error and by the byte cap instead.
+ruzstd = { version = "=0.9.1", default-features = false, features = ["std"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
