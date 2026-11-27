@@ -146,6 +146,7 @@ import { time } from "./en/time";
 import { titles } from "./en/titles";
 import { tl } from "./en/tl";
 import { tlink } from "./en/tlink";
+import { tm } from "./en/tm";
 import { tmenu } from "./en/tmenu";
 import { tray } from "./en/tray";
 import { tshare } from "./en/tshare";
@@ -309,6 +310,7 @@ export const en = {
   ...titles,
   ...tl,
   ...tlink,
+  ...tm,
   ...tmenu,
   ...tray,
   ...tshare,

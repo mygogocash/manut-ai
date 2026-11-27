@@ -14,6 +14,7 @@ import { usePendingRequests } from "../sessions/termShare";
 import { DOCK_MAX, dockCount } from "../lib/outside";
 import { isMacPlatform } from "../lib/power";
 import { inTauri } from "../lib/tauri";
+import { useMcp } from "../threadsMcp/store";
 
 /** The number shown: every request waiting, at most 99 (the Dock cuts longer labels). */
 export const badgeCount = (asks: number) => Math.min(Math.max(0, asks), DOCK_MAX);
@@ -40,7 +41,9 @@ export function useAsksBadge(): void {
   const s = useStore();
   // a bot waiting to type into a terminal waits on the person too
   const terminal = usePendingRequests();
-  const n = dockRequests(selectAsks(s), terminal);
+  // a program outside Manut AI waiting to be let in waits on the person too (item 103); a card whose call is gone does not
+  const programs = useMcp().cards.filter((c) => !c.gone);
+  const n = dockRequests([...selectAsks(s), ...programs], terminal);
   useEffect(() => {
     void setDockBadge(n).catch(() => undefined);
   }, [n]);
