@@ -1,5 +1,6 @@
 import { createRoot } from "react-dom/client";
 import { startMotionDriver } from "./lib/firstPaint";
+import { startHiddenMark } from "./app/hidden";
 import { App } from "./app/App";
 import { getSessions } from "./sessions/sessions";
 import { bootResume } from "./app/resumeBoot";
@@ -38,6 +39,8 @@ startSnapshots();
 void import("./remote/state").then((m) => m.resumeRemote());
 // pages that name their moves (rows arriving once, rows sliding to a new place) are looked after in one place
 startMotionDriver();
+// a hidden window holds its loops still (item 136)
+startHiddenMark();
 // No gate in front of the app: Oh My Hermes waited here for its bridge process (and offered to install Hermes).
 // Manut AI's runtime is reached through `src/runtime`, and the default one lives in this page, so there is nothing
 // to wait for. A runtime that can be away says so through the store's `conn` state, which the chat already shows.
