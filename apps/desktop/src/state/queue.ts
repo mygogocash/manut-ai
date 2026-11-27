@@ -10,6 +10,13 @@ import { withItems, patchTurn } from "./helpers";
 // to Hermes at once, so it can still change: Hermes keeps no way to take a message back out of its own queue. When
 // the turn ends the head goes out with chat.send, one at a time, each after the previous one's turn started.
 
+/** Edit on a held message, in both steer queues (a bot's chat here, an agent chat's in sessions/steerQueue.ts): its text goes
+ *  back in the box, in front of whatever the person typed there since, so neither is lost. */
+export function editBack(text: string, typed: string): string {
+  const t = typed.trim();
+  return t ? `${text}\n${t}` : text;
+}
+
 export type QueueAction =
   /** The head goes out now: no longer held, moved to the end of the timeline, its turn awaited. */
   | { type: "queue.take"; bot: string; id: string; now: number }

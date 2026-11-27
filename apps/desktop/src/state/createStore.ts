@@ -65,7 +65,7 @@ import {
 import { PENDING_TURN_MS, STEER_REFUSED } from "./activity";
 import { savedLook, ROSTER_KEY, seedRoster, saveList, writeStored, initialState } from "./prefs";
 import { setChatRoute, chatRoute, folderKey, isSessionChat, chatTarget } from "./chatRoutes";
-import { queueReady, mustHold } from "./queue";
+import { editBack, queueReady, mustHold } from "./queue";
 import { selectSidebarBots, selectUnlisted } from "./selectors";
 import { reduce, type Action } from "./reducer";
 
@@ -1059,8 +1059,7 @@ export function createStore(bridge: BridgeLike, opts: StoreOptions = {}): Store 
       if (!bot || !p) return;
       held.delete(id);
       dispatch({ type: "queue.drop", bot, id });
-      const typed = getDraft(bot).trim();
-      dispatch({ type: "ui.draft", bot, text: typed ? `${p.text}\n${typed}` : p.text });
+      dispatch({ type: "ui.draft", bot, text: editBack(p.text, getDraft(bot)) });
     },
     queueDelete(id, which) {
       const bot = botArg(which);

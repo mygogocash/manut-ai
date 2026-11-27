@@ -50,6 +50,7 @@ import { localBot } from "../peers/peerKey";
 import { askOpen, folderKey, getStore, notifySessionEvent, notifySessionNote, onBridgeEvent, asksIn, setChatRoute, setSessionKeyLookup, type ApprovalItem, type OutFile, type SentFile, type Store } from "../state/store";
 import { pathsTyped, shellQuote } from "./attach";
 import { createSentFiles, type Prepared } from "./sentFiles";
+import { createSteerQueue } from "./steerQueue";
 import type { AccountGroup, ApprovalChoice, BridgeEvent, ClarifyAnswers, DiffFile, EventOf, Msg } from "../lib/protocol";
 import { settleApproval } from "../chat/cards/respond";
 import { afterBranchRead, beforeBranchRead, kitAnswer, noteChange, savesAlone } from "../code/kitAsks";
@@ -1002,112 +1003,24 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
 
   // ---- steer queue sessions ------------------------------------------------------------------
   //
-  // A message sent while an agent chat's turn runs stays in manut (a held row with the ↵ mark, "Waiting") instead of
-  // going to the agent's own queue, so it can still be sent now, steered in, edited or deleted. When the turn ends the
-  // head goes out, one per turn, in order. The rows reuse the bot chat's steer queue (held rows, `queue.take` /
-  // `queue.front` / `queue.drop`); the store's own flush, which sends through the Hermes bridge, is kept off agent
-  // chats by a standing `steering` mark (HOLD_MARK), so only this code sends them, to the agent.
+  // A message sent while an agent chat's turn runs waits in manut as a held row, which can still be sent now, steered in,
+  // edited or deleted; the head goes out when the turn ends (steerQueue.ts).
 
-  /** What each held row sends, by its bubble id. */
-  const heldInputs = new Map<string, { id: string; input: Extract<ChatInput, { kind: "send" }>; sent?: () => void }>();
-  /** Sessions whose running turn Send now stopped: its end sends the chosen one first and keeps the rest waiting. */
-  const sendingNow = new Set<string>();
-  const HOLD_MARK = "agent-hold";
   const chatOf = (key: string) => store().getState().chats[key];
-  /** Held for agent chats only (a Hermes folder chat goes through the bridge as before). */
-  const mustHoldHere = (id: string, key: string) => procs.get(id)?.kind === "agent" && (!!chatOf(key)?.turn || !!chatOf(key)?.queue?.length);
-  const hold = (id: string, key: string, lid: string, i: Extract<ChatInput, { kind: "send" }>, show: () => void, sent?: () => void) => {
-    const st = store();
-    if (chatOf(key)?.steering !== HOLD_MARK) st.dispatch({ type: "queue.steering", bot: key, id: HOLD_MARK });
-    heldInputs.set(lid, { id, input: i, sent });
-    show();
-    // the row reads "Waiting", as a message the agent queued does
-    dispatchChat(id, { event: "message.queued", id: lid });
-  };
-  /** The head held message goes out now: the row leaves the queue (moved to the end) before the request, once. */
-  const sendHead = async (id: string) => {
-    const key = keys.get(id);
-    const head = key ? chatOf(key)?.queue?.[0] : undefined;
-    if (!key || !head || chatOf(key)?.turn) return;
-    const h = heldInputs.get(head);
-    heldInputs.delete(head);
-    store().dispatch({ type: "queue.take", bot: key, id: head, now: Date.now() });
-    dispatchChat(id, { event: "message.taken", id: head });
-    // no text kept for it, or the send fails: no turn starts, so no turn.end would ever send the next one
-    if (!h) return void setTimeout(() => void sendHead(id), 0);
-    h.sent?.();
-    try {
-      await input(id, h.input);
-    } catch (e) {
-      store().dispatch({ type: "send.failed", bot: key, id: head, error: errText(e) });
-      setTimeout(() => void sendHead(id), 0);
-    }
-  };
-  /** A turn ended. Stop (not Send now) throws away what waited, as the agents themselves do; otherwise the head goes. */
-  const afterTurn = (id: string, stopped: boolean) => {
-    const key = keys.get(id);
-    // a Send now mark is used by this turn's end, whatever waits: a later real Stop is never read as Send now
-    const now = sendingNow.delete(id);
-    if (!key || !chatOf(key)?.queue?.length) return;
-    if (stopped && !now) {
-      for (const lid of [...(chatOf(key)?.queue ?? [])]) {
-        heldInputs.delete(lid);
-        store().dispatch({ type: "queue.take", bot: key, id: lid, now: Date.now() });
-        dispatchChat(id, { event: "message.dropped", id: lid });
-      }
-      return;
-    }
-    setTimeout(() => void sendHead(id), 0);
-  };
-  const heldIn = (id: string, lid: string) => {
-    const key = keys.get(id);
-    return key && chatOf(key)?.queue?.includes(lid) && heldInputs.get(lid)?.id === id ? key : null;
-  };
-  /** The ↵ ↓ × buttons of a waiting message in session `id`'s chat. */
-  const queuePick = async (id: string, lid: string, c: "now" | "steer" | "edit" | "delete") => {
-    const key = heldIn(id, lid);
-    if (!key) return; // already with the agent: the menu offers nothing
-    const st = store();
-    if (c === "delete" || c === "edit") {
-      const text = heldInputs.get(lid)?.input.text ?? "";
-      heldInputs.delete(lid);
-      st.dispatch({ type: "queue.drop", bot: key, id: lid });
-      if (c === "edit") {
-        const typed = getDraft(key).trim();
-        st.dispatch({ type: "ui.draft", bot: key, text: typed ? `${text}\n${typed}` : text });
-      }
-      return;
-    }
-    if (c === "now") {
-      st.dispatch({ type: "queue.front", bot: key, id: lid });
-      if (!chatOf(key)?.turn) return void sendHead(id);
-      // one Stop, however often it is pressed; the stopped turn's end sends this one first
-      if (sendingNow.has(id)) return;
-      sendingNow.add(id);
-      await input(id, { kind: "interrupt" }).catch((e) => {
-        sendingNow.delete(id);
-        note(id, errText(e));
-      });
-      return;
-    }
-    // Steer: the agent's own mid-turn input, text only; with pictures, or no turn left to steer, it goes out next
-    const h = heldInputs.get(lid)!;
-    const agent = rec(id)?.agent ?? "";
-    if (!steersOf(agent)) return;
-    if (!chatOf(key)?.turn || h.input.images?.length) {
-      st.dispatch({ type: "queue.front", bot: key, id: lid });
-      if (!chatOf(key)?.turn) void sendHead(id);
-      return;
-    }
-    try {
-      await input(id, { kind: "steer", id: lid, text: h.input.text });
-      heldInputs.delete(lid);
-      // with the agent now: no longer held, "Waiting" until the agent says it took it
-      st.dispatch({ type: "queue.take", bot: key, id: lid, now: Date.now() });
-    } catch {
-      st.dispatch({ type: "queue.front", bot: key, id: lid });
-    }
-  };
+  const steerQueue = createSteerQueue({
+    store: () => store(),
+    keyOf: (id) => keys.get(id),
+    isAgent: (id) => procs.get(id)?.kind === "agent",
+    input: (id, i) => input(id, i),
+    dispatchChat: (id, ev) => dispatchChat(id, ev),
+    note: (id, text) => note(id, text),
+    steers: (id) => steersOf(rec(id)?.agent ?? ""),
+    draftOf: (key) => getDraft(key),
+  });
+  const mustHoldHere = steerQueue.mustHold;
+  const hold = steerQueue.hold;
+  const afterTurn = steerQueue.afterTurn;
+  const queuePick = steerQueue.pick;
 
   /** The app's own message to a session (the helpers' report, item 102j): it goes to the agent with no bubble (the chat shows a
    *  quiet line instead, `system.note`), and it is not the person speaking, so it gives the lead no new rounds (R4). Sent only
