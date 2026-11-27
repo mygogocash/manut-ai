@@ -327,7 +327,9 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    for 102l (the owner's). The owner chose on 27 Nov to leave iOS for now. Then a fix (the sign-in
    vault hands browser steps out in the order they were asked for) merged, and refactor pass 1
    (`docs/decisions/2026-11-27-refactor-pass-1.md`) merged; pass 2 (`docs/decisions/2026-11-27-refactor-pass-2.md`: the steer
-   queue and terminals out of sessions.ts, one money rule, the approvals index cached, and `pnpm lint`) is in its pull request. From 27 Nov the owner asked for English first: new words are English, copied into ja, ko and zh. Needs the owner from 101b: Grok signed in and `permission_mode = "ask"`
+   queue and terminals out of sessions.ts, one money rule, the approvals index cached, and `pnpm lint`) merged too. The owner
+   merged pilot/week-1 into main (#49, then #48, both squashed); pilot/week-1 was made again from main. 99a (the person's own
+   keys, and worktree choices for one project) is in its pull request; themes, chat width and fonts stay 99, the owner's. From 27 Nov the owner asked for English first: new words are English, copied into ja, ko and zh. Needs the owner from 101b: Grok signed in and `permission_mode = "ask"`
    under `[ui]` in `~/.grok/config.toml` (it says always-approve, so Grok chats are refused), and Muse Code's CLI. From 101e: all 325 Codex sessions on the owner's Mac are compressed, so
    only Claude Code's conversations are offered until 106b. Needs the owner from 101a: Cursor's Approval mode set to Allowlist (it is Run Everything, so Cursor
    chats are refused), and a Cursor plan with messages left to record a real tool call. GitHub reported 7 Dependabot alerts on `main` (2 critical) at that push, for the owner to look at.
