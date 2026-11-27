@@ -3,7 +3,7 @@ import { BrokenLinkIcon, CheckIcon, CloudOffIcon, QrIcon } from "../../ui/marks"
 import { Loading, Notice, OWNER_CARD as CARD, OWNER_TAP as TAP, OWNER_TOUCH as TOUCH, Pulse, whenText } from "../../ui/owner";
 import type { AppStrings, MacStrings } from "../strings";
 import type { PracticeBackend } from "./practice";
-import { type AskNote, type AskState, MacRemote, type MacBackend, type MacView, type OpenChat } from "./remote";
+import { type AskNote, type AskState, MacRemote, type MacBackend, type MacView, type NotifyView, type OpenChat } from "./remote";
 import { browserScanner, type Scanner } from "./scan";
 import type { OpenedLink } from "./setup";
 import type { ApprovalAsk, AskView, ChatRow, ChatState, MessageView, QuestionAsk } from "./wire";
@@ -441,8 +441,54 @@ function Paired({ s, view, remote, now }: { s: AppStrings; view: Extract<MacView
           ))}
         </div>
       )}
+      <Notify m={m} notify={view.notify} remote={remote} />
       <Forget m={m} remote={remote} forgetting={view.forgetting} />
     </>
+  );
+}
+
+/// "Tell me when my Mac needs me" (item 78d): a switch, what it does in one breath (the words of the notification, that
+/// nothing more is in it, and that the relay keeps this phone's push address), and why it did not turn on. Where only the
+/// app on the Home Screen can be told (Safari's own tab on an iPhone), one line says so instead.
+function Notify({ m, notify, remote }: { m: MacStrings; notify: NotifyView; remote: MacRemote }) {
+  if (notify.offered === "no") return null;
+  if (notify.offered === "install") {
+    return (
+      <p className="hint" style={{ margin: 0 }} data-testid="mac-notify-install">
+        {m.notifyInstall}
+      </p>
+    );
+  }
+  const tone: Record<NonNullable<NotifyView["note"]>, string> = { denied: "warn", failed: "err", refused: "warn", mac: "warn", later: "info" };
+  return (
+    <section className="box" style={CARD} aria-labelledby="mac-notify-title">
+      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <h2 id="mac-notify-title" className="grow" style={{ ...H2, minWidth: 0 }}>
+          {m.notifyTitle}
+        </h2>
+        <button
+          type="button"
+          className="sw"
+          role="switch"
+          aria-checked={notify.on}
+          aria-labelledby="mac-notify-title"
+          aria-describedby="mac-notify-body"
+          aria-busy={notify.busy || undefined}
+          disabled={notify.busy}
+          data-testid="mac-notify"
+          // Straight from the tap, so Safari opens its permission prompt.
+          onClick={() => void (notify.on ? remote.notifyOff() : remote.notifyOn())}
+        />
+      </div>
+      <p id="mac-notify-body" className="hint" style={{ margin: 0 }}>
+        {m.notifyBody}
+      </p>
+      {notify.note && (
+        <div className={`banner ${tone[notify.note]}`} role={notify.note === "later" ? "status" : "alert"}>
+          <span className="grow">{m.notifyNotes[notify.note]}</span>
+        </div>
+      )}
+    </section>
   );
 }
 

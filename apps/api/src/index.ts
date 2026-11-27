@@ -31,6 +31,7 @@ import { timingSafeEqual } from "./timing-safe";
 import { pilotRoute } from "./pilot";
 import { routinesRoute } from "./routines";
 import { relayEnabled, relayPath, relayRoute, relaySourceGroup } from "./relay";
+import { webPushKey } from "./web-push";
 import { RelayObject } from "./relay-object";
 import { ScheduleObject } from "./schedule-object";
 import { signUpsOpen } from "./self-serve";
@@ -67,6 +68,12 @@ export interface Env {
   /// The relay's kill switch. Only exactly "1" opens a relay route; every real
   /// environment leaves it unset until the owner turns the relay on (gate G3).
   RELAY_ENABLED?: string;
+  /// The relay's Web Push key pair (item 78d, web-push.ts; docs/remote-access.md, "Push key"): made by us, both halves
+  /// Wrangler secrets, never in config. WEB_PUSH_PRIVATE_KEY is base64url of the 32-byte P-256 scalar, WEB_PUSH_PUBLIC_KEY
+  /// base64url of the 65-byte uncompressed point. Until both are set (and PUBLIC_API_ORIGIN, the pushes' sender), the
+  /// health answer offers no key and the relay sends no push.
+  WEB_PUSH_PRIVATE_KEY?: string;
+  WEB_PUSH_PUBLIC_KEY?: string;
   /// Operator secret (`wrangler secret put CLOUD_API_KEY`). Never in config.
   CLOUD_API_KEY?: string;
   /// Expected protected admin Access application audience. Unset denies admin.
@@ -717,12 +724,14 @@ export default {
 
     // Health carries no task data and stays public. It also says whether the relay is switched on, which anyone can
     // already learn from a relay route's 503: the desktop's page cannot read that answer from a socket, and asks here
-    // before dialling again (apps/desktop/src/remote/link.ts).
+    // before dialling again (apps/desktop/src/remote/link.ts). While the relay is on and its push key is set, it also
+    // offers the key's public half (`webPush`), which a paired phone subscribes with (item 78d): a public key, by design.
     if (request.method === "GET" && url.pathname === "/v1/health") {
       return json({
         ok: true,
         service: "manut-api",
         relay: relayEnabled(env) ? "on" : "off",
+        webPush: relayEnabled(env) ? webPushKey(env) : null,
         families: [
           "tasks",
           "work",

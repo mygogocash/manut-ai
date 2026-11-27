@@ -63,4 +63,6 @@ export const rm: Record<keyof typeof en, string> = {
   "rm.ts.consent.public": "Turning on HTTPS for your tailnet published this Mac's name in public certificate logs.",
   "rm.ts.consent.accept": "Turn on",
   "rm.ts.consent.decline": "Not now",
+  // item 78d: a phone that turned on "Tell me when my Mac needs me"; English first (the owner, 27 Nov 2026), the same English in every language until translated
+  "rm.pushOn": "{line}. It gets a notification when this Mac needs you.",
 };

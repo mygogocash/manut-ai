@@ -5,6 +5,7 @@ import type { RelyingParty } from "@manut/remote-channel";
 import { expect } from "vitest";
 import { RemoteMac, type RemoteSnapshot } from "../host";
 import { memoryKeyring } from "../keys";
+import { memoryPushStore } from "../push";
 import { FakeChats } from "./chats";
 import { ManualClock, settle } from "./clock";
 import { TestAuthenticator, TestPhone } from "./phone";
@@ -21,11 +22,12 @@ export async function waitFor(check: () => boolean, rounds = 400): Promise<void>
   throw new Error("waited too long");
 }
 
-export function macHarness(options: { origin?: string | null; door?: DoorShell } = {}) {
+export function macHarness(options: { origin?: string | null; door?: DoorShell; pushes?: Record<string, string> } = {}) {
   const relay = new FakeRelay();
   const clock = new ManualClock();
   const keyring = memoryKeyring();
   const chats = new FakeChats();
+  const pushes = memoryPushStore(options.pushes);
   const probes: string[] = [];
   const remote = new RemoteMac({
     keyring,
@@ -39,6 +41,7 @@ export function macHarness(options: { origin?: string | null; door?: DoorShell }
     actions: chats.actions,
     now: () => clock.now,
     timers: clock,
+    pushes,
     ...(options.door ? { door: options.door } : {}),
   });
   const views: RemoteSnapshot["pairing"][] = [];
@@ -46,7 +49,7 @@ export function macHarness(options: { origin?: string | null; door?: DoorShell }
     // The pairing's own steps, from the first code on.
     if (views.at(-1) !== s.pairing && (s.pairing.phase !== "idle" || views.length > 0)) views.push(s.pairing);
   });
-  return { relay, clock, keyring, chats, remote, probes, views };
+  return { relay, clock, keyring, chats, pushes, remote, probes, views };
 }
 
 export type Harness = ReturnType<typeof macHarness>;

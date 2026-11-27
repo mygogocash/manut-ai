@@ -4,7 +4,7 @@
 import { DecisionChallenges, type StoredPasskey, decisionChallenge, fromBase64Url, toBase64Url, verifyPasskeyRegistration } from "@manut/remote-channel";
 import { describe, expect, it } from "vitest";
 import type { SourceApproval } from "./project";
-import { Server, STAYS_ON_MAC } from "./serve";
+import { type ServeDeps, Server, STAYS_ON_MAC } from "./serve";
 import { FakeChats } from "./testkit/chats";
 import { RP } from "./testkit/harness";
 import { TestAuthenticator } from "./testkit/phone";
@@ -42,7 +42,7 @@ const secondApproval: SourceApproval = {
 
 /** A Mac's server over chats a test controls, with two paired phones. Both have opened "buddy" (so they were shown its
  *  asks at revision 1), unless `open` is false. */
-async function setup(options: { open?: boolean } = {}) {
+async function setup(options: { open?: boolean; notify?: ServeDeps["notify"] } = {}) {
   const chats = new FakeChats();
   chats.update("buddy", (items) => [...items, secondApproval]);
   const authenticators = new Map([
@@ -74,6 +74,7 @@ async function setup(options: { open?: boolean } = {}) {
       rp: RP,
       now: () => now,
       push: (device, message) => pushed.push({ device, message }),
+      ...(options.notify ? { notify: options.notify } : {}),
     });
   let server = start();
   if (options.open !== false) {
@@ -159,6 +160,37 @@ async function setup(options: { open?: boolean } = {}) {
     whenSeen: (run: () => void) => (onSeen = run),
   };
 }
+
+describe("notify, the seventh request (item 78d)", () => {
+  it("hands only the speaking device's push address on, needs no passkey, and touches nothing of the Mac's", async () => {
+    const asked: [string, string | null][] = [];
+    const s = await setup({ notify: (device, endpoint) => (asked.push([device, endpoint]), endpoint === "https://bad.example/x" ? "push_address" : null) });
+    expect(await s.send(PHONE, { t: "notify", endpoint: "https://fcm.googleapis.com/fcm/send/a" })).toMatchObject({ t: "done" });
+    // A device id in the request is not read: who asks is the channel's device.
+    expect(await s.send(OTHER, { t: "notify", endpoint: null, device: PHONE })).toMatchObject({ t: "done" });
+    expect(await s.send(PHONE, { t: "notify", endpoint: "https://bad.example/x" })).toMatchObject({ t: "refused", request: "notify", reason: "push_address" });
+    expect(asked).toEqual([
+      [PHONE, "https://fcm.googleapis.com/fcm/send/a"],
+      [OTHER, null],
+      [PHONE, "https://bad.example/x"],
+    ]);
+    for (const endpoint of [42, {}, undefined]) {
+      expect(await s.send(PHONE, { t: "notify", endpoint })).toMatchObject({ t: "refused", reason: "malformed" });
+    }
+    expect(asked).toHaveLength(3);
+    // A phone unpaired is answered by nothing.
+    s.paired.delete(PHONE);
+    expect(await s.send(PHONE, { t: "notify", endpoint: null })).toMatchObject({ t: "refused", reason: "unknown_device" });
+    expect(asked).toHaveLength(3);
+    expect(s.chats.done).toEqual([]);
+    expect(s.challenges.size).toBe(0);
+  });
+
+  it("is not offered by a Mac that keeps no push addresses", async () => {
+    const s = await setup();
+    expect(await s.send(PHONE, { t: "notify", endpoint: null })).toMatchObject({ t: "refused", reason: "not_offered" });
+  });
+});
 
 describe("the six requests", () => {
   it("each reaches the right store action, and nothing else does", async () => {

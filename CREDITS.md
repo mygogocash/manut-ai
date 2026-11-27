@@ -130,6 +130,12 @@ case of `workplaceRules`, `howToWork` and `howToReport` (`GoGoCode/Models/Buddy.
 `BuddyBudget.pacingNote`, `wrapUpNote` and `finalNote` (its final note without "your tools are gone", since a helper lane keeps
 its tools for its report), written through the four dictionaries.
 
+GoSpark again (at `a7537c80`, the same checkout, 27 Nov 2026) for the relay's Web Push (item 78d,
+`apps/api/src/web-push.ts`): the ES256 token signed with WebCrypto, whose raw `r || s` signature is used as the JWS
+signature as it comes (`fakeTokenOnce` in `docs/plans/worker-apns-spike-probe.ts`), here as RFC 8292's VAPID token for
+Web Push instead of an APNs provider token; and its threat model's push rows (RT-11, RT-12), followed with Web Push in
+place of APNs.
+
 The Agent Client Protocol's agent registry (Apache-2.0, `agentclientprotocol/registry`, release `v2026.11.26-3667256` at
 commit `36672565f76e7fb9796eb15182e0e14fb9e77c33`) for Settings › Providers › From the ACP registry (item 101c): its
 published `registry.json` is pinned byte for byte in `apps/desktop/src-tauri/acp-registry/` with its `quarantine.json`

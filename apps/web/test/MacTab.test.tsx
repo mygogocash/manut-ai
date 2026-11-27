@@ -158,6 +158,25 @@ describe("the Your Mac tab", () => {
     expect(document.querySelector("[data-greyed]")).not.toBeNull();
   });
 
+  it("turns on and off being told when the Mac needs the person, saying what the notification holds (item 78d)", async () => {
+    const practice = show();
+    await pairInPractice(practice);
+    const toggle = screen.getByRole("switch", { name: m.notifyTitle });
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
+    expect(screen.getByText(m.notifyBody)).toBeTruthy();
+    expect(m.notifyBody).toContain(m.pushTitle);
+    fireEvent.click(toggle);
+    await waitFor(() => expect(screen.getByRole("switch", { name: m.notifyTitle }).getAttribute("aria-checked")).toBe("true"));
+    expect(await practice.push!.current()).not.toBeNull();
+    fireEvent.click(screen.getByRole("switch", { name: m.notifyTitle }));
+    await waitFor(() => expect(screen.getByRole("switch", { name: m.notifyTitle }).getAttribute("aria-checked")).toBe("false"));
+    expect(await practice.push!.current()).toBeNull();
+    // Not inside a chat: it belongs to the Mac, not to one of its chats.
+    fireEvent.click(screen.getByRole("button", { name: /Shop launch plan/ }));
+    await screen.findByRole("button", { name: m.allowOnce });
+    expect(screen.queryByRole("switch", { name: m.notifyTitle })).toBeNull();
+  });
+
   it("forgets the Mac after saying what that removes, and keeps nothing of a chat anywhere", async () => {
     window.history.replaceState(null, "", "/app/#mac");
     const practice = show();
