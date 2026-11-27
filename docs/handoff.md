@@ -365,6 +365,7 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    138 merged at 03:45 (`docs/paradev-parity.md`: Paradev, MIT, checked feature by feature for the code mode, 117 features,
    rows 145 to 166, iOS design pass last). Then 148 (terminal fixes lifted from Paradev) and 150 (find in a chat) started.
    Needs the owner from 138: CodeMirror 6 for row 165's editor, and which iOS app (111e).
+   140 merged at 04:05 (a former owner can no longer finish a stopped deletion on a shop they lost); 141 started.
    The dev relay is on with its push key pair as dev secrets, deployed to dev 27 Nov; the owner's try on an iPhone is left.
    Two Rust tests that raced under load (the MCP relay's round trip, the Grok account check) now wait for their answers, and
    the 16 hook-dependency warnings `pnpm lint` found are settled. Fonts stay 99, the owner's. From 27 Nov the owner asked for English first: new words are English, copied into ja, ko and zh. Needs the owner from 101b: Grok signed in and `permission_mode = "ask"`
