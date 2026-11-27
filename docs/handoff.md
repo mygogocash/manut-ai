@@ -342,6 +342,11 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    After 102l-2: on Connected, Buddy's chat has no model menu and no "no model yet" line (the runtime's `models` capability is
    off there), and the answer's line says how long Buddy took (`turn.start`'s `since`). While the API works on an
    answer the chat shows Buddy's typing bubble with no turn (`answersOnSend`), so a refused message is still only a message not sent.
+   That fix merged on 27 Nov (pull request 68), with `e2e/timings.json` refreshed from its green run. Two lead sessions had
+   started in the same worktree that evening; one stood back, so one lead merges. At 98% disk the shared Rust cache's
+   app-crate builds (30 GB) and incremental cache were cleared. Then 102l-5 (`feat/chat-lines-apart`) started as a helper in
+   its own `cc-item…` worktree, beside a sixth security read over everything merged since the fifth (26 Nov, 14:10). 108b
+   stays proposed: it waits for the owner's answers to item 108's nine questions (`docs/multi-machine.md`).
    The dev relay is on with its push key pair as dev secrets, deployed to dev 27 Nov; the owner's try on an iPhone is left.
    Two Rust tests that raced under load (the MCP relay's round trip, the Grok account check) now wait for their answers, and
    the 16 hook-dependency warnings `pnpm lint` found are settled. Fonts stay 99, the owner's. From 27 Nov the owner asked for English first: new words are English, copied into ja, ko and zh. Needs the owner from 101b: Grok signed in and `permission_mode = "ask"`
@@ -623,6 +628,10 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
 
 Every switch that turns a built part on, and what each needs from the owner, is in `docs/turning-on.md`.
 
+- **Manut AI on more than one machine (item 108, `docs/multi-machine.md`, "Open questions for the owner"):** nine
+  questions, each with a recommendation (a local-network road, the relay's cost, Macs only, a terminal from afar, others'
+  devices, pairing from afar, when updates install, agents reaching other machines, and the consent words). Its phases
+  108a to 108j stay proposed until the owner answers; 108b's levels table follows questions 4 to 6.
 - **Confirm the console behind Access:** open https://dev.manut.xyz/ops, log in with the emailed code, and
   paste the operator key (`security find-generic-password -s manut-dev-operator-key -w | pbcopy`). The shop
   list should load. That proves the admin gate gets `ctx.access` on the deployed front door.
