@@ -18,6 +18,11 @@
 // A phone reaches the Mac by one of two roads (roads.ts): the relay's link, and, while the person has it on, the tailnet's
 // door (door.ts, item 78f-2b). Both carry the same sessions under the same pairing, K and challenges; turning the Tailscale
 // road off, or the whole switch off, closes every stream that came by it.
+//
+// "Your Mac needs you" (item 78d, push.ts): a phone's `notify` keeps its push address here and hands it to the relay; when
+// the store changes and an ask opened that no paired phone has a session to see, the relay is asked to wake the phones
+// with an address (at most once an ask, never twice within two minutes). Unpair forgets the address, and the relay's
+// `revoke` deletes it there.
 import {
   type Channel,
   type MacSessionHandshake,
@@ -25,13 +30,15 @@ import {
   type RelyingParty,
   DecisionChallenges,
   acceptSession,
+  pushAddressOk,
 } from "@manut/remote-channel";
 import { type Keyring, type PairedPhone, RemoteVault } from "./keys";
 import { type LinkState, type RelayProbe, type SocketFactory, type Timers, RelayLink, relaySocketUrl } from "./link";
 import { PairingDoor, type PairingView } from "./pairing";
 import { DoorLink, type DoorShell } from "./door";
 import { Roads } from "./roads";
-import { Projector } from "./project";
+import { Projector, askBinding } from "./project";
+import { type PushStore, PushPlan, memoryPushStore } from "./push";
 import { type ChatSources, type MacActions, Server } from "./serve";
 
 export interface RemoteMacDeps {
@@ -48,6 +55,8 @@ export interface RemoteMacDeps {
   readonly random?: RandomBytes;
   /** The shell's Tailscale door (item 78f); absent where there is none (a browser, the tests that do not use it). */
   readonly door?: DoorShell;
+  /** Where each phone's push address is kept (item 78d, push.ts); in memory when absent. */
+  readonly pushes?: PushStore;
 }
 
 /** The Tailscale road, as Settings shows it: off; starting; on under the Mac's tailnet name; or failed, with why. */
@@ -59,7 +68,8 @@ export interface RemoteSnapshot {
   /** `no_origin`: the app is not connected to an API the page may open a socket to (Practice, or another host). */
   readonly link: LinkState | "no_origin" | "no_keychain";
   readonly pairing: PairingView;
-  readonly phones: readonly (PairedPhone & { readonly connected: boolean })[];
+  /** `push`: the phone turned on "Tell me when my Mac needs me", and this Mac keeps its push address. */
+  readonly phones: readonly (PairedPhone & { readonly connected: boolean; readonly push: boolean })[];
   readonly tailscale: TailscaleRoad;
 }
 
@@ -111,6 +121,9 @@ export class RemoteMac {
   /** Each ask's revision and what each phone was shown, for this app's life: kept across the switch going off and on,
    *  so a phone's revision binds across a reconnect (project.ts). */
   readonly #projector = new Projector();
+  readonly #pushes: PushStore;
+  /** Which asks were pushed for, or let go by, and when the last push went (push.ts). */
+  readonly #pushPlan = new PushPlan();
   #on = false;
   #linkState: LinkState | "no_origin" | "no_keychain" = "stopped";
   #pairingView: PairingView = { phase: "idle" };
@@ -120,6 +133,7 @@ export class RemoteMac {
   constructor(deps: RemoteMacDeps) {
     this.#deps = deps;
     this.#timers = deps.timers ?? systemTimers;
+    this.#pushes = deps.pushes ?? memoryPushStore();
   }
 
   get isOn(): boolean {
@@ -140,12 +154,13 @@ export class RemoteMac {
   }
 
   snapshot(): RemoteSnapshot {
-    const connected = new Set([...this.#streams.values()].flatMap((s) => (s.state.kind === "open" ? [s.state.deviceId] : [])));
+    const connected = this.#connected();
+    const book = this.#pushes.read();
     return {
       on: this.#on,
       link: this.#linkState,
       pairing: this.#pairingView,
-      phones: (this.#vault?.phones() ?? []).map((p) => ({ ...p, connected: connected.has(p.id) })),
+      phones: (this.#vault?.phones() ?? []).map((p) => ({ ...p, connected: connected.has(p.id), push: p.id in book })),
       tailscale: this.#tailscale,
     };
   }
@@ -220,12 +235,20 @@ export class RemoteMac {
             this.#linkState = state;
             this.#changed();
           },
+          onPushGone: (device) => this.#pushGone(device),
         },
       }),
     );
     this.#link = link;
     this.#rpOrigin = rp.origin;
     for (const [id, hash] of vault.tokenHashes()) link.allowDevice(id, hash);
+    // Each paired phone's push address goes to the relay with its device; an address of a phone no longer paired goes.
+    const book = this.#pushes.read();
+    for (const id of Object.keys(book)) if (!vault.has(id)) delete book[id];
+    this.#pushes.write(book);
+    for (const [id, endpoint] of Object.entries(book)) link.setWebPush(id, endpoint);
+    // Asks open as the switch turns on are not pushed for: the person is at the Mac.
+    this.#pushPlan.seed(this.#openAsks());
     this.#server = new Server({
       chats: this.#deps.chats,
       actions: this.#deps.actions,
@@ -235,6 +258,7 @@ export class RemoteMac {
       now: () => this.#deps.now(),
       push: (deviceId, message) => this.#push(deviceId, message),
       projector: this.#projector,
+      notify: (deviceId, endpoint) => this.#notify(deviceId, endpoint),
     });
     this.#pairing = new PairingDoor({
       hostId: identity.hostId,
@@ -394,11 +418,66 @@ export class RemoteMac {
     this.#challenges.revoke(id);
     this.#server?.left(id);
     this.#projector.forgetDevice(id);
+    // Its push address goes too; the relay's `revoke`, sent by whoever forgot it, deletes it there.
+    this.#forgetPush(id);
   }
 
-  /** The store changed: phones watching a chat hear what moved. */
+  /** The store changed: phones watching a chat hear what moved, and phones away from it are woken for a new ask. */
   publish(): void {
     this.#server?.publish();
+    this.#maybePush();
+  }
+
+  /** Every device with a session open now, by either road. */
+  #connected(): Set<string> {
+    return new Set([...this.#streams.values()].flatMap((s) => (s.state.kind === "open" ? [s.state.deviceId] : [])));
+  }
+
+  /** Every ask waiting on the person now, in every chat, as `askBinding` names it. */
+  #openAsks(): string[] {
+    return this.#deps.chats.list().flatMap((chat) => chat.items.flatMap((item) => (item.kind !== "message" && item.open ? [askBinding(chat.key, item.id)] : [])));
+  }
+
+  /** An ask opened: when no paired phone has a session open, the relay is asked to wake every paired phone with a push
+   *  address, at most once for each ask and never twice within `PUSH_GAP_MS` (push.ts). */
+  #maybePush(): void {
+    const link = this.#link;
+    const vault = this.#vault;
+    if (!this.#on || !link || !vault) return;
+    const devices = Object.keys(this.#pushes.read()).filter((id) => vault.has(id));
+    const canPush = devices.length > 0 && this.#connected().size === 0;
+    if (this.#pushPlan.consider(this.#openAsks(), this.#deps.now(), canPush)) link.push(devices);
+  }
+
+  /** A phone's `notify` (serve.ts): its push address, kept and handed to the relay, or forgotten with null. Only an
+   *  address on a known push service is taken, the same rule the relay checks. */
+  #notify(deviceId: string, endpoint: string | null): string | null {
+    if (!this.#vault?.has(deviceId)) return "unknown_device";
+    if (endpoint !== null && !pushAddressOk(endpoint)) return "push_address";
+    const book = this.#pushes.read();
+    if ((book[deviceId] ?? null) !== endpoint) {
+      if (endpoint === null) delete book[deviceId];
+      else book[deviceId] = endpoint;
+      this.#pushes.write(book);
+      this.#link?.setWebPush(deviceId, endpoint);
+      this.#changed();
+    }
+    return null;
+  }
+
+  /** The relay forgot a phone's push address because its push service said it is gone: forgotten here too. The phone
+   *  sends a new one at its next session if it still has notifications on. */
+  #pushGone(deviceId: string): void {
+    this.#forgetPush(deviceId);
+    this.#link?.setWebPush(deviceId, null);
+  }
+
+  #forgetPush(deviceId: string): void {
+    const book = this.#pushes.read();
+    if (!(deviceId in book)) return;
+    delete book[deviceId];
+    this.#pushes.write(book);
+    this.#changed();
   }
 
   #onOpen(stream: number, device: string): void {

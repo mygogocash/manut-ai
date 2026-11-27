@@ -96,6 +96,10 @@ pairing. Exactly this is kept, in this origin's IndexedDB, in one database named
 - **`spent`**: the door ids of the last 32 pairing codes this phone started, so a code is one try also after a reload. A
   door id is random and names nothing.
 
+With "Tell me when my Mac needs me" on (item 78d, docs/remote-access.md), the browser itself also holds the app's push
+subscription, which this page never copies into storage: its push address goes to the Mac inside the channel, and the
+notification a push brings says only "Your Mac needs you". Turning the switch off, or Forget this Mac, ends it.
+
 Nothing of a chat is ever kept: chats, asks, messages, answers and the Mac's state live in the page's memory, are dropped
 when the person leaves the tab, and are cleared 15 minutes after the Mac last confirmed them. None of it goes in the
 address (the tab is always `#mac`), a log or a notification, and a pairing link the page was opened with is taken out of

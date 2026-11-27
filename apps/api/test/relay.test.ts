@@ -295,7 +295,9 @@ describe("relay routes", () => {
       expect(health.status).toBe(200);
       const body = (await health.json()) as Record<string, unknown>;
       expect(body.relay).toBe(said);
-      expect(Object.keys(body).sort()).toEqual(["families", "ok", "relay", "service"]);
+      // No push key is set here, so none is offered (relay-push.test.ts has the key's own cases).
+      expect(body.webPush).toBeNull();
+      expect(Object.keys(body).sort()).toEqual(["families", "ok", "relay", "service", "webPush"]);
       expect(fixture.forwarded).toEqual([]);
     }
   });

@@ -239,6 +239,15 @@ export type MacStrings = {
   keep: string;
   forgetFailed: string;
 
+  /// "Tell me when my Mac needs me" (item 78d): the switch, what it does, and why it did not turn on.
+  notifyTitle: string;
+  notifyBody: string;
+  notifyInstall: string;
+  notifyNotes: Record<"denied" | "failed" | "refused" | "mac" | "later", string>;
+  /// The notification itself, which the service worker shows on a push (src/app/swPush.ts holds the same words, since the
+  /// worker is built on its own and cannot import this table; a test keeps the two the same).
+  pushTitle: string;
+
   passkeyName: string;
   practice: string;
   practiceDigits: string;
@@ -552,6 +561,19 @@ export const en: AppStrings = {
     forgetConfirm: "Forget",
     keep: "Keep it",
     forgetFailed: "This phone could not delete its key. Try again.",
+
+    notifyTitle: "Tell me when my Mac needs me",
+    notifyBody:
+      "When something waits for you and this phone isn't connected, it shows “Your Mac needs you” and nothing more. To send it, the relay keeps this phone's push address.",
+    notifyInstall: "To be told when your Mac needs you, open Manut AI from your Home Screen.",
+    notifyNotes: {
+      denied: "Notifications are off for Manut AI on this phone. Turn them on in the phone's Settings, then try again.",
+      failed: "This phone could not turn on notifications. Try again.",
+      refused: "This browser's notifications can't come from your Mac. Use Safari on an iPhone, or Chrome on Android.",
+      mac: "Your Mac can't send notifications yet. Update Manut AI on your Mac, then try again.",
+      later: "Your Mac hears this the next time this phone connects.",
+    },
+    pushTitle: "Your Mac needs you",
 
     passkeyName: "Your Mac",
     practice: "There is no Mac in practice: paste any text to pair with a pretend one, which is forgotten when the page reloads.",

@@ -118,14 +118,16 @@ describe("Settings › Sharing and access", () => {
 
   it("lists the paired phones with Unpair, and says quietly which one is connected", () => {
     const phones = [
-      { id: "A", name: "Somchai's iPhone", pairedAt: NOW - 86_400_000, lastSeen: NOW, connected: true },
-      { id: "B", name: "Pixel", pairedAt: NOW, lastSeen: NOW, connected: false },
+      { id: "A", name: "Somchai's iPhone", pairedAt: NOW - 86_400_000, lastSeen: NOW, connected: true, push: true },
+      { id: "B", name: "Pixel", pairedAt: NOW, lastSeen: NOW, connected: false, push: false },
     ];
     const html = view({ on: true, link: "ready", phones });
     const text = words(html);
     expect(text).toContain("Somchai's iPhone");
     expect(text).toContain("Pixel");
     expect(text).toContain("last seen");
+    // Only the phone that turned on "Tell me when my Mac needs me" says it gets a notification (item 78d).
+    expect(text.match(/It gets a notification when this Mac needs you\./g)).toHaveLength(1);
     expect(html.match(/data-testid="remote-unpair"/g)).toHaveLength(2);
     expect(text).toContain("Somchai's iPhone is connected.");
     expect(words(view({ on: true, link: "ready", phones: phones.map((p) => ({ ...p, connected: true })) }))).toContain("2 phones are connected.");

@@ -444,6 +444,65 @@ describe("the phone and the Mac through the real relay", () => {
     mac.turnOff();
   }, 30_000);
 
+  it("turns on notifications: the push address reaches the Mac inside the channel, and the relay only from the Mac", async () => {
+    const carried: Carried[] = [];
+    const { mac, chats } = await macOnRelay(carried);
+    const endpoint = "https://web.push.apple.com/QGuQyavXutnMH8iVgwGGgVwKbd5Wfa1DXQWCeQGAkdaBJgJ1wUtklzp9KgAoWwPb";
+    const subscribed: string[] = [];
+    let current: string | null = null;
+    const phone = new MacRemote(
+      liveBackend({
+        origin: ORIGIN,
+        connect: (url) => socketTo(new URL(url.replace(/^wss:/, "https:")).pathname, "phone", carried),
+        vault: memoryVault(),
+        passkeys: standInPasskeys(new TestAuthenticator(0xd4)),
+        relay: async () => "on",
+        pushKey: async () => "B".padEnd(87, "x"),
+        push: {
+          supported: () => true,
+          current: async () => current,
+          subscribe: async (key) => {
+            subscribed.push(key);
+            current = endpoint;
+            return { ok: true, endpoint };
+          },
+          unsubscribe: async () => {
+            current = null;
+          },
+        },
+        name: NAME,
+        label: "Your Mac",
+      }),
+    );
+    await phone.start();
+    await pairThrough(mac, phone);
+    await vi.waitFor(() => expect(paired(phone.view)?.link).toBe("live"), { timeout: 5_000 });
+    expect(paired(phone.view)!.notify).toMatchObject({ offered: "yes", on: false });
+    const from = carried.length;
+    await phone.notifyOn();
+    expect(subscribed).toEqual(["B".padEnd(87, "x")]);
+    expect(paired(phone.view)!.notify).toMatchObject({ on: true, note: null });
+    await vi.waitFor(() => expect(mac.snapshot().phones[0]?.push).toBe(true), { timeout: 5_000 });
+    // The address crossed the relay sealed from the phone: the only message that carries it in the clear is the Mac's
+    // own `webpush` to its relay.
+    const needle = new TextEncoder().encode(endpoint);
+    const clear = carried.slice(from).filter((c) => (typeof c.data === "string" ? c.data.includes(endpoint) : contains(c.data, needle)));
+    expect(clear.map((c) => ({ side: c.side, way: c.way, message: JSON.parse(c.data as string) as unknown }))).toEqual([
+      { side: "mac", way: "sent", message: { t: "webpush", v: 1, id: mac.snapshot().phones[0]!.id, endpoint } },
+    ]);
+    // The phone goes away; a new ask opens on the Mac, which asks its relay to wake the phone, naming it and nothing else.
+    phone.dispose();
+    await vi.waitFor(() => expect(mac.snapshot().phones[0]?.connected).toBe(false), { timeout: 5_000 });
+    const ask: SourceApproval = { kind: "approval", id: "req-9", ts: 1_800_000_900, open: true, title: "Refund an order", command: "refund --order 9", choices: ["once", "deny"] };
+    chats.update("buddy", (items) => [...items, ask]);
+    mac.publish();
+    const pushes = () => carried.filter((c) => c.side === "mac" && c.way === "sent" && typeof c.data === "string" && c.data.includes('"t":"push"'));
+    await vi.waitFor(() => expect(pushes()).toHaveLength(1), { timeout: 5_000 });
+    expect(JSON.parse(pushes()[0]!.data as string)).toEqual({ t: "push", v: 1, kind: "decision", devices: [mac.snapshot().phones[0]!.id] });
+    expect(pushes()[0]!.data).not.toContain("Refund");
+    mac.turnOff();
+  }, 30_000);
+
   it("refuses a code the relay no longer has, after the Mac cancelled it", async () => {
     const carried: Carried[] = [];
     const { mac } = await macOnRelay(carried);

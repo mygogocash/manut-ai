@@ -21,6 +21,9 @@ export interface Road {
   setPresence(state: RelayPresence, at: number): void;
   sendFrame(stream: number, payload: Uint8Array): boolean;
   closeStream(stream: number): void;
+  /** Push (item 78d) is the relay's alone: the door has neither. */
+  setWebPush?(id: string, endpoint: string | null): void;
+  push?(devices: readonly string[]): boolean;
 }
 
 export type RoadName = "relay" | "door";
@@ -29,6 +32,7 @@ export class Roads {
   readonly #events: RoadEvents;
   readonly #roads = new Map<RoadName, Road>();
   readonly #devices = new Map<string, string>();
+  readonly #webPush = new Map<string, string>();
   #presence: [RelayPresence, number] | null = null;
   /** The host's number for each road's stream, and the way back. */
   readonly #local = new Map<string, number>();
@@ -82,6 +86,7 @@ export class Roads {
     if (this.#roads.has(name)) this.removeRoad(name);
     this.#roads.set(name, road);
     for (const [id, hash] of this.#devices) road.allowDevice(id, hash);
+    for (const [id, endpoint] of this.#webPush) road.setWebPush?.(id, endpoint);
     if (this.#presence) road.setPresence(...this.#presence);
   }
 
@@ -118,7 +123,22 @@ export class Roads {
 
   revokeDevice(id: string): void {
     this.#devices.delete(id);
+    this.#webPush.delete(id);
     for (const r of this.#roads.values()) r.revokeDevice(id);
+  }
+
+  /** A phone's push address, to every road that pushes (the relay's), and to one added later. */
+  setWebPush(id: string, endpoint: string | null): void {
+    if (endpoint === null) this.#webPush.delete(id);
+    else this.#webPush.set(id, endpoint);
+    for (const r of this.#roads.values()) r.setWebPush?.(id, endpoint);
+  }
+
+  /** Asks every road that pushes to wake `devices`; true when one took it. */
+  push(devices: readonly string[]): boolean {
+    let sent = false;
+    for (const r of this.#roads.values()) sent = (r.push?.(devices) ?? false) || sent;
+    return sent;
   }
 
   setPresence(state: RelayPresence, at: number): void {
