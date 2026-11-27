@@ -2,7 +2,9 @@
 // blocks, provider-prefixed keys, JSON web tokens, credentials in HTTP headers, `password:` in YAML and JSON, the password of
 // `scheme://user:pass@host`, quoted `KEY="…"` and `--password value`). The patterns live in secrets.json, which the desktop shell
 // (tasks.rs mask_secrets, mask_command) reads too, so every surface masks the same strings the same way: what a phone is shown, a
-// skill bundle before it is published, the keys counted in Kit's changes.
+// skill bundle before it is published, the keys counted in Kit's changes. The API's Worker imports this file too, to mask what
+// Buddy's chat sends a model and keeps (apps/api/src/chat.ts), and compiles it under its own stricter checks
+// (`noUncheckedIndexedAccess`): that is what the few `!` after an index here are for.
 //
 // Two forms (item 117). `maskSecrets` is for text that never runs. `maskCommand` is for what an approval shows: a person decides
 // on it, so it never hides anything the shell would act on (secrets.json's `about` says how).
@@ -38,7 +40,7 @@ interface Reading {
 function heredocWord(w: string): { word: string; quoted: boolean } | null {
   if (/^[A-Za-z0-9_.-]+$/.test(w)) return { word: w, quoted: false };
   const m = /^(?:'([^']*)'|"([^"\\$`]*)"|\\([A-Za-z0-9_.-]+))$/.exec(w);
-  return m ? { word: m[1] ?? m[2] ?? m[3], quoted: true } : null;
+  return m ? { word: (m[1] ?? m[2] ?? m[3])!, quoted: true } : null;
 }
 
 /** A command read as the shell reads it (item 121). Words part at a blank; `;`, `&`, `|`, `(`, `)`, `<`, `>` and a line break
@@ -114,7 +116,7 @@ function lex(text: string): Reading {
     return Math.min(at, n);
   };
   for (let i = 0; i < n; i++) {
-    const c = text[i];
+    const c = text[i]!;
     if (quote === "'") {
       if (c === "'") close(i);
       continue;
@@ -187,12 +189,12 @@ export function shellWords(text: string): string[] {
 function aligned(before: string, from: number, after: string, free: (at: number) => boolean): boolean {
   if (before === after) return true;
   const pieces = after.split(spec.mask);
-  if (pieces.length === 1 || pieces.length > 64 || !before.startsWith(pieces[0])) return false;
+  if (pieces.length === 1 || pieces.length > 64 || !before.startsWith(pieces[0]!)) return false;
   const failed = new Set<number>();
   const rest = (i: number, at: number): boolean => {
     const key = i * (before.length + 1) + at;
     if (failed.has(key)) return false;
-    const next = pieces[i];
+    const next = pieces[i]!;
     const last = i === pieces.length - 1;
     for (let end = at + 1; end <= before.length && free(from + end - 1); end++) {
       if (before.startsWith(next, end) && (last ? end + next.length === before.length : rest(i + 1, end + next.length))) return true;
@@ -200,7 +202,7 @@ function aligned(before: string, from: number, after: string, free: (at: number)
     failed.add(key);
     return false;
   };
-  return rest(1, pieces[0].length);
+  return rest(1, pieces[0]!.length);
 }
 
 /** Whether `after` splits into the same shell words as `before`, as many and each the same, or with masks standing for
@@ -209,7 +211,7 @@ function shaped(before: string, after: string, free: (reading: Reading) => (at: 
   const a = lex(before);
   const b = lex(after);
   const ok = free(a);
-  return a.words.length === b.words.length && a.words.every((w, i) => aligned(w.text, w.from, b.words[i].text, ok));
+  return a.words.length === b.words.length && a.words.every((w, i) => aligned(w.text, w.from, b.words[i]!.text, ok));
 }
 
 /** The structural check of what an approval shows (item 121): `after` splits into exactly `before`'s shell words, each the
@@ -302,8 +304,8 @@ function maskWhole(text: string, command = false): string {
 function splitToken(all: string, body: string, n: number): string {
   let k = 0;
   for (let i = 0; i < body.length; i++) {
-    if (/\s/.test(body[i])) continue;
-    if (++k === n) return i + 1 === body.length || /\s/.test(body[i + 1]) ? spec.mask + body.slice(i + 1) : all;
+    if (/\s/.test(body[i]!)) continue;
+    if (++k === n) return i + 1 === body.length || /\s/.test(body[i + 1]!) ? spec.mask + body.slice(i + 1) : all;
   }
   return all;
 }
@@ -376,7 +378,7 @@ export function showCommand(command: string): ShownCommand {
   const masked = blocks.split("\n").map(commandLine).join("\n");
   const sure =
     masked === command ||
-    (!command.includes(spec.mask.charAt(0)) && shaped(command, blocks, (r) => (k) => r.data[k]) && sameShape(blocks, masked));
+    (!command.includes(spec.mask.charAt(0)) && shaped(command, blocks, (r) => (k) => r.data[k]!) && sameShape(blocks, masked));
   const plain = sure ? masked : command;
   const text = revealHidden(plain);
   return { text, unmasked: !sure, hidden: text !== plain };
