@@ -139,7 +139,8 @@ test("a Claude Code terminal whose conversation cannot be continued after a rest
   await expect.poll(() => savedOf(page, id)).toMatchObject({ agent: "claude", agentSession: conv, running: false });
   await openRow(page, id);
   await expect(screen(page)).toContainText(`No conversation found with session ID: ${conv}`);
-  await expect(page.getByTestId(`session-${id}`).getByTestId("term-row-mark")).toHaveAttribute("data-agent", "claude");
+  // its mark, in the terminal's own header (the row with the same mark is on the Code page now)
+  await expect(page.getByTestId("header").getByTestId("term-row-mark")).toHaveAttribute("data-agent", "claude");
   await expect(page.getByTestId("session-fresh")).toBeVisible();
   expect(await shellStarts(page)).toEqual([]);
 
@@ -375,7 +376,8 @@ test("a Codex conversation with no rollout is not started to refuse it: the row 
   expect(await starts(page)).toEqual([]);
   await openRow(page, id);
   await expect(screen(page)).toContainText("Codex could not find this conversation");
-  await expect(page.getByTestId(`session-${id}`).getByTestId("term-row-mark")).toHaveAttribute("data-agent", "codex");
+  // its mark, in the terminal's own header (the row with the same mark is on the Code page now)
+  await expect(page.getByTestId("header").getByTestId("term-row-mark")).toHaveAttribute("data-agent", "codex");
 
   // the way out stays after another restart
   await page.reload();

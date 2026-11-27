@@ -81,6 +81,8 @@ test("a Claude Code terminal starts under an id manut made and continues it afte
   await expect.poll(async () => (await saved(page))?.sessions?.find((s: { id: string }) => s.id === id)).toMatchObject({ agent: "claude", agentSession: conv, running: true });
 
   await page.reload();
+  await startDone(page);
+  await openCode(page);
   await expect(page.getByTestId(`session-${id}`)).toBeVisible();
   // it starts by itself, continuing the same conversation in the same folder: no new id, no Resume button
   await expect.poll(() => starts(page)).toEqual([expect.objectContaining({ agent: "claude", cwd: FOLDER, resume: conv })]);
@@ -113,6 +115,8 @@ async function holds(page: Page, id: string, conv: string) {
 const asks = (page: Page) => page.evaluate(() => ((window as unknown as { __manutPastReads?: { op: string; pty?: number }[] }).__manutPastReads ?? []).filter((r) => r.op === "own"));
 const conv = async (page: Page, id: string) => (await saved(page))?.sessions?.find((s: { id: string }) => s.id === id)?.agentSession;
 async function closeRow(page: Page, id: string) {
+  // from its row's ×, on the Code page where the TERMINALS rows are now
+  await openCode(page);
   const card = page.getByTestId(`session-${id}`);
   await card.hover();
   await card.getByTestId("session-close").click();
@@ -136,6 +140,8 @@ test("a Codex terminal learns its conversation from its own Codex and continues 
   expect(await asks(page)).toEqual([{ op: "own", agent: "codex", pty }]);
 
   await page.reload();
+  await startDone(page);
+  await openCode(page);
   await expect(page.getByTestId(`session-${id}`)).toBeVisible();
   // it starts by itself as `codex resume <id>` in the same folder, and asks for nothing again
   await expect.poll(() => starts(page)).toEqual([expect.objectContaining({ agent: "codex", cwd: FOLDER, resume: A })]);
@@ -203,6 +209,7 @@ test("a Codex that exits to the shell gives its conversation to no other termina
   // the person types codex in that shell: the row shows Codex, but it is a shell row and asks nothing
   const shellPty = await ptyOf(page, b);
   await page.evaluate((p) => (window as unknown as { __manutEmitSessionFg(x: { id: number; agent: string }): void }).__manutEmitSessionFg({ id: p!, agent: "codex" }), shellPty);
+  await openCode(page);
   await expect(page.getByTestId(`session-${b}`).getByTestId("term-row-mark")).toHaveAttribute("data-agent", "codex");
   // the first one asks after 5 s: its Codex holds nothing yet, so it learns nothing, and never the other's
   await expect.poll(async () => (await asks(page)).length, { timeout: 15_000 }).toBeGreaterThanOrEqual(1);
@@ -211,6 +218,8 @@ test("a Codex that exits to the shell gives its conversation to no other termina
   expect((await asks(page)).map((r) => r.pty)).toEqual([await ptyOf(page, a)]);
   // after a restart neither continues anything: both come back paused
   await page.reload();
+  await startDone(page);
+  await openCode(page);
   await expect(page.getByTestId(`session-${a}`)).toBeVisible();
   await page.waitForTimeout(300);
   expect(await starts(page)).toEqual([]);
@@ -346,6 +355,7 @@ test("the scrollback comes back dimmed, under a divider, before the program's ne
   expect((await history(page)).find((c) => c.op === "history.prune")?.keep).toContain(id);
 
   // closing the row removes its kept text
+  await openCode(page);
   await page.getByTestId(`session-${id}`).hover();
   await page.evaluate((i) => (window as unknown as { __manutSessions: { close(id: string): void } }).__manutSessions.close(i), id);
   await expect.poll(async () => (await history(page)).filter((c) => c.op === "history.remove").map((c) => c.key)).toEqual([id]);
@@ -427,7 +437,7 @@ test("the bottom panel's tabs come back after a restart in their folders, with t
   // a slow computer: the shell answers the history read late
   await page.addInitScript(() => ((window as unknown as Record<string, unknown>).__manutMockHistoryDelay = 400));
   await page.reload();
-  await expect(page.getByTestId("bot-kami")).toBeVisible();
+  await startDone(page);
   // nothing starts until the panel shows
   await page.waitForTimeout(300);
   expect(await page.evaluate(() => (window as unknown as { __manutShellCalls?: unknown[] }).__manutShellCalls ?? [])).toEqual([]);
