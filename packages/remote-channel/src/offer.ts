@@ -35,9 +35,24 @@ import { hostIdBytes } from "./session";
 ///
 /// In a link it goes after `#pair=`: a fragment is never sent to a server, so the secret reaches
 /// no log, unlike a query string.
+///
+/// Version 2 (item 78f-2d, `docs/remote-access.md`, "Which road") is version 1 with the Mac's name
+/// on the person's tailnet after it, so a phone can reach the pairing door over the tailnet with the
+/// relay switched off; the door's port is the Mac's one fixed port and is not carried:
+///
+/// ```text
+/// version     1   0x02
+/// ...             as version 1, 112 bytes
+/// name length 1   1 to 253
+/// name        n   lowercase DNS labels under ts.net, ASCII
+/// ```
+///
+/// A Mac without a tailnet road shows version 1, unchanged.
 
 const VERSION = 0x01;
+const VERSION_TAILNET = 0x02;
 const OFFER_BYTES = 1 + 32 + 16 + 32 + SECRET_BYTES;
+const NAME_MAX = 253;
 /// The longest text `readPairingLink` reads, as GoSpark's 4,096-byte cap on a pairing link.
 const MAX_LINK_CHARS = 4_096;
 /// How long a code can pair, from when the Mac shows it.
@@ -49,35 +64,63 @@ export interface PairingOffer {
   readonly doorId: string;
   readonly doorToken: Bytes;
   readonly secret: Bytes;
+  /// The Mac's name on the person's tailnet, when it has a tailnet road (version 2).
+  readonly tailnet?: string;
+}
+
+/// A Mac's name on a tailnet as the desktop reads it: lowercase DNS labels of 1 to 63 letters,
+/// digits and hyphens, none starting or ending with one, at most 253 characters, under ts.net with
+/// a label of its own.
+export function tailnetNameOk(name: string): boolean {
+  const labels = name.split(".");
+  return name.length <= NAME_MAX && name.endsWith(".ts.net") && labels.length >= 3 && labels.every((l) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(l));
 }
 
 /// A new code for this Mac: a fresh door and a fresh secret, drawn in that order (door id, door
-/// token, secret) from `random`.
-export function newPairingOffer(hostId: string, random: RandomBytes = systemRandom): PairingOffer {
+/// token, secret) from `random`, and the Mac's tailnet name when it has a tailnet road.
+export function newPairingOffer(hostId: string, random: RandomBytes = systemRandom, tailnet?: string): PairingOffer {
   hostIdBytes(hostId);
+  if (tailnet !== undefined && !tailnetNameOk(tailnet)) throw new RemoteChannelError("invalid");
   const offer: PairingOffer = {
     hostId,
     doorId: uuidV4(draw(random, 16)),
     doorToken: draw(random, DOOR_TOKEN_BYTES),
     secret: draw(random, SECRET_BYTES),
+    ...(tailnet !== undefined ? { tailnet } : {}),
   };
   return redactedWhenPrinted(offer, ["doorToken", "secret"]);
 }
 
 export function encodePairingOffer(offer: PairingOffer): string {
   if (offer.doorToken.length !== DOOR_TOKEN_BYTES || offer.secret.length !== SECRET_BYTES) throw new RemoteChannelError("invalid");
-  return toBase64Url(concatBytes(Uint8Array.of(VERSION), hostIdBytes(offer.hostId), uuidToBytes(offer.doorId), offer.doorToken, offer.secret));
+  const body = [hostIdBytes(offer.hostId), uuidToBytes(offer.doorId), offer.doorToken, offer.secret];
+  if (offer.tailnet === undefined) return toBase64Url(concatBytes(Uint8Array.of(VERSION), ...body));
+  if (!tailnetNameOk(offer.tailnet)) throw new RemoteChannelError("invalid");
+  const name = new TextEncoder().encode(offer.tailnet);
+  return toBase64Url(concatBytes(Uint8Array.of(VERSION_TAILNET), ...body, Uint8Array.of(name.length), name));
 }
 
-/// The strict inverse of `encodePairingOffer`: exactly 113 bytes of version 1, or `malformed`.
+/// The strict inverse of `encodePairingOffer`: exactly 113 bytes of version 1, or version 2 with a
+/// tailnet name that reads exactly, or `malformed`.
 export function decodePairingOffer(text: string): PairingOffer {
   const bytes = fromBase64Url(text);
-  if (bytes.length !== OFFER_BYTES || bytes[0] !== VERSION) throw new RemoteChannelError("malformed");
+  const v2 = bytes[0] === VERSION_TAILNET;
+  if (!v2 && (bytes.length !== OFFER_BYTES || bytes[0] !== VERSION)) throw new RemoteChannelError("malformed");
+  let tailnet: string | undefined;
+  if (v2) {
+    const n = bytes[OFFER_BYTES] ?? 0;
+    if (n < 1 || n > NAME_MAX || bytes.length !== OFFER_BYTES + 1 + n) throw new RemoteChannelError("malformed");
+    const raw = bytes.subarray(OFFER_BYTES + 1);
+    if (!raw.every((b) => b < 0x80)) throw new RemoteChannelError("malformed");
+    tailnet = String.fromCharCode(...raw);
+    if (!tailnetNameOk(tailnet)) throw new RemoteChannelError("malformed");
+  }
   const offer: PairingOffer = {
     hostId: toBase64Url(bytes.subarray(1, 33)),
     doorId: uuidFromBytes(bytes.subarray(33, 49)),
     doorToken: copyBytes(bytes.subarray(49, 81)),
     secret: copyBytes(bytes.subarray(81, 113)),
+    ...(tailnet !== undefined ? { tailnet } : {}),
   };
   return redactedWhenPrinted(offer, ["doorToken", "secret"]);
 }

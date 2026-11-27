@@ -38,7 +38,8 @@ export function takeOpenedLink(): OpenedLink | null {
 /// `label` is the passkey's name in the phone's passwords.
 export function macSetup(mode: ApiMode, label: string, apiOrigin: string | undefined = import.meta.env.VITE_API_ORIGIN): MacSetup {
   if (mode === "fake") {
-    const practice = practiceBackend({ relay: window.location.search.includes(PRACTICE_MAC_OFF) ? "off" : "on" });
+    const off = window.location.search.includes(PRACTICE_MAC_OFF);
+    const practice = practiceBackend(off ? { relay: "off", paired: true } : { relay: "on" });
     return { backend: practice, practice };
   }
   const origin = window.location.origin;

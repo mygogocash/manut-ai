@@ -157,9 +157,22 @@ export class MacSession implements MacLink {
 /// first to say `ready` carries the session and the other is closed when it comes. The same hello, token and channel go
 /// down either road. Turned away by both, the relay's reason is the one said, since it names what the Mac decided.
 export function dialRoads(deps: SessionDeps, mac: PairedMac, timers: Timers): Promise<{ ok: true; pipe: RelayPipe } | { ok: false; end: RelayEnd }> {
-  const relay = relayUrl(deps.origin, mac.hostId);
-  const tail = mac.tailnet ? tailnetUrl(mac.tailnet, mac.hostId) : null;
-  const dial = (url: string) => dialRelay({ connect: deps.connect, url, device: mac.deviceId, token: toBase64Url(mac.doorToken), timers });
+  return dialDoor(deps, { hostId: mac.hostId, device: mac.deviceId, token: toBase64Url(mac.doorToken), ...(mac.tailnet ? { tailnet: mac.tailnet } : {}) }, timers);
+}
+
+/// A door on the Mac by either road: a paired phone's own (`dialRoads`), or a pairing code's one-use door (pair.ts).
+export interface DoorTarget {
+  readonly hostId: string;
+  readonly device: string;
+  readonly token: string;
+  readonly tailnet?: Road;
+}
+
+/// `dialRoads` for any door: the tailnet first when it is known, the relay after the head start or at once.
+export function dialDoor(deps: SessionDeps, target: DoorTarget, timers: Timers): Promise<{ ok: true; pipe: RelayPipe } | { ok: false; end: RelayEnd }> {
+  const relay = relayUrl(deps.origin, target.hostId);
+  const tail = target.tailnet ? tailnetUrl(target.tailnet, target.hostId) : null;
+  const dial = (url: string) => dialRelay({ connect: deps.connect, url, device: target.device, token: target.token, timers });
   if (!tail) return relay ? dial(relay) : Promise.resolve({ ok: false, end: { why: "lost" } });
   if (!relay) return dial(tail);
   return new Promise((resolve) => {
