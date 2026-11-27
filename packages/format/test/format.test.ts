@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatDate, formatMoney, formatTime, parseMoney, splitVat } from "../src/index";
+import { formatDate, formatMoney, formatSignedMoney, formatTime, parseMoney, plainBaht, splitVat } from "../src/index";
 
 describe("formatMoney", () => {
   it.each([
@@ -158,5 +158,27 @@ describe("formatDate", () => {
     const moment = new Date("2026-11-22T20:00:00Z");
     expect(formatDate(moment)).toBe("Monday 23 November");
     expect(formatDate(moment, { timeZone: "UTC" })).toBe("Sunday 22 November");
+  });
+});
+
+describe("formatSignedMoney", () => {
+  it("writes an amount below zero with a minus before the baht sign, and refuses a fraction as formatMoney does", () => {
+    expect(formatSignedMoney(129000)).toBe("฿1,290");
+    expect(formatSignedMoney(-125050)).toBe("-฿1,250.50");
+    expect(formatSignedMoney(-40)).toBe("-฿0.40");
+    expect(formatSignedMoney(0)).toBe("฿0");
+    expect(formatSignedMoney(-500, { always: true })).toBe("-฿5.00");
+    expect(() => formatSignedMoney(1.5)).toThrow(RangeError);
+  });
+});
+
+describe("plainBaht", () => {
+  it("writes baht as plain decimals with two places, below zero too, with no float's tail", () => {
+    expect(plainBaht(129033)).toBe("1290.33");
+    expect(plainBaht(129030)).toBe("1290.30");
+    expect(plainBaht(5)).toBe("0.05");
+    expect(plainBaht(0)).toBe("0.00");
+    expect(plainBaht(-150)).toBe("-1.50");
+    expect(() => plainBaht(Number.NaN)).toThrow(RangeError);
   });
 });

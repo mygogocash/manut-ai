@@ -1,16 +1,15 @@
 /// Money and time the way the canvas writes them: the baht sign first (฿1,290), 24-hour clock times, and
 /// every time in the shop's own zone, whatever zone the viewer's device is in.
 
+import { formatSignedMoney } from "@manut/format";
+
 export const SHOP_TIME_ZONE = "Asia/Bangkok";
 
-/// ฿1,290 for whole baht, ฿1,290.50 when there are satang.
+/// ฿1,290 for whole baht, ฿1,290.50 when there are satang, -฿500 below zero: `@manut/format`'s rule. What the page is handed is
+/// shown, never thrown at the person: an amount that is not whole satang (none should be) is rounded to the satang first, as
+/// this page always did, rather than leaving the screen without its total.
 export function formatBaht(satang: number): string {
-  const sign = satang < 0 ? "-" : "";
-  const abs = Math.abs(Math.round(satang));
-  const baht = Math.floor(abs / 100);
-  const rest = abs % 100;
-  const whole = String(baht).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-  return `${sign}฿${whole}${rest ? `.${String(rest).padStart(2, "0")}` : ""}`;
+  return Number.isFinite(satang) ? formatSignedMoney(Math.round(satang)) : "฿–";
 }
 
 /// Reads "1290", "1,290", "฿1,290.50" or "1290.5" as satang. Anything else, zero or negative is null. The

@@ -16,6 +16,7 @@
     "@manut/agent-prompts": "workspace:*",
     "@manut/approval-core": "workspace:*",
     "@manut/dev-url": "workspace:*",
+    "@manut/format": "workspace:*",
     "@manut/env-example": "workspace:*",
     "@manut/member-grants": "workspace:*",
     "@manut/notify-rules": "workspace:*",

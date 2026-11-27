@@ -20,6 +20,7 @@
 
 import type { ApprovalKind } from "@manut/approval-core";
 import type { BookLine } from "@manut/books";
+import { formatSignedMoney } from "@manut/format";
 
 /// The operation an append is, as the task object stores its proposal. It is not on the propose route's allowlist:
 /// only a worker's ask stores one, through the job flow, with the request that alone decides it.
@@ -247,15 +248,10 @@ export function booksTotals(lines: readonly BookLine[], vatRegistered: boolean):
   return totals;
 }
 
-/// Integer satang written in baht by `@manut/format`'s rule (`formatMoney`): `฿1,250.50`, `฿500` for whole baht, and a
-/// minus sign before the baht sign. In integer arithmetic only: the baht are the satang less their remainder, divided
-/// exactly, so no float ever touches the amount.
+/// Integer satang written in baht by `@manut/format`'s rule: `฿1,250.50`, `฿500` for whole baht, and a minus sign before the
+/// baht sign (a month's net can go below zero).
 export function bahtText(amount: number): string {
-  const sign = amount < 0 ? "-" : "";
-  const whole = Math.abs(amount);
-  const rest = whole % 100;
-  const grouped = String((whole - rest) / 100).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-  return `${sign}฿${grouped}${rest === 0 ? "" : `.${String(rest).padStart(2, "0")}`}`;
+  return formatSignedMoney(amount);
 }
 
 function counted(count: number, one: string, many: string): string {

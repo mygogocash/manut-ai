@@ -25,6 +25,7 @@
     "@manut/agent-prompts": "workspace:*",
     "@manut/approval-core": "workspace:*",
     "@manut/books": "workspace:*",
+    "@manut/format": "workspace:*",
     "@manut/member-grants": "workspace:*",
     "@manut/people-rules": "workspace:*",
     "@manut/routine-rules": "workspace:*",

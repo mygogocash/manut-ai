@@ -196,6 +196,9 @@ importers:
       '@manut/books':
         specifier: workspace:*
         version: link:../../packages/books
+      '@manut/format':
+        specifier: workspace:*
+        version: link:../../packages/format
       '@manut/member-grants':
         specifier: workspace:*
         version: link:../../packages/member-grants
@@ -248,6 +251,9 @@ importers:
       '@manut/env-example':
         specifier: workspace:*
         version: link:../../packages/env-example
+      '@manut/format':
+        specifier: workspace:*
+        version: link:../../packages/format
       '@manut/member-grants':
         specifier: workspace:*
         version: link:../../packages/member-grants
@@ -560,6 +566,9 @@ importers:
       '@manut/books':
         specifier: workspace:*
         version: link:../books
+      '@manut/format':
+        specifier: workspace:*
+        version: link:../format
     devDependencies:
       typescript:
         specifier: 7.0.2
