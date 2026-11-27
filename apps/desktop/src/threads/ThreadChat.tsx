@@ -8,6 +8,7 @@ import { promptsOf } from "../chat/parts/promptHistory";
 import { Avatar } from "../ui";
 import { t } from "../i18n";
 import { threadKey } from "./types";
+import { kindWord } from "./kind";
 import { rowStatus } from "./ThreadTree";
 import { StatusGlyph } from "./StatusGlyph";
 import { AgentBoxTools, pickFolder, teammates, useAgentBox } from "../chat/box/AgentBox";
@@ -38,6 +39,12 @@ export function ThreadChat({ bot, thread }: { bot: Bot; thread: string }) {
         <span className="head-title th-head-title" data-testid="thread-title" title={title}>
           {title}
         </span>
+        {/* a conversation with Buddy or the team's work, where the runtime lists both (Connected), so neither is taken for the other */}
+        {row && kindWord(row.kind) && (
+          <span className="th-head-kind" data-testid="thread-kind" data-kind={row.kind}>
+            {kindWord(row.kind)}
+          </span>
+        )}
       </header>
       <div className="pane" data-pane={key} data-testid="thread-chat" data-thread={thread}>
         <Timeline

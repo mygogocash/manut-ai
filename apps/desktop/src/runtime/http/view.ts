@@ -140,7 +140,8 @@ function lastOf(task: ShopTask, fallback: number): number {
   return Math.max(task.updatedAt ?? 0, task.createdAt ?? 0, ...task.actions.map((a) => a.proposedAt ?? 0)) || fallback;
 }
 
-/** Every task as one of Buddy's threads, newest activity first; `needs` marks one with a request waiting for an answer. */
+/** Every task as one of Buddy's threads, newest activity first; `needs` marks one with a request waiting for an answer. Each is
+ *  marked the team's work (`kind: "task"`), so the screens tell it from a conversation with Buddy (chat.ts). */
 export function threadRows(snapshot: ShopSnapshot): ThreadRow[] {
   const needs = asking(snapshot);
   return snapshot.tasks
@@ -156,6 +157,7 @@ export function threadRows(snapshot: ShopSnapshot): ThreadRow[] {
         needs: needs.has(task.id),
         message_count: 2 + task.actions.length,
         preview: task.objective,
+        kind: "task" as const,
       };
     })
     .sort((a, b) => b.last - a.last);

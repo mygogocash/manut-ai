@@ -303,8 +303,8 @@ describe("the owner's everyday writes", () => {
     const before = writes(api).length;
     expect(await refusal(req("routine.pause", { shop: SHOP_A.id, routine: "rt-9999-none" }))).toMatchObject({ code: "not_found" });
     expect(await refusal(req("automations.pause", { bot: "buddy", job: "sched-own" }))).toEqual({ code: "not_yet", message: t("rt.notYet") });
+    // Buddy's chat is the API's (chat.test.ts); a member has none there
     for (const [op, params] of [
-      ["chat.send", { bot: "buddy", text: "Hello" }],
       ["chat.send", { bot: "nam", text: "Hello" }],
       ["automations.remove", { bot: "ton", job: "rt-0001-brief" }],
     ] as const)

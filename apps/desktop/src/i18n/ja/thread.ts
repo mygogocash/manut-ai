@@ -38,4 +38,7 @@ export const thread: Record<keyof typeof en, string> = {
   "thread.cmdHint": "{name}との新しいスレッド",
   "thread.cmdFiles": "ファイルではスレッドを始められません。先に ./thread を送り、スレッドで添付してください。",
   "thread.newWith": "{name}との新しいスレッド",
+  // a thread the connected runtime marks (item 102l-2): a conversation with Buddy, or the team's work on a task
+  "thread.kind.chat": "Conversation",
+  "thread.kind.task": "Team's work",
 };

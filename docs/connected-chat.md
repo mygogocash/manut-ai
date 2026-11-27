@@ -1,8 +1,9 @@
 # Buddy's chat on the Connected runtime (item 102l)
 
 The design pass for item 102l, written 27 Nov 2026 after the owner chose to build it, deployed to the dev API only.
-Status: 102l-1 (A) built on 27 Nov 2026, not yet deployed; 102l-2 and 102l-3 proposed. The phases at the end are the order
-to build it in, and "What 102l-1 built" (below) says where the build differs from this design.
+Status: 102l-1 (A) built on 27 Nov 2026, not yet deployed; 102l-2 (B, the desktop's side) built on 27 Nov 2026; 102l-3 proposed.
+The phases at the end are the order to build it in, and "What 102l-1 built" and "What 102l-2 built" (below) say where the build
+differs from this design.
 
 ## Why 102l is bigger than its row
 
@@ -87,7 +88,7 @@ On Connected, a "chat" is a chat thread of A and B, and the asking chat is Buddy
 | Phase | What | Needs the owner |
 | --- | --- | --- |
 | 102l-1 | The chat route and its store (A), with the stand-in provider in tests; deployed to dev, where it answers `not_configured`. **Built 27 Nov 2026**, behind its own switch, which is off everywhere; not deployed | Nothing to build. A key in dev to try it for real, and the switch turned on there |
-| 102l-2 | Chat threads (B) and the Connected runtime's `chat.send` and `thread.create` over them | Nothing |
+| 102l-2 | Chat threads (B) and the Connected runtime's `chat.send` and `thread.create` over them. **Built 27 Nov 2026** in the desktop (`apps/desktop/src/runtime/http/chat.ts`); the API needed nothing more | Nothing |
 | 102l-3 | The reach cards over Connected chat threads (C) | Nothing |
 | 102l-4 | Real answers: the owner's key set, first in dev, then staging and production at the owner's word | The paid Anthropic account, the cap (`MODEL_DEFAULT_CAP_SATANG`) and the rate (`MODEL_SATANG_PER_USD`) |
 
@@ -117,6 +118,32 @@ owner (`docs/decisions/102l-connected-chat.md`). Where it differs from the desig
   There is no `POST /v1/chat/threads` to make an empty one, and nothing in the Connected runtime yet: that is 102l-2.
 - **Not deployed.** The design's phase deploys to dev; this build is not deployed, and the switch stays off until the owner
   says.
+
+## What 102l-2 built
+
+Section B in the desktop's Connected runtime (`apps/desktop/src/runtime/http/chat.ts`, wired in `host.ts`; the words a screen shows in
+`src/threads/kind.ts`; tests in `chat.test.ts` and `src/threads/kind.test.ts`, over a stand-in of the API's chat in `testkit.ts`). The ops
+and their refusals are in `docs/runtime-adapter.md`, "Buddy's chat on Connected"; the calls are Claude's
+(`docs/decisions/102l-connected-chat.md`). Where it differs from the design above:
+
+- **No `POST /v1/chat/threads`.** `thread.create` prepares a conversation in the desktop, with nothing sent, and its first message makes
+  it on the API (a message with no `thread`). The store asks for a conversation before the person has typed anything, the API has no
+  route that makes an empty one, and an empty conversation would be a record with nothing in it, so the API was left as 102l-1 built it.
+  The prepared conversation keeps the id the screens gave it for the rest of the run.
+- **Buddy's main chat is a conversation too.** A message typed in Buddy's main chat on Connected goes to the API's chat: its first
+  message makes a conversation, listed with the others, and the next ones go to it until the chat is opened again. The design spoke of
+  `chat.send` posting to a chat thread; the main chat is where an owner types first, so it had to answer too.
+- **The shop is the chat's.** The main chat's messages go with the owner session of the shop it was opened for, a conversation's with
+  that of the shop it was made for, never the shop the switcher shows by then, as the owner's other changes go.
+- **The turn comes with the answer.** The API answers a message whole, after the model call, so the answer is shown as one turn once the
+  API answered, and a refusal starts no turn: the message is marked not sent with its reason, as other failed sends are.
+- **Which is which.** Every thread row says what it is (`kind`: `chat` or `task`). A conversation's header says "Conversation" and a
+  task's "Team's work"; History already lists each task once, as its job.
+- **No removal from the desktop yet.** The API's `POST /v1/chat/threads/remove` is not called: no screen offers to remove a thread now
+  (the thread tree with its x is no longer drawn), so `thread.remove` stays "not yet". Deleting the shop's data still wipes every
+  conversation (102l-1).
+- **Not built:** older messages than a conversation's newest 50 (the API pages them; the desktop reads the first page only), and a live
+  answer: the API answers whole, so nothing streams.
 
 ## Open questions for the owner
 

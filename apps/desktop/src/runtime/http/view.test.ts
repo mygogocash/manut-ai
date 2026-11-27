@@ -99,8 +99,9 @@ describe("tasks as Buddy's threads", () => {
         needs: true,
         message_count: 3,
         preview: "Answer her question about delivery",
+        kind: "task",
       },
-      { thread: "task-0", title: "Untitled task", cwd: "", started_at: (T0 - 7200_000) / 1000, last: (T0 - 3600_000) / 1000, running: false, needs: false, message_count: 2, preview: "" },
+      { thread: "task-0", title: "Untitled task", cwd: "", started_at: (T0 - 7200_000) / 1000, last: (T0 - 3600_000) / 1000, running: false, needs: false, message_count: 2, preview: "", kind: "task" },
     ]);
   });
 

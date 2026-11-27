@@ -38,4 +38,7 @@ export const thread: Record<keyof typeof en, string> = {
   "thread.cmdHint": "与 {name} 的新线程",
   "thread.cmdFiles": "文件不能开始一个线程。请先发送 ./thread，再在线程里附加文件。",
   "thread.newWith": "与 {name} 的新线程",
+  // a thread the connected runtime marks (item 102l-2): a conversation with Buddy, or the team's work on a task
+  "thread.kind.chat": "Conversation",
+  "thread.kind.task": "Team's work",
 };

@@ -24,9 +24,11 @@
 // one of its routines, and Pause everyone, each through apps/api's own routines routes with the owner session of the shop the
 // change names (`change`; the shop its list was read for, never the one viewed by then). What the team knows has its own ops,
 // with the same session and rules (memory.ts). None of them sends, posts or pays, the only deletions are the owner's own (a
-// routine, a fact), which the page asks about once more first, and a request still settles only through the decide route. Every
-// other write answers `not_yet`, Buddy's chat included, which would need a model. While only a kept read is shown every write
-// answers `offline` instead (an ask from it: "Connect to answer this"), and none is queued.
+// routine, a fact), which the page asks about once more first, and a request still settles only through the decide route. Buddy's
+// chat (chat.ts, item 102l-2) is a message to Buddy with the owner session of the shop the chat is of, and the shop's conversations
+// beside its tasks; it starts, sends, posts, pays and deletes nothing. Every other write answers
+// `not_yet`. While only a kept read is shown every write answers `offline` instead (an ask from it: "Connect to answer this"), and
+// none is queued.
 //
 // An ask that leaves the shop's open approvals with no answer from here closes in how its request was settled. A shop session reads
 // no tasks, so the two reads alone cannot tell a decision from a withdrawal; the host reads the shop's recent requests, once for each
@@ -66,6 +68,7 @@ import { OpError } from "../mock/host";
 import { decisionPath, outcomeOf, type Closing, type Outcome } from "./answer";
 import { answerable, isAsk, optionFor, parseAskId, parseShopAskId, type ShopApproval } from "./approvals";
 import { CACHE_MAX_AGE_MS, type CachedRead, type ShopCache } from "./cache";
+import { BuddyChat, isChatId, type ChatLink } from "./chat";
 import { connectionHandlers, type OwnerLink } from "./connections";
 import { googleHandlers } from "./google";
 import { shopRoutines, teamRoutineRow } from "./customize";
@@ -247,6 +250,9 @@ const teamSig = (s: ShopSnapshot | null) => JSON.stringify(team(s).map((b) => [b
 
 /** The writes the owner makes to a shop's team (`change`): refused while only a kept read is shown, as every write is. */
 const TEAM_CHANGES = new Set(["team.pause", "team.resume", "routine.create", "routine.pause", "routine.resume", "routine.remove", "automations.pause", "automations.resume"]);
+/** Buddy's chat's writes (chat.ts): a message, and a conversation prepared. Refused while only a kept read is shown, as every write
+ *  is: a conversation made then could not be sent to, and a message is never held to be sent later. */
+const CHAT_WRITES = new Set(["chat.send", "thread.create"]);
 
 export class HttpHost {
   readonly session: ApiSession;
@@ -341,7 +347,7 @@ export class HttpHost {
     // Only a kept read answers while the API cannot be reached, so a write has nothing live to act on. It is refused, not
     // held to be sent later: an ask from the kept read needs the live record, and everything else the person says again.
     const asks = op === "approval.respond" || op === "approval.pass_on";
-    const writes = handler === notYet || asks || TEAM_CHANGES.has(op);
+    const writes = handler === notYet || asks || TEAM_CHANGES.has(op) || CHAT_WRITES.has(op);
     if (writes && this.cache.kind === "showing") throw new OpError("offline", t(asks ? "rt.connectToAnswer" : "rt.offline"));
     return handler(params);
   }
@@ -366,6 +372,7 @@ export class HttpHost {
     this.snapshot = null;
     this.onDisk = null;
     this.closings.clear();
+    this.chat.forget();
     this.forgotten += 1;
     this.viewing = null;
     this.departed = [];
@@ -384,6 +391,7 @@ export class HttpHost {
       this.snapshot = null;
       this.onDisk = null;
       this.closings.clear();
+      this.chat.forget();
       this.forgotten += 1;
       this.viewing = null;
       this.departed = [];
@@ -1271,6 +1279,29 @@ export class HttpHost {
     };
   }
 
+  // ---- Buddy's chat -----------------------------------------------------------------------------------------------
+
+  /** What Buddy's chat needs of this host (chat.ts): the shops of the latest read, the one the switcher shows, each shop's own
+   *  session, and the host's events. Nothing it sends or reads is kept here. */
+  private chatLink(): ChatLink {
+    const owner = this.ownerLink();
+    return {
+      live: () => owner.live(),
+      inShops: () => owner.inShops(),
+      roleAt: (shop) => owner.roleAt(shop),
+      departed: (shop, departure) => owner.departed(shop, departure),
+      viewing: () => (this.snapshot?.shops ? (this.snapshot.viewing ?? null) : null),
+      shopRow: (shop) => partOf(this.snapshot, shop)?.shop,
+      read: (shop, path) => this.shopSessions.read(shop, path),
+      write: (shop, path, body) => this.shopSessions.write(shop, path, body),
+      emit: (ev) => this.emit(ev),
+      now: () => this.now(),
+    };
+  }
+
+  /** Buddy's chat with the owner of the shop it is of, and the shop's conversations (chat.ts). */
+  private readonly chat = new BuddyChat(this.chatLink());
+
   // ---- ops --------------------------------------------------------------------------------------------------------
 
   private readonly ops: Handlers = (() => {
@@ -1289,16 +1320,28 @@ export class HttpHost {
         const snapshot = await this.current();
         if (p.bot !== TEAM) return { session_id: `main-${String(p.bot)}`, messages: [], running: false, model: "", provider: "", reasoning: "" };
         this.replayAsks(snapshot);
+        // a message from this chat goes to the shop it was opened for, whichever the switcher shows by then
+        this.chat.opened();
         return { session_id: `main-${TEAM}`, messages: attentionRows(snapshot), running: false, model: "", provider: "", reasoning: "" };
       },
-      // Every task is one of Buddy's threads, as before members: History and Recent list each once.
-      "thread.list": async (p) => (member(p), { threads: p.bot === TEAM ? threadRows(await this.current()) : [] }),
+      // Every task is one of Buddy's threads, as before members, marked the team's work; beside them the shop's conversations with
+      // Buddy, marked conversations (chat.ts). History and Recent list each once, newest activity first.
+      "thread.list": async (p) => {
+        member(p);
+        if (p.bot !== TEAM) return { threads: [] };
+        const tasks = threadRows(await this.current());
+        const chats = await this.chat.rows();
+        return { threads: [...tasks, ...chats].sort((a, b) => (b.last ?? b.started_at) - (a.last ?? a.started_at)) };
+      },
       "thread.open": async (p) => {
         member(p);
+        if (p.bot === TEAM && this.chat.knows(p.thread)) return this.chat.open(p.thread);
         const snapshot = await this.current();
         const task = p.bot === TEAM ? snapshot.tasks.find((x) => x.id === p.thread) : undefined;
-        if (!task) throw notFound();
-        return taskOpen(task, snapshot.readAt);
+        if (task) return taskOpen(task, snapshot.readAt);
+        // a conversation this run has not listed yet (another window's, say): the shop the switcher shows
+        if (p.bot === TEAM && isChatId(p.thread)) return this.chat.open(p.thread);
+        throw notFound();
       },
       "routines.list": async (p) => (member(p), { routines: routineRows(await this.current(), p.bot) }),
       "automations.list": async () => ({ automations: automationRows(await this.current()) }),
@@ -1352,13 +1395,22 @@ export class HttpHost {
       "media.read": () => {
         throw notFound();
       },
-      // Writes: answering an ask, through the decide route, and a helper passing one on; nothing else yet.
+      // Writes: answering an ask, through the decide route, and a helper passing one on.
       "approval.respond": (p) => (member(p), this.answer(p.request_id, p.choice)),
       "approval.pass_on": (p) => (member(p), this.passOn(p.request_id, p.note)),
       "shops.list": () => this.shopList(),
       "shops.switch": (p) => this.switchTo(p.shop),
       "shops.make": (p) => this.makeShop(p),
-      "chat.send": notYet,
+      // A message to Buddy, for a shop the person owns, through the API's chat (chat.ts). A member has no chat on the API, and a task
+      // is the team's work, kept as Buddy's notes: nothing is said to either.
+      "chat.send": (p) => {
+        member(p);
+        if (p.bot !== TEAM) return notYet();
+        if (typeof p.session === "string" && !this.chat.knows(p.session) && this.snapshot?.tasks.some((x) => x.id === p.session)) {
+          throw new OpError("task_thread", t("rt.chat.taskThread"));
+        }
+        return this.chat.send(p);
+      },
       "chat.steer": notYet,
       "chat.interrupt": notYet,
       "clarify.respond": notYet,
@@ -1367,7 +1419,10 @@ export class HttpHost {
       "folder.open": notYet,
       "folder.close": notYet,
       "folder.resume": notYet,
-      "thread.create": notYet,
+      // A conversation with Buddy, prepared here; its first message makes it on the API (chat.ts).
+      "thread.create": (p) => (member(p), p.bot === TEAM ? this.chat.create(p) : notYet()),
+      // No screen offers to remove a thread now (the thread tree with its x is no longer drawn), so a conversation is not removed
+      // from here, though the API has a route for it; a task never is.
       "thread.remove": notYet,
       "bots.rename": notYet,
       "bots.set_avatar": notYet,

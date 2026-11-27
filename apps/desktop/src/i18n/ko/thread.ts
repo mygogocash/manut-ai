@@ -38,4 +38,7 @@ export const thread: Record<keyof typeof en, string> = {
   "thread.cmdHint": "{name}와 새 스레드",
   "thread.cmdFiles": "파일로는 스레드를 시작할 수 없어요. ./thread를 먼저 보내고 스레드에서 첨부해 주세요.",
   "thread.newWith": "{name}와 새 스레드",
+  // a thread the connected runtime marks (item 102l-2): a conversation with Buddy, or the team's work on a task
+  "thread.kind.chat": "Conversation",
+  "thread.kind.task": "Team's work",
 };

@@ -654,6 +654,21 @@ export interface ServedShops {
   /** what each shop's team knows, by shop id, in `@manut/shop-memory`'s own state: the owner's own routes read and change it, as
    *  apps/api's do (`/v1/memory`); a shop with none listed here knows nothing yet. Seed it with `learned`. */
   memory: Record<string, MemoryState>;
+  /** each shop's conversations with Buddy, by shop id, oldest made first, as apps/api's chat keeps them (`/v1/chat/*`) */
+  chat: Record<string, FakeChatThread[]>;
+  /** what every message is answered with instead of Buddy's answer, keeping nothing, as apps/api refuses one; null to answer */
+  chatRefusal: FakeAnswer | null;
+  /** Buddy's answer to a message, as the stand-in provider gives it */
+  chatAnswer: (text: string) => { text: string; stopReason?: string };
+}
+
+/** One conversation as apps/api's chat keeps it (chat-store.ts), its times as the API answers them. */
+export interface FakeChatThread {
+  id: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  messages: { id: string; from: "owner" | "buddy"; text: string; at: string; stopReason?: string }[];
 }
 
 /** What a shop's team has learned: each text with where it came from, in the order given, as the package's `propose` keeps them
@@ -755,6 +770,9 @@ export function serveShops(api: FakeApi, list: ShopJson[], approvals: Record<str
     opened: {},
     work: Object.fromEntries(list.filter((s) => s.role === "owner").map((s) => [s.id, { ...emptyWork(), ...work[s.id] }])),
     memory: {},
+    chat: {},
+    chatRefusal: null,
+    chatAnswer: (text) => ({ text: `Buddy's answer to: ${text}`, stopReason: "end_turn" }),
   };
   /** The shop a shop-session request is for, or the 401 to answer; null when the bearer is not a shop session. */
   const shopOf = (req: Recorded): { shop: string; role: "owner" | "helper" } | FakeAnswer | null => {
@@ -828,6 +846,7 @@ export function serveShops(api: FakeApi, list: ShopJson[], approvals: Record<str
   }
   ownerMemoryRoutes(api, served, owned, now);
   ownerRoutineRoutes(api, owned, now);
+  ownerChatRoutes(api, served, owned, now);
   return served;
 }
 
@@ -867,6 +886,57 @@ function ownerMemoryRoutes(api: FakeApi, served: ServedShops, owned: Owned, now:
     const gone = forgetFact(state, body.id as string);
     return gone.ok ? { ok: true, state: gone.state, reply: { id: body.id } } : { ok: false, reason: gone.reason };
   });
+}
+
+/** A conversation's id as apps/api makes them (`cht-…`, chat-store.ts `THREAD_ID`), numbered so a test can tell one from the next. */
+export const chatId = (n: number) => `cht-${String(n).padStart(9, "0")}-abc-${n.toString(16).padStart(8, "0")}`;
+
+/** What apps/api's chat answers an owner session (docs/pilot-api.md, "Chat"): a message (`POST /v1/chat/messages`, exactly `{ text }` or
+ *  `{ thread, text }`) makes a conversation titled by its first words when it names none, and is kept with Buddy's answer; or, with
+ *  `served.chatRefusal`, is answered that instead and nothing is kept. The shop's conversations (`GET /v1/chat/threads`, newest written
+ *  first) and one conversation (`GET /v1/chat/threads/{id}`, its newest 50 messages, oldest first). A conversation of another shop is
+ *  404 `thread_not_found`; a helper's session is 403 `owner_only`. */
+function ownerChatRoutes(api: FakeApi, served: ServedShops, owned: Owned, now: () => number): void {
+  let made = 0;
+  const view = (c: FakeChatThread) => ({ id: c.id, title: c.title, createdAt: c.createdAt, updatedAt: c.updatedAt, messageCount: c.messages.length });
+  const exact = (body: unknown, keys: readonly string[]): body is Record<string, unknown> =>
+    !!body && typeof body === "object" && !Array.isArray(body) && Object.keys(body).length === keys.length && keys.every((k) => k in (body as object));
+  const threadRoute = (id: string) =>
+    api.on("GET", `/v1/chat/threads/${id}`, (req) =>
+      owned(req, (shop) => {
+        const c = (served.chat[shop] ?? []).find((x) => x.id === id);
+        if (!c) return { status: 404, json: { error: "thread_not_found" } };
+        return { status: 200, json: { thread: view(c), messages: c.messages.slice(-50), next: c.messages.length > 50 ? c.messages[c.messages.length - 51].id : null } };
+      }),
+    );
+  api.on("POST", "/v1/chat/messages", (req) =>
+    owned(req, (shop) => {
+      if (!exact(req.body, ["text"]) && !exact(req.body, ["thread", "text"])) return { status: 400, json: { error: "invalid_request" } };
+      const body = req.body as { thread?: unknown; text: unknown };
+      if (typeof body.text !== "string" || !body.text.trim()) return { status: 400, json: { error: "invalid_text" } };
+      if (served.chatRefusal) return served.chatRefusal;
+      const threads = (served.chat[shop] ??= []);
+      const at = iso(now());
+      let c = body.thread === undefined || body.thread === null ? undefined : threads.find((x) => x.id === body.thread);
+      if (body.thread !== undefined && body.thread !== null && !c) return { status: 404, json: { error: "thread_not_found" } };
+      const text = body.text.trim();
+      if (!c) {
+        made += 1;
+        c = { id: chatId(made), title: text.split(/\s+/).join(" ").slice(0, 60), createdAt: at, updatedAt: at, messages: [] };
+        threads.push(c);
+        threadRoute(c.id);
+      }
+      const answered = served.chatAnswer(text);
+      const message = { id: `m${c.messages.length + 1}`, from: "owner" as const, text, at };
+      const answer = { id: `m${c.messages.length + 2}`, from: "buddy" as const, text: answered.text, at, ...(answered.stopReason ? { stopReason: answered.stopReason } : {}) };
+      c.messages.push(message, answer);
+      c.updatedAt = at;
+      return { status: 200, json: { thread: view(c), message, answer, costSatang: 3 } };
+    }),
+  );
+  api.on("GET", "/v1/chat/threads", (req) =>
+    owned(req, (shop) => ({ status: 200, json: { threads: [...(served.chat[shop] ?? [])].sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt)).map(view) } })),
+  );
 }
 
 const WORK: Record<string, readonly ActionKind[]> = { nam: ["reply"], pim: ["draft", "send"], ton: ["brief", "draft", "send", "pay", "delete"] };
