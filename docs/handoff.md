@@ -340,8 +340,8 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    again on 27 Nov with the chat route, which stays off there until the operator turns `buddyChat` on. The 38 unused names
    `pnpm lint` found outside tests are removed.
    After 102l-2: on Connected, Buddy's chat has no model menu and no "no model yet" line (the runtime's `models` capability is
-   off there), and the answer's line says how long Buddy took (`turn.start`'s `since`). Still missing there: a line that shows
-   Buddy is answering while the API works, which needs a turn that can be taken back quietly when a message is refused.
+   off there), and the answer's line says how long Buddy took (`turn.start`'s `since`). While the API works on an
+   answer the chat shows Buddy's typing bubble with no turn (`answersOnSend`), so a refused message is still only a message not sent.
    The dev relay is on with its push key pair as dev secrets, deployed to dev 27 Nov; the owner's try on an iPhone is left.
    Two Rust tests that raced under load (the MCP relay's round trip, the Grok account check) now wait for their answers, and
    the 16 hook-dependency warnings `pnpm lint` found are settled. Fonts stay 99, the owner's. From 27 Nov the owner asked for English first: new words are English, copied into ja, ko and zh. Needs the owner from 101b: Grok signed in and `permission_mode = "ask"`
@@ -742,6 +742,12 @@ Every switch that turns a built part on, and what each needs from the owner, is 
 - `apps/desktop/e2e/term-link.spec.ts:202` ("a link to a terminal it does not have says so over an open terminal
   too"): failed once and passed on its retry in item 102h's two runs on 27 Nov (and showed in several runs before).
   If it fails twice in one run, fix it.
+- `apps/desktop/e2e/several-agents.spec.ts:231` ("the Gathered block under the columns"): failed on both tries in
+  `pilot/week-1`'s run of c528a62 and in pull request 68's push run on 27 Nov. Not load: the stand-in bridge is a
+  worker's for the whole run and this file never resets it, and the shard plan (the file has no measured time yet) put
+  `prompt-history.spec.ts` just before it in one worker, so that file's two sends were still in the log the test expected
+  empty. Fixed the same day: the test counts only what is sent after it starts, as the file's Compare test does. A spec
+  that reads the bridge's log either resets it (`mock.reset`) or counts from its own start.
 - Rust `a_grok_chat_reads_its_accounts_own_home_for_its_asks` (item 101d): failed in three loaded runs by 27 Nov and
   passed alone each time; it slept a fixed 300 ms for a stand-in process. Fixed 27 Nov: it waits for the process's file.
 - Rust `threads_mcp::door::tests::a_call_goes_through_the_real_socket_and_back` (item 103): failed once on CI's macOS

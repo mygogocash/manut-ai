@@ -49,6 +49,14 @@ export function runtimeCapabilities(setting: RuntimeSetting = startedRuntime()):
   return kind === "websocket" ? ALL_CAPABILITIES : kind === "http" ? HTTP_CAPABILITIES : MOCK_CAPABILITIES;
 }
 
+/** Whether the runtime answers a message before the message's own request ends. Connected's chat does: the API answers a
+ *  message whole, and says no turn until it has, since a refused message is a message not sent and never a turn that
+ *  failed. A chat there shows its member writing while a message is on its way (`answeringOnSend`, chat/parts/Typing.tsx).
+ *  Every other runtime takes a message at once, and its turn says when the member works. */
+export function answersOnSend(setting: RuntimeSetting = startedRuntime()): boolean {
+  return runtimeKind(setting) === "http";
+}
+
 /** Whether the runtime has `feature`. Screens and menu rows that need a missing one are not shown. */
 export function can(feature: RuntimeFeature): boolean {
   return runtimeCapabilities()[feature];

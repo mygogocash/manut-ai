@@ -647,9 +647,11 @@ words in `src/threads/kind.ts`), the desktop's half of `docs/connected-chat.md`,
 - **Buddy's answer** is the turn's events, `turn.start`, the answer as a `message` (id `<conversation>/<message>`), `turn.end` with
   `done`, tagged with the conversation (`session`) for a conversation, and only once the API answered. A turn that started before the
   API let the message through would end Failed for a refusal (a Failed line, a sound, a notification), where a refused message is a
-  message not sent; so while Buddy answers, the person's message shows as sent and nothing more. The turn says when its work began
-  (`turn.start`'s `since`: the moment the message went), so its line reads how long Buddy took, "Worked for 6s", not "0s". A line that
-  shows Buddy is answering while the API works needs a turn that can be taken back without a Failed line, which is not built. An answer the provider refused with nothing said says "Buddy did not answer this one.", and one cut at its length says so
+  message not sent. While the API works on the answer the chat shows Buddy's typing bubble all the same, with no turn: the runtime
+  says it answers a message before the message's request ends (`answersOnSend`, src/runtime), and the chat then draws the bubble
+  while the person's newest message is on its way (`answeringOnSend`, chat/parts/Typing.tsx: sent in this run, last in the chat, not
+  read, refused or held). A refusal ends it with the message marked not sent. The turn says when its work began (`turn.start`'s
+  `since`: the moment the message went), so its line reads how long Buddy took, "Worked for 6s", not "0s". An answer the provider refused with nothing said says "Buddy did not answer this one.", and one cut at its length says so
   after it.
 - **Refusals**, each in the person's words, so the store marks the message "Not sent" with the reason, as any failed send; nothing is
   queued, retried or sent again from here, and the API keeps nothing for any of them. `feature_disabled` (and the 404 of an API from

@@ -5,7 +5,7 @@
 // History lists the conversation, and opening it shows both messages, its header saying it is a conversation, not the team's work. It
 // runs on the app's own runtime, so the page asks for it (`__MANUT_IN_PROCESS__`, src/lib/bridge.ts): the suite's server is built for the
 // mock bridge, which has no Connected.
-// Shots: MANUT_SHOTS=<dir> -> connected-chat-{main,thread}.png
+// Shots: MANUT_SHOTS=<dir> -> connected-chat-{main,answering,thread}.png
 import { expect, test, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -97,6 +97,9 @@ async function stubShell(page: Page) {
           if (key === "GET /v1/inbound/attention") return reply(200, { items: [] });
           if (key === "GET /v1/routines") return reply(200, { tenant: mali.id, team: { paused: false, since: null, members: ["nam", "pim", "ton"] }, routines: [] });
           if (key === "POST /v1/chat/messages") {
+            // the API takes this long over a message, when a test says so: a model call is seconds, not nothing
+            const wait = (window as unknown as { __chatDelay?: number }).__chatDelay;
+            if (wait) await new Promise((r) => setTimeout(r, wait));
             const text = String(body?.text ?? "").trim();
             if (/again/i.test(text)) return reply(429, { error: "rate_limited", retryAfter: 1_500, perHour: 60 });
             let c = threads.find((x) => x.id === body?.thread);
@@ -155,6 +158,43 @@ test("a message to Buddy goes to the shop's chat with its owner session, Buddy a
     [OWNER_MALI, { text: "How were sales today?" }],
     [OWNER_MALI, { thread: CHAT_ID, text: "And again?" }],
   ]);
+});
+
+test("while the API works on an answer the chat shows Buddy writing, the line then says how long it took, and a refused message is no failed turn", async ({ page }) => {
+  await stubShell(page);
+  await page.goto("/");
+  await expect(page.getByTestId("page-home")).toBeVisible();
+  await openChat(page, "buddy", "Buddy");
+  await page.evaluate(() => {
+    (window as unknown as { __chatDelay: number }).__chatDelay = 1_500;
+  });
+
+  await page.getByTestId("composer").fill("How were sales today?");
+  await page.getByTestId("send").click();
+  // the message is on its way and no turn is said yet: Buddy's typing bubble shows, and no line says anything ran
+  await expect(page.getByTestId("typing")).toBeVisible();
+  await expect(page.getByTestId("activity")).toHaveCount(0);
+  await expect(page.getByTestId("bubble-bot")).toHaveCount(0);
+  // the person's own words are above it, in view
+  await expect(page.getByTestId("bubble-user").filter({ hasText: "How were sales today?" })).toBeInViewport();
+  // for the picture only: the message's own arrival has settled
+  if (SHOTS) await page.waitForTimeout(500);
+  await shot(page, "answering");
+  await expect(page.getByTestId("bubble-bot").filter({ hasText: "Sales were ฿4,250 from 12 orders today." })).toBeVisible();
+  await expect(page.getByTestId("typing")).toHaveCount(0);
+  // the turn began when the message went, so its line counts the second and a half the API took
+  await expect(page.getByTestId("activity")).toContainText(/Worked for [12]s/);
+
+  await page.getByTestId("composer").fill("And again?");
+  await page.getByTestId("send").click();
+  await expect(page.getByTestId("typing")).toBeVisible();
+  const refused = page.getByTestId("bubble-user").filter({ hasText: "And again?" });
+  await expect(refused.locator(".msg-err")).toContainText("Not sent · Buddy takes at most 60 messages an hour.");
+  // the bubble goes with the refusal, and nothing says a turn failed: the one line is the first answer's
+  await expect(page.getByTestId("typing")).toHaveCount(0);
+  await expect(page.getByTestId("activity")).toHaveCount(1);
+  await expect(page.locator('[data-testid="activity"][data-state="error"]')).toHaveCount(0);
+  await expect(page.getByTestId("bubble-bot")).toHaveCount(1);
 });
 
 test("History lists the conversation, which opens with both messages and says it is a conversation", async ({ page }) => {

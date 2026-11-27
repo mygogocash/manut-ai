@@ -20,6 +20,16 @@ export function awaitingFirstToken(chat: Chat | undefined): boolean {
   return true;
 }
 
+/** True while the person's newest message is on its way to a runtime that answers it before its request ends (`answersOnSend`:
+ *  Connected's chat), so the member is writing though no turn says so: the message is the last thing in the chat, it went from
+ *  this app in this run (a message read back from history is never on its way), and it is not read, refused or held. It ends
+ *  with the answer's turn, or with a refusal, which marks the message not sent: no turn started, so nothing failed. */
+export function answeringOnSend(chat: Chat | undefined): boolean {
+  if (!chat || chat.turn) return false;
+  const last = chat.items[chat.items.length - 1];
+  return !!last && last.kind === "user" && last.id.startsWith("local-") && last.readAt === undefined && !last.error && !last.held;
+}
+
 /** The bot's 28px face in the live ring (`face`: a SESSIONS chat's agent mark instead of the picture). One of
  *  these sits in the live run while the bot works: beside the typing bubble, then the activity line, then the
  *  streaming answer (liveFaceRow). */
