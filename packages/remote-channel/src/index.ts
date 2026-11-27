@@ -46,6 +46,7 @@ export {
   newPairingOffer,
   pairingLink,
   readPairingLink,
+  tailnetNameOk,
 } from "./offer";
 export { type MacPairing, type PairingOptions, type PhonePairing, macPairing, startPairing } from "./pairing";
 export { type PairingGrant, decodePairingGrant, doorTokenHash, encodePairingGrant, newPairingGrant } from "./grant";

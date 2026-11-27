@@ -40,6 +40,12 @@ All integers are big-endian. `||` is concatenation. Labels are ASCII.
 browser sends to a server): `01` version | host id (32, the SHA-256 the relay names the Mac by) | door id (16, UUID
 bytes) | door token (32) | secret (32).
 
+**Pairing code, version 2** (item 78f-2d): version 1's bytes with `02` as the version, then the length of the Mac's
+tailnet name (1 byte, 1 to 253) and the name (lowercase DNS labels under `ts.net`, ASCII), so a phone can reach the
+pairing door over the person's tailnet with the relay switched off. The door's port is the Mac's one fixed port and is not
+carried. A Mac without a tailnet road shows version 1, unchanged; `decodePairingOffer` reads both, strictly, and
+`tailnetNameOk` is the name's rule.
+
 **Pairing** (phone dials through the door; the relay forwards each message as one binary frame):
 
 ```text

@@ -199,12 +199,13 @@ export class MacRemote {
     if (this.#view.phase === "paired") this.#show(change(this.#view));
   }
 
-  /// Opens the tab: whether the relay is on, and whether this phone has paired.
+  /// Opens the tab: whether the relay is on, and whether this phone has paired. With the relay off, a phone that knows its
+  /// Mac's tailnet door still connects, and a phone not yet paired is still offered the code, since a code that names the
+  /// Mac's tailnet pairs over it (item 78f-2d); only a paired phone with no tailnet door has no way to its Mac.
   async start(): Promise<void> {
     const generation = this.#generation;
     const relay = await this.#backend.relay().catch(() => "unknown" as const);
     if (generation !== this.#generation || this.#disposed) return;
-    if (relay !== "on") return this.#show({ phase: "unavailable" });
     let mac: PairedMac | null = null;
     try {
       mac = await this.#backend.vault.load();
@@ -212,6 +213,7 @@ export class MacRemote {
       mac = null;
     }
     if (generation !== this.#generation || this.#disposed) return;
+    if (relay !== "on" && mac && !mac.tailnet) return this.#show({ phase: "unavailable" });
     if (!mac) return this.#show({ phase: "unpaired", failed: null });
     this.#mac = mac;
     this.#show(this.#fresh());

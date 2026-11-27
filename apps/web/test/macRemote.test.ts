@@ -138,6 +138,17 @@ describe("opening the tab", () => {
     const { remote } = await setup({ paired: false });
     await remote.start();
     expect(remote.view).toEqual({ phase: "unpaired", failed: null });
+    // item 78f-2d: with the relay off, a phone not yet paired is offered the code (one naming the Mac's tailnet pairs over it),
+    // and a phone that knows its Mac's tailnet door connects; only a paired phone with no tailnet door has no way to its Mac
+    const off = await setup({ relay: "off", paired: false });
+    await off.remote.start();
+    expect(off.remote.view).toEqual({ phase: "unpaired", failed: null });
+    const viaTailnet = await setup({ relay: "off" });
+    await viaTailnet.vault.save({ ...viaTailnet.mac, tailnet: { name: "mac.tail1234.ts.net", port: 47100 } });
+    await viaTailnet.remote.start();
+    await settle();
+    expect(viaTailnet.remote.view.phase).toBe("paired");
+    expect(viaTailnet.links).toHaveLength(1);
   });
 
   it("opens a session for a paired phone and lists the chats as Working, Needs you or Done", async () => {

@@ -248,6 +248,7 @@ export class RemoteMac {
       now: () => this.#deps.now(),
       timers: this.#timers,
       ...(this.#deps.random ? { random: this.#deps.random } : {}),
+      tailnet: () => (this.#tailscale.state === "on" ? this.#tailscale.name : null),
       onView: (view) => {
         this.#pairingView = view;
         this.#changed();
