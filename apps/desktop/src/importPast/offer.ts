@@ -23,7 +23,7 @@ export interface ImportProject {
 export interface ImportSkipped {
   /** folders that are no longer on this Mac */
   gone: number;
-  /** Codex conversations written compressed, which nothing here reads yet (item 106b) */
+  /** Codex conversations written compressed (`.jsonl.zst`) that could not be unpacked: corrupt or cut short (item 106b); the rest are read like plain ones */
   compressed: number;
   /** files that could not be read: a link, a file that cannot be opened, one that is not JSON lines */
   unreadable: number;

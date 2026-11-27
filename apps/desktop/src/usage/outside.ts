@@ -22,6 +22,7 @@ export interface OutsideSkipped {
   links: number;
   too_big: number;
   not_json: number;
+  /** compressed Codex sessions that could not be unpacked (corrupt or cut short); the others are read (item 106b) */
   compressed: number;
   app_started: number;
   over_limit: number;
