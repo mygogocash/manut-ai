@@ -9,22 +9,34 @@ import {
   staleFiles,
   swRoute,
 } from "./swRules";
+import { MAC_URL, PUSH_TITLE, pushNotice, windowToOpen } from "./swPush";
 
 /// The owner's web app's service worker, built to `/app/sw.js` as a classic script of its own (vite.config.ts) and
 /// registered with the scope `/app/` (main.tsx). Its rules are swRules.ts's; this file only wires them to the worker's
 /// events. It caches the app's shell so the app opens offline and says so, and nothing else: a request it does not answer
 /// goes to the network exactly as it would with no worker, which is what every request to the API does.
+///
+/// Since item 78d it also shows "Your Mac needs you" when the relay wakes the phone with a push, never anything a push
+/// carries, and opening it opens the Your Mac tab (swPush.ts).
 
 /// The worker's events and globals this file uses, typed here rather than with TypeScript's worker library, which cannot
 /// sit beside the DOM library the rest of the app is checked with.
 type Waits = Event & { waitUntil(work: Promise<unknown>): void };
 type Fetching = Waits & { request: Request; respondWith(answer: Promise<Response>): void };
+type Clicked = Waits & { notification: { close(): void } };
+type WindowClient = { url: string; focus(): Promise<unknown>; navigate?(url: string): Promise<unknown> };
 type Worker = {
   location: Location;
   skipWaiting(): Promise<void>;
-  clients: { claim(): Promise<void> };
-  addEventListener(type: "install" | "activate", listener: (event: Waits) => void): void;
+  registration: { showNotification(title: string, options: Record<string, unknown>): Promise<void> };
+  clients: {
+    claim(): Promise<void>;
+    matchAll(options: { type: "window"; includeUncontrolled: boolean }): Promise<readonly WindowClient[]>;
+    openWindow(url: string): Promise<unknown>;
+  };
+  addEventListener(type: "install" | "activate" | "push", listener: (event: Waits) => void): void;
   addEventListener(type: "fetch", listener: (event: Fetching) => void): void;
+  addEventListener(type: "notificationclick", listener: (event: Clicked) => void): void;
 };
 const worker = self as unknown as Worker;
 
@@ -90,4 +102,28 @@ worker.addEventListener("fetch", (event) => {
   if (route === "shell") event.respondWith(shell(request));
   else if (route === "file") event.respondWith(file(request));
   // Anything else is not answered here, so the browser asks the network as if there were no worker.
+});
+
+// A push from the relay: always the same words, and nothing the push carried. Every push shows one, as Safari and Chrome
+// require of a subscription made with `userVisibleOnly`.
+worker.addEventListener("push", (event) => {
+  event.waitUntil(worker.registration.showNotification(PUSH_TITLE, pushNotice()));
+});
+
+/// Brings the app forward on the Your Mac tab: an open window of it if there is one, else a new one.
+async function openMac(): Promise<void> {
+  const windows = await worker.clients.matchAll({ type: "window", includeUncontrolled: true });
+  const at = windowToOpen(windows.map((w) => w.url), worker.location.origin);
+  const open = at >= 0 ? windows[at] : undefined;
+  if (!open) {
+    await worker.clients.openWindow(MAC_URL);
+    return;
+  }
+  await open.focus();
+  await open.navigate?.(new URL(MAC_URL, worker.location.origin).href).catch(() => undefined);
+}
+
+worker.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  event.waitUntil(openMac().catch(() => undefined));
 });

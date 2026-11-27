@@ -18,8 +18,8 @@ setLang("en");
 const NOW = Date.UTC(2026, 10, 26, 9, 30);
 const LINK = "https://dev.manut.xyz/app/#pair=AQ" + "x7Kq2mZp9VbR4tLw8nYc3HdF6jGs1aEo5uTi0WkQyNvBrCxMzPlOhUgJfDeSaIqKmYtR2c4V6b8N0".repeat(2).slice(0, 149);
 const phones = [
-  { id: "A", name: "Somchai's iPhone", pairedAt: NOW - 3 * 86_400_000, lastSeen: NOW - 120_000, connected: true },
-  { id: "B", name: "Pixel 9", pairedAt: NOW - 86_400_000, lastSeen: NOW - 86_400_000, connected: false },
+  { id: "A", name: "Somchai's iPhone", pairedAt: NOW - 3 * 86_400_000, lastSeen: NOW - 120_000, connected: true, push: true },
+  { id: "B", name: "Pixel 9", pairedAt: NOW - 86_400_000, lastSeen: NOW - 86_400_000, connected: false, push: false },
 ];
 const STATES: Record<string, { snapshot: RemoteSnapshot; consenting?: boolean }> = {
   off: { snapshot: { on: false, link: "stopped", pairing: { phase: "idle" }, phones: [] } },

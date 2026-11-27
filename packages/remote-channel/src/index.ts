@@ -10,6 +10,8 @@
 ///   numbered, encrypted records it opens, split to fit the relay's frame.
 /// - Each decision (`decision.ts`, `webauthn.ts`): a one-use, 60-second challenge bound to one
 ///   device, request, revision and choice, answered with a passkey the Mac checks.
+/// - A phone's push address (`push.ts`, item 78d): the one rule the phone, the Mac and the relay
+///   check a Web Push endpoint by.
 ///
 /// See README.md for every byte layout and where each part came from in GoSpark.
 
@@ -81,3 +83,4 @@ export {
   acceptSession,
   startSession,
 } from "./session";
+export { MAX_PUSH_ADDRESS, PUSH_HOSTS, pushAddressOk } from "./push";

@@ -12,6 +12,7 @@ import { getStore } from "../state/store";
 import { fromStore, storeActions } from "./fromStore";
 import { healthProbe, pageSocket, shellKeyring } from "./fromShell";
 import { RemoteMac, type RemoteMacDeps, type RemoteSnapshot } from "./host";
+import { localPushStore } from "./push";
 import { changes } from "../lib/changes";
 import { inTauri } from "../lib/tauri";
 import type { DoorEvent, DoorShell } from "./door";
@@ -120,6 +121,7 @@ export function remoteMac(deps?: RemoteMacDeps): RemoteMac {
       actions: storeActions(store),
       now: () => Date.now(),
       door: shellDoor(),
+      pushes: localPushStore(),
     });
     // Phones watching a chat hear what moved, a quarter of a second at most after the store changed.
     let pending: ReturnType<typeof setTimeout> | null = null;

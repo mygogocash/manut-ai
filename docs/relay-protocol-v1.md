@@ -15,7 +15,10 @@
 >   off from the API's public `/v1/health` (`relay: "on" | "off"`), because a page cannot read a refused upgrade's 503.
 > - **The grant (section 12).** No relay URL is granted: the phone runs on the API's own origin (`/app/`), so the relay
 >   is that origin's. The grant's layout is the package's (`40 01 | device id | door token | K`).
-> - **Push (`push`, `pushToken`).** Not yet: item 78d. The Swift types, tests and plan files named below are GoSpark's.
+> - **Push (item 78d).** Web Push, not APNs. The Mac's `webpush` (a device id and its push address, or `null`) replaces
+>   GoSpark's `pushToken`, which this relay accepts and ignores; `push` gains an optional `devices` list; and the relay
+>   answers a push address its push service says is gone with its own `webpush` to the Mac. Sections 4, 5, 9 and 14 say
+>   how. The Swift types, tests and plan files named below are GoSpark's.
 
 **Date:** 11 Nov 2026 · **Version:** 1 · **Task:** A4a in [`phase1-track-a-remote-2026-11-09.md`](plans/phase1-track-a-remote-2026-11-09.md)
 **Status:** Partly built. The Worker side is built (A4b, A4c); the Mac side arrives in A5a and
@@ -118,8 +121,9 @@ vectors hold one example of each.
 | `revoke` | `id`: a device id | `{"t":"revoke","v":1,"id":"E621E1F8-..."}` |
 | `status` | `state`: `available`, `paused`, `sleeping` or `off`; `at`: when the Mac's state changed, by its own clock | `{"t":"status","v":1,"state":"paused","at":1789000000}` |
 | `close` | `stream` | `{"t":"close","v":1,"stream":4275878552}` |
-| `push` | `kind`: `decision`, `finished` or `failed` (A7) | `{"t":"push","v":1,"kind":"decision"}` |
-| `pushToken` | `id`: a device id; `token`: the device's APNs token as lower-case hex, or `null` to remove it; `env`: `sandbox` or `production` (A7) | `{"t":"pushToken","v":1,"id":"E621E1F8-...","token":null,"env":"sandbox"}` |
+| `push` | `kind`: `decision`, `finished` or `failed`; `devices`: the device ids to wake, at most 8 (optional, default every device with a push address) | `{"t":"push","v":1,"kind":"decision","devices":["E621E1F8-..."]}` |
+| `webpush` | `id`: a device id; `endpoint`: that device's push address, an https URL on a known push service, or `null` to remove it (item 78d) | `{"t":"webpush","v":1,"id":"E621E1F8-...","endpoint":"https://web.push.apple.com/QGuQ..."}` |
+| `pushToken` | `id`: a device id; `token`: the device's APNs token as lower-case hex, or `null` to remove it; `env`: `sandbox` or `production` (GoSpark's A7; accepted and ignored here) | `{"t":"pushToken","v":1,"id":"E621E1F8-...","token":null,"env":"sandbox"}` |
 
 **From the relay to the Mac** (`RemoteRelayHostInbound`):
 
@@ -129,7 +133,8 @@ vectors hold one example of each.
 | `ready` | `devices`: the registered device ids, never their hashes (optional, default none) | `{"t":"ready","v":1,"devices":["E621E1F8-..."]}` |
 | `open` | `stream`; `device`: the device that opened it | `{"t":"open","v":1,"stream":4275878552,"device":"E621E1F8-..."}` |
 | `close` | `stream`; `reason`: one word for the log (optional, default `closed`) | `{"t":"close","v":1,"stream":4275878552,"reason":"closed"}` |
-| `error` | `code` | `{"t":"error","v":1,"code":"device_limit"}` |
+| `error` | `code`: `device_limit`, `push_address` or `push_limit` | `{"t":"error","v":1,"code":"device_limit"}` |
+| `webpush` | `id`; `endpoint`: always `null`: the relay forgot that device's push address because its push service said it is gone (item 78d) | `{"t":"webpush","v":1,"id":"E621E1F8-...","endpoint":null}` |
 
 **From a phone to the relay** (`RemoteRelayPhoneHello`), its only text message:
 
@@ -187,8 +192,23 @@ The rules:
 - After `ready`, a text message whose `t` the relay does not know, or whose `v` is not 1, is
   ignored, so a newer Mac can talk to an older relay. A message the relay knows but cannot read,
   such as one with a missing field or a `status` of `offline`, closes the socket with 4400.
-- `push` and `pushToken` belong to v1, but only a relay with push support (A7) acts on them. Before
-  that, a relay accepts both and does nothing with them.
+- `webpush` (item 78d) gives one of this Mac's registered devices a push address, or removes it with
+  `null`. An id the object does not hold, another Mac's device included, is ignored, as `revoke`
+  ignores one. An address must be an https URL on `web.push.apple.com`, `fcm.googleapis.com` or
+  `updates.push.services.mozilla.com`, at the default port, with a path, no user and no fragment, in
+  the URL parser's own form (`apps/api/src/web-push.ts`, the same rule as `@manut/remote-channel`'s
+  `pushAddressOk`); any other address is not kept and the relay answers `error` with the code
+  `push_address`. A phone cannot send `webpush`: its text after `ready` closes it with 4400.
+- `push` wakes the devices it names that have a push address (every such device when it names none)
+  with a Web Push that carries no payload: an empty POST to the address with `TTL: 3600`,
+  `Urgency: high`, `Topic: manut-mac` and `Authorization: vapid t=<JWT>, k=<public key>` (RFC 8292:
+  an ES256 JWT whose `aud` is the push service's origin, `exp` 12 hours on and `sub` the Worker's
+  `PUBLIC_API_ORIGIN`, signed with the Wrangler secret `WEB_PUSH_PRIVATE_KEY`; `k` is
+  `WEB_PUSH_PUBLIC_KEY`). It does nothing while either half of the key is unset. Past the hour's
+  allowance (section 9) the relay answers `error` with the code `push_limit` and sends nothing. A
+  push service that answers 404 or 410 has that address forgotten, if it is still the device's, and
+  the Mac hears `webpush` for that device with `endpoint: null`. Any other answer keeps the address.
+- `pushToken` is GoSpark's APNs message; this relay accepts it and does nothing with it.
 
 ## 6. A phone's socket
 
@@ -268,6 +288,7 @@ threat model's rows RT-1 and RT-2 and its section 6.
 | Registered devices per Mac | 8 | `error` with the code `device_limit` |
 | Phone sockets per Mac | 8 | A further phone's `hello` gets close 4429 |
 | Bytes per Mac per UTC day, counting every message the object receives on an authenticated socket, so a stranger who knows the host id cannot spend it | 1 GiB (1,073,741,824 bytes), counted approximately | Every phone socket closes with 4429, and each new phone's `hello` gets 4429 until the next UTC day. The Mac's socket stays open |
+| `push` messages sent on per Mac (item 78d) | 30 per clock hour, counted only for a `push` that names at least one device with a push address while the key is set | `error` with the code `push_limit`, and nothing is sent |
 | Mac socket upgrades | 10 per 60 seconds per source group | 429 |
 | Phone socket upgrades | 60 per 60 seconds per source group | 429 |
 | Stored state | Deleted once no Mac socket is open and the relay last saw the Mac more than 30 days ago. Byte counts older than two days are pruned | The object forgets the Mac's key, devices and status |
@@ -294,7 +315,8 @@ is open closes that socket with 4503.
 
 A close may carry a short reason text. Receivers act on the code alone.
 
-The relay sends the Mac one `error` code, `device_limit`. The `reason` in a `close` sent to the Mac
+The relay sends the Mac three `error` codes: `device_limit`, and since item 78d `push_address` and
+`push_limit` (section 5). The `reason` in a `close` sent to the Mac
 is `closed`, `replaced`, `revoked`, `too_large`, `over_budget`, `disabled` or `off`, and is only for
 the log: the Mac treats a reason it does not know as `closed`.
 
@@ -344,8 +366,10 @@ printed or logged phone `hello`, show the token as `redacted` (RT-4).
 ## 14. What the relay keeps and logs
 
 The relay object keeps only what the threat model's section 6 lists: `hostKey`, `devices` (each
-with its token hash, and with A7 its push token and environment), `status`, `lastHostSeen` and
-`usage:<YYYY-MM-DD>`. It never stores a raw token, a nonce, a signature or a byte of a session.
+with its token hash, and since item 78d its push address, `webPush`), `status`, `lastHostSeen`,
+`usage:<YYYY-MM-DD>` and, since item 78d, `pushes` (the clock hour and how many `push` messages it
+sent on in it). It never stores a raw token, a nonce, a signature, a byte of a session or a push's
+signed token, which lives only in the isolate's memory. It logs no push address.
 
 Besides storage, each socket carries an attachment that lives only as long as the socket. While a
 socket waits to authenticate, its attachment holds that socket's nonce, the host id and the
