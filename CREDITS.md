@@ -144,6 +144,11 @@ read into `pin.json`, and its `FORMAT.md` read for the fields and platform targe
 registry's search: `searchRank` in `packages/provider-acp-registry/src/server/AcpRegistrySupport.ts`, lifted as `searchRank`
 in `apps/desktop/src/settings/agents/acpRegistry.ts`; its live fetch, downloads and `npx` runs were read and left out.
 
+Paradev (MIT, Copyright (c) 2025-2026 Superset Inc., `paradevai/paradev` at `2db3bbaf37ffbe24b78c8cdb974bf34632e6fb20`)
+for item 138's study of the code mode (`docs/paradev-parity.md`): read only, no code taken yet. Each module a later item
+lifts from it is named here with what it does; the study lists the candidates, among them VS Code's fuzzy scorer as
+Paradev ported it, which keeps Microsoft's MIT notice beside Paradev's.
+
 Libraries added for one feature are named here too: `qrcode` 1.5.4 (MIT, soldair/node-qrcode), already the web app's,
 pinned in the desktop for the pairing code's QR image (`apps/desktop/src/remote/QrCode.tsx`, lifted from
 `apps/web/src/ops/QrCode.tsx`); only its `create` is used, which returns the modules and reaches no network; `objc2-speech`, `objc2-avf-audio` and `objc2-av-foundation`
