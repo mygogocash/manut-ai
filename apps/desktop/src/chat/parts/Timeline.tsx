@@ -17,7 +17,7 @@ export interface SessionQueue {
 import { quoteFor } from "./answers";
 import { SystemDetail } from "./SystemDetail";
 import { ErrorBoundary } from "../../ui/ErrorBoundary";
-import { LiveFace, TypingRow, awaitingFirstToken } from "./Typing";
+import { LiveFace, TypingRow, answeringOnSend, awaitingFirstToken } from "./Typing";
 import { liveFaceRow } from "./liveFace";
 import { ActivityFallback, CardFallback, RoutineFallback } from "./fallbacks";
 import { PluginAddedCard, RoutineAddedCard } from "../../pages/ChatCards";
@@ -55,6 +55,7 @@ export function Timeline({
   queue,
   emptyHint,
   hideOpenAsks = false,
+  answersOnSend = false,
 }: {
   bot: Bot;
   face?: ReactNode;
@@ -66,6 +67,9 @@ export function Timeline({
   /** A card that still waits is left out: the side-by-side view (item 102b) draws it under the chat, as the same card, so it is never
    *  lost in a long scroll. Once decided it is the one grey line it is everywhere. */
   hideOpenAsks?: boolean;
+  /** The runtime answers a message before its request ends (Connected's chat, `answersOnSend` in src/runtime): the typing bubble
+   *  shows while the person's message is on its way, as no turn says the member works until the answer came. */
+  answersOnSend?: boolean;
 }) {
   const s = useStore();
   const items = selectTimeline(s, bot.name);
@@ -73,7 +77,7 @@ export function Timeline({
   const notReady = useBotReady(bot.name).status === "not";
   // the answer being written, in whole lines: never word by word, never the commentary beside a tool call
   const writing = chat?.turn ? answerSoFar(chat.turn) : "";
-  const typing = awaitingFirstToken(chat);
+  const typing = awaitingFirstToken(chat) || (answersOnSend && answeringOnSend(chat));
   // rows that arrived while this chat was open Rise once; the answer that was already on screen as it streamed, an
   // error and a note do not (docs/motion.md)
   const wasWriting = useRef(false);

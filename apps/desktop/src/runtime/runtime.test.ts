@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { BridgeClient } from "../lib/bridge";
 import { ALL_CAPABILITIES, NO_CAPABILITIES } from "./adapter";
 import { HTTP_CAPABILITIES, HttpRuntime, sharedHttpHost } from "./http";
-import { can, createRuntime, forgetStartedRuntime, runtimeCapabilities, runtimeKind, startedRuntime } from "./index";
+import { answersOnSend, can, createRuntime, forgetStartedRuntime, runtimeCapabilities, runtimeKind, startedRuntime } from "./index";
 import { MockRuntime } from "./mock";
 import { RUNTIME_KEY } from "./setting";
 
@@ -28,6 +28,14 @@ describe("the runtime this computer chose", () => {
     expect(a.status).toBe("closed");
     expect(sharedHttpHost(CONNECTED.origin)).toBe(sharedHttpHost(CONNECTED.origin));
     expect(runtimeCapabilities(CONNECTED)).toEqual(HTTP_CAPABILITIES);
+  });
+
+  it("says only Connected answers a message before the message's request ends, so only its chats show a member writing while one is on its way", () => {
+    expect(answersOnSend(CONNECTED)).toBe(true);
+    // the demo, and a runtime on this computer, take a message at once: their turns say when a member works
+    expect(answersOnSend()).toBe(false);
+    win.window = { __MANUT_BRIDGE_URL__: async () => "ws://127.0.0.1:5308/?token=e2e" };
+    expect(answersOnSend()).toBe(false);
   });
 
   it("shows the shop's schedules when connected, and none of the groups only a runtime on this computer has", () => {

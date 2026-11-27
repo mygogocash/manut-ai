@@ -13,7 +13,7 @@ import { rowStatus } from "./ThreadTree";
 import { StatusGlyph } from "./StatusGlyph";
 import { AgentBoxTools, pickFolder, teammates, useAgentBox } from "../chat/box/AgentBox";
 import { chatScope } from "../chat/box/scope";
-import { runtimeKind } from "../runtime";
+import { answersOnSend, runtimeKind } from "../runtime";
 import { BuddyMayReach } from "../jobs/MayReach";
 
 export function ThreadChat({ bot, thread }: { bot: Bot; thread: string }) {
@@ -53,6 +53,7 @@ export function ThreadChat({ bot, thread }: { bot: Bot; thread: string }) {
           bot={as}
           face={<Avatar bot={bot.name} size={28} />}
           connectionNotice={false}
+          answersOnSend={answersOnSend()}
           emptyHint={
             !chat?.turn && (
               <div className="th-empty" data-testid="thread-empty">

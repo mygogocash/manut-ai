@@ -5,7 +5,7 @@ import { Timeline } from "./parts/Timeline";
 import { Composer } from "./parts/Composer";
 import { promptsOf } from "./parts/promptHistory";
 import { t } from "../i18n";
-import { can, runtimeKind } from "../runtime";
+import { answersOnSend, can, runtimeKind } from "../runtime";
 import { ThreadChat } from "../threads/ThreadChat";
 import { BuddyMayReach } from "../jobs/MayReach";
 import { AgentBoxTools, pickFolder, teammates, useAgentBox } from "./box/AgentBox";
@@ -46,7 +46,7 @@ export function Chat() {
     <>
       <Header bot={bot} />
       <div className="pane" data-pane={bot.name}>
-        <Timeline bot={bot} />
+        <Timeline bot={bot} answersOnSend={answersOnSend()} />
         <Composer
           key={bot.name}
           bot={bot}

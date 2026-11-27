@@ -340,8 +340,8 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    again on 27 Nov with the chat route, which stays off there until the operator turns `buddyChat` on. The 38 unused names
    `pnpm lint` found outside tests are removed.
    After 102l-2: on Connected, Buddy's chat has no model menu and no "no model yet" line (the runtime's `models` capability is
-   off there), and the answer's line says how long Buddy took (`turn.start`'s `since`). Still missing there: a line that shows
-   Buddy is answering while the API works, which needs a turn that can be taken back quietly when a message is refused.
+   off there), and the answer's line says how long Buddy took (`turn.start`'s `since`). While the API works on an
+   answer the chat shows Buddy's typing bubble with no turn (`answersOnSend`), so a refused message is still only a message not sent.
    The dev relay is on with its push key pair as dev secrets, deployed to dev 27 Nov; the owner's try on an iPhone is left.
    Two Rust tests that raced under load (the MCP relay's round trip, the Grok account check) now wait for their answers, and
    the 16 hook-dependency warnings `pnpm lint` found are settled. Fonts stay 99, the owner's. From 27 Nov the owner asked for English first: new words are English, copied into ja, ko and zh. Needs the owner from 101b: Grok signed in and `permission_mode = "ask"`
