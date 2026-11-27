@@ -227,8 +227,21 @@ const result = await callModel(env, tenant, {
 - 503 `meter_unavailable`: the ledger could not hold the call, so it was not made.
 - 502 or 503 `provider_error` with `retryable` and `callId`.
 
-There is no HTTP route that makes a model call. The Phase 4 workers call `callModel` in code. A route would let
-anyone holding the operator key spend money from outside.
+One HTTP route makes a model call, and no other may: Buddy's chat, `POST /v1/chat/messages` (item 102l-1;
+`docs/pilot-api.md`, "Chat"). Everything else calls `callModel` in code, as the Phase 4 workers do. The rule was that a
+route would let anyone holding the operator key spend money from outside, and the chat keeps what it protected:
+
+- It takes the shop's owner's own session and nothing else. The operator key, a helper's session, a link's token and an
+  outpost's credential are refused before the gateway is asked, so nothing is held, called or counted for them.
+- The shop is the session's, never a field, so an owner spends only on their own shop, inside that shop's own cap, and
+  every refusal of the gateway's (`budget_exceeded`, `not_counted_in`, `not_configured`) reaches the owner as it is.
+- It is behind its own switch (`buddyChat`), off by default; it needs the shop's consent to cloud work; and it allows 60
+  messages an hour per shop, so even the owner's session cannot run up calls faster than a person types.
+- It sends, posts, pays, deletes and starts nothing: Buddy only talks.
+
+Each message is one call, held and settled like any other, so the shop's ledger shows one record per message. A new route
+that calls a model needs the same: the owner's session, the shop's own cap, its own switch and its own tests that every
+other credential is refused first.
 
 ## Operator routes
 

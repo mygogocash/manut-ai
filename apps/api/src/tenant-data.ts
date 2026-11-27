@@ -56,7 +56,7 @@ export async function tenantCall(
 
 /// Assembles a tenant's task documents with their histories, connection
 /// metadata, site sign-ins and outposts (no secret), schedules, consent, inbound attention items, pilot records,
-/// routines, model meter, audit log, memory, people, artifact links and deletion tombstone. Each task answers with its document, event
+/// routines, model meter, audit log, memory, people, artifact links, Buddy's chat and deletion tombstone. Each task answers with its document, event
 /// log, action proposals and attempts, so the export no longer leaves the
 /// history behind (the old "task record only" gap is closed below).
 ///
@@ -142,6 +142,10 @@ async function assembleExport(env: TenantDataEnv, tenant: string): Promise<Respo
   const artifactsResp = await tenantCall(env, tenant, `/artifacts/export?${query}`, { headers: { "x-artifacts": "1" } });
   if (!artifactsResp.ok) failed.push("artifacts");
   const artifacts = (artifactsResp.ok ? await artifactsResp.json() : {}) as { artifacts?: unknown[] };
+  // Buddy's chat with the owner: every thread, newest first, with every message, oldest first (chat-store.ts).
+  const chatResp = await tenantCall(env, tenant, `/chat/export?${query}`);
+  if (!chatResp.ok) failed.push("chat");
+  const chat = (chatResp.ok ? await chatResp.json() : {}) as { threads?: unknown[] };
   const schedResp = await scheduleStub(env, tenant).fetch(new Request("https://schedules/schedules", { headers }));
   if (!schedResp.ok) failed.push("schedules");
   const schedules = (schedResp.ok ? await schedResp.json() : {}) as { schedules?: unknown[] };
@@ -173,6 +177,7 @@ async function assembleExport(env: TenantDataEnv, tenant: string): Promise<Respo
     memory,
     people,
     artifacts: artifacts.artifacts ?? [],
+    chat: { threads: chat.threads ?? [] },
     ...(tomb.tombstone ? { deletedAt: tomb.tombstone.deletedAt } : {}),
   });
 }

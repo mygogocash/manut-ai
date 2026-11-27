@@ -563,6 +563,10 @@ const AUDIT_ACTIONS: Readonly<Record<string, (entry: AuditEntry, context: AuditC
   // down. The log names the link by its id only, never its title, its text or the link itself.
   "artifact.published": () => "published a page as a public link",
   "artifact.removed": () => "removed a public link",
+  // Buddy's chat with the owner (docs/connected-chat.md). The log names the thread and the message by their ids only, never
+  // a word of the chat.
+  "chat.message_sent": () => "talked with Buddy in a chat thread",
+  "chat.thread_deleted": () => "deleted a chat thread with Buddy",
 };
 
 /// " in November 2026" for an entry about a month of the model meter, or nothing for one that names none.
@@ -835,6 +839,8 @@ const SUBJECT_LABELS: readonly (readonly [string, string])[] = [
   ["month", "model month"],
   // An artifact link, by its id (`art-…`), which is not the link itself.
   ["artifactId", "artifact"],
+  // A chat thread with Buddy, by its id (`cht-…`).
+  ["threadId", "chat thread"],
 ];
 
 export function auditSubjectText(subject: Record<string, string>): string {

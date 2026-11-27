@@ -36,6 +36,8 @@ function defaults(): Record<string, () => Response> {
         passedOn: [], removed: [] }, names: { "helper-1": "Mint" } }),
     "TENANT GET /artifacts/export": () =>
       Response.json({ artifacts: [{ id: "art-1", title: "Menu", kind: "html", bytes: 12, createdAt: 1, text: "<h1>Menu</h1>" }] }),
+    "TENANT GET /chat/export": () => Response.json({ threads: [{ id: "cht-1", title: "Sales", messages: [{ id: "m1",
+      from: "owner", text: "How did sales go?" }] }] }),
     "TENANT POST /pilot/prune": () => Response.json({ messagesPruned: 0 }),
     "TENANT POST /tenant-wipe": () => Response.json({ deletedAt: "2026-09-24T00:00:00.000Z", tasksWiped: 2 }),
     "TASK GET /export": () => Response.json({ task: { id: "unnamed" }, events: [], actions: [], attempts: [] }),
@@ -197,6 +199,7 @@ describe("tenant export fan-out", () => {
       people?: { state?: { helpers?: unknown[] }; names?: unknown };
       routines?: { routines?: unknown[]; runs?: unknown[] };
       artifacts?: unknown[];
+      chat?: unknown;
     };
     expect(body.tenant).toBe(TENANT);
     expect((body.tasks ?? []).map((entry) => entry.task?.id)).toEqual(TASK_IDS);
@@ -222,6 +225,9 @@ describe("tenant export fan-out", () => {
     expect(body.routines?.runs).toEqual([{ routineId: "rt-1", status: "done" }]);
     // The shop's artifact links: each page with its text, never the link itself.
     expect(body.artifacts).toEqual([{ id: "art-1", title: "Menu", kind: "html", bytes: 12, createdAt: 1, text: "<h1>Menu</h1>" }]);
+    // Buddy's chat with the owner: every thread with every message.
+    expect(body.chat).toEqual({ threads: [{ id: "cht-1", title: "Sales", messages: [{ id: "m1", from: "owner",
+      text: "How did sales go?" }] }] });
   });
 
   for (const [route, part] of [
@@ -239,6 +245,7 @@ describe("tenant export fan-out", () => {
     ["TENANT GET /memory/export", "memory"],
     ["TENANT GET /people/export", "people"],
     ["TENANT GET /artifacts/export", "artifacts"],
+    ["TENANT GET /chat/export", "chat"],
     ["TENANT GET /index", "index"],
   ] as const) {
     it(`answers export_incomplete when the ${part} read fails`, async () => {

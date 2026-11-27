@@ -1,8 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { maskCommand, maskSecrets, revealHidden, sameShape, shellWords, showCommand } from "./secrets";
+import { maskCommand, maskSecrets, revealHidden, sameShape, shellWords, showCommand } from "../src/index";
 import table from "./secrets.cases.json";
 
 const X = (n: number) => "X".repeat(n);
+
+/** A row of the shared table as its texts: [text, masked] or [command, shown, notes], the notes empty when the row has none.
+ *  A row that is not made of texts fails the test, naming it, rather than being read as an empty field. */
+function texts(row: readonly unknown[]): [string, string, string] {
+  const [text, want, notes = ""] = row;
+  if (typeof text !== "string" || typeof want !== "string" || typeof notes !== "string") {
+    throw new Error(`a row of secrets.cases.json is not texts: ${JSON.stringify(row)}`);
+  }
+  return [text, want, notes];
+}
 
 describe("maskSecrets (the one masker; patterns in secrets.json)", () => {
   it("masks every token family whole", () => {
@@ -20,12 +30,12 @@ describe("maskSecrets (the one masker; patterns in secrets.json)", () => {
 
   it("runs the shared table (secrets.cases.json, also run by tasks.rs and the bridge)", () => {
     expect(table.cases.length).toBeGreaterThan(120);
-    for (const [text, want] of table.cases) expect(maskSecrets(text), text).toBe(want);
+    for (const [text, want] of table.cases.map(texts)) expect(maskSecrets(text), text).toBe(want);
   });
 
   it("runs the shared command table: what an approval shows (secrets.cases.json `command`, also run by tasks.rs)", () => {
     expect(table.command.length).toBeGreaterThan(25);
-    for (const [text, want, notes = ""] of table.command) {
+    for (const [text, want, notes] of table.command.map(texts)) {
       const shown = showCommand(text);
       expect(shown.text, text).toBe(want);
       // a row's third field names the notes the card adds: `unmasked` when the line is shown as it is, `hidden` when it
@@ -39,14 +49,14 @@ describe("maskSecrets (the one masker; patterns in secrets.json)", () => {
   it("splits a shown command into the same shell words as the command, on every row of both tables (item 121)", () => {
     // a mask stands for part of one word and never for a blank, a quote, `#` or a second word, so the line a person
     // reads splits where the line that runs does
-    for (const [text] of [...table.command, ...table.cases]) {
+    for (const [text] of [...table.command, ...table.cases].map(texts)) {
       expect(shellWords(maskCommand(text)).length, text).toBe(shellWords(text).length);
     }
   });
 
   it("shows every direction and format character in an ask's text as a visible mark (item 121, secrets.cases.json `reveal`)", () => {
     expect(table.reveal.length).toBeGreaterThan(3);
-    for (const [text, want] of table.reveal) expect(revealHidden(text), JSON.stringify(text)).toBe(want);
+    for (const [text, want] of table.reveal.map(texts)) expect(revealHidden(text), JSON.stringify(text)).toBe(want);
   });
 
   it("accepts a masked line only when its words are the command's, each with only a key's part replaced (item 121)", () => {
@@ -60,7 +70,7 @@ describe("maskSecrets (the one masker; patterns in secrets.json)", () => {
     // masked characters, since the block starts and ends with its dashes.
     const shell = (s: string) => s.replace(/[^`$()|;&<>{}\n]/g, "");
     const block = /-{4,5} ?BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY/;
-    for (const [text] of [...table.command, ...table.cases]) {
+    for (const [text] of [...table.command, ...table.cases].map(texts)) {
       // a private key block keeps its BEGIN and END lines and shows its body as one line: only its body's line breaks go
       const out = maskCommand(text);
       const lines = (s: string) => (block.test(text) ? s.replace(/\n/g, "") : s);

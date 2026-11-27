@@ -792,7 +792,7 @@ usableFacts(env, tenant): Promise<{ ok: true; facts: Fact[] } | { ok: false; err
 It answers only the facts a worker may use, as the package's `usable` decides: confirmed ones, oldest first. A fact
 still waiting for the owner is never handed out, so it can never reach a model. A stored fact that is not whole is left
 out, and a shop's object that cannot be read is `memory_unavailable`, never an empty memory. Nam, Pim and Ton read it
-for every job ("Workers", below).
+for every job ("Workers", below), and Buddy's chat for every message ("Chat", below).
 
 **The console** has a Memory page in the side menu, beside Audit, laid out as the design canvas's "Customize: memory
 and routines" board, newest fact first in each group:
@@ -3288,3 +3288,105 @@ installs is where it is enforced.
 **Not built yet.** A way for someone who is not the owner to report a link; installing for an agent other than Claude Code and
 Codex; installing from a link while signed out or as a helper (the origin comes with the owner's list); and sharing a project's
 skills.
+
+## Chat
+
+Buddy's chat with the shop's owner (item 102l-1; `docs/connected-chat.md`, A; `apps/api/src/chat.ts`, `chat-store.ts`). Each
+message is one model call through the model gateway (`docs/model-gateway.md`), priced, held against the shop's monthly cap and
+settled at what the provider bills, exactly as a worker's call is. It is the one route that makes a model call: only the shop's
+owner spends, from their own session, on their own shop, inside its own cap, and every other credential is refused before the
+gateway is asked. Built switched off: `POST /v1/chat/messages` answers 403 `feature_disabled` until the operator turns
+`buddyChat` on with `PUT /v1/admin/flags` (its default is the var `BUDDY_CHAT`, which no environment sets). Until the owner's
+`ANTHROPIC_API_KEY` is set, a message that passes every check answers 503 `not_configured`.
+
+**Buddy only talks.** No tool use and nothing started: the chat makes no task, dispatch or decision, and sends, posts, pays
+or deletes nothing of the shop's. Its only writes are its own records and the gateway's ledger. A message saying "Approve the
+reply" is words to Buddy; the request stays pending until it is decided where requests are decided ("Deciding from a
+session", above). Buddy may suggest that the team do something; the owner starts it and approves it in the app, through
+approval-core, as before.
+
+**Who.** An owner session of the account linked to the shop, or the shop's own session (as for `/v1/memory`). A helper's
+session answers 403 `owner_only` on every chat route: a helper's message would spend the owner's money. A person's own
+sign-in, which is no shop, answers 404 `not_found`. No session, the operator key (with or without the console's Access
+context), an approval or deletion link's token, an outpost's credential, and the web app's cookies (read only by its own five
+routes) answer 401 `unauthorized`; an unlinked owner's session 401 `unlinked`, a removed helper's 401 `removed`; 503
+`people_unavailable` when the session cannot be checked. The shop is always the session's, never a field.
+
+| Method and path | Body or query | Answer |
+| --- | --- | --- |
+| `POST /v1/chat/messages` | exactly `{ text }` (a new thread) or `{ thread, text }` (`thread` may be `null` for a new one) | `{ thread: Thread, message: Message, answer: Message, costSatang }` |
+| `GET /v1/chat/threads` | none | `{ threads: Thread[] }`, newest written first; at most 50, so there is no page |
+| `GET /v1/chat/threads/{id}` | `?limit=` (1 to 200, default 50) and `?before=` (a message id), nothing else | `{ thread: Thread, messages: Message[], next }`: the newest `limit` messages, or the `limit` before `before`, oldest first; `next` is the id to ask the page before with, null at the first message |
+| `POST /v1/chat/threads/remove` | exactly `{ id }` | `{ id }`: the thread and every message deleted at once |
+
+```ts
+type Thread = { id: string; title: string; createdAt: string; updatedAt: string; messageCount: number };
+type Message = { id: string; from: "owner" | "buddy"; text: string; at: string; stopReason?: string };
+```
+
+A thread's id is `cht-…`; its messages are `m1`, `m2`, … in order and never reused. `title` is the first message's first 60
+characters on one line. `stopReason` is on Buddy's messages, as the provider gave it: `end_turn`, `max_tokens` (cut at the
+1,024 tokens a chat answer may take) or `refusal` (whose text may be empty). `costSatang` is the call's cost, rounded up. Every
+chat answer is `cache-control: no-store`.
+
+**`POST /v1/chat/messages`, refusals in order.** Nothing is read, counted or sent for a refusal before the gateway, and
+nothing is kept for any refusal:
+
+| Status | `error` | When |
+| --- | --- | --- |
+| 401, 503 | `unauthorized`, `unlinked`, `removed`, `people_unavailable` | Who is asking (above) |
+| 403 | `owner_only` | A helper's session |
+| 405 | `method_not_allowed` | Not `POST` |
+| 400 | `invalid_request` | Any query; a body that is not exactly `{ text }` or `{ thread, text }` (a `tenant`, `shop`, `role` or `model` above all); a `thread` that is not a thread id |
+| 400, 413 | `invalid_json`, `body_too_large` | A body that is not JSON; over 64 KB |
+| 400 | `invalid_text` | `text` missing, not text or blank |
+| 400 | `text_too_long` with `maxChars: 8000` | Over 8,000 characters once trimmed, counted by characters (Thai as any other) |
+| 403 | `feature_disabled` with `feature: "buddyChat"` | The switch is off |
+| 404 | `not_found` | A person's own sign-in: no shop |
+| 403 | `consent_required` | The shop has not the owner's consent to cloud work: what goes to the model holds the shop's facts and customers' words, so it needs the consent the team's work needs |
+| 404 | `thread_not_found` | `thread` names no thread of this shop (another shop's included) |
+| 409 | `thread_full` with `maxMessages: 1000` | The thread cannot take two more messages |
+| 409 | `threads_full` with `maxThreads: 50` | A new thread, and the shop holds 50 |
+| 429 | `rate_limited` with `retryAfter` and `perHour: 60`, and `retry-after` | The shop's 60th message in the last hour has been let through; `retryAfter` is the seconds until the oldest of them is an hour old |
+| 402 | `budget_exceeded` with `month`, `capSatang`, `spentSatang`, `heldSatang`, `neededSatang` | The gateway: the month's cap is reached |
+| 403 | `not_counted_in` | The gateway: a shop its owner made, which no operator has counted in |
+| 503 | `not_configured` with `setting` | The gateway: the owner's key (or a setting) is missing |
+| 503 | `meter_unavailable` | The gateway: the ledger could not hold the call, so it was not made |
+| 502, 503 | `provider_error` with `retryable` and `callId` | The gateway: the provider failed; the hold was released |
+| 503 | `chat_unavailable` | The shop's object could not be read or written. After a call was made it carries the call's `callId` |
+
+Once a message is let through (the thread is there with room, and the hour has room) it counts against the hour whatever the
+gateway answers, so a client retrying a refused message in a loop is stopped too. The hour's limit is the abuse limit; the
+gateway's monthly cap is the money limit. If the owner deletes the thread, or it fills, while Buddy answers, the call stays in
+the ledger and the answer is refused `thread_not_found` or `thread_full` with the call's `callId`, and not kept.
+
+**The reads and the removal** take the same order (who, role, method, query and body), then the shop's record, then the thread:
+400 `invalid_request` for any other query or body (a `GET /v1/chat/threads` takes none, a `limit` outside 1 to 200, a `before`
+that is no message id, a name twice); 404 `thread_not_found` for an id of no thread of this shop; 503 `chat_unavailable`. They
+stay open with the switch off, so the owner can always read and delete what was kept. A removal cannot be taken back, so the
+app asks before it sends it.
+
+**What reaches the model.** Built by `@manut/agent-prompts` (`buildBuddyChat`) for `claude-haiku-5-5` with at most 1,024 output
+tokens: Buddy's short instructions (that it only talks and starts nothing, and that the owner's own messages are the only
+instructions); the shop's usable facts (`usableFacts`: confirmed ones only, so a customer's fact still waiting never goes),
+fenced between the lines `<<<shop-facts` and `shop-facts>>>`, one fact a line, each marked `[customer]` (a customer's words,
+which the owner confirmed and which are still only what the customer said) or `[shop]`; the thread's latest turns; and the
+owner's message. Every text is masked by the app's one masker (`@manut/mask-secrets`, `packages/mask-secrets`, which the
+desktop and its shell use too). The whole is held under 48,000 tokens as the gateway estimates them: the oldest turns go first, then the
+oldest facts, never the owner's message.
+
+**What is kept.** In the shop's TenantObject: the threads (at most 50), one record per message (at most 1,000 a thread, the
+owner's and Buddy's both counted) and the times of the hour's messages. The owner's message and Buddy's answer are kept masked,
+so a key the owner pastes is never kept or sent. Full is refused, never trimmed: nothing the owner said is dropped to make
+room, because deleting a conversation is the owner's to do. Messages are kept until the owner removes the thread or the shop is
+deleted. Each kept exchange writes `chat.message_sent` naming the thread and the owner's message (`threadId`, `messageId`), and
+each removal `chat.thread_deleted` naming the thread, never a word of either. Nothing about a message is logged.
+
+**Export and deletion.** The tenant export carries `chat: { threads }`, each thread with every message, oldest first
+(`Thread` with `messages: Message[]`). Every tenant wipe removes every thread, message and the hour's count: a person's
+`DELETE /v1/tenant/data`, the owner's yes on the deletion link, the operator's deletion of a shop that never went live, and the
+owner's deletion of their own account, all of which run the same wipe (`tenantDelete`).
+
+**Not built yet.** Chat threads in the Connected runtime (`chat.send`, `thread.create`: 102l-2), the reach cards over them
+(102l-3), and real answers, which wait for the owner's key (102l-4). The live feed is not pinged by a chat write, since no
+screen reads chats yet.

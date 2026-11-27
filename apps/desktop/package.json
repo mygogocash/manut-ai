@@ -18,6 +18,7 @@
     "@manut/dev-url": "workspace:*",
     "@manut/format": "workspace:*",
     "@manut/env-example": "workspace:*",
+    "@manut/mask-secrets": "workspace:*",
     "@manut/member-grants": "workspace:*",
     "@manut/notify-rules": "workspace:*",
     "@manut/people-rules": "workspace:*",

@@ -23,6 +23,7 @@ import { readLinear } from "./connectors/linear";
 import { CredObject } from "./cred-object";
 import { googleRoute } from "./google-connect";
 import { receiveLinearWebhook } from "./inbound";
+import { chatRoute } from "./chat";
 import { memoryRoute } from "./memory";
 import { modelAdminRoute } from "./model-gateway";
 import { ACCOUNT_DELETION_PATH, accountRoute } from "./account-deletion";
@@ -133,6 +134,9 @@ export interface Env {
   /// Skill links (item 84): the default of `skillLinks`, which no environment sets either. A bundle of skills is published and
   /// read only while both switches are on.
   SKILL_LINKS?: string;
+  /// Buddy's chat on the owner's session (chat.ts; docs/connected-chat.md): the default of `buddyChat`, which no environment
+  /// sets. Each message is a model call billed to the shop's cap, so the chat stays off until the owner says.
+  BUDDY_CHAT?: string;
   ARTIFACT_ORIGIN?: string;
   ARTIFACT_READ_LIMITER?: RateLimit;
   /// Making a shop of one's own (self-serve.ts; docs/pilot-api.md, "Making a shop of your own"). Built and off: the route
@@ -418,10 +422,13 @@ export type FeatureFlags = {
   /// Skill links (artifacts.ts, docs/pilot-api.md "Skill links"): a bundle of skills is refused 403 `feature_disabled` and its
   /// link answers 404 until this is on as well as `artifactLinks`, so pages can be allowed and skills not.
   skillLinks: boolean;
+  /// Buddy's chat on the owner's session (chat.ts, docs/pilot-api.md "Chat"): `POST /v1/chat/messages` answers 403
+  /// `feature_disabled` until it is on, so no message makes a model call. Reading and deleting what was kept stay open.
+  buddyChat: boolean;
 };
 
 const FLAG_KEYS = ["officeCloud", "officeRoutines", "officeExternalWrites", "officeInbound", "officeSharing", "shopFeed",
-  "artifactLinks", "skillLinks"] as const;
+  "artifactLinks", "skillLinks", "buddyChat"] as const;
 
 async function featureFlags(env: Env): Promise<FeatureFlags> {
   const defaults: FeatureFlags = {
@@ -433,6 +440,7 @@ async function featureFlags(env: Env): Promise<FeatureFlags> {
     shopFeed: env.SHOP_FEED === "1",
     artifactLinks: env.ARTIFACT_LINKS === "1",
     skillLinks: env.SKILL_LINKS === "1",
+    buddyChat: env.BUDDY_CHAT === "1",
   };
   try {
     const response = await authCall(env, "/flags");
@@ -453,6 +461,7 @@ async function featureFlags(env: Env): Promise<FeatureFlags> {
       shopFeed: typeof dynamic.shopFeed === "boolean" ? dynamic.shopFeed : defaults.shopFeed,
       artifactLinks: typeof dynamic.artifactLinks === "boolean" ? dynamic.artifactLinks : defaults.artifactLinks,
       skillLinks: typeof dynamic.skillLinks === "boolean" ? dynamic.skillLinks : defaults.skillLinks,
+      buddyChat: typeof dynamic.buddyChat === "boolean" ? dynamic.buddyChat : defaults.buddyChat,
     };
   } catch {
     return defaults;
@@ -846,6 +855,11 @@ export default {
     // own from the shop's session.
     const memory = await memoryRoute(request, url, env, ctx);
     if (memory) return memory;
+
+    // Buddy's chat with the owner (chat.ts): one model call per message through the gateway, under the shop's cap, from
+    // the owner's own session only, behind its own switch; and the owner's reads and deletion of what it kept.
+    const chat = await chatRoute(request, url, env, () => featureFlags(env));
+    if (chat) return chat;
 
     // Nam, Pim and Ton (workers.ts). The admin gate above already required both credentials and the exact method; the
     // runner reads the kill switches and the owner's consent before it creates anything.

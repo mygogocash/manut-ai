@@ -61,6 +61,10 @@ function areasOfPath(path) {
   if (path.startsWith(".claude/skills/lead-merge/scripts/")) return only("desktop");
   if (path.startsWith(".github/") || path.startsWith(".claude/") || path.startsWith(".vscode/") ||
       [".gitignore", ".gitattributes", ".editorconfig", "LICENSE", "NOTICE"].includes(path)) return flags(false);
+  // The one masker's package reaches the shell too: tasks.rs reads its patterns and its table of cases with include_str!.
+  if (path.startsWith("packages/mask-secrets/")) {
+    return only("typecheck", "packages", "api", "web", "phones", "desktop", "e2e", "rust");
+  }
   // A shared package reaches every app that imports it.
   if (path.startsWith("packages/")) return only("typecheck", "packages", "api", "web", "phones", "desktop", "e2e");
   if (path.startsWith("apps/api/")) return only("typecheck", "api");

@@ -3,6 +3,7 @@ import { approvalIndexRoute, forgetIndexed, readyOnFirstTask, stepBackfill, wipe
 import { artifactTenantRoute, wipeArtifactsTenant } from "./artifact-store";
 import { actorOr, auditPut, auditTenantRoute, wipeAuditTenant } from "./audit-log";
 import { readJsonBody } from "./body";
+import { chatTenantRoute, wipeChatTenant } from "./chat-store";
 import { isValidTenant } from "./companies";
 import { FEED_CLOSE, ShopFeed } from "./feed";
 import type { AttentionItem } from "./inbound";
@@ -205,6 +206,10 @@ export class TenantObject extends DurableObject {
     // What the team knows about the shop: its facts, and the owner's say over each (memory-store.ts).
     if (url.pathname === "/memory" || url.pathname.startsWith("/memory/")) {
       return memoryTenantRoute(this.ctx.storage, request, url);
+    }
+    // Buddy's chat with the owner: its threads, their messages and the hour's count (chat-store.ts).
+    if (url.pathname.startsWith("/chat/")) {
+      return chatTenantRoute(this.ctx.storage, request, url);
     }
     // The people around the shop: the owner's helpers, invites, cover and notes passed on (people-store.ts). A change to
     // the record pings the feed: a note passed on shows on an ask, a helper's new device is told after the owner's next
@@ -426,8 +431,9 @@ export class TenantObject extends DurableObject {
   /// per-call records, and the crossings' notice for AuthObject), audit log
   /// (entries and the miss count), memory (facts and the fingerprints of
   /// forgotten texts), people (helpers, invites and every helper
-  /// session, so no helper can open a deleted shop) and artifact links (every
-  /// page and its way in, so no link of the shop opens again), then writes a
+  /// session, so no helper can open a deleted shop), artifact links (every
+  /// page and its way in, so no link of the shop opens again) and Buddy's chat
+  /// (every thread, every message and the hour's count), then writes a
   /// tombstone.
   /// Sessions are wiped by AuthObject through the worker; the tombstone
   /// proves the deletion happened and marks any data that reappears
@@ -454,6 +460,7 @@ export class TenantObject extends DurableObject {
     await wipePeopleTenant(this.ctx.storage, body.tenant);
     await wipeAuditTenant(this.ctx.storage, body.tenant);
     await wipeArtifactsTenant(this.ctx.storage, body.tenant);
+    await wipeChatTenant(this.ctx.storage, body.tenant);
     const tombstone = { deletedAt: new Date().toISOString(), tasksWiped: ids.length };
     await this.ctx.storage.put(`tomb:${body.tenant}`, tombstone);
     // The shop is gone, and so is every session that followed it: its sockets close, and each desktop learns why from

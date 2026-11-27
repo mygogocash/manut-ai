@@ -40,8 +40,12 @@ describe("what a changed file needs", () => {
     assert.deepEqual(on(areasOf(["apps/desktop/src-tauri/icons/icon.png"])), ["desktop", "rust"]);
   });
 
-  it("runs every app's jobs for a shared package, and never Rust, which imports none", () => {
+  it("runs every app's jobs for a shared package, and Rust only for the masker's, whose patterns the shell reads", () => {
     assert.deepEqual(on(areasOf(["packages/approval-core/src/index.ts"])), ["api", "desktop", "e2e", "packages", "phones", "typecheck", "web"]);
+    for (const path of ["packages/mask-secrets/src/secrets.json", "packages/mask-secrets/test/secrets.cases.json",
+      "packages/mask-secrets/src/index.ts"]) {
+      assert.deepEqual(on(areasOf([path])), ["api", "desktop", "e2e", "packages", "phones", "rust", "typecheck", "web"], path);
+    }
   });
 
   it("runs the two jobs whose tests read the docs for a change of words, and nothing heavy", () => {

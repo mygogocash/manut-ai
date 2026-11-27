@@ -90,6 +90,8 @@ const API_AUDIT_ACTIONS = [
   "model.cap_reached",
   "artifact.published",
   "artifact.removed",
+  "chat.message_sent",
+  "chat.thread_deleted",
 ];
 
 const NOW = "2026-11-24T03:00:00.000Z";

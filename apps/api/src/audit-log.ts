@@ -145,6 +145,11 @@ export const AUDIT_ACTIONS = [
   // ask, and removing one. Each names the link by its id, never its title, its text or the link itself.
   "artifact.published",
   "artifact.removed",
+  // Buddy's chat with the owner (chat-store.ts, docs/connected-chat.md): an exchange kept, the owner's message and Buddy's
+  // answer, and a thread the owner deleted. Each names the thread and the owner's message by their ids, never a word of
+  // either, a thread's title or what the model was sent.
+  "chat.message_sent",
+  "chat.thread_deleted",
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 
@@ -193,6 +198,8 @@ export const AUDIT_SUBJECT_KEYS = [
   "month",
   // An artifact link's id (`art-…`, artifact-store.ts), which is not the link's secret.
   "artifactId",
+  // A chat thread's id (`cht-…`, chat-store.ts). Its message ids (`m1`, `m2`, …) go in `messageId`.
+  "threadId",
 ] as const;
 export type AuditSubject = Partial<Record<(typeof AUDIT_SUBJECT_KEYS)[number], string>>;
 
