@@ -623,6 +623,8 @@ function againTip(rec: SessionRec): string {
 /** An ended session (chat or terminal): one quiet line, and Restart, which starts its agent again in the same folder
  *  and account (and, when its CLI could not continue its conversation, a new conversation instead). A session of an agent manut no longer offers (Kilo Code) says only that, with no Restart. */
 function Ended({ rec }: { rec: SessionRec }) {
+  // read before any early return: a hook is called on every render, in the same order
+  const live = useSessions().live[rec.id];
   if (isGone(rec.agent))
     return (
       <div className="ss-ended" role="status" data-testid="session-ended">
@@ -634,7 +636,7 @@ function Ended({ rec }: { rec: SessionRec }) {
   const why = rec.error ? rec.error.trim().split("\n").pop() : "";
   // an agent that is not signed in: its line says what to run (the command as inline code), and the person's own
   // terminal opens in the folder
-  const signin = useSessions().live[rec.id]?.signin;
+  const signin = live?.signin;
   return (
     <div className="ss-ended" role="status" data-testid="session-ended">
       <span className="ss-ended-t" title={why || undefined}>

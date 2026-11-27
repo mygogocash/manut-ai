@@ -40,13 +40,15 @@ export function useMoved(root: string, host: ReadsGit = getHost(), opts: MovedOp
         busy = false;
       }
     };
-    void read();
-    const timer = setInterval(read, POLL_MS);
-    window.addEventListener("focus", read);
+    // `read` keeps its own errors; the timer and the focus only start it
+    const poke = () => void read();
+    poke();
+    const timer = setInterval(poke, POLL_MS);
+    window.addEventListener("focus", poke);
     return () => {
       live = false;
       clearInterval(timer);
-      window.removeEventListener("focus", read);
+      window.removeEventListener("focus", poke);
     };
   }, [root, host, base, branch, off]);
   return off ? null : moved;

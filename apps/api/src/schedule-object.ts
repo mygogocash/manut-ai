@@ -164,7 +164,8 @@ export class ScheduleObject extends DurableObject {
     // disabled schedule was saved, leaving enabled schedules dormant. Waking
     // with no alarm re-arms, so those start running again on the first request
     // after deploy instead of waiting for someone to save a schedule.
-    ctx.blockConcurrencyWhile(async () => {
+    // not awaited, as a constructor cannot: the runtime holds every request until it is done, and a throw resets the object
+    void ctx.blockConcurrencyWhile(async () => {
       if ((await ctx.storage.getAlarm()) === null) await this.rearm();
     });
   }

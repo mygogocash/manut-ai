@@ -88,18 +88,16 @@ export function createTerminals(d: TerminalsDeps) {
   const findCodexId = (id: string, t: Term, run: number, pty: number, wait: number) => {
     if (!host.codexConversation) return;
     clearTimeout(codexIdTimer.get(id));
-    codexIdTimer.set(
-      id,
-      setTimeout(async () => {
-        codexIdTimer.delete(id);
-        const live = () => terms.get(id) === t && t.run === run && !t.closed && t.hostId === pty && rec(id)?.agent === "codex" && !rec(id)?.agentSession;
-        if (!live()) return;
-        const got = await host.codexConversation!(pty).catch(() => null);
-        if (!live()) return;
-        if (got) patchRec(id, { agentSession: got });
-        else findCodexId(id, t, run, pty, CODEX_ID_EVERY_MS);
-      }, wait),
-    );
+    const ask = async () => {
+      codexIdTimer.delete(id);
+      const live = () => terms.get(id) === t && t.run === run && !t.closed && t.hostId === pty && rec(id)?.agent === "codex" && !rec(id)?.agentSession;
+      if (!live()) return;
+      const got = await host.codexConversation!(pty).catch(() => null);
+      if (!live()) return;
+      if (got) patchRec(id, { agentSession: got });
+      else findCodexId(id, t, run, pty, CODEX_ID_EVERY_MS);
+    };
+    codexIdTimer.set(id, setTimeout(() => void ask(), wait));
   };
 
   /** Whether the file of TERMINALS session `r`'s own conversation is where its CLI looks for it (rule 30, names

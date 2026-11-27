@@ -2126,7 +2126,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
       const go = omhLater.filter((id) => termAgain.has(id));
       if (go.length && typeof document !== "undefined") void loadXterm().then((m) => go.forEach((id) => startOffPage(m, id)));
     });
-    if (again.length) void ready().then(() => Promise.all(again.map(({ id, resume: rid }) => (procs.has(id) ? undefined : startAgentChat(id, rid)))));
+    if (again.length) void ready().then(() => Promise.all(again.filter(({ id }) => !procs.has(id)).map(({ id, resume: rid }) => startAgentChat(id, rid))));
     // their terminals are made and started now, off the page (a view that opens one later takes it as it is)
     const now = [...termAgain].filter((id) => !omhLater.includes(id));
     if (now.length && typeof document !== "undefined") void loadXterm().then((m) => now.forEach((id) => startOffPage(m, id)));

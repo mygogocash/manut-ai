@@ -86,7 +86,7 @@ function QuestionRow({ shop, question, onAnswered }: { shop: Shop; question: Sho
           <div className="mut">{W.forgotten(shop.ownerName)}</div>
         )
       ) : (
-        <form noValidate onSubmit={save} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        <form noValidate onSubmit={(e) => void save(e)} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           <label htmlFor={boxId} className="mut" style={{ fontSize: 13 }}>
             {W.answerLabel(shop.ownerName)}
           </label>

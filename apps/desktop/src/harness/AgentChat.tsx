@@ -43,7 +43,7 @@ function useNodeSession(bot: string, target: NodeSessionTarget, running: boolean
           if (!live) return;
           setRes(r);
           const still = running || r.session?.state === "running";
-          if (still) timer = setTimeout(load, POLL_MS);
+          if (still) timer = setTimeout(() => void load(), POLL_MS);
         },
         (e) => live && setError(String((e as { message?: string })?.message ?? e)),
       );

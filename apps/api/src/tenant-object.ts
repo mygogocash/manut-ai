@@ -65,7 +65,8 @@ export class TenantObject extends DurableObject {
     // object and is never billed for its time (docs/turning-on.md).
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
     // An object that wakes with work and no alarm sets one: holds made before the sweep existed, or an alarm lost.
-    ctx.blockConcurrencyWhile(async () => {
+    // not awaited, as a constructor cannot: the runtime holds every request until it is done, and a throw resets the object
+    void ctx.blockConcurrencyWhile(async () => {
       if ((await ctx.storage.getAlarm()) === null) await this.arm();
     });
   }

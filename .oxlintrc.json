@@ -1,0 +1,11 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["eslint", "typescript", "react", "unicorn", "oxc"],
+  "rules": {
+    "typescript/no-floating-promises": "warn",
+    "typescript/no-misused-promises": "warn",
+    "react/exhaustive-deps": "warn",
+    "react/rules-of-hooks": "error"
+  },
+  "ignorePatterns": ["**/dist/**", "**/node_modules/**", "**/target/**", "**/gen/**", "**/.wrangler/**"]
+}
