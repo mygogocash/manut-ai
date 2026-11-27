@@ -1,5 +1,6 @@
 // One Mac and its relay for a test: the real RemoteMac with a keyring in memory, a fake relay, chats a test controls and
 // a clock it moves by hand.
+import type { DoorShell } from "../door";
 import type { RelyingParty } from "@manut/remote-channel";
 import { expect } from "vitest";
 import { RemoteMac, type RemoteSnapshot } from "../host";
@@ -20,7 +21,7 @@ export async function waitFor(check: () => boolean, rounds = 400): Promise<void>
   throw new Error("waited too long");
 }
 
-export function macHarness(options: { origin?: string | null } = {}) {
+export function macHarness(options: { origin?: string | null; door?: DoorShell } = {}) {
   const relay = new FakeRelay();
   const clock = new ManualClock();
   const keyring = memoryKeyring();
@@ -38,6 +39,7 @@ export function macHarness(options: { origin?: string | null } = {}) {
     actions: chats.actions,
     now: () => clock.now,
     timers: clock,
+    ...(options.door ? { door: options.door } : {}),
   });
   const views: RemoteSnapshot["pairing"][] = [];
   remote.subscribe((s) => {

@@ -24,7 +24,7 @@ function fakeStorage(seed: Record<string, string> = {}): Storage {
 function view(snapshot: Partial<RemoteSnapshot>, more: Partial<RemoteViewProps> = {}): string {
   const noop = () => undefined;
   const props: RemoteViewProps = {
-    snapshot: { on: false, link: "stopped", pairing: { phase: "idle" }, phones: [], ...snapshot },
+    snapshot: { on: false, link: "stopped", pairing: { phase: "idle" }, phones: [], tailscale: { state: "off" }, ...snapshot },
     consenting: false,
     now: NOW,
     copied: false,
@@ -178,5 +178,36 @@ describe("the switch and consent, kept on this computer", () => {
     resumeRemote();
     await vi.waitFor(() => expect(sockets).toHaveLength(1));
     expect(keyring.doc()?.host).toBeTruthy();
+  });
+});
+
+describe("the Tailscale road (item 78f-2b)", () => {
+  const READY = { state: "ready" as const, name: "mac.tail1234.ts.net" };
+  const plain = (html: string) => html.replace(/<[^>]*>/g, " ").replace(/&#x27;/g, "'").replace(/&amp;/g, "&").replace(/\s+/g, " ");
+
+  it("shows only while the main switch is on, its switch off and usable only where Tailscale is ready", () => {
+    expect(view({ on: false }, { tailscaleHere: READY })).not.toContain('data-testid="remote-tailscale"');
+    const ready = view({ on: true, link: "ready" }, { tailscaleHere: READY });
+    expect(plain(ready)).toContain("Off. Phones on your tailnet would reach this Mac at mac.tail1234.ts.net, without the relay.");
+    expect(ready).toMatch(/data-testid="remote-tailscale-switch"(?![^>]*disabled)/);
+    const notReady = view({ on: true, link: "ready" }, { tailscaleHere: { state: "needs_https" } });
+    expect(notReady).toMatch(/disabled=""[^>]*data-testid="remote-tailscale-switch"|data-testid="remote-tailscale-switch"[^>]*disabled/);
+    expect(plain(view({ on: true, link: "ready" }, { tailscaleHere: { state: "missing" } }))).toContain("Tailscale isn");
+  });
+
+  it("says when it is on, starting, or did not start and why", () => {
+    expect(plain(view({ on: true, link: "ready", tailscale: { state: "on", name: "mac.tail1234.ts.net", port: 47100 } }, { tailscaleHere: READY }))).toContain("On. Phones on your tailnet reach this Mac at mac.tail1234.ts.net, port 47100.");
+    expect(plain(view({ on: true, link: "ready", tailscale: { state: "starting" } }, { tailscaleHere: READY }))).toContain("Starting: Tailscale is serving this Mac's door.");
+    expect(plain(view({ on: true, link: "ready", tailscale: { state: "failed", why: "Tailscale already serves something else on port 47100" } }, { tailscaleHere: READY }))).toContain("It did not start: Tailscale already serves something else on port 47100");
+  });
+
+  it("asks first on its own sheet, which says what changes in Tailscale and what stays the same", () => {
+    const html = plain(view({ on: true, link: "ready" }, { tailscaleHere: READY, tailscaleConsenting: true }));
+    expect(html).toContain("on port 47100 under mac.tail1234.ts.net, and removes it when you turn this off. Your other serve entries are not touched.");
+    expect(html).toContain("only a paired phone gets in");
+    expect(html).toContain("Face ID for each Allow are the same as on the relay");
+    expect(html).toContain("public certificate logs");
+    expect(html).toContain("Turn on");
+    expect(html).toContain("Not now");
   });
 });

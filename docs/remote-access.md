@@ -402,9 +402,15 @@ from the app.
   prints with no serve entry at all (read as free when it is empty or `{}`, else left alone), and how an installed iPhone
   web app and Android Chrome open the socket.
 
-Left: **78f-2b**, the page: a second door beside `link.ts` (the same devices registered, the same status, each stream's
-frames handed to the same sessions, kept apart from the relay's streams), and Settings, Sharing and access's Tailscale
-switch with its consent sheet. **78f-2c**, the phone: the pairing code and the encrypted channel carry the Mac's tailnet
+**Built: the page's side (78f-2b, 27 Nov 2026).** `remote/door.ts` (the shell's door seen as a link, frames in base64 over
+the Tauri channel), `remote/roads.ts` (the relay's link and the door as one link to the host: devices and the Mac's state to
+every road, each road's streams kept apart under the host's numbers, a frame or a close back down its own road, a road taken
+away closing only its streams), `turnTailscaleOn` and `turnTailscaleOff` on the host, and Settings, Sharing and access's
+"Reach it over Tailscale too": a switch under the main one, off, usable only while the main switch is on and Tailscale reads
+ready, with its own consent sheet, kept on this Mac and resumed at launch only for a person who turned it on under that
+sheet. Pairing, the server and the sessions are unchanged: they talk to the roads as they talked to the relay's link.
+
+Left: **78f-2c**, the phone: the pairing code and the encrypted channel carry the Mac's tailnet
 name, the phone tries the tailnet first and starts the relay after 1.5 seconds, and `APP_POLICY` gains
 `wss://*.ts.net:47100` and nothing wider.
 
