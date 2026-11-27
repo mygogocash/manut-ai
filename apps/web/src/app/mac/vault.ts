@@ -10,6 +10,10 @@
 /// - `spent`: the door ids of the last pairing codes this phone started, so a code is one try on the phone also after a
 ///   reload (packages/remote-channel/README.md, "What the callers must do"). A door id is random and names nothing.
 ///
+/// - `mac.tailnet`, only once the Mac has told it (item 78f-2c): the Mac's name on the person's tailnet and its door's port,
+///   so the phone tries that road first. A tailnet name is not a secret (turning on HTTPS for a tailnet publishes it in
+///   public certificate logs); the Mac sends it again at each session, and sends none when its Tailscale road is off.
+///
 /// Nothing of a chat is ever kept here or anywhere: chats, asks, messages and the Mac's name live in the page's memory.
 /// "Forget this Mac" deletes `mac`. The passkey itself stays in the phone's passwords until the person deletes it there:
 /// a page cannot delete one, and without K and the Mac's record it answers nothing.
@@ -25,6 +29,14 @@ export interface PairedMac {
   /// The passkey's relying party: this page's host when it paired.
   readonly rpId: string;
   readonly pairedAt: number;
+  /// The Mac's own door over the person's tailnet, when the Mac said it has one (item 78f-2c).
+  readonly tailnet?: Road;
+}
+
+/// The Mac's door over the person's tailnet: its name (`mac.tail1234.ts.net`) and port.
+export interface Road {
+  readonly name: string;
+  readonly port: number;
 }
 
 export interface PhoneVault {

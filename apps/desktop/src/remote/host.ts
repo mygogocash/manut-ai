@@ -311,11 +311,26 @@ export class RemoteMac {
       }
       roads.setRoad("door", door);
       this.#tailscale = { state: "on", name: served.name, port: served.port };
+      this.#announceRoad();
     } catch (e) {
       this.#tailscale = { state: "failed", why: e instanceof Error ? e.message : String(e) };
     }
     this.#changed();
     return this.#tailscale.state === "on";
+  }
+
+  /** The `road` message (item 78f-2c): the Mac's tailnet name and the door's port while the Tailscale road is on, else none,
+   *  so a phone tries the tailnet first only while it can work. A tailnet name is no secret: turning on HTTPS for a tailnet
+   *  publishes it in public certificate logs. */
+  #road(): Record<string, unknown> {
+    const road = this.#tailscale;
+    return road.state === "on" ? { t: "road", name: road.name, port: road.port } : { t: "road", name: null };
+  }
+
+  /** Every open session hears the road as it is now. */
+  #announceRoad(): void {
+    const message = this.#road();
+    for (const [stream, s] of this.#streams) if (s.state.kind === "open") this.#send(stream, s, message);
   }
 
   /** The Tailscale road switched off: every stream that came by it closes, Tailscale stops serving the door, and the
@@ -326,7 +341,9 @@ export class RemoteMac {
       // a door that failed to start may still have been left half made: off is asked of the shell either way
       if (!this.#link?.has("door")) void this.#deps.door?.off().catch(() => undefined);
     }
+    const was = this.#tailscale.state;
     this.#tailscale = { state: "off" };
+    if (was === "on") this.#announceRoad();
     this.#changed();
   }
 
@@ -422,6 +439,8 @@ export class RemoteMac {
           throw new Error("unpaired");
         }
         s.state = { kind: "open", channel, deviceId };
+        // the phone learns, inside the channel, where this Mac's door over the tailnet is, or that it has none (78f-2c)
+        this.#send(stream, s, this.#road());
         void vault.seen(deviceId, this.#deps.now()).catch(() => undefined);
         this.#changed();
         return;
