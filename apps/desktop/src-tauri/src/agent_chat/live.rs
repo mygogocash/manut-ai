@@ -1261,8 +1261,9 @@ mod tests {
         std::fs::write(home.join(".grok/config.toml"), "[ui]\npermission_mode = \"always-approve\"\n").unwrap();
         std::fs::write(acct.join("config.toml"), "[ui]\npermission_mode = \"ask\"\n").unwrap();
         assert!(start(Some("work")).is_ok(), "an account that asks is held back by ~/.grok");
-        thread::sleep(Duration::from_millis(300));
-        assert!(seen.exists());
+        // waited for, not slept for: on a loaded machine the stand-in program took past a fixed 300 ms to write its file
+        // (it failed that way three times by 27 Nov 2026 and passed alone each time)
+        assert!(wait_for(|| seen.exists(), 20), "{} never ran", seen.display());
         let _ = std::fs::remove_file(&seen);
         // and the person's own home ("This computer") is refused, as before
         assert_eq!(start(Some("default")).unwrap_err(), crate::acp_chat::no_asks("Grok"));

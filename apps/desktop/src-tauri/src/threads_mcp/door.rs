@@ -799,7 +799,9 @@ mod tests {
             }
         }
         let w: Arc<Mutex<dyn Write + Send>> = Arc::new(Mutex::new(W(out.clone())));
-        super::super::relay::serve(std::io::Cursor::new(input), w, door.socket().to_path_buf());
+        // the program keeps its end open until its answer has come: closing it earlier would close the call
+        let answer = out.clone();
+        super::super::relay::serve(super::super::relay::WaitsForAnswers::new(&input, move || answer.lock().unwrap().contains(&b'\n')), w, door.socket().to_path_buf());
         let got: Value = serde_json::from_str(String::from_utf8(out.lock().unwrap().clone()).unwrap().trim()).unwrap();
         assert_eq!(got["result"]["content"][0]["text"], "1. Fix the login (Claude Code, idle)", "{got}");
         assert_eq!(page.tools(), [LET_IN, LIST]);
