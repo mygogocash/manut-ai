@@ -130,6 +130,12 @@ case of `workplaceRules`, `howToWork` and `howToReport` (`GoGoCode/Models/Buddy.
 `BuddyBudget.pacingNote`, `wrapUpNote` and `finalNote` (its final note without "your tools are gone", since a helper lane keeps
 its tools for its report), written through the four dictionaries.
 
+GoSpark again (at `a7537c80`, the same checkout, 27 Nov 2026) for landings in the chat (item 102i,
+`apps/desktop/src/jobs/helperLandings.ts`): `AppModel.buddyHeadTurnFinished`'s rule that only finished work lands, a stopped or
+failed head keeping its half-done edits in its copy, and `landBuddyHead`'s one landing at a time into a checkout
+(`GoGoCode/App/AppModel+Buddy.swift`), rewritten in TypeScript. Here a landing also waits until the lead is idle, which GoSpark
+does not.
+
 The Agent Client Protocol's agent registry (Apache-2.0, `agentclientprotocol/registry`, release `v2026.11.26-3667256` at
 commit `36672565f76e7fb9796eb15182e0e14fb9e77c33`) for Settings › Providers › From the ACP registry (item 101c): its
 published `registry.json` is pinned byte for byte in `apps/desktop/src-tauri/acp-registry/` with its `quarantine.json`

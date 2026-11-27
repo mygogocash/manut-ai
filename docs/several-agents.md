@@ -1,7 +1,7 @@
 # Several agents on one job (item 102)
 
 The design for plan item 102 (`docs/plan.md`; `docs/t3code-parity.md`, "Orchestration", group 3 of its order: "must be
-designed first because it can act for the person"). Status on 27 Nov 2026: design, with slice 102a built (Ask several agents: the + menu row, its panel, one send starting one lane for each row, the job saved with each session and its row in the Lanes band), slice 102b (the side-by-side view the row opens), slice 102c (the gathered answers under it), slice 102d (the helper lanes' rules, pure), slice 102e (the helper blocks and the Start helpers card), slice 102f (a helper lane made from a snapshot of its lead's folder, in the shell), slice 102g (a helper lane's work landed in its lead's folder, and Take back, in the shell), slice 102h (running helper lanes) and slice 102k (chats that reach other chats); see "Phases and slices". The rest is not built. It covers three
+designed first because it can act for the person"). Status on 27 Nov 2026: design, with slice 102a built (Ask several agents: the + menu row, its panel, one send starting one lane for each row, the job saved with each session and its row in the Lanes band), slice 102b (the side-by-side view the row opens), slice 102c (the gathered answers under it), slice 102d (the helper lanes' rules, pure), slice 102e (the helper blocks and the Start helpers card), slice 102f (a helper lane made from a snapshot of its lead's folder, in the shell), slice 102g (a helper lane's work landed in its lead's folder, and Take back, in the shell), slice 102h (running helper lanes), slice 102i (landings in the chat) and slice 102k (chats that reach other chats); see "Phases and slices". The rest is not built. It covers three
 things:
 
 1. **Ask several agents.** One message from the person starts lanes on different agents and models side by side, and their
@@ -522,6 +522,22 @@ the screens are built on tested ground.
 - **102i. Landings in the chat.** Landing each helper when it reports and the lead is idle, the rows' outcomes, Show patch,
   Take back this landing, keys named. Tests: a store test with the stand-in shell's landing answers, the e2e spec. Safety
   test: no landing starts while the lead's turn runs or its ask waits.
+  **Built 27 Nov 2026** (`src/jobs/helperLandings.ts`, `landingWire.ts`, the landing rows in `HelperRunCard.tsx`, `beforeSend` in
+  the sessions store's `input`, the shell's `lane_patch` in `src-tauri/src/lane_land.rs`, their tests, and
+  `e2e/helper-landings.spec.ts`; `docs/decisions/102i-landings-chat.md`). The sessions store hands each helper lane that comes back
+  (`whenHelperBack`) to the landings, which call the shell's `lane_land` for finished work one at a time per lead, in the order
+  the helper lanes reported, only while the lead is idle (its chat open, no turn of it running, no ask or question of it waiting,
+  heard from the app's store so an ask settled after its turn counts); a helper that reports meanwhile waits on its row. A message
+  to the lead waits while a landing writes its folder, and no landing starts between that message and its turn. Each row says how
+  its work landed ("Landed 3 files", "Landed 2 files, 1 with conflicts: src/qr.ts", "Changed nothing", "Kept as a patch: it would
+  not apply" with git's line, kept untried for a file outside the project, or "Not landed: <why>") and names each file a key is
+  in; a kept patch offers Show patch (its text through the diff view, read-only, masked by the shell and the view); a landing in
+  the lead offers Take back this landing, which waits while the lead works and says the shell's reason when refused. The round's
+  reports carry each landing (`settleLanding`), and `whenHelperRoundLanded` hands a round over once every landing is settled;
+  nothing is sent to the lead. What changed from the design or was settled on the way: only finished work lands (a stopped or
+  failed helper's work stays in its folder, as GoSpark's); a refused landing has no Land again press; a helper that reports again
+  while its landing is in the lead lands nothing more; Show patch is offered only for a kept patch, which the new `lane_patch`
+  reads; `Landing` gains `more`, `keys`, `outside` and `takenBack`.
 - **102j. Reports to the lead, and the second round.** The one message with its fence, masked and capped; a late report
   kept off; the second round's card and the closed policy after it; the restart path (Land what they did, Report to Kit).
   Tests: ported from GoSpark's `BuddyReportTextTests`. Safety tests: a key in a report is masked; after a restart nothing

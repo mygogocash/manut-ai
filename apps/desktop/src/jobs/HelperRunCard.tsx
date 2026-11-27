@@ -242,7 +242,8 @@ function PatchView({ n, shown }: { n: number; shown: PatchShown }) {
   const files = patchFiles(shown.patch.text);
   return (
     <div className="hr-patch" role="region" aria-label={t("helpers.land.patchLabel", { n })} data-testid="landing-patch" data-state="shown">
-      {files.length ? <DiffView files={files} scroll={false} testId="landing-patch" /> : <span className="hr-patch-note">{t("helpers.land.patchNone")}</span>}
+      {/* opened by the person's click, it scrolls itself into view, as a file edit's change does */}
+      {files.length ? <DiffView files={files} testId="landing-patch" /> : <span className="hr-patch-note">{t("helpers.land.patchNone")}</span>}
       {shown.patch.cut && <span className="hr-patch-note">{t("helpers.land.patchCut", { kb: kb(shown.patch.text.length), total: kb(shown.patch.bytes) })}</span>}
       <span className="hr-patch-note hr-patch-at" title={shown.patch.path} data-testid="landing-patch-at">
         {t("helpers.land.patchAt", { path: revealHidden(shown.patch.path) })}
