@@ -228,3 +228,46 @@ test("each helper's work lands in Kit's folder while it is idle, Take back puts 
   expect((await calls(page)).filter((c) => c.op === "lane.takeBack")).toHaveLength(1);
   await expect(rows.nth(1).getByTestId("helper-run-take-back")).toBeVisible();
 });
+
+test("a round open when the app closes comes back held: nothing lands or goes to Kit until Land what they did, then Report to Kit (102j-2)", async ({ page }) => {
+  const lead = await round(page);
+  const rows = page.getByTestId("helper-run-card").getByTestId("helper-run-row");
+  await expect(rows.nth(1)).toHaveAttribute("data-state", "asking");
+  // the snapshot holds the lead's open round before the app "closes"
+  const savedRounds = () => page.evaluate((id) => JSON.parse(localStorage.getItem("manut.resume") || "null")?.sessions?.find((s: { id: string }) => s.id === id)?.helperRounds?.rounds?.length ?? 0, lead);
+  await expect.poll(savedRounds).toBe(1);
+  await page.reload();
+  await page.evaluate(async (i) => {
+    const store = (await import(/* @vite-ignore */ "/src/state/store.ts" as string)) as { getStore(): { actions: { openSession(id: string): void } } };
+    store.getStore().actions.openSession(i);
+  }, lead);
+  const card = page.getByTestId("helpers-restart");
+  await expect(card).toBeVisible();
+  await expect(card.getByTestId("helpers-restart-row")).toHaveCount(3);
+  await expect(card.getByTestId("helpers-restart-landing")).toHaveText(["Not landed: the app closed first.", "Not landed: the app closed first.", "Changed nothing."]);
+  // safety (R11): seconds pass and nothing lands, no helper starts again, and nothing goes to Kit
+  await page.waitForTimeout(2_500);
+  const before = await calls(page);
+  expect(before.filter((c) => c.op === "lane.land")).toEqual([]);
+  expect(before.filter((c) => c.op === "chat.start" && (c.cwd ?? "").includes("-help-"))).toEqual([]);
+  expect(before.filter((c) => c.op === "chat.input" && (c.input?.text ?? "").includes("your helper lanes reported"))).toEqual([]);
+  await expect(page.getByTestId("system-line").filter({ hasText: "Helpers reported to Kit." })).toHaveCount(0);
+
+  await card.getByTestId("helpers-restart-land").click();
+  await expect(card.getByTestId("helpers-restart-landing")).toHaveText(["Landed 1 file in Kit's folder.", "Landed 1 file in Kit's folder.", "Changed nothing."]);
+  expect((await calls(page)).filter((c) => c.op === "lane.land")).toHaveLength(2);
+  await expect(card.getByTestId("helpers-restart-land")).toBeDisabled();
+  // landed, and still nothing went to Kit until the second press
+  expect((await calls(page)).filter((c) => c.op === "chat.input" && (c.input?.text ?? "").includes("your helper lanes reported"))).toEqual([]);
+  for (const th of ["light", "dark"] as const) {
+    await theme(page, th);
+    await card.screenshot({ path: join(SHOTS, `helper-restart-card-${th}.png`), animations: "disabled" });
+  }
+
+  await card.getByTestId("helpers-restart-report").click();
+  await expect(page.getByTestId("helpers-restart-line")).toHaveText(/Helper lanes from before the restart reported to Kit\./);
+  const line = page.getByTestId("system-line").filter({ hasText: "Helpers reported to Kit." });
+  await expect(line).toHaveCount(1);
+  await line.getByTestId("system-line-detail").click();
+  await expect(line.locator(".sys-detail-text")).toContainText("The app closed while it worked");
+});

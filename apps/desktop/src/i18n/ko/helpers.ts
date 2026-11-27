@@ -114,4 +114,11 @@ export const helpers: Record<keyof typeof en, string> = {
   "helpers.showSent": "Show what was sent",
   "helpers.showUnsent": "Show the reports",
   "helpers.land.landedOne": "Landed 1 file in Kit's folder.",
+  "helpers.land.held": "Not landed: the app closed first.",
+  "helpers.restart.title": "The app closed while Kit's helper lanes were out",
+  "helpers.restart.lead": "Nothing of theirs has landed in Kit's folder or gone to Kit since. Land what they did puts their work in Kit's folder; Report to Kit tells Kit how each one ended.",
+  "helpers.restart.land": "Land what they did",
+  "helpers.restart.report": "Report to Kit",
+  "helpers.restart.reporting": "The reports go to Kit once their work has landed and Kit is idle.",
+  "helpers.restart.done": "Helper lanes from before the restart reported to Kit.",
 };

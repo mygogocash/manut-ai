@@ -53,6 +53,8 @@ export function landingWords(l: LandingView): string {
   switch (l.state) {
     case "waiting":
       return t("helpers.land.waiting");
+    case "held":
+      return t("helpers.land.held");
     case "landing":
       return t("helpers.land.landing");
     case "nothing":
