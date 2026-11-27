@@ -37,7 +37,7 @@ export const key: Record<keyof typeof en, string> = {
   "key.press": "请按下新的按键。按 Esc 取消。",
   "key.needsMod": "请按住 {mods} 再按一个键。",
   "key.taken": "{keys} 已用于{action}。",
-  "key.reserved.system": "{keys} 由 macOS 或窗口使用。",
+  "key.reserved.system": "{keys} 由 macOS 系统保留。",
   "key.reserved.editing": "{keys} 用于编辑文字。",
   "key.reserved.members": "{keys} 用于打开团队成员。",
   "key.ownHint": "点按更改，然后按下你想要的按键。你的快捷键只保存在这台 Mac 上。",
