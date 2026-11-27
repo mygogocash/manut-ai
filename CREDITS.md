@@ -1,6 +1,6 @@
 # Credits
 
-Manut AI is built on other people's good work. This file names every project we took code, ideas, wording or test vectors from, what we took and under which licence. It moved here from the README on 26 Nov 2026, word for word. The desktop app's own notices are in [`apps/desktop/NOTICE.md`](https://github.com/mygogocash/manut-ai/blob/pilot/week-1/apps/desktop/NOTICE.md) and [`apps/desktop/THIRD_PARTY_NOTICES.md`](https://github.com/mygogocash/manut-ai/blob/pilot/week-1/apps/desktop/THIRD_PARTY_NOTICES.md), which also list the coding agents' and editors' marks (Lobe Icons, MIT; Simple Icons, CC0).
+Manut AI is built on other people's good work. This file names every project we took code, ideas, wording or test vectors from, what we took and under which licence. It moved here from the README on 26 Nov 2026, word for word. The desktop app's own notices are in [`apps/desktop/NOTICE.md`](apps/desktop/NOTICE.md) and [`apps/desktop/THIRD_PARTY_NOTICES.md`](apps/desktop/THIRD_PARTY_NOTICES.md), which also list the coding agents' and editors' marks (Lobe Icons, MIT; Simple Icons, CC0).
 
 ## Where each part started
 
@@ -61,9 +61,88 @@ the consent kept with the version of its words (`RemoteRelayConsent.swift`, `Sha
 reworded for this app with the operator's sentence left for the owner; and `docs/relay-protocol-v1.md` and
 `docs/security/remote-relay-threat-model.md`, copied into `docs/` with a note on where this app differs.
 
+GoSpark again (at `a7537c80`, read in the checkout on the owner's Mac on 26 Nov 2026) for Cursor and Antigravity as chats
+(item 101a, `apps/desktop/src-tauri/src/acp_chat.rs`, `ask_tool.rs`, `providers.rs`): no code, the facts its adapters
+hold. From `AntigravitySession.swift`, Antigravity's own input names (`CommandLine`, `TargetFile`, `AbsolutePath`,
+`Query`, `Url`) and reading its sign-in from `agy models` (a list of model ids when signed in, the words that mean it is
+not); from `ACPSession.swift`, that an agent's `session/new` reports its modes and models both as `modes` and `models`
+and as configuration options, and that a mode is set with `session/set_config_option` or else `session/set_mode`.
+
+GoSpark again (at `a7537c80`, read in the checkout on the owner's Mac on 26 Nov 2026) for the sounds (item 131,
+`apps/desktop/src/sound/`, `docs/sounds.md`): the notes, partials, envelopes, durations and volumes of `ToneSynth.swift`,
+`FinishChime.swift`, `SettleChime.swift`, `EffortChime.swift` and `TooltipSound.swift`, ported to Web Audio with their
+numbers unchanged; and the five selectable notification tones (Heaven, Highwire, Iridium, Krypton, Kzurb Sonar) from the
+Android Open Source Project (`platform/frameworks/base` at `1cdfff555f4a21f71ccc978290e2e212e2f8b168`, Apache-2.0;
+Highwire and Kzurb Sonar credit Dr. MAD), which GoSpark had converted to AIFF and `afconvert` turned into WAV here
+(`apps/desktop/src/assets/sounds/`; their hashes are in `AndroidSoundSources.json` and the licence is in
+`apps/desktop/THIRD_PARTY_NOTICES.md`).
+
+GoSpark again (at `a7537c80`, read in the checkout on the owner's Mac on 26 Nov 2026) for the chat box's effort card
+(item 132, `apps/desktop/src/chat/box/EffortCard.tsx`, `effort.ts`, `ultrathink.ts`): `ModelEffortButton`,
+`EffortSliderCard`, `EffortSlider`, `EffortBrand` and `visibleEfforts` / `defaultEffort` from
+`GoGoCode/Views/Composer/EffortSlider.swift`, and `UltrathinkDraft.swift`, ported to React and this app's tokens with
+their rules (the title words, the default, the nearest stop, the brand at the top level, and when the Ultrathink line may
+be added or taken out); its sizes and spacing are GoSpark's, its moves the Motion board's.
+
+GoSpark again (at `a7537c80`, the same checkout, 27 Nov 2026) for Grok as a chat (item 101b, `apps/desktop/src-tauri/src/acp_chat.rs`
+and `sessions.rs`): no code, the facts its adapters hold. From `ACPSession.swift`, that Grok's ACP server is `grok agent
+stdio` and is started supervised as `grok --permission-mode default agent stdio`; from `ACPToolMapping.swift`, that Grok
+names a call's tool in `_meta["x.ai/tool"]` (`kind`, else `name`: `bash`, `search_replace`, `write_file`, `edit_file`,
+`read_file`) rather than in `kind`; and from its migration plan (`docs/plans/migrate-from-grok-muse-2026-09-25.md`), what
+Muse Code is and where it keeps its settings and sessions.
+
+GoSpark again (at `a7537c80`, the same checkout, 27 Nov 2026) for the helper lanes' rules (item 102d,
+`apps/desktop/src/jobs/rules.ts`): Buddy's round queue (`BuddyBatchQueue` in `GoGoCode/Models/BuddyBatching.swift`), its budget
+(`BuddyBudget` in `GoGoCode/Models/Buddy.swift`, with how `ThreadRuntime.swift`, `OpenAICompatibleSession.swift` and
+`APIKeyToolTally` apply it, and `BuddyHangWatchdog.answeredGrace`), its head cap (`BuddyHeadCap`), its landing predicates
+(`BuddyLanding`), what `BuddyPrompts.reportMessage` tells the lead about each head, and `BuddyFailureClass` with its fragments,
+ported to TypeScript with their numbers; and their tests (`BuddyBatchingTests`, `BuddyHeadCapTests`, `BuddyReportTests`,
+`BuddyFailureClassTests`, `BuddyBudgetTests`, the tally in `APIKeyToolsTests`), ported case by case as tables in `rules.test.ts`.
+
+GoSpark again (at `a7537c80`, the same checkout, 27 Nov 2026) for a helper lane's snapshot of its lead's folder (item 102f,
+`apps/desktop/src-tauri/src/lane_helper.rs`): `Git.captureTree()` (a temporary `GIT_INDEX_FILE` copied from the real index,
+`add -A`, `write-tree`), `commitTree` and `captureCheckpoint` (`commit-tree` on top of HEAD under the app's own name, kept by a
+ref of the app's own) in `GoGoCode/Git/Git.swift`, and the isolated copy each Buddy head starts from (`makeBuddyCopy` in
+`GoGoCode/App/AppModel+Buddy.swift`, `BuddyCopySnapshots` in `GoGoCode/Models/BuddyCopySnapshot.swift`), rewritten in Rust.
+Here the ref is under `refs/manut/helpers/` and the copy is a worktree on a branch of its own rather than a detached one.
+
+GoSpark again (at `a7537c80`, the same checkout, 27 Nov 2026) for the helper blocks (item 102e,
+`apps/desktop/src/jobs/helperBlocks.ts`): Buddy's delegation block parser in `GoGoCode/Models/Buddy.swift`
+(`delegationOutcome`, `streamingOutcome`, `partialDelegations`, `delegatingReply`, `displayText`, `withoutDelegationBlock` and
+`firstDelegationBlock`'s nested fences), ported to TypeScript and made stricter, walked with the fork's own top-level fence walk
+(`hideSplitBlocks`, from Oh My Hermes); its tests (`BuddyDelegationTests`, `BuddyDelegationFenceTests`,
+`BuddyStreamingDelegationTests` and the `delegatingReply` cases of `BuddyHeldBackTests`), ported case by case as tables in
+`helperBlocks.test.ts`; and its `fallbackPolicy`, adapted as the lead's note (`apps/desktop/src/jobs/helperPolicy.ts`).
+
+GoSpark again (at `a7537c80`, the same checkout, 27 Nov 2026) for landing a helper lane's work in its lead's folder (item 102g,
+`apps/desktop/src-tauri/src/lane_land.rs`): `BuddyLand.applyHeadWork`, `foreignTarget`, `pathsOutside`, `excludingBuildOutput`
+and the kept patch written owner-read-only (`GoGoCode/Models/BuddyLandingApply.swift`), `TouchedPaths.isBuildOutput`'s cache
+names (`GoGoCode/Git/TouchedPaths.swift`), `Git.apply` (a three-way apply against a throwaway copy of the index, its conflicts
+read from it) and `captureTree` (`GoGoCode/Git/Git.swift`), and one writer per checkout with a copy never taken mid-patch
+(`BuddyCheckoutGate`, `CheckoutCoordinator` in `GoGoCode/Git/CheckoutCoordinator.swift`, `AppModel.landBuddyHead` in
+`GoGoCode/App/AppModel+Buddy.swift`), rewritten in Rust; their tests (`BuddyLandingTests`, `BuddyCheckoutGateTests` and
+`pathsOutsideTheCheckout` in `BuddyForeignPatchTests`), ported against temporary repositories in `lane_land.rs`. Here the cut
+is made in the index before the patch, a landing is kept so it can be taken back, and the kept patch is under `~/.manut/patches`.
+
+GoSpark again (at `a7537c80`, the same checkout, 27 Nov 2026) for running helper lanes (item 102h,
+`apps/desktop/src/jobs/helperRuns.ts` and `helperBrief.ts`): a helper lane's brief is `delegatedHeadPrompt` with the own-copy
+case of `workplaceRules`, `howToWork` and `howToReport` (`GoGoCode/Models/Buddy.swift`), and the budget's three notes are
+`BuddyBudget.pacingNote`, `wrapUpNote` and `finalNote` (its final note without "your tools are gone", since a helper lane keeps
+its tools for its report), written through the four dictionaries.
+
+The Agent Client Protocol's agent registry (Apache-2.0, `agentclientprotocol/registry`, release `v2026.11.26-3667256` at
+commit `36672565f76e7fb9796eb15182e0e14fb9e77c33`) for Settings › Providers › From the ACP registry (item 101c): its
+published `registry.json` is pinned byte for byte in `apps/desktop/src-tauri/acp-registry/` with its `quarantine.json`
+read into `pin.json`, and its `FORMAT.md` read for the fields and platform targets; its licence is in
+`apps/desktop/THIRD_PARTY_NOTICES.md`. Each agent it lists keeps its own licence. T3 Code again (MIT, at `ae945dd`) for the
+registry's search: `searchRank` in `packages/provider-acp-registry/src/server/AcpRegistrySupport.ts`, lifted as `searchRank`
+in `apps/desktop/src/settings/agents/acpRegistry.ts`; its live fetch, downloads and `npx` runs were read and left out.
+
 Libraries added for one feature are named here too: `qrcode` 1.5.4 (MIT, soldair/node-qrcode), already the web app's,
 pinned in the desktop for the pairing code's QR image (`apps/desktop/src/remote/QrCode.tsx`, lifted from
 `apps/web/src/ops/QrCode.tsx`); only its `create` is used, which returns the modules and reaches no network; `objc2-speech`, `objc2-avf-audio` and `objc2-av-foundation`
 (the objc2 project's bindings to Apple's Speech, AVFAudio and AVFoundation frameworks, Zlib OR Apache-2.0 OR MIT), which
 reach the Mac's own speech recognition and the microphone for voice in the chat box (`apps/desktop/src-tauri/src/voice.rs`,
-`docs/voice.md`).
+`docs/voice.md`); and `tauri-plugin-global-shortcut` 2.4.1 with `global-hotkey` 0.8.0 (Tauri's own, Apache-2.0 OR MIT),
+on the Mac only, which registers the snapshot key a person turns on in Settings › Computer
+(`apps/desktop/src-tauri/src/computer/snap.rs`, `docs/computer-use.md`, item 104).

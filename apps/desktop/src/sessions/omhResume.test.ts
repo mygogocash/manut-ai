@@ -100,6 +100,8 @@ describe("a TERMINALS oh-my-hermes terminal after a restart", () => {
       ["s4", "exited", true],
       ["s5", "exited", true],
     ]);
+    // item 101b: saved while Grok opened only as its terminal (no `open`), it comes back as that terminal, not a chat
+    expect(ss.getState().list[0]).toMatchObject({ view: "terminal", open: "terminal" });
   });
 });
 

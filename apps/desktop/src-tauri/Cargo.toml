@@ -30,8 +30,9 @@ plist = "1"
 # the tree via tauri
 zeroize = "1"
 # A rewind's copy of a folder that is not a git repository keeps each content once, under its sha256
-# (turn_files.rs); already in the tree via tauri
-sha2 = "0.10"
+# (turn_files.rs); also remote_keys.rs, accounts.rs and acp_mcp.rs. 0.11 is already in Cargo.lock
+# through tauri-codegen (wry keeps 0.10), so no new crate enters the tree
+sha2 = "0.11"
 # Settings › MCP and Skills reads the names of the MCP servers in Codex's own `config.toml` (agent_config.rs); already in
 # the tree via tauri
 toml = "1"
@@ -67,6 +68,12 @@ objc2-av-foundation = { version = "0.3", default-features = false, features = ["
 # (NSRunningApplication's `bundleIdentifier`), for any kind of bundle, so macOS's own prompts that are not `.app`s are
 # recognised. The objc2 project's AppKit bindings, already in the tree through objc2-web-kit; only this class is named.
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "libc", "NSRunningApplication"] }
+# A snapshot of any app (computer/snap.rs, item 104): the key the person sets in Settings › Computer, registered with
+# macOS only while they have it on. Tauri's own plugin (Apache-2.0 OR MIT), which on macOS registers a Carbon hot key
+# (`RegisterEventHotKey`, through global-hotkey 0.8): that asks for no permission. Only letters and digits are ever
+# registered, so the plugin's event tap for media keys, which would, is never started. The page is given none of the
+# plugin's commands (capabilities/default.json): the shell alone registers.
+tauri-plugin-global-shortcut = "2"
 # Reaching this Mac from a phone (remote_keys.rs): the relay key is made and signs in the shell, through Security's
 # `SecKeyCreateWithData`, which security-framework does not wrap. Already in the tree (security-framework builds on it,
 # and api_link.rs's tests used it), so nothing new is built and Cargo.lock does not change.

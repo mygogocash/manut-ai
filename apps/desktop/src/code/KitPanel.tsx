@@ -58,7 +58,7 @@ export interface KitPanelProps {
    *  (KitPanel fills these: the panel under a Reverted lane reads the stores). */
   /** The pull request on a lane's row was pressed: Tasks opens on it (tasks/state.ts `showPull`). */
   onOpenPull?: LanesProps["onPull"];
-  laneBack?: Pick<LanesProps, "backOpen" | "onBack" | "below" | "marks" | "away" | "onAway">;
+  laneBack?: Pick<LanesProps, "backOpen" | "onBack" | "below" | "marks" | "away" | "onAway" | "jobOpen" | "onJob" | "onJobView">;
   onProject: (root: string) => void;
   onLevel: (level: KitLevel) => void;
   onAllow: (folder: string) => void;
@@ -209,7 +209,9 @@ function LaneBelow({ root, row, backOpen, onCloseBack }: { root: string; row: La
   useEffect(() => {
     if (backOpen && !row.canBringBack) onCloseBack();
   }, [backOpen, row.canBringBack, onCloseBack]);
-  const own = laneBase(row);
+  // a helper lane's work goes back to its lead by landing (item 102i), never by merging its lead's branch into it or by a pull request
+  // of its own (docs/several-agents.md, "What it does not do"): it offers neither main-moved's merge nor Put up for review
+  const own = row.helper ? null : laneBase(row);
   return (
     <>
       {backOpen && row.canBringBack ? <BringBack id={row.id} onClose={onCloseBack} /> : null}
@@ -234,7 +236,7 @@ export function LanesEmpty({ onNew }: { onNew: () => void }) {
   );
 }
 
-export function KitPanel() {
+export function KitPanel({ onJobView }: { onJobView?: (job: string) => void } = {}) {
   const ss = useSessions();
   const prefs = useFolderPrefs();
   useKeysVersion();
@@ -281,6 +283,8 @@ export function KitPanel() {
   // what the person did to each lane (pinned, snoozed, done for now, archived), and whether the snoozed and archived ones are open
   const rowMarks = useRowMarks();
   const [awayOpen, setAwayOpen] = useState(false);
+  // the jobs (Ask several agents, item 102a) whose lanes are listed under their row
+  const [jobsOpen, setJobsOpen] = useState<string[]>([]);
   // the time a turn has run moves while one does
   const now = useNow(lanes.some((l) => l.status === "working"), 1_000);
   // No project yet: the canvas's Lanes band with its New lane, over the empty state that says what a lane is, so the page
@@ -317,6 +321,9 @@ export function KitPanel() {
           marks: rowMarks,
           away: awayOpen,
           onAway: () => setAwayOpen((v) => !v),
+          jobOpen: jobsOpen,
+          onJob: (job) => setJobsOpen((cur) => (cur.includes(job) ? cur.filter((j) => j !== job) : [...cur, job])),
+          onJobView,
         }}
         onProject={setPicked}
         onLevel={(level) => updateKitProjects((x) => setLevel(x, root, level))}

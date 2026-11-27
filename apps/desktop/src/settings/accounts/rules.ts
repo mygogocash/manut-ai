@@ -16,14 +16,15 @@ export const CLI_NAME: Record<AccountCli, string> = {
   grok: "Grok",
   gemini: "Gemini CLI",
 };
-/** How another subscription is added: the app runs the CLI's own sign-in (`run`), or a session of the CLI is
- *  opened with the account's home and the person types /login (`session`). Grok and Gemini: not yet. */
+/** How another subscription is added: the app runs the CLI's own sign-in (`run`: `claude auth login`, `codex login`,
+ *  `grok login`), or a session of the CLI is opened with the account's home and the person types its own /login there
+ *  (`session`: pi, item 101d). Oh-my-pi and Gemini: not yet. */
 export const SIGN_IN: Record<AccountCli, "run" | "session" | null> = {
   claude: "run",
   codex: "run",
   pi: "session",
-  omp: "session",
-  grok: null,
+  omp: null,
+  grok: "run",
   gemini: null,
 };
 

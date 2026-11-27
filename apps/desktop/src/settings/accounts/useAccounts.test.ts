@@ -13,7 +13,21 @@ vi.mock("../../state/store", () => ({
   useStore: () => ({ conn: "open" }),
 }));
 vi.mock("../../lib/notify", () => ({ showNote: async (n: { tag: string }) => void shown.push(n) }));
-vi.mock("./native", () => ({ accountHost: () => ({ clis: async () => ({ codex: true }), status: async () => null, version: async () => null }) }));
+// `useAccounts` is called here as a plain function: what it hands React to subscribe with is kept, so a test can read
+// how the shared copy tells its readers.
+const react = vi.hoisted(() => ({ subscribe: null as ((f: () => void) => () => void) | null }));
+vi.mock("react", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("react")>()),
+  useSyncExternalStore: (subscribe: (f: () => void) => () => void, get: () => unknown) => ((react.subscribe = subscribe), get()),
+}));
+const asked = vi.hoisted(() => ({ status: [] as string[], version: [] as string[] }));
+vi.mock("./native", () => ({
+  accountHost: () => ({
+    clis: async () => ({ codex: true, grok: true, pi: true }),
+    status: async (cli: string, id: string) => (asked.status.push(`${cli}:${id}`), null),
+    version: async (cli: string) => (asked.version.push(cli), null),
+  }),
+}));
 
 const acc = (id: string): Account => ({
   id,
@@ -56,5 +70,46 @@ describe("lapse notice across reloads", () => {
     expect(shown).toHaveLength(1);
     await reloadAccounts();
     expect(shown).toHaveLength(1);
+  });
+});
+
+describe("the shared copy's readers", () => {
+  it("tells its readers from a copy taken first (as before lib/changes.ts), and not after they unsubscribe", async () => {
+    const { reloadAccounts, useAccounts } = await import("./useAccounts");
+    useAccounts();
+    const subscribe = react.subscribe!;
+    const told: string[] = [];
+    let offB = () => {};
+    let first = true;
+    const offA = subscribe(() => {
+      told.push("a");
+      if (!first) return;
+      first = false;
+      offB();
+    });
+    offB = subscribe(() => told.push("b"));
+    setAccounts(1);
+    await reloadAccounts();
+    // `b`, removed while `a` was told of the first change, still hears that one change and no later one
+    expect(told.slice(0, 2)).toEqual(["a", "b"]);
+    expect(told.filter((x) => x === "b")).toHaveLength(1);
+    expect(told.length).toBeGreaterThan(2);
+    offA();
+    const before = told.length;
+    await reloadAccounts();
+    expect(told).toHaveLength(before);
+  });
+});
+
+describe("the sign-in read for each CLI's accounts (item 101d)", () => {
+  it("asks for every Grok and pi account's own sign-in, as for Claude Code and Codex, and for no CLI that has none", async () => {
+    const { reloadAccounts } = await import("./useAccounts");
+    asked.status.length = 0;
+    asked.version.length = 0;
+    const row = (id: string): Account => ({ id, label: "", email: "", state: "login" });
+    groups = (["grok", "pi", "omp", "gemini"] as const).map((cli) => ({ cli, installed: true, active: "default", accounts: [row("default"), row("work")] }));
+    await reloadAccounts();
+    expect(asked.status.sort()).toEqual(["grok:default", "grok:work", "pi:default", "pi:work"]);
+    expect(asked.version.sort()).toEqual(["grok", "pi"]);
   });
 });

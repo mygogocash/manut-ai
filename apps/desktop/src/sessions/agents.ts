@@ -3,6 +3,7 @@ import { isAppStore } from "../appStore";
 import { t } from "../i18n";
 import { harness, harnessByName } from "../harness/registry";
 import type { LaneBranch } from "../code/laneBranch";
+import type { ReachEntry } from "../jobs/reachList";
 
 // The agent programs a session can run, and the pure helpers the sidebar and the session views share.
 // Two kinds, both decided by the shell (it refuses anything else):
@@ -61,7 +62,7 @@ export const AGENTS: readonly AgentDef[] = [
   { id: "omh", program: "omh", label: "oh-my-hermes", mode: "hermes" },
   { id: "pi", program: "pi", label: "pi", mode: "chat" },
   { id: "omp", program: "omp", label: "oh-my-pi", mode: "chat" },
-  { id: "grok", program: "grok", label: "Grok", mode: "terminal" },
+  { id: "grok", program: "grok", label: "Grok", mode: "chat" },
   { id: "opencode", program: "opencode", label: "OpenCode", mode: "chat" },
 ];
 
@@ -170,9 +171,9 @@ export const isAgentId = (v: unknown): v is AgentId => typeof v === "string" && 
 
 /** Built-ins whose Restart (and Resume) continues the conversation, all of them chats: Claude Code `--resume`, Codex
  *  `thread/resume`, OmO `--session`, DSH `--session-id` (DeepSeek Harness's own session), OpenCode
- *  `session/resume` (or `session/load`). pi, oh-my-pi and Grok (a terminal) start a new one. A generic ACP agent
- *  continues when its row says so ([`continues`]). */
-export const CONTINUES: readonly BuiltinId[] = ["claude", "codex", "omo", "dsh", "opencode"];
+ *  `session/resume` (or `session/load`), Grok `session/resume` (item 101b: its ACP server offers it). pi and oh-my-pi
+ *  start a new one. A generic ACP agent continues when its row says so ([`continues`]). */
+export const CONTINUES: readonly BuiltinId[] = ["claude", "codex", "omo", "dsh", "opencode", "grok"];
 
 /** Whether `agent`'s Restart (and a restart of manut) continues its conversation. */
 export const continues = (agent: AgentId): boolean => (isBuiltin(agent) ? CONTINUES.includes(agent) : !!acpRow(agent)?.continues);
@@ -290,16 +291,21 @@ export function parseOpens(raw: string | null): Opens {
 }
 
 /** Which ways `agent` can open: manut's chat and/or its own terminal. oh-my-hermes has a terminal (`omh`) but, for a
- *  person who has Hermes and no `omh`, only the Hermes chat; DSH has no terminal here; Grok has no chat here. */
+ *  person who has Hermes and no `omh`, only the Hermes chat; DSH has no terminal here. Grok has both since item 101b. */
 export function opensAs(agent: AgentId, agents?: AgentInfo[] | null): Record<OpenAs, boolean> {
   if (agent === SHELL) return { chat: false, terminal: true };
   if (agent === "dsh") return { chat: true, terminal: false };
-  if (agent === "grok") return { chat: false, terminal: true };
   if (agent === "omh" && hermesOnly(agents)) return { chat: true, terminal: false };
   // an agent the person added (Settings › Agents) runs only through ACP on pipes: the shell's terminal start knows
   // the allow-list alone and answers `unknown agent`, so TERMINALS must not offer it
   if (isCustom(agent)) return { chat: true, terminal: false };
   return { chat: true, terminal: true };
+}
+
+/** A session saved before item 101b, when Grok opened only as its own terminal and so kept no `open`: it was that
+ *  terminal, and comes back as one rather than as a chat it never was. Any other session is returned as it is. */
+export function savedOpen<T extends { agent: AgentId; view: "chat" | "terminal"; open?: OpenAs }>(s: T): T {
+  return s.agent === "grok" && s.view === "terminal" && !s.open ? { ...s, open: "terminal" } : s;
 }
 
 /** The way a New session opens: the one remembered for the agent if it still has it, else Chat, else the terminal
@@ -394,12 +400,37 @@ export interface SessionRec {
   /** A lane a workflow started (src/workflows/): the workflow's name. Nobody may be watching it, so Kit's dial reads its asks at
    *  the most careful level, Asks every time, with no kept rule, whatever the project's dial says. Saved with the session. */
   workflow?: string;
+  /** Helpers is on in this lane's box (item 102e, src/jobs/leadLanes.ts): its agent is told how to ask for helper lanes, and a request
+   *  becomes a Start helpers card. Only a lane's chat with a folder of its own may have it. Saved with the session. */
+  helpers?: true;
+  /** The "Kit may reach" list under this chat's box (item 102k, src/jobs/reachList.ts): the chats the person put in front of its agent,
+   *  the only ones its reach blocks may name, each read, sent to or opened only from a card. Saved with the session. */
+  reach?: ReachEntry[];
+  /** A lane opened by Start lane on another chat's card (item 102k): that chat's session. Like a workflow's or a job's lane, it is a
+   *  chat whatever way the agent was last opened and starts only in a lane of its own. Not saved: once started, it is a lane like any. */
+  openedBy?: string;
   /** Continue with… (item 97, continueWith.ts): the link id of the chat this one continues, and of the chat that continues this
    *  one, each shown as a quiet line linking the other. */
   continuedFrom?: string;
   continuedIn?: string;
   /** A continued chat's model picked in Continue with: set as its agent starts, before the first message goes. */
   modelWant?: string;
+  /** Ask several agents (item 102a, src/jobs/ask.ts): the id of the job whose one message started this lane. Every lane of a job
+   *  is an ordinary lane started in its agent's Ask mode; the id only groups them in the Lanes band. Saved with the session. */
+  job?: string;
+  /** A helper lane (item 102h, src/jobs/helperRuns.ts): the lead lane it was started for, the job its lead's helper lanes share (the
+   *  shell's ref names it, item 102f), the round the person approved with Start helpers and its place in that round (Helper 1 is 0).
+   *  It is an ordinary lane started in its agent's Ask mode, which the person cannot change while it runs, and it never offers the
+   *  Helpers switch: a helper lane cannot ask for helper lanes. Saved with the session. */
+  helperOf?: HelperOf;
+}
+
+/** What a helper lane's record names of its lead and its round (SessionRec `helperOf`). */
+export interface HelperOf {
+  lead: string;
+  job: string;
+  round: string;
+  index: number;
 }
 
 /** How long a TERMINALS card's second line may be (the card truncates it further with an ellipsis). */

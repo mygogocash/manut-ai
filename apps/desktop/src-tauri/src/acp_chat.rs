@@ -1,6 +1,7 @@
 //! One chat adapter for every agent that speaks the Agent Client Protocol (ACP: JSON-RPC 2.0, one object per
-//! line on stdio), plus a row per agent: OpenCode (`opencode acp`, [`ACP_AGENTS`], with its own rule check) and the
-//! generic agents of [`crate::acp_agents::ACP_LIST`] (Gemini CLI, Qwen Code, Kimi Code, Copilot CLI, Cline).
+//! line on stdio), plus a row per agent: OpenCode (`opencode acp`, [`ACP_AGENTS`], with its own rule check), Grok
+//! (`grok agent stdio`, [`ACP_AGENTS`], item 101b, held to its asking mode and its own settings) and the generic agents of
+//! [`crate::acp_agents::ACP_LIST`] (Gemini CLI, Qwen Code, Kimi Code, Copilot CLI, Cline, Cursor, Antigravity).
 //!
 //! - start: `initialize` with the client's file-system and terminal capabilities OFF, so the agent uses its
 //!   own tools and manut reads and writes nothing new; then `session/resume` when the agent offers it and manut
@@ -12,14 +13,25 @@
 //!   session.commands).
 //! - `session/request_permission` -> an approval card offering only what the request offers. `allow_always`
 //!   is never offered: OpenCode saves it as a permanent project rule, which is not manut's "for this session".
-//!   A Stop while a card is open answers `cancelled` and expires the card.
+//!   A Stop while a card is open answers `cancelled` and expires the card. A request that offers several `allow_once`
+//!   answers is a question (Cursor asks its own questions this way): it becomes a question card whose choices are those
+//!   answers, and skipping it picks the request's `reject_once`.
+//! - A row with [`AcpAgent::asks_in`] (Cursor, Antigravity, Grok) is held to the session modes in which its agent asks before
+//!   acting: when the agent reports any other mode (Antigravity's `accept-edits` or `auto`, set as its default in its own
+//!   settings, or a switch of its own), manut sets the row's first mode back before any message is sent, stops a running
+//!   turn, and sends nothing until the agent confirms it.
 //! - An agent that is not signed in (`-32000` on `session/new`) ends in one `session.error` of kind `signed_out`
 //!   with the sign-in line from its row; manut never calls `authenticate` (Cline's opens a browser by itself).
 //! - An unknown request from the agent gets a JSON-RPC error answer so the agent never waits on manut; unknown
 //!   notifications, fields and lines are ignored and nothing raw reaches the chat.
 //!
-//! Checked against OpenCode 1.19.5 (`tests/fixtures/acp/opencode-*.jsonl`, recorded from real runs); the generic
-//! agents up to their signed-out `session/new` (`<agent>-signed-out.jsonl`).
+//! - A row with [`AcpAgent::settings`] (Cursor, Grok) starts only while the agent's own settings files leave it asking
+//!   ([`settings_allow`]), and one with [`AcpAgent::ask_switches`] (Grok) is never sent a message that starts with its own
+//!   command that turns its asks off.
+//!
+//! Checked against OpenCode 1.19.5 (`tests/fixtures/acp/opencode-*.jsonl`, recorded from real runs); Antigravity 1.5.18
+//! and Cursor Agent 2026.11.22 through real turns (`agy-*.jsonl`, `cursor-*.jsonl`, item 101a); Grok Build 1.0.93 and the
+//! other generic agents up to their signed-out `session/new` (`<agent>-signed-out.jsonl`).
 
 use std::collections::HashMap;
 use std::time::Instant;
@@ -86,6 +98,177 @@ pub struct AcpAgent {
     /// How the agent is made to ask before edits and shell commands without loosening a rule of the person's own
     /// (see [`RuleProbe`]); `None` adds nothing.
     pub rules: Option<RuleProbe>,
+    /// The session modes in which the agent asks the client before it acts (the ids its `session/new` lists under
+    /// `modes`, or as its `mode` configuration option), the first being the one manut sets whenever the agent reports
+    /// another. Empty: the agent is not held to a mode here.
+    pub asks_in: &'static [&'static str],
+    /// The values in the agent's own settings files that make it act without asking (Cursor's Run Everything, Grok's
+    /// always-approve): a chat of an agent whose files hold one does not start ([`SettingCheck`]). Empty: nothing is read.
+    pub settings: &'static [SettingCheck],
+    /// The agent's own commands that turn its asks off when a message starts with them (Grok's `/always-approve`,
+    /// item 101b): such a message is never sent ([`no_asks_command`]), and the agent's command list in the chat leaves
+    /// them out. Written without the slash.
+    pub ask_switches: &'static [&'static str],
+}
+
+/// How a settings file is written: JSON, TOML, or (a file a variable names) TOML unless its name ends in `.json`, as Grok
+/// reads `GROK_CONFIG_PATH`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Format {
+    Json,
+    Toml,
+    ByExtension,
+}
+
+/// Where the agent itself reads a settings file.
+#[derive(Debug)]
+pub enum Place {
+    /// `file` in the folder named by the first of `vars` set to something other than blanks (joined with its subfolder),
+    /// else in `dir` under the home folder. An absolute `dir` (`/etc/grok`) is that folder itself.
+    Home { vars: &'static [(&'static str, &'static str)], dir: &'static str, file: &'static str },
+    /// `file` in `dir` of the chat's folder and of every folder above it (a project's own settings, which an agent reads
+    /// up to its repository's root; every folder up to the top is read, which reads that and more).
+    Up { dir: &'static str, file: &'static str },
+    /// The file variable `var` names; nothing when it is not set.
+    FileVar(&'static str),
+    /// The text of variable `var` itself (inline settings); nothing when it is not set.
+    TextVar(&'static str),
+}
+
+/// One settings file of an agent whose values can turn its asks off, read before its chat starts, where the agent itself
+/// reads it ([`Place`]). Each of `keys` is a path of keys (`ui.permission_mode`) and the values with which the agent still
+/// asks; a boolean is compared as `true` or `false`. The chat starts only when the file is not there, or is an object in
+/// which each key is absent or one of its values. Anything else (another value, a value of another kind, a file that is not
+/// an object or cannot be read) refuses the start with [`no_asks`]: a file the agent itself might read differently is not
+/// taken as safe.
+#[derive(Debug)]
+pub struct SettingCheck {
+    pub place: Place,
+    pub format: Format,
+    pub keys: &'static [(&'static str, &'static [&'static str])],
+}
+
+/// The value of variable `name` that counts as set: something other than blanks.
+fn set_var(var: &dyn Fn(&str) -> Option<String>, name: &str) -> Option<String> {
+    var(name).filter(|v| !v.trim().is_empty())
+}
+
+impl SettingCheck {
+    /// The settings files the agent reads, with the variables `var` gives (the chat's own, then the app's), home `home`
+    /// and the chat's folder `cwd`. A [`Place::TextVar`] has none.
+    pub fn paths(&self, var: &dyn Fn(&str) -> Option<String>, home: &std::path::Path, cwd: &std::path::Path) -> Vec<std::path::PathBuf> {
+        match &self.place {
+            Place::Home { vars, dir, file } => {
+                for (name, sub) in *vars {
+                    if let Some(v) = set_var(var, name) {
+                        let d = std::path::PathBuf::from(v);
+                        return vec![if sub.is_empty() { d.join(file) } else { d.join(sub).join(file) }];
+                    }
+                }
+                vec![home.join(dir).join(file)]
+            }
+            Place::Up { dir, file } => cwd.ancestors().map(|a| a.join(dir).join(file)).collect(),
+            Place::FileVar(name) => set_var(var, name).map(|v| vec![std::path::PathBuf::from(v)]).unwrap_or_default(),
+            Place::TextVar(_) => Vec::new(),
+        }
+    }
+
+    /// The one file of a [`Place::Home`] check (Cursor's), for its tests.
+    #[cfg(test)]
+    pub fn path(&self, var: &dyn Fn(&str) -> Option<String>, home: &std::path::Path) -> std::path::PathBuf {
+        self.paths(var, home, std::path::Path::new("")).into_iter().next().unwrap_or_default()
+    }
+
+    /// Whether the settings text `text` (`None`: there is no such file) leaves the agent asking, read as `self.format`
+    /// says (a [`Format::ByExtension`] file read here is TOML). The start reads each file through [`settings_allow`].
+    #[cfg(test)]
+    pub fn keeps_asking(&self, text: Option<&str>) -> bool {
+        self.keeps_asking_as(if self.format == Format::Json { Format::Json } else { Format::Toml }, text)
+    }
+
+    fn keeps_asking_as(&self, format: Format, text: Option<&str>) -> bool {
+        let Some(text) = text else { return true };
+        let doc = match format {
+            Format::Json => serde_json::from_str::<Value>(text).ok(),
+            _ => text.parse::<toml::Table>().ok().and_then(|t| serde_json::to_value(t).ok()),
+        };
+        let Some(doc @ Value::Object(_)) = doc else { return false };
+        self.keys.iter().all(|(path, allowed)| {
+            let mut at = &doc;
+            for part in path.split('.') {
+                match at {
+                    Value::Object(m) => match m.get(part) {
+                        Some(v) => at = v,
+                        None => return true,
+                    },
+                    // a key's table that is something else is not a file the agent reads as meant
+                    _ => return false,
+                }
+            }
+            match at {
+                Value::String(v) => allowed.contains(&v.as_str()),
+                Value::Bool(b) => allowed.contains(&if *b { "true" } else { "false" }),
+                _ => false,
+            }
+        })
+    }
+}
+
+/// Why an agent with a [`SettingCheck`] did not start (the UI shows it translated, `ss.noAsks`).
+pub fn no_asks(label: &str) -> String {
+    format!("{label} did not start because its own settings let it run commands and change files without asking first.")
+}
+
+/// Why a message that starts with one of an agent's [`AcpAgent::ask_switches`] was not sent (`ss.noAsksCommand`).
+pub fn no_asks_command(label: &str, command: &str) -> String {
+    format!("{label}'s /{command} turns off its asks, so Manut AI does not send it. Write your message without it.")
+}
+
+/// The largest settings file read for a [`SettingCheck`]; a bigger one refuses.
+const SETTINGS_MAX: u64 = 4 << 20;
+
+/// Whether agent `label` may start as far as its own settings files say ([`SettingCheck`]): each read where the agent
+/// reads it, with `var` giving the variables its chat runs with (the chat's own, then the app's) and the home folder from
+/// them, and `cwd` the chat's folder. No home, a file that is not a plain file, is larger than [`SETTINGS_MAX`] or cannot be
+/// read refuses with [`no_asks`].
+pub fn settings_allow(checks: &[SettingCheck], label: &str, var: &dyn Fn(&str) -> Option<String>, cwd: &std::path::Path) -> Result<(), String> {
+    if checks.is_empty() {
+        return Ok(());
+    }
+    let home = set_var(var, if cfg!(windows) { "USERPROFILE" } else { "HOME" }).ok_or_else(|| no_asks(label))?;
+    for check in checks {
+        if let Place::TextVar(name) = check.place {
+            let text = set_var(var, name);
+            if !check.keeps_asking_as(if check.format == Format::Toml { Format::Toml } else { Format::Json }, text.as_deref()) {
+                return Err(no_asks(label));
+            }
+            continue;
+        }
+        for path in check.paths(var, std::path::Path::new(&home), cwd) {
+            let text = match std::fs::metadata(&path) {
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+                Ok(m) if m.is_file() && m.len() <= SETTINGS_MAX => Some(std::fs::read_to_string(&path).map_err(|_| no_asks(label))?),
+                _ => return Err(no_asks(label)),
+            };
+            let format = match check.format {
+                Format::ByExtension if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("json")) => Format::Json,
+                Format::ByExtension => Format::Toml,
+                f => f,
+            };
+            if !check.keeps_asking_as(format, text.as_deref()) {
+                return Err(no_asks(label));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The first word of message `text` when it is one of `switches` written as a command (`/always-approve`, `/auto on`):
+/// a slash, the name, then nothing or a space. Leading blanks are skipped, as an agent reading a command would.
+pub fn ask_switch<'a>(switches: &[&'a str], text: &str) -> Option<&'a str> {
+    let rest = text.trim_start().strip_prefix('/')?;
+    let word = rest.split(|c: char| c.is_whitespace()).next().unwrap_or("");
+    switches.iter().copied().find(|s| s.eq_ignore_ascii_case(word))
 }
 
 /// An agent whose own default runs tools without asking. Before the chat starts, the shell runs the agent's fixed
@@ -151,24 +334,84 @@ pub fn no_rules(label: &str) -> String {
     NO_RULES.replace("OpenCode", label)
 }
 
-/// The built-in ACP agents: OpenCode, whose own default runs tools unasked, with its rule check. The generic ones
-/// are rows of [`crate::acp_agents::ACP_LIST`].
+/// The built-in ACP agents: OpenCode, whose own default runs tools unasked, with its rule check, and Grok (item 101b),
+/// held to its asking mode and to its own settings. The generic ones are rows of [`crate::acp_agents::ACP_LIST`].
 ///
 /// OpenCode lists its agents two ways (item 114). 2.x: `opencode debug agents --standalone`, JSON, read by
 /// [`opencode2_ask`]; `--standalone` because without it the listing comes from OpenCode's background service, started
 /// earlier with other variables, while `opencode acp` always starts a server of its own that inherits the chat's (read in
 /// 2.3.0's bundle). 1.x: `opencode agent list`, read by [`opencode_ask`]; 2.3.0 has no such command and prints its help.
 /// The newer comes first, so a current OpenCode is listed once and the older command never reaches it.
-pub const ACP_AGENTS: [AcpAgent; 1] = [AcpAgent {
-    id: "opencode",
-    label: "OpenCode",
-    login: "opencode auth login",
-    skill_tool: Some("skill"),
-    rules: Some(RuleProbe {
-        forms: &[ProbeForm { args: &["debug", "agents", "--standalone"], build: opencode2_ask, kept: opencode2_kept }, ProbeForm { args: &["agent", "list"], build: opencode_ask, kept: opencode_kept }],
-        var: "OPENCODE_CONFIG_CONTENT",
-    }),
-}];
+///
+/// Grok Build 1.0.93 (`grok agent stdio`, its ACP server; `crate::sessions::chat_args`) reports two session modes,
+/// `default` and `plan` (its `current_mode_update`s, counted in its own session logs on this Mac), and is held to
+/// `default`: its plan mode lets its own plan file, and on some of its tool sets any Markdown file, be written without a
+/// card (its `plan-mode.md`). Its permission mode (ask, auto-review, always-approve) is not one of those: it comes from its
+/// own settings ([`GROK_SETTINGS`]), from `/always-approve` and its siblings typed in a message ([`AcpAgent::ask_switches`]),
+/// or from the client (`_meta.yoloMode`, which manut never sends).
+pub const ACP_AGENTS: [AcpAgent; 2] = [
+    AcpAgent {
+        id: "opencode",
+        label: "OpenCode",
+        login: "opencode auth login",
+        skill_tool: Some("skill"),
+        rules: Some(RuleProbe {
+            forms: &[ProbeForm { args: &["debug", "agents", "--standalone"], build: opencode2_ask, kept: opencode2_kept }, ProbeForm { args: &["agent", "list"], build: opencode_ask, kept: opencode_kept }],
+            var: "OPENCODE_CONFIG_CONTENT",
+        }),
+        asks_in: &[],
+        settings: &[],
+        ask_switches: &[],
+    },
+    AcpAgent {
+        id: "grok",
+        label: "Grok",
+        login: "grok login",
+        skill_tool: None,
+        rules: None,
+        asks_in: &["default"],
+        settings: &GROK_SETTINGS,
+        // its permission toggles (`/always-approve`, `/auto-review`, and `/auto`, which "still runs the same toggle and is
+        // omitted from the menu", its `slash-commands.md`), and `yolo`, its command line's name for always-approve
+        ask_switches: &["always-approve", "auto-review", "auto", "yolo"],
+    },
+];
+
+/// The values of Grok's own settings that start its sessions without asks: `[ui] permission_mode` (`default`, `ask`,
+/// `auto` or `always-approve`; "Permission mode new sessions start in", its `config-reference.md`), its deprecated name
+/// `approval_mode`, and `[ui] yolo` ("Always-approve tool calls"). Only `default` and `ask` are taken, and a `yolo` of
+/// `false`.
+const GROK_UI: &[(&str, &[&str])] = &[("ui.permission_mode", &["default", "ask"]), ("ui.approval_mode", &["default", "ask"]), ("ui.yolo", &["false"])];
+
+/// Claude Code's `defaultMode`, which Grok also reads from Claude's settings files ("Claude-compatible `defaultMode` in
+/// `.claude/settings.json` is also supported", its `permissions-and-safety.md`), under `permissions` or, when that is
+/// absent, at the top. `default` asks; `plan` "is accepted. It does not enter plan mode". Any other (`acceptEdits`,
+/// `auto`, `bypassPermissions`, `dontAsk`) refuses.
+const CLAUDE_MODE: &[(&str, &[&str])] = &[("permissions.defaultMode", &["default", "plan"]), ("defaultMode", &["default", "plan"])];
+
+/// Every file in which Grok Build 1.0.93 documents a value that starts its sessions without asks, where it reads each
+/// (its `config-reference.md`, "How to configure", and `permissions-and-safety.md`): its own `config.toml`,
+/// `managed_config.toml` and `requirements.toml` in `$GROK_HOME` (else `~/.grok`, where an account's home points it) and
+/// the fleet's two in `/etc/grok`; the `GROK_CONFIG` (inline JSON) and `GROK_CONFIG_PATH` (a JSON or TOML file, by its
+/// name) overlays; and Claude Code's settings it reads, the person's, every folder's from the chat's up (it reads them up to
+/// the repository's root), and Claude's managed settings on macOS and Linux. A project's `.grok/config.toml` cannot set the
+/// mode ("only `[mcp_servers]`, `[plugins]`, `[permission]`, `[env]`"). Not read: macOS device management (`ai.x.grok`)
+/// and a default Grok's servers send after a sign-in, which no file holds.
+pub const GROK_SETTINGS: [SettingCheck; 13] = [
+    SettingCheck { place: Place::Home { vars: &[("GROK_HOME", "")], dir: ".grok", file: "config.toml" }, format: Format::Toml, keys: GROK_UI },
+    SettingCheck { place: Place::Home { vars: &[("GROK_HOME", "")], dir: ".grok", file: "managed_config.toml" }, format: Format::Toml, keys: GROK_UI },
+    SettingCheck { place: Place::Home { vars: &[("GROK_HOME", "")], dir: ".grok", file: "requirements.toml" }, format: Format::Toml, keys: GROK_UI },
+    SettingCheck { place: Place::Home { vars: &[], dir: "/etc/grok", file: "managed_config.toml" }, format: Format::Toml, keys: GROK_UI },
+    SettingCheck { place: Place::Home { vars: &[], dir: "/etc/grok", file: "requirements.toml" }, format: Format::Toml, keys: GROK_UI },
+    SettingCheck { place: Place::TextVar("GROK_CONFIG"), format: Format::Json, keys: GROK_UI },
+    SettingCheck { place: Place::FileVar("GROK_CONFIG_PATH"), format: Format::ByExtension, keys: GROK_UI },
+    SettingCheck { place: Place::Home { vars: &[], dir: ".claude", file: "settings.json" }, format: Format::Json, keys: CLAUDE_MODE },
+    SettingCheck { place: Place::Home { vars: &[], dir: ".claude", file: "settings.local.json" }, format: Format::Json, keys: CLAUDE_MODE },
+    SettingCheck { place: Place::Up { dir: ".claude", file: "settings.json" }, format: Format::Json, keys: CLAUDE_MODE },
+    SettingCheck { place: Place::Up { dir: ".claude", file: "settings.local.json" }, format: Format::Json, keys: CLAUDE_MODE },
+    SettingCheck { place: Place::Home { vars: &[], dir: "/Library/Application Support/ClaudeCode", file: "managed-settings.json" }, format: Format::Json, keys: CLAUDE_MODE },
+    SettingCheck { place: Place::Home { vars: &[], dir: "/etc/claude-code", file: "managed-settings.json" }, format: Format::Json, keys: CLAUDE_MODE },
+];
 
 /// One UTF-16 unit as the agents' matcher compares it. On Windows (`fold`) the agents match without case, as a
 /// JavaScript RegExp with the `i` flag does: a unit stands for its upper case when that is one unit too, and a unit
@@ -483,6 +726,36 @@ pub fn is_acp_session_id(id: &str) -> bool {
     (1..=128).contains(&id.len()) && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
 }
 
+/// The card key of a request with JSON-RPC id `rpc_id`: `acp-` and the id as it was given, a number or the text of a
+/// string (Antigravity's are strings, `"1"`), never its JSON quotes.
+fn request_key(rpc_id: &Value) -> String {
+    match rpc_id {
+        Value::String(x) => format!("acp-{x}"),
+        other => format!("acp-{other}"),
+    }
+}
+
+/// A command written as Cursor titles one: the whole title between one pair of backticks, each backtick inside escaped
+/// with a backslash. The command, unescaped; `None` for any other title.
+fn unticked(title: &str) -> Option<String> {
+    let t = title.trim();
+    let inner = t.strip_prefix('`')?.strip_suffix('`')?;
+    let cmd = inner.replace("\\`", "`");
+    (!cmd.trim().is_empty()).then_some(cmd)
+}
+
+/// The paths of the diffs a tool call carries (ACP's `content` entries of `type: "diff"`), in order.
+fn diff_paths(tc: &Value) -> Vec<String> {
+    tc.get("content")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|c| s(c, "type") == "diff")
+        .map(|c| s(c, "path"))
+        .filter(|p| !p.trim().is_empty())
+        .collect()
+}
+
 /// The objects in one line of output: a leading BOM dropped, and two objects printed on one line (`}{`) split.
 /// Anything that does not parse is dropped.
 pub fn json_objects(line: &str) -> Vec<Value> {
@@ -503,13 +776,17 @@ enum Call {
     Open,
     Prompt,
     Config,
+    /// a switch back to a mode in which the agent asks ([`AcpAgent::asks_in`])
+    Mode,
 }
 
-/// An open permission request: its JSON-RPC id and the option id for each answer manut offers.
+/// An open permission request: its JSON-RPC id and the option id for each answer manut offers. A question (a request
+/// offering several `allow_once` answers) keeps each answer's words and option id in `answers`.
 struct Ask {
     rpc_id: Value,
     once: Option<String>,
     deny: Option<String>,
+    answers: Vec<(String, String)>,
 }
 
 struct Tool {
@@ -549,6 +826,16 @@ pub struct Acp {
     /// whether the agent takes HTTP and SSE servers (`agentCapabilities.mcpCapabilities`); stdio it always takes
     mcp_http: bool,
     mcp_sse: bool,
+    /// The agent's session mode as it last reported it, and the id of its `mode` configuration option when it has one
+    /// (else a switch is `session/set_mode`). Only read for a row with [`AcpAgent::asks_in`].
+    mode: String,
+    mode_option: Option<String>,
+    /// A switch back to an asking mode is on its way: nothing is sent to the agent until it is confirmed.
+    mode_pending: bool,
+    /// The agent would not go back to a mode in which it asks: nothing more is sent to it.
+    mode_refused: bool,
+    /// The mode the agent was in when manut set it back, for the chat's note and the refusal.
+    mode_from: String,
 }
 
 impl Acp {
@@ -576,6 +863,11 @@ impl Acp {
             mcp: crate::acp_mcp::Approved::default(),
             mcp_http: false,
             mcp_sse: false,
+            mode: String::new(),
+            mode_option: None,
+            mode_pending: false,
+            mode_refused: false,
+            mode_from: String::new(),
         }
     }
 
@@ -661,9 +953,15 @@ impl Acp {
         emit(st, ev("turn.end", f));
     }
 
-    /// `configOptions` from new/load/resume/set_config_option or a `config_option_update`: the model list and the
-    /// current model.
+    /// `configOptions` from new/load/resume/set_config_option or a `config_option_update`: the session's mode (for a
+    /// row held to its asking modes, [`Self::mode_seen`]), the model list and the current model.
     fn config(&mut self, st: &mut Step, opts: &Value) {
+        if let Some(m) = opts.as_array().into_iter().flatten().find(|o| s(o, "category") == "mode" || s(o, "id") == "mode") {
+            if !s(m, "id").is_empty() {
+                self.mode_option = Some(s(m, "id"));
+            }
+            self.mode_seen(st, &s(m, "currentValue"));
+        }
         let Some(model) = opts.as_array().into_iter().flatten().find(|o| s(o, "category") == "model" || s(o, "id") == "model") else { return };
         let mut options = Vec::new();
         for o in model.get("options").and_then(Value::as_array).into_iter().flatten() {
@@ -693,25 +991,161 @@ impl Acp {
         }
     }
 
-    fn tool_detail(&self, kind: &str, title: &str, raw: &Value) -> String {
-        clip(&self.whole_detail(kind, title, raw), 160)
+    /// The session's mode `mode`, as the agent reported it. For a row held to the modes in which its agent asks
+    /// ([`AcpAgent::asks_in`]), any other mode is switched back at once: the row's first mode is set (through the agent's
+    /// `mode` configuration option, else `session/set_mode`), a running turn is stopped and its open cards expire, and
+    /// nothing is sent to the agent until it confirms the switch ([`Self::mode_settled`]). The agent can only report a
+    /// mode for a conversation that is open, so the switch always names it.
+    fn mode_seen(&mut self, st: &mut Step, mode: &str) {
+        let asks = self.agent.asks_in;
+        if asks.is_empty() || mode.is_empty() {
+            return;
+        }
+        self.mode = mode.to_string();
+        if asks.contains(&mode) || self.mode_pending || self.mode_refused {
+            return;
+        }
+        let Some(sid) = self.session.clone() else { return };
+        self.mode_pending = true;
+        self.mode_from = mode.to_string();
+        let to = asks[0];
+        match self.mode_option.clone() {
+            Some(id) => self.call(st, Call::Mode, "session/set_config_option", json!({"sessionId": sid, "configId": id, "value": to})),
+            None => self.call(st, Call::Mode, "session/set_mode", json!({"sessionId": sid, "modeId": to})),
+        };
+        if self.turn && self.prompt_id.is_some() {
+            for (rid, a) in self.pending.drain() {
+                out(st, json!({"jsonrpc": "2.0", "id": a.rpc_id, "result": {"outcome": {"outcome": "cancelled"}}}));
+                emit(st, ev("prompt.expired", json!({"request_id": rid, "reason": "cancelled"})));
+            }
+            out(st, json!({"jsonrpc": "2.0", "method": "session/cancel", "params": {"sessionId": sid}}));
+        }
+    }
+
+    /// The agent's answer to a switch back to an asking mode: `ok` when it confirmed one of the row's modes. Said once in
+    /// the chat either way (`session.note` `asks_mode`). Confirmed, a message that waited is sent; refused, the waiting
+    /// turn ends with [`Self::mode_refusal`] and nothing more is ever sent to this agent process.
+    fn mode_settled(&mut self, st: &mut Step, ok: bool) {
+        self.mode_pending = false;
+        let from = std::mem::take(&mut self.mode_from);
+        let to = self.agent.asks_in.first().copied().unwrap_or("");
+        emit(st, ev("session.note", json!({"kind": "asks_mode", "agent": self.agent.label, "mode": from, "to": to, "ok": ok})));
+        if ok {
+            if let Some(text) = (!self.queued.is_empty() && self.turn).then(|| std::mem::take(&mut self.queued).join("\n\n")) {
+                self.prompt(st, text);
+            }
+            return;
+        }
+        self.mode_refused = true;
+        self.mode_from = from;
+        if self.turn && self.prompt_id.is_none() {
+            self.queued.clear();
+            let why = self.mode_refusal();
+            self.end(st, "error", Some(why));
+        }
+    }
+
+    /// Why nothing is sent to an agent that would not go back to a mode in which it asks.
+    fn mode_refusal(&self) -> String {
+        format!("{} stayed in its {} mode, which does not ask before it acts, so Manut AI sends it nothing more. Close this chat and start a new one.", self.agent.label, self.mode_from)
+    }
+
+    /// Grok's own notice that a session's always-approve or auto-review was turned on (`x.ai/yolo_mode_changed`, item
+    /// 101b): neither is a session mode manut can set back, so for a row held to its asking modes it is treated as a
+    /// refused switch. A running turn is stopped and its cards expire, the chat says so once, and nothing more is sent to
+    /// this process. Its shape (`yolo_mode`, `auto_mode`) is read from Grok 1.0.93's binary, not from a recording, and an
+    /// update that names another conversation is not this chat's.
+    fn permission_notice(&mut self, st: &mut Step, p: &Value) {
+        if self.agent.asks_in.is_empty() || self.mode_refused {
+            return;
+        }
+        if self.session.as_deref().is_some_and(|sid| !s(p, "sessionId").is_empty() && s(p, "sessionId") != sid) {
+            return;
+        }
+        let on = |k: &str| p.get(k).and_then(Value::as_bool) == Some(true);
+        let mode = if on("yolo_mode") || on("yoloMode") {
+            "always-approve"
+        } else if on("auto_mode") || on("autoMode") {
+            "auto"
+        } else {
+            return;
+        };
+        self.mode_refused = true;
+        self.mode_from = mode.to_string();
+        if let Some(sid) = self.session.clone().filter(|_| self.turn && self.prompt_id.is_some()) {
+            for (rid, a) in self.pending.drain() {
+                out(st, json!({"jsonrpc": "2.0", "id": a.rpc_id, "result": {"outcome": {"outcome": "cancelled"}}}));
+                emit(st, ev("prompt.expired", json!({"request_id": rid, "reason": "cancelled"})));
+            }
+            out(st, json!({"jsonrpc": "2.0", "method": "session/cancel", "params": {"sessionId": sid}}));
+        }
+        emit(st, ev("session.note", json!({"kind": "asks_mode", "agent": self.agent.label, "mode": mode, "to": "", "ok": false})));
+        if self.turn && self.prompt_id.is_none() {
+            self.queued.clear();
+            let why = self.mode_refusal();
+            self.end(st, "error", Some(why));
+        }
+    }
+
+    fn tool_detail(&self, kind: &str, tc: &Value) -> String {
+        clip(&self.whole_detail(kind, tc), 160)
+    }
+
+    /// What call `tc` is about, read from its own input (`rawInput`) and, for a file it changes, the diff it carries: the
+    /// command, the file (relative to the session's folder), the search, the address. `None` when it names none.
+    ///
+    /// Antigravity names a command `CommandLine` and a file `TargetFile` or `AbsolutePath` (its `run_command`, file and
+    /// view tools, as GoSpark's Antigravity adapter reads them, and seen in a real run here); Cursor's permission requests
+    /// carry no input at all, and title a command as the command between backticks (`` `npm test` ``, its backticks
+    /// escaped with a backslash), which is read back whole for the card only.
+    fn subject(&self, kind: &str, tc: &Value) -> Option<String> {
+        let raw = tc.get("rawInput").unwrap_or(&Value::Null);
+        let pick = |k: &str| raw.get(k).and_then(Value::as_str).map(str::trim).filter(|x| !x.is_empty()).map(String::from);
+        match kind {
+            "terminal" => pick("command").or_else(|| pick("CommandLine")).or_else(|| unticked(&s(tc, "title"))),
+            // some agents' permission requests name it `filepath`
+            "patch" | "read_file" => ["filePath", "path", "file_path", "filepath", "TargetFile", "AbsolutePath"]
+                .into_iter()
+                .find_map(pick)
+                .or_else(|| diff_paths(tc).into_iter().next())
+                .map(|p| rel(&p, &self.cwd)),
+            "search_files" => pick("pattern").or_else(|| pick("query")).or_else(|| pick("Query")),
+            "web_extract" => pick("url").or_else(|| pick("Url")),
+            "web_search" => pick("query").or_else(|| pick("Query")),
+            _ => pick("description"),
+        }
     }
 
     /// What a call is about, for its approval card: as [`Self::tool_detail`], but whole, its line breaks kept, since what
     /// a person approves is what runs (item 117); the card and the phone scroll a long one.
-    fn whole_detail(&self, kind: &str, title: &str, raw: &Value) -> String {
-        let pick = |k: &str| raw.get(k).and_then(Value::as_str).map(str::trim).filter(|x| !x.is_empty()).map(String::from);
-        let d = match kind {
-            "terminal" => pick("command"),
-            // some agents' permission requests name it `filepath`
-            "patch" | "read_file" => pick("filePath").or_else(|| pick("path")).or_else(|| pick("file_path")).or_else(|| pick("filepath")).map(|p| rel(&p, &self.cwd)),
-            "search_files" => pick("pattern").or_else(|| pick("query")),
-            "web_extract" => pick("url"),
-            "web_search" => pick("query"),
-            _ => pick("description"),
-        };
+    fn whole_detail(&self, kind: &str, tc: &Value) -> String {
+        let title = s(tc, "title");
         // the title stands in only when it says more than the tool's name (`Reply with kiwi`, not `bash`)
-        d.unwrap_or_else(|| if title.trim().contains(' ') { title.to_string() } else { String::new() })
+        self.subject(kind, tc).unwrap_or_else(|| if title.trim().contains(' ') { title } else { String::new() })
+    }
+
+    /// The ACP kind of tool call `tc` as the agent named it: its `kind`, else the kind or tool Grok names in its own
+    /// `_meta["x.ai/tool"]` (Grok leaves `kind` off almost every call, as GoSpark's `ACPToolMapping` reads it: its `bash`
+    /// runs a command, `search_replace`, `write_file` and `edit_file` change a file, `read_file` reads one). Only the
+    /// card's words and the step's name read it: Kit's dial reads ACP's own `kind` alone (`ask_tool::acp_tool`), so a
+    /// call that names its tool only there asks.
+    fn call_kind(tc: &Value) -> String {
+        let own = s(tc, "kind");
+        if !own.is_empty() {
+            return own;
+        }
+        let tool = tc.get("_meta").and_then(|m| m.get("x.ai/tool")).unwrap_or(&Value::Null);
+        let kind = s(tool, "kind");
+        if !kind.is_empty() {
+            return kind;
+        }
+        match s(tool, "name").as_str() {
+            "bash" => "execute",
+            "search_replace" | "write_file" | "edit_file" => "edit",
+            "read_file" => "read",
+            _ => "",
+        }
+        .into()
     }
 
     /// The manut tool name for an ACP tool call: from its `kind`, else its title (OpenCode titles a call by the
@@ -742,12 +1176,11 @@ impl Acp {
     /// folder, then its input with the first update), and the skill a skill tool loads.
     fn show(&mut self, st: &mut Step, id: &str, u: &Value) {
         let raw = u.get("rawInput").cloned().unwrap_or(Value::Null);
-        let title = s(u, "title");
         let Some(tool) = self.tools.get(id) else { return };
         let (name, shown, skill) = (tool.name.clone(), tool.shown, tool.skill);
         let known = raw.as_object().is_some_and(|m| m.keys().any(|k| k != "cwd"));
         if !shown && known {
-            let detail = self.tool_detail(&name, &title, &raw);
+            let detail = self.tool_detail(&name, u);
             emit(st, ev("tool.start", json!({"tool_id": id, "name": name, "detail": detail})));
             self.tools.get_mut(id).unwrap().shown = true;
         }
@@ -769,13 +1202,14 @@ impl Acp {
                 if !id.is_empty() {
                     self.text_id = id;
                 }
-                if !t.is_empty() && self.turn {
+                // (a conversation being loaded replays its history before it is open: none of that is this turn's)
+                if !t.is_empty() && self.turn && self.session.is_some() {
                     self.text.push_str(&t);
                     emit(st, ev("delta", json!({"text": t})));
                 }
             }
-            "agent_thought_chunk" if self.turn => emit(st, crate::agent_chat::thinking_event(&u.get("content").map(|c| s(c, "text")).unwrap_or_default())),
-            "tool_call" if self.turn => {
+            "agent_thought_chunk" if self.turn && self.session.is_some() => emit(st, crate::agent_chat::thinking_event(&u.get("content").map(|c| s(c, "text")).unwrap_or_default())),
+            "tool_call" if self.turn && self.session.is_some() => {
                 let id = s(u, "toolCallId");
                 if id.is_empty() || self.tools.contains_key(&id) {
                     return;
@@ -783,7 +1217,7 @@ impl Acp {
                 // text before a tool call is its own message, as in the other adapters
                 self.flush(st);
                 let title = s(u, "title");
-                let name = Acp::kind_of(&s(u, "kind"), &title);
+                let name = Acp::kind_of(&Acp::call_kind(u), &title);
                 let skill = self.agent.skill_tool.is_some_and(|t| t == title);
                 self.tools.insert(id.clone(), Tool { started: Instant::now(), name, skill, shown: false });
                 self.show(st, &id, u);
@@ -807,6 +1241,10 @@ impl Acp {
                 let opts = u.get("configOptions").cloned().unwrap_or(Value::Null);
                 self.config(st, &opts);
             }
+            "current_mode_update" => {
+                let m = s(u, "currentModeId");
+                self.mode_seen(st, &m);
+            }
             "session_info_update" => {
                 let t = clip(&s(u, "title").replace(|c: char| c.is_control(), " "), 80);
                 if !t.is_empty() {
@@ -820,6 +1258,8 @@ impl Acp {
                     .into_iter()
                     .flatten()
                     .filter(|c| !s(c, "name").trim().is_empty())
+                    // an agent's own switch that turns its asks off is never offered (Grok's `always-approve`, item 101b)
+                    .filter(|c| ask_switch(self.agent.ask_switches, &format!("/{}", s(c, "name").trim())).is_none())
                     .take(500)
                     .map(|c| {
                         let hint = c.get("input").map(|i| s(i, "hint")).unwrap_or_default();
@@ -837,9 +1277,28 @@ impl Acp {
             out(st, json!({"jsonrpc": "2.0", "id": rpc_id, "error": {"code": -32601, "message": "not supported by Manut AI"}}));
             return;
         }
+        // a turn being stopped because the agent left its asking mode takes no new card
+        if self.mode_pending || self.mode_refused {
+            out(st, json!({"jsonrpc": "2.0", "id": rpc_id, "result": {"outcome": {"outcome": "cancelled"}}}));
+            return;
+        }
         let options: Vec<&Value> = p.get("options").and_then(Value::as_array).into_iter().flatten().collect();
         let opt = |kind: &str| options.iter().find(|o| s(o, "kind") == kind).map(|o| s(o, "optionId")).filter(|x| !x.is_empty());
         let (once, deny) = (opt("allow_once"), opt("reject_once").or_else(|| opt("reject_always")));
+        let tc = p.get("toolCall").cloned().unwrap_or(Value::Null);
+        let key = request_key(&rpc_id);
+        // several `allow_once` answers are a question, not an approval (Cursor asks its questions so, each answer an
+        // option and "Skip" its `reject_once`): a question card with those answers, never "Allow once" for the first
+        let answers: Vec<(String, String)> =
+            options.iter().filter(|o| s(o, "kind") == "allow_once").map(|o| (s(o, "name").trim().to_string(), s(o, "optionId"))).filter(|(n, i)| !n.is_empty() && !i.is_empty()).collect();
+        if answers.len() > 1 {
+            let said = tc.get("content").and_then(Value::as_array).into_iter().flatten().filter_map(|c| c.get("content")).map(|c| s(c, "text")).find(|x| !x.trim().is_empty());
+            let question = said.unwrap_or_else(|| s(&tc, "title"));
+            let choices: Vec<&str> = answers.iter().map(|(n, _)| n.as_str()).collect();
+            emit(st, ev("clarify.request", json!({"request_id": key, "question": question.trim(), "choices": choices})));
+            self.pending.insert(key, Ask { rpc_id, once: None, deny, answers });
+            return;
+        }
         let mut choices = Vec::new();
         if deny.is_some() {
             choices.push("deny");
@@ -852,14 +1311,17 @@ impl Acp {
             out(st, json!({"jsonrpc": "2.0", "id": rpc_id, "result": {"outcome": {"outcome": "cancelled"}}}));
             return;
         }
-        let tc = p.get("toolCall").cloned().unwrap_or(Value::Null);
-        let raw = tc.get("rawInput").cloned().unwrap_or(Value::Null);
         let title = s(&tc, "title");
-        let kind = Acp::kind_of(&s(&tc, "kind"), &title);
-        let detail = self.whole_detail(&kind, &title, &raw);
+        let kind = Acp::kind_of(&Acp::call_kind(&tc), &title);
+        let detail = self.whole_detail(&kind, &tc);
         let (title, command) = match kind.as_str() {
             "terminal" => ("Run this command?".to_string(), detail),
-            "patch" => (if detail.is_empty() { format!("Allow {} to change files?", self.agent.label) } else { format!("Allow {} to change {detail}?", self.agent.label) }, String::new()),
+            // the file it names, else the call's own words (Cursor: "Delete `a.txt`"), else files in general
+            "patch" => match self.subject(&kind, &tc) {
+                Some(f) => (format!("Allow {} to change {f}?", self.agent.label), String::new()),
+                None if !title.trim().is_empty() => (title.trim().to_string(), String::new()),
+                None => (format!("Allow {} to change files?", self.agent.label), String::new()),
+            },
             // any other call: its own title, whole, and what it names (the address, the search, its description) under it,
             // so nothing it was given is left off the card (item 117)
             _ => {
@@ -868,8 +1330,7 @@ impl Acp {
                 (shown, command)
             }
         };
-        let key = format!("acp-{}", rpc_id);
-        self.pending.insert(key.clone(), Ask { rpc_id, once, deny });
+        self.pending.insert(key.clone(), Ask { rpc_id, once, deny, answers: Vec::new() });
         // the card's command is whole, for the person (the page masks its keys); Kit's dial reads the call's own kind and
         // input
         let tool = acp_tool(&tc, &self.cwd);
@@ -914,6 +1375,7 @@ impl Acp {
                 Call::Prompt => self.end(st, "error", Some(msg)),
                 Call::Config => emit(st, ev("session.error", json!({"message": msg}))),
                 Call::Initialize => emit(st, ev("session.error", json!({"message": msg}))),
+                Call::Mode => self.mode_settled(st, false),
             }
             return;
         }
@@ -950,8 +1412,15 @@ impl Acp {
                 emit(st, ev("session.info", json!({"agent_session": sid})));
                 let opts = r.get("configOptions").cloned().unwrap_or(Value::Null);
                 self.config(st, &opts);
-                if let Some(text) = (!self.queued.is_empty()).then(|| std::mem::take(&mut self.queued).join("\n\n")) {
-                    self.prompt(st, text);
+                if self.mode_option.is_none() {
+                    let m = r.get("modes").map(|m| s(m, "currentModeId")).unwrap_or_default();
+                    self.mode_seen(st, &m);
+                }
+                // a message that waited for the conversation waits on for a switch back to an asking mode
+                if !self.mode_pending && !self.mode_refused {
+                    if let Some(text) = (!self.queued.is_empty()).then(|| std::mem::take(&mut self.queued).join("\n\n")) {
+                        self.prompt(st, text);
+                    }
                 }
             }
             Call::Prompt => {
@@ -969,6 +1438,19 @@ impl Acp {
             Call::Config => {
                 let opts = r.get("configOptions").cloned().unwrap_or(Value::Null);
                 self.config(st, &opts);
+            }
+            // `session/set_config_option` answers with the options as they now are; `session/set_mode` answers nothing,
+            // and its success is the switch
+            Call::Mode => {
+                match r.get("configOptions").filter(|o| o.is_array()) {
+                    Some(opts) => {
+                        let opts = opts.clone();
+                        self.config(st, &opts);
+                    }
+                    None => self.mode = self.agent.asks_in.first().copied().unwrap_or("").to_string(),
+                }
+                let ok = self.agent.asks_in.contains(&self.mode.as_str());
+                self.mode_settled(st, ok);
             }
         }
     }
@@ -1033,6 +1515,11 @@ impl Adapter for Acp {
                         self.update(&mut st, u);
                     }
                 }
+                // an ACP extension notification goes out with a leading underscore (Grok's `_x.ai/session/setup`)
+                (Some(method), None) if method.trim_start_matches('_') == "x.ai/yolo_mode_changed" => {
+                    let p = v.get("params").cloned().unwrap_or(Value::Null);
+                    self.permission_notice(&mut st, &p);
+                }
                 _ => {}
             }
         }
@@ -1052,9 +1539,16 @@ impl Adapter for Acp {
                 if self.signed_out {
                     return Err(self.signed_out());
                 }
+                if self.mode_refused {
+                    return Err(self.mode_refusal());
+                }
+                // the agent's own command that turns its asks off is never sent, whoever wrote it (item 101b)
+                if let Some(c) = ask_switch(self.agent.ask_switches, &text) {
+                    return Err(no_asks_command(self.agent.label, c));
+                }
                 self.turn = true;
                 emit(&mut st, ev("turn.start", json!({})));
-                if self.session.is_none() {
+                if self.session.is_none() || self.mode_pending {
                     self.queued.push(text);
                 } else {
                     self.prompt(&mut st, text);
@@ -1089,7 +1583,31 @@ impl Adapter for Acp {
                 let a = self.pending.remove(&request_id).unwrap();
                 out(&mut st, json!({"jsonrpc": "2.0", "id": a.rpc_id, "result": {"outcome": {"outcome": "selected", "optionId": option}}}));
             }
-            Input::Clarify { .. } => return Err("no such question".into()),
+            // a question the agent asked as a permission request: the answer's words pick its option, and a skipped
+            // question (no answer) picks the request's own "skip"; words that are none of its answers are refused, since
+            // the agent takes only its own (the card stays open)
+            Input::Clarify { request_id, answer } => {
+                let Some(a) = self.pending.get(&request_id).filter(|a| !a.answers.is_empty()) else { return Err("no such question".into()) };
+                let said = match &answer {
+                    Value::Object(m) => m.get("q1").or_else(|| m.values().next()).cloned().unwrap_or(Value::Null),
+                    other => other.clone(),
+                };
+                let said = said.as_str().map(str::trim).unwrap_or("").to_string();
+                let option = if said.is_empty() {
+                    a.deny.clone()
+                } else {
+                    match a.answers.iter().find(|(n, _)| *n == said) {
+                        Some((_, id)) => Some(id.clone()),
+                        None => return Err(format!("{} takes one of its own answers here", self.agent.label)),
+                    }
+                };
+                let a = self.pending.remove(&request_id).unwrap();
+                let outcome = match option {
+                    Some(id) => json!({"outcome": "selected", "optionId": id}),
+                    None => json!({"outcome": "cancelled"}),
+                };
+                out(&mut st, json!({"jsonrpc": "2.0", "id": a.rpc_id, "result": {"outcome": outcome}}));
+            }
             // the agent picks its own permission mode and effort; manut offers no switch for them here
             Input::Mode { .. } | Input::Effort { .. } => return Err(format!("{} has no mode or effort switch here", self.agent.label)),
             Input::Rewind | Input::RewindTo { .. } => return Err(format!("{} cannot take a message back here", self.agent.label)),
@@ -1713,6 +2231,8 @@ fn decide_on(rules: &[(String, String, String)], tool: &str, input: &str, fold: 
             ("kimi", "kimi-signed-out.jsonl", "Kimi Code is not signed in. Run `kimi login` in a terminal and sign in.", "--login"),
             ("copilot", "copilot-signed-out.jsonl", "Copilot CLI is not signed in. Run `copilot login` in a terminal and sign in.", "copilot-darwin-arm64"),
             ("cline", "cline-signed-out.jsonl", "Cline is not signed in. Run `cline auth` in a terminal and sign in.", "Call authenticate"),
+            // item 101b: Grok Build 1.0.93 signed out, its `_x.ai/` setup notices and its MCP list (emptied here) ignored
+            ("grok", "grok-signed-out.jsonl", "Grok is not signed in. Run `grok login` in a terminal and sign in.", "no auth method id provided"),
         ] {
             let mut a = Acp::new(acp_agent(id).unwrap(), "/w/proj", None);
             // the person's first message goes in at once, as a draft's first send does; the conversation never opens
@@ -2050,7 +2570,11 @@ fn decide_on(rules: &[(String, String, String)], tool: &str, input: &str, fold: 
     #[test]
     fn opencode_and_the_list_rows() {
         let rows: Vec<(&str, &str, &str, bool)> = ACP_AGENTS.iter().map(|a| (a.id, a.label, a.login, a.rules.is_some())).collect();
-        assert_eq!(rows, [("opencode", "OpenCode", "opencode auth login", true)]);
+        assert_eq!(rows, [("opencode", "OpenCode", "opencode auth login", true), ("grok", "Grok", "grok login", false)]);
+        // each built-in row is the allow-list's agent of the same name, a chat
+        for a in &ACP_AGENTS {
+            assert_eq!(crate::sessions::agent(a.id).map(|x| (x.label, x.mode)), Some((a.label, crate::sessions::Mode::Chat)), "{}", a.id);
+        }
         for e in &crate::acp_agents::ACP_LIST {
             let a = acp_agent(e.agent.id).unwrap();
             assert_eq!((a.id, a.label, a.login, a.rules.is_some(), a.skill_tool), (e.agent.id, e.agent.label, e.acp.login, false, None));
@@ -2301,5 +2825,603 @@ fn decide_on(rules: &[(String, String, String)], tool: &str, input: &str, fold: 
         for bad in ["", "../x", "ses x", "--yolo ", "a;b", "ses_é", &"a".repeat(129)] {
             assert!(!is_acp_session_id(bad), "{bad}");
         }
+    }
+
+    // ---- item 101a: Antigravity and Cursor as chats ---------------------------------------------------------------
+
+    fn row(id: &str) -> &'static AcpAgent {
+        acp_agent(id).unwrap()
+    }
+
+    /// Antigravity 1.5.18, a real turn (`agy-1-plain.jsonl`: "Reply with the word ok and nothing else."), its session
+    /// id, folder and the account's plan tier replaced, its 300 commands cut to two, and its prompt's id numbered as
+    /// manut numbers it). It starts in `default`, the mode in which it asks, so nothing but the message is sent.
+    #[test]
+    fn real_antigravity_1_plain_answer() {
+        let mut a = Acp::new(row("agy"), "/w/proj", None);
+        let st = replay(&mut a, "agy-1-plain.jsonl", Some("Reply with the word ok and nothing else."), &[]);
+        one_clean_turn(&st.events);
+        let w = written(&st);
+        assert_eq!(w.iter().map(|x| s(x, "method")).collect::<Vec<_>>(), ["initialize", "session/new", "session/prompt"]);
+        assert_eq!(w[1]["params"], json!({"cwd": "/w/proj", "mcpServers": []}));
+        let msgs: Vec<String> = of(&st.events, "message").iter().map(|e| s(e, "text")).collect();
+        assert_eq!(msgs, ["ok"]);
+        assert_eq!(s(of(&st.events, "turn.end")[0], "outcome"), "done");
+        let info = of(&st.events, "session.info");
+        assert_eq!(s(info[0], "agent_session"), "0b8f2c1e-5d6a-4c3b-9e7f-1a2b3c4d5e6f");
+        assert_eq!(s(info[1], "model"), "Gemini 4 Hydrogen");
+        assert!(info.iter().any(|e| s(e, "title") == "Testing AI Output Instructions"));
+        let models: Vec<String> = of(&st.events, "session.models")[0]["options"].as_array().unwrap().iter().map(|m| s(m, "id")).collect();
+        assert_eq!(models, ["gemini-4-hydrogen", "gemini-3.8-flash", "claude-sonnet-4-6", "claude-opus-4-6-thinking", "gpt-oss-120b-medium"]);
+        assert!(of(&st.events, "session.note").is_empty(), "no mode was switched");
+    }
+
+    /// Antigravity runs `pwd` only after the person allows it (`agy-2-allow-once.jsonl`, the same session's second real
+    /// turn). Its request's id is a string, its command is `CommandLine` (its `run_command`), and it ran in the folder the
+    /// conversation was opened with, which it printed.
+    #[test]
+    fn real_antigravity_2_asks_before_its_command_and_runs_it_once_allowed() {
+        let mut a = Acp::new(row("agy"), "/w/proj", None);
+        let st = replay(&mut a, "agy-2-allow-once.jsonl", Some("Run the shell command `pwd` and reply with only its output."), &["once"]);
+        one_clean_turn(&st.events);
+        let card = of(&st.events, "approval.request")[0];
+        assert_eq!(s(card, "request_id"), "acp-1");
+        assert_eq!(s(card, "title"), "Run this command?");
+        assert_eq!(s(card, "command"), "pwd");
+        assert_eq!(card["choices"], json!(["deny", "once"]));
+        assert_eq!(card["tool"], json!({"kind": "command", "line": "pwd", "cwd": "/w/proj"}));
+        // the answer goes back under the request's own id, a string, and names the option it offered
+        let answer = written(&st).into_iter().find(|w| w.get("result").is_some()).unwrap();
+        assert_eq!(answer, json!({"jsonrpc": "2.0", "id": "1", "result": {"outcome": {"outcome": "selected", "optionId": "allow"}}}));
+        let tools: Vec<(String, String)> = of(&st.events, "tool.start").iter().map(|e| (s(e, "name"), s(e, "detail"))).collect();
+        assert_eq!(tools, [("terminal".to_string(), "pwd".to_string())]);
+        assert_eq!(of(&st.events, "tool.end")[0]["ok"], true);
+        let msgs: Vec<String> = of(&st.events, "message").iter().map(|e| s(e, "text")).collect();
+        assert_eq!(msgs, ["/w/proj"]);
+    }
+
+    /// Cursor Agent 2026.11.22, a real turn on an account whose plan had run out (`cursor-1-plan-limit.jsonl`, the
+    /// session id and folder replaced, its models and commands cut short): Cursor says so in its own reply and ends the
+    /// turn, which the chat shows as it is. It starts in `agent`, which asks, so no mode is set.
+    #[test]
+    fn real_cursor_1_a_plan_limit_is_its_own_reply() {
+        let mut a = Acp::new(row("cursor-agent"), "/w/proj", None);
+        let st = replay(&mut a, "cursor-1-plan-limit.jsonl", Some("Reply with the word ok and nothing else."), &[]);
+        one_clean_turn(&st.events);
+        let w = written(&st);
+        assert_eq!(w.iter().map(|x| s(x, "method")).collect::<Vec<_>>(), ["initialize", "session/new", "session/prompt"]);
+        let msgs: Vec<String> = of(&st.events, "message").iter().map(|e| s(e, "text")).collect();
+        assert_eq!(msgs, ["\n\nUpgrade your plan to continue"]);
+        assert_eq!(s(of(&st.events, "turn.end")[0], "outcome"), "done");
+        let models: Vec<String> = of(&st.events, "session.models")[0]["options"].as_array().unwrap().iter().map(|m| s(m, "label")).collect();
+        assert_eq!(models, ["Auto", "grok-4.7", "grok-4.6", "composer-2.5"]);
+        assert!(of(&st.events, "session.note").is_empty());
+    }
+
+    /// The first two lines of a real recording with its session's mode changed to `mode` (Antigravity's configuration
+    /// option and `modes`, as its own default would set them).
+    fn opened_in(file: &str, mode: &str) -> (String, String) {
+        let lines = real(file);
+        let mut new: Value = serde_json::from_str(&lines[1]).unwrap();
+        new["result"]["modes"]["currentModeId"] = json!(mode);
+        for o in new["result"]["configOptions"].as_array_mut().unwrap() {
+            if o["id"] == "mode" {
+                o["currentValue"] = json!(mode);
+            }
+        }
+        (lines[0].clone(), new.to_string())
+    }
+
+    /// Antigravity's own settings can make `auto` or `accept-edits` its default: the message waits, `default` is set
+    /// first, and the message goes only once Antigravity says it is in `default`. The chat says what was changed.
+    #[test]
+    fn antigravity_opened_in_a_mode_that_skips_asks_is_set_back_before_anything_is_sent() {
+        for skip in ["auto", "accept-edits"] {
+            let (init, new) = opened_in("agy-1-plain.jsonl", skip);
+            let mut a = Acp::new(row("agy"), "/w/proj", None);
+            a.start();
+            a.on_line(&init);
+            let st = a.on_input(Input::send("hi")).unwrap();
+            assert!(st.write.is_empty());
+            let st = a.on_line(&new);
+            let w = written(&st);
+            assert_eq!(w.len(), 1, "{skip}: only the switch, never the message");
+            assert_eq!(w[0]["method"], "session/set_config_option");
+            assert_eq!(w[0]["params"], json!({"sessionId": "0b8f2c1e-5d6a-4c3b-9e7f-1a2b3c4d5e6f", "configId": "mode", "value": "default"}));
+            // a send meanwhile waits with the first
+            assert!(a.on_input(Input::send("more")).is_err(), "one turn at a time");
+            // the real answer to a switch: the options as they now are
+            let id = w[0]["id"].as_u64().unwrap();
+            let real_opts: Value = serde_json::from_str::<Value>(&real("agy-1-plain.jsonl")[1]).unwrap()["result"]["configOptions"].clone();
+            let st = a.on_line(&json!({"jsonrpc": "2.0", "id": id, "result": {"configOptions": real_opts}}).to_string());
+            let note = of(&st.events, "session.note")[0];
+            assert_eq!(*note, json!({"event": "session.note", "kind": "asks_mode", "agent": "Antigravity", "mode": skip, "to": "default", "ok": true}));
+            let w = written(&st);
+            assert_eq!(w.iter().map(|x| s(x, "method")).collect::<Vec<_>>(), ["session/prompt"]);
+            assert_eq!(w[0]["params"]["prompt"], json!([{"type": "text", "text": "hi"}]));
+        }
+    }
+
+    /// An agent that stays in a mode without asks gets nothing more: the waiting message is never sent, the turn ends
+    /// saying why, and every later message is refused. An error answer to the switch is the same.
+    #[test]
+    fn an_agent_that_will_not_go_back_to_asking_is_sent_nothing() {
+        for answer in [json!({"result": {"configOptions": [{"id": "mode", "category": "mode", "currentValue": "auto", "options": []}]}}), json!({"error": {"code": -32603, "message": "no"}})] {
+            let (init, new) = opened_in("agy-1-plain.jsonl", "auto");
+            let mut a = Acp::new(row("agy"), "/w/proj", None);
+            a.start();
+            a.on_line(&init);
+            a.on_input(Input::send("hi")).unwrap();
+            let id = written(&a.on_line(&new))[0]["id"].clone();
+            let mut reply = answer.clone();
+            reply["jsonrpc"] = json!("2.0");
+            reply["id"] = id;
+            let st = a.on_line(&reply.to_string());
+            assert!(written(&st).is_empty(), "{answer}");
+            assert_eq!(of(&st.events, "session.note")[0]["ok"], false);
+            let end = of(&st.events, "turn.end")[0];
+            assert_eq!(s(end, "outcome"), "error");
+            assert!(s(end, "error").starts_with("Antigravity stayed in its auto mode, which does not ask before it acts"), "{end}");
+            let refused = a.on_input(Input::send("again")).unwrap_err();
+            assert!(refused.starts_with("Antigravity stayed in its auto mode"));
+        }
+    }
+
+    /// An agent that reports a mode without asks while it works (its own switch, or a setting changed meanwhile): the
+    /// turn is stopped at once, its open card expires, the mode is set back, and the agent gets no card while it stops.
+    #[test]
+    fn a_switch_to_a_mode_without_asks_mid_turn_stops_the_turn_and_sets_it_back() {
+        let lines = real("agy-2-allow-once.jsonl");
+        let mut a = Acp::new(row("agy"), "/w/proj", None);
+        a.start();
+        a.on_line(&lines[0]);
+        a.on_line(&lines[1]);
+        a.on_input(Input::send("run pwd")).unwrap();
+        // up to the real permission request: a card is open
+        let mut events = Vec::new();
+        for l in &lines[2..8] {
+            events.extend(a.on_line(l).events);
+        }
+        let card = s(of(&events, "approval.request")[0], "request_id");
+        let update = json!({"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "0b8f2c1e-5d6a-4c3b-9e7f-1a2b3c4d5e6f", "update": {"sessionUpdate": "current_mode_update", "currentModeId": "accept-edits"}}});
+        let st = a.on_line(&update.to_string());
+        let w = written(&st);
+        // through its `mode` option, which its conversation named when it opened
+        assert_eq!(w[0]["method"], "session/set_config_option");
+        assert_eq!(w[0]["params"], json!({"sessionId": "0b8f2c1e-5d6a-4c3b-9e7f-1a2b3c4d5e6f", "configId": "mode", "value": "default"}));
+        assert_eq!(w[1], json!({"jsonrpc": "2.0", "id": "1", "result": {"outcome": {"outcome": "cancelled"}}}));
+        assert_eq!(w[2]["method"], "session/cancel");
+        assert_eq!(s(of(&st.events, "prompt.expired")[0], "request_id"), card);
+        // a request that comes while it stops is cancelled, not shown
+        let ask = json!({"jsonrpc": "2.0", "id": "2", "method": "session/request_permission", "params": {"sessionId": "0b8f2c1e-5d6a-4c3b-9e7f-1a2b3c4d5e6f", "toolCall": {"toolCallId": "c2", "kind": "edit", "title": "write", "rawInput": {"TargetFile": "/w/proj/a.txt"}}, "options": [{"optionId": "allow", "kind": "allow_once", "name": "Allow"}, {"optionId": "deny", "kind": "reject_once", "name": "Deny"}]}});
+        let st = a.on_line(&ask.to_string());
+        assert!(of(&st.events, "approval.request").is_empty());
+        assert_eq!(written(&st)[0]["result"]["outcome"]["outcome"], "cancelled");
+    }
+
+    /// A `session/set_mode` switch (an agent that lists modes but has no `mode` option) answers nothing: its success is
+    /// the switch.
+    #[test]
+    fn a_set_mode_switch_is_confirmed_by_its_answer() {
+        let init = json!({"jsonrpc": "2.0", "id": 1, "result": {"protocolVersion": 1, "agentCapabilities": {}}}).to_string();
+        let new = json!({"jsonrpc": "2.0", "id": 2, "result": {"sessionId": "s1", "modes": {"currentModeId": "auto", "availableModes": [{"id": "default"}, {"id": "auto"}]}}}).to_string();
+        let mut a = Acp::new(row("agy"), "/w", None);
+        a.start();
+        a.on_line(&init);
+        a.on_input(Input::send("hi")).unwrap();
+        let w = written(&a.on_line(&new));
+        assert_eq!((s(&w[0], "method"), w.len()), ("session/set_mode".to_string(), 1));
+        let st = a.on_line(&json!({"jsonrpc": "2.0", "id": w[0]["id"], "result": {}}).to_string());
+        assert_eq!(of(&st.events, "session.note")[0]["ok"], true);
+        assert_eq!(written(&st)[0]["method"], "session/prompt");
+    }
+
+    /// Agents not held to a mode (OpenCode, Gemini CLI) are never switched, whatever they report.
+    #[test]
+    fn an_agent_with_no_asking_modes_is_never_switched() {
+        for id in ["opencode", "gemini"] {
+            let init = json!({"jsonrpc": "2.0", "id": 1, "result": {"protocolVersion": 1, "agentCapabilities": {}}}).to_string();
+            let new = json!({"jsonrpc": "2.0", "id": 2, "result": {"sessionId": "s1", "modes": {"currentModeId": "yolo"}, "configOptions": [{"id": "mode", "category": "mode", "currentValue": "yolo"}]}}).to_string();
+            let mut a = Acp::new(row(id), "/w", None);
+            a.start();
+            a.on_line(&init);
+            a.on_input(Input::send("hi")).unwrap();
+            assert_eq!(written(&a.on_line(&new)).iter().map(|x| s(x, "method")).collect::<Vec<_>>(), ["session/prompt"], "{id}");
+        }
+    }
+
+    /// Cursor's own asks, in the shapes its 2026.11.22 bundle builds them (`acp/…` `formatOperation` and its question
+    /// tool), since its account could not run a tool here: a command is its title between backticks and carries no
+    /// input, a change carries its diff, a delete only its title, and a question offers each answer as an `allow_once`
+    /// with "Skip" its `reject_once`. Not a recording.
+    fn cursor_ask(id: u64, tool: Value, options: Value) -> String {
+        json!({"jsonrpc": "2.0", "id": id, "method": "session/request_permission", "params": {"sessionId": "6c1d9a7e-2f4b-4e8a-b3c5-7d9e0f1a2b3c", "toolCall": tool, "options": options}}).to_string()
+    }
+
+    fn cursor_in_a_turn() -> Acp {
+        let lines = real("cursor-1-plan-limit.jsonl");
+        let mut a = Acp::new(row("cursor-agent"), "/w/proj", None);
+        a.start();
+        a.on_line(&lines[0]);
+        a.on_line(&lines[1]);
+        a.on_input(Input::send("go")).unwrap();
+        a
+    }
+
+    #[test]
+    fn cursors_asks_show_the_command_and_the_file_it_names() {
+        let allow = json!([{"optionId": "allow-once", "name": "Allow once", "kind": "allow_once"}, {"optionId": "allow-always", "name": "Allow always", "kind": "allow_always"}, {"optionId": "reject-once", "name": "Reject", "kind": "reject_once"}]);
+        let mut a = cursor_in_a_turn();
+        let shell = json!({"toolCallId": "t1", "title": "`git commit -m \\`wip\\``", "kind": "execute", "status": "pending", "content": [{"type": "content", "content": {"type": "text", "text": "Save the work"}}]});
+        let st = a.on_line(&cursor_ask(7, shell, allow.clone()));
+        let card = of(&st.events, "approval.request")[0];
+        assert_eq!((s(card, "title"), s(card, "command")), ("Run this command?".to_string(), "git commit -m `wip`".to_string()));
+        // "Allow always" would become a rule in Cursor's own settings: never offered
+        assert_eq!(card["choices"], json!(["deny", "once"]));
+        // the title is for the person: the dial gets no line from it and asks
+        assert_eq!(card["tool"], json!({"kind": "command", "cwd": "/w/proj"}));
+        let st = a.on_input(Input::Approve { request_id: "acp-7".into(), choice: "deny".into() }).unwrap();
+        assert_eq!(written(&st)[0]["result"], json!({"outcome": {"outcome": "selected", "optionId": "reject-once"}}));
+
+        let write = json!({"toolCallId": "t2", "title": "Edit `src/a.ts`", "kind": "edit", "status": "pending", "content": [{"type": "diff", "path": "/w/proj/src/a.ts", "oldText": "a", "newText": "b"}]});
+        let card = a.on_line(&cursor_ask(8, write, allow.clone())).events.remove(0);
+        assert_eq!(s(&card, "title"), "Allow Cursor to change src/a.ts?");
+        assert_eq!(card["tool"]["paths"], json!(["/w/proj/src/a.ts"]));
+        let delete = json!({"toolCallId": "t3", "title": "Delete `old.ts`", "kind": "edit", "status": "pending"});
+        let card = a.on_line(&cursor_ask(9, delete, allow)).events.remove(0);
+        assert_eq!(s(&card, "title"), "Delete `old.ts`");
+    }
+
+    #[test]
+    fn a_question_asked_as_a_permission_request_is_a_question_card() {
+        let mut a = cursor_in_a_turn();
+        let q = json!({"toolCallId": "ask_1_q0", "title": "Which file?", "kind": "other", "status": "pending", "content": [{"type": "content", "content": {"type": "text", "text": "Which greeting file should I change?"}}]});
+        let options = json!([{"optionId": "a", "name": "hello.txt", "kind": "allow_once"}, {"optionId": "b", "name": "hi.txt", "kind": "allow_once"}, {"optionId": "__ask_question_skip__", "name": "Skip", "kind": "reject_once"}]);
+        let st = a.on_line(&cursor_ask(11, q.clone(), options.clone()));
+        assert!(of(&st.events, "approval.request").is_empty(), "never \"Allow once\" for its first answer");
+        let card = of(&st.events, "clarify.request")[0];
+        assert_eq!(*card, json!({"event": "clarify.request", "request_id": "acp-11", "question": "Which greeting file should I change?", "choices": ["hello.txt", "hi.txt"]}));
+        // words that are none of its answers are refused and the card stays
+        assert!(a.on_input(Input::Clarify { request_id: "acp-11".into(), answer: json!("both") }).is_err());
+        assert!(a.on_input(Input::Approve { request_id: "acp-11".into(), choice: "once".into() }).is_err(), "a question has no Allow");
+        let st = a.on_input(Input::Clarify { request_id: "acp-11".into(), answer: json!("hi.txt") }).unwrap();
+        assert_eq!(written(&st)[0], json!({"jsonrpc": "2.0", "id": 11, "result": {"outcome": {"outcome": "selected", "optionId": "b"}}}));
+        // skipped (no answer): its own "Skip"
+        a.on_line(&cursor_ask(12, q, options));
+        let st = a.on_input(Input::Clarify { request_id: "acp-12".into(), answer: json!({"q1": null}) }).unwrap();
+        assert_eq!(written(&st)[0]["result"], json!({"outcome": {"outcome": "selected", "optionId": "__ask_question_skip__"}}));
+    }
+
+    /// A conversation being loaded replays its history before `session/load` answers (Cursor continues with it): a
+    /// message the person sent meanwhile waits, and none of the replay reaches the chat as that turn's reply.
+    #[test]
+    fn a_loaded_conversations_replay_is_not_the_waiting_turns_reply() {
+        let mut a = Acp::new(row("cursor-agent"), "/w/proj", Some("6c1d9a7e-2f4b-4e8a-b3c5-7d9e0f1a2b3c"));
+        a.start();
+        let w = written(&a.on_line(&real("cursor-1-plan-limit.jsonl")[0]));
+        assert_eq!(w[0]["method"], "session/load");
+        a.on_input(Input::send("next")).unwrap();
+        let replay = |u: Value| json!({"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "6c1d9a7e-2f4b-4e8a-b3c5-7d9e0f1a2b3c", "update": u}}).to_string();
+        let mut events = Vec::new();
+        events.extend(a.on_line(&replay(json!({"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "an old answer"}}))).events);
+        events.extend(a.on_line(&replay(json!({"sessionUpdate": "tool_call", "toolCallId": "old", "kind": "execute", "title": "`ls`", "rawInput": {"command": "ls"}}))).events);
+        assert!(events.is_empty(), "{events:?}");
+        let loaded = json!({"jsonrpc": "2.0", "id": w[0]["id"], "result": {"modes": {"currentModeId": "agent"}}}).to_string();
+        let st = a.on_line(&loaded);
+        assert_eq!(written(&st).iter().map(|x| s(x, "method")).collect::<Vec<_>>(), ["session/prompt"]);
+    }
+
+    /// Cursor's settings file, where Cursor reads it: `CURSOR_CONFIG_DIR`, else `$XDG_CONFIG_HOME/cursor`, else `~/.cursor`.
+    #[test]
+    fn cursors_settings_file_is_where_cursor_reads_it() {
+        let check = crate::acp_agents::CURSOR_SETTINGS;
+        let home = std::path::Path::new("/h");
+        let vars = |pairs: &'static [(&'static str, &'static str)]| move |k: &str| pairs.iter().find(|(n, _)| *n == k).map(|(_, v)| v.to_string());
+        assert_eq!(check.path(&vars(&[]), home), std::path::PathBuf::from("/h/.cursor/cli-config.json"));
+        assert_eq!(check.path(&vars(&[("XDG_CONFIG_HOME", "/x")]), home), std::path::PathBuf::from("/x/cursor/cli-config.json"));
+        assert_eq!(check.path(&vars(&[("XDG_CONFIG_HOME", "/x"), ("CURSOR_CONFIG_DIR", "/c")]), home), std::path::PathBuf::from("/c/cli-config.json"));
+        // a variable set to blanks is not set, as Cursor reads it
+        assert_eq!(check.path(&vars(&[("CURSOR_CONFIG_DIR", "  ")]), home), std::path::PathBuf::from("/h/.cursor/cli-config.json"));
+    }
+
+    /// Only Allowlist (or no file, or no `approvalMode`, which is Cursor's own default) starts a Cursor chat; Run
+    /// Everything, Auto-review, any other value, and a file manut cannot read as Cursor's settings refuse it.
+    #[test]
+    fn only_cursors_allowlist_starts_its_chat() {
+        let check = crate::acp_agents::CURSOR_SETTINGS;
+        for ok in [None, Some("{}"), Some(r#"{"approvalMode":"allowlist","permissions":{"allow":["Shell(ls)"],"deny":[]}}"#), Some(r#"{"version":1}"#)] {
+            assert!(check.keeps_asking(ok), "{ok:?}");
+        }
+        for bad in [r#"{"approvalMode":"unrestricted"}"#, r#"{"approvalMode":"auto-review"}"#, r#"{"approvalMode":"yolo"}"#, r#"{"approvalMode":true}"#, r#"{"approvalMode":null}"#, "[]", "not json", ""] {
+            assert!(!check.keeps_asking(Some(bad)), "{bad}");
+        }
+    }
+
+    #[test]
+    fn a_cursor_chat_does_not_start_when_its_settings_run_everything() {
+        let check = crate::acp_agents::CURSOR_SETTINGS;
+        let home = std::env::temp_dir().join(format!("manut-101a-settings-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(home.join(".cursor")).unwrap();
+        let h = home.to_string_lossy().into_owned();
+        let var = |k: &str| (k == "HOME" || k == "USERPROFILE").then(|| h.clone());
+        let check = [check];
+        let cwd = home.join("proj");
+        // no file yet: Cursor writes its default, Allowlist
+        assert_eq!(settings_allow(&check, "Cursor", &var, &cwd), Ok(()));
+        std::fs::write(home.join(".cursor/cli-config.json"), r#"{"approvalMode":"unrestricted"}"#).unwrap();
+        assert_eq!(settings_allow(&check, "Cursor", &var, &cwd), Err(no_asks("Cursor")));
+        std::fs::write(home.join(".cursor/cli-config.json"), r#"{"approvalMode":"allowlist"}"#).unwrap();
+        assert_eq!(settings_allow(&check, "Cursor", &var, &cwd), Ok(()));
+        // a folder where the file should be cannot be read as settings
+        std::fs::remove_file(home.join(".cursor/cli-config.json")).unwrap();
+        std::fs::create_dir(home.join(".cursor/cli-config.json")).unwrap();
+        assert_eq!(settings_allow(&check, "Cursor", &var, &cwd), Err(no_asks("Cursor")));
+        // no home folder at all
+        assert_eq!(settings_allow(&check, "Cursor", &|_: &str| None, &cwd), Err(no_asks("Cursor")));
+        let _ = std::fs::remove_dir_all(&home);
+        assert_eq!(no_asks("Cursor"), "Cursor did not start because its own settings let it run commands and change files without asking first.");
+    }
+
+    // ---- item 101b: Grok as a chat -----------------------------------------------------------------------------------
+
+    /// Grok Build 1.0.93 up to its signed-out `session/new` (`grok-signed-out.jsonl`), then a conversation opened as its
+    /// documentation describes `session/new`'s answer (`configOptions` for its model and effort; `modes` as its own session
+    /// logs name them), since it could not be signed in here. Not a recording past the first file.
+    fn grok_opened(mode: &str) -> Acp {
+        let mut a = Acp::new(row("grok"), "/w/proj", None);
+        a.start();
+        a.on_line(&real("grok-signed-out.jsonl")[0]);
+        let new = json!({"jsonrpc": "2.0", "id": 2, "result": {"sessionId": "g1", "modes": {"currentModeId": mode, "availableModes": [{"id": "default", "name": "Default"}, {"id": "plan", "name": "Plan"}]}, "configOptions": [{"id": "model", "category": "model", "type": "select", "currentValue": "grok-4.6", "options": [{"value": "grok-4.6", "name": "Grok 4.6"}]}, {"id": "reasoning_effort", "category": "thought_level", "type": "select", "currentValue": "high", "options": [{"value": "high", "name": "High"}]}]}});
+        a.on_line(&new.to_string());
+        a
+    }
+
+    fn grok_update(u: Value) -> String {
+        json!({"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "g1", "update": u}}).to_string()
+    }
+
+    /// Grok opens a conversation it can load and resume, and its answer to `initialize` is read as any agent's.
+    #[test]
+    fn real_grok_initialize_offers_resume_and_takes_no_client_files() {
+        let mut a = Acp::new(row("grok"), "/w/proj", Some("01a218bc-0000-7000-8000-000000000003"));
+        let st = a.start();
+        assert_eq!(written(&st)[0]["params"]["clientCapabilities"], json!({"fs": {"readTextFile": false, "writeTextFile": false}, "terminal": false}));
+        let w = written(&a.on_line(&real("grok-signed-out.jsonl")[0]));
+        assert_eq!(w[0]["method"], "session/resume");
+        // never `_meta.yoloMode`, which would turn its asks off for the conversation
+        assert_eq!(w[0]["params"].get("_meta"), None);
+    }
+
+    /// Grok's plan mode is not one in which it always asks first: reported while it works, the turn stops, its card
+    /// expires and `default` is set through `session/set_mode` (Grok has no `mode` option), and the chat says so once.
+    #[test]
+    fn grok_in_plan_mode_is_set_back_to_default() {
+        let mut a = grok_opened("default");
+        let st = a.on_input(Input::send("hi")).unwrap();
+        assert_eq!(written(&st)[0]["method"], "session/prompt");
+        let ask = json!({"jsonrpc": "2.0", "id": 5, "method": "session/request_permission", "params": {"sessionId": "g1", "toolCall": {"toolCallId": "t1", "title": "Run a terminal command", "rawInput": {"command": "ls"}, "_meta": {"x.ai/tool": {"name": "bash"}}}, "options": [{"optionId": "allow_once", "kind": "allow_once", "name": "Allow once"}, {"optionId": "allow_always", "kind": "allow_always", "name": "Always allow"}, {"optionId": "reject_once", "kind": "reject_once", "name": "Reject once"}]}});
+        assert_eq!(of(&a.on_line(&ask.to_string()).events, "approval.request").len(), 1);
+        let st = a.on_line(&grok_update(json!({"sessionUpdate": "current_mode_update", "currentModeId": "plan"})));
+        let w = written(&st);
+        assert_eq!(w[0]["method"], "session/set_mode");
+        assert_eq!(w[0]["params"], json!({"sessionId": "g1", "modeId": "default"}));
+        assert_eq!(w[1]["result"]["outcome"]["outcome"], "cancelled");
+        assert_eq!(w[2]["method"], "session/cancel");
+        assert_eq!(of(&st.events, "prompt.expired").len(), 1);
+        let st = a.on_line(&json!({"jsonrpc": "2.0", "id": w[0]["id"], "result": {}}).to_string());
+        assert_eq!(*of(&st.events, "session.note")[0], json!({"event": "session.note", "kind": "asks_mode", "agent": "Grok", "mode": "plan", "to": "default", "ok": true}));
+        // opened in plan, the first message waits for the switch
+        let mut a = grok_opened("plan");
+        let st = a.on_input(Input::send("hi")).unwrap();
+        assert!(written(&st).is_empty());
+    }
+
+    /// Grok's own always-approve and auto-review are switched by a message that starts with its command: none is sent,
+    /// whoever wrote it, and the chat's command list never offers one. Its other commands go as they are.
+    #[test]
+    fn grok_never_gets_the_command_that_turns_its_asks_off() {
+        let mut a = grok_opened("default");
+        for text in ["/always-approve", "/always-approve on", "  /Always-Approve on", "/auto-review", "/auto", "/yolo", "/auto\nthen go"] {
+            let e = a.on_input(Input::send(text)).unwrap_err();
+            assert!(e.starts_with("Grok's /") && e.ends_with("turns off its asks, so Manut AI does not send it. Write your message without it."), "{text}: {e}");
+            assert!(!a.in_turn(), "{text}");
+        }
+        assert_eq!(no_asks_command("Grok", "always-approve"), "Grok's /always-approve turns off its asks, so Manut AI does not send it. Write your message without it.");
+        // not a command, or another command: sent
+        for text in ["/autonomous goal", "please /always-approve", "/compact", "always-approve"] {
+            let mut a = grok_opened("default");
+            let st = a.on_input(Input::send(text)).unwrap();
+            assert_eq!(written(&st)[0]["params"]["prompt"][0]["text"], text);
+        }
+        // the commands it lists in its answer to `initialize` (real), offered as an update: always-approve is left out
+        let listed = serde_json::from_str::<Value>(&real("grok-signed-out.jsonl")[0]).unwrap()["result"]["_meta"]["availableCommands"].clone();
+        let st = a.on_line(&grok_update(json!({"sessionUpdate": "available_commands_update", "availableCommands": listed})));
+        let names: Vec<String> = of(&st.events, "session.commands")[0]["commands"].as_array().unwrap().iter().map(|c| s(c, "name")).collect();
+        assert_eq!(names, ["compact", "context", "session-info", "deep-research", "workflow", "goal"]);
+        // another agent's commands are its own
+        assert_eq!(ask_switch(row("agy").ask_switches, "/always-approve"), None);
+    }
+
+    /// Grok's notice that always-approve or auto-review came on for this conversation (`_x.ai/yolo_mode_changed`, read
+    /// from its binary): the turn stops, its card expires, the chat says so, and nothing more is sent. Off, another
+    /// conversation's, or an agent not held to a mode: nothing happens.
+    #[test]
+    fn grok_turning_on_always_approve_ends_what_is_sent_to_it() {
+        let notice = |p: Value| json!({"jsonrpc": "2.0", "method": "_x.ai/yolo_mode_changed", "params": p}).to_string();
+        let mut a = grok_opened("default");
+        a.on_input(Input::send("hi")).unwrap();
+        for quiet in [json!({"sessionId": "g1", "yolo_mode": false}), json!({"sessionId": "other", "yolo_mode": true}), json!({"sessionId": "g1"})] {
+            let st = a.on_line(&notice(quiet.clone()));
+            assert!(st.events.is_empty() && st.write.is_empty(), "{quiet}");
+        }
+        let ask = json!({"jsonrpc": "2.0", "id": 6, "method": "session/request_permission", "params": {"sessionId": "g1", "toolCall": {"toolCallId": "t1", "kind": "execute", "title": "Run a terminal command", "rawInput": {"command": "ls"}}, "options": [{"optionId": "allow_once", "kind": "allow_once", "name": "Allow once"}, {"optionId": "reject_once", "kind": "reject_once", "name": "Reject once"}]}});
+        a.on_line(&ask.to_string());
+        let st = a.on_line(&notice(json!({"sessionId": "g1", "yolo_mode": true})));
+        let w = written(&st);
+        assert_eq!(w[0], json!({"jsonrpc": "2.0", "id": 6, "result": {"outcome": {"outcome": "cancelled"}}}));
+        assert_eq!(w[1]["method"], "session/cancel");
+        assert_eq!(of(&st.events, "session.note")[0]["ok"], false);
+        assert_eq!(of(&st.events, "session.note")[0]["mode"], "always-approve");
+        // the prompt answers `cancelled`; then nothing more is sent
+        let prompt = json!({"jsonrpc": "2.0", "id": 3, "result": {"stopReason": "cancelled"}}).to_string();
+        assert_eq!(s(of(&a.on_line(&prompt).events, "turn.end")[0], "outcome"), "interrupted");
+        assert!(a.on_input(Input::send("again")).unwrap_err().starts_with("Grok stayed in its always-approve mode"));
+        // auto-review before any message: the next message is refused
+        let mut a = grok_opened("default");
+        a.on_line(&json!({"jsonrpc": "2.0", "method": "x.ai/yolo_mode_changed", "params": {"auto_mode": true}}).to_string());
+        assert!(a.on_input(Input::send("hi")).unwrap_err().starts_with("Grok stayed in its auto mode"));
+        // OpenCode is not held to a mode: the same notice changes nothing
+        let mut o = Acp::new(opencode(), "/w", None);
+        o.start();
+        assert!(o.on_line(&notice(json!({"yolo_mode": true}))).events.is_empty());
+    }
+
+    /// A Grok call names its tool in `_meta["x.ai/tool"]`, not `kind` (as GoSpark reads it): the card says what runs and
+    /// the step is a command, while Kit's dial, which reads ACP's own `kind` alone, gets `other` and asks.
+    #[test]
+    fn a_grok_call_shows_its_command_from_its_own_tool_name() {
+        let mut a = grok_opened("default");
+        a.on_input(Input::send("list")).unwrap();
+        let call = json!({"sessionUpdate": "tool_call", "toolCallId": "t1", "title": "Run a terminal command", "status": "pending", "rawInput": {"command": "ls -la"}, "_meta": {"x.ai/tool": {"name": "bash"}}});
+        let st = a.on_line(&grok_update(call));
+        assert_eq!((s(of(&st.events, "tool.start")[0], "name"), s(of(&st.events, "tool.start")[0], "detail")), ("terminal".to_string(), "ls -la".to_string()));
+        let ask = json!({"jsonrpc": "2.0", "id": 9, "method": "session/request_permission", "params": {"sessionId": "g1", "toolCall": {"toolCallId": "t1", "title": "Run a terminal command", "rawInput": {"command": "ls -la"}, "_meta": {"x.ai/tool": {"name": "bash"}}}, "options": [{"optionId": "allow_once", "kind": "allow_once", "name": "Allow once"}, {"optionId": "enable_always_approve", "kind": "allow_always", "name": "Enable always-approve mode"}, {"optionId": "reject_once", "kind": "reject_once", "name": "Reject once"}]}});
+        let st = a.on_line(&ask.to_string());
+        let card = of(&st.events, "approval.request")[0];
+        assert_eq!((s(card, "title"), s(card, "command")), ("Run this command?".to_string(), "ls -la".to_string()));
+        // "Enable always-approve mode" (an `allow_always`) is never offered
+        assert_eq!(card["choices"], json!(["deny", "once"]));
+        assert_eq!(card["tool"], json!({"kind": "other", "cwd": "/w/proj"}));
+        // a file it changes, named by its kind in `_meta`
+        let edit = json!({"toolCallId": "t2", "title": "Edit file", "rawInput": {"path": "/w/proj/src/a.ts"}, "_meta": {"x.ai/tool": {"name": "search_replace"}}});
+        assert_eq!(Acp::call_kind(&edit), "edit");
+        assert_eq!(Acp::call_kind(&json!({"kind": "read", "_meta": {"x.ai/tool": {"name": "bash"}}})), "read", "ACP's own kind first");
+        assert_eq!(Acp::call_kind(&json!({"_meta": {"x.ai/tool": {"kind": "fetch", "name": "bash"}}})), "fetch");
+        assert_eq!(Acp::call_kind(&json!({"_meta": {"x.ai/tool": {"name": "spawn_subagent"}}})), "");
+        let st = a.on_line(&json!({"jsonrpc": "2.0", "id": 10, "method": "session/request_permission", "params": {"sessionId": "g1", "toolCall": edit, "options": [{"optionId": "allow_once", "kind": "allow_once", "name": "Allow once"}, {"optionId": "reject_once", "kind": "reject_once", "name": "Reject once"}]}}).to_string());
+        assert_eq!(s(of(&st.events, "approval.request")[0], "title"), "Allow Grok to change src/a.ts?");
+    }
+
+    /// What Grok's settings say about its asks, read as Grok reads each file: only `ask` or `default`, a `yolo` of false,
+    /// and a Claude `defaultMode` of `default` or `plan` leave it asking.
+    #[test]
+    fn only_grok_settings_that_ask_start_its_chat() {
+        let toml = &GROK_SETTINGS[0];
+        for ok in [None, Some(""), Some("[ui]\npermission_mode = \"ask\"\nyolo = false\n"), Some("# permission_mode = \"always-approve\"\n[ui]\npermission_mode = \"default\" # asks\n"), Some("[models]\ndefault = \"grok-4.6\"\n[ui]\nmax_thoughts_width = 120\n"), Some("[ui]\napproval_mode = \"ask\"\n")] {
+            assert!(toml.keeps_asking(ok), "{ok:?}");
+        }
+        for bad in [
+            "[ui]\npermission_mode = \"always-approve\"\n",
+            "[ui]\npermission_mode = \"auto\"\n",
+            "[ui]\nyolo = true\n",
+            "[ui]\napproval_mode = \"always-approve\"\n",
+            "ui.permission_mode = \"always-approve\"\n",
+            "ui = { yolo = true }\n",
+            "ui = \"always-approve\"\n",
+            "[ui]\npermission_mode = 1\n",
+            "[ui\npermission_mode = \"ask\"\n",
+        ] {
+            assert!(!toml.keeps_asking(Some(bad)), "{bad}");
+        }
+        let claude = &GROK_SETTINGS[7];
+        for ok in [Some("{}"), Some(r#"{"permissions":{"defaultMode":"default","allow":["Bash(ls)"]}}"#), Some(r#"{"defaultMode":"plan"}"#), Some(r#"{"permissions":{}}"#)] {
+            assert!(claude.keeps_asking(ok), "{ok:?}");
+        }
+        for bad in [r#"{"permissions":{"defaultMode":"bypassPermissions"}}"#, r#"{"permissions":{"defaultMode":"acceptEdits"}}"#, r#"{"defaultMode":"auto"}"#, r#"{"permissions":{"defaultMode":"dontAsk"}}"#, r#"{"permissions":"all"}"#, "not json"] {
+            assert!(!claude.keeps_asking(Some(bad)), "{bad}");
+        }
+    }
+
+    /// Where Grok reads each file: `$GROK_HOME` (an account's home) else `~/.grok`, the fleet's `/etc/grok`, the overlay a
+    /// variable names, Claude's own and every folder's from the chat's up.
+    #[cfg(unix)]
+    #[test]
+    fn grok_settings_are_read_where_grok_reads_them() {
+        let vars = |pairs: &'static [(&'static str, &'static str)]| move |k: &str| pairs.iter().find(|(n, _)| *n == k).map(|(_, v)| v.to_string());
+        let home = std::path::Path::new("/h");
+        let cwd = std::path::Path::new("/w/proj");
+        let all = |v: &dyn Fn(&str) -> Option<String>| GROK_SETTINGS.iter().flat_map(|c| c.paths(v, home, cwd)).map(|p| p.to_string_lossy().into_owned()).collect::<Vec<_>>();
+        assert_eq!(
+            all(&vars(&[])),
+            [
+                "/h/.grok/config.toml",
+                "/h/.grok/managed_config.toml",
+                "/h/.grok/requirements.toml",
+                "/etc/grok/managed_config.toml",
+                "/etc/grok/requirements.toml",
+                "/h/.claude/settings.json",
+                "/h/.claude/settings.local.json",
+                "/w/proj/.claude/settings.json",
+                "/w/.claude/settings.json",
+                "/.claude/settings.json",
+                "/w/proj/.claude/settings.local.json",
+                "/w/.claude/settings.local.json",
+                "/.claude/settings.local.json",
+                "/Library/Application Support/ClaudeCode/managed-settings.json",
+                "/etc/claude-code/managed-settings.json",
+            ]
+        );
+        let moved = all(&vars(&[("GROK_HOME", "/acct/grok"), ("GROK_CONFIG_PATH", "/o/over.json")]));
+        assert_eq!(moved[..4], ["/acct/grok/config.toml", "/acct/grok/managed_config.toml", "/acct/grok/requirements.toml", "/etc/grok/managed_config.toml"]);
+        assert!(moved.contains(&"/o/over.json".to_string()));
+    }
+
+    /// A Grok chat starts only while every file it reads leaves it asking: its own `config.toml` in its home, the overlay
+    /// variables (inline JSON, or a file read by its name), and a project's own Claude settings in any folder above.
+    #[cfg(unix)]
+    #[test]
+    fn a_grok_chat_does_not_start_while_any_of_its_settings_skip_asks() {
+        let base = std::env::temp_dir().join(format!("manut-101b-grok-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(base.join("g")).unwrap();
+        std::fs::create_dir_all(base.join("repo/app/.claude")).unwrap();
+        let base = base.canonicalize().unwrap();
+        let cwd = base.join("repo/app");
+        let h = base.to_string_lossy().into_owned();
+        let gh = base.join("g").to_string_lossy().into_owned();
+        let extra: std::cell::RefCell<Vec<(String, String)>> = Default::default();
+        let var = |k: &str| match k {
+            "HOME" | "USERPROFILE" => Some(h.clone()),
+            "GROK_HOME" => Some(gh.clone()),
+            _ => extra.borrow().iter().find(|(n, _)| n == k).map(|(_, v)| v.clone()),
+        };
+        let allow = || settings_allow(&GROK_SETTINGS, "Grok", &var, &cwd);
+        assert_eq!(allow(), Ok(()), "no settings at all: Grok's own default, ask");
+        // the owner's own file says always-approve today
+        std::fs::write(base.join("g/config.toml"), "[ui]\nyolo = false\npermission_mode = \"always-approve\"\n").unwrap();
+        assert_eq!(allow(), Err(no_asks("Grok")));
+        std::fs::write(base.join("g/config.toml"), "[ui]\nyolo = false\npermission_mode = \"ask\"\n").unwrap();
+        assert_eq!(allow(), Ok(()));
+        // a repository's own Claude settings, two folders up from the chat's
+        std::fs::create_dir_all(base.join("repo/.claude")).unwrap();
+        std::fs::write(base.join("repo/.claude/settings.json"), r#"{"permissions":{"defaultMode":"bypassPermissions"}}"#).unwrap();
+        assert_eq!(allow(), Err(no_asks("Grok")));
+        std::fs::write(base.join("repo/.claude/settings.json"), r#"{"permissions":{"defaultMode":"plan"}}"#).unwrap();
+        std::fs::write(base.join("repo/app/.claude/settings.local.json"), r#"{"defaultMode":"acceptEdits"}"#).unwrap();
+        assert_eq!(allow(), Err(no_asks("Grok")));
+        std::fs::remove_file(base.join("repo/app/.claude/settings.local.json")).unwrap();
+        assert_eq!(allow(), Ok(()));
+        // the overlays: inline JSON, then a file, JSON or TOML by its name
+        extra.borrow_mut().push(("GROK_CONFIG".into(), r#"{"ui":{"permission_mode":"always-approve"}}"#.into()));
+        assert_eq!(allow(), Err(no_asks("Grok")));
+        extra.borrow_mut().clear();
+        extra.borrow_mut().push(("GROK_CONFIG".into(), r#"{"models":{"default_reasoning_effort":"high"}}"#.into()));
+        assert_eq!(allow(), Ok(()));
+        std::fs::write(base.join("over.json"), r#"{"ui":{"yolo":true}}"#).unwrap();
+        std::fs::write(base.join("over.toml"), "[ui]\nyolo = true\n").unwrap();
+        for f in ["over.json", "over.toml"] {
+            extra.borrow_mut().push(("GROK_CONFIG_PATH".into(), base.join(f).to_string_lossy().into_owned()));
+            assert_eq!(allow(), Err(no_asks("Grok")), "{f}");
+            extra.borrow_mut().pop();
+        }
+        // a JSON overlay named `.json` is not read as TOML, so its asking value starts the chat
+        std::fs::write(base.join("over.json"), r#"{"ui":{"permission_mode":"ask"}}"#).unwrap();
+        extra.borrow_mut().push(("GROK_CONFIG_PATH".into(), base.join("over.json").to_string_lossy().into_owned()));
+        assert_eq!(allow(), Ok(()));
+        // a settings file that is a folder cannot be read as settings
+        std::fs::create_dir(base.join("g/managed_config.toml")).unwrap();
+        assert_eq!(allow(), Err(no_asks("Grok")));
+        let _ = std::fs::remove_dir_all(&base);
     }
 }

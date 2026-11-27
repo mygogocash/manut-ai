@@ -53,6 +53,8 @@ import { TermShareCards } from "./TermShareCard";
 import { LanePane } from "../code/LanePane";
 import { LaneReview } from "../code/Review";
 import { isLaneChat } from "../code/laneStore";
+import { HelpersSwitch } from "../jobs/HelpersSwitch";
+import { MayReach } from "../jobs/MayReach";
 import { chatPullOf, useChatPullsVersion, type ChatPull } from "../code/chatPull";
 import { usePullsVersion } from "../tasks/pulls";
 import { showBoardPull } from "../tasks/state";
@@ -243,9 +245,17 @@ function ChatPane({ rec, chatKey }: { rec: SessionRec; chatKey: string }) {
             {/* the chat box's model with its effort, and how much the agent may do before asking (item 80) */}
             <SessionModel rec={rec} options={ss.models[rec.id]} note={ss.notes[rec.id]} />
             {(modesOf(rec.agent).length > 0 || takesFiles) && <SessionApproval rec={rec} />}
+            {/* Helpers, beside the approval level: only in a lane's chat with a folder of its own (item 102e) */}
+            <HelpersSwitch rec={rec} />
           </>
         }
-        foot={<Context rec={rec} />}
+        foot={
+          <>
+            <Context rec={rec} />
+            {/* the chats this chat's agent may ask to reach, each only after a card (item 102k) */}
+            <MayReach rec={rec} chatKey={chatKey} />
+          </>
+        }
         // a note or another chat's context made under another account of this agent is not sent here (item 97)
         scope={chatScope(chatKey, null, rec, null)}
       />
@@ -491,14 +501,16 @@ function SessionApproval({ rec }: { rec: SessionRec }) {
   // a workflow's lane asks before every change, whatever the project's dial says (sessions.ts `kitAsk`): its box says that level
   // and why, and offers no dial, since the project's would not reach it
   const careful = !!rec.workflow;
+  // a helper lane runs in its agent's Ask mode, set by the job: its box says so and offers no other (item 102h, rule R3)
+  const helper = !!rec.helperOf;
   return (
     <ApprovalMenu
-      modes={modes}
+      modes={helper ? [] : modes}
       current={cur}
       own={own ? { words: own, from: t("ctl.own.from", { agent: agentDef(rec.agent).label }) } : null}
-      live={live || !modes.length}
+      live={!helper && (live || !modes.length)}
       onPick={(m) => void getSessions().setMode(rec.id, m)}
-      label={t(`kit.level.${careful ? DEFAULT_KIT_LEVEL : project.level}`)}
+      label={helper ? t("helpers.run.modeSet") : t(`kit.level.${careful ? DEFAULT_KIT_LEVEL : project.level}`)}
       foot={rec.agent === "codex" ? t("ctl.modeFoot") : undefined}
       testId={modes.length ? "session-mode" : "session-approval"}
       extra={
@@ -725,7 +737,8 @@ function SplitPane({ rec }: { rec: SessionRec }) {
 export { groupModels } from "../chat/box/ModelMenu";
 
 /** The session's model in the chat box (item 80): the shared model menu (chat/box/ModelMenu.tsx) with what the agent
- *  itself offers and its own reasoning levels. A pick made while a turn runs waits for the next turn, which says so. */
+ *  itself offers and its own reasoning levels, on the effort card (item 132). A pick made while a turn runs waits for the
+ *  next turn, which says so. */
 function SessionModel({ rec, options, note }: { rec: SessionRec; options: ModelOption[] | undefined; note: string | undefined }) {
   const agentLive = useSessions().live[rec.id];
   const efforts = agentLive?.efforts ?? [];
@@ -745,7 +758,9 @@ function SessionModel({ rec, options, note }: { rec: SessionRec; options: ModelO
       canPick={live}
       efforts={efforts}
       effort={effort}
-      onEffort={(v) => void getSessions().setEffort(rec.id, v)}
+      onEffort={(v) => getSessions().setEffort(rec.id, v)}
+      // the effort card's one-click Ultrathink row is Claude Code's keyword, so only its chats offer it (item 132)
+      ultrathink={rec.agent === "claude"}
       empty={live ? tr("ss.loadingModels") : tr("ss.agentNotRunning", { agent: label })}
       badge={
         // a pick made while a turn ran: the agent takes it from the next turn, whose start confirms it

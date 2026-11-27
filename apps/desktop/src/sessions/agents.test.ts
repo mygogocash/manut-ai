@@ -31,7 +31,7 @@ describe("session agents", () => {
     for (const a of AGENTS) expect(a.program).toBe(a.id);
   });
 
-  it("opens claude, codex, omo, dsh, pi, omp, opencode and the six more ACP agents as chats, omh as a Hermes chat, grok as a terminal (same as the Rust list)", () => {
+  it("opens claude, codex, omo, dsh, pi, omp, grok, opencode and the generic ACP agents as chats, omh as a Hermes chat (same as the Rust list)", () => {
     expect(AGENTS.map((a) => [a.id, a.mode])).toEqual([
       ["claude", "chat"],
       ["codex", "chat"],
@@ -40,7 +40,7 @@ describe("session agents", () => {
       ["omh", "hermes"],
       ["pi", "chat"],
       ["omp", "chat"],
-      ["grok", "terminal"],
+      ["grok", "chat"],
       ["opencode", "chat"],
     ]);
     // the Terminal toggle says whether the terminal view continues the conversation or starts fresh
@@ -239,7 +239,7 @@ describe("mock session host", () => {
     // the generic ACP agents come as the shell's rows, with nothing of theirs kept in this app (Cursor and Antigravity
     // since item 74)
     expect(list.filter((a) => a.acp).map((a) => a.acp!.id)).toEqual(["gemini", "qwen", "kimi", "copilot", "cline", "cursor-agent", "agy"]);
-    expect(list.map((a) => a.mode)).toEqual(["chat", "chat", "chat", "chat", "hermes", "chat", "chat", "terminal", "chat", "chat", "chat", "chat", "chat", "chat", "chat", "chat"]);
+    expect(list.map((a) => a.mode)).toEqual(["chat", "chat", "chat", "chat", "hermes", "chat", "chat", "chat", "chat", "chat", "chat", "chat", "chat", "chat", "chat", "chat"]);
   });
 });
 

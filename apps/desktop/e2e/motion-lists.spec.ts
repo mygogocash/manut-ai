@@ -8,6 +8,7 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { usePlatform } from "./term-find-helpers";
 import { chatOpen } from "./start";
+import { ARRIVING_MS } from "../src/lib/firstPaint";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 async function mock(op: string, params: Record<string, unknown> = {}): Promise<any> {
@@ -31,8 +32,15 @@ const DIR = process.env.LIST_SHOTS || "";
 
 type Moment = "start" | "middle" | "end";
 
-/** The finite moves running under `root` now (loops such as a working dot are not arrivals). */
-const arrivals = (root: Locator) => root.evaluate((el) => el.getAnimations({ subtree: true }).filter((a) => a.playState === "running" && a.effect?.getComputedTiming().iterations !== Infinity).map((a) => (a as CSSAnimation).animationName ?? (a as CSSTransition).transitionProperty ?? "?").length);
+/** The finite keyframe moves running under `root` now. Loops such as a working dot are not arrivals, and neither is a
+ *  CSSTransition: every arrival here is a keyframe animation (.mo-rise, .mo-fade, .arriving), while a transition is a
+ *  control answering a click or a focus (the mode button's 150ms colour, the send button's opacity). Counting those made
+ *  this fail on a loaded runner, where a click's transition was still running when the count was taken. */
+const arrivals = (root: Locator) =>
+  root.evaluate(
+    (el) =>
+      el.getAnimations({ subtree: true }).filter((a) => a instanceof CSSAnimation && a.playState === "running" && a.effect?.getComputedTiming().iterations !== Infinity).length,
+  );
 
 /** Hold every finite move under `root` at `at` of its own length, delay included. */
 const hold = (root: Locator, at: Moment) =>
@@ -46,14 +54,47 @@ const hold = (root: Locator, at: Moment) =>
     return anims.length;
   }, at);
 
-const release = (root: Locator) => root.evaluate((el) => el.getAnimations({ subtree: true }).filter((a) => a.effect?.getComputedTiming().iterations !== Infinity).forEach((a) => a.finish()));
+const release = (root: Locator) =>
+  root.evaluate((el) => {
+    el.getAnimations({ subtree: true }).filter((a) => a.effect?.getComputedTiming().iterations !== Infinity).forEach((a) => a.finish());
+    // the driver's kept timers: the classes that ended the arrival
+    const w = window as unknown as { __held?: (() => void)[] };
+    for (const run of w.__held?.splice(0) ?? []) run();
+  });
+
+/** Make a frame the same on a fast Mac and a loaded runner, by taking both clocks that end an arrival out of the
+ *  runner's hands until the test lets go:
+ *  - the animation clock (Chrome DevTools Animation.setPlaybackRate 0), so an arrival is created at time 0 and waits
+ *    there until `hold` sets its time (otherwise a slow runner lets a short Rise finish before `hold` gets to it); and
+ *  - the driver's own timer (firstPaint.ts removes `mo-rise`, `mo-fade` and `arriving` ARRIVING_MS after an arrival, in
+ *    wall-clock time, whatever the animation clock says), which is kept and run by `release` instead.
+ *  `now` is for a page that is already open; `onLoad` is for one about to be opened. */
+async function freezeClock(page: Page, when: "now" | "onLoad" = "now") {
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("Animation.enable");
+  await cdp.send("Animation.setPlaybackRate", { playbackRate: 0 });
+  const keep = (ms: number) => {
+    const w = window as unknown as { __held: (() => void)[]; setTimeout: typeof setTimeout };
+    w.__held = [];
+    const real = w.setTimeout.bind(window);
+    w.setTimeout = ((fn: TimerHandler, delay?: number, ...args: unknown[]) => {
+      if (delay === ms && typeof fn === "function") {
+        w.__held.push(() => fn(...args));
+        return 0;
+      }
+      return real(fn, delay, ...args);
+    }) as typeof setTimeout;
+  };
+  if (when === "onLoad") await page.addInitScript(keep, ARRIVING_MS);
+  else await page.evaluate(keep, ARRIVING_MS);
+}
 
 const opacity = (row: Locator) => row.evaluate((el) => Number(getComputedStyle(el).opacity));
 
 const still = (page: Page) =>
   page.waitForFunction(() => !document.getAnimations().some((a) => a.playState === "running" && a.effect?.getComputedTiming().iterations !== Infinity), undefined, { polling: "raf" });
 
-async function begin(page: Page, theme: "dark" | "light", reduced: boolean, seed?: () => Promise<void>) {
+async function begin(page: Page, theme: "dark" | "light", reduced: boolean, seed?: () => Promise<void>, frozen = false) {
   await mock("mock.reset");
   await seed?.();
   if (DIR) mkdirSync(DIR, { recursive: true });
@@ -63,6 +104,7 @@ async function begin(page: Page, theme: "dark" | "light", reduced: boolean, seed
   await page.goto("/");
   await chatOpen(page);
   await still(page);
+  if (frozen) await freezeClock(page);
 }
 
 test.describe("lists arrive once", () => {
@@ -70,7 +112,7 @@ test.describe("lists arrive once", () => {
 
   for (const theme of ["light", "dark"] as const) {
     test(`Team's rows rise in order the first time, and the header stays still (${theme})`, async ({ page }) => {
-      await begin(page, theme, false);
+      await begin(page, theme, false, undefined, true);
       await page.getByTestId("menu-team").click();
       const body = page.locator('[data-testid="page-team"] .mpage-body');
       const rows = page.locator('[data-testid="page-team"] li.tli');
@@ -160,7 +202,7 @@ test.describe("lists arrive once", () => {
   test("an ask fades where it stands: Home's and Needs you's rows never move", async ({ page }) => {
     await begin(page, "light", false, async () => {
       await mock("mock.ask", { bot: "friren", kind: "approval" });
-    });
+    }, true);
     await page.getByTestId("menu-new").click();
     await expect(page.getByTestId("home-need").first()).toBeVisible();
     const home = await frames(page, "page-home", '[data-testid="home-need"]', "home-asks-light");
@@ -179,7 +221,7 @@ test.describe("lists arrive once", () => {
   test("Home with nothing waiting, and History, rise in order", async ({ page }) => {
     await begin(page, "light", false, async () => {
       await mock("mock.threads", { bot: "kami", threads: [{ title: "Late parcels" }, { title: "The 12.12 teaser" }, { title: "Check the books" }] });
-    });
+    }, true);
     await page.getByTestId("menu-new").click();
     await expect(page.getByTestId("page-home")).toBeVisible();
     const home = await frames(page, "page-home", ".rows > li", "home-none-light");
@@ -199,6 +241,7 @@ test.describe("lists arrive once", () => {
     await mock("mock.threads", { bot: "kami", threads: [{ title: "Late parcels" }, { title: "The 12.12 teaser" }, { title: "Check the books" }] });
     await page.emulateMedia({ reducedMotion: "no-preference" });
     await usePlatform(page);
+    await freezeClock(page, "onLoad");
     await page.goto("/");
     await page.locator(".sb-recent .rec-li.mo-rise").first().waitFor({ state: "attached" });
     const f = await frames(page, "sidebar", ".sb-recent .rec-li", "recent-light");
@@ -210,7 +253,7 @@ test.describe("lists arrive once", () => {
   test("Needs you in dark", async ({ page }) => {
     await begin(page, "dark", false, async () => {
       await mock("mock.ask", { bot: "friren", kind: "approval" });
-    });
+    }, true);
     await page.getByTestId("menu-needs").click();
     await expect(page.getByTestId("needs-row").first()).toBeVisible();
     await frames(page, "page-needs", "li[data-ask]", "needs-dark");

@@ -66,7 +66,9 @@ export function AgentBoxTools({ bot, thread, box }: { bot: string; thread?: stri
         canPick={box.models.length > 0}
         efforts={box.efforts}
         effort={box.effort}
-        onEffort={(v) => void choose({ effort: v })}
+        onEffort={(v) => choose({ effort: v })}
+        // Ultrathink is Claude Code's keyword: the card offers its row when that is the agent answering (item 132)
+        ultrathink={box.agent === "claude"}
         empty={box.agent ? t("box.modelsLater", { agent: box.label }) : t("box.noModels")}
         notes={
           note ? (

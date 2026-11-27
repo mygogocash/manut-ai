@@ -34,6 +34,8 @@ import { useLanePulls, usePullsVersion, type LanePull } from "../tasks/pulls";
 import { asLanePull, chatPullOf, useChatPullsVersion } from "./chatPull";
 import { MoreButton, settledWhy, useRowMenu } from "../sidebar/RowMenu";
 import { MenuIcon } from "../ui/MenuIcon";
+import { Icon } from "../ui/icons";
+import "../jobs/ask.css";
 import { AgentMark } from "../sessions/AgentMark";
 import { arrange, sessionRowKey, settleDue, settleRows, untilWord, useRowMarks, type RowMark, type RowMarks, type RowPlace } from "../sidebar/rows";
 import { useInbox } from "../sidebar/inbox";
@@ -85,11 +87,21 @@ export interface LaneRow {
   /** The lane is Reverted by a rewind that put the files back, and the shell still keeps the files from before it: the row
    *  offers Bring it back. */
   canBringBack: boolean;
+  /** The job (Ask several agents, item 102a) whose one message started the lane; the band groups a job's lanes under one row. */
+  job?: string;
+  /** When the lane was started (ms): the order of a job's lanes under its row. */
+  startedAt?: number;
+  /** A helper lane (item 102h): its lead's session, its number (Helper 1 is 1) and its lead's title. The band draws it indented under
+   *  its lead's row while that row is listed. */
+  helper?: { lead: string; n: number; leadTitle: string };
+  /** The agent's id and the lane's title as a job's row names them are `agentId` and `title`. */
 }
 
 export interface LaneRowInput {
-  rec: Pick<SessionRec, "id" | "agent" | "cwd" | "status"> & Partial<Pick<SessionRec, "title" | "modelTitle" | "agentTitle" | "promptTitle" | "error" | "lane" | "linkId" | "startedAt">>;
+  rec: Pick<SessionRec, "id" | "agent" | "cwd" | "status"> & Partial<Pick<SessionRec, "title" | "modelTitle" | "agentTitle" | "promptTitle" | "error" | "lane" | "linkId" | "startedAt" | "job" | "helperOf">>;
   agent: string;
+  /** A helper lane's lead's title, as its row names it (item 102h). */
+  leadTitle?: string;
   live?: Pick<AgentLive, "branch">;
   lane: LaneRecord;
   /** The chat's running turn, if one runs. */
@@ -145,6 +157,9 @@ export function laneRowOf(i: LaneRowInput, time: (ms: number) => string = (ms) =
     error,
     // only a rewind that put the files back has files to bring back: the agent's own rewind of the last message left them
     canBringBack: status === "reverted" && lane.revertedFiles === true && i.canBringBack === true,
+    ...(rec.job ? { job: rec.job } : {}),
+    ...(rec.helperOf ? { helper: { lead: rec.helperOf.lead, n: rec.helperOf.index + 1, leadTitle: i.leadTitle ?? "" } } : {}),
+    ...(rec.startedAt !== undefined ? { startedAt: rec.startedAt } : {}),
     ...(rec.startedAt !== undefined || i.lastMessage !== undefined ? { lastAt: Math.max(rec.startedAt ?? 0, i.lastMessage ?? 0) } : {}),
   };
 }
@@ -166,10 +181,13 @@ export function useLaneRows(root: string): LaneRow[] {
     const key = sessions.chatKey(rec.id);
     if (!isLaneChat(key)) return [];
     const turn = app.chats[key]?.turn;
+    // a helper lane names its lead (item 102h)
+    const lead = rec.helperOf ? ss.list.find((x) => x.id === rec.helperOf!.lead) : undefined;
     return [
       laneRowOf({
         rec,
         agent: agentLabel(rec.agent, ss.agents),
+        ...(lead ? { leadTitle: pickTitle(lead, folderName(lead.cwd)).title } : {}),
         live: ss.live[rec.id],
         lane: laneOf(key),
         turn: turn ? { status: turn.status, startedAt: turn.startedAt } : null,
@@ -241,6 +259,92 @@ export interface LanesProps {
   /** The line that opens the snoozed and archived lanes is open, and the link that opens or closes it. */
   away?: boolean;
   onAway?: () => void;
+  /** The jobs whose lanes are shown under their row, and the press that opens or closes one. */
+  jobOpen?: readonly string[];
+  onJob?: (job: string) => void;
+  /** The job's row was pressed: its side-by-side view opens (item 102b). Without it the press shows or hides the lanes, as the chevron does. */
+  onJobView?: (job: string) => void;
+}
+
+/** A job's lanes in the order they started, with the job's name: the first message's words, as each lane is titled. */
+export interface JobGroup {
+  job: string;
+  title: string;
+  lanes: LaneRow[];
+}
+
+/** The jobs among `rows` (item 102a): a job with two or more lanes shown is one group, placed where its first lane stands; `head`
+ *  maps that first lane's id to the group and `skip` holds the ids of the other lanes, which are drawn under the group. A job with
+ *  a single lane left (the person closed the others) is not grouped: its lane is an ordinary row. */
+export function jobGroups(rows: readonly LaneRow[]): { head: Map<string, JobGroup>; skip: Set<string> } {
+  const by = new Map<string, LaneRow[]>();
+  for (const r of rows) if (r.job) by.set(r.job, [...(by.get(r.job) ?? []), r]);
+  const head = new Map<string, JobGroup>();
+  const skip = new Set<string>();
+  for (const [job, lanes] of by) {
+    if (lanes.length < 2) continue;
+    const ordered = [...lanes].sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0));
+    head.set(lanes[0].id, { job, title: ordered[0].title, lanes: ordered });
+    for (const l of lanes.slice(1)) skip.add(l.id);
+  }
+  return { head, skip };
+}
+
+/** The helper lanes among `rows` whose lead is listed too (item 102h): `of` maps a lead's id to its helper lanes in their round order,
+ *  and `under` holds the ids drawn under their lead rather than as rows of their own. */
+export function helperGroups(rows: readonly LaneRow[]): { of: Map<string, LaneRow[]>; under: Set<string> } {
+  const ids = new Set(rows.map((r) => r.id));
+  const of = new Map<string, LaneRow[]>();
+  const under = new Set<string>();
+  for (const r of rows) {
+    if (!r.helper || !ids.has(r.helper.lead) || r.helper.lead === r.id) continue;
+    of.set(r.helper.lead, [...(of.get(r.helper.lead) ?? []), r]);
+    under.add(r.id);
+  }
+  for (const list of of.values()) list.sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0) || (a.helper!.n - b.helper!.n));
+  return { of, under };
+}
+
+function JobItem({ group, now, open, onToggle, onView, lane }: { group: JobGroup; now: number; open: boolean; onToggle: () => void; onView?: () => void; lane: (r: LaneRow) => ReactNode }) {
+  const needs = group.lanes.some((l) => l.status === "needs_you");
+  return (
+    <div className="lane lane-job" data-testid={`lane-job-${group.job}`} data-job={group.job} data-needs={needs ? "true" : undefined}>
+      {/* the row opens the side-by-side view (item 102b); the chevron before it shows or hides the lanes as rows, as 102a's row did */}
+      <div className="rowl job-head">
+        <button type="button" className="job-chev" aria-expanded={open} aria-label={t("several.jobTip")} onClick={onToggle} title={t("several.jobTip")} data-testid="lane-job-toggle">
+          <Icon name="chevron-right" size={12} />
+        </button>
+        <button type="button" className="job-open grow" onClick={onView ?? onToggle} title={t("jobview.openTip")} data-testid="lane-job-open">
+          <span className="l1">{t("several.jobRow", { n: group.lanes.length, title: group.title })}</span>
+          <span className="mut who job-who">
+            {group.lanes.map((l) => {
+              const tag = laneTag(l.status);
+              return (
+                <span key={l.id} className="job-one" data-testid={`lane-job-agent-${l.id}`} data-status={l.status}>
+                  {l.agentId && <AgentMark agent={l.agentId} size={16} />}
+                  <span className={`tag ${tag.tone}`.trim()}>
+                    {l.status === "working" ? (
+                      <>
+                        {l.testing ? t("lane.testing") : l.step || t(tag.key)}
+                        {l.since !== null && <span className="when">{elapsed(now - l.since)}</span>}
+                      </>
+                    ) : (
+                      t(tag.key)
+                    )}
+                  </span>
+                </span>
+              );
+            })}
+          </span>
+        </button>
+      </div>
+      {open && (
+        <div className="job-lanes" data-testid="lane-job-lanes">
+          {group.lanes.map((l) => lane(l))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function branchTitle(b: LaneBranchTag): string {
@@ -258,7 +362,14 @@ function LaneItem({ row, now, onOpen, onPull, backOpen, onBack, below, place, ma
   const tag = laneTag(row.status);
   const line = row.status === "failed" ? row.error : row.line ? t(row.line.key, row.line.vars) : "";
   return (
-    <div className={`lane${place === "settled" ? " settled" : ""}`} data-testid={`lane-${row.id}`} data-row-key={laneKey(row)} data-status={row.status} data-place={place}>
+    <div
+      className={`lane${place === "settled" ? " settled" : ""}${row.helper ? " lane-helper" : ""}`}
+      data-testid={`lane-${row.id}`}
+      data-row-key={laneKey(row)}
+      data-status={row.status}
+      data-place={place}
+      {...(row.helper ? { "data-helper-of": row.helper.lead } : {})}
+    >
       {/* dragged onto an open chat's box, the lane brings its context (item 97) */}
       <button type="button" className="rowl" onClick={() => onOpen(row.id)} title={t("lane.open")} {...dragRef({ kind: "session", id: row.id })}>
         {place === "pinned" && (
@@ -287,6 +398,11 @@ function LaneItem({ row, now, onOpen, onPull, backOpen, onBack, below, place, ma
           )}
         </span>
       </button>
+      {row.helper && (
+        <p className="mut lline lane-helper-of" data-testid="lane-helper-of">
+          {t("helpers.run.laneOf", { n: row.helper.n, lead: row.helper.leadTitle })}
+        </p>
+      )}
       {row.pull && (
         <p className="mut lline lpull" data-testid="lane-pull-line">
           <button type="button" className="lk" title={t("lane.prTip")} onClick={() => row.pull && onPull?.(row.pull, row.id)} data-testid="lane-pr" data-state={row.pull.state}>
@@ -400,7 +516,7 @@ function awayWord(mark: RowMark | undefined, now: number): string {
 }
 
 
-export function LanesView({ rows, now, onOpen, onPull, onNew, backOpen = null, onBack, below, marks = {}, away = false, onAway }: LanesProps) {
+export function LanesView({ rows, now, onOpen, onPull, onNew, backOpen = null, onBack, below, marks = {}, away = false, onAway, jobOpen = [], onJob, onJobView }: LanesProps) {
   if (rows.length === 0 && !onNew) return null;
   // pinned on top, in the order pinned, then the rest, then the settled ones, small and quiet. Snoozed and archived lanes are put
   // away: a line under the list counts them and opens them. A lane that asks something is never put away (rows.ts `placeOf`).
@@ -415,7 +531,24 @@ export function LanesView({ rows, now, onOpen, onPull, onNew, backOpen = null, o
     ...places.settled.map((x) => ({ r: x.r, place: "settled" as const })),
   ];
   const hidden = [...places.snoozed, ...places.archived];
-  const item = (r: LaneRow, place: RowPlace) => <LaneItem key={r.id} row={r} now={now} onOpen={onOpen} onPull={onPull} backOpen={backOpen === r.id} onBack={onBack} below={below} place={place} mark={marks[laneKey(r)]} />;
+  // the lanes one Ask several message started (item 102a) are one row, whose lanes open under it; a job with one lane left shows as it is
+  const jobs = jobGroups(shown.map((x) => x.r));
+  // a helper lane is drawn indented under its lead's row while that row is listed here (item 102h); one whose lead is not is a row
+  const helpers = helperGroups(shown.map((x) => x.r));
+  const isShown = (id: string) => !jobs.skip.has(id) && !helpers.under.has(id);
+  const one = (r: LaneRow, place: RowPlace) => <LaneItem key={r.id} row={r} now={now} onOpen={onOpen} onPull={onPull} backOpen={backOpen === r.id} onBack={onBack} below={below} place={place} mark={marks[laneKey(r)]} />;
+  const item = (r: LaneRow, place: RowPlace) => {
+    const mine = helpers.of.get(r.id);
+    if (!mine) return one(r, place);
+    return (
+      <div key={r.id} className="lane-with-helpers" data-testid={`lane-with-helpers-${r.id}`}>
+        {one(r, place)}
+        <div className="lane-helpers" data-testid={`lane-helpers-${r.id}`}>
+          {mine.map((h) => one(h, shown.find((x) => x.r.id === h.id)?.place ?? place))}
+        </div>
+      </div>
+    );
+  };
   return (
     <>
       <div className="band" data-testid="lanes-band">
@@ -428,7 +561,11 @@ export function LanesView({ rows, now, onOpen, onPull, onNew, backOpen = null, o
       </div>
       {rows.length > 0 && (
         <div className="lanes" data-testid="lanes">
-          {shown.map(({ r, place }) => item(r, place))}
+          {shown.map(({ r, place }) => {
+            const group = jobs.head.get(r.id);
+            if (group) return <JobItem key={`job-${group.job}`} group={group} now={now} open={jobOpen.includes(group.job)} onToggle={() => onJob?.(group.job)} onView={onJobView ? () => onJobView(group.job) : undefined} lane={(l) => item(l, shown.find((x) => x.r.id === l.id)?.place ?? place)} />;
+            return isShown(r.id) ? item(r, place) : null;
+          })}
           {hidden.length > 0 && (
             <>
               <button type="button" className="lk lane-away" aria-expanded={away} onClick={onAway} data-testid="lane-away">

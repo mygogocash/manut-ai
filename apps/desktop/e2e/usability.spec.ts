@@ -144,6 +144,9 @@ test("shortcuts: Mod+2 opens the second bot, Mod+K opens the palette, Mod+. togg
 
 test("Esc stops a running answer, but not while the search field has focus", async ({ page }) => {
   await open(page);
+  // a turn that runs until it is stopped: the scripted answer ends by itself after 2.5 seconds, which a loaded CI shard
+  // spent on the way to History and back (26 Nov 2026), so the answer had ended before the test looked for its stop button
+  await mock("mock.manual", { bot: "kami" });
   await send(page, "check the 502s");
   await expect(page.getByTestId("stop")).toBeVisible();
   // Esc inside the search field only clears the search: the palette's last row opens History with its field focused, and

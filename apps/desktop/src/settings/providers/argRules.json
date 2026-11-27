@@ -345,6 +345,7 @@
       "id": "grok",
       "skips": [
         "always-approve",
+        "yolo",
         "allow",
         "allowedTools",
         "allowed-tools",
@@ -525,5 +526,10 @@
     "grok",
     "cursor-agent",
     "agy"
+  ],
+  "signinAgents": [
+    "cursor-agent",
+    "agy",
+    "grok"
   ]
 }

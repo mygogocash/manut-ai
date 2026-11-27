@@ -95,3 +95,23 @@ test("a lane's MCP server the shell did not start because its entry differs is n
     "Not started in this lane: local-tools. It runs files from the lane's own folder, which the lane's agent can change. It starts in a chat in your project folder.",
   ]);
 });
+
+test("an agent set back to the mode in which it asks says so once in the chat, and so does one that would not go back (item 101a)", async () => {
+  const t = setup("claude");
+  await t.ss.loadAgents();
+  const id = t.ss.draft("claude");
+  t.ss.setDraft(id, { cwd: "/w/proj" });
+  await t.ss.start(id, "hi");
+  const key = t.ss.chatKey(id)!;
+  const notes = () => (t.store.getState().chats[key]?.items ?? []).flatMap((i) => (i.kind === "system" ? [i.text] : []));
+  const before = notes().length;
+  // as acp_chat.rs sends it (`mode_settled`)
+  t.sinks.get(1)!({ event: "session.note", kind: "asks_mode", agent: "Antigravity", mode: "auto", to: "default", ok: true });
+  t.sinks.get(1)!({ event: "session.note", kind: "asks_mode", agent: "Antigravity", mode: "accept-edits", to: "default", ok: false });
+  // a note that names no mode says nothing
+  t.sinks.get(1)!({ event: "session.note", kind: "asks_mode", agent: "Antigravity", ok: true });
+  expect(notes().slice(before)).toEqual([
+    "Antigravity was in its auto mode, which does not ask before it acts, so Manut AI switched it to default.",
+    "Antigravity stayed in its accept-edits mode, which does not ask before it acts, so Manut AI sends it nothing more. Close this chat and start a new one.",
+  ]);
+});

@@ -6,6 +6,7 @@ import type { HistoryHost } from "./term/history";
 import { type AgentId, type AgentInfo } from "./agents";
 import { type TurnFilesHost } from "./turnFiles";
 import { type CustomEntry, type CustomList, type CustomPreview } from "./custom";
+import type { RegistryList } from "../settings/agents/acpRegistry";
 import type { ApprovalChoice, ClarifyAnswers } from "../lib/protocol";
 import type { DiskState } from "../lib/disk";
 import type { ImportApp, ImportProfile } from "./term/import";
@@ -16,7 +17,8 @@ import { type KeptLane, type LaneCleaned, type LaneMade, type LaneReleased, type
 import { type AgentConfig } from "../settings/mcp/agentConfig";
 import { type InstallAsk, type InstallDone, type LinkRead, type ReadSkill } from "../runtime/skillBundle";
 import { type MergeMethod, type NewProjectMade, type Pulled, type RepoAsk, type ReviewAsk, type ReviewDone, type ReviewDraft, type SourceTools } from "../code/source";
-import { type ProviderPatch, type ProviderView } from "../settings/providers/model";
+import { type ProviderPatch, type ProviderView, type SignIn } from "../settings/providers/model";
+import { type ImportFound } from "../importPast/offer";
 import { inTauri } from "../lib/tauri";
 import { TauriHost } from "./host.tauri";
 import { MockHost } from "./host.mock";
@@ -175,6 +177,16 @@ export interface SessionHost extends HistoryHost {
   /** Settings › Worktrees: check the folder chosen for lanes' folders and make it; resolves with its real path, rejects with a
    *  code (`bad_root`, `root_too_broad`, `root_in_checkout`, `root_unwritable`). */
   laneRootCheck?(root: string): Promise<string>;
+  /** A helper lane's own working folder (item 102f, src-tauri/src/lane_helper.rs; item 102h starts its agent there): a snapshot of
+   *  the lead lane's folder `lead` (the lane's `worktree`) as it is now, kept under the app's own ref and checked out in a new
+   *  worktree beside the lead's, on a branch named from the lead's (`kit/<words>-help-1`), its record naming job `job`. The lead's
+   *  index, HEAD, branch, stash and files never change, nothing is pushed and no agent starts. Rejects with a short code
+   *  (`bad_job`, `not_a_lane`, `lead_is_helper`, `busy`, `no_commit`, `taken`, `no_folder`, `git_missing`) or git's own line, with
+   *  nothing made. Absent in a shell older than helper lanes: none then starts. */
+  laneHelperWorktree?(lead: string, job: string): Promise<LaneMade>;
+  /** This computer's memory in bytes (item 102h, src-tauri/src/machine.rs; docs/several-agents.md R7), read once by the shell with no
+   *  program run, so the page can tell how many helper lanes run at once. Null when it could not be read. */
+  machineMemory?(): Promise<number | null>;
   /** Settings › MCP and Skills: the MCP servers and skills Claude Code and Codex have, by name and where each comes from, read
    *  from their own files (src-tauri/src/agent_config.rs) for the person's own home and, when given, the project folder `cwd`.
    *  Only reads. Null where this computer's files cannot be read (a plain browser). */
@@ -276,6 +288,14 @@ export interface SessionHost extends HistoryHost {
   pastChats(agent: "claude" | "codex", cwds: string[]): Promise<PastChat[]>;
   /** The last messages of `agent`'s conversation `id` in `cwd`. */
   pastMessages(agent: "claude" | "codex", id: string, cwd: string): Promise<PastMsg[]>;
+  /** The newest `max` conversations of `agent` across all of `cwds` together (the folders brought over, item 101e), for History
+   *  (src-tauri/src/past_chats.rs `recent`): read-only, the files read bounded by `max` however many folders. Absent on a shell
+   *  older than the item. */
+  pastRecent?(agent: "claude" | "codex", cwds: string[], max: number): Promise<PastChat[]>;
+  /** Bring over (item 101e, src-tauri/src/import_past.rs): the folders Claude Code and Codex worked in that are still on this Mac,
+   *  each with its conversations counted, newest first, and what was skipped (folders gone, compressed or unreadable files,
+   *  files past the bounds). Read-only: only folders and counts come back. Absent on a shell older than the item. */
+  importScan?(): Promise<ImportFound>;
   /** Whether the file of `agent`'s conversation `id` is where the CLI looks for it, in the home of `account` (none =
    *  the account new sessions use): `unknown` when that could not be told (a folder that cannot be read, an account
    *  whose folder is gone). Only names are looked at (rule 30). */
@@ -296,6 +316,9 @@ export interface SessionHost extends HistoryHost {
   providerSave?(id: string, patch: ProviderPatch): Promise<ProviderView>;
   /** The version agent `id`'s program prints (the token only), or null. */
   providerVersion?(id: string): Promise<string | null>;
+  /** Agent `id`'s sign-in as its own status command says it (Cursor, Antigravity: `signinAgent`), or null when it says
+   *  nothing. Never a token: whether it is signed in, and an email at most. */
+  providerSignin?(id: string): Promise<SignIn | null>;
   /** Settings › Agents: the person's own agents, read and checked by the shell from manut's own file, and the broken
    *  entries. */
   customList(): Promise<CustomList>;
@@ -309,6 +332,14 @@ export interface SessionHost extends HistoryHost {
   customConfirm(entry: CustomEntry): Promise<void>;
   /** The remove confirm: agent `id` leaves the file. */
   customRemove(id: string): Promise<void>;
+  /** Settings › Providers › From the ACP registry (item 101c): the agents of the registry's pinned copy, which the shell
+   *  compiles in and never fetches (src-tauri/src/acp_registry.rs), each offered or not with its reason. Absent on a
+   *  shell older than the item. */
+  acpRegistry?(): Promise<RegistryList>;
+  /** The confirm card for registry entry `id`: drafted as a bot's draft is (the form's checks, and no shell, interpreter
+   *  or built-in program), with the exact command and where it comes from. Writes nothing: Add is `customConfirm`. A
+   *  refusal rejects with `why:<code>`. */
+  acpRegistryPreview?(id: string): Promise<CustomPreview>;
   /** Free space on the home folder's volume (src/lib/disk.ts): Settings' warn value in GB (0 = off), answered with
    *  the level and the last reading. */
   diskWatch(warnGb: number): Promise<DiskState>;

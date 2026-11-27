@@ -135,6 +135,32 @@ describe("resume snapshot", () => {
     expect(parseResume(JSON.stringify(buildResume(input(), T)))!.sessions[0].workflow).toBeUndefined();
   });
 
+  it("keeps the Helpers switch of a lane with a folder of its own, and of nothing else (item 102e)", () => {
+    const lane = { name: "kit/promptpay-qr", base: "main", dir: "/h/.manut/lanes/web-app/promptpay-qr", worktree: "/h/.manut/lanes/web-app/promptpay-qr" };
+    const good = buildResume(input({ sessions: [{ ...input().sessions[0], lane, helpers: true }] }), T);
+    expect(parseResume(JSON.stringify(good))!.sessions[0].helpers).toBe(true);
+    const back = (s: Record<string, unknown>) => parseResume(JSON.stringify({ ...good, sessions: [{ ...good.sessions[0], ...s }] }))!.sessions[0].helpers;
+    // not true itself, or a lane with no folder of its own, or no lane at all: off, as Helpers may only be on in a lane's chat
+    expect(back({ helpers: "yes" })).toBeUndefined();
+    expect(back({ lane: { name: "kit/x", base: "main" } })).toBeUndefined();
+    expect(back({ lane: undefined })).toBeUndefined();
+    expect(parseResume(JSON.stringify(buildResume(input(), T)))!.sessions[0].helpers).toBeUndefined();
+  });
+
+  it("keeps a chat's \"Kit may reach\" list, each chat checked as it is read back (item 102k)", () => {
+    const reach = [
+      { n: 1, ref: { kind: "session", id: "s4" }, link: "abc123", title: "Receipt layout", scope: { account: "claude:work" } },
+      { n: 3, ref: { kind: "thread", bot: "buddy", thread: "t1" }, title: "Orders", scope: { shop: "baanmali" } },
+    ];
+    const good = buildResume(input({ sessions: [{ ...input().sessions[0], reach } as never] }), T);
+    expect(parseResume(JSON.stringify(good))!.sessions[0].reach).toEqual(reach);
+    const back = (r: unknown) => parseResume(JSON.stringify({ ...good, sessions: [{ ...good.sessions[0], reach: r }] }))!.sessions[0].reach;
+    // a chat that cannot be read is left out, the rest kept; nothing readable: no list at all
+    expect(back([...reach, { n: 4, ref: { kind: "nope" }, title: "x", scope: {} }, { n: 5, ref: { kind: "session", id: "s9" }, title: "y", scope: { shop: 1 } }])).toEqual(reach);
+    expect(back("all of them")).toBeUndefined();
+    expect(parseResume(JSON.stringify(buildResume(input(), T)))!.sessions[0].reach).toBeUndefined();
+  });
+
   it("keeps that an ended session's CLI could not continue its conversation, and only for an ended one", () => {
     const good = buildResume(input(), T);
     const raw = (resumeFailed: unknown, running: boolean) => JSON.stringify({ ...good, sessions: [{ ...good.sessions[2], running, resumeFailed }] });
@@ -158,7 +184,10 @@ describe("resume snapshot", () => {
     // OmO continues with --session (a real omo answered from its earlier turn after a restart)
     expect(continuesItself({ agent: "omo", view: "chat", agentSession: "01a1ca42-38d5-7b6b-b3e9-d76953dcecd0" })).toBe(true);
     expect(continuesItself({ agent: "claude", view: "chat" })).toBe(false);
-    for (const agent of ["pi", "omp", "grok", "omh"] as const) expect(continuesItself({ agent, view: "chat", agentSession: "x" })).toBe(false);
+    for (const agent of ["pi", "omp", "omh"] as const) expect(continuesItself({ agent, view: "chat", agentSession: "x" })).toBe(false);
+    // item 101b: Grok's chat continues over its ACP server, as OpenCode's does
+    expect(continuesItself({ agent: "grok", view: "chat", agentSession: "01a218bc-0000-7000-8000-000000000003" })).toBe(true);
+    expect(continuesItself({ agent: "grok", view: "chat" })).toBe(false);
   });
 });
 
@@ -332,5 +361,14 @@ describe("update confirm: the running line", () => {
     expect(sp(runningLine([rec("s1", "claude", "/w/a", "running", "u"), rec("s2", "grok", "/w/g", "starting")], mode))).toBe(
       "2 sessions running: a (Claude Code), g (Grok). Claude Code, Codex and OmO resume after the restart; the others come back with a Resume button.",
     );
+  });
+});
+
+describe("a job's lanes (Ask several agents, item 102a)", () => {
+  it("keeps the job a lane belongs to, so the lanes one message started are still one job after a restart", () => {
+    const good = buildResume(input({ sessions: [{ ...input().sessions[0], job: "jk7m2" }] }), T);
+    expect(parseResume(JSON.stringify(good))!.sessions[0].job).toBe("jk7m2");
+    expect(parseResume(JSON.stringify({ ...good, sessions: [{ ...good.sessions[0], job: 7 }] }))!.sessions[0].job).toBeUndefined();
+    expect(parseResume(JSON.stringify(buildResume(input(), T)))!.sessions[0].job).toBeUndefined();
   });
 });

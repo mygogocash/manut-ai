@@ -1,0 +1,5 @@
+# Item 129: the desktop's browser specs run several at once, each against its own stand-in
+
+| Date | Decision | Why | By | Undo by |
+| --- | --- | --- | --- | --- |
+| 26 Nov 2026 | The dev server serves each language's dictionary as one module (`src/i18n/oneModule.ts`, a Vite plugin for `vite` serve only, not in the unit tests): each area's object is written in place of its import, each area file is registered as a file the module depends on, and an area of any other shape than type imports and one object of string words is served as separate files with a warning | Item 128's split made every fresh page fetch 1,218 modules instead of 610. On CI the same 165 spec files took 3,493 s before the split's merge (run 45804452975) and 4,098 s right after it (run 45807288347), a median file 21% slower; on this Mac a fresh page's first paint went from 280 ms to 380 ms and the chat was ready at 505 ms instead of 389 ms. With the plugin: 610 requests, 260 ms and 369 ms. The source keeps one file per prefix | Claude | Remove the plugin from `vite.config.ts` |

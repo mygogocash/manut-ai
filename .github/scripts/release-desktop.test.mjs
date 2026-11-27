@@ -6,6 +6,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
+import { updateFileName } from "../../.claude/skills/release-desktop/scripts/release-assets.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const read = (path) => readFileSync(join(root, path), "utf8");
@@ -114,6 +115,40 @@ describe("Release desktop: pinned actions", () => {
     const uses = [...code.matchAll(/uses:\s*(\S+)/g)].map((m) => m[1]).filter((u) => !u.startsWith("./"));
     assert.ok(uses.length > 0);
     for (const u of uses) assert.match(u, /@[0-9a-f]{40}$/, u);
+  });
+
+  it("builds the signed and the unsigned Mac app with the same tauri-action commit", () => {
+    const pins = [...code.matchAll(/uses:\s*tauri-apps\/tauri-action@([0-9a-f]{40})/g)].map((m) => m[1]);
+    assert.equal(pins.length, 2);
+    assert.equal(new Set(pins).size, 1);
+  });
+});
+
+describe("checking a draft: the file each latest.json address names", () => {
+  // tauri-action 0.6 wrote download addresses; from 1.0 it writes the asset's GitHub API address, which names no file,
+  // so the release skill's verify-release.mjs reads the name from the release's asset list (`gh release view --json`).
+  const api = (id) => `https://api.github.com/repos/mygogocash/manut-ai/releases/assets/${id}`;
+  const assets = [
+    { apiUrl: api(791021204), name: "Manut.AI_0.1.2_aarch64.app.tar.gz" },
+    { apiUrl: api(791036773), name: "latest.json" },
+  ];
+
+  it("reads the file from a download address, as 0.6 wrote one", () => {
+    const url = "https://github.com/mygogocash/manut-ai/releases/download/desktop-v0.1.1/Manut.AI_aarch64.app.tar.gz";
+    assert.deepEqual(updateFileName(url, undefined), { name: "Manut.AI_aarch64.app.tar.gz" });
+    assert.deepEqual(updateFileName(url, assets), { name: "Manut.AI_aarch64.app.tar.gz" });
+  });
+
+  it("reads the file from an asset address through the release's asset list, as 1.0 writes one", () => {
+    assert.deepEqual(updateFileName(api(791021204), assets), { name: "Manut.AI_0.1.2_aarch64.app.tar.gz" });
+  });
+
+  it("asks for the asset list rather than guess a file, and refuses what is not this release's", () => {
+    assert.match(updateFileName(api(791021204), undefined).error, /asset list/);
+    assert.match(updateFileName(api(1), assets).error, /no asset/);
+    assert.match(updateFileName("https://api.github.com/repos/someone/else/releases/assets/791021204", assets).error, /not this repository/);
+    assert.match(updateFileName("https://github.com/someone/else/releases/download/v1/x.app.tar.gz", assets).error, /not this repository/);
+    assert.match(updateFileName(`${api(791021204)}/extra`, assets).error, /not this repository/);
   });
 });
 

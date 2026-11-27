@@ -1,0 +1,27 @@
+import type { lk as en } from "../en/lk";
+
+export const lk: Record<keyof typeof en, string> = {
+  "lk.links": "链接",
+  "lk.showAll": "显示全部 {n} 个",
+  "lk.thread": "{name} · 消息列",
+  "lk.svcKind": "{svc} {kind}",
+  "lk.k.channel": "频道",
+  "lk.k.message": "消息",
+  "lk.k.server": "服务器",
+  "lk.k.invite": "邀请",
+  "lk.k.dms": "私信",
+  "lk.k.thread": "消息列",
+  "lk.k.file": "文件",
+  "lk.k.folder": "文件夹",
+  "lk.k.job": "职位",
+  "lk.k.post": "帖子",
+  "lk.k.short": "短视频",
+  "lk.k.playlist": "播放列表",
+  "lk.k.video": "视频",
+  "lk.k.project": "项目",
+  "lk.k.discussion": "讨论",
+  "lk.k.releases": "发布",
+  "lk.ciRun": "CI 运行",
+  "lk.compare": "比较 {range}",
+  "lk.calEvent": "日历活动",
+};

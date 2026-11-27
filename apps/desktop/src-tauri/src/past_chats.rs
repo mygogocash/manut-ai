@@ -27,7 +27,7 @@ const TEXT_MAX: usize = 4_000;
 /// Characters of a title or first words.
 const TITLE_MAX: usize = 80;
 /// Bytes read from the start of a file (its folder, first message, early title).
-const HEAD: u64 = 256 * 1024;
+pub(crate) const HEAD: u64 = 256 * 1024;
 /// Bytes read from the end of a file (its latest title, its last messages).
 const TAIL: u64 = 1024 * 1024;
 /// Codex rollouts looked at for one listing, newest first.
@@ -68,6 +68,9 @@ pub fn cli_home(home: &Path, agent: &str, account_env: &[(String, String)], env:
     let (var, dir) = match agent {
         "claude" => ("CLAUDE_CONFIG_DIR", ".claude"),
         "codex" => ("CODEX_HOME", ".codex"),
+        // Accounts only (item 101d): their conversations are not read here, `lists` says which agents' are
+        "grok" => ("GROK_HOME", ".grok"),
+        "pi" => ("PI_CODING_AGENT_DIR", ".pi/agent"),
         _ => return None,
     };
     let picked = account_env.iter().find(|(k, _)| k == var).map(|(_, v)| v.clone());
@@ -91,7 +94,7 @@ pub fn inside(root: &Path, p: &Path) -> Option<PathBuf> {
 }
 
 /// A real folder, not a link.
-fn plain_dir(p: &Path) -> bool {
+pub(crate) fn plain_dir(p: &Path) -> bool {
     std::fs::symlink_metadata(p).map(|m| m.is_dir()).unwrap_or(false)
 }
 
@@ -100,7 +103,7 @@ fn same_folder(a: &str, b: &str) -> bool {
     !a.is_empty() && t(a) == t(b)
 }
 
-fn mtime(p: &Path) -> f64 {
+pub(crate) fn mtime(p: &Path) -> f64 {
     std::fs::metadata(p).and_then(|m| m.modified()).ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map(|d| d.as_secs_f64()).unwrap_or(0.0)
 }
 
@@ -143,6 +146,35 @@ fn tail(path: &Path) -> Vec<Value> {
 fn last_part(path: &Path) -> Vec<Value> {
     let size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
     lines_in(path, size.saturating_sub(TAIL), TAIL)
+}
+
+/// The whole lines at the start of `path`, up to `cap` bytes, given one at a time to `each` until it says it has seen
+/// enough (true): a short look that usually stops in the first lines, where a list's look ([`head`]) reads all of
+/// them. A line that is not JSON is passed over. `None` when the file could not be opened or read; otherwise how many
+/// lines were JSON, so a caller can tell a file that is not JSON lines from one that holds nothing it wants.
+pub(crate) fn head_until(path: &Path, cap: u64, each: &mut dyn FnMut(&Value) -> bool) -> Option<u32> {
+    use std::io::BufRead;
+    let f = File::open(path).ok()?;
+    let mut r = std::io::BufReader::new(f.take(cap));
+    let (mut buf, mut json, mut read) = (Vec::new(), 0u32, 0u64);
+    loop {
+        buf.clear();
+        let n = r.read_until(b'\n', &mut buf).ok()?;
+        read += n as u64;
+        // the file's last line may have no newline; a line the cap cut has none either, and is not whole, so not read
+        if n == 0 || (buf.last() != Some(&b'\n') && read >= cap) {
+            return Some(json);
+        }
+        let line = buf.trim_ascii();
+        if line.is_empty() {
+            continue;
+        }
+        let Ok(v) = serde_json::from_slice::<Value>(line) else { continue };
+        json += 1;
+        if each(&v) {
+            return Some(json);
+        }
+    }
 }
 
 fn s<'a>(v: &'a Value, k: &str) -> &'a str {
@@ -192,7 +224,7 @@ pub fn iso_secs(t: &str) -> Option<f64> {
 // ---- Claude Code ------------------------------------------------------------------------------
 
 /// The text of a Claude Code user line the person typed (not a tool result, a meta line or a subagent's).
-fn claude_user_text(o: &Value) -> Option<String> {
+pub(crate) fn claude_user_text(o: &Value) -> Option<String> {
     if s(o, "type") != "user" || o.get("isMeta").and_then(Value::as_bool) == Some(true) || o.get("isSidechain").and_then(Value::as_bool) == Some(true) {
         return None;
     }
@@ -318,6 +350,12 @@ pub fn claude_messages(root: &Path, id: &str, cwd: &str) -> Result<Vec<PastMsg>,
 /// Codex rollout files, newest day first (names carry the time, so newest first within a day too), at most
 /// `max`. Links are skipped at every level.
 fn codex_rollouts(root: &Path, max: usize) -> Vec<PathBuf> {
+    codex_rollouts_seen(root, max, &mut 0)
+}
+
+/// [`codex_rollouts`], also counting into `compressed` the rollouts Codex wrote compressed (`rollout-*.jsonl.zst`), which
+/// no reader here opens (item 106b). Bringing work over (import_past.rs) says how many it left out.
+pub(crate) fn codex_rollouts_seen(root: &Path, max: usize, compressed: &mut u32) -> Vec<PathBuf> {
     let sessions = root.join("sessions");
     if !plain_dir(&sessions) {
         return Vec::new();
@@ -338,7 +376,13 @@ fn codex_rollouts(root: &Path, max: usize) -> Vec<PathBuf> {
                         rd.flatten()
                             .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
                             .map(|e| e.path())
-                            .filter(|p| p.file_name().and_then(|x| x.to_str()).is_some_and(|x| x.starts_with("rollout-") && x.ends_with(".jsonl")))
+                            .filter(|p| {
+                                let name = p.file_name().and_then(|x| x.to_str()).unwrap_or("");
+                                if name.starts_with("rollout-") && name.ends_with(".jsonl.zst") {
+                                    *compressed += 1;
+                                }
+                                name.starts_with("rollout-") && name.ends_with(".jsonl")
+                            })
                             .collect()
                     })
                     .unwrap_or_default();
@@ -374,7 +418,7 @@ fn codex_names(root: &Path) -> std::collections::HashMap<String, String> {
 }
 
 /// The text of a Codex user message the person typed (Codex's own AGENTS.md and environment blocks left out).
-fn codex_user_text(o: &Value) -> Option<String> {
+pub(crate) fn codex_user_text(o: &Value) -> Option<String> {
     let p = &o["payload"];
     if s(o, "type") != "response_item" || s(p, "type") != "message" || s(p, "role") != "user" {
         return None;
@@ -401,7 +445,7 @@ fn codex_assistant_text(o: &Value) -> Option<String> {
 }
 
 /// A rollout's `session_meta`: (thread id, cwd), when it is a conversation of its own (not a subagent's thread).
-fn codex_meta(lines: &[Value]) -> Option<(String, String)> {
+pub(crate) fn codex_meta(lines: &[Value]) -> Option<(String, String)> {
     let first = lines.first()?;
     if s(first, "type") != "session_meta" {
         return None;
@@ -498,16 +542,20 @@ fn keep_last(mut v: Vec<PastMsg>) -> Vec<PastMsg> {
     v
 }
 
-fn newest(mut v: Vec<PastChat>) -> Vec<PastChat> {
+fn newest(v: Vec<PastChat>) -> Vec<PastChat> {
+    newest_n(v, LIST_MAX)
+}
+
+fn newest_n(mut v: Vec<PastChat>, n: usize) -> Vec<PastChat> {
     v.sort_by(|a, b| b.at.total_cmp(&a.at));
     let mut seen = std::collections::HashSet::new();
     v.retain(|c| seen.insert(c.id.clone()));
-    v.truncate(LIST_MAX);
+    v.truncate(n);
     v
 }
 
 /// An absolute folder path, as each CLI records its cwd (`/…` on macOS and Linux, `C:\\…` on Windows).
-fn absolute(c: &str) -> bool {
+pub(crate) fn absolute(c: &str) -> bool {
     Path::new(c).is_absolute() || c.starts_with('/')
 }
 
@@ -522,6 +570,55 @@ pub fn list(root: &Path, agent: &str, cwds: &[String]) -> Result<Vec<PastChat>, 
     match agent {
         "claude" => Ok(claude_list(root, &cwds)),
         "codex" => Ok(codex_list(root, &cwds)),
+        _ => Err(format!("{agent} conversations are not listed")),
+    }
+}
+
+/// Folders History lists conversations of at once (item 101e: the projects brought over).
+pub const RECENT_FOLDERS_MAX: usize = 200;
+/// Conversations History lists per agent.
+pub const RECENT_MAX: usize = 60;
+
+/// The newest `max` (at most [`RECENT_MAX`]) conversations of `agent` across all of `cwds` (at most
+/// [`RECENT_FOLDERS_MAX`]), for History (item 101e). Unlike [`list`], which takes the newest of each of a few folders,
+/// this takes the newest of all of them together, so the files read are bounded by `max` whatever the number of
+/// folders: about twice `max` Claude Code transcripts (a head and a tail each, as a listing reads), and the newest
+/// Codex rollouts a listing looks at.
+pub fn recent(root: &Path, agent: &str, cwds: &[String], max: usize) -> Result<Vec<PastChat>, String> {
+    let cwds: Vec<String> = cwds.iter().filter(|c| absolute(c)).take(RECENT_FOLDERS_MAX).cloned().collect();
+    let max = max.clamp(1, RECENT_MAX);
+    match agent {
+        "claude" => {
+            let projects = root.join("projects");
+            if !plain_dir(&projects) {
+                return Ok(Vec::new());
+            }
+            let mut files: Vec<(f64, PathBuf, &String)> = Vec::new();
+            for cwd in &cwds {
+                let dir = projects.join(claude_slug(cwd));
+                if !plain_dir(&dir) {
+                    continue;
+                }
+                let Ok(rd) = std::fs::read_dir(&dir) else { continue };
+                files.extend(
+                    rd.flatten()
+                        .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
+                        .map(|e| e.path())
+                        .filter(|p| p.extension().is_some_and(|x| x == "jsonl") && p.file_stem().and_then(|x| x.to_str()).is_some_and(is_uuid))
+                        .filter_map(|p| inside(root, &p))
+                        .map(|p| (mtime(&p), p, cwd)),
+                );
+            }
+            files.sort_by(|a, b| b.0.total_cmp(&a.0));
+            // a few more than shown: empty ones (only /clear) and another folder's (the lossy slug) are skipped
+            let rows = files.iter().take(max * 2).filter_map(|(_, p, cwd)| claude_row(p, cwd)).collect();
+            Ok(newest_n(rows, max))
+        }
+        "codex" => {
+            let names = codex_names(root);
+            let rows = codex_rollouts(root, CODEX_FILES_MAX).iter().filter_map(|p| inside(root, p)).filter_map(|p| codex_row(&p, &cwds, &names)).collect();
+            Ok(newest_n(rows, max))
+        }
         _ => Err(format!("{agent} conversations are not listed")),
     }
 }
@@ -949,6 +1046,62 @@ mod tests {
         let m = claude_messages(&root, C1, cwd).unwrap();
         // the early messages lie outside the tail; the last ones are there
         assert_eq!(m.iter().map(|x| x.text.as_str()).collect::<Vec<_>>(), ["What was the word?", "MARIGOLD"]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn recent_takes_the_newest_across_many_folders_and_reads_a_bounded_number_of_files() {
+        let root = tmp("recent");
+        let set = |p: &Path, secs: u64| File::options().write(true).open(p).unwrap().set_modified(UNIX_EPOCH + std::time::Duration::from_secs(secs)).unwrap();
+        // fifteen folders (more than the + menu's twelve), one conversation each, the newest in the last folder
+        let cwds: Vec<String> = (0..15).map(|i| format!("/Users/you/code/p{i}")).collect();
+        for (i, cwd) in cwds.iter().enumerate() {
+            let id = format!("{i:08x}-2222-4333-8444-555555555555");
+            let p = root.join("projects").join(claude_slug(cwd)).join(format!("{id}.jsonl"));
+            write(&p, &claude_file(cwd, &id));
+            set(&p, 1_000 + i as u64);
+        }
+        let rows = recent(&root, "claude", &cwds, 4).unwrap();
+        assert_eq!(rows.iter().map(|r| r.cwd.as_str()).collect::<Vec<_>>(), ["/Users/you/code/p14", "/Users/you/code/p13", "/Users/you/code/p12", "/Users/you/code/p11"]);
+        // a folder not asked for is not listed; a relative one is dropped; the cap holds
+        assert!(recent(&root, "claude", &["/Users/you/code/p3".into(), "p4".into()], 10).unwrap().iter().all(|r| r.cwd == "/Users/you/code/p3"));
+        assert_eq!(recent(&root, "claude", &cwds, 10_000).unwrap().len(), 15);
+        // Codex across folders, newest first, and an agent whose conversations are not listed
+        let day = root.join("sessions/2026/11/12");
+        write(&day.join(format!("rollout-2026-11-12T15-28-54-{X1}.jsonl")), &codex_file(X1, "/Users/you/code/p1"));
+        write(&day.join(format!("rollout-2026-11-12T15-29-01-{X2}.jsonl")), &codex_file(X2, "/Users/you/code/p2"));
+        let got: Vec<String> = recent(&root, "codex", &cwds, 1).unwrap().into_iter().map(|r| r.id).collect();
+        assert_eq!(got.len(), 1);
+        assert_eq!(recent(&root, "codex", &cwds, 5).unwrap().len(), 2);
+        assert!(recent(&root, "omo", &cwds, 5).is_err());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_short_look_stops_when_told_and_reads_only_whole_lines() {
+        let root = tmp("head-until");
+        let p = root.join("t.jsonl");
+        std::fs::write(&p, "{\"n\":1}\nnot json\n\n{\"n\":2}\n{\"n\":3}").unwrap();
+        let mut seen = Vec::new();
+        // the last line has no newline and is whole: it is read
+        assert_eq!(head_until(&p, 1_000, &mut |v| { seen.push(v["n"].as_u64().unwrap()); false }), Some(3));
+        assert_eq!(seen, [1, 2, 3]);
+        seen.clear();
+        assert_eq!(head_until(&p, 1_000, &mut |v| { seen.push(v["n"].as_u64().unwrap()); v["n"] == 2 }), Some(2));
+        assert_eq!(seen, [1, 2]);
+        // a line the cap cuts is not read
+        seen.clear();
+        assert_eq!(head_until(&p, 20, &mut |v| { seen.push(v["n"].as_u64().unwrap()); false }), Some(1));
+        assert_eq!(seen, [1]);
+        assert_eq!(head_until(&root.join("missing.jsonl"), 1_000, &mut |_| false), None);
+        // Codex's compressed rollouts are counted by name, never opened
+        let day = root.join("sessions/2026/11/12");
+        std::fs::create_dir_all(&day).unwrap();
+        std::fs::write(day.join(format!("rollout-2026-11-12T00-00-00-{X1}.jsonl.zst")), [0u8; 4]).unwrap();
+        write(&day.join(format!("rollout-2026-11-12T00-00-01-{X2}.jsonl")), &codex_file(X2, "/w"));
+        let mut zst = 0;
+        assert_eq!(codex_rollouts_seen(&root, 10, &mut zst).len(), 1);
+        assert_eq!(zst, 1);
         let _ = std::fs::remove_dir_all(&root);
     }
 

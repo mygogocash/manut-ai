@@ -37,7 +37,7 @@ async function openZh(page: Page) {
 async function englishLeft(page: Page, root: string): Promise<string[]> {
   return page.evaluate((sel) => {
     const KEEP =
-      /^(manut|Manut AI|OMH|Hermes|Kami|Friren|Frieren|Hermes Bot|OMH TUI|English|한국어|日本語|中文|Claude( Code)?|Codex|OmO|DSH|pi|omp|oh-my-pi|oh-my-hermes|Grok|Gemini( CLI)?|OpenAI|Worktrees|ChatGPT|CLIProxyAPI|Slack|Discord|Telegram|Cron|GitHub|GitLab|Linear|API|ID|PR|CI|Esc|Ctrl\+?.*|⌘.*|Max \d+x|Pro|Plus)$/;
+      /^(manut|Manut AI|OMH|Hermes|Kami|Friren|Frieren|Hermes Bot|OMH TUI|English|한국어|日本語|中文|Claude( Code)?|Codex|OmO|DSH|pi|omp|oh-my-pi|oh-my-hermes|Grok|Gemini( CLI)?|OpenAI|Worktrees|ChatGPT|CLIProxyAPI|Slack|Discord|Telegram|Cron|GitHub|GitLab|Linear|API|ID|PR|CI|Esc|Ctrl\+?.*|⌘.*|Max \d+x|Pro|Plus|Heaven|Highwire|Iridium|Krypton|Kzurb Sonar)$/;
     // commands (`hermes auth add …`, `npm i -g …`), paths, ids and model or provider names stay as written
     const isData = (s: string) =>
       /[@/\\:]|^\d|^[a-z0-9._-]+$|^v?\d+(\.\d+)+/.test(s) ||
@@ -55,8 +55,9 @@ async function englishLeft(page: Page, root: string): Promise<string[]> {
         out.add(s);
       }
     };
-    // .prov-n: an agent's own product name on Settings › Providers (Copilot CLI, Cursor), as .ss-l is in the + menu
-    const skip = (el: Element | null) => !!el?.closest("code, pre, kbd, .mono, .msg, .md, .ap-preview, [data-testid=bot-sub], [data-testid=bots-grid] .bc-desc, .be-desc, .acc-n, .acc-sub, .pv-ms, .pv-v, .mp-list, .ss-n, .ss-l, .ss-where, [data-testid=session-sub], [data-testid=session-name], .bot-n, .head-title, .prov-n");
+    // .prov-n: an agent's own product name on Settings › Providers (Copilot CLI, Cursor), as .ss-l is in the + menu;
+    // .areg-data: an ACP registry entry's name, version, description and reason, in the registry's own words (item 101c)
+    const skip = (el: Element | null) => !!el?.closest("code, pre, kbd, .mono, .msg, .md, .ap-preview, [data-testid=bot-sub], [data-testid=bots-grid] .bc-desc, .be-desc, .acc-n, .acc-sub, .pv-ms, .pv-v, .mp-list, .ss-n, .ss-l, .ss-where, [data-testid=session-sub], [data-testid=session-name], .bot-n, .head-title, .prov-n, .areg-data");
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
     for (let n = walker.nextNode(); n; n = walker.nextNode()) {
       const el = n.parentElement;

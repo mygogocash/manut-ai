@@ -133,15 +133,18 @@ test("a face keeps the footprint its place asked for: chat header, a message, Ho
     const f = (await el.locator("span.face").boundingBox())!;
     return { box: [b.width, b.height], spill: Math.round((f.width - b.width) * 100) / 100 };
   };
+  // Each size is read until it settles: a page that has just opened may still be playing its entrance, and on a CI
+  // runner the Settings page's 64px face once measured 63.99999 twice in a row (26 Nov 2026). The sizes must still
+  // be exact once it has.
   // the header's 26 and a message's 28 are not the kit's sizes: drawn in its proportions, a third larger than the box
-  expect(await size('[data-testid="who"] .ui-av')).toEqual({ box: [26, 26], spill: 8.5 });
-  expect(await size('[data-testid="bubble-bot"] .msg-face')).toEqual({ box: [28, 28], spill: 9.5 });
+  await expect.poll(() => size('[data-testid="who"] .ui-av')).toEqual({ box: [26, 26], spill: 8.5 });
+  await expect.poll(() => size('[data-testid="bubble-bot"] .msg-face')).toEqual({ box: [28, 28], spill: 9.5 });
   await page.getByTestId("menu-home").click();
-  expect(await size('[data-testid="page-home"] .ui-av[data-face="nam"]')).toEqual({ box: [32, 32], spill: 11 });
+  await expect.poll(() => size('[data-testid="page-home"] .ui-av[data-face="nam"]')).toEqual({ box: [32, 32], spill: 11 });
   await page.getByTestId("nav-settings").click();
   await page.getByTestId("settings-nav-bot-nam").click();
-  expect(await size('[data-testid="settings-nav-bot-nam"] .ui-av')).toEqual({ box: [18, 18], spill: 6 });
-  expect(await size('[data-testid="avatar-edit"] .ui-av')).toEqual({ box: [64, 64], spill: 21.5 });
+  await expect.poll(() => size('[data-testid="settings-nav-bot-nam"] .ui-av')).toEqual({ box: [18, 18], spill: 6 });
+  await expect.poll(() => size('[data-testid="avatar-edit"] .ui-av')).toEqual({ box: [64, 64], spill: 21.5 });
 });
 
 test("with reduced motion no face moves; without it the face that waits for the person does", async ({ page }) => {

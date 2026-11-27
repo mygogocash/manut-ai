@@ -23,7 +23,7 @@ state that needs the owner: a real GitHub account, money, a real sign-in or real
 | Open pull request | Has (item 75): Put up for review under a lane's row and in its pane pushes the lane's branch and opens its pull request through `gh` or `glab`, after one ask that names the repository, branch, base, title and body exactly as sent, settled once; an open one then offers Merge, asked with its method and exact message. A lane whose branch has an open pull request shows "Pull request #12 (Open)" quietly under its title, and pressing it opens Tasks on that repository with the request selected (item 76, [Pinned, snoozed, settled and archived](#pinned-snoozed-settled-and-archived)). See [Source control](#source-control) | `code/Review.tsx`, `code/reviewAsk.ts`, `src-tauri/src/review.rs`, `tasks/pulls.ts`, `code/Lanes.tsx` |
 | The request, "Edited 3 files and ran 14 tests", Kit's note, the changed files with their counts | Part: the session's timeline shows each step and a file edit's diff, and (this branch) the pane beside a lane lists the changed files with their counts. No line that counts the files and the tests together | `chat/activity/Work.tsx` (`DiffView`), `code/LanePane.tsx` |
 | Tell Kit what to change, add a file, the Code chip | Has: the session's composer (item 80, the same box as Buddy's), in two rows as the canvas draws it: the text, then a + for Add context (Files; Folder, named in the message by its path and never copied; Actions and skills, the agent's `/` menu, also over text already typed), the agent, the model with its effort, the approval level, the microphone and voice mode (item 81, the Mac app: speak the message, or talk with Kit and hear the answer, the asks still on their cards; `docs/voice.md`) and Send. No Mention: a coding agent knows no team | `sessions/SessionView.tsx`, `chat/box/`, `chat/parts/Attach.tsx`, `chat/parts/Composer.tsx`, `voice/` |
-| "Your Claude Code plan" in the composer | Part: a session runs on the developer's own sign-in; the box names the model (moved there from the header) and its effort, not the plan | `sessions/SessionView.tsx` (`SessionModel`), `chat/box/ModelMenu.tsx` |
+| "Your Claude Code plan" in the composer | Part: a session runs on the developer's own sign-in; the box names the model (moved there from the header) and its effort, not the plan. Since item 132 (GoSpark's flow) the model chip opens the effort card: the level large by GoSpark's words (High, Extra High, Max), the model under it, which opens the agent's model list as the card's second view (Back, or a pick, returns), Reset to the default level, and a slider with one stop for each level the agent reported, moved by a drag (which sends only the level it lets go on), a click or the arrow, Home and End keys, each stop crossed ticking with item 131's effort sound. At the top level the title and the track take the provider's colour from its mark (Claude Code's terracotta; Codex in the ink). A Claude Code chat's card adds "Ultrathink this message", which puts a visible `Ultrathink:` line at the top of the draft and takes it out again; a word typed by hand or a slash command locks it. Nothing new reaches the agent: a level goes by the same effort input as before. No fast mode (no agent reports one) and no Ultracode | `sessions/SessionView.tsx` (`SessionModel`), `chat/box/ModelMenu.tsx`, `chat/box/EffortCard.tsx`, `chat/box/effort.ts`, `chat/box/ultrathink.ts`, `docs/decisions/132-effort-card.md` |
 | Diff, Preview and Tests beside the lane | Part (this branch): the chat of a lane has a pane beside it, "What to look at", with the chips Diff, Preview and Tests, Diff first; it goes under the chat when the column is too narrow for both. Diff: each file that really differs in the lane's own folder from where the lane started, read from git (so it holds after a restart and shows a subagent's edits), with the added and removed counts, drawn as the timeline draws a change; from the chat's own events where the shell cannot read. Tests: the last finished run's result as the lane read it, when it finished, the command that ran it, whether a file changed since, and any run in progress; none of the run's output, which the lane never kept. Preview (this branch): the lane's project run with its own dev server in the lane's own folder: the command named first (`$ pnpm run dev`) with Start, then Running at its address with Open in browser and Stop, Stopped, Ended with its exit code and its last lines, or Could not start with why; the Sample rows under it. While it runs at an address of this computer, its page is drawn in a frame that fills the view, as the board draws the page in a box, with Reload and Open in browser above it (this branch). See [The pane beside a lane](#the-pane-beside-a-lane), [The preview of a lane](#the-preview-of-a-lane) and [The page in the pane](#the-page-in-the-pane) | `code/LanePane.tsx`, `code/LanePreview.tsx`, `code/previewFrame.ts`, `code/previewStore.ts`, `src-tauri/src/preview.rs`, `code/changes.ts`, `code/laneFolder.ts`, `src-tauri/src/lane_diff.rs`, `code/lanepane.css`, `sessions/SessionView.tsx` (`LaneSplit`) |
 | The owner sees only the note; a developer gets the diff, the preview and the tests | Lacks: the Code page is the developer's view only | |
 
@@ -499,9 +499,9 @@ The Code page's + menu (the Terminals header's +, the empty section's New sessio
 ⌘T) offers each coding agent two ways, as the owner chose on 25 November (item 66). Under its folder chip:
 
 - **Chat with Kit**, first: one row for each installed agent that runs as the app's chat (`chatAgents`: Claude Code, Codex, OmO,
-  pi, oh-my-pi, OpenCode, DeepSeek Harness, the ACP agents (Cursor and Antigravity among them since item 74) and a person's
-  own, in the menu's order), with the account a new session runs as. An agent turned off on Settings › Providers is in neither
-  part of the menu (`offeredAgents`), and the shell would refuse its start anyway (see [Providers](#providers-each-agents-settings)). Never Grok, which has no chat here, and never oh-my-hermes. Picking one opens its New session chat in the
+  pi, oh-my-pi, Grok (since item 101b), OpenCode, DeepSeek Harness, the ACP agents (Cursor and Antigravity among them since
+  item 74) and a person's own, in the menu's order), with the account a new session runs as. An agent turned off on Settings ›
+  Providers is in neither part of the menu (`offeredAgents`), and the shell would refuse its start anyway (see [Providers](#providers-each-agents-settings)). Never oh-my-hermes. Picking one opens its New session chat in the
   folder the chip names (`draftChat`), as a chat whatever way the draft last kept for that agent. Nothing runs until the first
   message: it names the lane's branch, the shell makes the lane's folder (see [Where a lane works](#where-a-lane-works)), and the
   agent starts there. The chat then has the pane beside it, and the Code page's Lanes band lists the lane; TERMINALS does not.
@@ -519,7 +519,7 @@ The Code page's + menu (the Terminals header's +, the empty section's New sessio
   says "Not signed in" beside the name, and its tooltip says to sign in with the agent's own command in a terminal
   (`claude auth login`, `codex login`) and that it can still start. The row stays pickable: signing in is the person's own
   step, and what the app read can be a minute old. The app reads it only for the account a new session runs as (the Accounts
-  watcher's copy, `signedOut.ts`): Claude Code and Codex by the CLI's own status command, Grok (a terminal row only) by the
+  watcher's copy, `signedOut.ts`): Claude Code and Codex by the CLI's own status command, Grok by the
   bridge's state, as Settings › Providers › Accounts words it. No agent is run to find out. For every other agent, and in a
   browser, the app cannot tell and shows nothing new. Since item 74 the desktop app's shell keeps the accounts list, so
   Practice and Connected read Claude Code's and Codex's sign-in too.
@@ -552,7 +552,9 @@ start, so a file changed by hand never starts what the page would refuse.
 - **The list.** Every agent the app offers (the built-ins, the ACP agents, a person's own), each with its version (the
   program's own `--version`, for the agents whose flag was read here: Claude Code, Codex, OpenCode, Gemini CLI, Grok, Cursor,
   Antigravity), whether it is installed, whether it is signed in where the app can read that (Claude Code and Codex, through
-  the account new sessions use; no check is made up for any other agent) and a switch. oh-my-hermes, offered nowhere, is not
+  the account new sessions use; Cursor and Antigravity through their own status commands, item 101a, and Grok through its
+  `models`, item 101b; no check is made up
+  for any other agent) and a switch. oh-my-hermes, offered nowhere, is not
   listed. Pressing a row opens its settings under it.
 - **Off.** Offered nowhere: neither part of the + menu, the empty section's tooltip, a new draft, Buddy (which says where to turn
   it on). The shell refuses its start before any program is looked up: terminals and chats (`sessions::launch_with`), Buddy
@@ -587,7 +589,7 @@ start, so a file changed by hand never starts what the page would refuse.
   | OpenCode | `--auto`, `--yolo`, `--dangerously-skip-permissions` |
   | Gemini CLI | `-y`/`--yolo`, `--approval-mode`, `--allowed-tools`, `--policy`, `--admin-policy`, `--skip-trust`, `-s`/`--sandbox`, `--include-directories` |
   | oh-my-pi | `--auto-approve`, `--approval-mode`, `--yolo`, `--plan-yolo`, `--plan-yolo-into`, `--add-dir`, `--config`, `--profile`, `--allow-home`, `--hook`, `-e`/`--extension`, `--trusted-extension`, `--plugin-dir` |
-  | Grok | `--always-approve`, `--allow` (and its `--allowedTools`, `--allowed-tools`), `--permission-mode`, `--sandbox`, `--add-dir`, `--agents` |
+  | Grok | `--always-approve` and its other name `--yolo` (item 101b), `--allow` (and its `--allowedTools`, `--allowed-tools`), `--permission-mode`, `--sandbox`, `--add-dir`, `--agents` |
   | Cursor | `-f`/`--force`, `--yolo`, `--auto-review`, `--sandbox`, `--approve-mcps`, `--trust`, `--add-dir`, `--plugin-dir` |
   | Antigravity | `--dangerously-skip-permissions`, `--mode`, `--settings`, `--add-dir`, `--sandbox` |
 
@@ -639,12 +641,124 @@ start, so a file changed by hand never starts what the page would refuse.
   and ask the client with `session/request_permission` before acting (Cursor's documentation, cursor.com/docs/cli/acp, and
   its bundle, which asks before a write, a delete, a read, a command and an MCP tool unless `--force`; Antigravity's help,
   whose `--dangerously-skip-permissions` is what turns its requests off, and its binary). So both are rows of `ACP_LIST`,
-  continued with `session/load`. Not run as a chat for this item: no message was sent to either.
+  continued with `session/load` (Cursor) or `session/resume` (Antigravity offers it, and the adapter takes it first).
+- **Cursor and Antigravity as chats (item 101a).** Each ran here as a chat, two short messages each (Antigravity 1.5.18:
+  "ok", then `pwd` asked for, allowed and run in the chat's folder; Cursor Agent 2026.11.22: its account's plan had run out,
+  which it says in its own reply), recorded in `src-tauri/tests/fixtures/acp/agy-*.jsonl` and `cursor-1-plan-limit.jsonl`.
+  What the generic ACP adapter (`acp_chat.rs`) does for them:
+  - **Modes.** Each row lists the session modes in which its agent asks (`asks_in`): Cursor's `agent`, `plan` and `ask`;
+    Antigravity's `default` only, since its `accept-edits` approves edits and its `auto` approves edits and "safe" commands
+    unasked, and its default mode is a setting of its own. When the agent reports any other mode, when the conversation
+    opens or later, the adapter sets the row's first mode back (its `mode` option, else `session/set_mode`), stops a running
+    turn and expires its cards, and sends nothing until the agent confirms; the chat says so once. An agent that will not
+    go back gets nothing more, and the chat says to start a new one.
+  - **Cursor's own settings.** Cursor's ACP server reads the person's permissions from `cli-config.json` (in
+    `CURSOR_CONFIG_DIR`, else `$XDG_CONFIG_HOME/cursor`, else `~/.cursor`), and its `approvalMode` of `unrestricted` (Run
+    Everything) runs every command and change unasked, whatever the mode. So a Cursor chat starts only when that file is
+    absent or its `approvalMode` is absent or `allowlist`; anything else (Auto-review, Run Everything, a file that cannot
+    be read) refuses the start with a sentence that says to set Approval mode to Allowlist. Read once at the start: a change
+    to the file while the chat runs is not seen. A project's `.cursor/cli.json` cannot set the mode (its schema holds only
+    `permissions`).
+  - **Cards.** Antigravity names its command `CommandLine` and its folder `Cwd`, and its files `TargetFile` or
+    `AbsolutePath`; the card and Kit's dial read them. Its request ids are strings, answered as given. Cursor's requests
+    carry no input: a command is the title between backticks, shown whole on the card, and Kit's dial, which never reads a
+    title, asks; a change names its file in the diff it carries, which both read. "Allow always" is never offered.
+  - **Questions.** Cursor asks its own questions as a permission request whose answers are several `allow_once` options and
+    whose "Skip" is a `reject_once`; that becomes a question card with those answers. An answer that is none of them is
+    refused and the card stays.
+  - **A loaded conversation.** Cursor continues with `session/load`, which replays the conversation before it answers; the
+    replay is not shown as the reply of a message sent meanwhile.
+  - **Sign-in.** Settings › Providers reads Cursor's `status --format json` (only whether it is signed in, and the email)
+    and Antigravity's `models` (signed in when it lists models; it has no status command), one at a time after the
+    versions, and Report a problem reads them the same way.
+  - Not done: Antigravity's thinking level (`thought_level`) has no switch here, as for the other ACP agents. Cursor's ask
+    path was checked against its bundle, not a real tool call, since its account could not run one here.
+- **Grok as a chat (item 101b).** Grok Build was a terminal only. It now opens as a chat too, through the same generic ACP
+  adapter, as `grok --permission-mode default agent stdio` (its ACP server, "Run the agent over stdio"; the mode named before
+  it as GoSpark's ACP adapter starts Grok supervised), and its chat continues with `session/resume`, which its `initialize`
+  offers. A session opened as a terminal runs its own TUI as before, and a Grok session saved while Grok was a terminal only
+  comes back as that terminal. Grok was not signed in on this Mac, so it ran here only up to its signed-out `session/new`
+  (`tests/fixtures/acp/grok-signed-out.jsonl`); no message was sent. What holds it to asking, all of it read from Grok Build
+  1.0.93's own documentation (`~/.grok/docs/user-guide/`), its help, its binary's strings and its session logs here:
+  - **Its settings, read before the start.** Grok's permission mode (ask, auto-review, always-approve) is not a session mode:
+    a session starts in what its settings say ("Permission mode new sessions start in"), and its own logs here show this
+    Mac's sessions running with always-approve on. So a Grok chat starts only when every file Grok reads for it leaves it
+    asking (`acp_chat::GROK_SETTINGS`): `[ui] permission_mode` (or its old name `approval_mode`) absent, `ask` or
+    `default`, and `[ui] yolo` absent or false, in `config.toml`, `managed_config.toml` and `requirements.toml` in
+    `$GROK_HOME` (else `~/.grok`; an added account's home moves it) and in `/etc/grok`, and in the `GROK_CONFIG` and
+    `GROK_CONFIG_PATH` overlays; and a Claude `defaultMode` (which Grok also reads) absent, `default` or `plan` in
+    `~/.claude/settings.json` and `settings.local.json`, in every folder's `.claude/` from the chat's up, and in Claude's
+    managed settings. Anything else, or a file that cannot be read, refuses the start with a sentence naming
+    `permission_mode` and Claude's `defaultMode`. This Mac's own `config.toml` says `always-approve` today, so a Grok chat
+    does not start here until it says `ask`. The flag on the command line is kept as well: Grok documents flags as winning
+    over its files, but that it holds over `always-approve` could not be checked without a sign-in.
+  - **Its mode.** Its row asks in `default` only (`asks_in`). Grok's ACP sessions report `default` and `plan` (its own logs
+    here); its plan mode writes its plan file without a card, and on some of its tool sets any Markdown file, so a switch to
+    plan (which Grok asks for first) is set back with `session/set_mode`, the running turn stops, and the chat says so.
+  - **Its switches.** A message that starts with `/always-approve`, `/auto-review`, `/auto` (which "still runs the same
+    toggle") or `/yolo` is never sent, and the chat's command list leaves them out. `_meta.yoloMode` is never sent. Grok's own
+    notice that always-approve or auto-review came on (`x.ai/yolo_mode_changed`, its shape read from its binary, not seen)
+    stops the turn and sends nothing more.
+  - **Cards.** Grok names a call's tool in `_meta["x.ai/tool"]` rather than `kind` (as GoSpark's `ACPToolMapping` reads it),
+    so the card and the step read it there (`bash` runs a command, `search_replace`, `write_file` and `edit_file` change a
+    file, `read_file` reads one). Kit's dial reads ACP's own `kind` alone, so such a call asks. "Allow always" and Grok's
+    "Enable always-approve mode" (an `allow_always`) are never offered.
+  - **Sign-in.** Settings › Providers and Report a problem read `grok models`, whose first line says how Grok is signed in;
+    only the answer is kept.
+  - Not done or not checked: a real Grok turn, card and permission options (no sign-in); whether a request ever offers two
+    `allow_once` answers (the adapter would show them as a question); a project's own `.grok/config.toml` and
+    `.claude/settings*.json` allow rules, which apply as in Grok itself (below); a subagent definition with its own
+    `permissionMode`; macOS device management (`ai.x.grok`) and a default Grok's servers send, which no file holds; the
+    person's extra arguments on Settings › Providers are Grok's TUI's and go after `stdio`, where `agent stdio` takes none.
+- **Muse Code (item 101b): not offered.** Meta's Muse Code is the `muse` CLI (GoSpark's migration plan,
+  `docs/plans/migrate-from-grok-muse-2026-09-25.md`, and its `docs/migration.md`): settings in `$XDG_CONFIG_HOME/muse/settings.json`,
+  sessions in `$XDG_DATA_HOME/muse/sessions`, and a server mode, `muse serve`, which speaks its own protocol (MSP,
+  `meta-models/muse-code-sdk`'s `schema/msp/msp.d.ts`), not ACP. No `muse` is installed on this Mac (not on `PATH`, not in
+  `~/.local/bin`, Homebrew or npm); the `Muse` app in `/Applications` is Meta's chat app (`com.meta.endo`), which carries no
+  CLI, and `~/.config/muse/settings.json` holds only a hooks manager's three keys. So whether it has a mode in which it asks
+  before acting could not be read, and no adapter was guessed. It needs the owner: an install of the CLI, or its
+  documentation for MSP's approvals.
+
+- **From the ACP registry (item 101c).** Under Your agents, the agents of the Agent Client Protocol's registry
+  (agentclientprotocol/registry, Apache-2.0), with a search lifted from T3 Code's (the id or name whole, then a prefix, word
+  starts, inside, the makers, the description). Each row has its mark (item 122's logo where one is published, else the
+  monogram), the registry's name, version and description, and Add… or why not; the pinned release and its date are said
+  once at the foot.
+  - **Pinned, never fetched.** The list is one release of the registry (`src-tauri/acp-registry/registry.json`, byte for
+    byte, with its address, tag, commit and SHA-256 in `pin.json`), compiled into the shell (`acp_registry.rs`). Nothing in
+    the app asks the network for it and there is no "check for newer": `node scripts/pin-acp-registry.mjs [tag]` pins
+    another release by hand, prints what changed, and a Rust test holds the committed file to its SHA-256. The pin also keeps
+    the registry's own `quarantine.json` at that commit, and, for each npm package, the command it installs, read from its
+    manifest on registry.npmjs.org as `npm exec` would choose it. Each entry is read on its own: a bad one is skipped and
+    counted, never fatal.
+  - **Nothing run but the agent.** The registry runs agents through `npx`, `uvx` or a downloaded archive; manut runs none of
+    them. The card shows `npm install -g <package>@<version>`, `uv tool install <name>==<version>` or the archive's address
+    and SHA-256 for the person to install from, and the agent is then started as its installed command, exactly as one
+    added by hand. On Windows npm's commands are `.cmd` files, which a person's own agent never starts, so only archives and
+    uv are taken there.
+  - **Not offered twice, and not offered when unsafe.** An entry that is an agent manut already offers (by its id, by any
+    program it could run, or as Claude's, Codex's, Antigravity's and pi's own ACP adapters) says "In Providers as ...";
+    one whose program a person's own agent runs says "Added as ...". Not offered, with the reason: one the registry's
+    checks set aside, one with no way to run here, one that needs an environment variable (a person's own agent gets
+    none), one whose arguments are not one of the start lines read here (`STARTS`: none, `acp`, `--acp`, `--acp=true`,
+    `acp serve`, `serve acp`, `--mode acp`; the rule turned round, so a later pin cannot bring in an option that skips an
+    ask), and one the checks below refuse.
+  - **The same card and the same writer.** Add… asks the shell for the card (`acp_registry_preview`), drafted as a bot's
+    draft is: `custom_agents::bot_refusal` (no shell, interpreter, OpenCode, Kilo Code or built-in agent's program) and every
+    check of a hand-added agent. It writes nothing. The card shows the exact command, where the agent comes from, its
+    install line or archive, source and licence; Cancel, Change… (the Add agent form with the same values) and Add. Add is
+    `custom_agent_confirm`, the one writer of `~/.manut/custom-agents.json`, which checks the entry again. The registry names
+    no session modes (its schema has none), so an agent from it starts in its own default mode with no argument of manut's
+    changing it, and its asks come through `session/request_permission` as any person's own agent's do. Not done: holding a
+    registry agent to the modes in which it asks (item 101a's `asks_in`), which needs its own `session/new` read in a real
+    run; such an agent becomes a generic ACP row, and the registry then lists it as already there.
 
 `providers.rs`' tests pin each check, the order of a start's arguments and that a value never leaves; `agent_chat.rs`'
 `providers_settings_reach_a_chat_and_never_weaken_its_start` and `sessions.rs`' terminal twin start a stand-in program and
 read back exactly what it was given; `accounts.rs` pins the shell's list. `src/settings/providers/*.test.ts(x)` pin the page's
-own check, the patch, the words and the mock host, and `e2e/agents-settings.spec.ts` walks the page.
+own check, the patch, the words and the mock host, and `e2e/agents-settings.spec.ts` walks the page. `acp_registry.rs`' tests pin
+the registry's reading, matching, checks and card; `src/settings/agents/acpRegistry.test.tsx` the list and its search; and
+`e2e/acp-registry.spec.ts` finding an agent, its card and the result in Providers.
 
 ### Pinned, snoozed, settled and archived
 
@@ -1063,6 +1177,27 @@ another's files or the developer's folder.
   install, a generated file) happens by itself. The chat says it as the lane starts: where Kit works, how many of the
   developer's changed files did not come along, and that nothing is installed there yet. The app installs nothing; Kit may,
   and the dial asks first, as for any install.
+- **A helper lane** (item 102f, `src-tauri/src/lane_helper.rs`; [several agents](several-agents.md), R8) is the one lane
+  made otherwise: from a snapshot of its lead lane's folder, so it starts with the lead's uncommitted work and new files
+  (never what git ignores). The lead's index is copied to a temporary index of the shell's own and the snapshot written there
+  (`git add -A`, `write-tree`, `commit-tree` on top of the lead's HEAD as "Manut AI"), kept by
+  `refs/manut/helpers/<job>/<folder>`; the lead's index, HEAD, branch, stash and files never change. The helper lane is a
+  worktree beside the lead's folder on `<lead's branch>-help-<n>` at that commit, its record naming its job, its lead and the
+  ref, and is listed and removed as any lane (Remove takes the ref with the record). Its agent settings come from the
+  developer's folder, never from the lead's copy. The page calls `lane_helper_worktree` with the lead lane's folder and the
+  job's id only. Item 102h starts the helper lane's agent there (`startHelperLane` in `sessions/sessions.ts`, run by
+  `jobs/helperRuns.ts`), in its agent's Ask mode, as many at once as the shell's memory read allows (`machine_memory`); its row in
+  the Lanes band is indented under its lead's and offers no main-moved merge and no Put up for review, since its work goes back
+  by landing.
+- **Landing a helper lane's work** (item 102g, `src-tauri/src/lane_land.rs`; [several agents](several-agents.md), R8):
+  `lane_land` with the helper lane's folder only. One landing at a time per lead folder (a helper lane's snapshot and a
+  lane's removal wait for it too). The helper lane's change since its snapshot, committed or not, with build output cut and
+  any key the masker finds named, is applied with `git apply --3way` into the lead's working tree, against a throwaway copy
+  of the lead's index, so the lead's index, HEAD, branch and stash never change and nothing is committed or pushed. The files
+  it writes are kept first, byte for byte, under `refs/manut/landings/<job>/<folder>`, and `lane_take_back` puts them back
+  while nothing in the lead's folder changed since. A patch that will not apply, comes from another repository or names a
+  file outside the lead's project is kept at `~/.manut/patches/<job>/<folder>.patch` (0600) and the lead is not written. A
+  repository whose own config names a clean filter or a merge driver is not landed in.
 - **When a folder goes.** When its session is closed (the chat is deleted), once its agent stopped, and Settings › Worktrees'
   "Remove the folder when its chat is deleted" is on (it is, by default), `lane_release` removes it only if nothing in it is
   changed or new, git is not partway through a rebase, merge, cherry-pick, revert or bisect there, every commit on its branch
@@ -1716,11 +1851,13 @@ held by the source list (neither can run a program or allow a tool on its own).
 | Cline | `.cline/hooks/`, `.clinerules` | none found (`--hooks-dir` only adds) | open |
 | Cursor | `.cursor/cli.json` (`permissions.allow`), `.cursor/hooks.json` (needs workspace trust), `.cursor/mcp.json` (needs approval) | none found; `--trust` is the opposite and is refused | open |
 | Antigravity | not read: its hooks, MCP and project pages were not reached | `--include-default-customizations=false` is untested | open |
+| Grok | `.grok/config.toml` (`[permission]` rules, MCP servers, plugins, and `[env]` in a trusted folder), `.claude/settings.json` and `.claude/settings.local.json` up to the repository's root (permission rules, `defaultMode`), `.mcp.json`, and hooks, project skills and `AGENTS.md` after folder trust | folder trust (`--trust`, `GROK_FOLDER_TRUST`), whose `0` lets all of them in and is refused as a variable; none found that leaves out a project's permission rules | a `defaultMode` that skips asks refuses the start (item 101b); a project's allow rules: open |
 | pi | `.pi/extensions` (code), `.pi/settings.json` (`packages`, `extensions`), loaded after project trust (`defaultProjectTrust`, agent-folder settings only) | none for the rpc mode found | open (not installed here) |
 | oh-my-pi | `.omp/` hooks and extensions, `.omp/mcp.json` | `--no-extensions` also drops the person's own; `--approval-mode` unconfirmed against project settings | open |
 | OmO, DeepSeek Harness, a person's own agent | not read (not installed here, or the person's) | | open |
 
-Grok runs only as its own terminal, where its own prompts apply. `docs/decisions.md` has the call (item 89).
+Grok ran only as its own terminal until item 101b, where its own prompts apply. As a chat it reads a project's own files as
+in the row below; `docs/decisions/101b-grok-muse-chat.md` has the calls.
 
 ### A project's own instructions, as text
 
@@ -2270,3 +2407,45 @@ is never put into a shell string, and nothing is run in it.
   developer's. The palette's "Open the project in <Editor>" opens the open project's folder on the Code page, which is the
   developer's own. When no editor is installed the action is not offered; a failure is said in the app's own words under the
   chat, under the lane, or at the top of the Code page.
+
+## Bring over Claude Code and Codex work (item 101e)
+
+A person who already used Claude Code or Codex on this Mac is offered their folders as projects, and those folders'
+conversations in History. The pieces are `src-tauri/src/import_past.rs` (the look), `past_chats.rs` `recent` (History's
+list), `src/importPast/offer.ts` (the rules and what this computer keeps), `ImportPast.tsx` (the dialog) and
+`broughtOver.ts` (History's rows).
+
+- **When it is offered.** Once, by itself: on the first launch after the first-run setup (finished or skipped), the app
+  looks once, and opens the offer only when a folder that is not a project here yet was found. Closing it in any way
+  (Not now, Esc, a click outside, Done) counts as the offer made (`manut.importPast` `offered`), and so does a look that
+  found nothing new; a look that failed is tried on the next launch. After that, History's **Bring over…** opens it by
+  hand at any time. An install that finished its setup before this item is offered it once on its next launch.
+- **What it looks at.** The homes past chats reads (the one a new session of each agent uses), with past_chats.rs's own
+  readers: Claude Code's `projects/<slug>/<uuid>.jsonl`, whose own `cwd` names its folder, and Codex's
+  `sessions/YYYY/MM/DD/rollout-*.jsonl`, whose `session_meta` does. A conversation is one the + menu would list: the
+  person typed something in it, and a Codex subagent's thread or a fork is not one. Each file is read from its start
+  only until its folder and a typed line are found (at most 256 KiB), the newest 3,000 of each agent and 256 MiB in all.
+  A link anywhere under those folders is refused. Nothing is written, and only folders and counts reach the page.
+- **What is skipped, and said.** A folder no longer on this Mac, a Codex rollout written compressed (`.jsonl.zst`,
+  item 106b), a file that cannot be read or is not JSON lines, and files past the bounds are each counted, and the offer
+  says how many of each in one line. Never offered: the home folder itself, the disk's root, and folders under the app's
+  own `~/.manut` (its lanes and account homes).
+- **The offer.** Each folder newest first, with its conversations of each agent and how long ago the newest changed;
+  one already on the Code page is marked "Already a project" and cannot be picked. Nothing is picked until the person
+  picks, and one line says that nothing in the agents' files is copied, moved or changed and nothing leaves this Mac.
+  Bring over N projects… shows the picks again to confirm; only its Bring over adds anything.
+- **What bringing over does.** Each pick becomes an added folder on the Code page (`folders.ts` `addFolder`, as New
+  folder… and New project add), the newest on top, and is kept in `manut.importPast` `folders`. `addFolder` adds a
+  folder that is listed already only once, so running it again adds nothing twice.
+- **History.** The conversations of the folders brought over that are still on the Code page's list (one removed with
+  Remove from list leaves History too) are Code rows among the days: the agent's mark, the title, the folder's name and
+  the agent's name. History shows the newest 30 of each agent across all those folders (`past_chats.rs` `recent`, which
+  reads about twice that many Claude Code transcripts however many folders there are) and says so under the list when
+  there are more. A row opens the conversation and continues it exactly as the + menu's past conversations do
+  (`sessions.ts` `continuePast`): its last messages shown, then the agent resumes it.
+
+`import_past.rs` and `past_chats.rs` test the look on made-up homes in a temporary folder (counts, skips, links, bounds,
+the folders never offered, and that nothing under the home changes); `offer.test.ts`, `ImportPast.test.tsx`,
+`broughtOver.test.ts` and `historyLanes.test.tsx` hold the rules, the dialog and History's rows; `e2e/import-past.spec.ts`
+walks the offer, the confirmation, the result in History and on the Code page, a second run and Not now on the mock host,
+with pictures in light and dark (`MANUT_SHOTS`).

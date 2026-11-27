@@ -221,15 +221,27 @@ describe("a New session chat", () => {
     expect(ss.getState().list[0]).toMatchObject({ id: next, agent: "codex", cwd: "/w/api", status: "draft" });
   });
 
-  it("a terminal agent starts in the folder on Start and is sent nothing", async () => {
+  it("Grok opened as its terminal starts in the folder on Start and is sent nothing", async () => {
     const { ss, calls } = setup(["grok"]);
     await ss.loadAgents();
     const id = ss.draft();
     expect(ss.getState().list[0].agent).toBe("grok");
     ss.setDraft(id, { cwd: "/w/tui" });
+    ss.setOpen(id, "terminal");
     await ss.start(id);
-    expect(ss.getState().list[0]).toMatchObject({ status: "starting", view: "terminal", cwd: "/w/tui" });
+    expect(ss.getState().list[0]).toMatchObject({ status: "starting", view: "terminal", open: "terminal", cwd: "/w/tui" });
     expect(calls().filter((c) => c.op === "chat.start" || c.op === "chat.input")).toEqual([]);
+  });
+
+  it("Grok opens as a chat by default since item 101b", async () => {
+    const { ss, calls } = setup(["grok"]);
+    await ss.loadAgents();
+    const id = ss.draft();
+    ss.setDraft(id, { cwd: "/w/g" });
+    await ss.start(id, "hi");
+    expect(ss.getState().list[0]).toMatchObject({ agent: "grok", view: "chat" });
+    expect(ss.getState().list[0].open).toBeUndefined();
+    expect(calls().filter((c) => c.op === "chat.start").map((c) => (c as { agent?: string }).agent)).toEqual(["grok"]);
   });
 
   it("closing a draft starts nothing and forgets it", async () => {

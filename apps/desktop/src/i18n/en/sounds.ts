@@ -1,0 +1,25 @@
+export const sounds = {
+  // sounds (Settings › General)
+  "sounds.title": "Sounds",
+  "sounds.hint": "Quiet sounds when you send, a bot answers or asks, or a turn fails",
+  "sounds.play": "Play",
+  "sounds.on": "On",
+  "sounds.off": "Off",
+  // finish chime, tone, settle and effort sounds (item 131)
+  "sounds.group": "Sounds and chimes",
+  "sounds.finish": "Finish chime",
+  "sounds.finishHint": "A soft chime when a chat finishes its turn out of sight. Quiet hours keep it silent",
+  "sounds.tone": "Finish sound",
+  "sounds.toneHint": "What plays when a turn finishes: the built-in chime or a tone",
+  "sounds.preview": "Preview",
+  "sounds.tone.default": "Default",
+  "sounds.settle": "Done for now sound",
+  "sounds.settleHint": "A small tick when you put a chat away with Done for now",
+  "sounds.effort": "Effort slider sound",
+  "sounds.effortHint": "A tick for each level as you drag, rising as it climbs, and a short impact at the top",
+  "sounds.tone.heaven": "Heaven",
+  "sounds.tone.highwire": "Highwire",
+  "sounds.tone.iridium": "Iridium",
+  "sounds.tone.krypton": "Krypton",
+  "sounds.tone.kzurbSonar": "Kzurb Sonar",
+};

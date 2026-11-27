@@ -72,6 +72,8 @@ developer to sign it in: do not ship this build to an owner.
 Kept whole: the terminal (`src-tauri/src/sessions.rs`, `src/sessions/term/`), the coding-agent adapters
 (`agent_chat.rs`, `acp_chat.rs`, `acp_agents.rs`, `dsh_chat.rs`), tasks through `gh` and `glab`, the tray,
 notifications, and the four languages (English, Korean, Japanese, Chinese). Thai is not added yet.
+Their words are in `src/i18n`, one file per key prefix in each language (item 128); its `README.md` says where a
+key goes and how a feature adds its own area.
 
 ## Names
 
@@ -99,6 +101,10 @@ under one entry, "Under the hood", which is closed until someone opens it and is
 like "Settings › Terminal" still lands where it says. Under a 756px main column the list stacks above the page as rows
 that wrap. Its segmented switches are Home's 28px pill, one part for both (`src/ui/Modes.tsx`, `.ui-modes`).
 
+Adding a page is one entry in `PAGES` (`src/settings/pages.ts`): its id, the name and icon it shows, where it sits
+(`everyday` or `hood`) and the component that draws it, imported there. Settings' list, its body (`Settings.slot.tsx`)
+and the palette all read that list, so a new page adds no line to either (item 128).
+
 ## The command palette
 
 Command-K (Ctrl+K off macOS) and the side menu's Search open one box over whatever is showing (`src/palette`): a
@@ -124,8 +130,9 @@ ad hoc (`"-"`); there is no signing identity, notarisation or release workflow h
 
 ## Not done in this pass
 
-- The Playwright suite (`e2e/`, 156 spec files) runs in CI as six shards (job `e2e` in `.github/workflows/ci.yml`; run
-  one file locally with `pnpm exec playwright test e2e/<file>`). Specs of removed screens were deleted or skipped, each
-  skip with its reason beside it.
+- The Playwright suite (`e2e/`, about 210 spec files) runs in CI as nine shards of whole spec files balanced by their
+  measured time (job `e2e` in `.github/workflows/ci.yml`, `.github/scripts/e2e-shards.mjs`, `e2e/timings.json`), and a
+  failing spec fails the run; run one file locally with `pnpm exec playwright test e2e/<file>`. Specs of removed
+  screens were deleted or skipped, each skip with its reason beside it.
 - Rust tests were not run, only `cargo check`.
 - Dictionary strings of the hidden and removed screens were left in the four language files.

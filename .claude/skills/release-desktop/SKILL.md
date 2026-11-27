@@ -19,10 +19,12 @@ is pushed, so push one only when the owner asked for a build.
 3. **Check the draft** before anything else:
    ```bash
    dir=$(mktemp -d) && gh release download desktop-v<version> --repo mygogocash/manut-ai --dir "$dir"
-   node .claude/skills/release-desktop/scripts/verify-release.mjs "$dir" apps/desktop/src-tauri/tauri.conf.json
+   gh release view desktop-v<version> --repo mygogocash/manut-ai --json assets > "$dir.assets.json"
+   node .claude/skills/release-desktop/scripts/verify-release.mjs "$dir" apps/desktop/src-tauri/tauri.conf.json "$dir.assets.json"
    ```
    It verifies every update file's signature against the key pinned in the app, and that `latest.json` names both
-   chips. Then open each `.dmg` read-only (`hdiutil attach -nobrowse -readonly`), and check the app's version, chip
+   chips. Since tauri-action 1.0 `latest.json` names each file by its asset id, so the asset list is what says which
+   file that is (`release-assets.mjs`). Then open each `.dmg` read-only (`hdiutil attach -nobrowse -readonly`), and check the app's version, chip
    (`lipo -archs`), identifier and `codesign --verify --deep --strict`. Look at the icon. Start the Apple silicon app
    once from a copy and see that it stays up with no crash report.
 4. **Publish** only on the owner's word: `gh release edit desktop-v<version> --draft=false --prerelease --latest=false`

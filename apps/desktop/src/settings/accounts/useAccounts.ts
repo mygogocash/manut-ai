@@ -12,9 +12,12 @@ import { t } from "../../i18n";
 import { clock, limitName } from "../../sidebar/usageFormat";
 import { accountHost, accountOps, isDesktop, type LoginStatus } from "./native";
 import { accountName, autoSwitchOn, isCpa, lapseNotices, nextAccount, pruneSeen, resetFirstOn, switchNote, CLI_NAME } from "./rules";
+import { changes } from "../../lib/changes";
+import { errText } from "../../lib/errText";
 
 const REFRESH_MS = 60_000;
-const ASKS_STATUS: AccountCli[] = ["claude", "codex"];
+/** The CLIs the app reads a sign-in for: a status command (Claude Code, Codex) or the account folder's own auth file (Grok, pi). */
+const ASKS_STATUS: AccountCli[] = ["claude", "codex", "grok", "pi"];
 
 type Snap = {
   groups: AccountGroup[] | null;
@@ -28,14 +31,12 @@ type Snap = {
   note: { cli: string; text: string; at: number } | null;
 };
 let snap: Snap = { groups: null, error: null, onComputer: null, status: {}, versions: {}, note: null };
-const fns = new Set<() => void>();
+const fns = changes();
 const set = (next: Partial<Snap>) => {
   snap = { ...snap, ...next };
-  for (const f of [...fns]) f();
+  fns.emitSnapshot();
 };
 let inflight: Promise<void> | null = null;
-
-const errText = (e: unknown) => (typeof e === "object" && e && "message" in e ? String((e as { message: unknown }).message) : String(e));
 
 async function readStatuses(groups: AccountGroup[]): Promise<Record<string, LoginStatus>> {
   const host = accountHost();
@@ -162,10 +163,7 @@ export const accountsNow = (): Snap => snap;
 
 export function useAccounts(): Snap {
   return useSyncExternalStore(
-    (f) => {
-      fns.add(f);
-      return () => fns.delete(f);
-    },
+    (f) => fns.subscribe(f),
     () => snap,
     () => snap,
   );

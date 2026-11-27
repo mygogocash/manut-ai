@@ -86,7 +86,7 @@ Grab the latest `.dmg` from [Releases](https://github.com/mygogocash/manut-ai/re
 
 ## Run it locally
 
-You need Node 22, [pnpm](https://pnpm.io) and, for the desktop shell, stable Rust.
+You need Node 26 (the LTS; `.nvmrc` says so), [pnpm](https://pnpm.io) and, for the desktop shell, stable Rust.
 
 ```bash
 pnpm install          # only esbuild and workerd may run install scripts (pnpm-workspace.yaml)
@@ -98,7 +98,7 @@ pnpm --filter @manut/web e2e    # the owner's pages in WebKit and Chromium at ph
 pnpm --filter @manut/api dev    # both Workers on localhost:8787: the API and the web app on one origin
 ```
 
-The desktop app has its own guide: [`apps/desktop/README.md`](https://github.com/mygogocash/manut-ai/blob/pilot/week-1/apps/desktop/README.md). Set `VITE_API_ORIGIN` to point the web app at a running backend, or to `same-origin` for the API that served the page. The backend's tests run in real workerd (`pnpm --filter @manut/api test`). Nothing here deploys anything; deploying is in [`docs/deploying.md`](docs/deploying.md).
+The desktop app has its own guide: [`apps/desktop/README.md`](apps/desktop/README.md). Set `VITE_API_ORIGIN` to point the web app at a running backend, or to `same-origin` for the API that served the page. The backend's tests run in real workerd (`pnpm --filter @manut/api test`). Nothing here deploys anything; deploying is in [`docs/deploying.md`](docs/deploying.md).
 
 ## What's in the box
 
@@ -106,12 +106,12 @@ A pnpm monorepo. Three apps, a stack of small shared packages.
 
 | Path | What it is |
 | --- | --- |
-| [`apps/desktop`](https://github.com/mygogocash/manut-ai/tree/pilot/week-1/apps/desktop) | The Mac app: Tauri 2 shell in Rust, React 19 front end. Chat, Needs you, Kit, terminals and the coding-agent adapters. |
+| [`apps/desktop`](apps/desktop) | The Mac app: Tauri 2 shell in Rust, React 19 front end. Chat, Needs you, Kit, terminals and the coding-agent adapters. |
 | [`apps/api`](apps/api) | The backend on Cloudflare Workers and Durable Objects: shops, people, tasks with exact-action approvals, an encrypted credential vault, schedules, retention. |
-| [`apps/web`](https://github.com/mygogocash/manut-ai/tree/pilot/week-1/apps/web) | The owner's approval page, invite links, the phone web app and the operator console, served from the API's own origin. |
-| [`packages/*`](https://github.com/mygogocash/manut-ai/tree/pilot/week-1/packages) | The shared rules: approvals that settle once, one event contract for every agent, money and time formatting, notification rules, PromptPay QR, the phone's encrypted channel, the design tokens, and more. |
+| [`apps/web`](apps/web) | The owner's approval page, invite links, the phone web app and the operator console, served from the API's own origin. |
+| [`packages/*`](packages) | The shared rules: approvals that settle once, one event contract for every agent, money and time formatting, notification rules, PromptPay QR, the phone's encrypted channel, the design tokens, and more. |
 
-The plan lives in [`docs/plan.md`](https://github.com/mygogocash/manut-ai/blob/pilot/week-1/docs/plan.md) and the current state in [`docs/handoff.md`](https://github.com/mygogocash/manut-ai/blob/pilot/week-1/docs/handoff.md). Every call we made and why is in [`docs/decisions.md`](https://github.com/mygogocash/manut-ai/blob/pilot/week-1/docs/decisions.md).
+The plan lives in [`docs/plan.md`](docs/plan.md) and the current state in [`docs/handoff.md`](docs/handoff.md). Every call we made and why is in [`docs/decisions/`](docs/decisions/): [`archive.md`](docs/decisions/archive.md) up to 26 Nov 2026, then one file per item.
 
 ## Built different
 
@@ -119,7 +119,7 @@ This repo is built by one human lead and a squad of AI coding agents working sid
 
 - **Thousands of tests, every push.** Vitest across the apps and packages, the API in real workerd, Rust on Linux and macOS, and a Playwright suite of 200+ specs in parallel shards.
 - **Security reads on repeat.** Five rounds of security review so far, each one fixed and merged: what an approval shows is what runs, keys never reach a card or a phone, and a skill from a link can't sneak in settings.
-- **Motion with manners.** Every move comes from one motion file, respects Reduce Motion, and stays out of your way ([`docs/motion.md`](https://github.com/mygogocash/manut-ai/blob/pilot/week-1/docs/motion.md)).
+- **Motion with manners.** Every move comes from one motion file, respects Reduce Motion, and stays out of your way ([`docs/motion.md`](docs/motion.md)).
 - **Plain words.** No jargon on screen, four languages (English, Japanese, Korean, Chinese), with Thai on the list.
 
 ## Safety, but make it default
@@ -129,7 +129,7 @@ This repo is built by one human lead and a squad of AI coding agents working sid
 - **Keys stay hidden** on every approval, notification and phone screen; a command that could hide something is shown whole instead.
 - Deleting your account is **in the app**, two steps, and it takes your shop's data with it. What stays on your Mac stays.
 
-The longer reads: [`docs/code-editor.md`](https://github.com/mygogocash/manut-ai/blob/pilot/week-1/docs/code-editor.md), [`docs/remote-access.md`](https://github.com/mygogocash/manut-ai/blob/pilot/week-1/docs/remote-access.md), [`docs/security/`](https://github.com/mygogocash/manut-ai/tree/pilot/week-1/docs/security).
+The longer reads: [`docs/code-editor.md`](docs/code-editor.md), [`docs/remote-access.md`](docs/remote-access.md), [`docs/security/`](docs/security).
 
 ## Credits
 

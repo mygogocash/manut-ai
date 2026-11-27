@@ -6,6 +6,7 @@
 import type { PanelTabId, Ui } from "../state/store";
 import { continues, isAgentId, type AgentId } from "../sessions/agents";
 import { isLinkId } from "../sessions/termLink";
+import { parseEntries, type ReachEntry } from "../jobs/reachList";
 import { cleanShellId } from "../sessions/term/settings";
 import { isObj } from "../lib/guards";
 
@@ -74,12 +75,20 @@ export interface SavedSession {
   lane?: SavedLane;
   /** A lane a workflow started: the workflow's name (SessionRec `workflow`), so it keeps asking before every change. */
   workflow?: string;
+  /** Helpers is on in the lane's box (SessionRec `helpers`, item 102e). */
+  helpers?: true;
+  /** The "Kit may reach" list under the chat's box (SessionRec `reach`, item 102k). */
+  reach?: ReachEntry[];
   /** Continue with… (item 97, continueWith.ts): the link id of the chat this one continues, and of the chat that continues this
    *  one, each shown as a quiet line linking the other. */
   continuedFrom?: string;
   continuedIn?: string;
   /** A continued chat's model picked in Continue with: set as its agent starts, before the first message goes. */
   modelWant?: string;
+  /** The job (Ask several agents, item 102a) whose one message started this lane. */
+  job?: string;
+  /** A helper lane's lead, job, round and place in it (SessionRec `helperOf`, item 102h). */
+  helperOf?: { lead: string; job: string; round: string; index: number };
 }
 
 export interface SavedLane {
@@ -130,6 +139,18 @@ function parseLane(v: unknown): SavedLane | null {
   return absolute(dir) && absolute(worktree) ? { name, base, dir, worktree } : { name, base };
 }
 
+/** A helper lane's `helperOf` read back: its lead's session id, a job's id the shell takes, the round's id and its place, else null. */
+function parseHelperOf(v: unknown): SavedSession["helperOf"] | null {
+  if (!isObj(v)) return null;
+  const lead = str(v.lead, 12);
+  const job = str(v.job, 40);
+  const round = str(v.round, 200);
+  const index = v.index;
+  if (!lead || !SESSION_ID.test(lead) || !job || !/^[a-z0-9]+(-[a-z0-9]+)*$/.test(job) || !round) return null;
+  if (typeof index !== "number" || !Number.isInteger(index) || index < 0 || index > 99) return null;
+  return { lead, job, round, index };
+}
+
 function parseSession(v: unknown): SavedSession | null {
   if (!isObj(v)) return null;
   const id = str(v.id, 12);
@@ -155,7 +176,7 @@ function parseSession(v: unknown): SavedSession | null {
   if (typeof v.exitCode === "number" || v.exitCode === null) out.exitCode = v.exitCode;
   const error = str(v.error, MAX_TEXT);
   if (error) out.error = error;
-  for (const k of ["agentSession", "account", "bot", "model", "title", "modelTitle", "agentTitle", "promptTitle", "mode", "effort", "workflow", "continuedFrom", "continuedIn", "modelWant"] as const) {
+  for (const k of ["agentSession", "account", "bot", "model", "title", "modelTitle", "agentTitle", "promptTitle", "mode", "effort", "workflow", "continuedFrom", "continuedIn", "modelWant", "job"] as const) {
     const s = str(v[k], 200);
     if (s) out[k] = s;
   }
@@ -163,6 +184,14 @@ function parseSession(v: unknown): SavedSession | null {
   if (shell) out.shell = shell;
   const lane = parseLane(v.lane);
   if (lane) out.lane = lane;
+  // only a lane with a folder of its own may have Helpers on (item 102e)
+  if (v.helpers === true && lane?.dir) out.helpers = true;
+  // a helper lane keeps what names its lead and its round (item 102h); one that cannot be read is an ordinary lane
+  const helperOf = parseHelperOf(v.helperOf);
+  if (helperOf && lane?.dir) out.helperOf = helperOf;
+  // the chats the person listed under its box, each checked as it is read back; one that cannot be read is left out (item 102k)
+  const reach = parseEntries(v.reach);
+  if (reach.length) out.reach = reach;
   if (Array.isArray(v.messages)) {
     const msgs = v.messages.map(parseMsg).filter((m): m is SavedMsg => !!m).slice(-MAX_MESSAGES);
     if (msgs.length) out.messages = msgs;

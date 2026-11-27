@@ -50,8 +50,9 @@ async function setup(page: Page, rewrite: (msg: any) => void, kind: string, them
   await c.press("Enter");
 }
 
-// the mock bridge keeps pending asks between tests
-test.beforeEach(async () => {
+// the mock bridge keeps pending asks between tests, and between spec files: reset before each test, and once more after
+// the last, so the interview this file leaves open never reaches the spec file CI runs after it
+async function resetMock() {
   const ws = new WebSocket(`ws://127.0.0.1:${MOCK}/?token=e2e`);
   await new Promise<void>((res) => (ws.onopen = () => res()));
   await new Promise<void>((res) => {
@@ -59,7 +60,9 @@ test.beforeEach(async () => {
     ws.send(JSON.stringify({ id: "x1", op: "mock.reset" }));
   });
   ws.close();
-});
+}
+test.beforeEach(resetMock);
+test.afterAll(resetMock);
 
 for (const theme of ["dark", "light"] as const) {
   test(`shot: one question, ${theme}`, async ({ page }) => {

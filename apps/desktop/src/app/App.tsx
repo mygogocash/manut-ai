@@ -14,6 +14,7 @@ import { DetailsFallback } from "./DetailsFallback";
 import { PanelResizer } from "./PanelResizer";
 import { TermMenu } from "../sessions/term/TermMenu";
 import { CloseToasts } from "../sessions/CloseToasts";
+import { SnapshotNotice } from "../computer/SnapshotNotice";
 import { Palette } from "../palette/Palette";
 import { SettingsView } from "./SettingsView";
 import { AutomationsPage } from "../pages/Automations";
@@ -30,6 +31,7 @@ import { JobPage } from "../pages/JobPage";
 import { ActivityPage } from "../pages/ActivityPage";
 import { Onboarding } from "../onboarding/Onboarding";
 import { isFirstRunOpen } from "../onboarding/flow";
+import { ImportPast, useImportOffer } from "../importPast/ImportPast";
 import { useLookAttributes, useThemeAttribute } from "./theme";
 import { useShortcuts } from "./shortcuts";
 import { useAsksBadge } from "./badge";
@@ -61,6 +63,10 @@ export function App() {
   useShortcuts();
   useAsksBadge();
   const term = useTermPanel();
+  // Bring over (item 101e): once the first-run setup is out of the way, the first launch looks once for Claude Code and Codex
+  // work to offer
+  const firstRun = isFirstRunOpen(s.ui);
+  useImportOffer(firstRun);
   useEffect(() => {
     void s.init();
     // close = hide to the tray, keep awake while agents work (Settings › General)
@@ -101,7 +107,7 @@ export function App() {
 
   // The first-run setup fills the window, as the canvas's Welcome and Onboarding boards have no side menu. The store
   // still starts behind it (the effect above), so Home and the team are ready when it ends.
-  if (isFirstRunOpen(s.ui)) return <Onboarding />;
+  if (firstRun) return <Onboarding />;
 
   return (
     <MentionContext.Provider value={mentions}>
@@ -150,8 +156,12 @@ export function App() {
       {/* The undo toasts of a closed terminal belong to the app, not to the Code page's list: ⌘W closes the terminal in
           view, and the list is not drawn then. */}
       <CloseToasts />
+      {/* a press of the snapshot's key that read nothing says why, over whatever is showing (item 104) */}
+      <SnapshotNotice />
       {/* ⌘K and the menu's Search open it over whatever is showing */}
       <Palette />
+      {/* Bring over's offer, over whatever is showing: once on a first launch, then from History */}
+      <ImportPast />
     </div>
     </MentionContext.Provider>
   );

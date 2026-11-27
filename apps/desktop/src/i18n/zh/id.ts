@@ -1,0 +1,26 @@
+import type { id as en } from "../en/id";
+
+export const id: Record<keyof typeof en, string> = {
+  "id.changePic": "更换头像",
+  "id.changePicOf": "更换 {bot} 的头像",
+  "id.savingPic": "正在保存头像",
+  "id.defaultFace": "使用默认头像",
+  "id.rename": "重命名",
+  "id.botName": "名称",
+  "id.saving": "正在保存…",
+  "id.save": "保存",
+  "id.cancel": "取消",
+  "id.nameHint": "只会改变显示的名称，ID 仍是 {id}；留空则使用它。",
+  "id.loading": "加载中",
+  "id.unreadable": "无法读取这个机器人的信息。",
+  "id.elsewhere1": "其他地方的会话",
+  "id.elsewhere": "其他地方的会话",
+  "id.skill1": "技能",
+  "id.skills": "技能",
+  "id.routine1": "定时任务",
+  "id.routines": "定时任务",
+  "id.lastActive": "最近活跃",
+  "id.since": "自 {date} 起",
+  "id.picKinds": "请使用 PNG、JPEG 或 WebP 图片",
+  "id.picUnreadable": "无法读取这张图片",
+};

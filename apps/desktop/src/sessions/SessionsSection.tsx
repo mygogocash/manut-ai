@@ -43,6 +43,9 @@ import { pickTitle } from "./titles";
 import { useTitleModel } from "../lib/titleModel";
 import { wantsTitle } from "./titleWords";
 import { onOpenNewSessionMenu, useShells, type NewMenuStart } from "./newMenu";
+import { AskSeveralPanel } from "../jobs/AskSeveralPanel";
+import { offersAskSeveral } from "../jobs/ask";
+import { useAgentChoices } from "../jobs/choices";
 import { onTermSettings, readTermSettings } from "./term/settings";
 import { TermLinkGone } from "./termLinkOpen";
 import type { Account, AccountGroup } from "../lib/protocol";
@@ -140,6 +143,8 @@ export function SessionsHeader() {
 
 /** The menu spans the section, 8px inside both sidebar edges. */
 const MENU_W = "min(240px, calc(var(--side-w) - 16px))";
+/** The Ask several panel holds three rows and a chat box, so it is wider than the menu it came from (item 102a). */
+const ASK_W = "min(380px, calc(100vw - 24px))";
 
 /** Space kept between the menu and what it must not cover. */
 const MENU_GAP = 6;
@@ -272,6 +277,10 @@ function NewSessionMenu({ onClose, trigger, start }: { onClose: () => void; trig
   const agents = parts ? [...parts.shown, ...parts.more] : null;
   // Chat with Kit: the installed agents that run as the app's chat
   const chats = ss.agents ? chatAgents(offeredAgents(ss.agents), ss.recent) : [];
+  // Ask several agents (item 102a): offered when two or more chat rows can start (two agents, or one with two models)
+  const choices = useAgentChoices();
+  const several = offersAskSeveral(ss.agents ? offeredAgents(ss.agents) : null, ss.recent, choices, accounts.groups);
+  const [asking, setAsking] = useState(!!start?.again?.length);
   // the agents that are not installed stay folded until the person opens them
   const [unfold, setUnfold] = useState(false);
   const [copied, setCopied] = useState<AgentId | null>(null);
@@ -283,7 +292,7 @@ function NewSessionMenu({ onClose, trigger, start }: { onClose: () => void; trig
   const [folder, setFolder] = useState<string | null>(start?.folder ?? null);
   const [folders, setFolders] = useState(false);
   // measured again whenever its rows change (the folded agents, the folder list)
-  const fit = useMenuFit(box, ready && !past, `${unfold ? "open" : "folded"}:${folders ? "folders" : ""}`);
+  const fit = useMenuFit(box, ready && !past, `${unfold ? "open" : "folded"}:${folders ? "folders" : ""}:${asking ? "ask" : ""}`);
   // once placed (a hidden menu cannot take focus)
   const placed = fit !== null;
   const list = useRef<HTMLDivElement>(null);
@@ -407,6 +416,17 @@ function NewSessionMenu({ onClose, trigger, start }: { onClose: () => void; trig
       </button>
     );
   };
+  if (asking)
+    return (
+      <Popover open onClose={close} align="left" side={fit?.side ?? "bottom"} width={ASK_W} label={t("several.title")} className={`ss-pop${!fit ? " ss-pop-measuring" : ""}`}>
+        {/* placed as the menu is: on the side with room, and the panel scrolls inside what is left (a chat box under three rows is tall) */}
+        <div ref={box} data-testid="ask-wrap">
+          <div className="ss-scroll" style={fit ? { maxHeight: fit.max } : undefined} data-testid="ask-scroll">
+            <AskSeveralPanel at={at} initial={start?.again} accountWord={(a) => sessionAccountSuffix(accounts.groups, a)} onBack={() => setAsking(false)} onClose={() => close("pick")} />
+          </div>
+        </div>
+      </Popover>
+    );
   if (past)
     return (
       <Popover open onClose={close} align="left" side={fit?.side ?? "bottom"} width={MENU_W} label={t("ss.past.title", { agent: agentLabel(past, ss.agents) })} className="ss-pop">
@@ -497,6 +517,14 @@ function NewSessionMenu({ onClose, trigger, start }: { onClose: () => void; trig
             agents={chats.map((a) => ({ id: a.id, label: agentLabel(a.id, ss.agents), account: sessionAccountSuffix(accounts.groups, a.id), signedOut: agentSignedOut(accounts, a.id) }))}
             onPick={pickChat}
           />
+        )}
+        {ready && several && (
+          <button type="button" role="menuitem" className="ss-item ss-several" title={t("several.tip", { max: 3 })} onClick={() => setAsking(true)} data-testid="session-ask-several">
+            <span className="ss-ic" aria-hidden="true">
+              <Icon name="columns-2" />
+            </span>
+            <span className="ss-n">{t("several.row")}</span>
+          </button>
         )}
         {ready && (
           <div className="ss-h ss-way-h" data-testid="session-term-head">

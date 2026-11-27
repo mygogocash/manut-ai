@@ -1,0 +1,281 @@
+/* The effort card (item 132, EffortCard.tsx): GoSpark's `EffortSliderCard` and `EffortSlider` in this app's tokens. Its
+   sizes are GoSpark's: a 330px card padded 14 / 16 / 16 with 16 between its parts, a 17px title over a 13px model line,
+   a 30px round Reset, a 34px track with a 5px dot per stop and a 42px knob, and 34px rows in the model list. Its colour
+   is the brand's one look: the ink and its greys below the top level, and at the top level the provider's own colour
+   (--ef-brand, read from its mark), which is the only colour the card ever takes. Its moves are motion.css's: the knob
+   and the fill slide with the Switch, colours fade as a switch's track does, and a view comes in with Arrive's fade.
+   With reduced motion they all land at once (motion.css). */
+
+.ui-pop.ef-pop {
+  padding: 0;
+}
+
+.ef-card {
+  /* how far the title's brand colour leans to the ink: enough in light for 4.5:1 on the white card */
+  --ef-lift: 85%;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 14px 16px 16px;
+}
+[data-theme="light"] .ef-card {
+  --ef-lift: 75%;
+}
+.ef-card,
+.ef-list {
+  /* a view that comes in fades where it stands (Arrive with no distance) */
+  --rise-by: 0px;
+  animation: var(--anim-arrive);
+}
+
+/* the title, with the model under it, centred between Reset and the space GoSpark keeps for fast mode */
+.ef-head {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  padding: 0 44px;
+  min-width: 0;
+}
+.ef-title {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 2px 8px;
+  border-radius: var(--r);
+}
+.ef-title:hover {
+  background: color-mix(in srgb, var(--ink) 8%, transparent);
+}
+.ef-t {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--ink);
+  white-space: nowrap;
+}
+.ef-t > span {
+  transition: color var(--move-press) var(--ease-plain);
+}
+.ef-t > svg {
+  flex: none;
+  color: var(--muted);
+}
+/* the top level: the title takes the provider's colour, a little toward the ink so it reads on the card */
+.ef-card[data-top] .ef-t > span {
+  color: color-mix(in srgb, var(--ef-brand) var(--ef-lift), var(--ink));
+}
+.ef-m {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  max-width: 100%;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--muted);
+}
+.ef-m .model-ic {
+  color: var(--muted);
+}
+.ef-mn {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Reset and Back: GoSpark's round icon buttons, quiet until hovered */
+.ef-ib {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  border-radius: 50%;
+  color: var(--muted);
+}
+.ef-ib:hover:not(:disabled) {
+  color: var(--ink);
+  background: color-mix(in srgb, var(--ink) 10%, transparent);
+}
+.ef-ib:disabled {
+  opacity: 0.4;
+}
+.ef-reset {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  width: 30px;
+  height: 30px;
+  transform: translateY(-50%);
+}
+.ef-back {
+  width: 24px;
+  height: 24px;
+}
+
+/* the slider: a 34px track inside a 42px row the knob fills, so the whole row takes a drag or a click */
+.ef-slider {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 42px;
+  border-radius: 21px;
+  cursor: pointer;
+  touch-action: none;
+  user-select: none;
+}
+.ef-slider[aria-disabled="true"] {
+  cursor: default;
+  opacity: 0.5;
+}
+.ef-track {
+  --ef-h: 34px;
+  position: relative;
+  width: 100%;
+  height: var(--ef-h);
+  border-radius: calc(var(--ef-h) / 2);
+  background: color-mix(in srgb, var(--ink) 10%, transparent);
+}
+/* the filled part runs from the track's start to under the knob's middle, and half a track's height on */
+.ef-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: calc(var(--ef-h) + (100% - var(--ef-h)) * var(--ef-p));
+  border-radius: inherit;
+  background: var(--muted);
+  transition: width var(--tr-switch), background-color var(--move-press) var(--ease-plain);
+}
+.ef-card[data-top] .ef-fill {
+  background: var(--ef-brand);
+}
+.ef-stop {
+  position: absolute;
+  top: 50%;
+  left: calc(var(--ef-h) / 2 + (100% - var(--ef-h)) * var(--ef-s));
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  background: color-mix(in srgb, var(--ink) 32%, transparent);
+  transition: background-color var(--move-press) var(--ease-plain);
+}
+/* a stop the fill has passed reads against the fill: the page's ground on the ink's greys, white on a brand's colour */
+.ef-stop.on {
+  background: color-mix(in srgb, var(--bg) 70%, transparent);
+}
+.ef-card[data-top][data-brand="colour"] .ef-stop.on {
+  background: rgba(255, 255, 255, 0.6);
+}
+/* the knob: the app's switch knob (pages.css .pg-tog), at GoSpark's 42px, with an edge that keeps it on a light fill */
+.ef-knob {
+  position: absolute;
+  top: 50%;
+  left: calc(var(--ef-h) / 2 + (100% - var(--ef-h)) * var(--ef-p));
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  background: var(--knob);
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.14),
+    0 1px 3px rgba(0, 0, 0, 0.28);
+  transition: left var(--tr-switch);
+}
+/* while a drag moves it, the knob and the fill follow the pointer with no delay */
+.ef-slider.drag .ef-knob {
+  transition: none;
+}
+.ef-slider.drag .ef-fill {
+  transition: background-color var(--move-press) var(--ease-plain);
+}
+.ef-slider:focus-visible,
+.ef-title:focus-visible,
+.ef-ib:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--ink) 40%, transparent);
+  outline-offset: 2px;
+}
+.ef-none {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--muted);
+  text-align: center;
+}
+
+/* Ultrathink, under a line: a glyph, a title over what it does, and the app's switch */
+.ef-rows {
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+.ef-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.ef-ri {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 20px;
+  color: var(--ink);
+}
+.ef-rt {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+.ef-rn {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.ef-rl {
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--muted);
+}
+
+/* the card's second view: the model list under Back and its heading, with GoSpark's 34px rows */
+.ef-list {
+  padding: 6px;
+}
+.ef-lh {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 2px 6px;
+}
+.ef-lt {
+  font-size: 13px;
+  color: var(--muted);
+}
+.ef-list .mp-search {
+  margin: 0 2px 4px;
+}
+.ef-pop .mp-opt {
+  min-height: 34px;
+  padding: 0 10px;
+  border-radius: var(--r);
+  font-size: 14px;
+}
+
+/* the notes and the line that says where a choice applies, under either view */
+.ef-foot {
+  padding: 0 10px 8px;
+}
+.ef-foot .mp-note {
+  padding: 0 6px 6px;
+}
+.ef-pop [data-view="effort"] .mp-f {
+  margin-top: 0;
+}

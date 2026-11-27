@@ -5,6 +5,7 @@
 import { AGENTS, type AgentInfo } from "./agents";
 import mockAcpAgents from "./mockAcpAgents.json";
 import { t, type Key } from "../i18n";
+import type { RegistrySource } from "../settings/agents/acpRegistry";
 
 /** One agent a person added (`CustomAgent` in custom_agents.rs). */
 export interface CustomEntry {
@@ -43,11 +44,13 @@ export interface CustomForm {
 export const EMPTY_FORM: CustomForm = { label: "", program: "", args: "acp", install: "" };
 
 /** The confirm card: the checked entry, and the exact command manut will run (`null`: not found on the search path).
- *  `by`: the display name of the bot whose reply proposed it (an `manut-agent` draft), shown as one quiet line. */
+ *  `by`: the display name of the bot whose reply proposed it (an `manut-agent` draft), shown as one quiet line.
+ *  `registry`: where an entry from the ACP registry comes from and how the person installs it (item 101c). */
 export interface CustomPreview {
   entry: CustomEntry;
   command: string | null;
   by?: string;
+  registry?: RegistrySource;
 }
 
 /** A refusal the shell sent as `why:<code>`, else null. */

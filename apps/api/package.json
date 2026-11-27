@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=22.0.0"
+    "node": ">=26.0.0"
   },
   "scripts": {
     "dev": "wrangler dev -c wrangler.jsonc -c wrangler.web.jsonc",
@@ -14,12 +14,12 @@
     "test:origin": "node scripts/one-origin-contract.mjs"
   },
   "devDependencies": {
-    "@cloudflare/vitest-plugin": "1.6.0",
-    "@cloudflare/workers-types": "5.20261108.1",
+    "@cloudflare/vitest-plugin": "1.9.2",
+    "@cloudflare/workers-types": "5.20261125.1",
     "@manut/remote-channel": "workspace:*",
     "typescript": "7.0.2",
-    "vitest": "5.1.0",
-    "wrangler": "^4.158.0"
+    "vitest": "5.1.1",
+    "wrangler": "^4.168.0"
   },
   "dependencies": {
     "@manut/agent-prompts": "workspace:*",

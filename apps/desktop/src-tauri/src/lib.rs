@@ -3,6 +3,7 @@ mod acp_agents;
 mod api_link;
 mod acp_chat;
 mod acp_mcp;
+mod acp_registry;
 mod agent_chat;
 mod agent_config;
 mod app_menu;
@@ -26,8 +27,12 @@ mod lane;
 mod lane_clean;
 mod lane_config;
 mod lane_diff;
+mod lane_helper;
+mod lane_land;
+mod machine;
 mod outside_use;
 mod past_chats;
+mod import_past;
 mod new_project;
 mod project_icon;
 mod project_notes;
@@ -312,6 +317,13 @@ async fn provider_version(id: String) -> Result<Option<String>, String> {
     tauri::async_runtime::spawn_blocking(move || providers::version_here(&id)).await.map_err(|e| e.to_string())?
 }
 
+/// Agent `id`'s sign-in as its own fixed status command says it (Cursor, Antigravity: `providers::SIGNIN_AGENTS`), or
+/// null when it says nothing; never a token, an email at most.
+#[tauri::command]
+async fn provider_signin(id: String) -> Result<Option<accounts::LoginStatus>, String> {
+    tauri::async_runtime::spawn_blocking(move || providers::signin_here(&id)).await.map_err(|e| e.to_string())?
+}
+
 /// The allow-listed agent programs (claude, codex, omo, dsh, omh, pi, omp, grok), how each opens and where each
 /// was found, if anywhere.
 /// One row of the agent look-up: an allow-listed agent, or one the person added on Settings › Agents.
@@ -375,6 +387,22 @@ async fn custom_agent_bot_preview(label: String, program: String, args: Vec<Stri
     tauri::async_runtime::spawn_blocking(move || custom_agents::bot_preview_here(&label, &program, &args, &install).map_err(|w| format!("why:{}", w.code())))
         .await
         .map_err(|e| e.to_string())?
+}
+
+/// Settings › Providers › From the ACP registry (item 101c): the pinned registry's agents, each offered, already there,
+/// the person's own, or not offered with its reason. Reads the compiled-in copy and manut's own agents file; fetches
+/// nothing.
+#[tauri::command]
+async fn acp_registry_list() -> Result<acp_registry::RegistryList, String> {
+    tauri::async_runtime::spawn_blocking(acp_registry::list_here).await.map_err(|e| e.to_string())
+}
+
+/// The confirm card for registry entry `id`: drafted as a bot's draft is (the custom-agent checks, no shell, interpreter
+/// or built-in program) with the exact command and where it comes from. Writes nothing; only the card's Add
+/// (`custom_agent_confirm`) does. A refusal is `why:<code>`.
+#[tauri::command]
+async fn acp_registry_preview(id: String) -> Result<acp_registry::RegistryPreview, String> {
+    tauri::async_runtime::spawn_blocking(move || acp_registry::preview_here(&id)).await.map_err(|e| e.to_string())?
 }
 
 /// The remove confirm: agent `id` leaves manut's own file (a broken entry too).
@@ -972,6 +1000,50 @@ async fn lane_worktree(cwd: String, names: Vec<String>, start: Option<lane::Star
     tauri::async_runtime::spawn_blocking(move || lane::make_with(&home, std::path::Path::new(&cwd), &names, &start)).await.map_err(|e| e.to_string())?
 }
 
+/// A helper lane's own working folder (item 102f, lane_helper.rs; docs/several-agents.md R8): a snapshot of the lead lane's
+/// folder `lead` as it is now (its files staged or not and its new files git does not ignore, taken with an index file of the
+/// shell's own, so the lead's index, HEAD, branch, stash and files never change), kept under the app's own ref and checked out
+/// in a new worktree beside the lead's, on a branch named from the lead's (`kit/<words>-help-1`), its record naming job `job`
+/// and the lead. The page names only a lane the app made and a job's id: the folder, the branch and the ref are the shell's.
+/// Nothing is pushed, and no agent starts. A refusal is a short code (`bad_job`, `not_a_lane`, `lead_is_helper`, `busy`,
+/// `no_commit`, `taken`, `no_folder`, `git_missing`, a chosen folder's own) or git's own last line, with nothing made.
+#[tauri::command]
+async fn lane_helper_worktree(lead: String, job: String) -> Result<lane::Made, String> {
+    let home = user_home()?;
+    tauri::async_runtime::spawn_blocking(move || lane_helper::make(&home, &lead, &job)).await.map_err(|e| e.to_string())?
+}
+
+/// Lands the work of the helper lane whose folder is `helper` in its lead lane's folder (item 102g, lane_land.rs;
+/// docs/several-agents.md R8): the helper lane's change since its snapshot, committed or not, build output cut and keys named,
+/// applied three ways into the lead's working tree only, one landing at a time per lead folder, with what was there kept first
+/// for Take back. A patch that will not apply, or names a file outside the lead's project, is kept at
+/// `~/.manut/patches/<job>/<folder>.patch` (0600) and the lead's folder is not written. The page names only a helper lane the
+/// app made: its lead, job and snapshot come from its record. Nothing is committed or pushed, and no agent starts. A refusal is
+/// a short code (`not_a_lane`, `not_a_helper`, `no_lead`, `landed`, `busy`, `no_snapshot`, `no_commit`, `config:<setting>`,
+/// `git_missing`) or git's own line.
+#[tauri::command]
+async fn lane_land(helper: String) -> Result<lane_land::Landed, String> {
+    let home = user_home()?;
+    tauri::async_runtime::spawn_blocking(move || lane_land::land(&home, &helper)).await.map_err(|e| e.to_string())?
+}
+
+/// Take back this landing (item 102g, lane_land.rs): the files the landing of the helper lane `helper` wrote in its lead's folder
+/// go back as they were, byte for byte, only while nothing there changed since. A refusal is a short code (`not_a_lane`,
+/// `not_a_helper`, `no_lead`, `not_landed`, `changed`, `no_commit`, `git_missing`) or the system's own words.
+#[tauri::command]
+async fn lane_take_back(helper: String) -> Result<lane_land::TakenBack, String> {
+    let home = user_home()?;
+    tauri::async_runtime::spawn_blocking(move || lane_land::take_back(&home, &helper)).await.map_err(|e| e.to_string())?
+}
+
+/// How much memory this computer has, in bytes (item 102h, machine.rs; docs/several-agents.md R7): read once from the kernel
+/// (`hw.memsize` on macOS), with no program run, so the page can tell how many helper lanes run at once. Null when it could not
+/// be read, which the page counts as the smallest Mac the app runs on.
+#[tauri::command]
+fn machine_memory() -> Option<u64> {
+    machine::memory_bytes()
+}
+
 /// Settings › MCP and Skills: the MCP servers and skills Claude Code and Codex have, by name and where each comes from, read
 /// from their own files for the person's own home and, when given, the project folder `cwd` (agent_config.rs). Only reads,
 /// and names only: never a command, an argument, an environment value, a header or an address.
@@ -1523,6 +1595,28 @@ async fn past_chats_list(agent: String, cwds: Vec<String>) -> Result<Vec<past_ch
     tauri::async_runtime::spawn_blocking(move || past_chats::list(&past_home(&agent, None)?, &agent, &cwds)).await.map_err(|e| e.to_string())?
 }
 
+/// The newest conversations Claude Code or Codex keeps across the folders brought over (item 101e), for History: bounded by `max`
+/// whatever the number of folders (past_chats.rs `recent`), read-only (rule 30).
+#[tauri::command]
+async fn past_chats_recent(agent: String, cwds: Vec<String>, max: usize) -> Result<Vec<past_chats::PastChat>, String> {
+    tauri::async_runtime::spawn_blocking(move || past_chats::recent(&past_home(&agent, None)?, &agent, &cwds, max)).await.map_err(|e| e.to_string())?
+}
+
+/// What could be brought over from Claude Code and Codex (item 101e, import_past.rs): the folders they worked in that are still on
+/// this Mac, with their conversations counted, newest first, and what was skipped. Read from the homes past chats reads, with its
+/// readers; writes nothing, and only folders and counts come back. The page asks nothing but this.
+#[tauri::command]
+async fn import_past_scan() -> Result<import_past::Found, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let home = user_home()?;
+        let claude = past_home("claude", None).ok();
+        let codex = past_home("codex", None).ok();
+        Ok(import_past::scan(&home, claude.as_deref(), codex.as_deref(), &import_past::Limits::default()))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// What Claude Code or Codex used in sessions outside Manut AI, read from the tool's own files on this Mac (item 106,
 /// `outside_use.rs`): numbers, dates and a project folder's name, never a path above it or a word of a conversation. The
 /// page names the tool and the ids of the sessions it started (matched, never opened) and a number to cancel by; the folders
@@ -1687,6 +1781,19 @@ pub fn run() {
     // refused there (Guideline 2.4.5(vii), app_store.rs). Its page asks nothing either (src/sidebar/updater.ts).
     #[cfg(not(app_store))]
     let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    // A snapshot of any app (computer/snap.rs, item 104): the plugin is there, and registers nothing until the person
+    // turns the key on in Settings › Computer. Its one handler reads the app in front when the key goes down. The page is
+    // given none of its commands (capabilities/default.json), so only the shell registers a key.
+    #[cfg(target_os = "macos")]
+    let builder = builder.plugin(
+        tauri_plugin_global_shortcut::Builder::new()
+            .with_handler(|app, _keys, event| {
+                if event.state == tauri_plugin_global_shortcut::ShortcutState::Pressed {
+                    computer::snap::pressed(app);
+                }
+            })
+            .build(),
+    );
     let app = builder
         // The process plugin does the restart that follows an update.
         .plugin(tauri_plugin_process::init())
@@ -1759,6 +1866,15 @@ pub fn run() {
                     eprintln!("Manut AI: no computer use: {e}");
                 }
             }
+            // the snapshot's key (computer/snap.rs): off until the person turns it on, and registered only then. On the
+            // Mac app alone: elsewhere, and in the App Store edition, whose sandbox refuses accessibility, Settings says
+            // it is not here and nothing is ever registered.
+            #[cfg(target_os = "macos")]
+            let keys: Box<dyn computer::snap::Hotkeys> =
+                if app_store::APP_STORE { Box::new(computer::snap::Nowhere) } else { Box::new(computer::snap::Plugin(app.handle().clone())) };
+            #[cfg(not(target_os = "macos"))]
+            let keys: Box<dyn computer::snap::Hotkeys> = Box::new(computer::snap::Nowhere);
+            app.manage(computer::snap::Snap::start(user_home().ok(), keys, cfg!(target_os = "macos") && !app_store::APP_STORE));
             app.manage(Shell {
                 logins: accounts::Logins::new(),
                 sessions: Sessions::new(),
@@ -1831,12 +1947,15 @@ fn commands(invoke: tauri::ipc::Invoke) -> bool {
         providers_list,
         provider_save,
         provider_version,
+        provider_signin,
         sessions_agents,
         custom_agents_list,
         custom_agent_preview,
         custom_agent_bot_preview,
         custom_agent_confirm,
         custom_agent_remove,
+        acp_registry_list,
+        acp_registry_preview,
         session_start,
         shell_start,
         shells_available,
@@ -1865,6 +1984,10 @@ fn commands(invoke: tauri::ipc::Invoke) -> bool {
         term_share_take,
         session_branch,
         lane_worktree,
+        lane_helper_worktree,
+        lane_land,
+        lane_take_back,
+        machine_memory,
         lane_list,
         lane_projects,
         lane_remove,
@@ -1904,6 +2027,8 @@ fn commands(invoke: tauri::ipc::Invoke) -> bool {
         editors_installed,
         session_open_in_editor,
         past_chats_list,
+        past_chats_recent,
+        import_past_scan,
         outside_use_scan,
         outside_use_cancel,
         past_chat_messages,
@@ -1974,6 +2099,8 @@ fn commands(invoke: tauri::ipc::Invoke) -> bool {
         voice::voice_stop,
         computer::computer_status,
         computer::computer_open,
+        computer::snap::snapshot_settings,
+        computer::snap::snapshot_set,
         tailscale::tailscale_state
     ];
     answer(invoke)

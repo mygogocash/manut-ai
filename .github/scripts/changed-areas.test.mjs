@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
-import { AREAS, MOST_FILES, areasOf, decide, pushRuns } from "./changed-areas.mjs";
+import { AREAS, MOST_FILES, MOST_TRIES, areasOf, decide, integrates, pushRuns } from "./changed-areas.mjs";
 
 const on = (areas) => AREAS.filter((area) => areas[area]).sort();
 const every = [...AREAS].sort();
@@ -13,13 +13,17 @@ const REPO = "mygogocash/manut-ai";
 const BASE = "a".repeat(40);
 const HEAD = "b".repeat(40);
 const files = (...names) => names.map((filename) => ({ filename }));
-/** GitHub as a push run asks it: the last green run's commit, then the files changed since. */
-const github = ({ green = BASE, status = "ahead", changed = files("docs/plan.md") } = {}) => {
+/** GitHub as a push run asks it: the last green run's commit on the branch, then the files changed since. A branch with
+ *  no green run of its own asks for the newest green runs of every branch (`elsewhere`, newest first), and compares
+ *  them with its head in turn (`statuses`, by commit; `status` for any other). */
+const github = ({ green = BASE, status = "ahead", changed = files("docs/plan.md"), elsewhere = [], statuses = {} } = {}) => {
   const asked = [];
   const api = async (path) => {
     asked.push(path);
-    if (path.includes("/actions/workflows/ci.yml/runs")) return { workflow_runs: green ? [{ head_sha: green }] : [] };
-    if (path.includes("/compare/")) return { status, files: changed };
+    if (path.includes("/actions/workflows/ci.yml/runs?branch=")) return { workflow_runs: green ? [{ head_sha: green }] : [] };
+    if (path.includes("/actions/workflows/ci.yml/runs?")) return { workflow_runs: elsewhere.map(([head_branch, head_sha]) => ({ head_branch, head_sha })) };
+    const compare = /\/compare\/([0-9a-f]+)\.\.\./.exec(path);
+    if (compare) return { status: statuses[compare[1]] ?? status, files: changed };
     throw new Error(`unexpected ${path}`);
   };
   return { api, asked };
@@ -49,6 +53,15 @@ describe("what a changed file needs", () => {
   it("runs the jobs that test the other scripts and workflows for a change to one", () => {
     assert.deepEqual(on(areasOf([".github/workflows/release-desktop.yml"])), ["api", "desktop"]);
     assert.deepEqual(on(areasOf([".github/scripts/check-dev-deploys.mjs"])), ["api", "desktop"]);
+    assert.deepEqual(on(areasOf([".github/scripts/e2e-timings.mjs"])), ["api", "desktop"]);
+  });
+
+  it("runs the browser jobs too for the scripts they run: the shards' split and the summary that passes them", () => {
+    for (const path of [".github/scripts/e2e-shards.mjs", ".github/scripts/playwright-summary.mjs"]) {
+      assert.deepEqual(on(areasOf([path])), ["api", "desktop", "e2e", "phones"], path);
+    }
+    // New timings move files between shards, so the shards run on them.
+    assert.deepEqual(on(areasOf(["apps/desktop/e2e/timings.json"])), ["e2e", "typecheck"]);
   });
 
   it("runs everything for CI's own parts and for what every package installs from", () => {
@@ -66,6 +79,12 @@ describe("what a changed file needs", () => {
 
   it("runs nothing for files no job reads", () => {
     assert.deepEqual(on(areasOf([".gitignore", ".claude/settings.json", ".github/dependabot.yml", "LICENSE"])), []);
+  });
+
+  it("runs the desktop's job, where their tests are, for the lead's merge scripts", () => {
+    assert.deepEqual(on(areasOf([".claude/skills/lead-merge/scripts/ci-wait.sh"])), ["desktop"]);
+    assert.deepEqual(on(areasOf([".claude/skills/lead-merge/SKILL.md"])), ["api", "desktop"]);
+    assert.deepEqual(on(areasOf([".claude/skills/helper/scripts/x.sh"])), []);
   });
 
   it("adds up what several files need", () => {
@@ -89,12 +108,13 @@ describe("a push", () => {
     assert.deepEqual(on((await decide(push, {}, api)).areas), ["api", "desktop", "rust"]);
   });
 
-  it("runs everything when CI has never passed on the branch", async () => {
-    const { api, asked } = github({ green: null });
+  it("runs everything when CI has never passed on the branch, nor lately on main or a pilot branch", async () => {
+    const { api, asked } = github({ green: null, elsewhere: [["feat/other", "c".repeat(40)], ["cloud/format", "d".repeat(40)]] });
     const { areas, why } = await decide(push, {}, api);
     assert.deepEqual(on(areas), every);
-    assert.equal(asked.length, 1);
-    assert.match(why, /^Every job runs: CI has not passed on pilot\/week-1 yet/);
+    assert.equal(asked.length, 2);
+    assert.match(asked[1], /\/actions\/workflows\/ci\.yml\/runs\?event=push&status=success&per_page=100$/);
+    assert.match(why, /^Every job runs: CI has not passed on pilot\/week-1 yet, nor on main or a pilot branch lately/);
   });
 
   it("runs everything when history was rewritten or the list may be cut short or is empty", async () => {
@@ -117,12 +137,76 @@ describe("a push", () => {
   });
 });
 
+describe("a helper's branch that CI has not passed on yet", () => {
+  const helper = { event: "push", repository: REPO, sha: HEAD, branch: "feat/lane-diff" };
+  const P1 = "1".repeat(40);
+  const P2 = "2".repeat(40);
+  const M1 = "3".repeat(40);
+
+  it("is measured from the newest commit CI passed on a pilot branch or main that its history holds", async () => {
+    // The newest green runs: another helper's, then pilot's newest (not in this branch: it was made earlier), then an
+    // older pilot commit it was made from, then main.
+    const { api, asked } = github({
+      green: null,
+      elsewhere: [["feat/other", "9".repeat(40)], ["pilot/week-1", P2], ["pilot/week-1", P2], ["pilot/week-1", P1], ["main", M1]],
+      statuses: { [P2]: "diverged", [P1]: "ahead" },
+      changed: files("apps/web/src/App.tsx"),
+    });
+    const { areas, why } = await decide(helper, {}, api);
+    assert.deepEqual(on(areas), ["api", "phones", "typecheck", "web"]);
+    // Its own green run first, then the list, then pilot's newest (diverged), then the one it holds. A commit listed
+    // twice is compared once, and another helper's run is never a starting point.
+    assert.deepEqual(asked.slice(2), [`/repos/${REPO}/compare/${P2}...${HEAD}`, `/repos/${REPO}/compare/${P1}...${HEAD}`]);
+    assert.equal(asked.length, 4);
+    assert.match(why, /since 1111111, the newest commit CI passed on pilot\/week-1 that feat\/lane-diff holds\.$/);
+  });
+
+  it("uses main's green commit when no pilot one is in its history", async () => {
+    const { api } = github({ green: null, elsewhere: [["pilot/week-1", P1], ["main", M1]], statuses: { [P1]: "diverged", [M1]: "ahead" } });
+    const { areas, why } = await decide(helper, {}, api);
+    assert.deepEqual(on(areas), ["api", "desktop"]);
+    assert.match(why, /since 3333333, the newest commit CI passed on main that feat\/lane-diff holds/);
+  });
+
+  it("runs everything when none of the commits it tries is in its history, and tries only a few", async () => {
+    const many = Array.from({ length: MOST_TRIES + 5 }, (_, i) => ["pilot/week-1", i.toString(16).padStart(40, "a")]);
+    const { api, asked } = github({ green: null, elsewhere: many, status: "diverged" });
+    const { areas, why } = await decide(helper, {}, api);
+    assert.deepEqual(on(areas), every);
+    assert.equal(asked.filter((path) => path.includes("/compare/")).length, MOST_TRIES);
+    assert.match(why, new RegExp(`none of the last ${MOST_TRIES} commits CI passed on main or a pilot branch is in its history`));
+  });
+
+  it("runs everything when its head is the very commit CI passed on a pilot branch, or the list cannot be read", async () => {
+    const same = github({ green: null, elsewhere: [["pilot/week-1", HEAD]] });
+    const { areas, why } = await decide(helper, {}, same.api);
+    assert.deepEqual(on(areas), every);
+    assert.match(why, /this commit is one CI passed on pilot\/week-1, asked for again here/);
+    let calls = 0;
+    const failing = async () => { if (++calls === 2) throw new Error("GitHub answered 502"); return { workflow_runs: [] }; };
+    assert.match((await decide(helper, {}, failing)).why, /could not be read \(GitHub answered 502\)/);
+  });
+
+  it("keeps every rule of a measured run: a long list or an empty one still runs everything", async () => {
+    const many = files(...Array.from({ length: MOST_FILES }, (_, i) => `docs/n-${i}.md`));
+    assert.deepEqual(on((await decide(helper, {}, github({ green: null, elsewhere: [["pilot/week-1", P1]], changed: many }).api)).areas), every);
+    assert.deepEqual(on((await decide(helper, {}, github({ green: null, elsewhere: [["pilot/week-1", P1]], changed: [] }).api)).areas), every);
+  });
+
+  it("is measured from its own last green run once it has one, as every branch is", async () => {
+    const { api, asked } = github({ green: BASE, elsewhere: [["pilot/week-1", P1]] });
+    await decide(helper, {}, api);
+    assert.equal(asked[1], `/repos/${REPO}/compare/${BASE}...${HEAD}`);
+    assert.equal(asked.length, 2);
+  });
+});
+
 describe("a pull request", () => {
   const pr = (head, base = { sha: BASE, repo: { full_name: REPO } }) => ({ pull_request: { head, base } });
   const run = { event: "pull_request", repository: REPO, sha: "c".repeat(40), branch: "1/merge" };
 
   it("skips every job when its branch is one CI runs on a push of: that run checks the same commit", async () => {
-    for (const ref of ["pilot/week-1", "cloud/format", "main"]) {
+    for (const ref of ["pilot/week-1", "cloud/format", "main", "feat/lane-diff", "ci/many-agents", "chore/deps"]) {
       const { api, asked } = github();
       const { areas, why } = await decide(run, pr({ sha: HEAD, ref, repo: { full_name: REPO } }), api);
       assert.deepEqual(on(areas), [], ref);
@@ -134,7 +218,7 @@ describe("a pull request", () => {
   it("is checked by its own run when no push run covers it: another branch here, or a fork with the same branch name", async () => {
     const changed = files("apps/web/src/App.tsx");
     const own = github({ changed });
-    assert.deepEqual(on((await decide(run, pr({ sha: HEAD, ref: "feat/x", repo: { full_name: REPO } }), own.api)).areas), ["api", "phones", "typecheck", "web"]);
+    assert.deepEqual(on((await decide(run, pr({ sha: HEAD, ref: "spike/x", repo: { full_name: REPO } }), own.api)).areas), ["api", "phones", "typecheck", "web"]);
     assert.deepEqual(own.asked, [`/repos/${REPO}/compare/${BASE}...${HEAD}`]);
     const fork = github({ changed });
     assert.deepEqual(on((await decide(run, pr({ sha: HEAD, ref: "pilot/week-1", repo: { full_name: "someone/manut-ai" } }), fork.api)).areas), ["api", "phones", "typecheck", "web"]);
@@ -158,8 +242,24 @@ describe("ci.yml and this script agree", () => {
   const ci = readFileSync(join(root, ".github/workflows/ci.yml"), "utf8");
 
   it("names the branches a push runs on as pushRuns does", () => {
-    assert.match(ci, /\n {2}push:\n {4}branches: \[main, "pilot\/\*\*", "cloud\/\*\*"\]\n/);
-    assert.deepEqual(["main", "pilot/week-1", "cloud/format", "feat/x", "mainline"].map(pushRuns), [true, true, true, false, false]);
+    const branches = /\n {2}push:\n {4}branches: \[([^\]\n]+)\]\n/.exec(ci)?.[1].split(", ").map((name) => name.replace(/"/g, ""));
+    assert.deepEqual(branches, ["main", "pilot/**", "cloud/**", "feat/**", "fix/**", "refactor/**", "test/**", "docs/**", "ci/**", "chore/**"]);
+    for (const pattern of branches) {
+      const example = pattern.replace("**", "some/branch");
+      assert.equal(pushRuns(example), true, example);
+    }
+    assert.deepEqual(["main", "pilot/week-1", "feat/x", "ci/many-agents", "mainline", "spike/x", "feature/x", "docs"].map(pushRuns),
+      [true, true, true, true, false, false, false, false]);
+    assert.deepEqual(["main", "pilot/week-1", "cloud/format", "feat/x", "mainline"].map(integrates), [true, true, false, false, false]);
+  });
+
+  it("saves the Rust cache from pushes to main and the pilot branches only, which every helper branch cannot fill", () => {
+    assert.match(ci, /\n {10}save-if: \$\{\{ github\.event_name == 'push' && \(github\.ref == 'refs\/heads\/main' \|\| startsWith\(github\.ref, 'refs\/heads\/pilot\/'\)\) \}\}\n/);
+  });
+
+  it("never cancels a run on main or a pilot branch, and cancels a superseded one anywhere else", () => {
+    assert.match(ci, /\nconcurrency:\n {2}group: ci-\$\{\{ github\.ref \}\}\n {2}cancel-in-progress: \$\{\{ github\.ref != 'refs\/heads\/main' && !startsWith\(github\.ref, 'refs\/heads\/pilot\/'\) \}\}\n/);
+    assert.doesNotMatch(ci, /\n {2}queue: max/);
   });
 
   it("ties every job but the first to an area this script answers, and hands every area on", () => {

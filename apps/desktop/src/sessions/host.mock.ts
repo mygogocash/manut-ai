@@ -4,9 +4,13 @@ import { mockPtyOut, nextMockPty } from "./fg";
 import mockAcpAgents from "./mockAcpAgents.json";
 import { MockTurnFiles, type MockTurnGlobals, type TurnFilesHost } from "./turnFiles";
 import { botRefusal, mockCheck, mockNewId, type CustomEntry, type CustomList, type CustomPreview, type CustomWhy } from "./custom";
+import { withMine, type RegistryList } from "../settings/agents/acpRegistry";
 import type { AskTool } from "../lib/protocol";
 import { t } from "../i18n";
 import { steersOf } from "./controls";
+import { withoutHelperPolicy } from "../jobs/helperPolicy";
+import { withoutReachNote } from "../jobs/reachList";
+import { readHelperBrief } from "../jobs/helperBrief";
 import type { DiskLevel, DiskState } from "../lib/disk";
 import type { ImportApp, ImportProfile } from "./term/import";
 import { type GitView } from "../code/moved";
@@ -14,7 +18,8 @@ import { MOCK_MOVED, MOCK_MOVED_ROOT } from "../code/mockMoved";
 import { type KeptLane, type LaneCleaned, type LaneMade, type LaneReleased, type LaneRemoveAsk, type LaneRemoved } from "../code/laneBranch";
 import { readAgentConfig, type AgentConfig } from "../settings/mcp/agentConfig";
 import { readPulled, readTools, type MergeMethod, type NewProjectMade, type Pulled, type RepoAsk, type ReviewAsk, type ReviewDone, type ReviewDraft, type SourceTools } from "../code/source";
-import { checkArgs, checkVars, homeVarOf, rulesOf, versionAgent, type ProviderPatch, type ProviderView } from "../settings/providers/model";
+import { checkArgs, checkVars, homeVarOf, rulesOf, signinAgent, versionAgent, type ProviderPatch, type ProviderView, type SignIn } from "../settings/providers/model";
+import { NO_SKIPS, type ImportFound } from "../importPast/offer";
 import type { ChatInput, ChatEvent, PastChat, ConvState, PastMsg, BuddyChatInput, BuddyHost, TitleRequest, TitleWords, SessionHost } from "./host";
 
 // ---- mock (browser, e2e) --------------------------------------------------------------------
@@ -48,8 +53,10 @@ export interface MockCall {
     | "custom.botPreview"
     | "custom.confirm"
     | "custom.remove"
+    | "registry.preview"
     | "power.busy"
     | "lane.worktree"
+    | "lane.helper"
     | "lane.remove"
     | "lane.root"
     | "lane.release"
@@ -97,6 +104,9 @@ export interface MockCall {
   size?: number;
   path?: string;
   keep?: string[];
+  /** lane.helper: the lead lane's folder a helper lane was made from, and its job (item 102f) */
+  lead?: string;
+  job?: string;
   /** lane.worktree: the branch the shell made for a lane, and the one it was made from (main.moved: the one the page named) */
   branch?: string;
   base?: string;
@@ -174,6 +184,8 @@ export interface MockLane {
   /** The developer's folder it was made from. */
   project: string;
   made: number;
+  /** A helper lane's record (item 102f): its job and its lead lane's folder. */
+  helper?: { job: string; lead: string };
 }
 
 export type MockGlobals = MockTurnGlobals & {
@@ -206,6 +218,14 @@ export type MockGlobals = MockTurnGlobals & {
   __manutMockTaken?: string[];
   /** e2e: the lanes' working folders the mock shell made (its records), as `lane_list` lists them */
   __manutLanes?: MockLane[];
+  /** e2e: this computer's memory in bytes, as the shell reads `hw.memsize` (item 102h); unset = 8 GB, the smallest Mac; null = it
+   *  could not be read */
+  __manutMemory?: number | null;
+  /** e2e: the next helper lane's folder is refused with this code, as the shell refuses one (item 102f) */
+  __manutMockHelperRefused?: string;
+  /** e2e: what the stand-in agent does with helper lane `n`'s brief (item 102h): one of its own commands (`/work hold`, `/approve`);
+   *  none: it answers the brief at once */
+  __manutMockHelpers?: Record<number, string>;
   /** e2e: how many files are changed or new in each lane's folder, and how many commits on its branch are not on its base,
    *  by the folder's worktree (none: 0) */
   __manutLaneChanged?: Record<string, number>;
@@ -259,7 +279,13 @@ export type MockGlobals = MockTurnGlobals & {
   /** e2e: the conversations Claude Code and Codex keep (none = the built-in ones) */
   __manutPastChats?: PastChat[];
   /** e2e: reads of those conversations, apart from the session calls (opening the + menu lists them) */
-  __manutPastReads?: { op: "list" | "read" | "own"; agent: string; cwds?: string[]; id?: string; cwd?: string; pty?: number }[];
+  __manutPastReads?: { op: "list" | "read" | "own" | "recent"; agent: string; cwds?: string[]; id?: string; cwd?: string; pty?: number; max?: number }[];
+  /** e2e: what the shell's look for work to bring over finds (item 101e); none = nothing found */
+  __manutImportFound?: ImportFound;
+  /** e2e: the look for work to bring over fails with this text */
+  __manutImportFails?: string;
+  /** e2e: how many times the page looked for work to bring over */
+  __manutImportLooks?: number;
   /** e2e: the conversation each mock pty's Codex holds open (pty id -> UUID), as a real Codex once its rollout exists */
   __manutMockCodexOwn?: Record<number, string>;
   /** e2e: the Dock / taskbar count manut last set */
@@ -271,6 +297,8 @@ export type MockGlobals = MockTurnGlobals & {
   __manutProviders?: Record<string, MockProvider>;
   /** e2e: programs the mock finds on the search path, bare name -> where (absolute paths: any of the values) */
   __manutMockPrograms?: Record<string, string>;
+  /** Settings › Providers: what Cursor's and Antigravity's status commands say, by agent id (null: they say nothing) */
+  __manutMockSignins?: Record<string, SignIn | null>;
   /** e2e: custom agents the mock treats as signed out (the others answer) */
   __manutMockCustomSignedOut?: AgentId[];
   /** e2e: CLIs that are not on this computer: a terminal of one is refused, as the shell refuses it */
@@ -405,7 +433,7 @@ export class MockHost implements SessionHost, BuddyHost {
       takes_args: builtin && !!rulesOf(a.id),
       takes_vars: builtin && a.id !== "dsh",
       version: versionAgent(a.id),
-      signin: a.id === "claude" || a.id === "codex",
+      signin: a.id === "claude" || a.id === "codex" || signinAgent(a.id),
       chat: found && (a.mode ?? "chat") === "chat" && a.id !== "dsh" ? [found, ...(custom ? (a.acp?.args ?? []) : fixed), ...(custom ? [] : args)].join(" ") : null,
       terminal: found && !custom && a.id !== "dsh" ? [found, ...args].join(" ") : null,
     };
@@ -459,6 +487,15 @@ export class MockHost implements SessionHost, BuddyHost {
     this.g.__manutProviders = { ...(this.g.__manutProviders ?? {}), [id]: next };
     return this.providerView((await this.agents()).find((x) => x.id === id)!);
   }
+  /** Cursor's and Antigravity's sign-in as their status commands would say it: signed in, unless a test set
+   *  `__manutMockSignins` (an id to its answer, null for one that says nothing). */
+  async providerSignin(id: string): Promise<SignIn | null> {
+    const a = (await this.agents()).find((x) => x.id === id);
+    if (!a?.path || !signinAgent(id)) return null;
+    const set = this.g.__manutMockSignins;
+    if (set && id in set) return set[id] ?? null;
+    return { logged_in: true, email: null };
+  }
   async providerVersion(id: string): Promise<string | null> {
     const a = (await this.agents()).find((x) => x.id === id);
     if (!a?.path || !versionAgent(id)) return null;
@@ -503,8 +540,12 @@ export class MockHost implements SessionHost, BuddyHost {
   }
   async customPreview(label: string, program: string, args: string, install: string): Promise<CustomPreview> {
     this.log({ op: "custom.preview", name: label, path: program, data: args });
+    return this.customCard(label, program, args.split(/\s+/).filter(Boolean), install);
+  }
+  /** The card the shell's `draft` makes: the checked entry, an id free in the file, the command as found now. */
+  private customCard(label: string, program: string, args: string[], install: string): CustomPreview {
     const taken = (this.g.__manutCustomFile ?? []).map((v) => (v && typeof v === "object" ? String((v as { id?: unknown }).id ?? "") : "")).filter(Boolean);
-    const entry: CustomEntry = { id: mockNewId(label.trim(), program.trim(), taken), label: label.trim(), program: program.trim(), args: args.split(/\s+/).filter(Boolean), install: install.trim() };
+    const entry: CustomEntry = { id: mockNewId(label.trim(), program.trim(), taken), label: label.trim(), program: program.trim(), args, install: install.trim() };
     const why = mockCheck(entry, (p) => Object.values(this.programs()).includes(p));
     if (why) throw new Error(`why:${why}`);
     if (taken.length >= 32) throw new Error("why:many");
@@ -529,6 +570,25 @@ export class MockHost implements SessionHost, BuddyHost {
   async customRemove(id: string) {
     this.log({ op: "custom.remove", agent: id });
     this.g.__manutCustomFile = (this.g.__manutCustomFile ?? []).filter((v) => (v as { id?: unknown })?.id !== id);
+  }
+  // ---- the ACP registry (item 101c): the shell's list for an Apple silicon Mac (acp_registry.rs, held equal by its
+  // test), beside the mock's file; loaded only here, so the app's own bundle does not carry it ----------------------
+  async acpRegistry(): Promise<RegistryList> {
+    const list = (await import("../settings/agents/mockAcpRegistry.json")).default as RegistryList;
+    return withMine(list, this.loadCustom().agents);
+  }
+  /** acp_registry.rs `preview_in`: only an offered entry has a card, drafted as a bot's draft is. Writes nothing. */
+  async acpRegistryPreview(id: string): Promise<CustomPreview> {
+    this.log({ op: "registry.preview", agent: id });
+    const list = await this.acpRegistry();
+    const o = list.agents.find((a) => a.id === id);
+    if (!o) throw new Error("why:registry");
+    if (o.state !== "offered") throw new Error(o.state === "there" ? "why:builtin" : o.state === "yours" ? "why:dup" : o.state === "refused" ? `why:${o.note}` : "why:registry");
+    const why = botRefusal(o.program);
+    if (why) throw new Error(`why:${why}`);
+    const card = this.customCard(o.label, o.program, o.args, o.install);
+    const { name, version, via, install, archive, sha256, website, repository, license } = o;
+    return { ...card, registry: { id, name, version, via, install, archive, sha256, website, repository, license, tag: list.pin.tag } };
   }
   private disk: { level: DiskLevel; alerts: number; rev: number; heard: Set<(s: DiskState) => void> } = { level: "ok", alerts: 0, rev: 0, heard: new Set() };
   /** The shell's rules (src-tauri/src/disk.rs) on `__manutDiskFree` bytes (unset: 100 GB free): the event only when
@@ -864,6 +924,36 @@ export class MockHost implements SessionHost, BuddyHost {
     const remoteFrom = start?.remote ? (this.g.__manutRemoteFrom?.[cwd] ?? "") : "";
     return { branch, base, dir: worktree, worktree, left: this.g.__manutLeft?.[cwd] ?? 0, from: remoteFrom, local: start?.remote && !remoteFrom ? "no_remote" : "", config: this.g.__manutConfig?.[cwd] ?? 0, stayed: this.g.__manutStayed?.[cwd] ?? 0 };
   }
+  /** As the shell does it (src-tauri/src/lane_helper.rs, item 102f): only for a lane folder the mock shell made that is not itself a
+   *  helper lane's, on the first `<lead>-help-<n>` no branch has, in a folder beside the lead's, its record naming the job and the
+   *  lead. The snapshot itself is the shell's: here the folder is only listed. */
+  async laneHelperWorktree(lead: string, job: string): Promise<LaneMade> {
+    if (job.length > 40 || !/^[a-z0-9]+(-[a-z0-9]+)*$/.test(job)) throw new Error("bad_job");
+    const lanes = (this.g.__manutLanes ??= []);
+    const rec = lanes.find((l) => l.worktree === lead);
+    if (!rec) throw new Error("not_a_lane");
+    if (rec.helper) throw new Error("lead_is_helper");
+    const refused = this.g.__manutMockHelperRefused;
+    if (refused) {
+      delete this.g.__manutMockHelperRefused;
+      throw new Error(refused);
+    }
+    const taken = (this.g.__manutMockTaken ??= []);
+    const prefix = rec.branch.slice(0, rec.branch.lastIndexOf("/") + 1);
+    const words = rec.branch.slice(prefix.length);
+    const branch = Array.from({ length: 20 }, (_, k) => `${prefix}${words}-help-${k + 1}`).find((n) => !taken.includes(n));
+    if (!branch) throw new Error("taken");
+    const worktree = `${lead.slice(0, lead.lastIndexOf("/"))}/${branch.slice(prefix.length)}`;
+    taken.push(branch);
+    (this.g.__manutBranches ??= {})[worktree] = branch;
+    lanes.unshift({ worktree, dir: worktree, branch, base: rec.branch, project: rec.project, made: Math.floor(Date.now() / 1000), helper: { job, lead } });
+    this.log({ op: "lane.helper", lead, job, branch, path: worktree });
+    return { branch, base: rec.branch, dir: worktree, worktree, left: 0, from: "", local: "", config: 0, stayed: 0 };
+  }
+  /** As the shell reads `hw.memsize` (item 102h): what e2e set, else an 8 GB Mac. */
+  async machineMemory(): Promise<number | null> {
+    return this.g.__manutMemory === undefined ? 8 * 1024 ** 3 : this.g.__manutMemory;
+  }
   /** A browser cannot read this computer's files: nothing, unless e2e gave a stand-in of the shell's answer. */
   async agentConfig(): Promise<AgentConfig[] | null> {
     return this.g.__manutAgentConfig === undefined ? null : readAgentConfig(this.g.__manutAgentConfig);
@@ -1113,6 +1203,18 @@ export class MockHost implements SessionHost, BuddyHost {
     const all = this.g.__manutPastChats ?? MOCK_PAST;
     return all.filter((c) => c.agent === agent && cwds.includes(c.cwd)).sort((a, b) => b.at - a.at);
   }
+  /** As the shell (past_chats.rs `recent`): the newest `max` of the agent's conversations across `cwds`. */
+  async pastRecent(agent: "claude" | "codex", cwds: string[], max: number) {
+    (this.g.__manutPastReads ??= []).push({ op: "recent", agent, cwds, max });
+    const all = this.g.__manutPastChats ?? MOCK_PAST;
+    return all.filter((c) => c.agent === agent && cwds.includes(c.cwd)).sort((a, b) => b.at - a.at).slice(0, max);
+  }
+  /** As the shell (import_past.rs): what a spec says was found, else nothing; it reads nothing and writes nothing. */
+  async importScan(): Promise<ImportFound> {
+    this.g.__manutImportLooks = (this.g.__manutImportLooks ?? 0) + 1;
+    if (this.g.__manutImportFails) throw new Error(this.g.__manutImportFails);
+    return this.g.__manutImportFound ?? { projects: [], skipped: NO_SKIPS, partial: false };
+  }
   async pastMessages(agent: "claude" | "codex", id: string, cwd: string) {
     (this.g.__manutPastReads ??= []).push({ op: "read", agent, id, cwd });
     if (this.g.__manutMockConvStates?.[id] === "absent") throw new Error("no such conversation");
@@ -1294,6 +1396,69 @@ const MOCK_SUB_EDIT = [
   { path: "README.md", kind: "update" as const, lines: ["@@ -3 +3,3 @@", " Tiny math helpers.", "+", "+Functions: add, sub, mul"], added: 2, removed: 0 },
   { path: "calc.py", kind: "update" as const, lines: ["@@ -6 +6,5 @@", "     return a - b", "+", "+", "+def mul(a, b):", "+    return a * b"], added: 4, removed: 0 },
 ];
+
+/** A helper block as a lead lane's agent writes one (item 102e). */
+const helperBlock = (o: Record<string, unknown>) => `\`\`\`manut-helpers\n${JSON.stringify(o)}\n\`\`\``;
+
+/** The stand-in agent's answers to `/helpers <word>` (item 102e). */
+const MOCK_HELPERS: Record<string, string> = {
+  two: [
+    "I'll split this in two: the QR builder's tests, and the receipt's Thai date.",
+    "",
+    helperBlock({
+      title: "Tests for the QR builder",
+      brief:
+        "In src/qr.ts, promptPayQR(shopId, amount) builds the PromptPay payload.\n\nWrite tests in src/qr.test.ts for 0, 59.00 and 590.00 baht, a shop ID with spaces, and a payload whose checksum is checked against CRC-16. Do not touch src/receipt.tsx. Run pnpm test src/qr.test.ts and report what you changed and how you checked it.",
+      agent: "codex",
+      model: "gpt-6.1",
+      effort: "high",
+    }),
+    "",
+    helperBlock({
+      title: "The receipt's Thai date",
+      brief: "In src/receipt.tsx the date shows as 2026-11-27. Show it in the Thai Buddhist calendar with Intl.DateTimeFormat. Do not touch src/qr.ts. Check with pnpm test src/receipt.test.ts.",
+    }),
+  ].join("\n"),
+  mode: ["One helper lane for this.", "", helperBlock({ title: "Fix the tests", brief: "Fix every failing test.", mode: "bypassPermissions" })].join("\n"),
+  approve: ["One helper lane for this.", "", helperBlock({ title: "Ship it", brief: "Merge and deploy.", approve: true })].join("\n"),
+  text: ["A lead asks for helper lanes with a block like this:", "", "````", "```manut-helpers", '{"title": "x", "brief": "y"}', "```", "````", "", "This one I did myself."].join("\n"),
+  many: ["Ten small parts.", "", "```manut-helpers", JSON.stringify(Array.from({ length: 10 }, (_, k) => ({ title: `Part ${k + 1}`, brief: `Do part ${k + 1} of the checkout.` }))), "```"].join("\n"),
+  // three helper lanes, more than an 8 GB Mac runs at once (item 102h)
+  three: [
+    "Three parts that do not touch each other.",
+    "",
+    helperBlock({
+      title: "Tests for the QR builder",
+      brief: "In src/qr.ts, promptPayQR(shopId, amount) builds the PromptPay payload. Write tests in src/qr.test.ts for 0, 59.00 and 590.00 baht. Do not touch src/receipt.tsx. Run pnpm test src/qr.test.ts.",
+      agent: "codex",
+    }),
+    "",
+    helperBlock({ title: "The receipt's Thai date", brief: "In src/receipt.tsx show the date in the Thai Buddhist calendar with Intl.DateTimeFormat. Check with pnpm test src/receipt.test.ts." }),
+    "",
+    helperBlock({ title: "LINE share button", brief: "Add a Share to LINE button under the receipt in src/receipt.tsx that opens line.me/R/share with the receipt's link. Check with pnpm test src/receipt.test.ts." }),
+  ].join("\n"),
+};
+
+/** A reach block as a coding chat's agent writes one (item 102k). */
+const reachBlock = (word: string, o: Record<string, unknown>) => `\`\`\`manut-${word}\n${JSON.stringify(o)}\n\`\`\``;
+
+/** The stand-in agent's answers to `/reach <word>` (item 102k): a read, a send and an open of the chat its list calls 1, a key a
+ *  block never takes, and a chat that is not on the list. */
+const MOCK_REACH: Record<string, string> = {
+  read: ["I'll look at how the other lane built the QR first.", "", reachBlock("read", { chat: "1" })].join("\n"),
+  send: ["The receipt lane should know the QR payload changed.", "", reachBlock("send", { chat: "1", message: "Allow. The PromptPay payload now ends with a CRC-16 checksum: please make the receipt print the last four characters under the QR." })].join("\n"),
+  open: [
+    "This wants a lane of its own.",
+    "",
+    reachBlock("open", {
+      title: "Thai date on the receipt",
+      brief: "In src/receipt.tsx the date shows as 2026-11-27. Show it in the Thai Buddhist calendar with Intl.DateTimeFormat. Do not touch src/qr.ts. Check with pnpm test src/receipt.test.ts.",
+      agent: "codex",
+    }),
+  ].join("\n"),
+  mode: ["Reading it in full.", "", reachBlock("read", { chat: "1", mode: "bypassPermissions" })].join("\n"),
+  unlisted: ["Let me read the payments chat.", "", reachBlock("read", { chat: "Payments" })].join("\n"),
+};
 
 class MockChat {
   private timers: ReturnType<typeof setTimeout>[] = [];
@@ -1484,7 +1649,12 @@ class MockChat {
         }
       }
       if (this.how.noChat) return; // the old program reads it and says nothing
-      const text = i.text.trim();
+      // the lead's note in front of a message while Helpers is on (item 102e) is read as instructions, not as the command
+      // and the note naming its "Kit may reach" list (item 102k)
+      let text = withoutReachNote(withoutHelperPolicy(i.text)).trim();
+      // a helper lane's brief (item 102h): what e2e set for helper lane n (`__manutMockHelpers`), else it does the task at once
+      const brief = readHelperBrief(text);
+      if (brief) text = (globalThis as { __manutMockHelpers?: Record<number, string> }).__manutMockHelpers?.[brief.n] ?? `/helperdone ${brief.n}`;
       if (text === "/exit") {
         this.at(30, () => {
           // a clean exit mid-turn, as the Rust watcher reports it (exit_turn_end)
@@ -1583,6 +1753,49 @@ class MockChat {
           this.kitAsk = a.command || a.title;
           this.emit({ event: "approval.request", request_id: rid, title: a.title, command: a.command, cwd: this.cwd, choices: ["deny", "once", "session"], tool: a.tool });
         });
+        return;
+      }
+      if (text.startsWith("/helpers")) {
+        // a lead lane's answer ending with helper blocks (item 102e, src/jobs/helperBlocks.ts), streamed a few words at a time so
+        // the page is seen hiding the blocks while they are written; `two` asks for two helper lanes, `mode` and `approve` write a
+        // key a block never takes, `text` names the block only as an example, `many` asks for more than a round takes
+        this.took(i.id);
+        const word = text.slice(8).trim() || "two";
+        const reply = MOCK_HELPERS[word] ?? `No such request: ${word}`;
+        let at = 60;
+        for (let k = 0; k < reply.length; k += 32) {
+          const part = reply.slice(k, k + 32);
+          this.at(at, () => this.emit({ event: "delta", text: part }));
+          at += 90;
+        }
+        this.at(at + 60, () => this.emit({ event: "message", id: `m${++this.seq}`, text: reply }));
+        this.at(at + 200, () => this.end("done"));
+        return;
+      }
+      if (text.startsWith("/helperdone")) {
+        // a helper lane that did its brief (item 102h): one step that changed a file, and a short report
+        this.took(i.id);
+        const n = text.slice(11).trim() || "1";
+        this.at(60, () => this.emit({ event: "tool.start", tool_id: `t-h${n}`, name: "patch", detail: "src/qr.test.ts" }));
+        this.at(140, () => this.emit({ event: "tool.end", tool_id: `t-h${n}`, name: "", ok: true, ms: 70 }));
+        this.say(`Helper ${n}: done. I changed what the brief named and checked it with its own test.`, 220);
+        this.at(600, () => this.end("done"));
+        return;
+      }
+      if (text.startsWith("/reach")) {
+        // a coding chat's answer ending with a reach block (item 102k, src/jobs/reachBlocks.ts), streamed a few words at a time so
+        // the page is seen hiding the block while it is written
+        this.took(i.id);
+        const word = text.slice(6).trim() || "read";
+        const reply = MOCK_REACH[word] ?? `No such request: ${word}`;
+        let at = 60;
+        for (let k = 0; k < reply.length; k += 32) {
+          const part = reply.slice(k, k + 32);
+          this.at(at, () => this.emit({ event: "delta", text: part }));
+          at += 90;
+        }
+        this.at(at + 60, () => this.emit({ event: "message", id: `m${++this.seq}`, text: reply }));
+        this.at(at + 200, () => this.end("done"));
         return;
       }
       if (text.startsWith("/subedit")) {

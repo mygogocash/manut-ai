@@ -14,7 +14,7 @@
 
 use serde::{Serialize, Serializer};
 
-use crate::acp_chat::AcpAgent;
+use crate::acp_chat::{AcpAgent, Format, Place, SettingCheck};
 use crate::sessions::{Agent, Mode};
 
 /// One generic ACP agent. Built by [`generic`], so the id, the program and the adapter's name never disagree.
@@ -35,6 +35,7 @@ pub struct AcpEntry {
     pub continues: bool,
 }
 
+#[allow(clippy::too_many_arguments)]
 const fn generic(
     id: &'static str,
     label: &'static str,
@@ -43,11 +44,13 @@ const fn generic(
     install: &'static str,
     mark: &'static str,
     continues: bool,
+    asks_in: &'static [&'static str],
+    settings: &'static [SettingCheck],
 ) -> AcpEntry {
     AcpEntry {
         agent: Agent { id, program: id, label, mode: Mode::Chat },
         args,
-        acp: AcpAgent { id, label, login, skill_tool: None, rules: None },
+        acp: AcpAgent { id, label, login, skill_tool: None, rules: None, asks_in, settings, ask_switches: &[] },
         install,
         mark,
         continues,
@@ -67,15 +70,34 @@ const fn generic(
 /// requests", so by default it asks the client (its binary names `session/request_permission`, `session/load` and
 /// `loadSession`). Sign-in lines from each one's help (`login`; Antigravity's `acp --login`), install lines from
 /// cursor.com/docs/cli/installation and antigravity.google/docs/getting-started.
+///
+/// Item 101a ran both as chats (Cursor Agent 2026.11.22, Antigravity 1.5.18; `tests/fixtures/acp/cursor-*.jsonl` and
+/// `agy-*.jsonl`) and holds each to the modes in which it asks: Cursor's `session/new` lists `agent`, `plan` and `ask`,
+/// all asking; Antigravity's lists `default` ("Ask before edits and commands"), `accept-edits`, `auto` and `plan`, and
+/// only `default` is taken (its default mode is a setting of its own). Cursor's own settings file is read before its chat
+/// starts ([`CURSOR_SETTINGS`]).
 pub const ACP_LIST: [AcpEntry; 7] = [
-    generic("gemini", "Gemini CLI", &["--acp"], "gemini", "npm install -g @google/gemini-cli", "geminicli-color.svg", true),
-    generic("qwen", "Qwen Code", &["--acp"], "qwen", "npm install -g @qwen-code/qwen-code@latest", "qwen-color.svg", true),
-    generic("kimi", "Kimi Code", &["acp"], "kimi login", "npm install -g @moonshot-ai/kimi-code", "kimi-code.png", true),
-    generic("copilot", "Copilot CLI", &["--acp"], "copilot login", "npm install -g @github/copilot", "githubcopilot.svg", true),
-    generic("cline", "Cline", &["--acp"], "cline auth", "npm install -g cline", "cline.svg", true),
-    generic("cursor-agent", "Cursor", &["acp"], "cursor-agent login", "curl https://cursor.com/install -fsS | bash", "cursor.svg", true),
-    generic("agy", "Antigravity", &["acp"], "agy acp --login", "curl -fsSL https://antigravity.google/cli/install.sh | bash", "antigravity.svg", true),
+    generic("gemini", "Gemini CLI", &["--acp"], "gemini", "npm install -g @google/gemini-cli", "geminicli-color.svg", true, &[], &[]),
+    generic("qwen", "Qwen Code", &["--acp"], "qwen", "npm install -g @qwen-code/qwen-code@latest", "qwen-color.svg", true, &[], &[]),
+    generic("kimi", "Kimi Code", &["acp"], "kimi login", "npm install -g @moonshot-ai/kimi-code", "kimi-code.png", true, &[], &[]),
+    generic("copilot", "Copilot CLI", &["--acp"], "copilot login", "npm install -g @github/copilot", "githubcopilot.svg", true, &[], &[]),
+    generic("cline", "Cline", &["--acp"], "cline auth", "npm install -g cline", "cline.svg", true, &[], &[]),
+    generic("cursor-agent", "Cursor", &["acp"], "cursor-agent login", "curl https://cursor.com/install -fsS | bash", "cursor.svg", true, &["agent", "plan", "ask"], &[CURSOR_SETTINGS]),
+    generic("agy", "Antigravity", &["acp"], "agy acp --login", "curl -fsSL https://antigravity.google/cli/install.sh | bash", "antigravity.svg", true, &["default"], &[]),
 ];
+
+/// Cursor's own settings file, where Cursor itself reads it (Cursor Agent 2026.11.22, `cursor-config/dist/paths.js`:
+/// `CURSOR_CONFIG_DIR`, else `$XDG_CONFIG_HOME/cursor`, else `~/.cursor`; then `cli-config.json`). Its ACP server reads
+/// the person's permissions from it (`acp/shared-services.ts` merges `cursor-config/dist/permissions-adapter.js`), and an
+/// `approvalMode` of `unrestricted` (Run Everything) lets every command, edit and read run without a request; a project's
+/// `.cursor/cli.json` may hold only `permissions` (its schema is strict), so it cannot set the mode. `allowlist` is the
+/// only value taken: `auto-review` (a classifier that runs some calls unasked) and any other are refused. Read on this Mac
+/// from the CLI's own bundle; the person's `permissions.allow` rules are theirs and apply as in Cursor itself.
+pub const CURSOR_SETTINGS: SettingCheck = SettingCheck {
+    place: Place::Home { vars: &[("CURSOR_CONFIG_DIR", ""), ("XDG_CONFIG_HOME", "cursor")], dir: ".cursor", file: "cli-config.json" },
+    format: Format::Json,
+    keys: &[("approvalMode", &["allowlist"])],
+};
 
 /// The row of generic ACP agent `id`, or `None` for anything else (a built-in, a removed agent, any other text).
 pub fn entry(id: &str) -> Option<&'static AcpEntry> {
@@ -135,6 +157,8 @@ mod tests {
             assert!(ACP_ARGS.contains(&e.args), "{id}: {:?}", e.args);
             assert_eq!((e.acp.id, e.acp.label), (id, e.agent.label), "{id}");
             assert!(e.acp.skill_tool.is_none() && e.acp.rules.is_none(), "{id}: a generic agent has no rule probe");
+            // a row held to its asking modes names each one plainly, and the one it sets back first
+            assert!(e.acp.asks_in.iter().all(|m| !m.is_empty() && m.chars().all(|c| c.is_ascii_lowercase() || c == '-')), "{id}");
             // A plain file name of a kind the desktop's mark look-up names (AgentIcon.tsx `fileMark`: *.svg, *.png).
             assert!((e.mark.ends_with(".svg") || e.mark.ends_with(".png")) && !e.mark.contains('/'), "{id}: {}", e.mark);
             assert!(!assets.join(e.mark).exists(), "{id}: {} ships, but the vendors' logos are left out", e.mark);
@@ -144,6 +168,21 @@ mod tests {
             assert!(crate::sessions::AGENTS.iter().all(|a| a.id != id), "{id} is also a built-in");
         }
         assert_eq!(seen, ["gemini", "qwen", "kimi", "copilot", "cline", "cursor-agent", "agy"]);
+        // item 101a: Cursor and Antigravity, which ran here as chats, are held to their asking modes; Antigravity's
+        // `accept-edits` and `auto` are never among them, and only Cursor's settings file is read
+        let held: Vec<(&str, &[&str], bool)> = ACP_LIST.iter().map(|e| (e.agent.id, e.acp.asks_in, !e.acp.settings.is_empty())).collect();
+        assert_eq!(
+            held,
+            [
+                ("gemini", &[][..], false),
+                ("qwen", &[][..], false),
+                ("kimi", &[][..], false),
+                ("copilot", &[][..], false),
+                ("cline", &[][..], false),
+                ("cursor-agent", &["agent", "plan", "ask"][..], true),
+                ("agy", &["default"][..], false),
+            ]
+        );
         assert!(entry("kilo").is_none() && entry("opencode").is_none() && entry("claude").is_none() && entry("").is_none());
     }
 

@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { LANGS, setLang, t } from "../i18n";
 import { emptyLane, noteLane, type LaneRecord } from "./lane";
 import { sessionRowKey, type RowMarks } from "../sidebar/rows";
-import { LanesView, laneBase, laneKey, laneRowOf, type LaneRow, type LaneRowInput } from "./Lanes";
+import { LanesView, helperGroups, jobGroups, laneBase, laneKey, laneRowOf, type LaneRow, type LaneRowInput } from "./Lanes";
 
 type Ev = { event: string; [k: string]: unknown };
 const feed = (events: Ev[]): LaneRecord => events.reduce((lane, ev, i) => noteLane(lane, ev, 1_000 + i), emptyLane());
@@ -401,5 +401,150 @@ describe("the pull request on a lane's row (item 76)", () => {
     const draft = withPull();
     draft[0] = { ...draft[0], pull: { source: "github", repo: "o/r", number: 12, state: "draft", title: "x" } };
     expect(renderToString(createElement(LanesView, { rows: draft, now: 100_000, onOpen: vi.fn() }))).toContain("Pull request #12 (Draft)");
+  });
+});
+
+describe("a job's row (Ask several agents, item 102a)", () => {
+  const lane = (id: string, agent: string, over: Partial<LaneRowInput> = {}, startedAt = 1_000) =>
+    laneRowOf(input({ rec: { id, agent: agent as never, cwd: "/Users/fon/baanmali-preorder", status: "running", promptTitle: "Add the PromptPay QR", startedAt, job: "jk7m2", lane: { name: `kit/${id}`, base: "main" } }, agent, live: { branch: `kit/${id}` }, ...over }));
+  const job = (): LaneRow[] => [lane("s3", "codex", { turn: { status: "", startedAt: 1 }, asks: ["Allow npm install?"] }, 3_000), lane("s2", "claude", {}, 2_000), lane("s1", "claude", {}, 1_000)];
+
+  it("is saved on the row, and the lane's start, so the lanes keep their order", () => {
+    expect(lane("s1", "claude").job).toBe("jk7m2");
+    expect(lane("s1", "claude").startedAt).toBe(1_000);
+    expect(laneRowOf(input()).job).toBeUndefined();
+  });
+
+  it("groups the lanes of one job into one row placed where the first stands, the others drawn under it in the order they started", () => {
+    const g = jobGroups(job());
+    expect([...g.head.keys()]).toEqual(["s3"]);
+    expect([...g.skip]).toEqual(["s2", "s1"]);
+    expect(g.head.get("s3")!.lanes.map((l) => l.id)).toEqual(["s1", "s2", "s3"]);
+    expect(g.head.get("s3")!.title).toBe("Add the PromptPay QR");
+  });
+
+  it("does not group a job with one lane left, nor a lane with no job", () => {
+    expect(jobGroups([lane("s1", "claude")]).head.size).toBe(0);
+    expect(jobGroups(canvas()).head.size).toBe(0);
+  });
+
+  it("is one row that says how many agents and the message, with each agent's state, and no lane row until it is opened", () => {
+    const out = renderToString(createElement(LanesView, { rows: job(), now: 100_000, onOpen: vi.fn() }));
+    expect(out).toContain("3 agents: Add the PromptPay QR");
+    expect(out.split('data-testid="lane-job-agent-').length - 1).toBe(3);
+    expect(out).toContain("Needs you");
+    expect(out).not.toContain('data-testid="lane-s1"');
+    expect(out).toContain('aria-expanded="false"');
+  });
+
+  it("opens to show its lanes as ordinary rows that open each lane, and the press toggles it", () => {
+    const onOpen = vi.fn();
+    const onJob = vi.fn();
+    const els = drawn(LanesView({ rows: job(), now: 100_000, onOpen, jobOpen: ["jk7m2"], onJob }));
+    expect(els.filter((e) => /^lane-s\d$/.test(String(e.props["data-testid"]))).map((e) => e.props["data-testid"])).toEqual(["lane-s1", "lane-s2", "lane-s3"]);
+    const rowButtons = els.filter((e) => e.type === "button" && e.props.title === t("lane.open"));
+    expect(rowButtons).toHaveLength(3);
+    (rowButtons[0].props.onClick as () => void)();
+    expect(onOpen).toHaveBeenCalledWith("s1");
+    (els.find((e) => e.props["data-testid"] === "lane-job-toggle")!.props.onClick as () => void)();
+    expect(onJob).toHaveBeenCalledWith("jk7m2");
+  });
+
+  it("opens the side-by-side view when the row is pressed (item 102b), and the chevron before it still shows or hides the lanes", () => {
+    const onJob = vi.fn();
+    const onJobView = vi.fn();
+    const els = drawn(LanesView({ rows: job(), now: 100_000, onOpen: vi.fn(), onJob, onJobView }));
+    (els.find((e) => e.props["data-testid"] === "lane-job-open")!.props.onClick as () => void)();
+    expect(onJobView).toHaveBeenCalledWith("jk7m2");
+    expect(onJob).not.toHaveBeenCalled();
+    // without a view to open the row toggles the lanes, as it did
+    const bare = drawn(LanesView({ rows: job(), now: 100_000, onOpen: vi.fn(), onJob }));
+    (bare.find((e) => e.props["data-testid"] === "lane-job-open")!.props.onClick as () => void)();
+    expect(onJob).toHaveBeenCalledWith("jk7m2");
+  });
+
+  it("leaves a lane of no job as it was, beside the job", () => {
+    const own = canvas().map((r) => ({ ...r, id: `c${r.id}` }));
+    const out = renderToString(createElement(LanesView, { rows: [...job(), ...own], now: 100_000, onOpen: vi.fn() }));
+    for (const r of own) expect(out).toContain(`data-testid="lane-${r.id}"`);
+    expect(out).toContain("lane-job-jk7m2");
+    expect(out.split('data-testid="lane-job-agent-').length - 1).toBe(3);
+  });
+
+  it("reads in every language", () => {
+    for (const lang of LANGS) {
+      setLang(lang);
+      expect(renderToString(createElement(LanesView, { rows: job(), now: 100_000, onOpen: vi.fn() })), lang).toContain(t("several.jobRow", { n: 3, title: "Add the PromptPay QR" }));
+    }
+  });
+});
+
+describe("helper lanes under their lead (item 102h)", () => {
+  const LEAD = "Add the PromptPay QR";
+  const lead = laneRowOf(input({ rec: { id: "s1", agent: "claude", cwd: "/Users/fon/baanmali-preorder", status: "running", promptTitle: LEAD, startedAt: 1_000, lane: { name: "kit/promptpay-qr", base: "main" } } }));
+  const helper = (id: string, index: number, agent: string, over: Partial<LaneRowInput> = {}) =>
+    laneRowOf(
+      input({
+        rec: { id, agent: agent as never, cwd: "/Users/fon/baanmali-preorder", status: "running", title: `Part ${index + 1}`, startedAt: 2_000 + index, lane: { name: `kit/promptpay-qr-help-${index + 1}`, base: "kit/promptpay-qr" }, helperOf: { lead: "s1", job: "jk7m2", round: "r1", index } },
+        agent,
+        live: { branch: `kit/promptpay-qr-help-${index + 1}` },
+        leadTitle: LEAD,
+        ...over,
+      }),
+    );
+  const rows = (): LaneRow[] => [helper("s3", 1, "Codex", { turn: { status: "Running pnpm test", startedAt: 1 } }), lead, helper("s2", 0, "Claude Code", { asks: ["Allow pnpm add qrcode?"] })];
+
+  it("keeps its lead and its number on the row", () => {
+    expect(helper("s2", 0, "Claude Code").helper).toEqual({ lead: "s1", n: 1, leadTitle: LEAD });
+    expect(lead.helper).toBeUndefined();
+  });
+
+  it("draws each helper lane indented under its lead's row, in its round's order, each saying whose helper it is", () => {
+    const g = helperGroups(rows());
+    expect(g.of.get("s1")!.map((r) => r.id)).toEqual(["s2", "s3"]);
+    expect([...g.under].sort()).toEqual(["s2", "s3"]);
+    const out = renderToString(createElement(LanesView, { rows: rows(), now: 100_000, onOpen: vi.fn() }));
+    const block = out.slice(out.indexOf('data-testid="lane-helpers-s1"'));
+    expect(block.indexOf('data-testid="lane-s2"')).toBeGreaterThan(-1);
+    expect(block.indexOf('data-testid="lane-s2"')).toBeLessThan(block.indexOf('data-testid="lane-s3"'));
+    // the lead's row comes first, then its helper lanes under it
+    expect(out.indexOf('data-testid="lane-s1"')).toBeLessThan(out.indexOf('data-testid="lane-helpers-s1"'));
+    expect(out.split('data-testid="lane-helper-of"').length - 1).toBe(2);
+    expect(out).toContain("Helper 1 of Add the PromptPay QR");
+    expect(out).toContain("Helper 2 of Add the PromptPay QR");
+    expect(out).toContain('data-helper-of="s1"');
+    // a helper lane's ask reads Needs you on its own row, as any lane's does
+    expect(out).toMatch(/data-testid="lane-s2"[^>]*data-status="needs_you"/);
+  });
+
+  it("a lead that is a lane of a job (102b's row): the row still opens the side-by-side view, and its helper lanes sit under it once the job's lanes are shown", () => {
+    const inJob = (id: string, startedAt: number) =>
+      laneRowOf(input({ rec: { id, agent: "claude", cwd: "/Users/fon/baanmali-preorder", status: "running", promptTitle: LEAD, startedAt, job: "jk7m2", lane: { name: `kit/${id}`, base: "main" } } }));
+    const rows = [inJob("s1", 1_000), inJob("s9", 1_500), helper("s2", 0, "Claude Code")];
+    const onJobView = vi.fn();
+    const closed = drawn(LanesView({ rows, now: 100_000, onOpen: vi.fn(), onJobView }));
+    (closed.find((e) => e.props["data-testid"] === "lane-job-open")!.props.onClick as () => void)();
+    expect(onJobView).toHaveBeenCalledWith("jk7m2");
+    // the job's lanes hidden: its lead's helper lane is not drawn as a loose row either
+    expect(renderToString(createElement(LanesView, { rows, now: 100_000, onOpen: vi.fn(), onJobView }))).not.toContain('data-testid="lane-s2"');
+    const open = renderToString(createElement(LanesView, { rows, now: 100_000, onOpen: vi.fn(), onJobView, jobOpen: ["jk7m2"] }));
+    const block = open.slice(open.indexOf('data-testid="lane-helpers-s1"'));
+    expect(open.indexOf('data-testid="lane-helpers-s1"')).toBeGreaterThan(-1);
+    expect(block).toContain('data-testid="lane-s2"');
+    expect(open).toContain("Helper 1 of Add the PromptPay QR");
+  });
+
+  it("draws a helper lane whose lead is not listed as an ordinary row that still names its lead", () => {
+    const out = renderToString(createElement(LanesView, { rows: [helper("s2", 0, "Claude Code")], now: 100_000, onOpen: vi.fn() }));
+    expect(out).toContain('data-testid="lane-s2"');
+    expect(out).not.toContain("lane-helpers-");
+    expect(out).toContain("Helper 1 of Add the PromptPay QR");
+  });
+
+  it("reads in every language", () => {
+    for (const lang of LANGS) {
+      setLang(lang);
+      expect(renderToString(createElement(LanesView, { rows: rows(), now: 100_000, onOpen: vi.fn() })), lang).toContain(t("helpers.run.laneOf", { n: 1, lead: LEAD }));
+    }
   });
 });

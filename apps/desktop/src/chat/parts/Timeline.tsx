@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useLayoutEffect, useRef, type ReactNode } from "react";
 import { RestartAction, RestartLine } from "../../sidebar/RestartLine";
 import type { Bot } from "../../lib/protocol";
-import { answerSlot, answerSoFar, selectTimeline, turnHasActivity, useStore, type TimelineItem } from "../../state/store";
+import { answerSlot, answerSoFar, askOpen, selectTimeline, turnHasActivity, useStore, type TimelineItem } from "../../state/store";
 import { slots } from "../../features";
 import { dayLabel, hhmm, sameDay } from "../../app/time";
 import { Bubble } from "./Bubble";
@@ -20,6 +20,8 @@ import { liveFaceRow } from "./liveFace";
 import { ActivityFallback, CardFallback, RoutineFallback } from "./fallbacks";
 import { PluginAddedCard, RoutineAddedCard } from "../../pages/ChatCards";
 import { ThreadLinkLine, ThreadRouteCard } from "../cards/ThreadNotes";
+import { HelpersAskCard } from "../../jobs/HelpersCard";
+import { ReachAskCard } from "../../jobs/ReachCards";
 import { BriefNotice, WatchLine } from "../../routines/WatchLine";
 import { t } from "../../i18n";
 import { useBotReady } from "../connect/ready";
@@ -48,6 +50,7 @@ export function Timeline({
   connectionNotice = true,
   queue,
   emptyHint,
+  hideOpenAsks = false,
 }: {
   bot: Bot;
   face?: ReactNode;
@@ -56,6 +59,9 @@ export function Timeline({
   queue?: SessionQueue;
   /** what an empty chat says instead of "Say hi to <bot>" (a new thread asks what it is about): one line, not two */
   emptyHint?: ReactNode;
+  /** A card that still waits is left out: the side-by-side view (item 102b) draws it under the chat, as the same card, so it is never
+   *  lost in a long scroll. Once decided it is the one grey line it is everywhere. */
+  hideOpenAsks?: boolean;
 }) {
   const s = useStore();
   const items = selectTimeline(s, bot.name);
@@ -184,6 +190,12 @@ export function Timeline({
         return <ThreadLinkLine item={it} />;
       case "threadRoute":
         return <ThreadRouteCard item={it} />;
+      case "helpersAsk":
+        // a lead lane's Start helpers card (item 102e)
+        return <HelpersAskCard item={it} />;
+      case "reachAsk":
+        // a coding chat's read, send or open card (item 102k)
+        return <ReachAskCard item={it} />;
       case "briefNotice":
         return <BriefNotice bot={bot} />;
       case "system":
@@ -276,6 +288,7 @@ export function Timeline({
       {items.map((it, i) => {
         // the live activity line with nothing to say yet: the typing bubble below stands in for it
         if (it.kind === "activity" && chat?.turn?.id === it.turn.id && !turnHasActivity(it.turn)) return null;
+        if (hideOpenAsks && (it.kind === "approval" || it.kind === "clarify") && askOpen(chat?.items ?? [], it)) return null;
         const label = divider(items[i - 1], it);
         // the live activity line holds the face between the typing bubble and the answer, and keeps the typing
         // bubble's height until the turn ends, so neither hand-over moves it

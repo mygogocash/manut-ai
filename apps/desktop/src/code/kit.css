@@ -142,6 +142,21 @@
 .kitp .lane .lline {
   padding: 0 10px 2px;
 }
+/* A lead lane with helper lanes (item 102h): its helper lanes drawn under its row, indented with a quiet rule as a job's lanes are
+   (jobs/ask.css .job-lanes), each saying whose helper it is on the line under its title. */
+.kitp .lane-with-helpers {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.kitp .lane-helpers {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-left: 18px;
+  padding-left: 8px;
+  border-left: 1px solid var(--line);
+}
 /* The failing tests the line names: a few, in mono, each on its own line. */
 .kitp .lane .lnames {
   margin: 0;

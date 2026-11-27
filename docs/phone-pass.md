@@ -7,8 +7,9 @@ owner makes on a real phone. It is December item 35 in `docs/plan.md`.
 
 ## What the CI pass covers
 
-The job "Web on phones" (`.github/workflows/ci.yml`) runs the Playwright specs in `apps/web/e2e` on every push and pull
-request. Playwright starts the vite dev server in practice mode (no `VITE_API_ORIGIN`, so the pages run on the in-memory
+The jobs "Web on phones (Chromium)" and "Web on phones (WebKit)" (`.github/workflows/ci.yml`, one for each engine, side
+by side) run the Playwright specs in `apps/web/e2e` on every push and pull request that reaches the web app. Playwright
+starts the vite dev server in practice mode (no `VITE_API_ORIGIN`, so the pages run on the in-memory
 fake and need no backend) and opens the pages in real browser engines on four screens:
 
 | Phone | Engine | Screen, in CSS pixels |
@@ -84,12 +85,14 @@ pnpm --filter @manut/web e2e --project="Android 360x740 (Chromium)" --workers=1 
 
 The server takes port 5417 and will not reuse one, so a second run never tests another checkout. If a killed run left it
 behind, find it with `lsof -nP -iTCP:5417 -sTCP:LISTEN` and stop it. A failing test leaves its screenshot in
-`apps/web/test-results/`. In CI the job summary lists the failing states with the phones they failed on, and the job keeps
-the JSON report (artifact `web-phones-results`) and, when something failed, those screenshots (`web-phones-failures`) for
-seven days. The first run on one of GitHub's runners took 6 minutes 41 seconds in all, 5 minutes of it the specs (300
-tests at two workers: 294 passed and 6 skipped, the iPhones' landscape ones), so it stays one job. The browser install
-downloads from Ubuntu's package mirror, and once it crawled for 25 minutes; its step has a limit of 10 minutes, and the
-job can be run again.
+`apps/web/test-results/`. In CI each engine's job summary lists the failing states with the phones they failed on, and
+each job keeps its JSON report (artifacts `web-phones-results-chromium` and `web-phones-results-webkit`) and, when
+something failed, those screenshots (`web-phones-failures-chromium`, `web-phones-failures-webkit`) for seven days. The
+first run on one of GitHub's runners took 6 minutes 41 seconds in all, 5 minutes of it the specs (300 tests at two
+workers: 294 passed and 6 skipped, the iPhones' landscape ones). By 26 Nov 2026 the one job took 11 minutes (638 seconds
+of specs), so it became one job for each engine, each installing only its own browser (`--project="*(WebKit)"` picks an
+engine's two phones by the end of their names). The browser install downloads from Ubuntu's package mirror, and once it
+crawled for 25 minutes; its step has a limit of 10 minutes, and the job can be run again.
 
 ## What it cannot cover
 

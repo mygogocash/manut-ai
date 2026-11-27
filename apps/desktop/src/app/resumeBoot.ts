@@ -70,10 +70,18 @@ function snapshot(): ResumeSnap {
         ...(r.lane ? { lane: r.lane } : {}),
         // a workflow's lane stays careful after a restart (src/workflows/)
         ...(r.workflow ? { workflow: r.workflow } : {}),
+        // the Helpers switch stays as the person left it (item 102e)
+        ...(r.helpers ? { helpers: true as const } : {}),
+        // the "Kit may reach" list stays as the person left it (item 102k)
+        ...(r.reach?.length ? { reach: r.reach } : {}),
         // Continue with's links both ways, and a continued chat's model still to set (item 97)
         ...(r.continuedFrom ? { continuedFrom: r.continuedFrom } : {}),
         ...(r.continuedIn ? { continuedIn: r.continuedIn } : {}),
         ...(r.modelWant ? { modelWant: r.modelWant } : {}),
+        // the lanes one Ask several message started stay one job after a restart (item 102a)
+        ...(r.job ? { job: r.job } : {}),
+        // a helper lane stays under its lead after a restart (item 102h)
+        ...(r.helperOf ? { helperOf: r.helperOf } : {}),
       })),
       messages: (id) => {
         const key = ss.chatKey(id);

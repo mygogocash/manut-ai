@@ -286,11 +286,12 @@ test.describe("send when the limit resets", () => {
     await limited(page);
     await box(page).fill("run the tests");
     const offer = page.getByTestId("composer-limit");
-    await expect(offer).toContainText(/This account is at its limit until \d\d:\d\d\. Enter sends now anyway\./);
+    // a reset after midnight carries its day ("Fri 00:12"), as on runs started after 21:00 UTC
+    await expect(offer).toContainText(/This account is at its limit until (?:[A-Z][a-z]{2} )?\d\d:\d\d\. Enter sends now anyway\./);
     await offer.getByTestId("composer-wait").click();
     await expect(box(page)).toHaveValue("");
     const row = page.getByTestId("later-row");
-    await expect(row).toContainText(/Waiting to send at \d\d:\d\d: run the tests/);
+    await expect(row).toContainText(/Waiting to send at (?:[A-Z][a-z]{2} )?\d\d:\d\d: run the tests/);
     expect(await sessionSends(page)).not.toContain("run the tests");
     // kept on this computer: a reload brings it back
     await page.reload();
@@ -323,11 +324,12 @@ test.describe("send when the limit resets", () => {
     await page.clock.fastForward("03:05:00");
     const row = page.getByTestId("later-row");
     await expect(row).toHaveAttribute("data-late", "true");
-    await expect(row).toContainText(/This was waiting since \d\d:\d\d\. Send it now\?/);
+    // three hours on from a run that starts after 21:00 is the next day, and the time then carries its day ("Thu 21:44")
+    await expect(row).toContainText(/This was waiting since (?:[A-Z][a-z]{2} )?\d\d:\d\d\. Send it now\?/);
     expect(await sessionSends(page)).not.toContain("run the tests");
     await page.getByTestId("menu-new").click();
     const home = page.getByTestId("home-later");
-    await expect(home).toContainText(/A message to .+ was waiting since \d\d:\d\d\. Send it now\?/);
+    await expect(home).toContainText(/A message to .+ was waiting since (?:[A-Z][a-z]{2} )?\d\d:\d\d\. Send it now\?/);
     await home.getByTestId("later-send-now").click();
     await expect.poll(() => sessionSends(page)).toContain("run the tests");
     await expect(page.getByTestId("home-later")).toHaveCount(0);

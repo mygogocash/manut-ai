@@ -19,6 +19,8 @@
 //! settings git does not hold (`.mcp.json`, `.claude/settings.local.json`, untracked skills), copied by `lane_config.rs` and
 //! always ignored by git in the lane. No hook runs while a folder is made or removed, so
 //! nothing a project sets up on checkout happens by itself: Kit may install what the lane needs, and the dial asks first.
+//! A helper lane (item 102f, `lane_helper.rs`) is the one lane made otherwise: from a snapshot of its lead lane's folder, kept
+//! as a commit under the app's own refs, so it starts with the lead's uncommitted work. Its record says so (`Record::helper`).
 //!
 //! Settings › Worktrees (item 73): the folder lanes are made under can be the person's own (`Start::root`, checked by
 //! `check_lanes_root`: never inside a checkout, never unwritable), while the record stays under `~/.manut/lanes`; a lane can start
@@ -51,12 +53,12 @@ use crate::git_branch;
 use crate::tasks;
 
 /// The most names one call tries (the page sends nine).
-const NAMES_MAX: usize = 20;
+pub(crate) const NAMES_MAX: usize = 20;
 /// The longest a branch name is. The page makes them far shorter.
-const NAME_MAX: usize = 64;
+pub(crate) const NAME_MAX: usize = 64;
 /// How long making or removing a lane's folder may take: a checkout writes every file the project tracks, which on a large
 /// project takes longer than a read.
-const SLOW: Duration = Duration::from_secs(120);
+pub(crate) const SLOW: Duration = Duration::from_secs(120);
 /// The most numbered folder names tried when a lane's own is taken on disk.
 const FOLDER_TRIES: usize = 50;
 /// The most folders and records read when the lanes are listed: a person never has this many.
@@ -74,8 +76,8 @@ const IGNORED_MAX: usize = 2000;
 const SUBMODULES_MAX: usize = 100;
 
 /// Making and removing lanes one at a time, so two calls never choose the same folder or remove one twice. Reads take no
-/// turn: they only look.
-static WRITING: Mutex<()> = Mutex::new(());
+/// turn: they only look. A helper lane (`lane_helper.rs`) is made under the same turn.
+pub(crate) static WRITING: Mutex<()> = Mutex::new(());
 
 /// A test's own step at a named moment between one of the app's reads and the write it allows (`added`: a lane's folder made
 /// with nothing checked out yet; `fetched`: the automatic pull's fetch done, its one write still to come), standing in for
@@ -163,6 +165,20 @@ pub(crate) struct Record {
     pub(crate) at: String,
     /// When, in seconds since 1970.
     pub(crate) made: u64,
+    /// Set only for a helper lane (item 102f, `lane_helper.rs`): the job it was started for, its lead and the snapshot it
+    /// starts from. Its `base` is then the lead's branch and its `at` the snapshot's commit. Missing in every record written
+    /// before item 102f, which read as they did.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) helper: Option<HelperOf>,
+}
+
+/// What a helper lane's record says of the lane it helps: the job (`SessionRec.job` on the page), the lead lane's folder as
+/// its own record names it, and the ref of the app's own that keeps the snapshot's commit, `refs/manut/helpers/<job>/<folder>`.
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub(crate) struct HelperOf {
+    pub(crate) job: String,
+    pub(crate) lead: String,
+    pub(crate) snapshot: String,
 }
 
 /// A lane's working folder as the Code page lists it: the folders the app made for one repository, with whether each is still
@@ -214,7 +230,7 @@ pub struct Removed {
 }
 
 /// Whether `word` is one lower case word or number run joined by single hyphens (`promptpay-qr`).
-fn word_ok(word: &str) -> bool {
+pub(crate) fn word_ok(word: &str) -> bool {
     !word.is_empty() && word.split('-').all(|w| !w.is_empty() && w.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit()))
 }
 
@@ -228,7 +244,7 @@ pub fn valid_prefix(prefix: &str) -> bool {
 }
 
 /// The prefix of a branch name Kit made: everything up to and including the last `/` ("" when there is none).
-fn prefix_of(name: &str) -> &str {
+pub(crate) fn prefix_of(name: &str) -> &str {
     name.rfind('/').map_or("", |i| &name[..=i])
 }
 
@@ -365,6 +381,14 @@ fn runs_in_a_submodule(key: &str, value: &str) -> bool {
     runs_or_redirects(key, value) || lower == "diff.external" || driver
 }
 
+/// A merge driver's program in the repository's own config (`merge.<driver>.driver`), which git runs for a file whose
+/// attributes name that driver when it merges it. Only a landing merges (`git apply --3way`, item 102g, `lane_land.rs`): the
+/// app's other automatic work never does, so [`runs_or_redirects`] does not list it.
+fn runs_a_merge_driver(key: &str, _value: &str) -> bool {
+    let lower = key.to_ascii_lowercase();
+    lower.strip_prefix("merge.").and_then(|rest| rest.strip_suffix(".driver")).is_some_and(|name| !name.is_empty())
+}
+
 /// [`risky_setting`], with `risky` saying which settings count.
 fn risky_by(listing: &str, scoped: bool, risky: fn(&str, &str) -> bool) -> Option<String> {
     let mut parts = listing.split('\0').filter(|p| !p.is_empty());
@@ -491,7 +515,7 @@ fn gitlinks(listing: &tasks::Ran) -> Option<Vec<&str>> {
 }
 
 /// `p` as git printed it, from the folder `cwd`.
-fn from_cwd(cwd: &Path, p: &str) -> PathBuf {
+pub(crate) fn from_cwd(cwd: &Path, p: &str) -> PathBuf {
     let p = PathBuf::from(p);
     if p.is_absolute() {
         p
@@ -629,6 +653,13 @@ impl Git {
         self.config_risk(wt).or_else(|| listing_risk(&|args: &[&str]| self.run(repo, args).ok(), None, runs_or_redirects))
     }
 
+    /// What stops a landing in the lane folder `wt` of the repository whose git folder is `repo` (item 102g): what stops any
+    /// automatic work there ([`Git::lane_config_risk`]), and a merge driver's program in the repository's own config, which the
+    /// landing's three-way apply would run ([`runs_a_merge_driver`]).
+    pub(crate) fn landing_config_risk(&self, wt: &Path, repo: &Path) -> Option<String> {
+        self.lane_config_risk(wt, repo).or_else(|| listing_risk(&|args: &[&str]| self.run(wt, args).ok(), None, runs_a_merge_driver))
+    }
+
     /// `git -C <cwd> <args>`, at most `limit`.
     pub(crate) fn run_for(&self, cwd: &Path, args: &[&str], limit: Duration) -> Result<tasks::Ran, String> {
         self.run_with(cwd, args, limit, &[])
@@ -679,7 +710,7 @@ impl Git {
     }
 
     /// The branches under `prefix` (`kit/`) that exist, lower-cased (a file system that ignores letter case treats two as one).
-    fn taken(&self, cwd: &Path, prefix: &str) -> Result<HashSet<String>, String> {
+    pub(crate) fn taken(&self, cwd: &Path, prefix: &str) -> Result<HashSet<String>, String> {
         let pattern = format!("refs/heads/{prefix}");
         let ran = self.run(cwd, &["for-each-ref", "--format=%(refname:short)", &pattern])?;
         if ran.code != Some(0) {
@@ -706,12 +737,15 @@ impl Git {
     }
 
     /// How many commits on `branch` are not on `base` (the branch it was made from, as it is now; else the commit it was
-    /// made at, when that branch is gone), or None when git could not say.
+    /// made at, when that branch is gone), or None when git could not say. A helper lane's are counted from its snapshot's
+    /// commit alone (item 102f): that commit holds its lead's uncommitted work, which is never on the lead's branch, so a
+    /// helper lane nobody committed in reads as no commits of its own.
     pub(crate) fn ahead(&self, at: &Path, rec: &Record) -> Option<u32> {
         if !valid_name(&rec.branch) {
             return None;
         }
-        for from in [rec.base.as_str(), rec.at.as_str()] {
+        let froms: &[&str] = if rec.helper.is_some() { &[rec.at.as_str()] } else { &[rec.base.as_str(), rec.at.as_str()] };
+        for &from in froms {
             if !safe_rev(from) {
                 continue;
             }
@@ -852,7 +886,7 @@ fn is_link(p: &Path) -> bool {
 
 /// Makes `dir` for this account only when it is missing, and refuses one that is a link or a file: the folders lanes live in
 /// are the app's own, and nothing is written through a link.
-fn own_dir(dir: &Path) -> Result<(), String> {
+pub(crate) fn own_dir(dir: &Path) -> Result<(), String> {
     let check = || match fs::symlink_metadata(dir) {
         Ok(m) if m.file_type().is_symlink() => Err(format!("{} is a link", dir.display())),
         Ok(m) if !m.is_dir() => Err(format!("{} is not a folder", dir.display())),
@@ -940,8 +974,26 @@ pub(crate) fn records(home: &Path) -> Vec<(PathBuf, Record)> {
     out
 }
 
-fn now_secs() -> u64 {
+pub(crate) fn now_secs() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+}
+
+/// The first folder name nothing has on disk under `parent`, `<words>` and then `<words>-2`, `-3` … (at most [`FOLDER_TRIES`]),
+/// with its record written first under `record_parent`: the record is what says the folder is the app's, and writing it as a
+/// new file claims the name before git makes the folder. `rec` builds the record from the folder's name and its path. The
+/// folder and the record's path, or None when every name is taken.
+pub(crate) fn claim(parent: &Path, record_parent: &Path, words: &str, rec: impl Fn(&str, String) -> Record) -> Option<(PathBuf, PathBuf)> {
+    (1..=FOLDER_TRIES).find_map(|n| {
+        let folder = if n == 1 { words.to_string() } else { format!("{words}-{n}") };
+        let wt = parent.join(&folder);
+        let rec_path = record_parent.join(format!("{folder}.json"));
+        if fs::symlink_metadata(&wt).is_ok() || fs::symlink_metadata(&rec_path).is_ok() {
+            return None;
+        }
+        let wt_s = wt.to_str()?.to_string();
+        write_new(&rec_path, serde_json::to_string(&rec(&folder, wt_s)).ok()?.as_bytes()).ok()?;
+        Some((wt, rec_path))
+    })
 }
 
 /// The folder the person chose for lanes (Settings › Worktrees) as the real path lanes are made under, made when it is missing,
@@ -1167,29 +1219,18 @@ pub fn make_with(home: &Path, cwd: &Path, names: &[String], start: &Start) -> Re
     }
     for name in names.iter().filter(|n| !exists.contains(&n.to_lowercase())) {
         let words = &name[prefix_name.len()..];
-        // the first folder name nothing has on disk, its record written first: the record is what says the folder is the
-        // app's, and writing it as a new file claims the name before git makes the folder
-        let Some((wt, rec_path)) = (1..=FOLDER_TRIES).find_map(|n| {
-            let folder = if n == 1 { words.to_string() } else { format!("{words}-{n}") };
-            let wt = parent.join(&folder);
-            let rec_path = record_parent.join(format!("{folder}.json"));
-            if fs::symlink_metadata(&wt).is_ok() || fs::symlink_metadata(&rec_path).is_ok() {
-                return None;
-            }
-            let wt_s = wt.to_str()?.to_string();
-            let rec = Record {
-                v: 1,
-                worktree: wt_s,
-                repo: repo.to_string_lossy().into_owned(),
-                project: cwd.to_string_lossy().into_owned(),
-                prefix: prefix.clone(),
-                branch: name.clone(),
-                base: base.clone(),
-                at: at.clone(),
-                made: now_secs(),
-            };
-            write_new(&rec_path, serde_json::to_string(&rec).ok()?.as_bytes()).ok()?;
-            Some((wt, rec_path))
+        // the first folder name nothing has on disk, its record written first ([`claim`])
+        let Some((wt, rec_path)) = claim(&parent, &record_parent, words, |_, wt_s| Record {
+            v: 1,
+            worktree: wt_s,
+            repo: repo.to_string_lossy().into_owned(),
+            project: cwd.to_string_lossy().into_owned(),
+            prefix: prefix.clone(),
+            branch: name.clone(),
+            base: base.clone(),
+            at: at.clone(),
+            made: now_secs(),
+            helper: None,
         }) else {
             return Err("no_folder".into());
         };
@@ -1200,6 +1241,12 @@ pub fn make_with(home: &Path, cwd: &Path, names: &[String], start: &Start) -> Re
         if start.unattended {
             add.insert(2, "--no-checkout");
         }
+        // whether the branch is already there, read as late as it can be: `git worktree add -b` makes the branch before it
+        // refuses a folder that exists, so only a branch that was not here a moment ago can be this try's to take back
+        let ref_name = format!("refs/heads/{name}");
+        #[cfg(test)]
+        between::at("claimed", &wt);
+        let branch_before = git.line(cwd, &["rev-parse", "--verify", "--quiet", &ref_name]).is_some();
         let ran = git.run_for(cwd, &add, SLOW);
         #[cfg(test)]
         between::at("added", &wt);
@@ -1227,9 +1274,13 @@ pub fn make_with(home: &Path, cwd: &Path, names: &[String], start: &Start) -> Re
             Ok(r) => tasks::error_line(&r.err),
             Err(e) => e.clone(),
         };
-        // another process made the branch (or the folder) first: git made nothing, so the record goes and the next name is
-        // tried. Whatever has that name is someone else's, and is never taken back
+        // another process made the branch or the folder first, so the record goes and the next name is tried. A folder that
+        // appeared in the way is not git's to have made, but git had made the branch by then: that one goes again, while it is
+        // still at the commit this try used and was not there before. Whatever else has that name is someone else's
         if err.contains("already exists") {
+            if !branch_before {
+                take_back_branch(&git, cwd, name, &at);
+            }
             let _ = fs::remove_file(&rec_path);
             continue;
         }
@@ -1275,11 +1326,18 @@ fn undo_make(git: &Git, cwd: &Path, wt: &Path, name: &str, at: &str) -> bool {
             return false;
         }
     }
+    take_back_branch(git, cwd, name, at);
+    true
+}
+
+/// Deletes the branch `name` that one try of `git worktree add -b` made, only while it is still at the commit `at` that try
+/// used (a branch that has moved since is someone else's work). The caller has checked the branch was not there before the
+/// try. `-D` is needed because the branch holds nothing merged anywhere; nothing else is forced.
+pub(crate) fn take_back_branch(git: &Git, cwd: &Path, name: &str, at: &str) {
     let ref_name = format!("refs/heads/{name}");
     if git.line(cwd, &["rev-parse", "--verify", "--quiet", &ref_name]).as_deref() == Some(at) {
         let _ = git.run(cwd, &["branch", "-D", name]);
     }
-    true
 }
 
 /// The lanes the app made for the repository `cwd` is in, newest first.
@@ -1339,6 +1397,10 @@ pub fn remove(home: &Path, worktree: &str, ask: &RemoveAsk) -> Result<Removed, S
     let parent = wt.parent().ok_or("not_a_lane")?.to_path_buf();
     let git = Git::new(home)?;
     let _turn = WRITING.lock().unwrap_or_else(|e| e.into_inner());
+    // never while a helper lane's work lands in this folder, or this helper lane's work lands in its lead (item 102g): a folder
+    // is not taken away half way through a patch, and a landing does not read a folder that is going
+    let lead = crate::lane_land::lead_lock(rec.helper.as_ref().map_or(rec.worktree.as_str(), |h| h.lead.as_str()));
+    let _landing = lead.lock().unwrap_or_else(|e| e.into_inner());
     let repo = real(Path::new(&rec.repo));
     let exists = fs::symlink_metadata(&wt).map(|m| m.is_dir()).unwrap_or(false);
     if exists {
@@ -1379,6 +1441,15 @@ pub fn remove(home: &Path, worktree: &str, ask: &RemoveAsk) -> Result<Removed, S
         }
     }
     let _ = fs::remove_file(&rec_path);
+    // a helper lane's snapshot goes with its record: nothing lands from a lane the app no longer knows (item 102f), and its
+    // landing can no longer be named to take it back, so what was kept for that goes too (item 102g). A kept patch stays: it may
+    // be the only copy of the helper lane's work now
+    if let Some(h) = &rec.helper {
+        crate::lane_helper::drop_ref(&git, &repo, &h.snapshot, &rec.at);
+        if let Some(folder) = wt.file_name().and_then(|f| f.to_str()) {
+            crate::lane_land::forget(home, &git, &repo, &h.job, folder);
+        }
+    }
     // the project's folder goes when it holds no other lane (a folder with anything in it stays)
     let _ = fs::remove_dir(&parent);
     if let Some(record_parent) = rec_path.parent() {
@@ -1641,6 +1712,40 @@ pub(crate) mod tests {
         let _ = fs::remove_dir_all(home);
     }
 
+    /// A folder planted where the lane's folder goes after its name was claimed: git makes the branch before it refuses the
+    /// folder, so that branch must go again, the planted folder stays, and a branch that already had the failed name is untouched.
+    #[test]
+    fn a_folder_planted_mid_make_is_left_alone_leaves_no_branch_and_the_next_name_is_used() {
+        let Some((home, d)) = repo("planted") else { return };
+        let planted = home.join(".manut/lanes/web-app/checkout");
+        let p = planted.clone();
+        between::set(Some(Box::new(move |step, wt| {
+            if step == "claimed" && wt == p {
+                fs::create_dir_all(wt).unwrap();
+                fs::write(wt.join("theirs.txt"), "theirs\n").unwrap();
+            }
+        })));
+        let got = make(&home, &d, &names(&["kit/checkout", "kit/checkout-2"]));
+        between::set(None);
+        let made = got.unwrap();
+        assert_eq!(made.branch, "kit/checkout-2");
+        assert_eq!(fs::read_to_string(planted.join("theirs.txt")).unwrap(), "theirs\n");
+        assert_eq!(sh(&d, &["branch", "--list", "kit/checkout"]), "", "a stray branch was left");
+        assert!(!home.join(".manut/lanes/web-app/checkout.json").exists());
+        // a branch of the failed name made by someone else in the same moment, at the developer's own commit, stays
+        let dd = d.clone();
+        between::set(Some(Box::new(move |step, wt| {
+            if step == "claimed" && wt.ends_with("web-app/other") {
+                sh(&dd, &["branch", "kit/other"]);
+            }
+        })));
+        let got = make(&home, &d, &names(&["kit/other", "kit/other-2"]));
+        between::set(None);
+        assert_eq!(got.unwrap().branch, "kit/other-2");
+        assert_eq!(sh(&d, &["rev-parse", "refs/heads/kit/other"]), sh(&d, &["rev-parse", "HEAD"]));
+        let _ = fs::remove_dir_all(home);
+    }
+
     #[test]
     fn takes_the_next_name_or_folder_when_one_is_taken_and_refuses_when_all_are() {
         let Some((home, d)) = repo("taken") else { return };
@@ -1769,7 +1874,7 @@ pub(crate) mod tests {
         commit_in(Path::new(&b.dir), "b.txt", "b\n");
         commit_in(Path::new(&b.dir), "b2.txt", "b\n");
         // a record that names another folder than the one beside it is no record
-        let fake = Record { v: 1, worktree: d.to_string_lossy().into(), repo: d.join(".git").to_string_lossy().into(), project: String::new(), prefix: String::new(), branch: "kit/z".into(), base: "main".into(), at: String::new(), made: 0 };
+        let fake = Record { v: 1, worktree: d.to_string_lossy().into(), repo: d.join(".git").to_string_lossy().into(), project: String::new(), prefix: String::new(), branch: "kit/z".into(), base: "main".into(), at: String::new(), made: 0, helper: None };
         fs::write(home.join(".manut/lanes/web-app/z.json"), serde_json::to_string(&fake).unwrap()).unwrap();
 
         let got = list(&home, &d).unwrap();
@@ -1891,7 +1996,7 @@ pub(crate) mod tests {
         }
         assert!(d.join("a.txt").exists() && lanes.join("web-app/stray").exists() && lanes.join("web-app/a.x").exists());
         // a record pointing at another folder than its own is no record
-        let rec = Record { v: 1, worktree: d.to_string_lossy().into(), repo: d.join(".git").to_string_lossy().into(), project: String::new(), prefix: String::new(), branch: "kit/a".into(), base: "main".into(), at: String::new(), made: 0 };
+        let rec = Record { v: 1, worktree: d.to_string_lossy().into(), repo: d.join(".git").to_string_lossy().into(), project: String::new(), prefix: String::new(), branch: "kit/a".into(), base: "main".into(), at: String::new(), made: 0, helper: None };
         fs::write(lanes.join("web-app/stray.json"), serde_json::to_string(&rec).unwrap()).unwrap();
         assert_eq!(remove(&home, &lanes.join("web-app/stray").to_string_lossy(), &RemoveAsk::default()), Err("not_a_lane".into()));
         // the lane's folder replaced by a clone of its own (not a worktree of the recorded repository): not the app's
@@ -2809,13 +2914,13 @@ pub(crate) mod tests {
         let rec_dir = lanes_dir(&home).join("web-app");
         // a record whose folder has another last name than itself, or is not a plain absolute path, is no record
         for (name, wt) in [("x", d.to_string_lossy().into_owned()), ("web-app", format!("{}/../web-app", d.display())), ("web-app", "relative/web-app".to_string())] {
-            let rec = Record { v: 1, worktree: wt, repo: d.join(".git").to_string_lossy().into(), project: String::new(), prefix: String::new(), branch: "kit/a".into(), base: "main".into(), at: String::new(), made: 0 };
+            let rec = Record { v: 1, worktree: wt, repo: d.join(".git").to_string_lossy().into(), project: String::new(), prefix: String::new(), branch: "kit/a".into(), base: "main".into(), at: String::new(), made: 0, helper: None };
             fs::write(rec_dir.join(format!("{name}.json")), serde_json::to_string(&rec).unwrap()).unwrap();
         }
         assert_eq!(records(&home).len(), 1);
         // a record that does name the developer's own folder under its own name is still refused: git lists it as the main
         // worktree, never a linked one
-        let rec = Record { v: 1, worktree: d.to_string_lossy().into(), repo: d.join(".git").to_string_lossy().into(), project: String::new(), prefix: String::new(), branch: "kit/a".into(), base: "main".into(), at: String::new(), made: 0 };
+        let rec = Record { v: 1, worktree: d.to_string_lossy().into(), repo: d.join(".git").to_string_lossy().into(), project: String::new(), prefix: String::new(), branch: "kit/a".into(), base: "main".into(), at: String::new(), made: 0, helper: None };
         fs::write(rec_dir.join("web-app.json"), serde_json::to_string(&rec).unwrap()).unwrap();
         for ask in [&RemoveAsk::default(), &RemoveAsk { changed: 9, branch: true, ahead: Some(9) }] {
             assert_eq!(remove(&home, d.to_str().unwrap(), ask), Err("not_a_lane".into()));

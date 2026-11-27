@@ -1,7 +1,8 @@
 # Handoff: where the build stands (23 Nov 2026, about 14:45 Bangkok)
 
 Written so a new session in any tool can continue without the earlier conversations. Read `CLAUDE.md` first
-(rules and the owner's standing permissions), then this file, `docs/plan.md` and `docs/decisions.md`.
+(rules and the owner's standing permissions), then this file, `docs/plan.md` and `docs/decisions/` (since item 128,
+one file per item beside `archive.md`, which holds every decision made before; its `README.md` says how to add one).
 
 ## What this is
 
@@ -23,7 +24,7 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
 | Dev secrets | the Worker, and the owner's macOS Keychain: `manut-dev-operator-key`, `manut-dev-approval-link-secret`, `manut-dev-cred-key` |
 | Cloudflare token | GitHub environment `dev` (`CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`) |
 | Implementation plan | https://claude.ai/artifact/UBrAFtxwR159AM2rxbLTMr (not reachable from T3 Code sessions) |
-| Design canvas (screen spec) | https://claude.ai/artifact/Qd8PtNKK48ji7cFU4SpTsG, sources in `~/Developer/gospark-main/manut-ai-artifacts/app-screens/project/` |
+| Design canvas (screen spec) | https://claude.ai/artifact/Qd8PtNKK48ji7cFU4SpTsG, sources in `~/Developer/manut-ai-artifacts/app-screens/project/` |
 | GoSpark (source of the backend and the rules) | `~/Developer/gospark` (clone of `mygogocash/gospark`) |
 | Oh My Hermes (desktop base) | https://github.com/rlaope/oh-my-hermes, app in `apps/omher` (forked at commit `77b8646`) |
 | Orca (agent protocol code, worktrees) | https://github.com/stablyai/orca |
@@ -210,7 +211,8 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    The owner asked on 25 Nov, after the first release, for the smaller desktop items that need no decision (items 68 to
    71 in `docs/plan.md`), and reported that Buddy "doesn't response" in Practice mode, where it gave a sample answer
    (item 67). Two helpers run at a time, each on its own branch from `pilot/week-1`; review each, merge it after the
-   full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
+   full root gate, check its decisions are in its own `docs/decisions/<item>-<short-name>.md` (since item 128; before
+   then the lead added them to `docs/decisions.md`) and mark both trackers in `docs/plan.md`:
    Late on 25 Nov the owner said the account had credits to spare for the next 22 hours and to use them, and set the
    session's goal: every feature highlighted on 25 Nov, then whatever needs nothing from the owner, and an app that
    feels premium and quiet, with motion on its states and details (the canvas's Motion board is the rule:
@@ -289,6 +291,34 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    value on a card could still hide words that run) and several medium, fixed as items 120 and 121. On the owner's
    word the app is also going to the Mac App Store in GoSpark's listing (item 119), and the GitHub 0.1.2 waits for the
    Apple Developer ID secrets, to go out as a pre-release (owner, 26 Nov).
+   On 26 Nov at 16:50 the owner had the README merged to main (#22) and then the pilot itself (#1, merge commit
+   `374c49ee`). The repository deletes a pull request's head branch when it merges (`delete_branch_on_merge`), so
+   merging #1 deleted `pilot/week-1`; the lead pushed it back at the same commit about ten minutes later. Before the
+   next pilot-to-main merge, the owner protects `pilot/week-1` or turns that setting off, or the branch goes again.
+   Merging also switched on Dependabot, whose pull requests target main.
+   On the evening of 26 Nov the lead moved to a new Claude Code session. Item 129 merged (each Playwright worker has
+   its own stand-in; three CI shards of four workers). Item 101 is split into 101a to 101e (rows in `docs/plan.md`);
+   101a (Cursor and Antigravity as chats) and 101e (the first-launch offer to bring over Claude Code and Codex work)
+   merged, then 131 (GoSpark's sounds, asked for by the owner that night; the owner should listen to them on a real
+   Mac), then 101b (Grok as a chat; Muse Code needs the owner). Then 132 (GoSpark's effort card, asked for by the owner
+   that night) 101d (Grok and pi accounts), 101c (the ACP registry) and 104 (a snapshot of any app; the owner's steps to try it
+   are 11 to 18 in `docs/computer-use.md`). Then the design of 102
+   (`docs/several-agents.md`; its eight open questions answered provisionally by the lead with the design's own
+   recommendations, in `docs/decisions/102-several-agents.md`, for the owner) and 102d (its pure rules). Then 102a
+   (ask several agents). Then 133 (motion-lists and resilience fixed; CI now four
+   shards of three Playwright workers, since four on a 4-CPU runner made specs flaky). Then 102e (the helper blocks and the
+   Start helpers card, which starts nothing yet). Then 134 (the join page's countdown test, which owns its clock now).
+   Then 102f (a helper lane from a snapshot). At 04:00 on 27 Nov the first account reached its weekly limit (resets
+   30 Nov 17:00) with 102b, 102k and 135 mid-work; the owner signed in another account and they were sent on in their
+   own threads. Then 135, 102k (chats that reach other chats), 102g (landing, shell) and 102b (the job's side-by-side
+   view). Then 102c (gathered answers) and 102h (running helper lanes:
+   approving a round starts it; the owner should run one small round of two helpers). Next: 102i (landings in the
+   chat), 102j (reports to the lead). Needs the owner from 101b: Grok signed in and `permission_mode = "ask"`
+   under `[ui]` in `~/.grok/config.toml` (it says always-approve, so Grok chats are refused), and Muse Code's CLI. From 101e: all 325 Codex sessions on the owner's Mac are compressed, so
+   only Claude Code's conversations are offered until 106b. Needs the owner from 101a: Cursor's Approval mode set to Allowlist (it is Run Everything, so Cursor
+   chats are refused), and a Cursor plan with messages left to record a real tool call. GitHub reported 7 Dependabot alerts on `main` (2 critical) at that push, for the owner to look at.
+   The canvas sources moved to `~/Developer/manut-ai-artifacts` (the owner is deleting the GoSpark folders; the
+   GoSpark repository stays on GitHub, so a helper that needs its code clones it read-only into `mktemp -d`).
    Running at 14:15: items 100b, 119, 120 and 121, each a subagent in its own `cc-item…` worktree.
    By 15:35 on 26 Nov items 100b, 119 (the App Store edition), 120 (the fifth read's dial fixes) and 123 (the App
    Privacy draft) are merged. Item 121 (what an ask shows) is reviewed and in its gate; 122 (icon-led menus and
@@ -669,6 +699,16 @@ Every switch that turns a built part on, and what each needs from the owner, is 
 
 ## Known flaky tests (they fail only under heavy load)
 
+- `apps/desktop/e2e/term-link.spec.ts:202` ("a link to a terminal it does not have says so over an open terminal
+  too"): failed once and passed on its retry in item 102h's two runs on 27 Nov (and showed in several runs before).
+  If it fails twice in one run, fix it.
+- Rust `a_grok_chat_reads_its_accounts_own_home_for_its_asks` (item 101d): failed once in item 102g's first whole
+  Rust run on this Mac and passed alone and on the next run; it waits a fixed 300 ms for a stand-in process. If it fails
+  again, wait on the process instead of the clock.
+- `apps/api` `test/task-companies.test.ts` ("non-members cannot wait on company tasks...", "deleting a company
+  releases its tasks...") and `test/auth-email.test.ts` ("gives Apple's session in every way..."): timed out at 5 s in
+  item 104's run 45873764860 (with a `rows.filter is not a function` uncaught in workerd), a branch that changes no API
+  code; all passed on the next run. If they time out again, look at that uncaught error first.
 - `apps/desktop` `src/sessions/term/engine-osc52.test.ts`: builds clipboard-sized strings, can pass 5 seconds.
 - `apps/desktop` `src/lib/sounds.test.ts` and `apps/web` `test/RoutinesView.test.tsx` ("pauses everyone in practice"): each
   failed once in the gate of 25 Nov at load 7 with a helper's gate beside it (the second waited past testing-library's one
@@ -685,7 +725,7 @@ Every switch that turns a built part on, and what each needs from the owner, is 
 - `apps/web` `test/ShopDataTab.test.tsx`, "says when the API could not be reached": failed once in a loaded full run.
 - Failed once each in a loaded gate on 26 Nov and passed alone: `apps/desktop` `src/i18n/literals.test.ts`,
   `src/lib/notify.device.test.ts`, `src/lib/notify.ask.test.ts`; `apps/web` `test/macRemote.test.ts`,
-  `test/MakeRoutineForm.test.tsx`, `test/JoinPage.test.tsx` ("counts down to a new code"). Each is a 5 second limit
+  `test/MakeRoutineForm.test.tsx`. Each is a 5 second limit
   reached at a load of 30, not yet read further.
 - `apps/desktop` `src/sessions/term/kitty-placeholders.test.ts`: failed once in item 124's loaded gate on 26 Nov
   (`expected [] to deeply equal [[32, 2, 2, 16]]`) and passed alone.
@@ -701,15 +741,13 @@ Every switch that turns a built part on, and what each needs from the owner, is 
   `outpost::item::tests::keeps_this_macs_outpost_in_its_own_keychain_item_beside_the_session`: six failed once on 25
   Nov with `Err("keychain")` in a suite that took ten minutes, while the Mac slept between dark wakes; alone the same
   tree passed. The gate now runs the Rust suite a second time by itself.
-- `apps/web` `test/JoinPage.test.tsx`, "counts down to a new code from when the answer arrived": failed once in a loaded
-  gate on 25 Nov (it looks for the exact second, 0:42) and passed alone and in the next whole run.
 - `apps/api` `test/model-alerts.test.ts` ("notes 80% and then 100%"), `test/google-books.test.ts` ("makes the sheet once") and
   `test/approvals-route.test.ts` ("lists the session's open approvals"): all three passed five seconds in one CI run on
   `7ef8505` (25 Nov) and passed on the next commit; each has thirty seconds since.
-- The desktop's Playwright shards may fail without failing a CI run, so a spec that a merge breaks goes unseen: five did on
-  25 Nov (a row's menu, the Settings pages' order, a closed lane's clean-up, a word kept in English). After merging an
-  item that changes a menu, a Settings page or a lane's life, read the newest run's "Desktop Playwright (all shards)"
-  summary, or run the specs named for that area before pushing.
+- Until item 126 (26 Nov) the desktop's Playwright shards could fail without failing a CI run, so a spec that a merge
+  broke went unseen: five did on 25 Nov (a row's menu, the Settings pages' order, a closed lane's clean-up, a word kept
+  in English). Now a failing spec fails its shard and the run. On CI a failed spec runs once more, so one that passes on
+  its retry shows as flaky in "Desktop Playwright (all shards)": a spec flaky in two runs in a row belongs in this list.
 - `apps/web` `test/MakeRoutineForm.test.tsx`, "lists two routines made one after another": failed once in CI's Web
   tests on `0646cc1` (25 Nov), counting two reads where it expected three. The read after the second routine is asked
   for a moment after its row shows, and the test looked at once; it waits for the read since then.
@@ -744,6 +782,17 @@ Every switch that turns a built part on, and what each needs from the owner, is 
   push runs two short jobs. A pull request's own run of a `pilot/*` commit skips everything, as the push's run checks
   it. A skipped job shows as skipped and counts as passed; start CI by hand (Actions, CI, Run workflow) to run every
   job on a branch.
+- How an item merges, since item 126 (26 Nov): the helper merges the lead's branch in and pushes its branch; CI checks
+  that commit on GitHub (it runs on every push of `feat/`, `fix/`, `refactor/`, `test/`, `docs/`, `ci/` and `chore/`
+  branches, a helper's first push measured from the newest green `pilot/week-1` commit it holds); the lead merges on
+  green with `finish-item.sh --ci`, which refuses any commit but the one CI passed (`ci-wait.sh <branch>` prints each
+  job). `gate.sh` on this Mac is for when CI is down, and it does not run the browser specs. A run on `pilot/week-1` or
+  `main` is never cancelled by the next push: one runs, the newest waits, and a run already waiting is replaced. The
+  desktop's browser specs run as nine shards balanced by each spec file's measured time
+  (`apps/desktop/e2e/timings.json`); when the shards drift apart, refresh it from a green run with
+  `node .github/scripts/e2e-timings.mjs <run id>` and commit it. One full run is 18 jobs at its widest, and the
+  organisation's free plan runs 20 at once (5 on macOS), so a second full run at the same moment waits a few minutes
+  for places.
 - GitHub: `git push` works as it is. For `gh`, prefix commands with
   `GH_TOKEN="$(gh auth token --user KunanonJ)"`; the default `gh` account cannot see the organisation.
 - Secrets never go into source, logs, tests or chat. A secret the owner gives arrives through T3 Code's secure

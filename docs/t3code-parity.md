@@ -35,17 +35,17 @@ keeps them:
 | Linux | part: the code and CI tests are there, no build is released | 111 |
 | Windows, Windows ARM | part: an installer builds by hand and is not published; no ARM | 111 |
 | Stable and nightly channels | part: a signed in-app updater, one channel | 111 |
-| Imports your threads and projects on first launch | part: recent Claude Code and Codex conversations can be continued; no first-launch import | 101 |
+| Imports your threads and projects on first launch | has (item 101e): the first launch after the setup offers the folders Claude Code and Codex worked in that are still on this Mac, with their conversations counted; the picked ones join the Code page and their conversations show in History, where they continue. History's Bring over… offers it again. Read-only; Codex's compressed sessions are skipped and counted (106b) | 101 |
 | Thread switching on a bad connection | no (only the phone link's catch-up) | 108 |
 
 ## Agents and models
 
 | Feature | Today | Plan |
 | --- | --- | --- |
-| Codex, Claude Code, Cursor, Grok, OpenCode, Antigravity, Muse Code, Pi | part: all but Muse Code; Grok is a terminal only; Cursor and Antigravity never run as a chat | 101 |
-| The ACP registry, and any ACP agent by hand | part: any ACP agent by hand (Settings, Providers); seven fixed rows, no registry | 101 |
+| Codex, Claude Code, Cursor, Grok, OpenCode, Antigravity, Muse Code, Pi | part: all but Muse Code. Cursor and Antigravity run as chats over ACP (item 101a): replies, steps, asks and Cursor's questions, each held to the modes in which it asks; a Cursor whose own settings say Run Everything does not start. Grok runs as a chat over its ACP server too, and still as its own terminal (item 101b): held to its asking mode, never sent its `/always-approve`, and not started while its own settings (or Claude's `defaultMode`, which it reads) skip asks, which this Mac's do today; not yet run signed in. Muse Code (Meta's `muse` CLI, whose server speaks its own MSP, not ACP) is not installed here, so nothing was built for it: needs the owner | 101 |
+| The ACP registry, and any ACP agent by hand | has (item 101c): any ACP agent by hand, and the registry's agents on Settings, Providers, From the ACP registry, with a search, from a pinned release compiled in and never fetched (`v2026.11.26-3667256`, 46 agents: 23 offered, 14 already in Providers, the rest not offered with the reason). Add… opens the same confirm card, drafted as a bot's draft is, with the line to install it or the archive to download, which the app never runs or fetches. Not done: agents that need an environment variable, and holding a registry agent to the modes in which it asks (it has none of its own read here) | 101 |
 | Reuses installed agents and their sign-ins | has | |
-| Several accounts of one provider | part: Claude Code and Codex; not Grok or pi; off on Windows | 101 |
+| Several accounts of one provider | part: Claude Code, Codex, Grok and pi (item 101d); Grok signs in with `grok login`, pi through its own /login in a pi terminal opened as the account; Grok and pi show no usage or limit; not oh-my-pi or Gemini CLI; off on Windows | 101 |
 | Pick the model that writes titles, commit messages and PR words | part: chat titles and PR words by Claude Code only, off by default; no commit messages | 96 |
 
 ## Orchestration
@@ -95,7 +95,7 @@ keeps them:
 | Select several rows; bulk snooze, settle, new titles | part: select and bulk Pin, Snooze, Done for now, Archive in Recent and History (item 94); Write the title again is one row at a time (item 96) | 94, 96 |
 | Auto-settle after some days | has (item 94: 3 days by default) | 94 |
 | Several drafts; stash one | has (item 95): Drafts at the top of Home, five kept with their pictures and files; Cmd+S puts a chat's draft there, to take into any chat or project | 95 |
-| Snapshot of any app with a global key | no | 104 |
+| Snapshot of any app with a global key | has, never pressed on a real Mac (item 104): a key set in Settings › Computer, off until turned on (⌃⌥⌘M suggested), reads the front window with computer use's reader and refusals, masks what looks like a key, and opens a new chat with Buddy whose box holds it; nothing is sent until Send. Without Accessibility it says so with the Open button (`docs/computer-use.md`) | 104 |
 | Swipes on the phone; Live Activities | no (Live Activities need a native app) | 78c, 111 |
 
 ## Pull requests and git

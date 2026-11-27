@@ -120,6 +120,13 @@ real test.
 - `latest.json` carries the version and, per chip, the update bundle's address and signature. The app compares the
   version with its own (semver), downloads the bundle for its chip and installs it only if the signature verifies against
   the pinned key. A bundle signed with any other key is refused.
+- Since `tauri-apps/tauri-action` 1.0 (pinned from 26 Nov 2026, item 127), that address is the GitHub API's address of
+  the asset, `https://api.github.com/repos/mygogocash/manut-ai/releases/assets/<id>`, not a `releases/download/` one
+  (its `upload-version-json.ts` at action-v1.0.0). The updater asks for it with `Accept: application/octet-stream`
+  (`tauri-plugin-updater` 2.14.1, `updater.rs`), which GitHub answers with the file; an asset keeps its id when its
+  draft is published. Such a request carries no token, and GitHub allows 60 of them an hour from one IP address, so a
+  shop with many Macs behind one connection updates them over more than an hour. 1.0 also puts the version into the
+  update bundles' names (`Manut.AI_<version>_aarch64.app.tar.gz`).
 - The app asks when it opens, every 6 hours, and when its window comes back after half an hour (`src/sidebar/updater.ts`).
 - Any other release in this repository must be marked a prerelease, or it becomes `latest` and the updater finds no
   `latest.json` (the check fails quietly and retries).
@@ -133,6 +140,15 @@ without it add `--config '{"bundle":{"createUpdaterArtifacts":false}}'`.
 The unsigned path has run twice (25 Nov 2026, for `desktop-v0.1.0` and `desktop-v0.1.1`), about ten minutes a chip:
 each made one draft with both `.dmg` files and a `latest.json` that names both chips, and the Windows installer built
 on its first try. The signed path has never run: it is checked by `actionlint`, by its test, and against the
-documentation of Tauri's GitHub guide, macOS signing guide and `tauri-apps/tauri-action` (pinned at action-v1.0.0). Its
+documentation of Tauri's GitHub guide, macOS signing guide and `tauri-apps/tauri-action`. Its
 first run, for 0.1.2, should confirm that signing, notarization and the run's own check of the built app all pass. How the action finds the draft and adds to
 `latest.json` was read in its own source at the pinned commit (`src/create-release.ts`, `src/upload-version-json.ts`).
+
+The two runs so far used tauri-action 0.6.2: the workflow named commit `84b9d35` as "action-v1.0.0", but that commit is
+GitHub's tag `action-v0.6.2`. From 26 Nov 2026 (item 127) it is pinned at `1deb371`, the tag `action-v1.0.0`, read
+from the repository's tags and checked by reading only, as the workflow builds release files and was not run. None of
+the inputs it uses was renamed or removed in 1.0 (its release notes, and `action.yml` at both commits). What 1.0 changes
+for this workflow: `latest.json`'s addresses (above), the version in the update bundles' names, a failure when
+`releaseDraft` is true and the tag's release is already published, and pnpm found from the lockfile at the repository's
+root, so the build runs `pnpm tauri build`. The first 1.0 run, for 0.1.2, should therefore also confirm one draft with
+both chips in `latest.json`, and the release skill's `verify-release.mjs` passing with the release's asset list.

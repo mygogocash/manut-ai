@@ -2,6 +2,7 @@
 import { type AgentId, type AgentInfo } from "./agents";
 import { tauriTurnFiles, type TurnFilesHost } from "./turnFiles";
 import { type CustomEntry, type CustomList, type CustomPreview } from "./custom";
+import type { RegistryList } from "../settings/agents/acpRegistry";
 import { t } from "../i18n";
 import type { DiskState } from "../lib/disk";
 import type { ImportApp, ImportProfile } from "./term/import";
@@ -12,7 +13,8 @@ import { readCleaned, readKept, readMade, readReleased, readRemoved, type LaneRe
 import { readAgentConfig } from "../settings/mcp/agentConfig";
 import { readInstallAsk, readInstallDone, readLinkRead, readSkillReads } from "../runtime/skillBundle";
 import { readAsk, readDone, readDraft, readMadeProject, readPulled, readRepoAsk, readTools, type MergeMethod } from "../code/source";
-import { type ProviderPatch, type ProviderView } from "../settings/providers/model";
+import { type ProviderPatch, type ProviderView, type SignIn } from "../settings/providers/model";
+import { readFound } from "../importPast/offer";
 import type { ChatInput, ChatEvent, PastChat, ConvState, PastMsg, BuddyChatInput, BuddyHost, TitleRequest, TitleWords, SessionHost, LaneStart } from "./host";
 
 // ---- Tauri ----------------------------------------------------------------------------------
@@ -253,6 +255,17 @@ export class TauriHost implements SessionHost, BuddyHost {
     if (!made) throw new Error("no_folder");
     return made;
   }
+  async laneHelperWorktree(lead: string, job: string) {
+    const { invoke } = await this.core();
+    const made = readMade(await invoke<unknown>("lane_helper_worktree", { lead, job }));
+    if (!made) throw new Error("no_folder");
+    return made;
+  }
+  async machineMemory() {
+    const { invoke } = await this.core();
+    const n = await invoke<unknown>("machine_memory");
+    return typeof n === "number" && Number.isFinite(n) && n > 0 ? n : null;
+  }
   async laneList(cwd: string) {
     const { invoke } = await this.core();
     return readKept(await invoke<unknown>("lane_list", { cwd }));
@@ -310,6 +323,16 @@ export class TauriHost implements SessionHost, BuddyHost {
     const { invoke } = await this.core();
     return invoke<PastMsg[]>("past_chat_messages", { agent, id, cwd });
   }
+  async pastRecent(agent: "claude" | "codex", cwds: string[], max: number) {
+    const { invoke } = await this.core();
+    return invoke<PastChat[]>("past_chats_recent", { agent, cwds, max });
+  }
+  async importScan() {
+    const { invoke } = await this.core();
+    const found = readFound(await invoke<unknown>("import_past_scan"));
+    if (!found) throw new Error("unread");
+    return found;
+  }
   async conversationState(agent: "claude" | "codex", id: string, account?: string) {
     const { invoke } = await this.core();
     return invoke<ConvState>("conversation_state", { agent, id, account: account ?? null });
@@ -338,6 +361,10 @@ export class TauriHost implements SessionHost, BuddyHost {
     const { invoke } = await this.core();
     return invoke<string | null>("provider_version", { id });
   }
+  async providerSignin(id: string) {
+    const { invoke } = await this.core();
+    return invoke<SignIn | null>("provider_signin", { id });
+  }
   async customList() {
     const { invoke } = await this.core();
     return invoke<CustomList>("custom_agents_list");
@@ -357,6 +384,14 @@ export class TauriHost implements SessionHost, BuddyHost {
   async customRemove(id: string) {
     const { invoke } = await this.core();
     await invoke("custom_agent_remove", { id });
+  }
+  async acpRegistry() {
+    const { invoke } = await this.core();
+    return invoke<RegistryList>("acp_registry_list");
+  }
+  async acpRegistryPreview(id: string) {
+    const { invoke } = await this.core();
+    return invoke<CustomPreview>("acp_registry_preview", { id });
   }
   async diskWatch(warnGb: number) {
     const { invoke } = await this.core();

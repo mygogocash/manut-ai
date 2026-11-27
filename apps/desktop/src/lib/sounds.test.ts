@@ -44,7 +44,9 @@ function board(opts: { on?: boolean; state?: AudioContextState } = {}) {
   let on = opts.on ?? true;
   let quiet = false;
   let gesture: (() => void) | null = null;
+  const finishes: (string | undefined)[] = [];
   const b = new SoundBoard({
+    finish: (key) => finishes.push(key),
     now: () => clock.t,
     enabled: () => on,
     quiet: () => quiet,
@@ -53,6 +55,7 @@ function board(opts: { on?: boolean; state?: AudioContextState } = {}) {
   });
   return {
     b,
+    finishes,
     audio,
     clock,
     turn: (v: boolean) => (on = v),
@@ -80,8 +83,8 @@ function level(n: Tone, ms: number): number {
 describe("sound recipes", () => {
   const all = Object.entries(RECIPES) as [Sound, Tone[]][];
 
-  it("are exactly send, pop, chime and error", () => {
-    expect(Object.keys(RECIPES).sort()).toEqual(["chime", "error", "pop", "send"]);
+  it("are exactly send, chime and error (the finish chime is the sound module's)", () => {
+    expect(Object.keys(RECIPES).sort()).toEqual(["chime", "error", "send"]);
   });
 
   it("each lasts 60-250 ms, with a few-ms attack", () => {
@@ -126,7 +129,7 @@ describe("soundFor", () => {
     expect(soundFor({ event: "approval.request", bot, request_id: "a1", title: "", command: "ls", choices: [] }, ctx())).toEqual({ sound: "chime", ask: "a1" });
     expect(soundFor({ event: "clarify.request", bot, request_id: "c1", question: "?" }, ctx())).toEqual({ sound: "chime", ask: "c1" });
     expect(soundFor({ event: "turn.end", bot, outcome: "error", error: "boom" }, ctx(true))).toEqual({ sound: "error" });
-    expect(soundFor({ event: "turn.end", bot, outcome: "done" }, ctx(false))).toEqual({ sound: "pop" });
+    expect(soundFor({ event: "turn.end", bot, outcome: "done" }, ctx(false))).toEqual({ sound: "finish" });
   });
 
   it("is quiet for a reply you are watching, an interrupted turn, a closed ask and everything else", () => {
@@ -162,7 +165,7 @@ describe("SoundBoard", () => {
   it("off: plays nothing and never makes an AudioContext", () => {
     const x = board({ on: false });
     x.ready();
-    for (const s of ["send", "pop", "chime", "error"] as Sound[]) {
+    for (const s of ["send", "finish", "chime", "error"] as Sound[]) {
       expect(x.b.offer(s, s === "chime" ? { chat: "kami", id: `a-${s}` } : undefined)).toBe(false);
       x.clock.t += GAP_MS;
     }
@@ -175,16 +178,16 @@ describe("SoundBoard", () => {
     const x = board();
     x.ready();
     expect(x.audio.log.made).toBe(0);
-    expect(x.b.offer("pop")).toBe(true);
+    expect(x.b.offer("finish")).toBe(true);
     x.clock.t += GAP_MS;
     expect(x.b.offer("error")).toBe(true);
     expect(x.audio.log.made).toBe(1);
-    expect(x.audio.log.started).toHaveLength(RECIPES.pop.length + RECIPES.error.length);
+    expect(x.audio.log.started).toHaveLength(RECIPES.error.length);
   });
 
   it("is silent while the first state loads and just after; the send tick is the person's own and plays", () => {
     const x = board();
-    expect(x.b.offer("pop")).toBe(false);
+    expect(x.b.offer("finish")).toBe(false);
     expect(x.b.offer("chime", { chat: "kami", id: "a1" })).toBe(false);
     x.b.settle();
     x.clock.t += SETTLE_MS - 1;
@@ -197,21 +200,21 @@ describe("SoundBoard", () => {
   it("drops a second sound inside 1.5 s and plays one after", () => {
     const x = board();
     x.ready();
-    expect(x.b.offer("pop")).toBe(true);
+    expect(x.b.offer("finish")).toBe(true);
     x.clock.t += GAP_MS - 1;
     expect(x.b.offer("error")).toBe(false);
     expect(x.b.offer("send")).toBe(false);
     x.clock.t += 1;
     expect(x.b.offer("error")).toBe(true);
-    expect(x.audio.log.started).toHaveLength(RECIPES.pop.length + RECIPES.error.length);
+    expect(x.audio.log.started).toHaveLength(RECIPES.error.length);
   });
 
-  it("typing holds the pop, the chime and the error, not the send tick", () => {
+  it("typing holds the finish chime, the chime and the error, not the send tick", () => {
     const x = board();
     x.ready();
     x.b.typed();
     x.clock.t += TYPING_MS - 1;
-    expect(x.b.offer("pop")).toBe(false);
+    expect(x.b.offer("finish")).toBe(false);
     expect(x.b.offer("chime", { chat: "kami", id: "a1" })).toBe(false);
     expect(x.b.offer("error")).toBe(false);
     expect(x.b.offer("send")).toBe(true);
@@ -265,7 +268,7 @@ describe("SoundBoard", () => {
     const x = board();
     x.ready();
     x.hush(true);
-    for (const s of ["send", "pop", "chime", "error"] as const) {
+    for (const s of ["send", "finish", "chime", "error"] as const) {
       expect(x.b.offer(s), s).toBe(false);
       x.clock.t += GAP_MS;
     }
@@ -294,7 +297,7 @@ describe("SoundBoard", () => {
   it("a context the browser holds is resumed on the next gesture, and the sound is dropped", async () => {
     const x = board({ state: "suspended" });
     x.ready();
-    expect(x.b.offer("pop")).toBe(false);
+    expect(x.b.offer("finish")).toBe(false);
     expect(x.hasGesture()).toBe(true);
     // it started late: still dropped, never queued
     x.clock.t += 500;
@@ -312,16 +315,16 @@ describe("SoundBoard", () => {
   it("a context that starts at once still plays", async () => {
     const x = board({ state: "suspended" });
     x.ready();
-    x.b.offer("pop");
+    x.b.offer("finish");
     x.audio.resolveResume();
     await Promise.resolve();
-    expect(x.audio.log.started).toHaveLength(RECIPES.pop.length);
+    expect(x.finishes).toHaveLength(1);
   });
 
   it("switched off before the gesture: the context is not resumed", () => {
     const x = board({ state: "suspended" });
     x.ready();
-    x.b.offer("pop");
+    x.b.offer("finish");
     const before = x.audio.log.resumed;
     x.turn(false);
     x.gesture();
@@ -427,5 +430,46 @@ describe("sounds through the store", () => {
     l.x.clock.t += GAP_MS;
     l.store.dispatch({ type: "event", ev: ask("agent:s1", "x1"), now: l.x.clock.t });
     expect(l.x.audio.log.started).toHaveLength(2 * RECIPES.chime.length);
+  });
+  it("a finish out of sight chimes once per turn: the same turn ending twice stays silent, the next turn chimes again", async () => {
+    const l = liveStore();
+    await l.store.actions.init();
+    await l.tick();
+    l.x.clock.t += SETTLE_MS;
+    l.emit({ event: "turn.start", bot: "friren" });
+    l.emit({ event: "turn.end", bot: "friren", outcome: "done" });
+    expect(l.x.finishes).toHaveLength(1);
+    // the bridge says the same end again after the gap: it is the same finish
+    l.x.clock.t += GAP_MS;
+    l.emit({ event: "turn.end", bot: "friren", outcome: "done" });
+    expect(l.x.finishes).toHaveLength(1);
+    l.x.clock.t += GAP_MS;
+    l.emit({ event: "turn.start", bot: "friren" });
+    l.emit({ event: "turn.end", bot: "friren", outcome: "done" });
+    expect(l.x.finishes).toHaveLength(2);
+    expect(new Set(l.x.finishes).size).toBe(2);
+    // finishing makes no oscillator sound of the board's own
+    expect(l.x.audio.log.started).toHaveLength(0);
+  });
+
+  it("an adapter that sends no turn.start still chimes at each finish", async () => {
+    const l = liveStore();
+    await l.store.actions.init();
+    await l.tick();
+    l.x.clock.t += SETTLE_MS;
+    l.emit({ event: "turn.end", bot: "kami", outcome: "done" });
+    l.x.clock.t += GAP_MS;
+    l.emit({ event: "turn.end", bot: "kami", outcome: "done" });
+    expect(l.x.finishes).toHaveLength(2);
+  });
+
+  it("a Buddy head's or a folder chat's finish chimes under its own key", async () => {
+    const l = liveStore();
+    await l.store.actions.init();
+    await l.tick();
+    l.x.clock.t += SETTLE_MS;
+    l.emit({ event: "turn.start", bot: "kami", session: "f-1" });
+    l.emit({ event: "turn.end", bot: "kami", session: "f-1", outcome: "done" });
+    expect(l.x.finishes).toHaveLength(1);
   });
 });

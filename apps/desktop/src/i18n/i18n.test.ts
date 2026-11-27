@@ -24,7 +24,9 @@ describe("i18n", () => {
     // khope 2026-11-16: what needs no translation stays as written (a translated term hides which setting it is)
     const same = ["ctl.mode.ask", "ctl.mode.plan", "ctl.mode.acceptEdits", "ctl.mode.readOnly", "ctl.mode.auto", "sq.steer",
       "pn.diff", "pn.worktree", "pn.worktrees", "pn.detached", "rn.chainHead", "rn.fallback", "graph.effort", "graph.main",
-      "term.scrollback", "term.gpu"] as const;
+      "term.scrollback", "term.gpu",
+      // the five tones are named as Android names them (item 131)
+      "sounds.tone.heaven", "sounds.tone.highwire", "sounds.tone.iridium", "sounds.tone.krypton", "sounds.tone.kzurbSonar"] as const;
     // (the colour sets' names, Graphite, Ocean, Forest, Sunset and Rose, left with the colour picker in item 85i)
     for (const l of LANGS) for (const k of same) expect(DICT[l][k], `${l} ${k}`).toBe(DICT.en[k]);
     const banned = /노력|스티어링|워크트리|변경 내용|종료 코드|스크롤백|ステア|ワークツリー|終了コード|差分|引导|工作树|退出码|差异|游离|回滚行数|令牌/;

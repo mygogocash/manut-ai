@@ -378,6 +378,11 @@ fn pattern(p: &str, flags: &str, names: &str, prefixes: &str) -> Regex {
         .expect("secrets.json pattern")
 }
 
+/// The mask a masked secret becomes (`••••`, secrets.json `mask`), so a caller can count what [`mask_secrets`] hid.
+pub fn mask_mark() -> &'static str {
+    &secrets().mask
+}
+
 fn secrets() -> &'static Secrets {
     static R: OnceLock<Secrets> = OnceLock::new();
     R.get_or_init(|| {

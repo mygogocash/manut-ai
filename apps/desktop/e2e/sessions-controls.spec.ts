@@ -107,12 +107,15 @@ test("an agent without modes gets no mode control", async ({ page }) => {
 
 test("reasoning effort sits next to the model, with the agent's own levels", async ({ page }) => {
   await running(page);
-  await expect(page.getByTestId("reasoning-label")).toHaveText("high");
+  await expect(page.getByTestId("reasoning-label")).toHaveText("High");
+  // the effort card (item 132): one stop for each of the agent's levels
   await page.getByTestId("model-pill").click();
-  const seg = page.getByTestId("reasoning-seg");
-  await expect(seg.getByRole("radio")).toHaveText(["low", "medium", "high", "xhigh", "max"]);
-  await seg.getByRole("radio", { name: "low", exact: true }).click();
-  await expect(page.getByTestId("reasoning-label")).toHaveText("low");
+  await expect(page.getByTestId("effort-stop")).toHaveCount(5);
+  await page.getByTestId("effort-slider").press("Home");
+  await expect(page.getByTestId("effort-level")).toHaveText("Low");
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("reasoning-label")).toHaveText("Low");
+  await page.getByTestId("model-pill").click();
   expect((await inputs(page)).filter((i) => i.kind === "effort")).toEqual([{ kind: "effort", effort: "low" }]);
   // "Applies to this session" stays
   await expect(page.getByTestId("model-pop")).toContainText("Applies to this session");
@@ -200,6 +203,7 @@ test("a message sent while a turn runs waits, then the agent takes it; Stop stil
 test("the model menu searches and groups by provider", async ({ page }) => {
   await running(page, "omo");
   await page.getByTestId("model-pill").click();
+  await page.getByTestId("effort-title").click();
   const pop = page.getByTestId("model-pop");
   await expect(pop.getByTestId("model-search")).toBeFocused();
   await expect(pop.getByTestId("model-group")).toHaveCount(2);

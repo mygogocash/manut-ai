@@ -38,12 +38,12 @@ import { getShellHost, learnThisHost } from "../terminal/host";
 import { onSessionFg } from "./fg";
 import { termActs } from "./termActivity";
 import { isLinkId, LINK_COPIED_EVENT, newLinkId, termLinkUrl } from "./termLink";
-import { acpRow, agentDef, agentLabel, continues, draftAgent, draftFolder, draftOpen, hermesOnly, idInUse, installLine, isBuiltin, isGone, isShell, isTerminalRec, LAST_LINE_MAX, refusedResume, SHELL, termEnd, termMarkAgent, lastPrintedLine, OPEN_KEY, setsUpScreen, UI_BYTES, opensAs, pushRecent, RECENT_KEY, registerAcp, sessionMode, type AgentId, type OpenAs, type Unseen, type SessionRec } from "./agents";
+import { acpRow, agentDef, agentLabel, continues, draftAgent, draftFolder, draftOpen, hermesOnly, idInUse, installLine, isBuiltin, isGone, isShell, isTerminalRec, LAST_LINE_MAX, refusedResume, SHELL, termEnd, termMarkAgent, lastPrintedLine, OPEN_KEY, setsUpScreen, UI_BYTES, opensAs, pushRecent, savedOpen, RECENT_KEY, registerAcp, sessionMode, folderName, type AgentId, type OpenAs, type Unseen, type SessionRec } from "./agents";
 import { clearSuggestion, noteSuggestion } from "../chat/suggestion";
 import { suggestOn, suggestWorks } from "../lib/suggest";
 import { acceptTitle, chatMaterial, titleRequest, wantsTitle, whyKey } from "./titleWords";
 import { titleModel } from "../lib/titleModel";
-import { NAME_MAX, promptTitle, putTitle, TITLES_KEY } from "./titles";
+import { NAME_MAX, pickTitle, promptTitle, putTitle, TITLES_KEY } from "./titles";
 import { getDraft, setDraft as setUnsent } from "../app/drafts";
 import { getHost, type ChatEvent, type ChatInput, type ConvState, type PastChat, type SessionHost } from "./host";
 import { localBot } from "../peers/peerKey";
@@ -63,6 +63,8 @@ import { forgetPreview } from "../code/previewStore";
 import { continuesItself, type SavedSession } from "../app/resume";
 import { accountGroups } from "../settings/accounts/useAccounts";
 import { ASK_MODE, modesOf, steersOf } from "./controls";
+import { askRefusal, type AskPick, type AskRefusal } from "../jobs/ask";
+import { noteChoices } from "../jobs/choices";
 import { followUp as savedFollowUp, type FollowUp } from "../chat/box/keys";
 import { draftFolders } from "../app/stash";
 import { bareText, carry, type Scope } from "../chat/box/carry";
@@ -72,6 +74,13 @@ import { noteMcpSeen } from "../settings/mcp/agentConfig";
 import { t as tr, type Key } from "../i18n";
 import { recordError } from "../report/errors";
 import { notesSaid } from "./projectNotes";
+import { createLeadLanes } from "../jobs/leadLanes";
+import { createHelperRuns, type StartHelper } from "../jobs/helperRuns";
+import type { LaneMade } from "../code/laneBranch";
+import { createReach, type OpenLane } from "../jobs/reachChats";
+import { appReader } from "../chat/box/contextReader";
+import { chatScope } from "../chat/box/scope";
+import type { ThreadRef } from "../chat/box/threadContext";
 import { windowWatched, type SessionNote } from "../lib/notify";
 import { createCloseGrace, graceMs, restoreSplitIn, type SplitWas } from "./closeGrace";
 import { watchOpenFolder } from "./revealOpen";
@@ -95,8 +104,23 @@ const loadXterm = () =>
     ([x, f]) => (xtermMods = [x, f]),
   ));
 
-/** `pulls`: the Tasks host a chat's own pull request is read through (item 100, code/chatPull.ts); none reads nothing. */
-export function createSessions(host: SessionHost, store: () => Store = getStore, accounts: () => AccountGroup[] | null = () => null, pulls: () => Pick<TaskHost, "remote" | "view"> | null = () => null) {
+/** The time and a repeating timer, as the sessions store reads them: helper lanes' budgets (item 102h) run on it, and a test passes a
+ *  stand-in clock. */
+export interface SessionClock {
+  now(): number;
+  every(ms: number, fn: () => void): () => void;
+}
+const realClock: SessionClock = {
+  now: () => Date.now(),
+  every: (ms, fn) => {
+    const t = setInterval(fn, ms);
+    return () => clearInterval(t);
+  },
+};
+
+/** `pulls`: the Tasks host a chat's own pull request is read through (item 100, code/chatPull.ts); none reads nothing. `clock`: the
+ *  time helper lanes' budgets count by (item 102h). */
+export function createSessions(host: SessionHost, store: () => Store = getStore, accounts: () => AccountGroup[] | null = () => null, pulls: () => Pick<TaskHost, "remote" | "view"> | null = () => null, clock: SessionClock = realClock) {
   let state: SessionsState = { agents: null, home: null, list: [], recent: readRecent(), opens: readOpens(), models: {}, notes: {}, live: {}, unseen: {} };
   const listeners = new Set<() => void>();
   const terms = new Map<string, Term>();
@@ -130,6 +154,90 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     for (const l of [...listeners]) l();
   };
   const rec = (id: string) => state.list.find((s) => s.id === id);
+  /** Helper requests of lead lanes (item 102e, src/jobs/leadLanes.ts): the Helpers switch, the lead's note in front of each message
+   *  while it is on, and the Start helpers card a turn's answer can ask for. It starts no agent. */
+  const leads = createLeadLanes({
+    rec,
+    chatKey: (id) => keys.get(id),
+    store: () => store(),
+    agents: () => state.agents,
+    models: (id) => state.models[id] ?? [],
+    efforts: (id) => state.live[id]?.efforts ?? [],
+  });
+  /** Chats that reach other chats (item 102k, src/jobs/reachChats.ts): the "Kit may reach" list under a chat's box, the note naming it
+   *  in front of each message, and the read, send and open cards a turn's answer can ask for. Nothing of another chat moves but from
+   *  a card's press; a message into another chat goes through `route`, which sends text and nothing else. */
+  const reach = createReach({
+    rec,
+    chatKey: (id) => keys.get(id),
+    store: () => store(),
+    agents: () => state.agents,
+    models: (id) => state.models[id] ?? [],
+    efforts: (id) => state.live[id]?.efforts ?? [],
+    reader: () =>
+      appReader({
+        store: store(),
+        sessions: { getState: () => state, chatKey: (id: string | null) => (id ? (keys.get(id) ?? null) : null), byKey: (key: string) => byKey(key) },
+        host,
+        groups: accounts,
+      }),
+    setList: (id, list) => patchRec(id, { reach: list.length ? [...list] : undefined }),
+    sendTo: (id, text) => send(id, text, "queue"),
+    route: (id, text) => route(id, text),
+    running: (id) => {
+      const p = procs.get(id);
+      return p?.kind === "agent" && p.hostId !== undefined && rec(id)?.status === "running";
+    },
+    openLane: (p) => startOpenedLane(p),
+    laneScope: (agent) => chatScope("agent:", null, { agent: agent as AgentId, status: "draft" }, accounts()),
+  });
+  /** Helper lanes (item 102h, src/jobs/helperRuns.ts): each round the person approved with Start helpers starts its helper lanes as
+   *  this Mac has room (`startHelperLane`), each in its agent's Ask mode, and runs their budgets, their Stop and their end. Nothing of
+   *  it answers an ask: a helper's asks are its own cards. */
+  const runs = createHelperRuns({
+    rec,
+    asks: (id) => {
+      const key = keys.get(id);
+      return key ? selectAsks(store().getState()).filter((a) => a.bot === key).map((a) => a.item.request_id) : [];
+    },
+    working: (id) => working(id),
+    lastAnswer: (id) => {
+      const key = keys.get(id);
+      const items = key ? (store().getState().chats[key]?.items ?? []) : [];
+      for (let i = items.length - 1; i >= 0; i--) {
+        const it = items[i];
+        if (it.kind === "assistant") return it.text;
+      }
+      return "";
+    },
+    title: (id) => {
+      const r = rec(id);
+      return r ? pickTitle(r, folderName(r.cwd)).title : "";
+    },
+    othersRunning: () => state.list.filter((r) => r.job && working(r.id)).length,
+    rounds: (lead) => leads.roundsOf(lead),
+    setRounds: (lead, r) => leads.setRounds(lead, r),
+    memory: () => (host.machineMemory ? host.machineMemory() : Promise.resolve(null)),
+    groups: () => accounts(),
+    freshJob: () => `j${freshLinkId()}`,
+    startLane: (p) => startHelperLane(p),
+    interrupt: (id) => input(id, { kind: "interrupt" }),
+    steer: (id, text) => input(id, { kind: "steer", id: `local-s${++localSeq}`, text }),
+    send: (id, text) => send(id, text, "queue"),
+    endIdle: (id) => stopIdle(id),
+    note: (id, text) => {
+      const key = keys.get(id);
+      if (key) store().dispatch({ type: "system.note", bot: key, text, now: Date.now() });
+    },
+    now: () => clock.now(),
+    every: (ms, fn) => clock.every(ms, fn),
+  });
+  leads.whenRoundApproved((r) => runs.approved(r));
+  /** The session whose chat has app-store key `key`. */
+  const byKey = (key: string) => {
+    for (const [id, k] of keys) if (k === key) return rec(id) ?? null;
+    return null;
+  };
   /** A link id no session in the list holds (termLink.ts). */
   const freshLinkId = (taken: ReadonlySet<string> = new Set(state.list.map((r) => r.linkId).filter((x): x is string => !!x))): string => {
     for (;;) {
@@ -145,8 +253,16 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     const ui = store().getState().ui;
     return windowWatched() && ui.view === "session" && ui.session === id;
   };
+  /** A helper lane's name in Needs you and its notifications (item 102h): "Helper 1 of Add the PromptPay QR (Codex)", so an ask of
+   *  it is never read as its lead's or another lane's. Null for any other session. */
+  const helperName = (r: SessionRec): string | null => {
+    if (!r.helperOf) return null;
+    const lead = rec(r.helperOf.lead);
+    const title = lead ? pickTitle(lead, folderName(lead.cwd)).title : tr("ss.session");
+    return tr("helpers.run.askName", { n: r.helperOf.index + 1, lead: title, agent: agentLabel(r.agent, state.agents) });
+  };
   /** `web-app · Claude Code`, as its notifications and its Needs-you row name it. */
-  const nameOf = (r: SessionRec) => `${r.cwd.split(/[\\/]/).filter(Boolean).pop() ?? r.cwd} · ${agentLabel(r.agent, state.agents)}`;
+  const nameOf = (r: SessionRec) => helperName(r) ?? `${r.cwd.split(/[\\/]/).filter(Boolean).pop() ?? r.cwd} · ${agentLabel(r.agent, state.agents)}`;
   /** Session `id` did something the person did not see: its row carries it until they open the session. True when
    *  this is news (they are not watching, and the row does not say it already). */
   const flag = (id: string, what: Unseen): boolean => {
@@ -333,7 +449,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
   const refreshDrafts = () => {
     for (const r of state.list) {
       // a workflow's lane is a draft only while it starts, on the agent and folder its file names
-      if (r.status !== "draft" || r.workflow || r.continuedFrom) continue;
+      if (r.status !== "draft" || r.workflow || r.job || r.helperOf || r.continuedFrom) continue;
       const p = picked.get(r.id) ?? {};
       const patch: Partial<SessionRec> = {};
       if (!p.agent) {
@@ -374,7 +490,10 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     if (ev.event !== "approval.request" || !key?.startsWith("agent:") || !r?.cwd) return null;
     const ask = ev as unknown as EventOf<"approval.request">;
     // a lane's project is the session's folder, whose settings the dial keeps; what is inside it is the lane's own folder
-    const ctx = { chat: key, root: workDir(r), project: r.cwd, home: state.home, branch: state.live[id]?.branch, ...(r.workflow ? { careful: true } : {}) };
+    // a helper lane is read at its project's level, as any lane of the project, and never above its lead's: a lead read careful
+    // would make its helper lanes careful too (item 102h; a workflow's lane offers no helpers today)
+    const careful = !!r.workflow || (!!r.helperOf && !!rec(r.helperOf.lead)?.workflow);
+    const ctx = { chat: key, root: workDir(r), project: r.cwd, home: state.home, branch: state.live[id]?.branch, ...(careful ? { careful: true } : {}) };
     const card = { id: `approval-${ask.request_id}`, request_id: ask.request_id };
     if (savesAlone(ask, ctx)) {
       // a commit or a push the dial would let go alone: what it saves is read first (item 117), and a key there, or a read not
@@ -431,7 +550,10 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     return (ev: ChatEvent) => {
       const current = procs.get(id) === proc;
       handle(ev);
-      if (current) for (const w of [...chatWatchers]) w(id, ev);
+      if (!current) return;
+      // a helper lane's budget, its Stop and its end read its events once the chat has them (item 102h)
+      runs.event(id, ev);
+      for (const w of [...chatWatchers]) w(id, ev);
     };
   };
 
@@ -464,12 +586,21 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
         }
         return;
       }
-      case "session.models":
-        set({ models: { ...state.models, [id]: Array.isArray(ev.options) ? (ev.options as ModelOption[]) : [] } });
+      case "session.models": {
+        const options = Array.isArray(ev.options) ? (ev.options as ModelOption[]) : [];
+        set({ models: { ...state.models, [id]: options } });
+        // what the agent listed is kept for the Ask several panel, which offers it before any lane of the agent runs (item 102a)
+        const who = rec(id)?.agent;
+        if (who && options.length) noteChoices(who, { models: options.map((o) => ({ id: o.id, label: o.label })) });
         return;
-      case "session.efforts":
-        patchLive(id, { efforts: Array.isArray(ev.levels) ? ev.levels.filter((x): x is string => typeof x === "string" && !!x) : [] });
+      }
+      case "session.efforts": {
+        const levels = Array.isArray(ev.levels) ? ev.levels.filter((x): x is string => typeof x === "string" && !!x) : [];
+        patchLive(id, { efforts: levels });
+        const who = rec(id)?.agent;
+        if (who && levels.length) noteChoices(who, { efforts: levels });
         return;
+      }
       case "session.commands": {
         // an agent may send its list in parts (Codex: skills after start-up): keep each entry once
         const next = parseCommands(ev.commands);
@@ -525,6 +656,16 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
         }
         // the project's own instructions the shell read and handed to the agent as text (item 93, projectNotes.ts): said
         // once in the chat, so a restart that hands over the same files adds nothing
+        // an agent held to its asking modes reported another (acp_chat.rs, item 101a): what the shell set it back to, or
+        // that it would not go back and gets nothing more
+        if (ev.kind === "asks_mode") {
+          const key = keys.get(id);
+          const agent = typeof ev.agent === "string" ? ev.agent : agentDef(rec(id)?.agent ?? "claude").label;
+          const mode = typeof ev.mode === "string" ? ev.mode : "";
+          const to = typeof ev.to === "string" ? ev.to : "";
+          const said = ev.ok === true ? tr("ss.asksModeSet", { agent, mode, to }) : tr("ss.asksModeKept", { agent, mode });
+          if (key && mode) store().dispatch({ type: "system.note", bot: key, text: said, now: Date.now() });
+        }
         if (ev.kind === "instructions") {
           const key = keys.get(id);
           const text = notesSaid(ev);
@@ -569,10 +710,20 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
         // sentence, said in the person's language
         if (ev.event === "turn.end" && typeof ev.error === "string") ev = { ...ev, error: signedOutSaid(ev.error) };
         if (ev.event === "turn.end" && proc.noChat && ev.outcome === "error") ev = { ...ev, error: proc.noChat };
+        // a lead lane with Helpers on: its turn is marked so the chat hides its helper blocks, and what it writes is kept for its
+        // end to read (item 102e)
+        ev = leads.before(id, ev);
+        // a chat with chats on its "Kit may reach" list: its turn is marked so the chat hides its reach blocks, and what it writes is
+        // kept for its end to read (item 102k)
+        ev = reach.before(id, ev);
         // Kit's dial: the card is added either way, so the chat says what was done; its answer goes through the card
         const kit = kitAsk(id, ev);
         dispatchChat(id, ev, !!kit);
         if (kit) void kit();
+        // the turn's end: a helper request becomes the Start helpers card under the answer, or a line saying why not
+        void leads.after(id, ev);
+        // and a reach block becomes its card, or a line saying why not (item 102k)
+        void reach.after(id, ev);
         if (ev.event === "tool.diff" && Array.isArray(ev.files)) noteChange(keys.get(id) ?? "", ev.files as DiffFile[]);
         // what the lane's work has shown: its test runs read from their output, and the files that changed
         noteLaneEvent(keys.get(id) ?? "", ev, Date.now(), laneWhere(id));
@@ -750,6 +901,13 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
       // (rewind.ts); a message that joins a running turn starts none
       const key = keys.get(id);
       if (i.kind === "send" && i.id && REWINDS.includes(r.agent) && !(key && store().getState().chats[key]?.turn)) await turns.beforeSend(id, workDir(r), i.id);
+      if (i.kind === "send") {
+        // a message of the person's reaches the agent: it gets its own rounds of helper lanes, and while Helpers is on the lead's
+        // note goes in front of it, never into the bubble (item 102e)
+        leads.personSpoke(id);
+        // and while chats are on its "Kit may reach" list, the note naming them goes in front too (item 102k)
+        i = { ...i, text: leads.wire(id, reach.wire(id, i.text)) };
+      }
       await host.chatInput(proc.hostId, i);
       return;
     }
@@ -932,6 +1090,26 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     }
   };
 
+  /**
+   * A message from another chat into session `id`'s chat (item 102k, after Send there on that chat's card): marked by the caller as
+   * from that chat. It is only ever sent as text, so it has no way to answer, allow, deny or dismiss an ask, whatever its words. It
+   * waits as a held row while a turn runs, while messages wait ahead of it, or while an ask or a question of this chat waits on the
+   * person, and goes when the turn ends or when the person presses Send now on it; it is never steered into a running turn, whatever
+   * the person's Return does. False when nothing could be sent (no agent of the app's running there).
+   */
+  const route = async (id: string, text: string): Promise<boolean> => {
+    const key = keys.get(id);
+    const t = text.trim();
+    if (!key || !t || procs.get(id)?.kind !== "agent") return false;
+    const asks = selectAsks(store().getState()).some((a) => a.bot === key);
+    if (mustHoldHere(id, key) || asks) {
+      const lid = `local-s${++localSeq}`;
+      hold(id, key, lid, { kind: "send", text: t, id: lid }, () => store().dispatch({ type: "local.user", bot: key, id: lid, text: t, now: Date.now(), held: true }));
+      return true;
+    }
+    return send(id, t, "queue");
+  };
+
   // ---- files --------------------------------------------------------------------------------
 
   let sentFiles = readSentFiles();
@@ -1061,7 +1239,8 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     const r = rec(id);
     setChatRoute(key, {
       // folder first: it tells sessions apart, and a narrow Needs-you row keeps it when the name is cut
-      label: r ? `${r.cwd.split(/[\\/]/).filter(Boolean).pop() ?? r.cwd} · ${agentLabel(r.agent, state.agents)}` : tr("ss.session"),
+      // a helper lane names its place and its lead (item 102h): its asks in Needs you are never read as another lane's
+      label: r ? nameOf(r) : tr("ss.session"),
       open: () => store().actions.openSession(id),
       send: async (text) => {
         await send(id, text);
@@ -1112,7 +1291,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
   const draft = (agent?: AgentId): string => {
     // a workflow's lane, a draft only while it starts, is never the person's
     // nor a chat Continue with made (item 97): it is tied to its lane and the chat it continues
-    const open = state.list.find((r) => r.status === "draft" && !r.workflow && !r.continuedFrom);
+    const open = state.list.find((r) => r.status === "draft" && !r.workflow && !r.job && !r.helperOf && !r.continuedFrom);
     if (open) {
       if (agent) setDraft(open.id, { agent });
       store().actions.openSession(open.id);
@@ -1194,6 +1373,179 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     return started ? "started" : "failed";
   };
 
+
+  // ---- Ask several agents (item 102a) ---------------------------------------------------------------------------------------
+
+  /**
+   * Ask several agents: one message sent to up to three agents, each as an ordinary lane (`start`: a branch and a folder of its own,
+   * listed in the Lanes band) started in its agent's Ask mode and grouped as one job (`SessionRec.job`). Nothing is sent until the
+   * person pressed Send in the panel, which is the only caller, and nothing here starts an agent for another agent: every lane's
+   * own asks are its own cards. The send is refused whole, with nothing started, when any row is refused (`askRefusal`: a limited
+   * account's row cannot be sent). The lanes start one after the other, so two lanes never ask the shell for the same branch name
+   * at once; a lane that fails to start leaves the others as they are. A folder that is not a repository makes no lane, and no
+   * agent starts in it (rule R1): the answer then says `no_lane`.
+   */
+  const startJob = async (p: {
+    cwd: string;
+    text: string;
+    files?: OutFile[];
+    picks: readonly AskPick[];
+  }): Promise<{ ok: true; job: string; ids: string[]; failed: number } | { ok: false; refused: AskRefusal; ids: string[] } | { ok: false; refused: { why: "no_lane" }; ids: string[] }> => {
+    if (state.agents === null) await loadAgents();
+    const text = p.text.trim();
+    const files = p.files ?? [];
+    const refused = askRefusal({ cwd: p.cwd, hasMessage: !!text || files.length > 0, picks: p.picks, agents: state.agents ?? [], groups: accounts() });
+    if (refused) return { ok: false, refused, ids: [] };
+    const job = `j${freshLinkId()}`;
+    const ids: string[] = [];
+    let failed = 0;
+    for (const pick of p.picks) {
+      const id = `s${++seq}`;
+      const ask = ASK_MODE[pick.agent];
+      const r: SessionRec = {
+        id,
+        linkId: freshLinkId(),
+        agent: pick.agent,
+        cwd: p.cwd,
+        startedAt: Date.now(),
+        status: "draft",
+        view: "chat",
+        job,
+        // the agent's own Ask mode, named on its command line whatever mode the person last used (item 89)
+        ...(ask && modesOf(pick.agent).includes(ask) ? { mode: ask } : {}),
+        ...(pick.model ? { modelWant: pick.model } : {}),
+        ...(pick.effort ? { effort: pick.effort } : {}),
+      };
+      set({ list: [r, ...state.list] });
+      const started = await start(id, text, undefined, files).catch(() => false);
+      if (laneless.delete(id)) return { ok: false, refused: { why: "no_lane" }, ids };
+      if (!started) {
+        failed++;
+        continue;
+      }
+      ids.push(id);
+      const key = keys.get(id);
+      if (key) store().dispatch({ type: "system.note", bot: key, text: tr("several.lane.note", { n: p.picks.length }), now: Date.now() });
+    }
+    return { ok: true, job, ids, failed };
+  };
+
+  // ---- a lane another chat's card opened (item 102k) -------------------------------------------------------------------------
+
+  /**
+   * Start lane on another chat's open card: an ordinary lane on `agent` in the developer's folder `cwd` (`start`: a branch and a folder
+   * of its own, listed in the Lanes band), started in its agent's Ask mode with `first` (the card's brief, marked as from the asking
+   * chat) as its first message, named with the card's title. Made beside the person's drafts and never opened in front of them, as a
+   * workflow's lane is, and it changes neither how they last opened the agent nor their last folder. The card's press is the only
+   * caller. A folder that is not a repository makes no lane, and no agent starts in it (rule R1): the answer then says why.
+   */
+  const startOpenedLane = async (p: OpenLane): Promise<{ ok: true; id: string } | { ok: false; why: string }> => {
+    if (state.agents === null) await loadAgents();
+    const agent = p.agent as AgentId;
+    const id = `s${++seq}`;
+    const ask = ASK_MODE[agent];
+    const r: SessionRec = {
+      id,
+      linkId: freshLinkId(),
+      agent,
+      cwd: p.cwd,
+      startedAt: Date.now(),
+      status: "draft",
+      view: "chat",
+      title: p.title.replace(/\s+/g, " ").trim().slice(0, NAME_MAX),
+      openedBy: p.from,
+      // the agent's own Ask mode, named on its command line whatever mode the person last used (item 89)
+      ...(ask && modesOf(agent).includes(ask) ? { mode: ask } : {}),
+      ...(p.model ? { modelWant: p.model } : {}),
+      ...(p.effort ? { effort: p.effort } : {}),
+    };
+    set({ list: [r, ...state.list] });
+    const started = await start(id, p.first).catch(() => false);
+    if (laneless.delete(id)) return { ok: false, why: tr("reach.noLane") };
+    if (!started) return { ok: false, why: tr("reach.notStarted") };
+    const key = keys.get(id);
+    const from = rec(p.from);
+    if (key) store().dispatch({ type: "system.note", bot: key, text: tr("reach.opened.note", { title: from ? pickTitle(from, folderName(from.cwd)).title : tr("ss.session") }), now: Date.now() });
+    return { ok: true, id };
+  };
+
+  // ---- helper lanes (item 102h) ---------------------------------------------------------------------------------------------
+
+  /** The model a helper lane starts on: the one its block named, unless the card said the lead's agent does not list it; none named
+   *  on the lead's own agent is the lead's model, as the card said, found among what the lead's agent listed. */
+  const helperModel = (row: StartHelper["row"], lead: SessionRec): string | undefined => {
+    if (row.model) return row.modelUnlisted ? undefined : row.model;
+    if (!row.own || !lead.model) return undefined;
+    const listed = (state.models[lead.id] ?? []).find((m) => m.id === lead.model || m.label === lead.model);
+    return listed?.id;
+  };
+
+  /**
+   * One helper lane of a round the person approved with Start helpers (src/jobs/helperRuns.ts is the only caller): its folder made by
+   * the shell from a snapshot of the lead lane's folder as it is now (`laneHelperWorktree`, item 102f), then an ordinary lane on the
+   * row's agent in that folder (`start`), started in its agent's Ask mode whatever mode the lead runs in (rule R3) with `first` (the
+   * brief with its mark) as its first message, named with the card's title and marked `helperOf`. Made beside the person's drafts and
+   * never opened in front of them, as a workflow's lane is. Its project is the lead's, the developer's folder, so Kit's dial reads its
+   * asks at that project's level, as for any lane of it. `made` hears its id before its agent starts. `ok: false` says, in the
+   * person's words, why its folder or its agent did not start.
+   */
+  const startHelperLane = async (p: StartHelper): Promise<{ ok: true; id: string } | { ok: false; why: string }> => {
+    if (state.agents === null) await loadAgents();
+    const lead = rec(p.lead);
+    if (!lead?.lane?.worktree) return { ok: false, why: tr("helpers.run.why.noLead") };
+    if (!host.laneHelperWorktree) return { ok: false, why: tr("helpers.run.why.noShell") };
+    let made: LaneMade;
+    try {
+      made = await host.laneHelperWorktree(lead.lane.worktree, p.job);
+    } catch (e) {
+      return { ok: false, why: tr("helpers.run.why.folder", { why: errText(e) }) };
+    }
+    const lane = { name: made.branch, base: made.base, dir: made.dir, worktree: made.worktree };
+    if (!rec(p.lead)) {
+      // the lead was closed while the folder was made: nothing is in it yet, so it goes as a close takes it
+      void letLaneGo(lane);
+      return { ok: false, why: tr("helpers.run.why.noLead") };
+    }
+    const agent = p.row.agent as AgentId;
+    const ask = ASK_MODE[agent];
+    const model = helperModel(p.row, lead);
+    const effort = p.row.effort && !p.row.effortUnlisted ? p.row.effort : p.row.own ? lead.effort : undefined;
+    const id = `s${++seq}`;
+    const r: SessionRec = {
+      id,
+      linkId: freshLinkId(),
+      agent,
+      cwd: lead.cwd,
+      startedAt: Date.now(),
+      status: "draft",
+      view: "chat",
+      title: p.row.title.replace(/\s+/g, " ").trim().slice(0, NAME_MAX),
+      lane,
+      helperOf: { lead: p.lead, job: p.job, round: p.round, index: p.index },
+      // the agent's own Ask mode, named on its command line whatever mode the lead or the person last used (item 89, rule R3); an
+      // agent with no modes here starts in the careful one the shell picks
+      ...(ask && modesOf(agent).includes(ask) ? { mode: ask } : {}),
+      // on the lead's own agent it runs as the lead's account, so it reads the same sign-in the lead does
+      ...(agent === lead.agent && lead.account ? { account: lead.account } : {}),
+      ...(model ? { modelWant: model } : {}),
+      ...(effort ? { effort } : {}),
+    };
+    set({ list: [r, ...state.list] });
+    p.made(id);
+    // the chat says first where the helper lane works and what it is, so the brief below reads as what it was sent
+    keys.set(id, `agent:${id}`);
+    registerRoute(id);
+    openChat(id);
+    const title = pickTitle(lead, folderName(lead.cwd)).title;
+    store().dispatch({ type: "system.note", bot: `agent:${id}`, text: tr("helpers.run.laneNote", { n: p.index + 1, lead: title, branch: made.branch, folder: made.dir }), now: Date.now() });
+    const started = await start(id, p.first).catch(() => false);
+    const now = rec(id);
+    if (!started || !now) return { ok: false, why: tr("helpers.run.why.notStarted") };
+    // the shell refused to start its agent (one whose own settings would skip asks, items 101a and 101b): its row says why
+    if (now.status === "failed") return { ok: false, why: now.error || tr("helpers.run.why.notStarted") };
+    return { ok: true, id };
+  };
+
   // ---- Continue with (item 97) ----------------------------------------------------------------------------------------
 
   /** Whether session `id`'s turn runs (an ask of it waits inside its turn). */
@@ -1270,14 +1622,16 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
    * TERMINALS +: start `agent` (or the Shell, `SHELL`) in a terminal in `cwd` (none: the last folder used, else home)
    * at once, and open it. Never a chat: an agent that usually opens as manut's chat is opened as its own terminal.
    * A Shell runs `shell` (an id from the shell's list; none: Settings › Terminal › Default shell, else the login shell).
+   * `as`: the account the terminal runs as, instead of the one picked for new sessions (Settings › Accounts opens pi's
+   * terminal as the account it just added, so the person can type pi's own /login there; item 101d).
    */
-  const startTerminal = (agent: AgentId, cwd?: string, shell?: string): string | null => {
+  const startTerminal = (agent: AgentId, cwd?: string, shell?: string, as?: string): string | null => {
     const at = cwd || draftFolder(state.recent, state.home);
     if (!at) return null;
     const id = `s${++seq}`;
     const startedAt = Date.now();
     const asTerminal = !isShell(agent) && sessionMode(state.agents, { agent }) !== "terminal";
-    const account = isShell(agent) ? undefined : accountFor(accounts(), agent);
+    const account = isShell(agent) ? undefined : as ?? accountFor(accounts(), agent);
     const shellId = isShell(agent) ? shell || readTermSettings().defaultShell || undefined : undefined;
     const r: SessionRec = {
       id,
@@ -1455,11 +1809,13 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     await ready();
     const r = rec(id);
     if (!r || r.status !== "draft") return false; // closed or started meanwhile
-    // a workflow's lane is a chat whatever way the person last opened its agent
-    const open = r.workflow ? "chat" : draftOpen(r.agent, state.agents, state.opens);
+    // a workflow's lane and a job's lane (Ask several, item 102a) are chats whatever way the person last opened the agent, and run
+    // only in a lane of their own: a folder that is not a repository gets no agent (rule R1 of docs/several-agents.md)
+    const own = !!(r.workflow || r.job || r.openedBy || r.helperOf);
+    const open = own ? "chat" : draftOpen(r.agent, state.agents, state.opens);
     const mode = sessionMode(state.agents, { agent: r.agent, open });
-    // a workflow runs only in a lane of its own, which only a chat has
-    if (r.workflow && mode !== "chat") return refuseLaneless(id);
+    // such a lane runs only in a lane of its own, which only a chat has
+    if (own && mode !== "chat") return refuseLaneless(id);
     const text = first?.trim() ?? "";
     // the first message's files are saved before anything starts: one that cannot be leaves the draft as it was
     // (its chips stay)
@@ -1479,8 +1835,9 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     // the account it runs as is the one picked for new sessions now (recorded so a restart continues as it)
     // a chat continued on the same agent keeps the account it ran as (item 97)
     const account = r.account ?? accountFor(accounts(), r.agent);
-    // a workflow's folder is not the person's last one: their next New session opens where they last worked
-    if (!r.workflow) {
+    // a workflow's folder is not the person's last one: their next New session opens where they last worked, and a job's
+    // lanes leave the last agent used as it was
+    if (!own) {
       const recent = pushRecent(state.recent, { agent: r.agent, cwd: r.cwd, at: startedAt });
       try {
         localStorage.setItem(RECENT_KEY, JSON.stringify(recent));
@@ -1512,7 +1869,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
       registerRoute(id);
       openChat(id);
       if (!text && !withFiles) {
-        if (!r.lane && !(await startLane(id)) && r.workflow) return refuseLaneless(id);
+        if (!r.lane && !(await startLane(id)) && own) return refuseLaneless(id);
         await startAgentChat(id);
         await setWanted(id);
         return true;
@@ -1524,7 +1881,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
       if (!withFiles) st.dispatch({ type: "local.user", bot: key, id: lid, text, now: Date.now() });
       // the lane's own branch is there before the agent has a chance to change a file; a workflow's agent starts only in one. A
       // chat made by Continue with already has the lane it shares (item 97): no second folder or branch is made
-      if (!r.lane && !(await startLane(id)) && r.workflow) return refuseLaneless(id);
+      if (!r.lane && !(await startLane(id)) && own) return refuseLaneless(id);
       await startAgentChat(id);
       await setWanted(id);
       try {
@@ -2260,7 +2617,9 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     // second row holding the same one comes back paused, so one Hermes session is never attached for two rows
     const folderAgain: string[] = [];
     const folderTaken = new Set<string>();
-    for (const s of saved) {
+    for (const kept of saved) {
+      // a Grok session saved while Grok was a terminal only is that terminal (item 101b)
+      const s = savedOpen(kept);
       if (isGone(s.agent) && s.draft) {
         // a New session never started on an agent manut no longer offers: a draft again, on the usual agent
         list.push({ id: s.id, agent: draftAgent(state.recent, state.agents), cwd: s.cwd, startedAt: s.startedAt, view: "chat", status: "draft" });
@@ -2275,6 +2634,11 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
         seq = Math.max(seq, Number(s.id.slice(1)) || 0);
         keys.set(s.id, `agent:${s.id}`);
         openChat(s.id, s.model ?? "", (s.messages ?? []).map((m) => ({ id: `r-${m.id}`, role: m.role, text: m.text, ts: m.ts })));
+        continue;
+      }
+      // a job's lane that was still starting when the app closed: it never ran, and a draft of the person's it is not
+      if (s.draft && (s.job || s.helperOf)) {
+        seq = Math.max(seq, Number(s.id.slice(1)) || 0);
         continue;
       }
       if (s.draft) {
@@ -2306,7 +2670,8 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
       // TERMINALS lists terminal sessions only: a saved chat-mode session is kept as it was (its files and messages
       // stay) but is not listed and never starts again
       const terminalOnly = !isTerminalRec(state.agents, { agent: s.agent, open: s.open, status: "exited" });
-      const auto = !terminalOnly && s.running && mode === "chat" && continuesItself(s);
+      // a helper lane is not started again by itself: its round did not survive the restart, so it comes back paused (item 102h)
+      const auto = !terminalOnly && s.running && mode === "chat" && continuesItself(s) && !s.helperOf;
       // a TERMINALS Claude Code or Codex session that was running continues its own conversation in a fresh terminal;
       // an oh-my-hermes one starts again, and `omh` reopens what it dropped there
       const termAuto = !terminalOnly && s.running && mode === "terminal" && termComesBack(s);
@@ -2340,8 +2705,12 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
         // a lane keeps its branch and its own folder: Resume and Restart start its agent there, never in the developer's
         ...(s.lane ? { lane: s.lane } : {}),
         ...(s.workflow ? { workflow: s.workflow } : {}),
+        ...(s.helpers ? { helpers: true as const } : {}),
+        ...(s.reach?.length ? { reach: s.reach } : {}),
         ...(s.continuedFrom ? { continuedFrom: s.continuedFrom } : {}),
         ...(s.continuedIn ? { continuedIn: s.continuedIn } : {}),
+        ...(s.job ? { job: s.job } : {}),
+        ...(s.helperOf ? { helperOf: s.helperOf } : {}),
         ...(s.running && !auto && !termAuto && !folderAuto ? { paused: true } : {}),
       };
       list.push(r);
@@ -2540,6 +2909,10 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     void stopChat(id).then(() => Promise.all([host.removeFiles(id).catch(() => undefined), free ? letLaneGo(r?.lane) : undefined]));
     turns.forget(id);
     forgetSentFiles(id);
+    // a helper lane that had not reported is back as stopped by the person; a lead's helper lanes stop and land nothing (item 102h)
+    runs.closed(id);
+    leads.forget(id);
+    reach.forget(id);
     const key = keys.get(id);
     if (key) {
       // a title being written for it stops with it (item 96): nobody is left to read it, and it is the person's own use
@@ -2660,11 +3033,22 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     }
   };
 
+  /** The Helpers switch in a lane's box (item 102e): on, the lane's agent is told how to ask for helper lanes with each message and
+   *  its requests become Start helpers cards; off, a card still open is taken back. Kept with the session. Refused (false) where it
+   *  is not offered: a chat with no lane of its own, a workflow's lane, an agent that does not run as a chat. */
+  const setHelpers = (id: string, on: boolean): boolean => {
+    if (!leads.offered(id)) return false;
+    patchRec(id, { helpers: on ? true : undefined });
+    if (!on) leads.switchedOff(id);
+    return true;
+  };
+
   /** Change a chat session's permission mode (Claude Code's own switch; Codex from its next turn). Kept with the
    *  session, so a restart sets it again. Only the modes controls.ts offers for the agent. */
   const setMode = async (id: string, mode: string) => {
     const r = rec(id);
-    if (!r || !modesOf(r.agent).includes(mode)) return;
+    // a helper lane runs in its agent's Ask mode, set by the job, whatever the person or its lead would pick (item 102h, rule R3)
+    if (!r || r.helperOf || !modesOf(r.agent).includes(mode)) return;
     note(id, null);
     try {
       await input(id, { kind: "mode", mode });
@@ -2728,6 +3112,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     draft,
     draftChat,
     startWorkflowLane,
+    startJob,
     /** Hear every chat's events after the session handled them (a workflow's run); the returned function stops it. */
     onChatEvent(fn: (id: string, ev: ChatEvent) => void) {
       chatWatchers.add(fn);
@@ -2770,6 +3155,40 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     setModel,
     setMode,
     setEffort,
+    setHelpers,
+    /** Session `id` shows the "Kit may reach" list under its box (item 102k). */
+    reachOffered: (id: string): boolean => reach.offered(id),
+    /** Adds chat `ref` to session `id`'s "Kit may reach" list, at the person's press: null when added, else the line to show. */
+    addReach: (id: string, ref: ThreadRef): string | null => reach.add(id, ref),
+    /** Takes listed chat `n` off session `id`'s list; a card still open that names it is taken back. */
+    removeReach: (id: string, n: number): void => reach.remove(id, n),
+    /** The person's yes (`yes`) or no on reach card `askId` of session `id`: checked again, settled once in approval-core, and only
+     *  then read, sent or opened (item 102k). */
+    answerReach: (id: string, askId: string, yes: boolean) => reach.answer(id, askId, yes),
+    /** Session `id` may show the Helpers switch (item 102e). */
+    helpersOffered: (id: string): boolean => leads.offered(id),
+    /** The person's Start helpers (`start`) or Not now on the card `askId` of session `id`: settled once in approval-core; no agent
+     *  starts (item 102h listens on `whenHelperRoundApproved`). */
+    answerHelpers: (id: string, askId: string, start: boolean) => leads.answer(id, askId, start),
+    /** Item 102e's hand-off: each round the person approved with Start helpers (item 102h's runs listen and start its lanes). */
+    whenHelperRoundApproved: (fn: Parameters<typeof leads.whenRoundApproved>[0]) => leads.whenRoundApproved(fn),
+    /** Session `id`'s rounds of helper lanes, as item 102d's rules keep them. */
+    helperRounds: (id: string) => leads.roundsOf(id),
+    /** The helper lanes of round `round` (the Card's rows, item 102h), and how to hear them change. */
+    helperRuns: (round: string) => runs.roundRuns(round),
+    onHelperRuns: (fn: () => void) => runs.subscribe(fn),
+    /** How many helper lanes run at once on this Mac, once its memory was read (null before), and the read itself. */
+    helpersAtOnce: () => runs.atOnce(),
+    readHelpersAtOnce: () => runs.readCap(),
+    /** The person's Stop on one helper lane of a round, or on all of them: only ever a press (item 102h, rule R5). */
+    stopHelper: (round: string, index: number) => runs.stop(round, index),
+    stopHelpers: (round: string) => runs.stopAll(round),
+    /** Item 102h's hand-off to 102i and 102j: each helper lane that comes back, with its report bound to its round. */
+    whenHelperBack: (fn: Parameters<typeof runs.whenBack>[0]) => runs.whenBack(fn),
+    /** The budget's clock, read now (tests drive it with their own clock). */
+    helperTick: () => runs.tick(),
+    /** Helper session `id`'s budget as it stands (tests). */
+    helperBudget: (id: string) => runs.budgetOf(id),
     rename,
     rewriteTitle,
     moveRow,
@@ -2849,10 +3268,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     /** Changes each time Restart starts session `id`'s terminal program again. */
     termRun: (id: string) => termRuns.get(id) ?? 0,
     /** The session whose chat has app-store key `key`. */
-    byKey: (key: string) => {
-      for (const [id, k] of keys) if (k === key) return rec(id) ?? null;
-      return null;
-    },
+    byKey,
     /** The app-store chat key of session `id`'s chat, if it has one. */
     chatKey: (id: string | null) => (id ? (keys.get(id) ?? null) : null),
     /** Hook for system notifications of session chats (the app sets it). */

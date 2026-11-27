@@ -1,0 +1,27 @@
+import type { worktrees as en } from "../en/worktrees";
+
+export const worktrees: Record<keyof typeof en, string> = {
+  "worktrees.where.title": "레인을 만드는 위치",
+  "worktrees.where.hint": "레인마다 자기만의 폴더에서 작업합니다. 그 폴더를 둘 위치를 고르세요. 이미 만든 레인은 그 자리에 남습니다.",
+  "worktrees.where.default": "기본값: {folder}",
+  "worktrees.where.choose": "폴더 선택",
+  "worktrees.where.reset": "기본값 사용",
+  "worktrees.root.bad_root": "Kit이 쓸 수 없는 폴더입니다. 전체 폴더 경로를 고르세요.",
+  "worktrees.root.root_too_broad": "폴더 범위가 너무 넓습니다. 홈 폴더, 디스크 최상위 또는 Manut AI의 자체 데이터입니다. 다른 폴더를 고르세요.",
+  "worktrees.root.root_in_checkout": "프로젝트의 파일 안에 있는 폴더라 레인 폴더가 그 사이에 놓이게 됩니다. 어느 프로젝트에도 속하지 않은 폴더를 고르세요.",
+  "worktrees.root.root_unwritable": "Kit이 이 폴더에 쓸 수 없습니다. 파일을 저장할 수 있는 폴더를 고르세요.",
+  "worktrees.root.chat": "레인용으로 고른 폴더를 지금 쓸 수 없어 레인을 만들지 않았고, Kit은 이 프로젝트의 폴더에서 작업합니다. 설정의 Worktrees에서 바꾸세요.",
+  "worktrees.remote.title": "원격에서 시작",
+  "worktrees.remote.hint": "새 레인은 원격에 있는 기준 브랜치의 최신 커밋에서 시작합니다. Kit은 먼저 그 브랜치 하나만 가져오고, 최대 10초 기다리며, 비밀번호를 묻지 않습니다. 가져오지 못하거나 내 브랜치에 원격에 없는 커밋이 있으면 내 브랜치에서 시작하고 그렇게 알려 줍니다.",
+  "worktrees.prefix.title": "브랜치 접두사",
+  "worktrees.prefix.hint": "모든 레인의 브랜치가 이 접두사로 시작해 Kit의 브랜치를 구별할 수 있습니다. 소문자 단어 한두 개, 각각 슬래시로 끝납니다(예: kit/, team/ana/).",
+  "worktrees.prefix.save": "저장",
+  "worktrees.prefix.empty": "접두사를 입력하세요.",
+  "worktrees.prefix.slash": "접두사는 kit/처럼 슬래시로 끝나야 합니다.",
+  "worktrees.prefix.form": "소문자, 숫자, 하이픈만 쓰고, 슬래시로 끝나는 단어를 한두 개 쓰세요.",
+  "worktrees.cleanup": "정리",
+  "worktrees.deleted.title": "채팅을 삭제하면 폴더도 삭제",
+  "worktrees.deleted.hint": "폴더 안에 바뀌거나 새로 생긴 것이 없고 브랜치의 모든 커밋이 원격에 있을 때만 삭제합니다. 그렇지 않으면 폴더를 남기고 레인 아래에 표시합니다. 브랜치는 항상 남습니다.",
+  "worktrees.merged.title": "풀 리퀘스트가 병합되면 폴더 삭제",
+  "worktrees.merged.hint": "프로젝트를 열 때 gh 또는 glab으로 풀 리퀘스트를 읽으며, 최대 한 시간에 한 번입니다. 커밋이 기본 브랜치에 있고, 폴더 안에 바뀌거나 새로 생긴 것이 없고, 그 폴더에서 작업하는 채팅이 없을 때만 삭제합니다. gh 또는 glab에 로그인되어 있지 않으면 알 수 없다고 말하고 아무것도 하지 않습니다.",
+};
