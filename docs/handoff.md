@@ -316,8 +316,7 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    chat), 102j (reports to the lead). On 27 Nov the owner merged pull request #33 into `main`, which deleted
    `pilot/week-1` on GitHub; it was made again from `main` (f64363e4). Then the design of 103 (other programs reach chats
    through an MCP server, `docs/mcp-threads.md`; four open questions for the owner) and 103a (the door, in the shell;
-   off, and nothing on the page reaches it until 103b) merged. Then 103b (Settings, the list and the let-in card) merged. Next: 103c (reads and messages), then 103d (a new
-   lane). From 27 Nov the owner asked for English first: new words are English, copied into ja, ko and zh. Needs the owner from 101b: Grok signed in and `permission_mode = "ask"`
+   off, and nothing on the page reaches it until 103b) merged. Then 103b (Settings, the list and the let-in card) merged. Then 103c (reads and messages) merged. Next: 103d (a new lane). From 27 Nov the owner asked for English first: new words are English, copied into ja, ko and zh. Needs the owner from 101b: Grok signed in and `permission_mode = "ask"`
    under `[ui]` in `~/.grok/config.toml` (it says always-approve, so Grok chats are refused), and Muse Code's CLI. From 101e: all 325 Codex sessions on the owner's Mac are compressed, so
    only Claude Code's conversations are offered until 106b. Needs the owner from 101a: Cursor's Approval mode set to Allowlist (it is Run Everything, so Cursor
    chats are refused), and a Cursor plan with messages left to record a real tool call. GitHub reported 7 Dependabot alerts on `main` (2 critical) at that push, for the owner to look at.
