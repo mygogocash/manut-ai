@@ -1,6 +1,7 @@
 // Buddy's chat on the Connected runtime (item 102l-2; docs/runtime-adapter.md, "Buddy's chat on Connected"), over a stubbed desktop shell
 // against an API that answers its chat routes as apps/api does (docs/pilot-api.md, "Chat"). The person owns Baan Mali. A message in
-// Buddy's main chat goes to `POST /v1/chat/messages` with the shop's owner session, exactly `{ text }`, and Buddy's answer shows under it;
+// Buddy's main chat goes to `POST /v1/chat/messages` with the shop's owner session, exactly `{ text }` (a body with any key beyond
+// `thread`, `text`, `note` and `sentOnFrom` is refused, as the API refuses it), and Buddy's answer shows under it;
 // the next goes to the conversation the first made; a refused one (60 an hour) is marked "Not sent" with the reason, and no answer shows.
 // History lists the conversation, and opening it shows both messages, its header saying it is a conversation, not the team's work. It
 // runs on the app's own runtime, so the page asks for it (`__MANUT_IN_PROCESS__`, src/lib/bridge.ts): the suite's server is built for the
@@ -69,7 +70,7 @@ async function stubShell(page: Page) {
         attemptsTruncated: false,
         drafts: [],
       };
-      const threads: { id: string; title: string; createdAt: string; updatedAt: string; messages: { id: string; from: string; text: string; at: string; stopReason?: string }[] }[] = [];
+      const threads: { id: string; title: string; createdAt: string; updatedAt: string; messages: { id: string; from: string; text: string; at: string; stopReason?: string; sentOnFrom?: string; noted?: true }[] }[] = [];
       const view = (c: (typeof threads)[number]) => ({ id: c.id, title: c.title, createdAt: c.createdAt, updatedAt: c.updatedAt, messageCount: c.messages.length });
       let n = 0;
       (window as unknown as { __TAURI_INTERNALS__: unknown }).__TAURI_INTERNALS__ = {
@@ -100,15 +101,19 @@ async function stubShell(page: Page) {
             // the API takes this long over a message, when a test says so: a model call is seconds, not nothing
             const wait = (window as unknown as { __chatDelay?: number }).__chatDelay;
             if (wait) await new Promise((r) => setTimeout(r, wait));
-            const text = String(body?.text ?? "").trim();
+            // exactly the keys the API takes: `text` always, and `thread`, `note` and `sentOnFrom` when there are any
+            if (!body || !("text" in body) || !Object.keys(body).every((k) => ["thread", "text", "note", "sentOnFrom"].includes(k))) return reply(400, { error: "invalid_request" });
+            const text = String(body.text ?? "").trim();
             if (/again/i.test(text)) return reply(429, { error: "rate_limited", retryAfter: 1_500, perHour: 60 });
-            let c = threads.find((x) => x.id === body?.thread);
+            let c = threads.find((x) => x.id === body.thread);
             if (!c) {
+              // a new conversation is named by the words
               c = { id: chatId, title: text.slice(0, 60), createdAt: iso(Date.now()), updatedAt: iso(Date.now()), messages: [] };
               threads.push(c);
             }
             const at = iso(Date.now());
-            const message = { id: `m${c.messages.length + 1}`, from: "owner", text, at };
+            // kept: the words alone, with the title and that a note went with them
+            const message = { id: `m${c.messages.length + 1}`, from: "owner", text, at, ...(typeof body.sentOnFrom === "string" ? { sentOnFrom: body.sentOnFrom } : {}), ...(typeof body.note === "string" ? { noted: true } : {}) };
             const answer = { id: `m${c.messages.length + 2}`, from: "buddy", text: "Sales were ฿4,250 from 12 orders today.", at, stopReason: "end_turn" };
             c.messages.push(message, answer);
             c.updatedAt = at;
