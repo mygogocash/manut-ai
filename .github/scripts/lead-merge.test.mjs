@@ -225,6 +225,22 @@ exit "\${WAIT_VERDICT:-0}"
     assert.equal(w.leadHead(), before);
   });
 
+  it("never merges or deletes main or a pilot branch, even from a helper's worktree", () => {
+    const w = world("pilot-branch");
+    const other = join(dirname(w.item), "cc-item2-y");
+    git(w.env, w.repo, "worktree", "add", "-q", "-b", "pilot/week-2", other, "feat/continue-pilot-week-1");
+    commit(w.env, other, "p.txt", "p\n");
+    git(w.env, other, "push", "-q", "-u", "origin", "pilot/week-2");
+    const before = w.leadHead();
+    const { status, out } = w.finish({ ITEM: other }, "--ci");
+    assert.equal(status, 1);
+    assert.match(out, /pilot\/week-2 is not an item branch: nothing merged or removed/);
+    assert.equal(w.asked(), "");
+    assert.ok(existsSync(other));
+    assert.notEqual(git(w.env, w.repo, "ls-remote", "origin", "refs/heads/pilot/week-2"), "");
+    assert.equal(w.leadHead(), before);
+  });
+
   it("takes only a helper's worktree that start-item.sh made, never a session's shared one", () => {
     const w = world("shared");
     // A worktree a lead session works in, elsewhere than ~/.t3/worktrees/manut-ai/cc-item…, on a branch GitHub has.

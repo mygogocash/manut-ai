@@ -362,6 +362,11 @@ function protectedReason(path) {
   if (path.startsWith(".github/")) return "CI, its scripts and this classifier are the lead's to review";
   if (path.startsWith(".claude/")) return "the agents' rules and skills are the lead's to review";
   if (AGENT_RULES.test(path)) return "a file that steers agents";
+  // Agents read the plan, the handoff and the decisions as their rules (the sixth security read, 27 Nov 2026, L7), so a
+  // change to them is the lead's to read, though it is only Markdown.
+  if (path === "docs/plan.md" || path === "docs/handoff.md" || path.startsWith("docs/decisions/")) {
+    return "the plan, the handoff or a decision, which agents read as their rules";
+  }
   if ((path.startsWith("docs/") || path.endsWith(".md")) && SECURITY_DOC.test(path)) return "a security document";
   return "";
 }
@@ -378,6 +383,9 @@ function refactorForbids(path) {
   if (/(^|\/)e2e\//.test(path) || /\.spec\.[cm]?[tj]sx?$/.test(path)) return "an e2e spec";
   if (/(^|\/)src-tauri\/capabilities\//.test(path) || /\.entitlements$/.test(path) || /(^|\/)Info[^/]*\.plist$/.test(path) ||
       /(^|\/)Entitlements\.plist$/.test(path) || /(^|\/)tauri[^/]*\.conf\.json$/.test(path)) return "a permission, entitlement, plist or tauri config";
+  // The one ask path settles every send, post, payment and deletion (CLAUDE.md), so a change to it is never merged on a
+  // declared refactor alone (the sixth security read, 27 Nov 2026, L7).
+  if (path.startsWith("packages/approval-core/") || /^apps\/api\/src\/approval[^/]*\.ts$/.test(path)) return "the approval code";
   return "";
 }
 
