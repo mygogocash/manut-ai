@@ -8,7 +8,7 @@
 // can split with up to three others on any side (SplitView: ⌘D / ⌘⇧D in its terminal, or a TERMINALS row dragged onto it).
 import { useLimitOffer, WaitingRow } from "../chat/box/LaterRows";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { getStore, selectAsks, useStore, type Chat, type OutFile } from "../state/store";
+import { getStore, asksIn, useStore, type Chat, type OutFile } from "../state/store";
 import { useResolvedTheme } from "../app/theme";
 import { Timeline } from "../chat/parts/Timeline";
 import { Composer } from "../chat/parts/Composer";
@@ -212,7 +212,7 @@ function ChatPane({ rec, chatKey }: { rec: SessionRec; chatKey: string }) {
         key={chatKey}
         bot={bot}
         running={!!chat?.turn}
-        asking={selectAsks(s).some((a) => a.bot === chatKey)}
+        asking={asksIn(s, chatKey).length > 0}
         offline={rec.status !== "running"}
         offlineText={offlineText}
         suggestion={suggestion}
@@ -854,7 +854,7 @@ export function SessionView() {
   const c = chatKey ? s.chats[chatKey] : undefined;
   const turn = !!c?.turn;
   // an approval or question of this chat is still open (the Needs-you model: answered, expired or its turn over closes it)
-  const needs = !!chatKey && selectAsks(s).some((a) => a.bot === chatKey);
+  const needs = !!chatKey && asksIn(s, chatKey).length > 0;
   // What the agent says is left in the background. Its count can hold a command, which has no row, so nothing is
   // guessed about which task waits: the header says "waiting" only when the background subagents manut has rows
   // for are as many as the agent counts and each one's approval or question is open. Otherwise "running".

@@ -36,6 +36,7 @@ import {
   type ThreadLinkItem,
   type ThreadRouteItem,
   type HelpersAskItem,
+  type HelpersRestartItem,
   type ReachAskItem,
   type Turn,
   type Chat,
@@ -163,7 +164,7 @@ export type Action =
   | { type: "ui.look"; look: Partial<Look> }
   | { type: "ui.settings"; page?: string }
   | { type: "ui.closeSettings" }
-  | { type: "system.note"; bot: string; text: string; now: number }
+  | { type: "system.note"; bot: string; text: string; now: number; detail?: { label: string; text: string } }
   | { type: "ui.pin"; bot: string; on: boolean }
   | { type: "ui.roster"; roster: string[] }
   /** A sidebar row moved (drag or ⌥↑/⌥↓): the pin list and roster in their new order. */
@@ -193,6 +194,8 @@ export type Action =
   | { type: "helpers.ask"; bot: string; item: HelpersAskItem }
   /** What became of a Start helpers card: started, Not now, or gone (the person wrote again). Only an open card changes. */
   | { type: "helpers.done"; bot: string; id: string; done: NonNullable<HelpersAskItem["done"]> }
+  /** A lead's helper rounds put back after a restart: the Land what they did / Report to Kit card at the end of its chat (item 102j-2). */
+  | { type: "helpers.restart"; bot: string; item: HelpersRestartItem }
   /** A reach card, at the end of the asking chat (item 102k, src/jobs/reachChats.ts). */
   | { type: "reach.ask"; bot: string; item: ReachAskItem }
   /** What became of a reach card: pressed yes (then the lane it opened, or what went wrong), pressed no, or gone. Only an open card
@@ -605,6 +608,9 @@ export function reduce(state: AppState, a: Action): AppState {
     case "helpers.ask":
       // a lead lane's Start helpers card, after the answer that asked (item 102e)
       return touchChat(state, a.bot, (c) => (c.items.some((i) => i.id === a.item.id) ? c : withItems(c, [...c.items, a.item])));
+    case "helpers.restart":
+      // a lead's helper rounds put back after a restart, with their two presses (item 102j-2)
+      return touchChat(state, a.bot, (c) => (c.items.some((i) => i.id === a.item.id) ? c : withItems(c, [...c.items, a.item])));
     case "helpers.done":
       return touchChat(state, a.bot, (c) =>
         withItems(
@@ -845,7 +851,7 @@ export function reduce(state: AppState, a: Action): AppState {
       return { ...state, ui: { ...state.ui, view: state.ui.back === "session" && !state.ui.session ? "chat" : state.ui.back, back: "chat" } };
     case "system.note":
       return touchChat(state, a.bot, (c) =>
-        withItems(c, [...c.items, { kind: "system", id: `system-${a.now}-${c.items.length}`, ts: a.now / 1000, text: a.text }]),
+        withItems(c, [...c.items, { kind: "system", id: `system-${a.now}-${c.items.length}`, ts: a.now / 1000, text: a.text, ...(a.detail ? { detail: a.detail } : {}) }]),
       );
     case "ui.restore": {
       const { session, runsFull, ...rest } = a.ui;

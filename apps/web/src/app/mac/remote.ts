@@ -23,7 +23,7 @@ import type { PairFailure, PairResult, PairStep } from "./pair";
 import { PasskeyCancelled, type Passkeys } from "./passkeys";
 import type { Timers } from "./relay";
 import type { MacLink, Message, SessionEnd } from "./session";
-import type { PairedMac, PhoneVault } from "./vault";
+import type { PairedMac, PhoneVault, Road } from "./vault";
 import {
   type AskView,
   type ChatRow,
@@ -199,12 +199,13 @@ export class MacRemote {
     if (this.#view.phase === "paired") this.#show(change(this.#view));
   }
 
-  /// Opens the tab: whether the relay is on, and whether this phone has paired.
+  /// Opens the tab: whether the relay is on, and whether this phone has paired. With the relay off, a phone that knows its
+  /// Mac's tailnet door still connects, and a phone not yet paired is still offered the code, since a code that names the
+  /// Mac's tailnet pairs over it (item 78f-2d); only a paired phone with no tailnet door has no way to its Mac.
   async start(): Promise<void> {
     const generation = this.#generation;
     const relay = await this.#backend.relay().catch(() => "unknown" as const);
     if (generation !== this.#generation || this.#disposed) return;
-    if (relay !== "on") return this.#show({ phase: "unavailable" });
     let mac: PairedMac | null = null;
     try {
       mac = await this.#backend.vault.load();
@@ -212,6 +213,7 @@ export class MacRemote {
       mac = null;
     }
     if (generation !== this.#generation || this.#disposed) return;
+    if (relay !== "on" && mac && !mac.tailnet) return this.#show({ phase: "unavailable" });
     if (!mac) return this.#show({ phase: "unpaired", failed: null });
     this.#mac = mac;
     this.#show(this.#fresh());
@@ -265,6 +267,7 @@ export class MacRemote {
     const link = opened.link;
     this.#link = link;
     link.onEvent = (message) => this.#onEvent(message);
+    link.onRoad = (road) => this.#onRoad(road);
     link.onEnd = (end) => {
       if (this.#link !== link) return;
       this.#link = null;
@@ -273,6 +276,19 @@ export class MacRemote {
     this.#paired((v) => ({ ...v, link: "live", down: null, cleared: false, forgotten: false }));
     this.#confirmed();
     await this.#refresh();
+  }
+
+  /// The Mac said where its door over the person's tailnet is, or that it has none (item 78f-2c): kept with the paired
+  /// Mac, so the next session tries that road first. Saved only when it changed.
+  #onRoad(road: Road | null): void {
+    const mac = this.#mac;
+    if (!mac) return;
+    const had = mac.tailnet ?? null;
+    if (had?.name === road?.name && had?.port === road?.port) return;
+    const { tailnet: _old, ...rest } = mac;
+    const next: PairedMac = road ? { ...rest, tailnet: road } : rest;
+    this.#mac = next;
+    void this.#backend.vault.save(next).catch(() => undefined);
   }
 
   /// The Mac answered: what is shown is current now.

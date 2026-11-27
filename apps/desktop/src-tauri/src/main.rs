@@ -12,5 +12,9 @@ fn main() {
     if let Some(code) = manut_lib::computer_relay(&args) {
         std::process::exit(code);
     }
+    // another program runs this binary as the MCP server for the chats the person listed (threads_mcp/relay.rs)
+    if let Some(code) = manut_lib::threads_relay(&args) {
+        std::process::exit(code);
+    }
     manut_lib::run()
 }

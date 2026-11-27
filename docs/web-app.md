@@ -89,6 +89,10 @@ pairing. Exactly this is kept, in this origin's IndexedDB, in one database named
   it paired. K is a Web Crypto key made with `extractable: false`, so no script, the page's own included, can read its
   bytes back; it can only derive a session's keys. The door token is kept as bytes because the relay's hello carries it
   as text; it opens only the relay's door for this phone, never a session, which needs K.
+- **`mac.tailnet`**, only once the Mac said it has a door over the person's tailnet (item 78f-2c): the Mac's tailnet name
+  and that door's port (47100), so the next session tries that road first. A tailnet name is not a secret: turning on
+  HTTPS for a tailnet publishes it in public certificate logs. The Mac says it again at each session, and says it has none
+  when its Tailscale road is off, which removes it here.
 - **`spent`**: the door ids of the last 32 pairing codes this phone started, so a code is one try also after a reload. A
   door id is random and names nothing.
 

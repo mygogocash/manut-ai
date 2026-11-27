@@ -29,6 +29,7 @@ mod lane_config;
 mod lane_diff;
 mod lane_helper;
 mod lane_land;
+mod lock;
 mod machine;
 mod outside_use;
 mod past_chats;
@@ -44,6 +45,7 @@ mod preview;
 mod pulls;
 mod pulls_other;
 mod providers;
+mod remote_door;
 mod remote_keys;
 #[cfg(all(test, unix))]
 mod pty_bench;
@@ -56,6 +58,7 @@ mod shop_cache;
 mod shop_cache_key;
 mod skill_links;
 mod tailscale;
+mod tailscale_serve;
 mod tasks;
 mod title_run;
 mod term_history;
@@ -63,6 +66,7 @@ mod term_import;
 mod term_link;
 mod term_share;
 mod this_host;
+mod threads_mcp;
 mod tray;
 mod turn_files;
 mod voice;
@@ -1743,6 +1747,15 @@ pub fn computer_relay(args: &[std::ffi::OsString]) -> Option<i32> {
     Some(computer::mcp::relay_main())
 }
 
+/// `manut --threads-mcp`: another program on this Mac runs this program as the MCP server that reaches the chats the
+/// person listed (item 103, threads_mcp/relay.rs). Handled before anything of the app starts, as computer use's is.
+pub fn threads_relay(args: &[std::ffi::OsString]) -> Option<i32> {
+    if args.get(1)?.to_str()? != threads_mcp::relay::FLAG {
+        return None;
+    }
+    Some(threads_mcp::relay::relay_main())
+}
+
 /// The Mac App Store edition's real home, set before anything else runs (app_store.rs); nothing in the GitHub build.
 pub fn adopt_real_home() {
     app_store::adopt_real_home();
@@ -1864,6 +1877,16 @@ pub fn run() {
             if let Ok(home) = user_home() {
                 if let Err(e) = computer::hub::start(&home) {
                     eprintln!("Manut AI: no computer use: {e}");
+                }
+            }
+            // other programs reaching the listed chats (item 103, threads_mcp): the socket their relays reach. Off until the
+            // person turns it on in Settings, and without it nothing else changes.
+            #[cfg(target_os = "macos")]
+            if threads_mcp::available() {
+                if let Ok(home) = user_home() {
+                    if let Err(e) = threads_mcp::start(&home, app.handle().clone()) {
+                        eprintln!("Manut AI: no threads server: {e}");
+                    }
                 }
             }
             // the snapshot's key (computer/snap.rs): off until the person turns it on, and registered only then. On the
@@ -2101,7 +2124,17 @@ fn commands(invoke: tauri::ipc::Invoke) -> bool {
         computer::computer_open,
         computer::snap::snapshot_settings,
         computer::snap::snapshot_set,
-        tailscale::tailscale_state
+        threads_mcp::threads_mcp_settings,
+        threads_mcp::threads_mcp_set,
+        threads_mcp::threads_mcp_listen,
+        threads_mcp::threads_mcp_reply,
+        tailscale::tailscale_state,
+        remote_door::tailscale_door_on,
+        remote_door::tailscale_door_off,
+        remote_door::door_devices,
+        remote_door::door_status,
+        remote_door::door_send,
+        remote_door::door_close
     ];
     answer(invoke)
 }

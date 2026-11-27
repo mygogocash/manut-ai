@@ -829,6 +829,40 @@
   height: 1px;
   background: var(--line-strong);
 }
+/* a quiet line that opens what the app sent in the chat's name (the helpers' report, item 102j) */
+.sys-detail .line.sys {
+  height: auto;
+  min-height: 24px;
+}
+.sys-detail-toggle {
+  flex: none;
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: var(--accent);
+  cursor: pointer;
+}
+.sys-detail-toggle:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+.sys-detail-text {
+  margin: 4px auto 8px;
+  max-width: 640px;
+  max-height: 320px;
+  overflow: auto;
+  padding: 8px 10px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--body);
+  background: var(--bub-bot);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+}
 .line-src {
   flex: none;
 }

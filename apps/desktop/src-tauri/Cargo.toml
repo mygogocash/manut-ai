@@ -36,6 +36,8 @@ sha2 = "0.11"
 # Settings › MCP and Skills reads the names of the MCP servers in Codex's own `config.toml` (agent_config.rs); already in
 # the tree via tauri
 toml = "1"
+tungstenite = { version = "0.30.0", default-features = false, features = ["handshake"] }
+data-encoding = "2.11.1"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

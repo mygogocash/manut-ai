@@ -19,6 +19,7 @@ class FakeLink implements MacLink {
   readonly sent: Message[] = [];
   onEvent: ((message: Message) => void) | null = null;
   onEnd: ((end: SessionEnd) => void) | null = null;
+  onRoad: ((road: { name: string; port: number } | null) => void) | null = null;
   closed = false;
   answer: (message: Message) => Message | null | Promise<Message | null>;
 
@@ -137,6 +138,17 @@ describe("opening the tab", () => {
     const { remote } = await setup({ paired: false });
     await remote.start();
     expect(remote.view).toEqual({ phase: "unpaired", failed: null });
+    // item 78f-2d: with the relay off, a phone not yet paired is offered the code (one naming the Mac's tailnet pairs over it),
+    // and a phone that knows its Mac's tailnet door connects; only a paired phone with no tailnet door has no way to its Mac
+    const off = await setup({ relay: "off", paired: false });
+    await off.remote.start();
+    expect(off.remote.view).toEqual({ phase: "unpaired", failed: null });
+    const viaTailnet = await setup({ relay: "off" });
+    await viaTailnet.vault.save({ ...viaTailnet.mac, tailnet: { name: "mac.tail1234.ts.net", port: 47100 } });
+    await viaTailnet.remote.start();
+    await settle();
+    expect(viaTailnet.remote.view.phase).toBe("paired");
+    expect(viaTailnet.links).toHaveLength(1);
   });
 
   it("opens a session for a paired phone and lists the chats as Working, Needs you or Done", async () => {
@@ -389,3 +401,19 @@ describe("Forget this Mac", () => {
     expect(remote.view).toEqual({ phase: "unpaired", failed: null });
   });
 });
+
+describe("the Mac's tailnet door (item 78f-2c)", () => {
+  it("is kept with the paired Mac when the Mac says it, and dropped when the Mac says it has none", async () => {
+    const { remote, vault, link } = await setup();
+    await remote.start();
+    await settle();
+    link().onRoad?.({ name: "mac.tail1234.ts.net", port: 47100 });
+    await settle();
+    expect((await vault.load())?.tailnet).toEqual({ name: "mac.tail1234.ts.net", port: 47100 });
+    link().onRoad?.(null);
+    await settle();
+    expect((await vault.load())?.tailnet).toBeUndefined();
+    expect((await vault.load())?.deviceId).toBe(DEVICE);
+  });
+});
+

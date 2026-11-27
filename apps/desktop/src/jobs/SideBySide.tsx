@@ -26,7 +26,7 @@ import { AgentMark } from "../sessions/AgentMark";
 import { SessionFace } from "../sessions/SessionFace";
 import { agentLabel, type AgentId, type SessionRec } from "../sessions/agents";
 import { getSessions, useSessions } from "../sessions/sessions";
-import { selectAsks, useStore } from "../state/store";
+import { asksIn, useStore } from "../state/store";
 import { Icon } from "../ui/icons";
 import type { AskPick } from "./ask";
 import { Gathered, type GatheredInput } from "./GatheredBlock";
@@ -223,7 +223,7 @@ function LaneChat({ rec, chatKey }: { rec: SessionRec; chatKey: string }) {
 function LaneAsks({ chatKey }: { chatKey: string }) {
   const s = useStore();
   const Card = slots.cards ?? CardFallback;
-  const asks = selectAsks(s).filter((a) => a.bot === chatKey);
+  const asks = asksIn(s, chatKey);
   if (asks.length === 0) return null;
   return (
     <>
@@ -275,7 +275,7 @@ export function SideBySide({ job, onBack, onAgain }: { job: string; onBack: () =
     };
   });
   // a column's asks node is empty while nothing waits: leave the slot out then
-  const waiting = (id: string) => selectAsks(app).some((a) => a.bot === keyOf(id));
+  const waiting = (id: string) => asksIn(app, keyOf(id)).length > 0;
   const shown = columns.map((c) => (waiting(c.id) ? c : { ...c, asks: null }));
   if (here.length === 0)
     return (

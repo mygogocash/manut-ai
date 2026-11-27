@@ -1,11 +1,12 @@
 // The Mac's side put together (host.ts), against a relay in memory and a phone built from the package: built switched
 // off, sessions only for a device the Mac holds K for, Unpair ending everything of that phone on the Mac itself (with or
 // without a relay), and the switch ending everything.
-import { acceptSession, startSession, toBase64Url } from "@manut/remote-channel";
+import { acceptSession, readPairingLink, startSession, toBase64Url } from "@manut/remote-channel";
 import { describe, expect, it } from "vitest";
 import { settle } from "./testkit/clock";
 import { PLAIN } from "./testkit/chats";
 import { macHarness, pairPhone, turnOn, waitFor } from "./testkit/harness";
+import type { DoorShell } from "./door";
 
 describe("switched off", () => {
   it("opens no socket and makes no key until the switch is turned on", async () => {
@@ -248,5 +249,136 @@ describe("what crosses the relay", () => {
       for (const key of [secret!, new TextEncoder().encode(hex), new TextEncoder().encode(toBase64Url(secret!))]) expect(contains(bytes, key)).toBe(false);
       expect(contains(bytes, new TextEncoder().encode(h.keyring.doc()!.host!.d))).toBe(false);
     }
+  });
+});
+
+describe("the Tailscale road (item 78f-2b)", () => {
+  function door(fail?: string) {
+    const calls: string[] = [];
+    const shell: DoorShell = {
+      async on(hostId, origin) {
+        calls.push(`on ${hostId === "" ? "-" : "host"} ${origin}`);
+        if (fail) throw new Error(fail);
+        return { name: "mac.tail1234.ts.net", port: 47100 };
+      },
+      async off() {
+        calls.push("off");
+      },
+      async devices(list) {
+        calls.push(`devices ${list.map((d) => d.id).join(",")}`);
+        return true;
+      },
+      async status(state) {
+        calls.push(`status ${state}`);
+        return true;
+      },
+      async send() {
+        return true;
+      },
+      async close() {
+        return true;
+      },
+    };
+    return { shell, calls };
+  }
+
+  it("goes on only while the main switch is on, and is told the paired phones and the Mac's state as the relay is", async () => {
+    const d = door();
+    const h = macHarness({ door: d.shell });
+    expect(h.remote.snapshot().tailscale).toEqual({ state: "off" });
+    expect(await h.remote.turnTailscaleOn()).toBe(false);
+    expect(d.calls).toEqual([]);
+    await turnOn(h);
+    await pairPhone(h);
+    const phoneId = h.remote.snapshot().phones[0]!.id;
+    expect(await h.remote.turnTailscaleOn()).toBe(true);
+    expect(h.remote.snapshot().tailscale).toEqual({ state: "on", name: "mac.tail1234.ts.net", port: 47100 });
+    expect(d.calls[0]).toBe("on host https://dev.manut.xyz");
+    expect(d.calls).toContain(`devices ${phoneId}`);
+    expect(d.calls).toContain("status available");
+    // Unpair reaches the door too: the phone can no longer come in by either road
+    await h.remote.unpair(phoneId);
+    await settle();
+    expect(d.calls.at(-1)).toBe("devices ");
+    // off: Tailscale stops serving, the relay's road goes on
+    h.remote.turnTailscaleOff();
+    await settle();
+    expect(d.calls.at(-1)).toBe("off");
+    expect(h.remote.snapshot()).toMatchObject({ tailscale: { state: "off" }, link: "ready" });
+  });
+
+  it("says why when the door did not start, and the whole switch going off takes the road with it", async () => {
+    const failing = door("Tailscale is not ready on this Mac");
+    const h = macHarness({ door: failing.shell });
+    await turnOn(h);
+    expect(await h.remote.turnTailscaleOn()).toBe(false);
+    expect(h.remote.snapshot().tailscale).toEqual({ state: "failed", why: "Tailscale is not ready on this Mac" });
+    const d = door();
+    const h2 = macHarness({ door: d.shell });
+    await turnOn(h2);
+    await h2.remote.turnTailscaleOn();
+    h2.remote.turnOff();
+    await settle();
+    expect(d.calls.at(-1)).toBe("off");
+    expect(h2.remote.snapshot().tailscale).toEqual({ state: "off" });
+    // with no door at all (a browser), it says so
+    const h3 = macHarness();
+    await turnOn(h3);
+    expect(await h3.remote.turnTailscaleOn()).toBe(false);
+    expect(h3.remote.snapshot().tailscale).toMatchObject({ state: "failed" });
+  });
+});
+
+describe("the road message (item 78f-2c)", () => {
+  function servingDoor(): DoorShell {
+    return {
+      on: async () => ({ name: "mac.tail1234.ts.net", port: 47100 }),
+      off: async () => {},
+      devices: async () => true,
+      status: async () => true,
+      send: async () => true,
+      close: async () => true,
+    };
+  }
+
+  it("tells a phone at each session where the Mac's tailnet door is, or that it has none, and again when that changes", async () => {
+    const h = macHarness({ door: servingDoor() });
+    await turnOn(h);
+    const { phone } = await pairPhone(h);
+    const session = await phone.connect();
+    expect(await session.roadsHeard(1)).toEqual([{ t: "road", name: null }]);
+    await h.remote.turnTailscaleOn();
+    expect((await session.roadsHeard(2))[1]).toEqual({ t: "road", name: "mac.tail1234.ts.net", port: 47100 });
+    // a new session hears it at once
+    const next = await phone.connect();
+    expect(await next.roadsHeard(1)).toEqual([{ t: "road", name: "mac.tail1234.ts.net", port: 47100 }]);
+    // off: the open session hears there is none any more
+    h.remote.turnTailscaleOff();
+    expect((await next.roadsHeard(2))[1]).toEqual({ t: "road", name: null });
+  });
+});
+
+describe("the pairing code and the Tailscale road (item 78f-2d)", () => {
+  it("names the Mac's tailnet in the code while the road is on, and is a version 1 code otherwise", async () => {
+    const shell: DoorShell = {
+      on: async () => ({ name: "mac.tail1234.ts.net", port: 47100 }),
+      off: async () => {},
+      devices: async () => true,
+      status: async () => true,
+      send: async () => true,
+      close: async () => true,
+    };
+    const h = macHarness({ door: shell });
+    await turnOn(h);
+    expect(await h.remote.startPairing()).toBe(true);
+    let view = h.remote.snapshot().pairing;
+    if (view.phase !== "showing") throw new Error(view.phase);
+    expect(readPairingLink(view.link).tailnet).toBeUndefined();
+    h.remote.cancelPairing();
+    await h.remote.turnTailscaleOn();
+    expect(await h.remote.startPairing()).toBe(true);
+    view = h.remote.snapshot().pairing;
+    if (view.phase !== "showing") throw new Error(view.phase);
+    expect(readPairingLink(view.link).tailnet).toBe("mac.tail1234.ts.net");
   });
 });

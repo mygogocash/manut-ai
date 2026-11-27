@@ -14,6 +14,10 @@
 //   session, while the keychain write waits or after. Nothing is sent to a phone no longer paired, checked at the moment
 //   of sending.
 // - Turning the switch off ends everything: the pairing, every channel, every challenge, every journal and the socket.
+//
+// A phone reaches the Mac by one of two roads (roads.ts): the relay's link, and, while the person has it on, the tailnet's
+// door (door.ts, item 78f-2b). Both carry the same sessions under the same pairing, K and challenges; turning the Tailscale
+// road off, or the whole switch off, closes every stream that came by it.
 import {
   type Channel,
   type MacSessionHandshake,
@@ -25,6 +29,8 @@ import {
 import { type Keyring, type PairedPhone, RemoteVault } from "./keys";
 import { type LinkState, type RelayProbe, type SocketFactory, type Timers, RelayLink, relaySocketUrl } from "./link";
 import { PairingDoor, type PairingView } from "./pairing";
+import { DoorLink, type DoorShell } from "./door";
+import { Roads } from "./roads";
 import { Projector } from "./project";
 import { type ChatSources, type MacActions, Server } from "./serve";
 
@@ -40,7 +46,12 @@ export interface RemoteMacDeps {
   now(): number;
   readonly timers?: Timers;
   readonly random?: RandomBytes;
+  /** The shell's Tailscale door (item 78f); absent where there is none (a browser, the tests that do not use it). */
+  readonly door?: DoorShell;
 }
+
+/** The Tailscale road, as Settings shows it: off; starting; on under the Mac's tailnet name; or failed, with why. */
+export type TailscaleRoad = { state: "off" } | { state: "starting" } | { state: "on"; name: string; port: number } | { state: "failed"; why: string };
 
 /** What the Settings page shows. */
 export interface RemoteSnapshot {
@@ -49,6 +60,7 @@ export interface RemoteSnapshot {
   readonly link: LinkState | "no_origin" | "no_keychain";
   readonly pairing: PairingView;
   readonly phones: readonly (PairedPhone & { readonly connected: boolean })[];
+  readonly tailscale: TailscaleRoad;
 }
 
 const encoder = new TextEncoder();
@@ -89,7 +101,10 @@ export class RemoteMac {
   readonly #listeners = new Set<(snapshot: RemoteSnapshot) => void>();
   readonly #streams = new Map<number, Stream>();
   #vault: RemoteVault | null = null;
-  #link: RelayLink | null = null;
+  /** The roads a phone may take: the relay's link, and the tailnet's door while it is on. */
+  #link: Roads | null = null;
+  #rpOrigin: string | null = null;
+  #tailscale: TailscaleRoad = { state: "off" };
   #pairing: PairingDoor | null = null;
   #server: Server | null = null;
   #challenges = new DecisionChallenges();
@@ -131,6 +146,7 @@ export class RemoteMac {
       link: this.#linkState,
       pairing: this.#pairingView,
       phones: (this.#vault?.phones() ?? []).map((p) => ({ ...p, connected: connected.has(p.id) })),
+      tailscale: this.#tailscale,
     };
   }
 
@@ -185,23 +201,30 @@ export class RemoteMac {
     }
     const rp = relyingParty(origin);
     this.#challenges = new DecisionChallenges(this.#deps.random ? { random: this.#deps.random } : {});
-    const link = new RelayLink({
-      url,
-      identity,
-      connect: this.#deps.connect,
-      probe: this.#deps.probe,
-      timers: this.#timers,
-      events: {
-        onOpen: (stream, device) => this.#onOpen(stream, device),
-        onFrame: (stream, payload) => this.#onFrame(stream, payload),
-        onClose: (stream) => this.#onClose(stream),
-        onState: (state) => {
-          this.#linkState = state;
-          this.#changed();
-        },
-      },
+    const link = new Roads({
+      onOpen: (stream, device) => this.#onOpen(stream, device),
+      onFrame: (stream, payload) => this.#onFrame(stream, payload),
+      onClose: (stream) => this.#onClose(stream),
     });
+    link.setRoad(
+      "relay",
+      new RelayLink({
+        url,
+        identity,
+        connect: this.#deps.connect,
+        probe: this.#deps.probe,
+        timers: this.#timers,
+        events: {
+          ...link.eventsFor("relay"),
+          onState: (state) => {
+            this.#linkState = state;
+            this.#changed();
+          },
+        },
+      }),
+    );
     this.#link = link;
+    this.#rpOrigin = rp.origin;
     for (const [id, hash] of vault.tokenHashes()) link.allowDevice(id, hash);
     this.#server = new Server({
       chats: this.#deps.chats,
@@ -225,6 +248,7 @@ export class RemoteMac {
       now: () => this.#deps.now(),
       timers: this.#timers,
       ...(this.#deps.random ? { random: this.#deps.random } : {}),
+      tailnet: () => (this.#tailscale.state === "on" ? this.#tailscale.name : null),
       onView: (view) => {
         this.#pairingView = view;
         this.#changed();
@@ -256,9 +280,71 @@ export class RemoteMac {
       link.stop();
     }
     this.#linkState = "stopped";
+    this.#tailscale = { state: "off" };
     this.#pairingView = { phase: "idle" };
     // The shell's switch goes off too: no K, no signature and no new phone until it is turned on again.
     void this.#deps.keyring.setSwitch(false).catch(() => undefined);
+    this.#changed();
+  }
+
+  /** The Tailscale road switched on, after its own consent: only while the main switch is on, the shell's door starts
+   *  and Tailscale serves it, and it is told the same devices and state the relay is. A door that did not start says why. */
+  async turnTailscaleOn(): Promise<boolean> {
+    const roads = this.#link;
+    const hostId = this.hostId;
+    const origin = this.#rpOrigin;
+    if (!this.#on || !roads || !hostId || !origin) return false;
+    if (!this.#deps.door) {
+      this.#tailscale = { state: "failed", why: "no door here" };
+      this.#changed();
+      return false;
+    }
+    if (roads.has("door")) return true;
+    const generation = this.#generation;
+    this.#tailscale = { state: "starting" };
+    this.#changed();
+    const door = new DoorLink({ shell: this.#deps.door, hostId, origin, events: roads.eventsFor("door") });
+    try {
+      const served = await door.open();
+      if (generation !== this.#generation || this.#link !== roads) {
+        door.stop();
+        return false;
+      }
+      roads.setRoad("door", door);
+      this.#tailscale = { state: "on", name: served.name, port: served.port };
+      this.#announceRoad();
+    } catch (e) {
+      this.#tailscale = { state: "failed", why: e instanceof Error ? e.message : String(e) };
+    }
+    this.#changed();
+    return this.#tailscale.state === "on";
+  }
+
+  /** The `road` message (item 78f-2c): the Mac's tailnet name and the door's port while the Tailscale road is on, else none,
+   *  so a phone tries the tailnet first only while it can work. A tailnet name is no secret: turning on HTTPS for a tailnet
+   *  publishes it in public certificate logs. */
+  #road(): Record<string, unknown> {
+    const road = this.#tailscale;
+    return road.state === "on" ? { t: "road", name: road.name, port: road.port } : { t: "road", name: null };
+  }
+
+  /** Every open session hears the road as it is now. */
+  #announceRoad(): void {
+    const message = this.#road();
+    for (const [stream, s] of this.#streams) if (s.state.kind === "open") this.#send(stream, s, message);
+  }
+
+  /** The Tailscale road switched off: every stream that came by it closes, Tailscale stops serving the door, and the
+   *  relay's road goes on as it was. */
+  turnTailscaleOff(): void {
+    this.#link?.removeRoad("door");
+    if (this.#tailscale.state !== "off") {
+      // a door that failed to start may still have been left half made: off is asked of the shell either way
+      if (!this.#link?.has("door")) void this.#deps.door?.off().catch(() => undefined);
+    }
+    const was = this.#tailscale.state;
+    this.#tailscale = { state: "off" };
+    if (was === "on") this.#announceRoad();
     this.#changed();
   }
 
@@ -354,6 +440,8 @@ export class RemoteMac {
           throw new Error("unpaired");
         }
         s.state = { kind: "open", channel, deviceId };
+        // the phone learns, inside the channel, where this Mac's door over the tailnet is, or that it has none (78f-2c)
+        this.#send(stream, s, this.#road());
         void vault.seen(deviceId, this.#deps.now()).catch(() => undefined);
         this.#changed();
         return;

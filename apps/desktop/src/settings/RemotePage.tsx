@@ -12,7 +12,8 @@ import { Toggle } from "../pages/kit";
 import type { RemoteSnapshot } from "../remote/host";
 import type { PairingView } from "../remote/pairing";
 import { QrCode } from "../remote/QrCode";
-import { acceptAndTurnOn, consentCovers, readChoice, remoteMac, turnOff, turnOn, useRemote } from "../remote/state";
+import { acceptAndTurnOn, acceptTailscaleAndTurnOn, consentCovers, readChoice, readTailscaleChoice, remoteMac, TAILSCALE_CONSENT_VERSION, turnOff, turnOn, turnTailscaleOff, turnTailscaleOn, useRemote } from "../remote/state";
+import { readTailscale, tailscaleLine, type TailscaleState } from "../remote/tailscale";
 import { Row } from "./DevRow";
 
 /** The consent sheet's points, in order. `rm.consent.operator` is the owner's to write (a marked placeholder). */
@@ -59,6 +60,57 @@ export interface RemoteViewProps {
   onCopy(link: string): void;
   onCode(code: string): void;
   onUnpair(id: string): void;
+  /** Tailscale on this Mac (item 78f-2b), read when the page opens; null until read, or where there is no shell. */
+  readonly tailscaleHere?: TailscaleState | null;
+  readonly tailscaleConsenting?: boolean;
+  onTailscale?(on: boolean): void;
+  onTailscaleAccept?(): void;
+  onTailscaleDecline?(): void;
+}
+
+/** The Tailscale sheet's points, in order. */
+export const TAILSCALE_CONSENT_POINTS: Key[] = ["rm.ts.consent.serve", "rm.ts.consent.who", "rm.ts.consent.tls", "rm.ts.consent.public"];
+
+/** The Tailscale road's line: what it is doing, or why it cannot be turned on yet. */
+export function tailscaleHint(road: RemoteSnapshot["tailscale"], here: TailscaleState): string {
+  if (road.state === "on") return t("rm.ts.on", { name: road.name, port: road.port });
+  if (road.state === "starting") return t("rm.ts.starting");
+  if (road.state === "failed") return t("rm.ts.failed", { why: road.why });
+  return here.state === "ready" ? t("rm.ts.off", { name: here.name }) : tailscaleLine(here);
+}
+
+/** The Tailscale road under the main switch: its line, its own switch (on only where Tailscale is ready), and its sheet. */
+function TailscaleRoad(props: RemoteViewProps & { here: TailscaleState }) {
+  const road = props.snapshot.tailscale;
+  const on = road.state === "on" || road.state === "starting";
+  const name = props.here.state === "ready" ? props.here.name : "";
+  return (
+    <>
+      <div className="st-grp" data-testid="remote-tailscale">
+        <Row title={t("rm.ts.title")} hint={tailscaleHint(road, props.here)}>
+          <Toggle on={on} label={t("rm.ts.title")} disabled={!on && props.here.state !== "ready"} onChange={(v) => props.onTailscale?.(v)} testId="remote-tailscale-switch" />
+        </Row>
+      </div>
+      {props.tailscaleConsenting && (
+        <div className="rm-card rm-consent" role="dialog" aria-modal="false" aria-labelledby="rm-ts-consent-title" data-testid="remote-tailscale-consent">
+          <h3 id="rm-ts-consent-title">{t("rm.ts.consent.title")}</h3>
+          <ul>
+            {TAILSCALE_CONSENT_POINTS.map((k) => (
+              <li key={k}>{t(k, { name })}</li>
+            ))}
+          </ul>
+          <div className="rm-actions">
+            <button type="button" className="btn ghost" onClick={props.onTailscaleDecline} data-testid="remote-tailscale-no">
+              {t("rm.ts.consent.decline")}
+            </button>
+            <button type="button" className="btn dark" onClick={props.onTailscaleAccept} data-testid="remote-tailscale-yes">
+              {t("rm.ts.consent.accept")}
+            </button>
+          </div>
+        </div>
+      )}
+    </>
+  );
 }
 
 function CodeField({ expiresAt, now, onCode, onCancel }: { expiresAt: number; now: number; onCode(code: string): void; onCancel(): void }) {
@@ -195,6 +247,7 @@ export function RemoteView(props: RemoteViewProps) {
           <Toggle on={snapshot.on} label={t("rm.switch")} onChange={props.onSwitch} testId="remote-switch" />
         </Row>
       </div>
+      {snapshot.on && props.tailscaleHere && <TailscaleRoad {...props} here={props.tailscaleHere} />}
       {connected.length > 0 && (
         <div className="st-note rm-live" role="status" data-testid="remote-connected">
           {connected.length === 1 ? t("rm.connected", { name: connected[0]!.name }) : t("rm.connectedMany", { n: connected.length })}
@@ -257,6 +310,19 @@ export function RemoteView(props: RemoteViewProps) {
 export function RemotePage() {
   const snapshot = useRemote();
   const [consenting, setConsenting] = useState(false);
+  const [here, setHere] = useState<TailscaleState | null>(null);
+  const [tsConsenting, setTsConsenting] = useState(false);
+  useEffect(() => {
+    // what Tailscale says on this Mac, read again whenever the main switch changes; only the shell's read, nothing changed
+    if (!snapshot.on) return;
+    let live = true;
+    void readTailscale()
+      .then((s) => live && setHere(s))
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [snapshot.on]);
   const [copied, setCopied] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const counting = snapshot.pairing.phase === "showing" || snapshot.pairing.phase === "code";
@@ -300,6 +366,22 @@ export function RemotePage() {
       }}
       onCode={(code) => void remoteMac().typeCode(code)}
       onUnpair={(id) => void remoteMac().unpair(id)}
+      tailscaleHere={here}
+      tailscaleConsenting={tsConsenting}
+      onTailscale={(on) => {
+        if (!on) {
+          setTsConsenting(false);
+          turnTailscaleOff();
+          return;
+        }
+        if (consentCovers(readTailscaleChoice(), TAILSCALE_CONSENT_VERSION)) void turnTailscaleOn();
+        else setTsConsenting(true);
+      }}
+      onTailscaleAccept={() => {
+        setTsConsenting(false);
+        void acceptTailscaleAndTurnOn();
+      }}
+      onTailscaleDecline={() => setTsConsenting(false)}
     />
   );
 }

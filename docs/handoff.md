@@ -313,7 +313,20 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    own threads. Then 135, 102k (chats that reach other chats), 102g (landing, shell) and 102b (the job's side-by-side
    view). Then 102c (gathered answers) and 102h (running helper lanes:
    approving a round starts it; the owner should run one small round of two helpers). Next: 102i (landings in the
-   chat), 102j (reports to the lead). Needs the owner from 101b: Grok signed in and `permission_mode = "ask"`
+   chat), 102j (reports to the lead). On 27 Nov the owner merged pull request #33 into `main`, which deleted
+   `pilot/week-1` on GitHub; it was made again from `main` (f64363e4). Then the design of 103 (other programs reach chats
+   through an MCP server, `docs/mcp-threads.md`; four open questions for the owner) and 103a (the door, in the shell;
+   off, and nothing on the page reaches it until 103b) merged. Then 103b (Settings, the list and the let-in card) merged. Then 103c (reads and messages) and 103d (a new lane) merged, so item 103 is built. Needs the owner from 103: try it with a
+   real program (Settings, MCP and Skills, Other programs: turn it on, list a chat, paste the Claude Code line, then ask that
+   Claude Code to list and read the chat). The owner answered its open questions on 27 Nov (not remembered across runs, not
+   from a phone, ten chats, coding chats only, cards over every page); coding chats only is built. Then 125e (the dial's reader split by program family,
+   moves only) merged; 78f-2a, 78f-2b, 78f-2c and 78f-2d (the Tailscale road: the door in the shell, its switch, the phone
+   trying the tailnet first, and a pairing code that names the tailnet so the relay can stay off) merged. Needs the owner
+   from 78f: try it with a tailnet, an iPhone and an Android phone. 102i, 102j and 102j-2 (landings, the reports to the lead, and a
+   round open when the app closed coming back held with Land what they did and Report to Kit) merged, so item 102 is built but
+   for 102l (the owner's). The owner chose on 27 Nov to leave iOS for now. Then a fix (the sign-in
+   vault hands browser steps out in the order they were asked for) merged, and refactor pass 1
+   (`docs/decisions/2026-11-27-refactor-pass-1.md`) is in its pull request, for the review together. From 27 Nov the owner asked for English first: new words are English, copied into ja, ko and zh. Needs the owner from 101b: Grok signed in and `permission_mode = "ask"`
    under `[ui]` in `~/.grok/config.toml` (it says always-approve, so Grok chats are refused), and Muse Code's CLI. From 101e: all 325 Codex sessions on the owner's Mac are compressed, so
    only Claude Code's conversations are offered until 106b. Needs the owner from 101a: Cursor's Approval mode set to Allowlist (it is Run Everything, so Cursor
    chats are refused), and a Cursor plan with messages left to record a real tool call. GitHub reported 7 Dependabot alerts on `main` (2 critical) at that push, for the owner to look at.

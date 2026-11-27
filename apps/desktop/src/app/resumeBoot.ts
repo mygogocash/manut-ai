@@ -82,6 +82,8 @@ function snapshot(): ResumeSnap {
         ...(r.job ? { job: r.job } : {}),
         // a helper lane stays under its lead after a restart (item 102h)
         ...(r.helperOf ? { helperOf: r.helperOf } : {}),
+        // and a lead's rounds open when the app closed come back held, for the person's press (item 102j-2)
+        ...((hr) => (hr ? { helperRounds: hr } : {}))(ss.savedHelperRounds(r.id)),
       })),
       messages: (id) => {
         const key = ss.chatKey(id);

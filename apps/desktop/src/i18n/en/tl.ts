@@ -7,4 +7,5 @@ export const tl = {
   "tl.jumpNew": "{n} new",
   "tl.pinnedOwn": "Your message: {text}",
   "tl.sayHi": "Say hi to {bot}",
+  "tl.rowFailed": "This part of the chat could not be shown.",
 };

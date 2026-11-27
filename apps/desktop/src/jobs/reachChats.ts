@@ -49,8 +49,10 @@ export interface OpenLane {
   first: string;
   model?: string;
   effort?: string;
-  /** the asking chat's session */
+  /** the asking chat's session; "" when a program outside Manut AI asked (item 103d) */
   from: string;
+  /** the program outside Manut AI that asked, as the shell named it from the kernel, when no chat did (item 103d) */
+  program?: string;
 }
 
 /** What the reach cards need from the sessions store. */

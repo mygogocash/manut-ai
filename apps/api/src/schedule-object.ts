@@ -2,6 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 import { checkRoutine, nextRun, toSchedule, type Routine } from "@manut/routine-rules";
 import { readJsonBody } from "./body";
 import { runRoutineOccurrence, type OccurrenceOutcome, type RoutineEnv } from "./routines";
+import { errorCode } from "./log-safe";
 
 const MAX_BODY_BYTES = 256 * 1024;
 
@@ -231,9 +232,10 @@ export class ScheduleObject extends DurableObject {
         await this.fireDue(schedule);
       } catch (error) {
         // One schedule's failure never stops the sweep, and the error is
-        // logged instead of swallowed: unclaimed occurrences are retried
-        // below while still inside the grace window.
-        console.error("schedule alarm failed", schedule.id, error);
+        // logged instead of swallowed (its code, never its free text):
+        // unclaimed occurrences are retried below while still inside the
+        // grace window.
+        console.error("schedule alarm failed", schedule.id, errorCode(error));
         needsRetry = true;
       }
     }
@@ -705,7 +707,7 @@ export class ScheduleObject extends DurableObject {
       } catch (error) {
         // As for a schedule: one routine's failure never stops the sweep, and the error is logged with the routine's
         // id and nothing else.
-        console.error("routine timer failed", clock.routine.id, error);
+        console.error("routine timer failed", clock.routine.id, errorCode(error));
         needsRetry = true;
       }
     }

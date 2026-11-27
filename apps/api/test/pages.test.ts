@@ -75,6 +75,10 @@ describe("the pages Worker", () => {
       expect(response.headers.get("cache-control"), path).toBeNull();
     }
     expect(APP_POLICY).toContain("script-src 'self';");
+    // item 78f-2c: the web app's sockets may also reach a paired Mac's own door over a tailnet, on its one port, and nothing wider
+    expect(APP_POLICY).toContain("connect-src 'self' wss://*.ts.net:47100;");
+    expect(APP_POLICY.match(/connect-src[^;]*/)?.[0]).toBe("connect-src 'self' wss://*.ts.net:47100");
+    for (const other of [PAGE_POLICY, JOIN_POLICY]) expect(other.match(/connect-src[^;]*/)?.[0]).toBe("connect-src 'self'");
     expect(APP_POLICY).toContain("frame-ancestors 'none'");
     expect(APP_POLICY).not.toMatch(/script-src[^;]*'unsafe-(inline|eval)'/);
     for (const path of ["/apps", "/application", "/ops", "/", "/approve/tok_123", "/delete/tok_123", "/no-such-page",
@@ -95,7 +99,8 @@ describe("the pages Worker", () => {
       const seen = directives(policy);
       expect(seen.get("script-src"), name).toEqual(["'self'"]);
       expect(seen.get("default-src"), name).toEqual(["'self'"]);
-      expect(seen.get("connect-src"), name).toEqual(["'self'"]);
+      // the web app alone may also open a socket to a paired Mac's own door over a tailnet, on its one port (item 78f-2c)
+      expect(seen.get("connect-src"), name).toEqual(name === "app" ? ["'self'", "wss://*.ts.net:47100"] : ["'self'"]);
       expect(seen.get("frame-ancestors"), name).toEqual(["'none'"]);
       expect(seen.get("object-src"), name).toEqual(["'none'"]);
       expect(seen.get("base-uri"), name).toEqual(["'none'"]);

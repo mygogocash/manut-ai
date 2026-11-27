@@ -371,6 +371,62 @@ dictionaries (`tailscale.*`). Nothing shows them yet: the Sharing and access pag
 - Tested with a stand-in CLI whose call log holds only `status --json --peers=false`; on this Mac, with Tailscale
   stopped, the real read says `signed_out`.
 
+**Built: the door, in the shell (78f's second part, slice 78f-2a, 27 Nov 2026).** `src-tauri/src/remote_door.rs` and
+`src-tauri/src/tailscale_serve.rs`, with the commands `tailscale_door_on`, `tailscale_door_off`, `door_devices`,
+`door_status`, `door_send` and `door_close`. Nothing on the page calls them yet (78f-2b), so the road cannot be turned on
+from the app.
+
+- The door listens on 127.0.0.1 only, on one fixed port, 47100 (`DOOR_PORT`), so the phone page's policy can name it and
+  nothing wider; never 443, 8443 or 10000. It is the relay object made small: this Mac's own route
+  `/relay/v1/hosts/<hostID>/phone`, only from the phone page's own origin (any other `Origin`, or none, is refused before a
+  hello is read), a `hello` whose token's SHA-256 the page registered, compared in constant time, within 10 seconds, then
+  binary frames of at most 65,532 bytes, the `ping` keepalive, and the relay's close codes (4400, 4401, 4403, 4404, 4409,
+  4413, 4429). A newer socket of a device replaces the older one, and the page hears the old stream close first. At most 8
+  sockets that have not said hello and 8 phones, counted together since all arrive from 127.0.0.1; a phone silent for three
+  minutes is closed. It reads no frame and holds no key.
+- It is built on `tungstenite`, the core of the `tokio-tungstenite` crate the owner allowed on 27 Nov, without its async
+  layer or any TLS: the shell's other door (`computer/hub.rs`) is plain threads, and this brings three packages into the
+  build (`tungstenite`, `data-encoding`, `sha1`) where the async crate would bring more.
+- `tailscale_serve.rs` is the only place the app changes Tailscale's settings. It reads `serve status --json` for the
+  door's port alone (free, exactly the door, or someone else's), runs `serve --bg --yes --https=47100
+  http://127.0.0.1:47100` only when the port is free and Tailscale reads ready, and `serve --yes --https=47100 off` only
+  when the port is the door's; each change is read back. It never runs `serve reset`: this Mac already serves something of
+  the person's own on 443, which a reset would remove. Turning the road on starts the door first and stops it again if
+  serving fails, so a door is never left listening with no road to it; turning it off removes the serve entry, then closes
+  every phone.
+- Tested: 14 tests, the door's on real sockets with a WebSocket client (the route, the origin, each refusal, frames both
+  ways, replacing, revoking, a paused and an off Mac, the limits), the serve control with a stand-in CLI that keeps a
+  setting, beside the person's own entry on 443, which is never touched.
+- Not tried, before the road ships: on a real tailnet, that `serve` passes the WebSocket upgrade through on port 47100,
+  that `off` removes only that entry (Tailscale's documented way, not in 1.104.7's help), what `serve status --json`
+  prints with no serve entry at all (read as free when it is empty or `{}`, else left alone), and how an installed iPhone
+  web app and Android Chrome open the socket.
+
+**Built: the page's side (78f-2b, 27 Nov 2026).** `remote/door.ts` (the shell's door seen as a link, frames in base64 over
+the Tauri channel), `remote/roads.ts` (the relay's link and the door as one link to the host: devices and the Mac's state to
+every road, each road's streams kept apart under the host's numbers, a frame or a close back down its own road, a road taken
+away closing only its streams), `turnTailscaleOn` and `turnTailscaleOff` on the host, and Settings, Sharing and access's
+"Reach it over Tailscale too": a switch under the main one, off, usable only while the main switch is on and Tailscale reads
+ready, with its own consent sheet, kept on this Mac and resumed at launch only for a person who turned it on under that
+sheet. Pairing, the server and the sessions are unchanged: they talk to the roads as they talked to the relay's link.
+
+**Built: the phone's road choice (78f-2c, first part, 27 Nov 2026).** The Mac tells each phone, inside the channel at each
+session, where its tailnet door is (`{"t":"road","name","port"}`) or that it has none (`"name": null`), and tells every
+open session again when the road turns on or off. The phone keeps a name the desktop itself would accept on the door's one
+port with its paired Mac (`mac.tailnet`, docs/web-app.md) and from then on dials that door first and the relay after 1.5
+seconds, or at once when the tailnet turns it away; the first road to say `ready` carries the session and the other is
+closed when it comes; turned away by both, the relay's reason is said. `APP_POLICY` gains `wss://*.ts.net:47100` and
+nothing wider; no other page's policy changes. **Built: the pairing code names the tailnet (78f-2d, 27 Nov 2026).** While the Tailscale road is on, each code the Mac
+shows is version 2 of `@manut/remote-channel`'s offer, which adds the Mac's tailnet name; the phone dials the pairing door
+there first (the relay after 1.5 seconds), and keeps the name with the paired Mac. The Your Mac tab no longer stops at
+"not available" when the relay is off: a phone not yet paired is offered the code, and a paired phone that knows its
+Mac's tailnet door connects; only a paired phone with no tailnet door has no way to its Mac. So with the relay switched
+off, a phone on the tailnet pairs and works, and this road needs no server of ours.
+
+Left: **78f-2c**, the phone: the pairing code and the encrypted channel carry the Mac's tailnet
+name, the phone tries the tailnet first and starts the relay after 1.5 seconds, and `APP_POLICY` gains
+`wss://*.ts.net:47100` and nothing wider.
+
 **No shortcut for "the tailnet is already private".** Pairing, K and the decision challenge are the same on this road.
 A tailnet holds teammates' devices, shared devices and compromised ones; its access rules change; TLS ends in
 Tailscale, not in Manut; and a private network says nothing about Face ID for this one ask. The `Tailscale-User-Login`

@@ -41,10 +41,11 @@ export function reachOffered(rec: Pick<SessionRec, "status" | "workflow" | "agen
 const oneLine = (s: string): string => s.replace(/\s+/g, " ").trim();
 const cut = (s: string, max: number): string => (s.length <= max ? s : `${s.slice(0, max - 1).trimEnd()}…`);
 
-/** `list` with the chat `e` added under the next free name, or why it was not: the same chat again, or a full list. */
-export function addEntry(list: readonly ReachEntry[], e: Omit<ReachEntry, "n">): { list: ReachEntry[]; refused: "same" | "full" | null } {
+/** `list` with the chat `e` added under the next free name, or why it was not: the same chat again, or a full list. `max` is the
+ *  list's cap: a chat's own list holds `REACH_MAX`, the list for other programs (item 103) its own. */
+export function addEntry(list: readonly ReachEntry[], e: Omit<ReachEntry, "n">, max = REACH_MAX): { list: ReachEntry[]; refused: "same" | "full" | null } {
   if (list.some((x) => refKey(x.ref) === refKey(e.ref))) return { list: [...list], refused: "same" };
-  if (list.length >= REACH_MAX) return { list: [...list], refused: "full" };
+  if (list.length >= max) return { list: [...list], refused: "full" };
   const n = list.reduce((m, x) => Math.max(m, x.n), 0) + 1;
   return { list: [...list, { ...e, n, title: cut(oneLine(e.title), ENTRY_TITLE_MAX) }], refused: null };
 }
@@ -74,8 +75,9 @@ const isScope = (v: unknown): v is Scope => {
   );
 };
 
-/** A saved list read back, defensively: an entry that cannot be read is left out, a name is never taken twice, and the cap holds. */
-export function parseEntries(v: unknown): ReachEntry[] {
+/** A saved list read back, defensively: an entry that cannot be read is left out, a name is never taken twice, and the cap (`max`)
+ *  holds. */
+export function parseEntries(v: unknown, max = REACH_MAX): ReachEntry[] {
   if (!Array.isArray(v)) return [];
   const out: ReachEntry[] = [];
   for (const x of v) {
@@ -83,7 +85,7 @@ export function parseEntries(v: unknown): ReachEntry[] {
     const e = x as Record<string, unknown>;
     const ref = readRef(typeof e.ref === "string" ? e.ref : JSON.stringify(e.ref ?? null));
     if (!ref || typeof e.n !== "number" || !Number.isInteger(e.n) || e.n < 1 || e.n > 999 || typeof e.title !== "string" || !isScope(e.scope)) continue;
-    if (out.some((y) => y.n === e.n || refKey(y.ref) === refKey(ref)) || out.length >= REACH_MAX) continue;
+    if (out.some((y) => y.n === e.n || refKey(y.ref) === refKey(ref)) || out.length >= max) continue;
     out.push({ n: e.n, ref, ...(typeof e.link === "string" && e.link ? { link: e.link } : {}), title: cut(oneLine(e.title), ENTRY_TITLE_MAX), scope: e.scope });
   }
   return out;

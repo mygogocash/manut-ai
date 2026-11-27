@@ -46,7 +46,7 @@ export type { ChatRoute } from "./chatRoutes";
 export { reduceQueue, queueReady, heldDrafts, mustHold } from "./queue";
 export type { QueueAction } from "./queue";
 export {
-  selectTimeline, shopName, viewedShopName, askOpen, selectAsks, askFrom, askText, selectSidebarBots, selectUnlisted,
+  selectTimeline, shopName, viewedShopName, askOpen, selectAsks, asksIn, askFrom, askText, selectSidebarBots, selectUnlisted,
   selectUnreadTotal,
 } from "./selectors";
 export type { Ask } from "./selectors";

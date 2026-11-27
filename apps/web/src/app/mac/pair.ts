@@ -24,7 +24,8 @@ import {
   type PairingOffer,
 } from "@manut/remote-channel";
 import { PasskeyCancelled, type Passkeys, type Registration } from "./passkeys";
-import { type PhoneConnect, type RelayPipe, type Timers, dialRelay, relayUrl, systemTimers } from "./relay";
+import { type PhoneConnect, type RelayPipe, type Timers, relayUrl, systemTimers, tailnetUrl, TAILNET_PORT } from "./relay";
+import { dialDoor } from "./session";
 import type { PairedMac, PhoneVault } from "./vault";
 
 export type PairStep =
@@ -167,8 +168,9 @@ export async function pairWithMac(deps: PairDeps, text: string, onStep: (step: P
     return { ok: false, why };
   };
   if (!deps.passkeys.available) return fail("no_passkeys");
-  const url = relayUrl(deps.origin, offer.hostId);
-  if (!url) return fail("unreachable");
+  // a version 2 code names the Mac's tailnet too (item 78f-2d): its door is tried first, so pairing works with the relay off
+  const tailnet = offer.tailnet ? { name: offer.tailnet, port: TAILNET_PORT } : undefined;
+  if (!relayUrl(deps.origin, offer.hostId) && !(tailnet && tailnetUrl(tailnet, offer.hostId))) return fail("unreachable");
   // Spent before anything is dialled: whatever follows, this code is not started again on this phone.
   let fresh: boolean;
   try {
@@ -179,7 +181,7 @@ export async function pairWithMac(deps: PairDeps, text: string, onStep: (step: P
   if (!fresh) return fail("used");
   onStep({ step: "connecting" });
   const timers = deps.timers ?? systemTimers;
-  const dialled = await dialRelay({ connect: deps.connect, url, device: offer.doorId, token: toBase64Url(offer.doorToken), timers });
+  const dialled = await dialDoor({ origin: deps.origin, connect: deps.connect }, { hostId: offer.hostId, device: offer.doorId, token: toBase64Url(offer.doorToken), ...(tailnet ? { tailnet } : {}) }, timers);
   offer.doorToken.fill(0);
   if (!dialled.ok) {
     const end = dialled.end.why;
@@ -243,6 +245,7 @@ export async function pairWithMac(deps: PairDeps, text: string, onStep: (step: P
       credentialId: registration.credentialId.slice(),
       rpId: deps.rpId,
       pairedAt: deps.now(),
+      ...(tailnet ? { tailnet } : {}),
     };
     try {
       await deps.vault.save(mac);

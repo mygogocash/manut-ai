@@ -7,6 +7,7 @@ use std::sync::{Arc, Mutex};
 
 use super::keys::{char_codes, Chord, Keyboard, Layout};
 use super::room::{App, Desk, Focus, Handle, Node, Place, Win};
+use crate::lock::LockOrRecover;
 
 #[derive(Clone)]
 pub struct Facts {
@@ -218,7 +219,7 @@ impl Stand {
 
     /// Everything asked of the Mac that would read a window or act in one, in order.
     pub fn calls(&self) -> Vec<String> {
-        self.calls.lock().unwrap().clone()
+        self.calls.lock_or_recover().clone()
     }
 
     /// The actions alone: what changed something on the Mac.
@@ -227,37 +228,37 @@ impl Stand {
     }
 
     pub fn change(&self, pid: i32, window: usize, i: usize, edit: impl FnOnce(&mut Facts)) {
-        edit(&mut self.nodes.lock().unwrap().get_mut(&(pid, window)).unwrap()[i]);
+        edit(&mut self.nodes.lock_or_recover().get_mut(&(pid, window)).unwrap()[i]);
     }
 
     pub fn remove(&self, pid: i32, window: usize, i: usize) {
-        self.nodes.lock().unwrap().get_mut(&(pid, window)).unwrap().truncate(i);
+        self.nodes.lock_or_recover().get_mut(&(pid, window)).unwrap().truncate(i);
     }
 
     /// The app's first window with this title gets the keyboard.
     pub fn focus(&self, pid: i32, title: &str) {
-        let w = self.windows.lock().unwrap().get(&pid).and_then(|t| t.iter().position(|x| x == title));
-        self.focused.lock().unwrap().insert(pid, w);
+        let w = self.windows.lock_or_recover().get(&pid).and_then(|t| t.iter().position(|x| x == title));
+        self.focused.lock_or_recover().insert(pid, w);
     }
 
     /// Window `w` of the app gets the keyboard, or with None no window the Mac can tell.
     pub fn focus_window(&self, pid: i32, w: Option<usize>) {
-        self.focused.lock().unwrap().insert(pid, w);
+        self.focused.lock_or_recover().insert(pid, w);
     }
 
     /// App `pid` has the keyboard on the Mac, or with None no app the Mac can tell.
     pub fn front_app(&self, pid: Option<i32>) {
-        *self.front.lock().unwrap() = pid;
+        *self.front.lock_or_recover() = pid;
     }
 
     /// The keyboard layouts the Mac says are in use and turned on, or None for none it can read.
     pub fn set_keyboard(&self, k: Option<Keyboard>) {
-        *self.keyboard.lock().unwrap() = k;
+        *self.keyboard.lock_or_recover() = k;
     }
 
     /// Control `i` of window `w` of app `pid` has the keyboard there, or with None the window itself.
     pub fn focus_control(&self, pid: i32, w: usize, i: Option<usize>) {
-        let mut f = self.focused_control.lock().unwrap();
+        let mut f = self.focused_control.lock_or_recover();
         match i {
             Some(i) => f.insert((pid, w), i),
             None => f.remove(&(pid, w)),
@@ -274,32 +275,32 @@ impl Stand {
                 x.frame = [100, 80, 600, 400];
             }
         }
-        let mut windows = self.windows.lock().unwrap();
+        let mut windows = self.windows.lock_or_recover();
         let list = windows.entry(pid).or_default();
         list.push(title.into());
-        self.nodes.lock().unwrap().insert((pid, list.len() - 1), controls);
+        self.nodes.lock_or_recover().insert((pid, list.len() - 1), controls);
     }
 
     /// Window `w` of app `pid` is now called `title` (a document renamed, a browser gone to another page).
     pub fn set_title(&self, pid: i32, w: usize, title: &str) {
-        self.windows.lock().unwrap().get_mut(&pid).unwrap()[w] = title.into();
+        self.windows.lock_or_recover().get_mut(&pid).unwrap()[w] = title.into();
         self.change(pid, w, 0, |x| x.label = title.into());
     }
 
     pub fn add_app(&self, app: App) {
-        self.apps.lock().unwrap().push(app);
+        self.apps.lock_or_recover().push(app);
     }
 
     pub fn quit(&self, pid: i32) {
-        self.apps.lock().unwrap().retain(|a| a.pid != pid);
+        self.apps.lock_or_recover().retain(|a| a.pid != pid);
     }
 
     fn note(&self, c: String) {
-        self.calls.lock().unwrap().push(c);
+        self.calls.lock_or_recover().push(c);
     }
 
     fn node(&self, pid: i32, window: usize, i: usize) -> Option<Node> {
-        let nodes = self.nodes.lock().unwrap();
+        let nodes = self.nodes.lock_or_recover();
         let x = nodes.get(&(pid, window))?.get(i)?.clone();
         Some(Node { depth: x.depth.unwrap_or(usize::from(i > 0)), role: x.role.into(), subrole: x.subrole.into(), label: x.label, value: x.value, enabled: x.enabled, address: x.address, handle: Arc::new((pid, window, i)) as Handle })
     }
@@ -307,8 +308,8 @@ impl Stand {
     /// Window `w` of app `pid` as the Mac says it is: the stand-in's windows are flat, so every address any of its
     /// controls shows counts as one the control is in.
     fn win(&self, pid: i32, w: usize) -> Option<Win> {
-        let title = self.windows.lock().unwrap().get(&pid)?.get(w).cloned()?;
-        let addresses = self.nodes.lock().unwrap().get(&(pid, w)).map(|l| l.iter().filter_map(|x| x.address.clone()).collect()).unwrap_or_default();
+        let title = self.windows.lock_or_recover().get(&pid)?.get(w).cloned()?;
+        let addresses = self.nodes.lock_or_recover().get(&(pid, w)).map(|l| l.iter().filter_map(|x| x.address.clone()).collect()).unwrap_or_default();
         Some(Win { number: Some(window_number(pid, w)), title, addresses })
     }
 
@@ -331,15 +332,15 @@ impl Desk for Stand {
         OWN
     }
     fn apps(&self) -> Vec<App> {
-        self.apps.lock().unwrap().clone()
+        self.apps.lock_or_recover().clone()
     }
     fn windows(&self, pid: i32) -> Result<Vec<String>, String> {
         self.note(format!("windows {pid}"));
-        Ok(self.windows.lock().unwrap().get(&pid).cloned().unwrap_or_default())
+        Ok(self.windows.lock_or_recover().get(&pid).cloned().unwrap_or_default())
     }
     fn tree(&self, pid: i32, window: usize) -> Result<Vec<Node>, String> {
         self.note(format!("tree {pid} {window}"));
-        let n = self.nodes.lock().unwrap().get(&(pid, window)).map_or(0, Vec::len);
+        let n = self.nodes.lock_or_recover().get(&(pid, window)).map_or(0, Vec::len);
         Ok((0..n).filter_map(|i| self.node(pid, window, i)).collect())
     }
     fn picture(&self, pid: i32, window: usize) -> Result<Vec<u8>, String> {
@@ -352,13 +353,13 @@ impl Desk for Stand {
     }
     fn place(&self, handle: &Handle) -> Option<Place> {
         let (pid, w, i) = Stand::at(handle);
-        let nodes = self.nodes.lock().unwrap();
+        let nodes = self.nodes.lock_or_recover();
         let x = nodes.get(&(pid, w))?.get(i)?;
         Some(Place { window: Some(window_number(pid, w)), path: x.path.clone(), frame: Some(x.frame) })
     }
     fn window_of(&self, handle: &Handle) -> Option<Win> {
         let (pid, w, i) = Stand::at(handle);
-        self.nodes.lock().unwrap().get(&(pid, w))?.get(i)?;
+        self.nodes.lock_or_recover().get(&(pid, w))?.get(i)?;
         self.win(pid, w)
     }
     fn snapshot(&self, place: &Place) -> Result<Vec<u8>, String> {
@@ -366,9 +367,9 @@ impl Desk for Stand {
         Ok(b"\x89PNG control".to_vec())
     }
     fn focus(&self, pid: i32) -> Option<Focus> {
-        let w = self.focused.lock().unwrap().get(&pid).copied().unwrap_or(Some(0))?;
+        let w = self.focused.lock_or_recover().get(&pid).copied().unwrap_or(Some(0))?;
         let window = self.win(pid, w)?;
-        let i = self.focused_control.lock().unwrap().get(&(pid, w)).copied();
+        let i = self.focused_control.lock_or_recover().get(&(pid, w)).copied();
         let control = match i {
             Some(i) => {
                 let n = self.node(pid, w, i)?;
@@ -380,7 +381,7 @@ impl Desk for Stand {
         Some(Focus { window, control })
     }
     fn front(&self) -> Option<i32> {
-        *self.front.lock().unwrap()
+        *self.front.lock_or_recover()
     }
     fn press(&self, handle: &Handle) -> Result<(), String> {
         let (pid, w, i) = Stand::at(handle);
@@ -394,7 +395,7 @@ impl Desk for Stand {
         Ok(())
     }
     fn keyboard(&self) -> Result<Keyboard, String> {
-        self.keyboard.lock().unwrap().clone().ok_or_else(|| "macOS did not say which keyboard layout is in use, so no key is pressed.".into())
+        self.keyboard.lock_or_recover().clone().ok_or_else(|| "macOS did not say which keyboard layout is in use, so no key is pressed.".into())
     }
     fn key(&self, pid: i32, chord: &Chord, code: u16) -> Result<(), String> {
         self.note(format!("key {pid} {} 0x{code:02X}", chord.shown()));

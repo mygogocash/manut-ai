@@ -32,6 +32,8 @@ import { ActivityPage } from "../pages/ActivityPage";
 import { Onboarding } from "../onboarding/Onboarding";
 import { isFirstRunOpen } from "../onboarding/flow";
 import { ImportPast, useImportOffer } from "../importPast/ImportPast";
+import { McpCards } from "../threadsMcp/Cards";
+import { startMcp } from "../threadsMcp/start";
 import { useLookAttributes, useThemeAttribute } from "./theme";
 import { useShortcuts } from "./shortcuts";
 import { useAsksBadge } from "./badge";
@@ -73,6 +75,8 @@ export function App() {
     void startPower();
     // Settings › Workflows' clock: it runs while the app is open, and starts nothing while Workflows is off
     startWorkflows();
+    // other programs' calls (item 103): the shell hands the page nothing until it listens, and nothing while it is off
+    void startMcp();
     // init is idempotent in the store; run once on mount
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -162,6 +166,8 @@ export function App() {
       <Palette />
       {/* Bring over's offer, over whatever is showing: once on a first launch, then from History */}
       <ImportPast />
+      {/* a program outside Manut AI asking to be let in, to read a chat or to send one a message, over whatever is showing (item 103) */}
+      <McpCards />
     </div>
     </MentionContext.Provider>
   );

@@ -522,10 +522,30 @@ the screens are built on tested ground.
 - **102i. Landings in the chat.** Landing each helper when it reports and the lead is idle, the rows' outcomes, Show patch,
   Take back this landing, keys named. Tests: a store test with the stand-in shell's landing answers, the e2e spec. Safety
   test: no landing starts while the lead's turn runs or its ask waits.
+  **Built 27 Nov 2026** (`src/jobs/helperLanding.ts`, the landing line on `HelperRunCard.tsx`'s rows, `laneLand` and
+  `laneTakeBack` on the hosts, their tests, and a spec in `e2e/helper-runs.spec.ts`; `docs/decisions/102i-landings.md`). Each
+  helper lane back in its round is landed by 102g's `lane_land`, one at a time for its lead and only while the lead is idle with
+  nothing waiting on the person, retried each second; its row says how it went, Take back puts that landing back, Show patch
+  reveals a kept patch. What changed from the design: the shell counts no lines, so the report names files without counts; Show
+  patch opens the patch's folder, not a viewer.
 - **102j. Reports to the lead, and the second round.** The one message with its fence, masked and capped; a late report
   kept off; the second round's card and the closed policy after it; the restart path (Land what they did, Report to Kit).
   Tests: ported from GoSpark's `BuddyReportTextTests`. Safety tests: a key in a report is masked; after a restart nothing
   lands or is sent until the person presses.
+  **Built 27 Nov 2026, but for the restart path** (`src/jobs/helperReports.ts`, the hand-over in `helperLanding.ts`,
+  `sendFromApp` and `fromApp` in `sessions/sessions.ts`, `src/chat/parts/SystemDetail.tsx`, their tests). Once every helper of
+  every round is back and landed, the lead idle and nothing of the person's or of a helper's waiting, the reports go to the lead
+  in one message, fenced, masked and capped, taken from the rounds in one step so a later report is late. It goes with no bubble:
+  the chat shows "Helpers reported to Kit." with Show what was sent. It is not the person speaking, so it opens no new rounds; the
+  second round's card shows, and a third ask after two reports has none. Split off as 102j-2: the restart path (Land what they
+  did, Report to Kit).
+  **102j-2 built 27 Nov 2026** (`src/jobs/helperRestore.ts`, `src/jobs/HelpersRestartCard.tsx`, `restore`, `landRestored` and
+  `reportRestored` in `helperLanding.ts`, `helperRounds` in `app/resume.ts`, their tests, and a spec in
+  `e2e/helper-runs.spec.ts` that reloads the page mid-round). Each lead's open rounds are saved with it; after a restart they come
+  back all back and held, a helper that was still out reporting as failed with its last saved answer, and the lead's chat shows a
+  card with Land what they did and Report to Kit. Nothing lands, starts or is sent until a press, however long it waits. What
+  changed on the way: the reports wait for a lead whose agent runs (they were lost when sent to a paused one), and Report to Kit
+  starts a lead the restart left paused.
 
 ### Phase 3: chats that reach other chats
 

@@ -430,8 +430,14 @@ describe("the person's Stop (R5) and what comes back", () => {
     t.emit(h2, { event: "turn.end", outcome: "interrupted" });
     await settle();
     expect(t.helperStarts()).toHaveLength(2);
-    expect(t.ss.helperRounds(t.ss.getState().list.find((r) => r.id === h1)!.helperOf!.lead).rounds[0]).toMatchObject({ back: true, dropped: { breaker: 0, person: 1 } });
     expect(t.backs.map((b) => b.report.ended)).toEqual(["stopped", "stopped"]);
+    // the round, every helper back, went to the lead in one message (item 102j) counting the third as stopped by the person
+    const leadId = t.ss.getState().list.find((r) => r.id === h1)!.helperOf!.lead;
+    expect(t.ss.helperRounds(leadId).rounds).toEqual([]);
+    const reports = t.of(leadId, "send").map((i) => (i.input as { text: string }).text).filter((x) => x.includes("your helper lanes reported"));
+    expect(reports).toHaveLength(1);
+    expect(reports[0]).toContain("One helper never started, because the person stopped the round");
+    expect(reports[0]).not.toContain("two in a row could not run");
   });
 
   it("a round's idle processes are ended once it is done, but one still working in the background, or asking, is left running", async () => {
@@ -502,6 +508,15 @@ describe("names and what is kept", () => {
     }
   });
 
+  it("a lead lane's open helper rounds are saved with it, and only a lead lane with a folder of its own, not a helper, reads them back", () => {
+    const rounds = { roundsThisMessage: 1, rounds: [{ id: "r1", dropped: { breaker: 0, person: 0 }, helpers: [{ index: 0, title: "A" }] }] };
+    const lane = { name: "kit/a", base: "main", dir: "/w/l/a", worktree: "/w/l/a" };
+    const snap = (s: Record<string, unknown>) => JSON.stringify({ v: 1, at: 1, bot: null, view: "chat", session: null, panelOpen: false, panelTab: "details", runsFull: false, runId: null, drafts: {}, sessions: [{ id: "s3", agent: "claude", cwd: DEV, startedAt: 1, view: "chat", running: false, ...s }] });
+    expect(parseResume(snap({ lane, helperRounds: rounds }))?.sessions[0].helperRounds).toEqual(rounds);
+    expect(parseResume(snap({ helperRounds: rounds }))?.sessions[0].helperRounds).toBeUndefined();
+    expect(parseResume(snap({ lane, helperRounds: rounds, helperOf: { lead: "s2", job: "jabc", round: "r0", index: 0 } }))?.sessions[0].helperRounds).toBeUndefined();
+  });
+
   it("a helper lane saved while it ran comes back paused under its lead: its round did not survive the restart, so nothing starts by itself", async () => {
     const t = await setup();
     t.ss.restore([
@@ -513,5 +528,136 @@ describe("names and what is kept", () => {
     const h = t.ss.getState().list.find((r) => r.id === "s4")!;
     expect(h.paused).toBe(true);
     expect(h.helperOf).toEqual({ lead: "s3", job: "jabcdefghij", round: "r1", index: 0 });
+  });
+});
+
+describe("safety: the helpers' report is the app's, not the person's (R4, R9; item 102j)", () => {
+  const FENCE = "your helper lanes reported";
+  it("opens no new rounds, shows no bubble of the person's, and its quiet line opens every word that was sent", async () => {
+    const t = await setup();
+    const two = ask([{ title: "A", brief: "Do A." }, { title: "B", brief: "Do B." }]);
+    const { id } = await t.lead(two);
+    const cards = () => (t.chat(id)?.items ?? []).filter((i) => i.kind === "helpersAsk");
+    const reports = () => t.of(id, "send").map((i) => (i.input as { text: string }).text).filter((x) => x.includes(FENCE));
+    const finish = async () => {
+      for (const h of t.helperIds().filter((h) => t.ss.getState().list.find((r) => r.id === h)?.helperOf?.round === cards().at(-1)!.id)) await t.turn(h, "Done.");
+      await settle();
+    };
+    await finish();
+    expect(reports()).toHaveLength(1);
+    // the person's message's rounds are counted on: the report did not reset them as a message of the person's would
+    expect(t.ss.helperRounds(id).roundsThisMessage).toBe(1);
+    const items = t.chat(id)?.items ?? [];
+    expect(items.some((i) => i.kind === "user" && i.text.includes(FENCE))).toBe(false);
+    const line = items.find((i) => i.kind === "system" && !!i.detail);
+    expect(line).toMatchObject({ kind: "system", text: "Helpers reported to Kit.", detail: { label: "Show what was sent" } });
+    expect(line?.kind === "system" && line.detail?.text.startsWith("[Manut AI: your helper lanes reported]")).toBe(true);
+    // with one more round open, the report says so and carries the lead's note, and the lead's next ask is a card
+    expect(reports()[0]).toContain("you may send out helpers once more");
+    await t.turn(id, ask([{ title: "C", brief: "Do what A missed." }, { title: "D", brief: "Do what B missed." }]));
+    expect(cards()).toHaveLength(2);
+    expect(await t.ss.answerHelpers(id, cards()[1].id, true)).toEqual({ ok: true });
+    await settle();
+    await finish();
+    expect(reports()).toHaveLength(2);
+    expect(t.ss.helperRounds(id).roundsThisMessage).toBe(2);
+    expect(reports()[1]).toContain("This request has had all its rounds of helpers: send out no more");
+    // a third ask, after two reports and no word from the person: no card
+    await t.turn(id, ask([{ title: "E", brief: "One more." }, { title: "F", brief: "And one more." }]));
+    expect(cards()).toHaveLength(2);
+  });
+});
+
+describe("safety: a round open when the app closed (R11; item 102j-2)", () => {
+  const leadLane = { name: "kit/a", base: "main", dir: `${LANES}/a`, worktree: `${LANES}/a` };
+  const helperLane = (n: number) => ({ name: `kit/a-help-${n}`, base: "kit/a", dir: `${LANES}/a-help-${n}`, worktree: `${LANES}/a-help-${n}` });
+  const saved = () =>
+    parseResume(
+      JSON.stringify({
+        v: 1,
+        at: 1,
+        bot: null,
+        view: "chat",
+        session: null,
+        panelOpen: false,
+        panelTab: "details",
+        runsFull: false,
+        runId: null,
+        drafts: {},
+        sessions: [
+          {
+            id: "s3",
+            agent: "claude",
+            cwd: DEV,
+            startedAt: 1,
+            view: "chat",
+            running: false,
+            lane: leadLane,
+            helpers: true,
+            helperRounds: {
+              roundsThisMessage: 1,
+              rounds: [{ id: "r1", dropped: { breaker: 0, person: 0 }, helpers: [{ index: 0, title: "Tests", ended: "done", words: "Added the tests." }, { index: 1, title: "Thai date" }] }],
+            },
+          },
+          { id: "s4", agent: "claude", cwd: DEV, startedAt: 2, view: "chat", running: false, lane: helperLane(1), helperOf: { lead: "s3", job: "jabcdefghij", round: "r1", index: 0 } },
+          {
+            id: "s5",
+            agent: "claude",
+            cwd: DEV,
+            startedAt: 3,
+            view: "chat",
+            running: true,
+            agentSession: "c-help-2",
+            lane: helperLane(2),
+            helperOf: { lead: "s3", job: "jabcdefghij", round: "r1", index: 1 },
+            messages: [{ id: "m1", role: "assistant", text: "Half of the date is done.", ts: 5 }],
+          },
+        ],
+      }),
+    )!.sessions;
+  const detailLines = (t: Awaited<ReturnType<typeof setup>>) => (t.chat("s3")?.items ?? []).flatMap((i) => (i.kind === "system" && i.detail ? [i] : []));
+
+  it("comes back held with its card: nothing starts, lands or goes to the lead, however long it waits, and the rounds are saved again", async () => {
+    const t = await setup();
+    t.ss.restore(saved());
+    await settle();
+    for (let i = 0; i < 5; i++) {
+      for (const fn of t.timers) fn();
+      await settle();
+    }
+    expect(t.starts).toEqual([]);
+    expect(t.inputs).toEqual([]);
+    expect(detailLines(t)).toEqual([]);
+    expect((t.chat("s3")?.items ?? []).filter((i) => i.kind === "helpersRestart")).toEqual([expect.objectContaining({ lead: "s3" })]);
+    expect(t.ss.restartOf("s3")).toMatchObject({ state: "offered", canLand: true });
+    expect(t.ss.helperRounds("s3").roundsThisMessage).toBe(1);
+    // a second restart before the person pressed keeps them as they are
+    expect(t.ss.savedHelperRounds("s3")?.rounds[0].helpers.map((h) => [h.index, h.ended ?? "out"])).toEqual([
+      [0, "done"],
+      [1, "failed"],
+    ]);
+  });
+
+  it("Report to Kit starts the lead the restart left ended and tells it how each ended, the one cut off by its last answer, with nothing landed", async () => {
+    const t = await setup();
+    t.ss.restore(saved());
+    await settle();
+    expect(t.ss.reportRestored("s3")).toBe(true);
+    await settle();
+    // the press started the lead again (only the lead: no helper lane), and once it runs the reports go to it, once
+    expect(t.starts.map((s) => s.session)).toEqual(["s3"]);
+    for (const fn of t.timers) fn();
+    await settle();
+    const sent = t.of("s3", "send").map((i) => (i.input as { text: string }).text);
+    expect(sent.filter((x) => x.includes("[Manut AI: your helper lanes reported]"))).toHaveLength(1);
+    const [line] = detailLines(t);
+    expect(line?.text).toBe("Helpers reported to Kit.");
+    expect(line?.detail?.text).toContain("[Manut AI: your helper lanes reported]");
+    expect(line?.detail?.text).toContain("Half of the date is done.");
+    expect(line?.detail?.text).toContain("The app closed while it worked");
+    expect(line?.detail?.text).toContain("the person reported without landing it");
+    expect(t.ss.restartOf("s3")?.state).toBe("reported");
+    expect(t.ss.helperRounds("s3").rounds).toEqual([]);
+    expect(t.ss.savedHelperRounds("s3")).toBeNull();
   });
 });
