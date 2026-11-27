@@ -65,6 +65,13 @@
   // Skill links (item 84) are the same links for bundles of skills, behind
   // skillLinks as well (default the var SKILL_LINKS, which no environment
   // sets), so pages can be allowed and skills not.
+  // Buddy's chat on the owner's session (docs/pilot-api.md, "Chat") is built
+  // and off: POST /v1/chat/messages answers feature_disabled until the
+  // operator turns buddyChat on. Its default, the var BUDDY_CHAT, is unset in
+  // every environment, dev included, as the other switches are: each message
+  // is a model call billed to the shop's cap, so turning it on is the owner's
+  // call. With it on and no ANTHROPIC_API_KEY, a message answers
+  // not_configured.
   "main": "src/index.ts",
   "compatibility_date": "2026-09-16",
   // One origin for the pilot (docs/pilot-api.md): this Worker is the front

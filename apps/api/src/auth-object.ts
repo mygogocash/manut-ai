@@ -231,7 +231,7 @@ export class AuthObject extends DurableObject {
         }
         const next = (await this.ctx.storage.get<Record<string, boolean>>("flags")) ?? {};
         for (const key of ["officeCloud", "officeRoutines", "officeExternalWrites", "officeInbound", "officeSharing", "shopFeed",
-          "artifactLinks", "skillLinks"]) {
+          "artifactLinks", "skillLinks", "buddyChat"]) {
           if (body[key] === undefined) continue;
           if (typeof body[key] !== "boolean") {
             return Response.json({ error: "invalid_request" }, { status: 400 });
