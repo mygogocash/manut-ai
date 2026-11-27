@@ -352,6 +352,11 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    (`feat/machine-levels`, on the recommended answers), with item 138, a study of Paradev for the code mode
    (`docs/paradev-parity`), whose rows from 139 come next. iOS follows the macOS items, design first. The merge scripts
    now take the lead's worktree in `LEAD_WORKTREE` (the T3 folder they named is gone).
+   The SIXTH SECURITY READ (findings only, over everything merged since the fifth, 26 Nov 13:34 to 27 Nov 22:19) found no
+   critical, one high, three medium and seven low; its write-up was kept outside the repository and each fix's commit says
+   what was wrong. The high: oh-my-pi lanes and chats ran every tool with no card (omp's own default is `yolo`), item 139.
+   The rest are items 140 to 144. Found sound: item 103's door, the Tailscale road but two lows, the phone's push, and the
+   landing of helper patches.
    The dev relay is on with its push key pair as dev secrets, deployed to dev 27 Nov; the owner's try on an iPhone is left.
    Two Rust tests that raced under load (the MCP relay's round trip, the Grok account check) now wait for their answers, and
    the 16 hook-dependency warnings `pnpm lint` found are settled. Fonts stay 99, the owner's. From 27 Nov the owner asked for English first: new words are English, copied into ja, ko and zh. Needs the owner from 101b: Grok signed in and `permission_mode = "ask"`
