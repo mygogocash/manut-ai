@@ -74,7 +74,7 @@ for (const theme of ["light", "dark"] as const) {
     await expect(page.getByTestId("outside-codex-n")).toHaveText("0 today · 56k this week");
     await expect(page.getByTestId("outside-note")).toContainText("A plan's percentage is only what the tool itself reported.");
     await expect(page.getByTestId("outside-note")).toContainText("Last read");
-    await expect(page.getByTestId("outside-skipped")).toHaveText("8 files skipped: links, too large, not readable or compressed.");
+    await expect(page.getByTestId("outside-skipped")).toHaveText("8 files skipped: links, too large, not readable, or compressed files that could not be unpacked.");
     await expect(page.getByTestId("outside-claude-table")).toHaveCount(0);
     await page.getByTestId("outside-claude-details").click();
     const rows = page.getByTestId("outside-claude-table").locator("tbody tr");
