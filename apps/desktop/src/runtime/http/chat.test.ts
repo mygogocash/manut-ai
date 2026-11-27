@@ -20,6 +20,9 @@ import { ApiSession } from "./session";
 import type { FetchLike } from "./shell";
 import { chatId, fakeApi, keptPlain, memoryCacheStore, memoryVault, ORIGIN, serveShops, SHOP_A, SHOP_B, shopToken, storedSession, T0, useMicrotaskCrypto, workerTaskJson, type FakeAnswer, type FakeApi, type ShopWorkJson } from "./testkit";
 
+/** A character outside the basic plane (an ideograph in Japanese names): two UTF-16 units, one character as the API counts them. */
+const ASTRAL = String.fromCodePoint(0x20bb7);
+
 const NOW = T0 + 600_000;
 const OWNER_A = shopToken(SHOP_A.id, "owner");
 const HELPER_B = shopToken(SHOP_B.id, "helper");
@@ -568,7 +571,7 @@ describe("Buddy's note and a message sent on (items 102l-3 and 102l-5)", () => {
   it("refuses a title the API would refuse, first, with nothing sent", async () => {
     const { api, req } = await opened();
     await req("chat.open", { bot: "buddy" });
-    const bad = [7, null, "", "   ", ["Supplier"], "x".repeat(121), "😀".repeat(121), 'The "Supplier"', "two\nlines", "tab\there", `bell${String.fromCharCode(7)}`, `next${String.fromCharCode(0x85)}line`, `sep${String.fromCharCode(0x2028)}arator`];
+    const bad = [7, null, "", "   ", ["Supplier"], "x".repeat(121), ASTRAL.repeat(121), 'The "Supplier"', "two\nlines", "tab\there", `bell${String.fromCharCode(7)}`, `next${String.fromCharCode(0x85)}line`, `sep${String.fromCharCode(0x2028)}arator`];
     for (const title of bad) {
       expect(await refusal(req("chat.send", { bot: "buddy", text: "Hello", sent_on_from: title })), JSON.stringify(title)).toMatchObject({ code: "invalid_request", message: t("rt.chat.refused") });
     }

@@ -19,6 +19,8 @@ import {
   readFromChat,
 } from "./reachMarks";
 
+/** A character outside the basic plane (an ideograph in Japanese names): two UTF-16 units, one character as the API counts them. */
+const ASTRAL = String.fromCodePoint(0x20bb7);
 const note = buddyNote([{ n: 1, title: "Price list for March" }, { n: 3, title: "Supplier: Khun Somchai" }], BUDDY_GRAMMAR);
 /** What a reader could take for the end of a line besides a line feed, as characters (written as code so no file holds them raw). */
 const BREAKS = [0x0d, 0x0b, 0x0c, 0x85, 0x2028, 0x2029].map((code) => String.fromCharCode(code));
@@ -74,9 +76,9 @@ describe("Buddy's note (item 102l-3)", () => {
     for (const [label, bad] of refused) expect(isBuddyNote(bad), label).toBe(false);
   });
 
-  it("counts its length in characters as the API does, so a note of emoji titles is not refused for the units they take", () => {
+  it("counts its length in characters as the API does, so a note of characters that take two units is not refused for the units they take", () => {
     const fill = (chars: number, filler: string) => `${BUDDY_NOTE_HEAD}\n${filler.repeat(chars - [...BUDDY_NOTE_HEAD].length - [...BUDDY_NOTE_END].length - 2)}\n${BUDDY_NOTE_END}`;
-    for (const filler of ["x", "😀"]) {
+    for (const filler of ["x", ASTRAL]) {
       expect([...fill(BUDDY_NOTE_MAX, filler)]).toHaveLength(BUDDY_NOTE_MAX);
       expect(isBuddyNote(fill(BUDDY_NOTE_MAX, filler)), filler).toBe(true);
       expect(isBuddyNote(fill(BUDDY_NOTE_MAX + 1, filler)), filler).toBe(false);
@@ -112,15 +114,15 @@ describe("the title a mark names, and the title the API keeps as sentOnFrom (ite
     // a cut that lands after a blank leaves none before the ellipsis
     expect(markTitle(`${"a".repeat(ENTRY_TITLE_MAX - 2)} bbb`)).toBe(`${"a".repeat(ENTRY_TITLE_MAX - 2)}…`);
     expect(markTitle("ก".repeat(300))).toBe(`${"ก".repeat(ENTRY_TITLE_MAX - 1)}…`);
-    // an emoji takes two UTF-16 units: the cut is at the 120th character, never in the middle of one
-    const emoji = markTitle("😀".repeat(300));
-    expect(emoji).toBe(`${"😀".repeat(ENTRY_TITLE_MAX - 1)}…`);
-    expect([...emoji]).toHaveLength(ENTRY_TITLE_MAX);
-    expect(() => encodeURIComponent(emoji)).not.toThrow();
+    // such a character takes two UTF-16 units: the cut is at the 120th character, never in the middle of one
+    const astral = markTitle(ASTRAL.repeat(300));
+    expect(astral).toBe(`${ASTRAL.repeat(ENTRY_TITLE_MAX - 1)}…`);
+    expect([...astral]).toHaveLength(ENTRY_TITLE_MAX);
+    expect(() => encodeURIComponent(astral)).not.toThrow();
   });
 
   it("is one the API takes whatever the title was, unless it was blank", () => {
-    for (const title of ["Price list", "x".repeat(500), '"""', `a${BREAKS.join("b")}c`, "😀".repeat(200), 'Say "hi"\nand "bye"', "  padded  ", "sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789"]) {
+    for (const title of ["Price list", "x".repeat(500), '"""', `a${BREAKS.join("b")}c`, ASTRAL.repeat(200), 'Say "hi"\nand "bye"', "  padded  ", "sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789"]) {
       expect(isMarkTitle(markTitle(title)), JSON.stringify(title)).toBe(true);
     }
     expect(markTitle("   ")).toBe("");
@@ -128,11 +130,11 @@ describe("the title a mark names, and the title the API keeps as sentOnFrom (ite
   });
 
   it("is checked as the API checks it: text of 1 to 120 characters once trimmed, on one line, with no double quote", () => {
-    for (const ok of ["Price list", "  padded  ", "it's fine", "ก".repeat(ENTRY_TITLE_MAX), "😀".repeat(ENTRY_TITLE_MAX)]) expect(isMarkTitle(ok), ok).toBe(true);
+    for (const ok of ["Price list", "  padded  ", "it's fine", "ก".repeat(ENTRY_TITLE_MAX), ASTRAL.repeat(ENTRY_TITLE_MAX)]) expect(isMarkTitle(ok), ok).toBe(true);
     const refused: [string, unknown][] = [
       ["undefined", undefined], ["a number", 7], ["null", null], ["a list", ["Price list"]], ["empty", ""], ["blank", "   "],
       ["121 characters", "ก".repeat(ENTRY_TITLE_MAX + 1)],
-      ["121 characters that take two units each", "😀".repeat(ENTRY_TITLE_MAX + 1)],
+      ["121 characters that take two units each", ASTRAL.repeat(ENTRY_TITLE_MAX + 1)],
       ["a double quote", 'He said "stop"'],
       ...["\n", "\r\n", "\t", String.fromCharCode(7), String.fromCharCode(0x7f), ...BREAKS].map((c): [string, unknown] => [`${c.codePointAt(0)!.toString(16)} inside`, `Price${c}list`]),
     ];
