@@ -7,3 +7,5 @@ dist/
 *.log
 .DS_Store
 coverage/
+# One person's changes to the Paradev workspace config (.paradev/config.toml), kept in their main checkout.
+.paradev/config.local.toml
