@@ -334,7 +334,10 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    Linux and Windows releases, a nightly channel; no workflow has run yet), 99b (full themes and chat width), 78d (the push
    "Your Mac needs you"; the relay is on in dev only), 137 (the side menu slides, sizes and hides; Home's mode at the top
    left) and the designs of 108 (`docs/multi-machine.md`) and 102l (`docs/connected-chat.md`) merged; 102l-1 (Buddy's chat on
-   the API, off, waiting on the owner's Anthropic key) is in pull request #60. Fonts stay 99, the owner's. From 27 Nov the owner asked for English first: new words are English, copied into ja, ko and zh. Needs the owner from 101b: Grok signed in and `permission_mode = "ask"`
+   the API, off, waiting on the owner's Anthropic key) merged, and 102l-2 (the desktop's side of it) is in pull request #62.
+   The dev relay is on with its push key pair as dev secrets, deployed to dev 27 Nov; the owner's try on an iPhone is left.
+   Two Rust tests that raced under load (the MCP relay's round trip, the Grok account check) now wait for their answers, and
+   the 16 hook-dependency warnings `pnpm lint` found are settled. Fonts stay 99, the owner's. From 27 Nov the owner asked for English first: new words are English, copied into ja, ko and zh. Needs the owner from 101b: Grok signed in and `permission_mode = "ask"`
    under `[ui]` in `~/.grok/config.toml` (it says always-approve, so Grok chats are refused), and Muse Code's CLI. From 101e: all 325 Codex sessions on the owner's Mac are compressed, so
    only Claude Code's conversations are offered until 106b. Needs the owner from 101a: Cursor's Approval mode set to Allowlist (it is Run Everything, so Cursor
    chats are refused), and a Cursor plan with messages left to record a real tool call. GitHub reported 7 Dependabot alerts on `main` (2 critical) at that push, for the owner to look at.
@@ -720,6 +723,10 @@ Every switch that turns a built part on, and what each needs from the owner, is 
 
 ## Known flaky tests (they fail only under heavy load)
 
+- `apps/desktop/e2e/panel-max.spec.ts:314` ("a real click on the header's panel-button 180ms" and "350ms after Esc is
+  never stolen by the slide"): failed on this Mac on 27 Nov, in `maxForRound`'s five-second wait, while eight busy loops a
+  finished helper of another session had left running (`$TMPDIR/load.sh`, 16 hours) held every core. They passed alone,
+  twice each, once those were stopped. Before judging a local failure of a timing spec, read `uptime` and `ps -Ao pcpu,command -r`.
 - `apps/desktop/e2e/term-park.spec.ts:340` ("a parked terminal whose CLI ends goes on as the shell in the remade
   xterm"): failed in three CI runs on 27 Nov, twice on both tries, and passed every time on this Mac. Found and fixed the
   same day: the spec left its short parking thresholds on, so the xterm the shell's first lines remade was parked again a
