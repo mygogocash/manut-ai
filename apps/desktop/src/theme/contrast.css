@@ -1,0 +1,70 @@
+/* More contrast for the people who ask the system for it (item 136). Loaded after tokens.css, it changes only token values,
+   so every screen follows; tokens.css itself stays the design kit's own values (tokens.test.ts).
+
+   - Increase contrast (macOS: Accessibility › Display, which a page reads as `prefers-contrast: more`): second-line text
+     reads at 7 to 1 or better on every band (the side menu, a card, a hovered row), a hairline at 3 to 1, a strong edge
+     stronger, and the focus ring wider, in the light theme in the deeper blue (5.6 to 1 where the usual one is 3.8).
+   - High contrast on Windows (`forced-colors: active`): the system paints its own colours, which would wipe out the dots,
+     spinners and badges whose colour is what they say, so those keep theirs, with an edge in the text colour so they show
+     on any background; the focus ring is the system's highlight. */
+
+@media (prefers-contrast: more) {
+  :root {
+    --aui-muted: #c8c7c1;
+    --aui-placeholder: #b5b4ae;
+    --aui-border: #77766f;
+    --aui-border-strong: #a8a7a1;
+  }
+  [data-theme="light"] {
+    --aui-muted: #4a4944;
+    --aui-placeholder: #5a5953;
+    --aui-border: #7f7d77;
+    --aui-border-strong: #4f4e4a;
+    --aui-focus: #1764c0;
+  }
+  :focus-visible {
+    outline-width: 3px;
+  }
+}
+
+@media (forced-colors: active) {
+  :focus-visible {
+    outline: 2px solid Highlight;
+  }
+  .st-dot,
+  .rn-dot,
+  .ph-dot,
+  .usage-dot,
+  .tg-dot,
+  .dk-dot,
+  .tk-dot,
+  .tr-dot,
+  .vc-dot,
+  .needs-dot,
+  .head-pb-dot,
+  .ap-pv-dot,
+  .ui-spin,
+  .mo-spin,
+  .acc-spin,
+  .badge,
+  .tk-badge,
+  .pl-badge,
+  .iv-badge,
+  .att-badge {
+    forced-color-adjust: none;
+  }
+  .st-dot,
+  .rn-dot,
+  .ph-dot,
+  .usage-dot,
+  .tg-dot,
+  .dk-dot,
+  .tk-dot,
+  .tr-dot,
+  .vc-dot,
+  .needs-dot,
+  .head-pb-dot,
+  .ap-pv-dot {
+    outline: 1px solid CanvasText;
+  }
+}

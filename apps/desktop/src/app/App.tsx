@@ -1,6 +1,8 @@
 import { lazy, Suspense, useEffect, useMemo } from "react";
 import "../theme/fonts.css";
 import "../theme/tokens.css";
+// after the tokens: more contrast for the people who ask the system for it (item 136)
+import "../theme/contrast.css";
 import "../theme/base.css";
 import "../theme/motion.css";
 import "./app.css";
