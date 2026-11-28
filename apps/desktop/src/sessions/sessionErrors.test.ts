@@ -3,7 +3,7 @@
 // shell writes them, so a change on either side fails here.
 import { afterEach, describe, expect, it } from "vitest";
 import { setLang, t } from "../i18n";
-import { MODE_KEPT, NO_ASKS, NO_ASKS_COMMAND, signedOutSaid } from "./sessionErrors";
+import { MODE_KEPT, NO_ASK_PATH, NO_ASKS, NO_ASKS_COMMAND, NO_CHECK, signedOutSaid } from "./sessionErrors";
 
 afterEach(() => setLang("en"));
 
@@ -42,5 +42,27 @@ describe("an agent that would not ask before it acts", () => {
     setLang("en");
     expect(signedOutSaid(grok)).toContain("Set permission_mode to ask in the [ui] section of Grok's config.toml");
     expect(signedOutSaid(command)).toBe(command);
+  });
+
+  // item 139: omp_asks.rs `no_asks("oh-my-pi")` and `no_check("oh-my-pi")`, and sessions.rs `no_ask_path` for pi and OmO, word for word
+  it("oh-my-pi's are said with its own settings, and pi's and OmO's refused chats say they run only in a terminal", () => {
+    const omp = "oh-my-pi did not start because its own settings let it run commands and change files without asking first.";
+    const unchecked = "oh-my-pi did not start because Manut AI could not check that its own settings make it ask first.";
+    const pi = "pi does not ask before it runs a command or changes a file, so Manut AI runs it only in a terminal.";
+    const omo = "OmO does not ask before it runs a command or changes a file, so Manut AI runs it only in a terminal.";
+    expect(NO_ASKS.test(omp) && NO_CHECK.test(unchecked) && NO_ASK_PATH.test(pi) && NO_ASK_PATH.test(omo)).toBe(true);
+    for (const lang of ["en", "ja", "ko", "zh"] as const) {
+      setLang(lang);
+      expect(signedOutSaid(omp)).toBe(t("ss.noAsksOmp", { agent: "oh-my-pi" }));
+      expect(signedOutSaid(unchecked)).toBe(t("ss.noAsksCheck", { agent: "oh-my-pi" }));
+      expect(signedOutSaid(pi)).toBe(t("ss.noAskPath", { agent: "pi" }));
+      expect(signedOutSaid(` ${omo}\n`)).toBe(t("ss.noAskPath", { agent: "OmO" }));
+      // each language keeps the setting's own names, as omp writes them
+      expect(t("ss.noAsksOmp", { agent: "oh-my-pi" })).toContain("tools.approvalMode");
+      expect(t("ss.noAsksOmp", { agent: "oh-my-pi" })).toContain("tools.approval ");
+    }
+    setLang("en");
+    expect(signedOutSaid(omp)).toContain("set tools.approvalMode to always-ask and remove any tools.approval entry that says allow");
+    expect(signedOutSaid(pi)).toBe(pi);
   });
 });

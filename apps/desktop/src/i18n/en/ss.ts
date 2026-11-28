@@ -140,4 +140,7 @@ export const ss = {
   // Grok as a chat (item 101b): its own settings that skip asks, and its command that turns them off
   "ss.noAsksGrok": "{agent} did not start because its own settings let it run commands and change files without asking first. Set permission_mode to ask in the [ui] section of {agent}'s config.toml, check that no Claude settings file sets a defaultMode other than default or plan, then start the chat again.",
   "ss.noAsksCommand": "{agent}'s /{cmd} turns off its asks, so Manut AI does not send it. Write your message without it.",
+  "ss.noAskPath": "{agent} does not ask before it runs a command or changes a file, so Manut AI runs it only in a terminal.",
+  "ss.noAsksOmp": "{agent} did not start because its own settings let it run commands and change files without asking first. In {agent}'s own settings and this project's, set tools.approvalMode to always-ask and remove any tools.approval entry that says allow (omp config list --scope=global and --scope=project show them), then start the chat again.",
+  "ss.noAsksCheck": "{agent} did not start because Manut AI could not check that its own settings make it ask first. Check that omp config list --json works in a terminal in this folder and that PI_CONFIG_FILES is not set, then start the chat again.",
 };

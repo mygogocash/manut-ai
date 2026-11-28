@@ -19,6 +19,7 @@ export const helpers: Record<keyof typeof en, string> = {
   "helpers.effortUnlisted": "いつもの考える深さ (Kit は {name} を依頼しましたが、一覧にありません)",
   "helpers.unknownAgent": "{name}: Manut AI がレーンで動かすエージェントではないため、開始しません",
   "helpers.notInstalled": "インストールされていないため、開始しません",
+  "helpers.noAsks": "実行前に確認しないため、開始しません",
   "helpers.briefLabel": "ヘルパー {n} への指示",
   "helpers.lines": "それぞれ、今のこのレーンの作業のコピーで動きます。ヘルパーレーンが報告したあと、その作業が 1 つずつ取り込まれるまで、ここは何も変わりません。それぞれ最大 {minutes} 分、{steps} ステップまでです。あなたの返事を待つ時間は数えません。終わると、Kit が報告を受け取って続けます。",
   "helpers.heldBack": "Kit は {asked} 個を依頼しました。1 ラウンドは最大 {max} 個なので、最後の {left} 個は外します。",

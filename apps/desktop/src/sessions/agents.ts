@@ -57,10 +57,10 @@ export interface AcpRow {
 export const AGENTS: readonly AgentDef[] = [
   { id: "claude", program: "claude", label: "Claude Code", mode: "chat", main: true },
   { id: "codex", program: "codex", label: "Codex", mode: "chat", main: true },
-  { id: "omo", program: "omo", label: "OmO", mode: "chat", main: true },
+  { id: "omo", program: "omo", label: "OmO", mode: "terminal", main: true },
   { id: "dsh", program: "dsh", label: "DSH", mode: "chat" },
   { id: "omh", program: "omh", label: "oh-my-hermes", mode: "hermes" },
-  { id: "pi", program: "pi", label: "pi", mode: "chat" },
+  { id: "pi", program: "pi", label: "pi", mode: "terminal" },
   { id: "omp", program: "omp", label: "oh-my-pi", mode: "chat" },
   { id: "grok", program: "grok", label: "Grok", mode: "chat" },
   { id: "opencode", program: "opencode", label: "OpenCode", mode: "chat" },
@@ -290,10 +290,20 @@ export function parseOpens(raw: string | null): Opens {
   }
 }
 
+/** The built-in agents that cannot ask the person before a tool runs, so they never run as the app's chat or lane, only as
+ *  their own terminal, where the person types to them (item 139). pi asks before nothing (its own security page); OmO's engine
+ *  asks only under a preset that is not its default, and its dialog is not one the app carries as a card yet. The shell keeps
+ *  the same list (`NO_ASKS` in src-tauri/src/sessions.rs, pinned by its tests) and refuses their chats itself. */
+export const NO_ASKS: readonly BuiltinId[] = ["pi", "omo"];
+/** Whether `agent` can ask before a tool runs, as a chat or lane of the app's must (item 139). */
+export const asksFirst = (agent: AgentId): boolean => !(NO_ASKS as readonly string[]).includes(agent);
+
 /** Which ways `agent` can open: manut's chat and/or its own terminal. oh-my-hermes has a terminal (`omh`) but, for a
- *  person who has Hermes and no `omh`, only the Hermes chat; DSH has no terminal here. Grok has both since item 101b. */
+ *  person who has Hermes and no `omh`, only the Hermes chat; DSH has no terminal here. Grok has both since item 101b. pi
+ *  and OmO have only their terminal since item 139 ([`NO_ASKS`]). */
 export function opensAs(agent: AgentId, agents?: AgentInfo[] | null): Record<OpenAs, boolean> {
   if (agent === SHELL) return { chat: false, terminal: true };
+  if (!asksFirst(agent)) return { chat: false, terminal: true };
   if (agent === "dsh") return { chat: true, terminal: false };
   if (agent === "omh" && hermesOnly(agents)) return { chat: true, terminal: false };
   // an agent the person added (Settings › Agents) runs only through ACP on pipes: the shell's terminal start knows
@@ -475,6 +485,16 @@ export function chatAgents(agents: AgentInfo[], list: Recent[]): AgentInfo[] {
     agents.filter((a) => !!a.path && opensAs(a.id, agents).chat && sessionMode(agents, { agent: a.id }) === "chat"),
     list,
   );
+}
+
+/** The agent a program outside the app named for a new lane (item 103's `open_chat`): one this Mac has and the person has not
+ *  turned off, named by its id, its own name or the name Settings shows (any case), and one that runs as the app's chat, so it asks
+ *  before it acts (item 139: never pi or OmO, which run only as their own terminal). Null for anything else. */
+export function laneAgentNamed(name: string, agents: AgentInfo[]): { id: AgentId; label: string } | null {
+  const want = name.trim().toLowerCase();
+  const drives = (x: AgentInfo) => opensAs(x.id, agents).chat && sessionMode(agents, { agent: x.id }) === "chat";
+  const a = agents.find((x) => !x.off && !!x.path && drives(x) && (x.id.toLowerCase() === want || x.label.toLowerCase() === want || (x.name ?? "").toLowerCase() === want));
+  return a ? { id: a.id, label: agentLabel(a.id, agents) } : null;
 }
 
 /** TERMINALS groups: sessions by folder, in the order each folder first appears in `list` (newest first). */

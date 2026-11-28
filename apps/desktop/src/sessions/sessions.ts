@@ -27,7 +27,7 @@ import { readTermSettings } from "./term/settings";
 import { forgetHistory, pruneHistory, watchHistorySetting } from "./term/history";
 import { savedPanelKeys } from "../terminal/state";
 import { LINK_COPIED_EVENT, newLinkId, termLinkUrl } from "./termLink";
-import { acpRow, agentDef, agentLabel, continues, draftAgent, draftFolder, draftOpen, hermesOnly, installLine, isBuiltin, isGone, isShell, isTerminalRec, OPEN_KEY, opensAs, pushRecent, savedOpen, RECENT_KEY, registerAcp, sessionMode, folderName, type AgentId, type OpenAs, type Unseen, type SessionRec } from "./agents";
+import { acpRow, agentDef, agentLabel, asksFirst, continues, draftAgent, draftFolder, draftOpen, hermesOnly, installLine, isBuiltin, isGone, isShell, isTerminalRec, OPEN_KEY, opensAs, pushRecent, savedOpen, RECENT_KEY, registerAcp, sessionMode, folderName, type AgentId, type OpenAs, type Unseen, type SessionRec } from "./agents";
 import { clearSuggestion, noteSuggestion } from "../chat/suggestion";
 import { suggestOn, suggestWorks } from "../lib/suggest";
 import { acceptTitle, chatMaterial, titleRequest, wantsTitle, whyKey } from "./titleWords";
@@ -1256,6 +1256,8 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     unattended?: boolean;
     made?: (id: string) => void;
   }): Promise<"started" | "failed" | "no_lane" | { why: "config"; setting: string }> => {
+    // an agent that cannot ask before a tool runs has no lane of the app's (item 139); the runner offers none, so this only holds
+    if (!asksFirst(p.agent)) return "failed";
     const id = `s${++seq}`;
     if (p.unattended) unattended.add(id);
     const ask = ASK_MODE[p.agent];
@@ -1351,6 +1353,8 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
   const startOpenedLane = async (p: OpenLane): Promise<{ ok: true; id: string } | { ok: false; why: string }> => {
     if (state.agents === null) await loadAgents();
     const agent = p.agent as AgentId;
+    // pi and OmO cannot ask before a tool runs, so no card opens a lane on them, whoever asked (item 139): nothing is made
+    if (!asksFirst(agent)) return { ok: false, why: tr("ss.noAskPath", { agent: agentLabel(agent, state.agents) }) };
     const id = `s${++seq}`;
     const ask = ASK_MODE[agent];
     const r: SessionRec = {
@@ -1401,6 +1405,8 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
    */
   const startHelperLane = async (p: StartHelper): Promise<{ ok: true; id: string } | { ok: false; why: string }> => {
     if (state.agents === null) await loadAgents();
+    // a helper on an agent that cannot ask before a tool runs never starts, and no folder is made for it (item 139)
+    if (!asksFirst(p.row.agent)) return { ok: false, why: tr("ss.noAskPath", { agent: agentLabel(p.row.agent, state.agents) }) };
     const lead = rec(p.lead);
     if (!lead?.lane?.worktree) return { ok: false, why: tr("helpers.run.why.noLead") };
     if (!host.laneHelperWorktree) return { ok: false, why: tr("helpers.run.why.noShell") };

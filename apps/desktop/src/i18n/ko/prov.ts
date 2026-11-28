@@ -39,6 +39,7 @@ export const prov: Record<keyof typeof en, string> = {
   "prov.varRemove": "{name} 삭제",
   "prov.runsChat": "채팅이 실행하는 것",
   "prov.runsTerminal": "터미널이 실행하는 것",
+  "prov.noAsks": "{agent}는 명령을 실행하거나 파일을 바꾸기 전에 묻지 않아서 Manut AI는 채팅이나 레인으로 시작하지 않아요. 직접 입력하는 터미널에서는 계속 쓸 수 있어요.",
   "prov.save": "저장",
   "prov.cancel": "취소",
   "prov.saved": "저장됨",

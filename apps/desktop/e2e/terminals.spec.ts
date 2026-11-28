@@ -183,9 +183,11 @@ test("the + menu: Chat with Kit, then In a terminal with the Shell first and the
   // item 66 (owner, 25 Nov: both): each installed agent that runs as a chat is offered first as a chat with Kit, a lane
   // (kit-lanes.spec.ts starts one from here); Grok is one since item 101b, and stays a terminal row too
   await expect(menu.getByTestId("session-chat-head")).toHaveText("Chat with Kit");
+  // pi and OmO cannot ask before a tool runs, so they are terminal rows only (item 139)
   expect(await menu.locator("[role=menuitem][data-testid^=session-chat-]").evaluateAll((els) => els.map((e) => e.getAttribute("data-testid")))).toEqual(
-    ["claude", "codex", "omo", "pi", "omp", "grok", "opencode"].map((a) => `session-chat-${a}`),
+    ["claude", "codex", "omp", "grok", "opencode"].map((a) => `session-chat-${a}`),
   );
+  for (const a of ["omo", "pi"]) await expect(menu.getByTestId(`session-agent-${a}`)).toBeVisible();
   await expect(menu.getByTestId("session-term-head")).toHaveText("In a terminal");
   // the terminal part is as it was: the Shell first, then the CLIs; the last one used (none yet: the first) has the focus
   await expect(menu.getByTestId("session-agent-claude")).toBeFocused();

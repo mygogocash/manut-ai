@@ -35,13 +35,13 @@ const inputs = (page: Page) =>
       .map((c) => c.input!),
   );
 
-async function running(page: Page, agent: "claude" | "codex" | "omo" = "claude", folder = "/home/you/code/manut") {
+async function running(page: Page, agent: "claude" | "codex" | "omp" = "claude", folder = "/home/you/code/manut") {
   await page.addInitScript(
     ([f, a]) => {
       localStorage.removeItem("manut.sessions.recent");
       const w = window as unknown as { __manutPickFolder: string; __manutMockAgents: string[] };
       w.__manutPickFolder = f;
-      w.__manutMockAgents = ["claude", "codex", "omo", "omh"];
+      w.__manutMockAgents = ["claude", "codex", "omo", "omp", "omh"];
       void a;
     },
     [folder, agent],
@@ -100,7 +100,8 @@ test("Codex: read-only, ask and auto in the folder; a new chat starts in Ask", a
 });
 
 test("an agent without modes gets no mode control", async ({ page }) => {
-  await running(page, "omo");
+  // oh-my-pi, whose asking mode is the shell's own argument (OmO, this test's agent before item 139, runs only in a terminal)
+  await running(page, "omp");
   await expect(page.getByTestId("session-agent-fixed")).toBeVisible();
   await expect(page.getByTestId("session-mode")).toHaveCount(0);
 });
@@ -201,7 +202,7 @@ test("a message sent while a turn runs waits, then the agent takes it; Stop stil
 });
 
 test("the model menu searches and groups by provider", async ({ page }) => {
-  await running(page, "omo");
+  await running(page, "omp");
   await page.getByTestId("model-pill").click();
   await page.getByTestId("effort-title").click();
   const pop = page.getByTestId("model-pop");
