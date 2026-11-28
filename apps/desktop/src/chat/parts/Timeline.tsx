@@ -46,6 +46,9 @@ function divider(prev: TimelineItem | undefined, cur: TimelineItem): string | nu
 /** A bot bubble right above: the next bot bubble keeps the indent but not the face (one face per run). */
 const botSpoke = (it?: TimelineItem) => it?.kind === "assistant";
 
+/** Where `row`'s top is in the scrolling column's content: the same wherever the column is scrolled to. */
+const contentTop = (scroller: HTMLElement, row: HTMLElement) => row.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
+
 /** `face` stands in for the bot's picture beside its bubbles and the typing bubble (a SESSIONS chat: its
  *  agent's mark). Pass a stable element (useMemo): the bubbles are memoized on it. */
 export function Timeline({
@@ -57,6 +60,7 @@ export function Timeline({
   emptyHint,
   hideOpenAsks = false,
   answersOnSend = false,
+  before,
 }: {
   bot: Bot;
   face?: ReactNode;
@@ -71,6 +75,9 @@ export function Timeline({
   /** The runtime answers a message before its request ends (Connected's chat, `answersOnSend` in src/runtime): the typing bubble
    *  shows while the person's message is on its way, as no turn says the member works until the answer came. */
   answersOnSend?: boolean;
+  /** What the column starts with, above its first row: a conversation's Show older (item 102l-6). Its height must not change while
+   *  older rows come in, since the view is kept where it was by the first row's place. */
+  before?: ReactNode;
 }) {
   const s = useStore();
   const items = selectTimeline(s, bot.name);
@@ -110,12 +117,24 @@ export function Timeline({
   const keptFiles =
     lastUserAt >= 0 && items.slice(lastUserAt + 1).some((i) => i.kind === "activity" && i.turn.steps.some((st) => st.diff?.length));
 
+  // The first row drawn, and where it was in the column: what the view is kept by when older rows come in above it.
+  const anchor = useRef<{ id: string; top: number } | null>(null);
   // Stick to the bottom unless the person scrolled up; jump to the bottom on bot switch.
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
-    if (lastBot.current !== bot.name || pinned.current) el.scrollTop = el.scrollHeight;
+    // Rows put above the first one drawn (Show older, item 102l-6) push it down by their height. The person pressed it to read them,
+    // from a place that is not the bottom, so the view moves down by as much and what they were looking at stays where it was: the
+    // first row is found again by its id. A column at its bottom, and another chat, do what they always did.
+    const was = anchor.current;
+    const first = was && lastBot.current === bot.name && !pinned.current ? el.querySelector<HTMLElement>(`[data-row="${CSS.escape(was.id)}"]`) : null;
+    const moved = first && was ? contentTop(el, first) - was.top : 0;
+    if (first) {
+      if (moved) el.scrollTop += moved;
+    } else if (lastBot.current !== bot.name || pinned.current) el.scrollTop = el.scrollHeight;
     lastBot.current = bot.name;
+    const top = el.querySelector<HTMLElement>("[data-row]");
+    anchor.current = top?.dataset.row ? { id: top.dataset.row, top: contentTop(el, top) } : null;
     measure();
   }, [bot.name, items, writing, typing, measure]);
 
@@ -283,6 +302,7 @@ export function Timeline({
       }}
     >
       <PinnedOwn nav={nav} />
+      {before}
       {!chat?.loaded && items.length === 0 && <div className="day">{t("tl.loading")}</div>}
       {chat?.openError && (
         <div className="day note" data-testid="chat-error">

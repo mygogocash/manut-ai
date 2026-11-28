@@ -12,6 +12,14 @@ const counts = (it: TimelineItem) => it.kind === "user" || it.kind === "assistan
 const reduced = () => typeof matchMedia !== "undefined" && matchMedia("(prefers-reduced-motion: reduce)").matches;
 export const scrollBehavior = (): ScrollBehavior => (reduced() ? "auto" : "smooth");
 
+/** How many messages came in since the person let go of the bottom, when `since` holds the messages they had then. Messages put above
+ *  everything they had are older ones that Show older read (item 102l-6), not messages that came in since: only what is below the first
+ *  message they had counts. (An answer slotted above a message sent while it was being written is below that first one, and counts.) */
+export function freshSince(items: readonly TimelineItem[], since: ReadonlySet<string>): number {
+  const held = items.findIndex((i) => since.has(i.id));
+  return items.filter((i, k) => counts(i) && !since.has(i.id) && k > held).length;
+}
+
 export interface TimelineNav {
   /** more than a screen from the bottom */
   away: boolean;
@@ -81,7 +89,7 @@ export function useTimelineNav(ref: RefObject<HTMLDivElement | null>, items: Tim
     el.querySelector<HTMLElement>(`[data-item="${CSS.escape(pin.id)}"]`)?.scrollIntoView({ block: "start", behavior: scrollBehavior() });
   }, [ref, pin]);
 
-  const fresh = since ? items.filter((i) => counts(i) && !since.has(i.id)).length : 0;
+  const fresh = since ? freshSince(items, since) : 0;
   return { away, fresh, pin, measure, letGo, jump, showPin };
 }
 

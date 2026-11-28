@@ -41,4 +41,8 @@ export const thread: Record<keyof typeof en, string> = {
   // a thread the connected runtime marks (item 102l-2): a conversation with Buddy, or the team's work on a task
   "thread.kind.chat": "Conversation",
   "thread.kind.task": "Team's work",
+  // the question before a conversation is deleted for good (item 102l-6)
+  "thread.chatRemoveTitle": "Remove “{title}”?",
+  "thread.chatRemoveBody": "This deletes every message in it for good. It cannot be taken back.",
+  "thread.chatRemoveYes": "Remove conversation",
 };

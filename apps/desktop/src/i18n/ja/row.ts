@@ -46,4 +46,6 @@ export const row: Record<keyof typeof en, string> = {
   "row.why.quiet": "{n} 日動きがなく、いったん完了",
   "row.why.quiet1": "1 日動きがなく、いったん完了",
   "row.why.merged": "いったん完了: プルリクエストがマージされました",
+  // Remove, on a conversation's row menu (item 102l-6)
+  "row.removeChat": "Remove conversation…",
 };

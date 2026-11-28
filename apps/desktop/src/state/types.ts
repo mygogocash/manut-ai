@@ -354,6 +354,10 @@ export interface Chat {
   loaded: boolean;
   sessionId: string | null;
   turnSeq: number;
+  /** A conversation whose runtime pages its messages (the connected runtime, item 102l-6) says here that it has older ones than
+   *  `items` holds: the cursor `thread.older` reads the page before the oldest message shown with. Absent once the first message is
+   *  shown, and in every chat that is given whole; Show older is drawn only while it is set. */
+  older?: string;
   /** Set when chat.open failed (bot offline, gateway refused); the timeline shows it instead of loading forever. */
   openError?: string | null;
   /** A status that came while no turn ran (Hermes says "Resuming interrupted turn…" just before the turn starts):

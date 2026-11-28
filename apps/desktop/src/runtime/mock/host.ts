@@ -1056,6 +1056,8 @@ export class MockHost {
         ...this.models[b.name],
       };
     },
+    // Practice gives a thread whole, so it never says there are older messages and no screen asks.
+    "thread.older": () => ({ messages: [], older: null }),
     "thread.remove": (p) => {
       const b = this.needBot(p);
       if (p.thread === `main-${b.name}`) throw new OpError("bad_request", "that is the main chat, not a thread");

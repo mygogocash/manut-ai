@@ -658,6 +658,10 @@ export interface ServedShops {
   chat: Record<string, FakeChatThread[]>;
   /** what every message is answered with instead of Buddy's answer, keeping nothing, as apps/api refuses one; null to answer */
   chatRefusal: FakeAnswer | null;
+  /** what every removal of a conversation is answered with instead of deleting it (item 102l-6), as apps/api refuses one; null to delete */
+  chatRemoval: FakeAnswer | null;
+  /** Puts a conversation the API already held into `shop`, as if earlier messages had made it: it is read like any other. */
+  seedChat(shop: string, thread: FakeChatThread): void;
   /** Buddy's answer to a message, as the stand-in provider gives it: the owner's words, and what else came with them (`note`: Manut AI's
    *  note to Buddy, which the API gives the model and does not keep; `sentOnFrom`: the title the API gives the model as the mark) */
   chatAnswer: (text: string, sent: { note?: string; sentOnFrom?: string }) => { text: string; stopReason?: string };
@@ -773,6 +777,8 @@ export function serveShops(api: FakeApi, list: ShopJson[], approvals: Record<str
     memory: {},
     chat: {},
     chatRefusal: null,
+    chatRemoval: null,
+    seedChat: () => undefined,
     chatAnswer: (text) => ({ text: `Buddy's answer to: ${text}`, stopReason: "end_turn" }),
   };
   /** The shop a shop-session request is for, or the 401 to answer; null when the bearer is not a shop session. */
@@ -897,7 +903,10 @@ export const chatId = (n: number) => `cht-${String(n).padStart(9, "0")}-abc-${n.
  *  keeps one, item 102l-5) makes a conversation titled by its first words when it names none, and is kept with Buddy's answer: the words alone as
  *  its text, with `sentOnFrom` and `noted: true` beside them, and nothing of the note; or, with `served.chatRefusal`, is answered that instead
  *  and nothing is kept. The shop's conversations (`GET /v1/chat/threads`, newest written
- *  first) and one conversation (`GET /v1/chat/threads/{id}`, its newest 50 messages, oldest first). A conversation of another shop is
+ *  first) and one conversation (`GET /v1/chat/threads/{id}`, a page of its messages oldest first: the newest 50, or with `?before=` a message
+ *  id and `?limit=` the page before that message, and `next`, the id of the oldest message in the page when there are older ones, else null,
+ *  as chat-store.ts `readThread` answers). Its removal (`POST /v1/chat/threads/remove`, exactly `{ id }`, item 102l-6) deletes it and
+ *  every message in it, or with `served.chatRemoval` is answered that instead and keeps it. A conversation of another shop is
  *  404 `thread_not_found`; a helper's session is 403 `owner_only`. */
 function ownerChatRoutes(api: FakeApi, served: ServedShops, owned: Owned, now: () => number): void {
   let made = 0;
@@ -917,14 +926,34 @@ function ownerChatRoutes(api: FakeApi, served: ServedShops, owned: Owned, now: (
     return n >= 1 && n <= 120 && !/[\p{Cc}\p{Zl}\p{Zp}"]/u.test(title);
   };
   const view = (c: FakeChatThread) => ({ id: c.id, title: c.title, createdAt: c.createdAt, updatedAt: c.updatedAt, messageCount: c.messages.length });
+  // The API's paging (chat-store.ts `readThread`): a query of `before` (a message id) and `limit` (1 to 200, 50 by default) and nothing
+  // else, each once; the newest `limit` messages, or the `limit` before the message `before` names, oldest first; `next` is the id of the
+  // oldest message in the page when older ones remain, else null.
+  const pageOf = (c: FakeChatThread, url: string) => {
+    const query = new URL(url).searchParams;
+    const names = [...query.keys()];
+    const before = query.get("before");
+    const limitText = query.get("limit");
+    const limit = limitText === null ? 50 : /^\d{1,3}$/.test(limitText) ? Number(limitText) : 0;
+    if (names.some((k) => k !== "before" && k !== "limit") || new Set(names).size !== names.length || limit < 1 || limit > 200 || (before !== null && !/^m[1-9][0-9]*$/.test(before))) return null;
+    const earlier = c.messages.filter((m) => before === null || Number(m.id.slice(1)) < Number(before.slice(1)));
+    const shown = earlier.slice(-limit);
+    return { messages: shown, next: earlier.length > limit ? shown[0].id : null };
+  };
   const threadRoute = (id: string) =>
     api.on("GET", `/v1/chat/threads/${id}`, (req) =>
       owned(req, (shop) => {
         const c = (served.chat[shop] ?? []).find((x) => x.id === id);
-        if (!c) return { status: 404, json: { error: "thread_not_found" } };
-        return { status: 200, json: { thread: view(c), messages: c.messages.slice(-50), next: c.messages.length > 50 ? c.messages[c.messages.length - 51].id : null } };
+        const page = c && pageOf(c, req.url);
+        if (c && !page) return { status: 400, json: { error: "invalid_request" } };
+        if (!c || !page) return { status: 404, json: { error: "thread_not_found" } };
+        return { status: 200, json: { thread: view(c), ...page } };
       }),
     );
+  served.seedChat = (shop, c) => {
+    (served.chat[shop] ??= []).push(c);
+    threadRoute(c.id);
+  };
   api.on("POST", "/v1/chat/messages", (req) =>
     owned(req, (shop) => {
       const KEYS = ["thread", "text", "note", "sentOnFrom"];
@@ -960,6 +989,19 @@ function ownerChatRoutes(api: FakeApi, served: ServedShops, owned: Owned, now: (
   );
   api.on("GET", "/v1/chat/threads", (req) =>
     owned(req, (shop) => ({ status: 200, json: { threads: [...(served.chat[shop] ?? [])].sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt)).map(view) } })),
+  );
+  api.on("POST", "/v1/chat/threads/remove", (req) =>
+    owned(req, (shop) => {
+      // exactly `{ id }`: any other key, or a body that is not an object, is refused before anything is looked up
+      const body = req.body as { id?: unknown } | undefined;
+      if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).length !== 1 || typeof body.id !== "string") return { status: 400, json: { error: "invalid_request" } };
+      if (served.chatRemoval) return served.chatRemoval;
+      const threads = served.chat[shop] ?? [];
+      const at = threads.findIndex((x) => x.id === body.id);
+      if (at < 0) return { status: 404, json: { error: "thread_not_found" } };
+      threads.splice(at, 1);
+      return { status: 200, json: { id: body.id } };
+    }),
   );
 }
 
