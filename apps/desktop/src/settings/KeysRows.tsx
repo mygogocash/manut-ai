@@ -14,6 +14,7 @@ import { Row } from "./DevRow";
 /** Each action's words, as the fixed list's are (`key.*`). */
 export const ACTION_WORDS: Record<KeyAction, Key> = {
   search: "key.search",
+  find: "key.find",
   details: "key.details",
   settings: "key.settings",
   "next-ask": "key.nextAsk",

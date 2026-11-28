@@ -3,6 +3,8 @@
 //   ⌘1…⌘9  open team member 1 to 9 (the Team page's order)   ⌘K  the command palette (src/palette): where to go, what to
 //          do and the chats History finds; ⌘K again closes it (in a terminal on macOS it clears the terminal instead:
 //          engine-input.ts, and Ctrl+K in a terminal is the program's)
+//   ⌘F     find in the chat in view (src/chat/find): a bar over its messages and steps; in a terminal, in a pane or field that
+//          has a find of its own, or over an open menu or dialog it is theirs, and with no chat on screen it does nothing
 //   ⌘.     show or hide Details                    ⌘,  Settings
 //   ⌘J     jump to the next approval or question waiting on you (any bot or SESSIONS chat)
 //   ⌘⇧G   maximise the side panel in place, or restore it (Esc restores; a closed panel opens on Plans)
@@ -30,6 +32,7 @@ import { listenMenuClose } from "./menuClose";
 import { paletteOpen, togglePalette } from "../palette/state";
 import { currentKeys, keysRecording, matches, type KeyAction, type Keys } from "./keys";
 import { toggleSide } from "../sidebar/sideState";
+import { keepsFind, openChatFind } from "../chat/find/host";
 
 export const isMac = () => typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
 
@@ -39,7 +42,7 @@ export function shortcutFor(
   e: { key: string; code?: string; metaKey: boolean; ctrlKey: boolean; altKey: boolean; shiftKey: boolean; isComposing?: boolean; keyCode?: number },
   mac: boolean,
   keys: Keys = currentKeys(mac),
-): { kind: "bot"; index: number } | { kind: "session"; step: 1 | -1 } | { kind: "search" | "details" | "settings" | "stop" | "next-ask" | "graph" | "new-session" | "terminal" | "sidebar" } | null {
+): { kind: "bot"; index: number } | { kind: "session"; step: 1 | -1 } | { kind: "search" | "find" | "details" | "settings" | "stop" | "next-ask" | "graph" | "new-session" | "terminal" | "sidebar" } | null {
   if (composing(e)) return null;
   const hit = (a: KeyAction) => keys[a].some((c) => matches(c, e));
   // the bottom terminal panel first: its key is taken before a terminal sees it (onTerminalKey)
@@ -55,6 +58,8 @@ export function shortcutFor(
   if (hit("settings")) return { kind: "settings" };
   if (hit("next-ask")) return { kind: "next-ask" };
   if (hit("new-session")) return { kind: "new-session" };
+  // last of the settable keys: find is a newer default than any key the person has set, so ⌘F they gave another action stays theirs
+  if (hit("find")) return { kind: "find" };
   if (e.key === "Escape" && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) return { kind: "stop" };
   return null;
 }
@@ -129,6 +134,14 @@ export function onShortcutKey(e: KeyboardEvent): void {
   if (hit.kind === "search" && inTerminal(e.target)) return;
   // While the palette is open its field has the keys: only ⌘K (which closes it) is still a shortcut.
   if (paletteOpen() && hit.kind !== "search") return;
+  if (hit.kind === "find") {
+    // ⌘F is first the place that already took it (a terminal's find says so with preventDefault, as does a field with its own),
+    // then any place that keeps it (a terminal, its bar, a pane marked data-own-find, an open menu or dialog); the chat's bar
+    // opens only where none of them did, and only with a chat on screen. With none, the key is left as it was.
+    if (e.defaultPrevented || keepsFind(e.target)) return;
+    if (openChatFind(e.target)) e.preventDefault();
+    return;
+  }
   const store = getStore();
   const s = store.getState();
   const a = store.actions;

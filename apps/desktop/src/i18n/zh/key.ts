@@ -3,6 +3,7 @@ import type { key as en } from "../en/key";
 export const key: Record<keyof typeof en, string> = {
   "key.openBot": "打开第 1–9 个机器人",
   "key.search": "命令面板：前往任何页面，执行任何操作",
+  "key.find": "在聊天中查找",
   "key.details": "显示或隐藏详情",
   "key.settings": "设置",
   "key.nextAsk": "下一个审批或问题",

@@ -121,7 +121,7 @@ keeps them:
 | Limits left for each account | has | |
 | Send when the limit resets | has (item 95): a coding chat on a limited account offers Send at <time>; sent once when the account is usable, within the hour, else it asks first | 95 |
 | Themes, VS Code themes, chat width and fonts | part (item 99b, the owner's choice of 27 Nov): light and dark, text size, chat width (narrow, medium, wide), themes of the person's own (made from the look in force, six main colours edited, renamed, deleted, kept on this Mac) and VS Code themes imported from their JSON file, the terminal's colours included; each refused with why when its text reads under 4.5 to 1. Fonts not done | 99b |
-| Keybindings you set | has (item 99a): the nine app-wide shortcuts set in Settings › General › Keyboard, kept on this Mac | 99 |
+| Keybindings you set | has (item 99a): the eleven app-wide shortcuts set in Settings › General › Keyboard, kept on this Mac (item 150 added find in a chat, ⌘F) | 99 |
 | Settings for a project or an environment | part: Kit's level, rules and folders for a project, and its worktree choices (item 99a) | 99 |
 | A command that gathers what is wrong for an agent to fix | no | 105 |
 | Computer use (T3 Code has none) | has, never run against a real window | |

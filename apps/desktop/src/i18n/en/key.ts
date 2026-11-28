@@ -1,6 +1,7 @@
 export const key = {
   "key.openBot": "Open bot 1 to 9",
   "key.search": "Command palette: go anywhere, do anything",
+  "key.find": "Find in a chat",
   "key.details": "Show or hide Details",
   "key.settings": "Settings",
   "key.nextAsk": "Next approval or question",

@@ -122,6 +122,27 @@ when its other place is gone. An action that needs a place that is not open (a c
 Settings › Developer) is not listed, because that place registers it while it shows (`src/palette/places.ts`), and a
 later item adds an action with one entry in `ACTIONS`.
 
+## Find in a chat
+
+Command-F (Ctrl+F off macOS) in a chat's view (Buddy's, a member's, a coding chat, a lane's, and a job's lanes side by side)
+opens a bar at the top right of the chat's column (`src/chat/find`), the terminal's own find bar in the chat's column: a field,
+"3 of 12", Match case (Aa, Alt+C), Previous and Next (Enter and Shift+Enter work from the field) and Close. Esc closes it and the
+chat box has the keyboard. It finds across the messages and the steps, case-insensitively unless Match case is on, Thai text
+and any other script alike. It is one of the keys Settings › General › Keyboard lets the person change (`find`).
+
+It reads the page, not the store: only text the chat draws can be found, so a key the chat shows masked is found masked and never
+by its value (`read.ts`). A turn's steps are folded behind "Worked for 41s · 6 steps"; while a bar is open the activity line draws
+them hidden so the bar reads them the same way, and the group a match is in opens while that match is the current one and shuts
+again when the person moves on, unless they had opened it (`folds.ts`, `Activity.slot.tsx`). A step's own change, the agent's
+thinking and a subagent's rows are found only while they are open. Nothing is typed into the messages: with the CSS Custom Highlight
+API (`CSS.highlights`, tested at run time) the matches are painted by the browser, the current one in solid amber; in a web view
+with none (the macOS 11 one) a layer of boxes beside the column marks them, the current one ringed (`paint.ts`). Nothing is sent
+or kept: what was typed goes with the bar.
+
+The key is left to the page, and the chat's bar does not open, in a terminal and its find bar (which has the same key), in a pane that
+marks itself `data-own-find` (the pane beside a lane), over an open menu, list or dialog, while the palette is open, while the first-run
+setup fills the window, and when no chat is on screen (`src/chat/find/host.ts`, `src/app/shortcuts.ts`).
+
 ## Safety settings
 
 `src-tauri/tauri.conf.json` has a content security policy for the packaged app (scripts and styles from the app
