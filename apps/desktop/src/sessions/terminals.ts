@@ -7,7 +7,7 @@
 // their history keeping, the rows to start again) are the store's and handed in; anything the store defines later or changes
 // (its state, its close, its notifier) is read through a function, so it is always the current one.
 import type { ITerminalInitOnlyOptions, ITerminalOptions, Terminal } from "@xterm/xterm";
-import { afterOpen, bracketedPaste, CELLS_EVENT, feed, gpuComing, isParked, live, onVisible, PARKING_EVENT } from "./term/engine";
+import { afterOpen, bracketedPaste, CELLS_EVENT, feed, gpuComing, isParked, live, onVisible, PARKING_EVENT, programEnded } from "./term/engine";
 import { TERM_INPUT_EVENT } from "./term/paste-guard";
 import { onCwd, onProgress } from "./term/engine-marks";
 import { applyLook, termOptions } from "./term/look";
@@ -255,6 +255,10 @@ export function createTerminals(d: TerminalsDeps) {
           d.graceFinish(id);
           return;
         }
+        // an agent CLI the shell of this app started has ended, maybe killed in the middle of its screen: the input modes it
+        // died with (mouse, keys encoded, bracketed paste, the alternate screen) go back before the terminal goes on, as its
+        // login shell or as it is (term/engine-reclaim.ts). A Shell row's own end reclaims nothing.
+        programEnded(t.term, t.el, { agent: !shell });
         const label = agentDef(r.agent).label;
         // the look missed a conversation Claude Code has (it refused the id as a new one): continue it, once
         if (again && sessionId && !t.keyedHeard && idInUse(said, sessionId)) {
