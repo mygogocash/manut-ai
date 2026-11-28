@@ -14,7 +14,7 @@ read-only and never installed, built or run: the README, the docs (`apps/docs/co
 `pty-daemon`, `workspace-fs`, `workspace-client`, `macos-process-metrics`, `agent-setup`, `agent-harness`, `chat`,
 `chat-ui`, `chat-runtime`, `mcp`, `host-service`, `sandbox`, and parts of `shared`). Each row was checked against Manut
 AI's code and `docs/plan.md` on 28 Nov, by grep, not from memory. Of 117 Paradev features that bear on the code mode,
-Manut AI has 37, has 2 built and switched off, has part of 27, and has none of 51. The plan's rows for the rest are items
+Manut AI has 37, has 2 built and switched off, has part of 27, and has none of 51 (as studied on 28 Nov; since then each merged row's line says **has** with its item, starting with find in a chat, item 150). The plan's rows for the rest are items
 145 to 166; where items 94 to 137 or 108 already plan a feature, the Plan column points at them. Paradev's marketing,
 billing, its plugins for Slack, Gmail and the rest, its leaderboard and its settings sync are left out: none bears on
 the code mode.
