@@ -12,10 +12,10 @@
 // Pure but for the small store at the end, so a test reads every rule without a DOM.
 import { changes } from "../lib/changes";
 
-export type KeyAction = "search" | "find" | "details" | "settings" | "next-ask" | "graph" | "new-session" | "session-next" | "session-prev" | "terminal" | "sidebar";
+export type KeyAction = "search" | "find" | "details" | "settings" | "next-ask" | "graph" | "new-session" | "session-next" | "session-prev" | "terminal" | "sidebar" | "lane-prev" | "lane-next";
 
 /** In the order Settings lists them. */
-export const KEY_ACTIONS: readonly KeyAction[] = ["search", "find", "details", "settings", "next-ask", "new-session", "session-next", "session-prev", "sidebar", "graph", "terminal"];
+export const KEY_ACTIONS: readonly KeyAction[] = ["search", "find", "details", "settings", "next-ask", "new-session", "session-next", "session-prev", "lane-prev", "lane-next", "sidebar", "graph", "terminal"];
 
 export interface Chord {
   readonly meta: boolean;
@@ -75,6 +75,11 @@ export function defaultKeys(mac: boolean): Keys {
     terminal: [chord("Backquote", { ctrl: true })],
     // the side menu, shown or hidden, as ChatGPT's ⌘⇧S (the owner, 27 Nov 2026)
     sidebar: [chord("KeyS", { ...m, shift: true })],
+    // the previous and next lane in the side menu's order (item 167a), Paradev's keys for its previous and next workspace
+    // (`PREV_WORKSPACE` and `NEXT_WORKSPACE` in its hotkeys registry, MIT): ⌘⌥↑ and ⌘⌥↓ on macOS, Ctrl+Shift+Alt with the
+    // arrow elsewhere
+    "lane-prev": [chord("ArrowUp", mac ? { meta: true, alt: true } : { ctrl: true, shift: true, alt: true })],
+    "lane-next": [chord("ArrowDown", mac ? { meta: true, alt: true } : { ctrl: true, shift: true, alt: true })],
   };
 }
 

@@ -11,6 +11,8 @@
 //   ⌘N ⌘T  the Code page's TERMINALS + menu (a CLI as a chat with Kit, or the Shell or a CLI in a terminal, which has
 //          the focus); the Code page opens first
 //   ⌘⇧]    the next terminal session (the Code page's order, wrapping)  ⌘⇧[  the previous one
+//   ⌘⌥↑ ⌘⌥↓ the previous and the next lane in the side menu's order, wrapping (item 167a; Ctrl+Shift+Alt with the arrow off
+//          macOS, as Paradev's previous and next workspace); it only opens the lane, and answers none of its asks
 //   ⌘W     (the menu's Close Window) closes the focused split pane while a split has the keyboard, else the window
 //   Esc    stop the running answer (only when no popover, field or dialog wants Esc first)
 //   Ctrl+` the bottom terminal panel, show or hide, on every OS (Ctrl on macOS too, as in VS Code; a maximised side
@@ -33,6 +35,9 @@ import { paletteOpen, togglePalette } from "../palette/state";
 import { currentKeys, keysRecording, matches, type KeyAction, type Keys } from "./keys";
 import { toggleSide } from "../sidebar/sideState";
 import { keepsFind, openChatFind } from "../chat/find/host";
+import { openLane } from "../code/Lanes";
+import { menuLaneIds } from "../sidebar/laneGroups";
+import { menuLanesNow } from "../sidebar/MenuLanes";
 
 export const isMac = () => typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
 
@@ -42,7 +47,7 @@ export function shortcutFor(
   e: { key: string; code?: string; metaKey: boolean; ctrlKey: boolean; altKey: boolean; shiftKey: boolean; isComposing?: boolean; keyCode?: number },
   mac: boolean,
   keys: Keys = currentKeys(mac),
-): { kind: "bot"; index: number } | { kind: "session"; step: 1 | -1 } | { kind: "search" | "find" | "details" | "settings" | "stop" | "next-ask" | "graph" | "new-session" | "terminal" | "sidebar" } | null {
+): { kind: "bot"; index: number } | { kind: "session" | "lane"; step: 1 | -1 } | { kind: "search" | "find" | "details" | "settings" | "stop" | "next-ask" | "graph" | "new-session" | "terminal" | "sidebar" } | null {
   if (composing(e)) return null;
   const hit = (a: KeyAction) => keys[a].some((c) => matches(c, e));
   // the bottom terminal panel first: its key is taken before a terminal sees it (onTerminalKey)
@@ -53,6 +58,8 @@ export function shortcutFor(
   if (hit("sidebar")) return { kind: "sidebar" };
   if (hit("session-next")) return { kind: "session", step: 1 };
   if (hit("session-prev")) return { kind: "session", step: -1 };
+  if (hit("lane-prev")) return { kind: "lane", step: -1 };
+  if (hit("lane-next")) return { kind: "lane", step: 1 };
   if (hit("search")) return { kind: "search" };
   if (hit("details")) return { kind: "details" };
   if (hit("settings")) return { kind: "settings" };
@@ -85,6 +92,16 @@ const inTerminal = (t: EventTarget | null) => !!(t as HTMLElement | null)?.close
  *  Code page groups them), the groups in the saved order. */
 export function terminalOrder(rows: readonly { id: string; cwd: string }[], order: readonly string[]): string[] {
   return orderFolders(folderGroups(rows), order).flatMap((g) => g.rows.map((r) => r.id));
+}
+
+/** Open the previous (-1) or next (1) lane in the side menu's order (item 167a: MenuLanes.tsx, the project the Code page shows
+ *  first), wrapping at the ends; with no lane open, the first or the last. It only opens the lane, as its row does: no ask is
+ *  answered, nothing is sent, and a lane that asks opens with its card in view. */
+export function stepLane(step: 1 | -1): void {
+  const store = getStore();
+  const s = store.getState();
+  const to = stepSession(menuLaneIds(menuLanesNow()), s.ui.view === "session" ? s.ui.session : null, step);
+  if (to) openLane(to);
 }
 
 /** Open the next (1) or previous (-1) terminal session in TERMINALS order: the folder groups as the Code page shows them. */
@@ -127,7 +144,7 @@ export function onShortcutKey(e: KeyboardEvent): void {
   if (isFirstRunOpen(getStore().getState().ui) || keysRecording()) return;
   const hit = shortcutFor(e, isMac());
   if (!hit || hit.kind === "terminal") return;
-  if (!SESSIONS_ENTRY && (hit.kind === "new-session" || hit.kind === "session")) return;
+  if (!SESSIONS_ENTRY && (hit.kind === "new-session" || hit.kind === "session" || hit.kind === "lane")) return;
   // In a terminal session, Ctrl+<key> belongs to the program (Ctrl+K kills a line); ⌘ on macOS stays ours.
   if (!isMac() && inTerminal(e.target)) return;
   // ⌘K in a macOS terminal clears it (engine-input.ts); the terminal keeps the key
@@ -190,6 +207,8 @@ export function onShortcutKey(e: KeyboardEvent): void {
     openNewSessionMenu();
   } else if (hit.kind === "session") {
     stepTerminal(hit.step);
+  } else if (hit.kind === "lane") {
+    stepLane(hit.step);
   } else if (hit.kind === "next-ask") {
     const n = nextAsk(selectAsks(s), s.ui.focusAsk);
     if (n) void a.jumpToAsk(n.bot, n.item.id);

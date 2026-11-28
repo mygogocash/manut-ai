@@ -143,7 +143,10 @@ grouped by project with the open project first, in the band's order and with its
 top, settled below, snoozed and archived behind one line). Each is a menu row with its title and its one state mark (the
 next areas), the open one marked as the menu marks its current row, with its More menu on hover and focus
 (`src/sidebar/RowMenu.tsx`). Buddy's Recent threads give the lanes their place only while the code mode is open, and are
-still on Home, History and Buddy's pages. The Lanes band on the Code page stays, for the lines and actions a menu row has no
+still on Home, History and Buddy's pages. As built (167a, `docs/decisions/167a-lanes-in-menu.md`): the open project is the one
+the Code page shows, which opening a lane does not change, so the groups hold still as the person moves between lanes; snoozed
+and archived lanes are left out of the menu, as Recent leaves chats out, and stay behind the band's line; the Working group
+gives its place too; and Recent stays while no lane is listed. The Lanes band on the Code page stays, for the lines and actions a menu row has no
 room for. Back and forward: adopt, on a chord `src/app/keys.ts` accepts (Paradev's ⌘[ and ⌘]).
 
 ### Switching between lanes

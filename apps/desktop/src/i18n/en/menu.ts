@@ -16,4 +16,6 @@ export const menu = {
   "menu.plans": "Your coding plans",
   "menu.plansNote": "How much of each coding tool's plan is used, read from this computer.",
   "menu.working": "Working",
+  // the lanes listed in Recent's place while the code mode is open (item 167a): each project's list, for a screen reader
+  "menu.lanesIn": "Lanes in {project}",
 };

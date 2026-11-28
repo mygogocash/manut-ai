@@ -16,7 +16,7 @@ state that needs the owner: a real GitHub account, money, a real sign-in or real
 
 | State | Desktop | Where |
 | --- | --- | --- |
-| Lanes: a band with New lane, a row per lane with its title, "Kit, Careful" and a status tag | Part (this branch): the Kit panel opens with a Lanes band with a quiet New lane link (drawn even while the project has no lane), a row for each coding session that runs as a chat, with its title, "Kit · Claude Code", its branch and a state tag. Terminals stay in their folder groups below. Under the lanes, Kit's folders kept: a lane's folder that outlived its session, with Show folder and Remove. A lane is started from the + menu's Chat with Kit (item 66), or from New lane in the band, which opens that menu (item 68; see [Starting a lane](#starting-a-lane)). No effort word | `code/Lanes.tsx`, `code/KeptLanes.tsx`, `code/KitPanel.tsx`, `sessions/SessionsSection.tsx` (`ChatWay`) |
+| Lanes: a band with New lane, a row per lane with its title, "Kit, Careful" and a status tag | Part (this branch): the Kit panel opens with a Lanes band with a quiet New lane link (drawn even while the project has no lane), a row for each coding session that runs as a chat, with its title, "Kit · Claude Code", its branch and a state tag. Terminals stay in their folder groups below. Under the lanes, Kit's folders kept: a lane's folder that outlived its session, with Show folder and Remove. A lane is started from the + menu's Chat with Kit (item 66), or from New lane in the band, which opens that menu (item 68; see [Starting a lane](#starting-a-lane)). No effort word. The board keeps the band over an open lane; since item 167a the side menu lists every project's lanes instead while the code mode is open, each with one state mark and the open one marked, and ⌥⌘↑ and ⌥⌘↓ open the previous and next (see [Lanes in the side menu](#lanes-in-the-side-menu-item-167a)) | `code/Lanes.tsx`, `code/KeptLanes.tsx`, `code/KitPanel.tsx`, `sessions/SessionsSection.tsx` (`ChatWay`), `sidebar/MenuLanes.tsx` |
 | The lane's own branch (`kit/promptpay-qr`): "Kit works on a separate branch. Nothing is live." | Has (this branch): a chat session gets a branch of its own as it starts, named from its first message and made from the branch the developer's folder is on, checked out in a folder of its own (a git worktree under `~/.manut/lanes`), where its agent works. Several lanes work at once, none touching another's files or the developer's folder, whose branch, index, stash and HEAD never change because of a lane. The row and the composer's foot show the branch. Nothing is pushed or merged but through the asks of [Source control](#source-control). See [Where a lane works](#where-a-lane-works) | `code/laneBranch.ts`, `src-tauri/src/lane.rs`, `sessions/sessions.ts` (`startLane`) |
 | "Checked: 14 tests passed" | Has (this branch): read from the test run's output (vitest, jest, node's own runner, pytest, `go test`, `cargo test`, mocha, Playwright Test and Python's `unittest`). A run that cannot be read is Not confirmed, never Checked | `code/testRun.ts`, `code/lane.ts` |
 | Revert this turn | Has: Rewind, on the line under the box beside the branch, puts back the files and the chat of a kept turn; the newest is picked first. Claude Code and Codex only. The agent's own Edit on the last message still takes back the chat only, and then the lane says the files stay as they are | `sessions/RewindPanel.tsx`, `sessions/rewind.ts`, `src-tauri/src/turn_files.rs`, `code/lane.ts` |
@@ -899,6 +899,41 @@ undo toast, the picked time, the Working group and a quiet chat settling, in lig
   repository, never one per lane and never on a timer: it runs when the Code page shows a lane with a branch of its own, a failed read
   is not tried again within the five minutes, and a missing or signed-out `gh` shows no pull request. Nothing is written to GitHub or
   GitLab. `tasks/pulls.ts`.
+
+### Lanes in the side menu (item 167a)
+
+Paradev keeps its workspaces in a sidebar that is always there (`docs/paradev-ux.md`, "Navigation: where a lane is"). The code
+mode keeps its lanes in view the same way, in the side menu rather than a new column. `sidebar/laneGroups.ts` decides which lanes
+and in what order, `sidebar/MenuLanes.tsx` draws them, each with its tests beside it, and `e2e/menu-lanes.spec.ts` walks them
+from the menu and by the keys (`MENU_LANES_SHOTS=<dir>` keeps pictures in light and dark).
+
+- **When.** While the Code row is current (the Code page, Tasks, or a lane or a terminal open) and a lane is listed, the lanes take
+  the place of Recent and the Working group, which are Buddy's chats. Recent is back on Home, History, a member's page and anywhere
+  else, and stays where it is while no lane is listed.
+- **Which, and in what order.** Every project's lanes, each project under a quiet heading with its name (its list named "Lanes in
+  <project>" for a screen reader). The project the Code page shows leads (its picker; the newest session's by default), then the
+  others in the Code page's order. In a group the lanes are in the Lanes band's order and marks (`Lanes.tsx` `laneOrder`, fed by the
+  band's own functions, so the two cannot part): pinned on top with the pin, then the rest newest first, with a job's lanes where
+  its first lane stands and a helper lane indented under its lead, then the settled ones, small and quiet, with their reason.
+  Snoozed and archived lanes are left out, as Recent leaves out snoozed and archived chats; the band's line still opens them, and a
+  lane that asks is never put away.
+- **A row** is Recent's (`.rec`) with the kit's status dot before the title, in the colour of the band's tag (Checked green, Working
+  blue, Needs you amber, Failed and Tests failed red, the rest grey), and the state's words after the title for a screen reader and
+  in the tooltip. Only the working dot pulses. The open lane has the hover fill and the ink, as KitNavigation marks an open Recent
+  item (`aria-current="true"`; the Code row keeps `aria-current="page"`). Its More menu is the band's (`LaneMore`: Pin, Snooze, Done
+  for now, Archive, Open in the editor), on the "more" button that shows on hover and while the row has the keyboard focus, and on
+  a right-click. Dragged onto an open chat's box, a row brings its lane's context, as the band's row does.
+- **The project the Code page shows** is kept while the app runs (`code/codeProject.ts`) rather than in Kit's panel, so the menu reads
+  it too. Opening a lane does not change it: the groups stay where they are as the person goes from lane to lane, and the keys step
+  through one order.
+- **The previous and next lane.** Two settable actions in Settings › General › Keyboard, after the terminal sessions' (`keys.ts`
+  `lane-prev` and `lane-next`): ⌥⌘↑ and ⌥⌘↓ on macOS, Ctrl+Alt+Shift+↑ and ↓ elsewhere, Paradev's keys for its previous and next
+  workspace. They open the previous and next lane in the menu's order, wrapping at the ends, and the first or the last with no lane
+  open. They work from anywhere, as ⌘⇧] does for terminal sessions; off macOS a terminal keeps them, as it keeps every Ctrl key.
+- **Opening a lane answers nothing.** A row and a key only open the lane (`openSession`, as the band's row does): no ask is answered,
+  nothing is sent, no approval is touched, and a lane that asks opens with its card in view. `sidebar/MenuLanes.test.tsx` watches
+  every action of the app's store and every call of the sessions store while the keys and a row open lanes, and the spec checks that
+  no input reached an agent and that the card still waits.
 
 ### Titles and words by a model (item 96)
 
