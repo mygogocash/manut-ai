@@ -53,7 +53,7 @@ export function ShowOlderMessages({ bot, thread }: { bot: string; thread: string
         </p>
       )}
       {/* aria-disabled, not disabled, while the page is read, so the focus stays on the button the person pressed */}
-      <button type="button" className="th-older-b" aria-disabled={reading || undefined} aria-busy={reading || undefined} onClick={show} data-testid="chat-older-show">
+      <button type="button" className="th-older-btn" aria-disabled={reading || undefined} aria-busy={reading || undefined} onClick={show} data-testid="chat-older-show">
         {words.button}
       </button>
     </div>

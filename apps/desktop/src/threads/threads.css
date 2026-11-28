@@ -379,7 +379,7 @@
 .th-older > p[role="alert"] {
   color: var(--aui-danger);
 }
-.th-older-b {
+.th-older-btn {
   flex: none;
   height: 24px;
   padding: 0 12px;
@@ -388,15 +388,15 @@
   color: var(--body);
   background: var(--raise2);
 }
-.th-older-b:hover {
+.th-older-btn:hover {
   color: var(--ink);
   background: var(--line-strong);
 }
-.th-older-b:focus-visible {
+.th-older-btn:focus-visible {
   outline: 2px solid var(--line-strong);
   outline-offset: 2px;
 }
-.th-older-b[aria-disabled="true"] {
+.th-older-btn[aria-disabled="true"] {
   opacity: 0.55;
   cursor: progress;
 }
