@@ -72,7 +72,8 @@ The fixes are items 85e to 85i in `docs/plan.md`; the motion is items 85a to 85c
    chevrons-down-up, git-branch, diff, camera, hard-drive, columns-2, message-plus, list, paperclip, audio-lines, reply,
    home, nodes. Item 122 (26 Nov, the owner's request that every menu lead with an icon) drew eleven more on the same
    grid for menu entries that had words only: at-sign, square-slash, archive, pin-off, folder-plus, clipboard,
-   text-select, eraser, rows-2, user and git-pull-request. `src/ui/icons.test.tsx` fails on a line icon drawn anywhere else (marks, faces, meters, state glyphs
+   text-select, eraser, rows-2, user and git-pull-request, and item 167d (28 Nov) one more, keyboard, for the palette's Show every
+   shortcut row. `src/ui/icons.test.tsx` fails on a line icon drawn anywhere else (marks, faces, meters, state glyphs
    and the run graph are listed with why), and `e2e/quiet-sweep.spec.ts` measures every icon on the menu's pages and in
    Settings.
 10. **Two segmented switches.** Home's is a 28px pill; Settings' (`.mseg`) are 22px rectangles with 11.5px text. Seen.

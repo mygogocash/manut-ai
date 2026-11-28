@@ -167,6 +167,10 @@ written here as `atText` in `apps/desktop/src/chat/box/carry.ts`, the first line
 which file's numbers the lines are; and it read, to write anew, its Changes pane's scope control (all changes, uncommitted, one
 commit; `DiffPaneScope`, `ChangesScopeControl`). Its diff library `@pierre/diffs` is not used.
 
+Item 167d (keys where the actions are) read, to write anew in this app's own registry and look, Paradev's `hotkeys/display.ts` (a
+chord as a cap for each key), `CommandPaletteFooter`, `WorkspaceEmptyState`, `HotkeyTooltip` and `HotkeyLabel`, and the keys settings
+page's groups and search, all at `b0b0cdc6bd7eadf205a3fe8c45801affefbd89c5`; no file of Paradev's was lifted for it.
+
 Libraries added for one feature are named here too: `qrcode` 1.5.4 (MIT, soldair/node-qrcode), already the web app's,
 pinned in the desktop for the pairing code's QR image (`apps/desktop/src/remote/QrCode.tsx`, lifted from
 `apps/web/src/ops/QrCode.tsx`); only its `create` is used, which returns the modules and reaches no network; `objc2-speech`, `objc2-avf-audio` and `objc2-av-foundation`

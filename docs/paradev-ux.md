@@ -187,6 +187,16 @@ presses what a button elsewhere presses, and never answers an ask, removes a lan
 deletes a workspace (`R/commandPalette/ui/DeleteWorkspaceMount/DeleteWorkspaceMount.tsx`); here such a row would open the
 panel where the ask is answered. Import and Export of keys are not needed while keys stay on this Mac.
 
+**Built (item 167d, `docs/decisions/167d-keys-shown.md`).** The sheet is a settable action of its own, `key-sheet`, on ⌘/ (Ctrl+/ off
+a Mac), with a search over the words and the keys, five groups (Go to, Chat, Panels, Terminals, Help), a Change on each settable
+row that opens that row in Settings › General › Keyboard, and a link to the list at its foot; it is read only and holds the
+keyboard while it is open, as the palette does. The palette's rows carry the person's key at their tail, a cap for each key as the
+Search board draws it, only where the row does what the key does (New chat or terminal, Settings › General, and two rows added for
+it, the side menu's switch and the sheet); its foot says Return, Esc and the palette's own key. Buttons name the key in their tooltip
+and `aria-keyshortcuts` (Search, the side menu's Hide and Show, Settings, Details, the + menu, the terminal panel's Hide, the graph's
+Full view), and the Lanes band's New lane and the empty Terminals row show the + menu's key beside what they open. Every one reads
+the key the person set (`src/app/keyHints.ts`), and shows none for an action they gave none.
+
 ### An agent's state, and needing the person
 
 **Paradev.** Principle 2's four states and the one glyph; a dot on each tab
