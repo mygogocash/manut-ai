@@ -297,8 +297,14 @@ export interface SessionHost extends HistoryHost {
   /** The editors installed on this computer, from the shell's fixed list (item 107); the page offers only those. Absent on a
    *  shell older than the item: no editor is offered then. */
   editors?(): Promise<{ id: string; label: string }[]>;
-  /** Open folder `cwd` in the editor `editor`, an id from that list and never a path or a command. */
-  openInEditor?(cwd: string, editor: string): Promise<void>;
+  /** Open folder `cwd` in the editor `editor`, an id from that list and never a path or a command. With `at` (item 148), the
+   *  file it names instead, at its line where the editor's own documentation says how; the shell checks that it is a file
+   *  inside `cwd`. */
+  openInEditor?(cwd: string, editor: string, at?: { path: string; row?: number; col?: number }): Promise<void>;
+  /** Which of `paths`, as a terminal printed them, are files inside folder `cwd` (item 148): each answer is the file's path
+   *  from `cwd` as the shell found it, or null for one that is missing, a folder, outside `cwd` or a link out of it. Absent on
+   *  a shell older than the item: a terminal then has no file links. */
+  filesInFolder?(cwd: string, paths: string[]): Promise<(string | null)[]>;
   /** The recent conversations `agent` keeps for `cwds`, newest first (read-only). */
   pastChats(agent: "claude" | "codex", cwds: string[]): Promise<PastChat[]>;
   /** The last messages of `agent`'s conversation `id` in `cwd`. */

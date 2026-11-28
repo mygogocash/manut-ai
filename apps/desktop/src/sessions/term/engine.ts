@@ -19,6 +19,8 @@ import { attachInput } from "./engine-input";
 import { attachIme } from "./engine-ime";
 import { attachMarks } from "./engine-marks";
 import { attachOsc52 } from "./engine-osc52";
+import { attachReclaim, takeBackModes } from "./engine-reclaim";
+import { attachPathLinks } from "./engine-paths";
 import { FIND_EVENT, makeFinder, type FindRequest } from "./engine-find";
 import { attachImages, detachImages, loadImages, virtualImages } from "./engine-image";
 import { GPU_OPTIONS } from "./look";
@@ -307,6 +309,8 @@ export function afterOpen(term: Terminal, el: HTMLElement, settings: TermSetting
   // links (Cmd/Ctrl+click), find (Cmd/Ctrl+F, the bar listens for the event) and the two clipboard settings
   const finder = makeFinder(term);
   const undoLinks = attachLinks(term);
+  // a file path with its line (`src/app.ts:12:5`) inside the terminal's session folder opens in the person's editor (engine-paths.ts)
+  const undoPaths = attachPathLinks(term, el);
   const undoInput = attachInput(term, el, () => {
     const detail: FindRequest = { term, finder };
     el.dispatchEvent(new CustomEvent<FindRequest>(FIND_EVENT, { bubbles: true, detail }));
@@ -317,6 +321,8 @@ export function afterOpen(term: Terminal, el: HTMLElement, settings: TermSetting
   const undoMarks = attachMarks(term, el);
   // a program's copy to the clipboard (OSC 52), copy only (engine-osc52.ts)
   const undoOsc52 = attachOsc52(term, el);
+  // which input modes a program turns on and off, so the ones a dead agent left on can be given back (engine-reclaim.ts)
+  const undoReclaim = attachReclaim(term, el);
   // a font that arrives after the terminal drew (the symbols font loads on its first glyph, or JetBrains Mono came
   // after the wait for it gave up): the cell is measured again in the font now drawn, and the GPU renderer's glyph
   // cache, which holds the fallback's shapes, is cleared
@@ -342,9 +348,11 @@ export function afterOpen(term: Terminal, el: HTMLElement, settings: TermSetting
     fonts?.removeEventListener?.("loadingdone", fontsLoaded);
     undoMarks();
     undoOsc52();
+    undoReclaim();
     undoIme();
     undoInput();
     undoLinks();
+    undoPaths();
     finder.dispose();
     s.gone = true;
     s.held = null;
@@ -410,6 +418,19 @@ export function live(term: Terminal): Terminal {
     else next.write(p.snapshot, took); // xterm decodes UTF-8 bytes itself
   }
   return next;
+}
+
+/** The program the shell of this app started in terminal `term` has ended. An agent CLI killed or crashed in the middle of
+ *  its screen never writes the escapes that turn its input modes off, so every key would reach the next program encoded
+ *  and the mouse would print reports until `reset`: what it left on is given back (engine-reclaim.ts). That is done at
+ *  once, so the line its owner writes next (that the program ended) is drawn on the screen it goes back to and not on the
+ *  alternate one it leaves, and again when what the program printed has been read, in case its own last escapes were
+ *  still waiting. A shell, or any program that is not an agent, reclaims nothing: the modes in it are its own. */
+export function programEnded(term: Terminal, el: HTMLElement, o: { agent: boolean }): void {
+  if (!o.agent) return;
+  const back = () => void takeBackModes(live(term), el);
+  back();
+  feed(term, "", back);
 }
 
 /** Whether `term` is parked: it has no xterm (nothing to dispose) until `live` makes it again. */

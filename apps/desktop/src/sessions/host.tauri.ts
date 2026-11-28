@@ -332,9 +332,15 @@ export class TauriHost implements SessionHost, BuddyHost {
     // (id, label) pairs, as the shell sends them
     return Array.isArray(list) ? list.flatMap((p) => (Array.isArray(p) && typeof p[0] === "string" && typeof p[1] === "string" ? [{ id: p[0], label: p[1] }] : [])) : [];
   }
-  async openInEditor(cwd: string, editor: string) {
+  async openInEditor(cwd: string, editor: string, at?: { path: string; row?: number; col?: number }) {
     const { invoke } = await this.core();
-    await invoke("session_open_in_editor", { cwd, editor });
+    await invoke("session_open_in_editor", { cwd, editor, file: at?.path ?? null, row: at?.row ?? null, col: at?.col ?? null });
+  }
+  async filesInFolder(cwd: string, paths: string[]) {
+    const { invoke } = await this.core();
+    const got = await invoke<unknown>("session_files_in_folder", { cwd, paths });
+    // one answer for each path asked, a string or null
+    return paths.map((_, i) => (Array.isArray(got) && typeof got[i] === "string" ? (got[i] as string) : null));
   }
   async pastChats(agent: "claude" | "codex", cwds: string[]) {
     const { invoke } = await this.core();

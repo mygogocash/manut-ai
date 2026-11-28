@@ -292,6 +292,8 @@ export type MockGlobals = MockTurnGlobals & {
   __manutEditors?: { id: string; label: string }[];
   /** e2e: the text the mock shell refuses an Open in editor with */
   __manutEditorFails?: string;
+  /** e2e: the files, from the folder, that exist in every session's folder (the default is `MOCK_FILES`). */
+  __manutFiles?: string[];
   /** e2e: the conversations Claude Code and Codex keep (none = the built-in ones) */
   __manutPastChats?: PastChat[];
   /** e2e: reads of those conversations, apart from the session calls (opening the + menu lists them) */
@@ -349,6 +351,9 @@ export interface MockProvider {
 const MOCK_PROGRAMS: Record<string, string> = { "cursor-agent": "/opt/homebrew/bin/cursor-agent", "acme-agent": "/opt/homebrew/bin/acme-agent", "stub-acp": "/usr/local/bin/stub-acp" };
 
 /** The mock's past conversations: two Claude Code and one Codex conversation in the e2e folders. */
+/** The files the mock shell finds in a session's folder (item 148), from the folder: what a terminal may link to. */
+const MOCK_FILES = ["src/app.ts", "src/checkout/cart.ts", "README.md"];
+
 const MOCK_EDITORS = [
   { id: "vscode", label: "Visual Studio Code" },
   { id: "cursor", label: "Cursor" },
@@ -1239,11 +1244,28 @@ export class MockHost implements SessionHost, BuddyHost {
   async editors() {
     return this.g.__manutEditors ?? MOCK_EDITORS;
   }
-  async openInEditor(cwd: string, editor: string) {
-    this.log({ op: "editor", cwd, editor });
+  async openInEditor(cwd: string, editor: string, at?: { path: string; row?: number; col?: number }) {
+    this.log({ op: "editor", cwd, editor, ...(at ? { file: at.path, row: at.row, col: at.col } : {}) });
     // a spec makes the shell refuse, with the shell's own words
     const refuse = this.g.__manutEditorFails;
     if (refuse) throw new Error(refuse);
+  }
+  /** As the shell (folder_open.rs `files_in_folder`): the paths a spec says are files in the folder (`__manutFiles`, from the
+   *  folder, default a few), kept only when they sit inside it once `.` and `..` are read; the others answer null. */
+  async filesInFolder(cwd: string, paths: string[]) {
+    const known = this.g.__manutFiles ?? MOCK_FILES;
+    const root = cwd.replace(/\/+$/, "");
+    return paths.map((p) => {
+      if (!p || p.includes("\0")) return null;
+      const parts: string[] = [];
+      for (const seg of (p.startsWith("/") ? p : `${root}/${p}`).split("/")) {
+        if (seg === "..") parts.pop();
+        else if (seg && seg !== ".") parts.push(seg);
+      }
+      const full = `/${parts.join("/")}`;
+      const rel = full.startsWith(`${root}/`) ? full.slice(root.length + 1) : null;
+      return rel !== null && known.includes(rel) ? rel : null;
+    });
   }
   async pastChats(agent: "claude" | "codex", cwds: string[]) {
     (this.g.__manutPastReads ??= []).push({ op: "list", agent, cwds });

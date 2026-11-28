@@ -1,0 +1,5 @@
+# The owner's ask of 28 Nov 2026: align the code mode with Paradev's interaction and UX
+
+| Date | Decision | Why | By | Undo by |
+| --- | --- | --- | --- | --- |
+| 28 Nov 2026 | The owner said "I really love the interaction and how UX from Paradev, make sure that we align with its best practices". The lead reads it as: the code mode follows Paradev's interaction patterns (how a developer moves, finds, reviews and is told what needs them), studied first as item 167 (`docs/paradev-ux.md`), while Manut AI keeps its own look (the brand's faces, colours and motion rules, `docs/design-audit.md`, `docs/motion.md`) and its one promise (anything public, costly or irreversible asks first, through approval-core). Buddy's side for shop owners keeps its own design | Paradev is MIT licensed and built for the same developer flows as the code mode; its patterns can be learned from and lifted with a credit, and a copy of its look would leave Manut AI's brand | Owner (the ask), Claude (the reading) | Drop item 167's rows |

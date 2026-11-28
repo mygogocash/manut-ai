@@ -1586,10 +1586,24 @@ async fn editors_installed() -> Result<Vec<(String, String)>, String> {
 }
 
 /// Open a folder in an editor named by an id from the fixed list (rule 30, item 107): the folder is an absolute path to
-/// a folder that exists, the editor never a path or a command from the page.
+/// a folder that exists, the editor never a path or a command from the page. With `file` (item 148: a Cmd+click on
+/// `path:row:col` in a terminal) the file is opened instead, at `row` and `col` where the editor's own documentation says
+/// how; it must be a file inside the folder, which the shell checks again here whatever the page checked.
 #[tauri::command]
-async fn session_open_in_editor(cwd: String, editor: String) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || folder_open::open_in_editor(&cwd, &editor)).await.map_err(|e| e.to_string())?
+async fn session_open_in_editor(cwd: String, editor: String, file: Option<String>, row: Option<u32>, col: Option<u32>) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let at = file.map(|path| folder_open::At { path, row, col });
+        folder_open::open_in_editor(&cwd, &editor, at.as_ref())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Which of the paths a terminal printed are files inside the session's folder (item 148): for each, its path from the folder,
+/// or null when it is not a file inside it (missing, a folder, outside, or a link out). The page offers a link only for those.
+#[tauri::command]
+async fn session_files_in_folder(cwd: String, paths: Vec<String>) -> Result<Vec<Option<String>>, String> {
+    tauri::async_runtime::spawn_blocking(move || folder_open::files_in_folder(&cwd, &paths)).await.map_err(|e| e.to_string())?
 }
 
 /// The home a session of `agent` reads its conversations from: the account it ran with (`account`), else the account
@@ -2071,6 +2085,7 @@ fn commands(invoke: tauri::ipc::Invoke) -> bool {
         session_open_terminal,
         editors_installed,
         session_open_in_editor,
+        session_files_in_folder,
         past_chats_list,
         past_chats_recent,
         import_past_scan,
