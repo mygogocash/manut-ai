@@ -4,9 +4,10 @@
 // Where the list comes from, and why it costs nothing per row:
 //  - The Tasks page notes every pull request list it reads (`notePulls`), so what a person has looked at there is known here.
 //  - The Code page reads the repository's open pull requests itself only when the cache holds none for it or the last read is older
-//    than `PULLS_MAX_AGE`: one `tasks_list` call for the whole repository, never one for a lane, and never on a timer (it runs
-//    when the page shows a lane with a branch of its own and the cache is stale; a failed read is not tried again within the
-//    same time). Nothing is written to GitHub or GitLab; the call is the one Tasks makes.
+//    than `PULLS_MAX_AGE`: one call for the whole repository (`pulls_board`, the Pull requests list's own read, since item 167e;
+//    `tasks_list` where the host has no such read), never one for a lane, and never on a timer (it runs when the page shows a lane
+//    with a branch of its own and the cache is stale; a failed read is not tried again within the same time). Nothing is written
+//    to GitHub or GitLab; the call is one Tasks makes.
 // The cache lives in memory: a pull request's state is not something to show from last week.
 //
 // A request is known by the repository its branch is in and the branch's name, never the name alone (item 86): anyone can open a
@@ -15,17 +16,27 @@
 // this repository; any other is kept under its own, which no lane looks up.
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { taskHost, type TaskHost } from "./host";
-import type { CliSource, TaskItem, TaskRemote } from "./types";
+import type { CliSource, PullRow, TaskChecks, TaskItem, TaskRemote } from "./types";
 import { changes } from "../lib/changes";
 
-/** A pull request as a lane's row shows it. Only open and draft ones are listed: the list is of open requests. */
+/** A pull request as a lane's row shows it. Only open and draft ones are listed: the list is of open requests. Its checks, its review
+ *  and whether it conflicts are what the list it came from said (item 167e: the lane's top bar says them beside its Merge, as a row of
+ *  Tasks › Pull requests does). Every list carries the checks; only the Pull requests list's own read (`board`, src-tauri/src/pulls.rs)
+ *  carries the review and the conflict, so they are absent when the list did not say, never guessed. */
 export interface LanePull {
   source: CliSource;
   repo: string;
   number: number;
   state: "open" | "draft";
   title: string;
+  /** null: the list said nothing of its checks (a request the app noted itself as it opened it). */
+  checks?: TaskChecks | null;
+  review?: PullRow["review"];
+  conflict?: boolean;
 }
+
+/** A list's row as `notePulls` reads it: Tasks' row, with the review and the conflict when it is the Pull requests list's. */
+type ListedPull = TaskItem & Partial<Pick<PullRow, "review" | "conflict">>;
 
 /** How long a read of a repository's pull requests is good for. */
 export const PULLS_MAX_AGE = 5 * 60_000;
@@ -55,7 +66,7 @@ const branchKey = (repo: string, i: Pick<TaskItem, "same" | "from">, branch: str
 
 /** `items` (a list of pull requests the app just read for `repo`) into the cache. `whole`: the list is every open request of the
  *  repository's first page, so what it leaves out is no longer open; otherwise it is only added to what is known. */
-export function notePulls(source: CliSource, repo: string, items: readonly TaskItem[], now: number, whole = false): void {
+export function notePulls(source: CliSource, repo: string, items: readonly ListedPull[], now: number, whole = false): void {
   const prev = known.get(keyOf(source, repo));
   const byBranch = whole || !prev ? new Map<string, LanePull>() : new Map(prev.byBranch);
   for (const i of items) {
@@ -64,7 +75,17 @@ export function notePulls(source: CliSource, repo: string, items: readonly TaskI
     // two open requests from one branch of one repository: the newer (higher number) is the one the person means
     const key = branchKey(repo, i, i.head);
     const was = byBranch.get(key);
-    if (!was || was.number < i.number) byBranch.set(key, { source, repo, number: i.number, state: i.state, title: i.title });
+    if (!was || was.number < i.number)
+      byBranch.set(key, {
+        source,
+        repo,
+        number: i.number,
+        state: i.state,
+        title: i.title,
+        checks: i.checks ?? null,
+        ...(i.review !== undefined ? { review: i.review } : {}),
+        ...(i.conflict !== undefined ? { conflict: i.conflict } : {}),
+      });
   }
   known.set(keyOf(source, repo), { at: now, byBranch });
   bump();
@@ -114,7 +135,10 @@ export async function readPulls(host: TaskHost, source: CliSource, repo: string,
   if (!shouldRead(source, repo, now)) return;
   asked.set(keyOf(source, repo), now);
   try {
-    const page = await host.list(source, repo, "prs", "open", 0);
+    // The Pull requests list's own read where the host has one (item 167e): the same open requests, each with its review and whether
+    // it conflicts, which the lane's top bar says beside its Merge. One call for the repository either way, and GitHub answers an
+    // unchanged list without counting it (pulls.rs). A host without it (an older stand-in) is read as before.
+    const page = host.board ? await host.board(source, repo) : await host.list(source, repo, "prs", "open", 0);
     notePulls(source, repo, page.items, now, !page.more);
   } catch {
     /* gh or glab missing, signed out, offline: no pull request on the row */

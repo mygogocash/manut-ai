@@ -347,7 +347,9 @@ function JobItem({ group, now, open, onToggle, onView, lane }: { group: JobGroup
   );
 }
 
-function branchTitle(b: LaneBranchTag): string {
+/** What a lane's branch tag says when pointed at: where the branch was made, or why the folder is on another (the lane's header too,
+ *  LaneStep.tsx). */
+export function branchTitle(b: LaneBranchTag): string {
   switch (b.kind) {
     case "own":
       return b.dir ? t("lane.madeFromIn", { base: b.base, folder: b.dir }) : t("lane.madeFrom", { base: b.base });

@@ -14,13 +14,15 @@
 // yet...); the ask shows what will happen; Yes runs it once. Changing what is asked takes the ask back first, so a Yes never lands
 // on words the person no longer sees.
 //
-// `ReviewView` draws a given step so a test can draw each one; `Review` keeps the step and talks to the shell.
+// `ReviewView` draws a given step so a test can draw each one; `ReviewFlow` walks the steps and talks to the shell, apart from any
+// page, so the panel under a lane's row (`Review`) and the lane's top bar (LaneStep.tsx, item 167e) walk the very same steps and a
+// test walks them without a page.
 import "./review.css";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { t, type Key } from "../i18n";
 import { titleModel, titlesFor, useTitleModel } from "../lib/titleModel";
 import { pullMaterial, whyKey } from "../sessions/titleWords";
-import { getHost } from "../sessions/host";
+import { getHost, type SessionHost } from "../sessions/host";
 import { maskSecrets } from "../lib/secrets";
 import { openExternal } from "../lib/openExternal";
 import { setSourceSettings, sourceSettings, startMethod } from "../lib/sourceControl";
@@ -122,6 +124,9 @@ export interface ReviewViewProps {
   onOpenUrl?: (url: string) => void;
   /** The merge methods the repository allows (the Pull requests list reads them, item 100); none: all three. */
   methods?: readonly MergeMethod[];
+  /** false: closed, the panel shows only what the last answer did, since the lane's top bar holds the one button that opens it (item
+   *  167e); the quiet links are the row's. */
+  links?: boolean;
 }
 
 function TextBox({ text, testId }: { text: string; testId: string }) {
@@ -235,8 +240,10 @@ export function ReviewView(p: ReviewViewProps) {
   const s = p.step;
   if (s.at === "closed") {
     const done = s.done ?? null;
-    const mergeable = !!p.pull && p.pull.state === "open" && !!p.onMergeStart;
-    if (p.pull && !done && !mergeable) return null;
+    const links = p.links !== false;
+    const offer = links && !p.pull;
+    const mergeable = links && !!p.pull && p.pull.state === "open" && !!p.onMergeStart;
+    if (!done && !offer && !mergeable) return null;
     return (
       <div className="review" data-testid="review">
         {done && (
@@ -252,7 +259,7 @@ export function ReviewView(p: ReviewViewProps) {
             )}
           </p>
         )}
-        {!p.pull && (
+        {offer && (
           <p>
             <button type="button" className="lk" onClick={p.onStart} title={t("review.startTip")} data-testid="review-start">
               {t("review.start")}
@@ -329,6 +336,204 @@ export function ReviewView(p: ReviewViewProps) {
   return <div className="review" data-testid="review">{s.ask.kind === "merge" ? <MergeAsk a={s.ask} s={s} p={p} /> : <OpenAsk a={s.ask} s={s} p={p} />}</div>;
 }
 
+/** What the steps need of the shell: the reads and asks of src-tauri/src/review.rs, and the title run behind Suggest. Nothing here
+ *  can write: a push, a pull request or a merge runs only from a settled ask (reviewAsk.ts). */
+export type FlowHost = Pick<SessionHost, "reviewDraft" | "reviewAsk" | "reviewMerge" | "reviewSettle" | "reviewWithdraw" | "titleRun" | "laneDiff">;
+
+/** The steps of one lane's Put up for review and Merge (item 75): closed with what the last answer did, a draft or a method, then
+ *  the one ask, settled once. It keeps the step itself and says when it moved, so a page subscribes to it and a test drives it.
+ *  `title` and `pull` follow the lane (its title, and the open pull request made from its branch when the app has read one). */
+export class ReviewFlow {
+  private step: ReviewStep = { at: "closed" };
+  /** The ask now waiting, taken back when the lane or the panel goes. */
+  private asked: string | null = null;
+  private listeners = new Set<() => void>();
+  title = "";
+  pull: LanePull | null = null;
+
+  constructor(
+    readonly host: FlowHost,
+    readonly worktree: string,
+  ) {}
+
+  get = (): ReviewStep => this.step;
+
+  subscribe = (l: () => void): (() => void) => {
+    this.listeners.add(l);
+    return () => void this.listeners.delete(l);
+  };
+
+  private set(next: ReviewStep | ((s: ReviewStep) => ReviewStep)): void {
+    this.step = typeof next === "function" ? next(this.step) : next;
+    this.listeners.forEach((l) => l());
+  }
+
+  /** Whether this shell can ask at all: without its ask and its settle nothing is offered. */
+  get can(): boolean {
+    return !!this.host.reviewAsk && !!this.host.reviewSettle;
+  }
+
+  /** Whether it can ask to merge. */
+  get canMerge(): boolean {
+    return !!this.host.reviewMerge;
+  }
+
+  /** Takes an ask left waiting back, on both sides, so a later answer runs nothing. */
+  drop = (): void => {
+    const id = this.asked;
+    this.asked = null;
+    if (id) void withdrawReviewAsk(this.host, id);
+  };
+
+  /** Put up for review: the draft, its words from the lane's commits and its title, both the person's to change. Only reads. */
+  start = async (): Promise<void> => {
+    this.set({ at: "draft", ...draftOf(null, this.title), busy: true, why: null });
+    const draft = await this.host.reviewDraft?.(this.worktree).catch(() => null);
+    this.set((s) => (s.at === "draft" && s.busy ? { ...s, ...draftOf(draft ?? null, this.title), busy: false } : s));
+  };
+
+  /** Merge: the method, starting from Settings › Source control. Asks nothing. */
+  mergeStart = (): void => this.set({ at: "method", method: startMethod(sourceSettings()), busy: false, why: null });
+
+  /** The lane's top bar's one button (item 167e): it opens the step it names, the draft or the method, exactly as the row's quiet link
+   *  does. A press asks the shell for nothing that writes and answers no ask: the push, the pull request and the merge wait for Ask
+   *  and then for a Yes that approval-core settled. */
+  press = (step: "review" | "merge"): void => {
+    if (step === "merge") this.mergeStart();
+    else void this.start();
+  };
+
+  private asking = async (make: () => Promise<ReviewAsk>, back: ReviewStep): Promise<void> => {
+    try {
+      const got = await make();
+      await openReviewAsk(got);
+      this.asked = got.id;
+      this.set({ at: "ask", ask: got, busy: false, why: null });
+    } catch (e) {
+      this.set({ ...back, why: e instanceof Error ? e.message : String(e) } as ReviewStep);
+    }
+  };
+
+  /** Ask (the draft's): the shell reads the lane now and answers the ask, or why not. Writes nothing. */
+  ask = async (): Promise<void> => {
+    const s = this.step;
+    const make = this.host.reviewAsk;
+    if (s.at !== "draft" || !make) return;
+    const { title, body } = s;
+    this.set({ ...s, busy: true, why: null });
+    await this.asking(() => make(this.worktree, title, body), { at: "draft", title, body, busy: false, why: null });
+  };
+
+  /** Ask (the method's): the shell reads the pull request now and answers the merge's ask, or why not. Writes nothing. */
+  mergeAsk = async (): Promise<void> => {
+    const s = this.step;
+    const pull = this.pull;
+    const make = this.host.reviewMerge;
+    if (s.at !== "method" || !pull || !make) return;
+    const { method } = s;
+    // the method the person chose is the one "the last one I chose" starts with next time
+    setSourceSettings({ lastMethod: method });
+    this.set({ ...s, busy: true, why: null });
+    await this.asking(() => make(this.worktree, pull.number, method, sourceSettings().dropCredits), { at: "method", method, busy: false, why: null });
+  };
+
+  /** The person's Yes or No to the ask shown: approval-core settles it, and only then does the shell hear of it, once. */
+  answer = async (yes: boolean): Promise<void> => {
+    const s = this.step;
+    if (s.at !== "ask" || s.busy) return;
+    const a = s.ask;
+    this.set({ ...s, busy: true, why: null });
+    const got = await answerReviewAsk(this.host, a.id, yes);
+    this.asked = null;
+    if (!got.ok) {
+      this.set({ at: "closed", kind: a.kind, done: { outcome: "failed", pushed: false, url: "", number: 0, step: "settle", error: whyWords(got.refused) } });
+      return;
+    }
+    // an opened pull request shows on the lane's row at once, as Tasks would list it, until the next read of the list; a merged
+    // one leaves it
+    if (got.done.outcome === "opened" && got.done.number > 0) {
+      notePulls(a.source, a.repo, [{ number: got.done.number, title: a.title, state: "open", url: got.done.url, labels: [], author: "", created: 0, updated: 0, checks: null, head: a.branch, same: true }], Date.now());
+    }
+    if (got.done.outcome === "merged") dropPull(a.source, a.repo, a.number);
+    this.set({ at: "closed", kind: a.kind, done: got.done.outcome === "declined" ? null : got.done });
+  };
+
+  close = (): void => {
+    this.drop();
+    this.set({ at: "closed" });
+  };
+
+  edit = (patch: { title?: string; body?: string }): void => this.set((s) => (s.at === "draft" ? { ...s, ...patch, why: null } : s));
+
+  method = (method: MergeMethod): void => this.set((s) => (s.at === "method" ? { ...s, method, why: null } : s));
+
+  /** Back from the ask to what it was made from: the ask is taken back first, so a Yes never lands on words the person no longer
+   *  sees. */
+  change = (): void => {
+    const s = this.step;
+    if (s.at !== "ask") return;
+    this.drop();
+    const a = s.ask;
+    this.set(a.kind === "merge" ? { at: "method", method: a.method || startMethod(sourceSettings()), busy: false, why: null } : { at: "draft", title: a.title, body: a.body, busy: false, why: null });
+  };
+
+  /** Suggest: the person's chosen model writes a title and a description from the lane's commits and changed files, and they go into
+   *  the two fields to be read and changed. Nothing is asked of the host's pull request path: Ask is still the person's. */
+  suggest = async (): Promise<void> => {
+    const s = this.step;
+    const run = this.host.titleRun;
+    if (s.at !== "draft" || s.writing || !run) return;
+    this.set({ ...s, writing: true, why: null });
+    const settings = titleModel();
+    try {
+      const draft = await this.host.reviewDraft?.(this.worktree).catch(() => null);
+      const folder = await this.host.laneDiff(this.worktree).catch(() => null);
+      const got = await run({ agent: "claude", model: settings.model, effort: settings.effort, purpose: "pull", key: this.worktree, material: pullMaterial(draft?.commits ?? [], folder?.files ?? []) });
+      if (!got.title) throw new Error("empty");
+      this.set((x) => (x.at === "draft" ? { ...x, title: got.title, body: got.body, writing: false, why: null } : x));
+    } catch (e) {
+      this.set((x) => (x.at === "draft" ? { ...x, writing: false, why: t(`titles.why.${whyKey(e)}` as Key) } : x));
+    }
+  };
+}
+
+/** The steps of the lane whose own folder is `worktree`, kept while it is shown: a new lane gets new steps, and an ask left waiting is
+ *  taken back when the lane or the page that shows it goes. */
+export function useReviewFlow(worktree: string, title: string, pull: LanePull | null): ReviewFlow {
+  const [held, setHeld] = useState(() => new ReviewFlow(getHost(), worktree));
+  let flow = held;
+  if (held.worktree !== worktree) {
+    // another lane in the same place: its own steps, from closed (React's own way to start over from what a render was given)
+    flow = new ReviewFlow(getHost(), worktree);
+    setHeld(flow);
+  }
+  flow.title = title;
+  flow.pull = pull;
+  useSyncExternalStore(flow.subscribe, flow.get, flow.get);
+  useEffect(() => flow.drop, [flow]);
+  return flow;
+}
+
+/** The props that draw `flow`'s step: every press goes to the flow. */
+export function flowProps(flow: ReviewFlow, suggest: boolean): Omit<ReviewViewProps, "pull"> {
+  return {
+    step: flow.get(),
+    onStart: () => void flow.start(),
+    onTitle: (v) => flow.edit({ title: v }),
+    onBody: (v) => flow.edit({ body: v }),
+    onAsk: () => void flow.ask(),
+    ...(suggest ? { onSuggest: () => void flow.suggest() } : {}),
+    ...(flow.canMerge ? { onMergeStart: flow.mergeStart } : {}),
+    onMethod: flow.method,
+    onMergeAsk: () => void flow.mergeAsk(),
+    onYes: () => void flow.answer(true),
+    onNo: () => void flow.answer(false),
+    onClose: flow.close,
+    onChange: flow.change,
+    onOpenUrl: (url) => void openExternal(url).catch(() => undefined),
+  };
+}
+
 export interface ReviewProps {
   /** The lane's own folder (its worktree) and its title. */
   worktree: string;
@@ -339,115 +544,10 @@ export interface ReviewProps {
 
 /** The panel of one lane: closed with its link, a draft or a method, or an ask, and what the last answer did. */
 export function Review({ worktree, title, pull = null }: ReviewProps) {
-  const [step, setStep] = useState<ReviewStep>({ at: "closed" });
-  const asked = useRef<string | null>(null);
-  const host = getHost();
+  const flow = useReviewFlow(worktree, title, pull);
   const words = useTitleModel();
-
-  // an ask left waiting when the lane or the panel goes is taken back
-  const drop = useCallback(() => {
-    const id = asked.current;
-    asked.current = null;
-    if (id) void withdrawReviewAsk(getHost(), id);
-  }, []);
-  useEffect(() => drop, [drop, worktree]);
-
-  if (!host.reviewAsk || !host.reviewSettle) return null;
-
-  const start = async () => {
-    setStep({ at: "draft", ...draftOf(null, title), busy: true, why: null });
-    const draft = await host.reviewDraft?.(worktree).catch(() => null);
-    setStep((s) => (s.at === "draft" && s.busy ? { ...s, ...draftOf(draft ?? null, title), busy: false } : s));
-  };
-  const asking = async (make: () => Promise<ReviewAsk>, back: ReviewStep) => {
-    try {
-      const got = await make();
-      await openReviewAsk(got);
-      asked.current = got.id;
-      setStep({ at: "ask", ask: got, busy: false, why: null });
-    } catch (e) {
-      setStep({ ...back, why: e instanceof Error ? e.message : String(e) } as ReviewStep);
-    }
-  };
-  const ask = async () => {
-    if (step.at !== "draft") return;
-    const { title: tt, body } = step;
-    setStep({ ...step, busy: true, why: null });
-    await asking(() => host.reviewAsk!(worktree, tt, body), { at: "draft", title: tt, body, busy: false, why: null });
-  };
-  const mergeAsk = async () => {
-    if (step.at !== "method" || !pull || !host.reviewMerge) return;
-    const { method } = step;
-    // the method the person chose is the one "the last one I chose" starts with next time
-    setSourceSettings({ lastMethod: method });
-    setStep({ ...step, busy: true, why: null });
-    await asking(() => host.reviewMerge!(worktree, pull.number, method, sourceSettings().dropCredits), { at: "method", method, busy: false, why: null });
-  };
-  const answer = async (yes: boolean) => {
-    if (step.at !== "ask" || step.busy) return;
-    const a = step.ask;
-    setStep({ ...step, busy: true, why: null });
-    const got = await answerReviewAsk(host, a.id, yes);
-    asked.current = null;
-    if (!got.ok) {
-      setStep({ at: "closed", kind: a.kind, done: { outcome: "failed", pushed: false, url: "", number: 0, step: "settle", error: whyWords(got.refused) } });
-      return;
-    }
-    // an opened pull request shows on the lane's row at once, as Tasks would list it, until the next read of the list; a merged
-    // one leaves it
-    if (got.done.outcome === "opened" && got.done.number > 0) {
-      notePulls(a.source, a.repo, [{ number: got.done.number, title: a.title, state: "open", url: got.done.url, labels: [], author: "", created: 0, updated: 0, checks: null, head: a.branch, same: true }], Date.now());
-    }
-    if (got.done.outcome === "merged") dropPull(a.source, a.repo, a.number);
-    setStep({ at: "closed", kind: a.kind, done: got.done.outcome === "declined" ? null : got.done });
-  };
-  const close = () => {
-    drop();
-    setStep({ at: "closed" });
-  };
-  /** Suggest: the person's chosen model writes a title and a description from the lane's commits and changed files, and they go into
-   *  the two fields to be read and changed. Nothing is asked of the host's pull request path: Ask is still the person's. */
-  const suggest = async () => {
-    if (step.at !== "draft" || step.writing || !host.titleRun) return;
-    setStep({ ...step, writing: true, why: null });
-    const settings = titleModel();
-    try {
-      const draft = await host.reviewDraft?.(worktree).catch(() => null);
-      const folder = await host.laneDiff(worktree).catch(() => null);
-      const got = await host.titleRun({ agent: "claude", model: settings.model, effort: settings.effort, purpose: "pull", key: worktree, material: pullMaterial(draft?.commits ?? [], folder?.files ?? []) });
-      if (!got.title) throw new Error("empty");
-      setStep((s) => (s.at === "draft" ? { ...s, title: got.title, body: got.body, writing: false, why: null } : s));
-    } catch (e) {
-      setStep((s) => (s.at === "draft" ? { ...s, writing: false, why: t(`titles.why.${whyKey(e)}` as Key) } : s));
-    }
-  };
-  const edit = (patch: { title?: string; body?: string }) => setStep((s) => (s.at === "draft" ? { ...s, ...patch, why: null } : s));
-  const change = () => {
-    if (step.at !== "ask") return;
-    drop();
-    const a = step.ask;
-    setStep(a.kind === "merge" ? { at: "method", method: a.method || startMethod(sourceSettings()), busy: false, why: null } : { at: "draft", title: a.title, body: a.body, busy: false, why: null });
-  };
-
-  return (
-    <ReviewView
-      step={step}
-      pull={pull}
-      onStart={() => void start()}
-      onTitle={(v) => edit({ title: v })}
-      onBody={(v) => edit({ body: v })}
-      onAsk={() => void ask()}
-      {...(host.titleRun && titlesFor("claude", words) ? { onSuggest: () => void suggest() } : {})}
-      {...(host.reviewMerge ? { onMergeStart: () => setStep({ at: "method", method: startMethod(sourceSettings()), busy: false, why: null }) } : {})}
-      onMethod={(method) => setStep((s) => (s.at === "method" ? { ...s, method, why: null } : s))}
-      onMergeAsk={() => void mergeAsk()}
-      onYes={() => void answer(true)}
-      onNo={() => void answer(false)}
-      onClose={close}
-      onChange={change}
-      onOpenUrl={(url) => void openExternal(url).catch(() => undefined)}
-    />
-  );
+  if (!flow.can) return null;
+  return <ReviewView {...flowProps(flow, !!flow.host.titleRun && titlesFor("claude", words))} pull={pull} />;
 }
 
 /** The panel of the lane whose branch is `branch` in project `root`, with the open pull request made from it when the app has read

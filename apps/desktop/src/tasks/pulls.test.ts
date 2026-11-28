@@ -89,6 +89,25 @@ describe("reading the repository", () => {
     expect(pullFor("github", "o/r", "kit/promptpay-qr")?.number).toBe(12);
   });
 
+  it("reads the Pull requests list's own read where the host has one, and keeps each request's checks, review and conflict (item 167e)", async () => {
+    const row = { ...pr(12, "kit/promptpay-qr"), checks: { passed: 1, failed: 0, pending: 2, total: 3 }, review: "required" as const, conflict: true, base: "main" };
+    const board = vi.fn(async () => ({ items: [row], more: false, at: 0 }));
+    const host = fakeHost({ board } as never);
+    await readPulls(host, "github", "o/r", NOW);
+    expect(board).toHaveBeenCalledTimes(1);
+    expect(board).toHaveBeenCalledWith("github", "o/r");
+    expect(host.list).not.toHaveBeenCalled();
+    expect(pullFor("github", "o/r", "kit/promptpay-qr")).toEqual({ source: "github", repo: "o/r", number: 12, state: "open", title: "change 12", checks: { passed: 1, failed: 0, pending: 2, total: 3 }, review: "required", conflict: true });
+  });
+
+  it("leaves the review and the conflict out when the list did not say them, and says unknown checks as null", () => {
+    notePulls("github", "o/r", [pr(5, "kit/x")], NOW);
+    const p = pullFor("github", "o/r", "kit/x");
+    expect(p?.checks).toBeNull();
+    expect(p && "review" in p).toBe(false);
+    expect(p && "conflict" in p).toBe(false);
+  });
+
   it("reads again only when the answer is old", async () => {
     const host = fakeHost();
     await readPulls(host, "github", "o/r", NOW);

@@ -9,9 +9,11 @@
 // Tests shows what the lane keeps of its tests (lane.ts): the last run that finished, as testRun.ts read it, with when it finished
 // and the command that ran it, whether a file changed since, and any run still in progress. The lane keeps none of a test's output
 // (it can print anything), so the board's sample output is not drawn: what is shown is the result that was read.
+// Put up for review and Merge are not here since item 167e: the lane's top bar holds its one button (LaneStep.tsx), as the canvas's Code
+// board draws it, and the pane starts with its chips, as the board's does.
 // `LanePaneView` takes everything it shows as props and uses no hooks, so a test can draw it; `LanePane` reads the stores.
 import "./lanepane.css";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { hhmm } from "../app/time";
 import { t, type Key } from "../i18n";
 import type { DiffFile } from "../lib/protocol";
@@ -53,8 +55,6 @@ export interface LanePaneProps {
   tests: LaneTests;
   /** How a time (ms) is written; the time of day by default. */
   time?: (ms: number) => string;
-  /** Put up for review and its ask (Review.tsx), over the chips, for a lane with a folder and a branch of its own. */
-  review?: ReactNode;
   /** The Diff's scopes (All changes, Not committed, Commits) and the review that fills the last two (item 146): none where only the
    *  chat's events say what changed, which is the whole list alone. */
   scopes?: PaneScopes | null;
@@ -134,12 +134,11 @@ function TestsPane({ tests, time }: { tests: LaneTests; time: (ms: number) => st
 const NONE: Current = { key: null, was: 0 };
 const nothing = () => undefined;
 
-export function LanePaneView({ view, onView, files, moreFiles, needs, asked, onAdd, preview, tests, time = (ms) => hhmm(new Date(ms)), review, scopes = null, prefs = DIFF_DEFAULTS, onPrefs = nothing, current = NONE, onCurrent = nothing }: LanePaneProps) {
+export function LanePaneView({ view, onView, files, moreFiles, needs, asked, onAdd, preview, tests, time = (ms) => hhmm(new Date(ms)), scopes = null, prefs = DIFF_DEFAULTS, onPrefs = nothing, current = NONE, onCurrent = nothing }: LanePaneProps) {
   return (
     // the diff, the tests and a preview's text can be selected and noted for the chat beside it (item 97, chat/box/SelectionNote.tsx);
     // ⌘F here is not the chat's find (item 150): this pane keeps the key for a find of its own (src/chat/find/host.ts)
     <aside className="lpane" data-testid="lane-pane" data-view={view} data-note-source data-own-find {...(view === "diff" && prefs.layout === "split" ? { "data-wide": "" } : {})}>
-      {review}
       <div className="fgroup" role="group" aria-label={t("lane.pane.title")}>
         {VIEWS.map((v) => (
           <button key={v} type="button" className="fchip" aria-pressed={view === v} onClick={() => onView(v)} data-testid={`lane-chip-${v}`}>
@@ -169,7 +168,7 @@ function useChangedFiles(chat: Chat | undefined): DiffFile[] {
 
 /** The pane of the lane whose chat has key `chatKey`, which holds `chat`. `laneDir` is the lane's own folder, or null when the
  *  session works in the developer's own folder, where no preview is started. */
-export function LanePane({ chatKey, chat, laneDir = null, review }: { chatKey: string; chat: Chat | undefined; laneDir?: string | null; review?: ReactNode }) {
+export function LanePane({ chatKey, chat, laneDir = null }: { chatKey: string; chat: Chat | undefined; laneDir?: string | null }) {
   // the lane and what Kit's changes read move with the session's events
   useLanesVersion();
   usePreviewVersion();
@@ -232,7 +231,6 @@ export function LanePane({ chatKey, chat, laneDir = null, review }: { chatKey: s
       onAdd={setAsked}
       preview={preview}
       tests={laneTests(laneOf(chatKey))}
-      review={review}
       scopes={scopes}
       prefs={prefs}
       onPrefs={setDiffPrefs}

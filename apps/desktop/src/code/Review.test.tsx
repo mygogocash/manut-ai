@@ -46,6 +46,16 @@ describe("Put up for review", () => {
     expect(draw({ at: "closed" }, { pull: { source: "github", repo: "o/r", number: 12, state: "open", title: "x" } })).toBe("");
   });
 
+  it("offers no link where the lane's top bar holds the button (item 167e), and still says what the last answer did", () => {
+    expect(draw({ at: "closed" }, { links: false })).toBe("");
+    expect(draw({ at: "closed" }, { links: false, pull: PULL, onMergeStart: noop })).toBe("");
+    const done = draw({ at: "closed", done: { outcome: "opened", pushed: true, url: "https://github.com/o/r/pull/7", number: 7, step: "", error: "" } }, { links: false });
+    expect(words(done)).toBe(`${t("review.done.opened", { n: 7 })} ${t("review.done.openLink")}`);
+    expect(done).not.toContain("review-start");
+    // the steps after the press are the row's very own
+    expect(draw({ at: "draft", title: "x", body: "", busy: false, why: null }, { links: false })).toContain('data-testid="review-draft"');
+  });
+
   it("asks with exactly what will go: the repository, the branch, the base, the title and the body, line ends kept", () => {
     const html = draw({ at: "ask", ask: ASK, busy: false, why: null });
     const text = words(html);

@@ -1,0 +1,136 @@
+/* The lane's next step (LaneStep.tsx, item 167e): the design canvas's Code board draws the lane's top bar with the branch as a mono tag,
+   the state as a tag, and one dark button at its right. The canvas's rules (.tag, .tag.mono, .tag.ok, .tag.err, .tag.warn and .btn.dark
+   from packages/ui-kit/app.css) are copied and scoped under the header's new parts, as lanepane.css scopes the pane's. The canvas's short
+   token names map onto the desktop's (src/theme/tokens.css): --band is --aui-subtle, --oki and --erri are --aui-success and
+   --aui-danger, --pri and --onpri are --aui-primary and --aui-on-primary. Lines that are the desktop's own say so. */
+
+/* The branch and the state, after the header's own words. They give way after the path and before the title, and the branch, which
+   can be a long name, ends in an ellipsis. */
+.ss-head-lane {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 100000 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+.ss-head-lane .tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  padding: 2px 8px;
+  border-radius: var(--rad-pill);
+  background: var(--aui-subtle);
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.ss-head-lane .tag.mono {
+  display: block;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--aui-font-mono);
+}
+.ss-head-lane .tag.ok {
+  background: var(--okbg);
+  color: var(--aui-success);
+}
+.ss-head-lane .tag.err {
+  background: var(--errbg);
+  color: var(--aui-danger);
+}
+.ss-head-lane .tag.warn {
+  background: var(--warnbg);
+}
+
+/* The desktop's own: the header's slot is no box of its own, so the request's state and the button are the header's own items. The
+   first of them takes the header's free room before it, which the controls on the right otherwise take. */
+.ss-step-slot {
+  display: contents;
+}
+.ss-step-slot > :first-child {
+  margin-left: auto;
+}
+.ss-step-slot:not(:empty) + .head-right {
+  margin-left: 0;
+}
+
+/* The request's state, as quiet as the header's second words; it gives way first after the path, so the title keeps its room. */
+.ss-step-state {
+  flex: 0 1000000 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.ss-step-pull {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.ss-step-pull:hover {
+  color: var(--ink);
+}
+/* Tasks' own colours for a request's checks (tasks/pulls.css .prs-ck) */
+.ss-step-w[data-tone="ok"] {
+  color: var(--ok);
+}
+.ss-step-w[data-tone="fail"] {
+  color: var(--danger);
+}
+.ss-step-w[data-tone="run"] {
+  color: var(--spin);
+}
+
+/* The one dark button: the canvas's .btn.dark. It never gives way. */
+.ss-step-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  min-height: 34px;
+  padding: 0 12px;
+  border-radius: var(--rad);
+  border: 1px solid var(--aui-primary);
+  background: var(--aui-primary);
+  color: var(--aui-on-primary);
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.ss-step-btn:hover {
+  opacity: 0.88;
+}
+.ss-step-btn:focus-visible {
+  outline: 2px solid var(--aui-border-strong);
+  outline-offset: 1px;
+}
+
+/* The desktop's own: the step's panel (the draft or the method, then the ask, and what the answer did) opens under the header, at the
+   right where the button is, above the chat and the pane, which keep their place under it. It scrolls by itself past a share of the
+   window, so the chat keeps room. */
+.ss-step-panel {
+  flex: none;
+  display: flex;
+  justify-content: flex-end;
+  max-height: min(60vh, 560px);
+  overflow-y: auto;
+  padding: 8px 16px 0;
+}
+.ss-step-panel > .review {
+  width: min(560px, 100%);
+  margin: 0 0 8px;
+}

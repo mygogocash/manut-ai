@@ -28,7 +28,7 @@ import { useLaneProjects } from "../code/KeptLanes";
 import { PullMerge, type MergeHost } from "../code/PullMerge";
 import { MERGE_METHODS, type MergeMethod } from "../code/source";
 import type { TaskHost } from "./host";
-import { BoardWatch, readiness, READINESS, REFRESH_MS, repoKey, rowOf, type BoardRow, type BoardState, type OtherRow } from "./board";
+import { BoardWatch, checksWord, readiness, READINESS, REFRESH_MS, repoKey, reviewWord, rowOf, type BoardRow, type BoardState, type OtherRow } from "./board";
 import { clearPick, useTasks } from "./state";
 import { ago } from "./TasksPage";
 import { SOURCE_NAME } from "./TasksBar";
@@ -37,17 +37,8 @@ import "./pulls.css";
 
 export const rowKey = (r: Pick<BoardRow, "source" | "repo"> & { pull: Pick<PullRow, "number"> }): string => `${r.source}:${r.repo}:${r.pull.number}`;
 
-/** The checks of a request in words, and the meaning its colour carries. */
-export function checksWord(p: Pick<PullRow, "checks">): { text: string; tone: "ok" | "fail" | "run" | "none" } {
-  const c = p.checks;
-  if (!c || c.total === 0) return { text: t("prs.checks.none"), tone: "none" };
-  if (c.failed > 0) return { text: t("prs.checks.failing", { n: c.failed }), tone: "fail" };
-  if (c.pending > 0) return { text: t("prs.checks.running", { n: c.pending }), tone: "run" };
-  return { text: t("prs.checks.passed"), tone: "ok" };
-}
-
-/** The review of a request in words ("" when none is asked). */
-export const reviewWord = (p: Pick<PullRow, "review">): string => (p.review ? t(`prs.review.${p.review}` as Key) : "");
+// A request's checks and review in words live beside `readiness` (board.ts), since the lane's top bar says them too (item 167e).
+export { checksWord, reviewWord } from "./board";
 
 /** The methods offered for `m` (all three when the repository's were not read). */
 export const methodsOf = (m: MergeMethods | null): MergeMethod[] => (m ? MERGE_METHODS.filter((x) => m[x]) : [...MERGE_METHODS]);

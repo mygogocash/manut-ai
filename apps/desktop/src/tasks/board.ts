@@ -15,9 +15,10 @@
 //
 // A project on Azure DevOps, or on a Gitea or Forgejo server (item 100b), is listed too, read only, when its host's CLI is here: the
 // shell reads the folder's remote and the list (src-tauri/src/pulls_other.rs); a host whose CLI is not here gives nothing.
+import { t, type Key } from "../i18n";
 import type { TaskHost } from "./host";
 import { notePulls, remoteOf } from "./pulls";
-import type { CliSource, OtherHost, OtherRemote, PullRow } from "./types";
+import type { CliSource, OtherHost, OtherRemote, PullRow, TaskChecks } from "./types";
 
 export type Readiness = "ready" | "checks" | "review" | "changes" | "failing" | "conflict" | "draft";
 /** The order the list shows them in. */
@@ -33,6 +34,19 @@ export function readiness(p: Pick<PullRow, "state" | "conflict" | "review" | "ch
   if (p.review === "required") return "review";
   return "ready";
 }
+
+/** The checks of a request in words, and the meaning its colour carries: a row of the list, and the lane's top bar beside its Merge
+ *  (item 167e), say them alike. */
+export function checksWord(p: { checks?: TaskChecks | null }): { text: string; tone: "ok" | "fail" | "run" | "none" } {
+  const c = p.checks;
+  if (!c || c.total === 0) return { text: t("prs.checks.none"), tone: "none" };
+  if (c.failed > 0) return { text: t("prs.checks.failing", { n: c.failed }), tone: "fail" };
+  if (c.pending > 0) return { text: t("prs.checks.running", { n: c.pending }), tone: "run" };
+  return { text: t("prs.checks.passed"), tone: "ok" };
+}
+
+/** The review of a request in words ("" when none is asked, or the list did not say). */
+export const reviewWord = (p: { review?: PullRow["review"] }): string => (p.review ? t(`prs.review.${p.review}` as Key) : "");
 
 /** A request on the list, with the repository it is in and the project folder it was listed for. */
 export interface BoardRow {

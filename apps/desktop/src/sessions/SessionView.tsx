@@ -51,7 +51,7 @@ import { groupOf } from "./splitState";
 import { isCopyLinkKey, LINK_COPIED_EVENT } from "./termLink";
 import { TermShareCards } from "./TermShareCard";
 import { LanePane } from "../code/LanePane";
-import { LaneReview } from "../code/Review";
+import { LaneHeadTags, LaneTop } from "../code/LaneStep";
 import { isLaneChat } from "../code/laneStore";
 import { HelpersSwitch } from "../jobs/HelpersSwitch";
 import { MayReach } from "../jobs/MayReach";
@@ -265,21 +265,18 @@ function ChatPane({ rec, chatKey }: { rec: SessionRec; chatKey: string }) {
 
 /** A lane: a coding session's chat with the pane beside it that says what to look at (code/LanePane.tsx), as the design canvas's Code
  *  board draws it. The pane goes under the chat when the column is too narrow for both (code/lanepane.css). Only the chat is
- *  `session-chat`; the pane is its own. */
-function LaneSplit({ rec, chatKey, chat }: { rec: SessionRec; chatKey: string; chat: Chat | undefined }) {
+ *  `session-chat`; the pane is its own. A lane with a folder of its own has its next step (code/LaneStep.tsx, item 167e): the button in
+ *  the header's `slot`, and the step's panel over the chat and the pane. */
+function LaneSplit({ rec, chatKey, chat, slot }: { rec: SessionRec; chatKey: string; chat: Chat | undefined; slot: Element | null }) {
   return (
     <div className="ss-lane" data-testid="session-lane">
+      {/* a new key for each lane, so each walks its own steps and an ask left waiting is taken back when the lane goes */}
+      {rec.lane?.worktree && <LaneTop key={chatKey} root={rec.cwd} worktree={rec.lane.worktree} branch={rec.lane.name} title={pickTitle(rec, folderName(rec.cwd)).title} slot={slot} />}
       <div className="ss-lane-body">
         <ChatPane rec={rec} chatKey={chatKey} />
         {/* a new key for each lane, so each opens on Diff and keeps its own question about a secret; a preview runs only in the
             lane's own folder */}
-        <LanePane
-          key={chatKey}
-          chatKey={chatKey}
-          chat={chat}
-          laneDir={rec.lane?.dir || null}
-          review={rec.lane?.worktree ? <LaneReview root={rec.cwd} worktree={rec.lane.worktree} branch={rec.lane.name} title={pickTitle(rec, folderName(rec.cwd)).title} /> : undefined}
-        />
+        <LanePane key={chatKey} chatKey={chatKey} chat={chat} laneDir={rec.lane?.dir || null} />
       </div>
     </div>
   );
@@ -796,6 +793,8 @@ export function SessionView() {
   const ss = useSessions();
   const sp = useSplit();
   const rec = ss.list.find((r) => r.id === s.ui.session) ?? null;
+  // the header's place for a lane's next step (code/LaneStep.tsx), which the lane's split fills
+  const [stepSlot, setStepSlot] = useState<HTMLSpanElement | null>(null);
   // looking at a session sees what its row carried for the person (it rang, it finished): at once when it is opened,
   // and when the window comes back to it
   const shown = rec?.id ?? null;
@@ -855,6 +854,9 @@ export function SessionView() {
   const showChat = (rec.view === "chat" || noTerminal) && !!chatKey;
   const c = chatKey ? s.chats[chatKey] : undefined;
   const turn = !!c?.turn;
+  // a coding session that runs as a chat is a lane (code/Lanes.tsx lists them): its chat has the pane beside it, and its header the
+  // lane's branch, its state and its next step, as the design canvas's Code board draws the lane's top bar
+  const lane = showChat && isLaneChat(chatKey);
   // an approval or question of this chat is still open (the Needs-you model: answered, expired or its turn over closes it)
   const needs = !!chatKey && asksIn(s, chatKey).length > 0;
   // What the agent says is left in the background. Its count can hold a command, which has no row, so nothing is
@@ -941,6 +943,8 @@ export function SessionView() {
             )}
           </span>
         </span>
+        {lane && <LaneHeadTags rec={rec} agent={label} chatKey={chatKey!} live={ss.live[rec.id]} turn={c?.turn ? { status: c.turn.status, startedAt: c.turn.startedAt } : null} needs={needs} />}
+        {lane && <span className="ss-step-slot" ref={setStepSlot} />}
         {showRight && (
           <div className="head-right ss-head-right" data-testid="head-right">
             {canToggle && (
@@ -965,8 +969,7 @@ export function SessionView() {
         // a TERMINALS session in a split: every pane shows, each as its session is (running, paused, ended)
         <SplitView main={rec} pane={(r) => <SplitPane rec={r} />} />
       ) : showChat ? (
-        // a coding session that runs as a chat is a lane (code/Lanes.tsx lists them): its chat has the pane beside it
-        isLaneChat(chatKey) ? <LaneSplit rec={rec} chatKey={chatKey} chat={c} /> : <ChatPane rec={rec} chatKey={chatKey!} />
+        lane ? <LaneSplit rec={rec} chatKey={chatKey!} chat={c} slot={stepSlot} /> : <ChatPane rec={rec} chatKey={chatKey!} />
       ) : rec.paused || ((rec.status === "exited" || rec.status === "failed") && !getSessions().hasTerm(rec.id)) ? (
         <TerminalIdle rec={rec} />
       ) : rec.view === "chat" && mode !== "terminal" ? (

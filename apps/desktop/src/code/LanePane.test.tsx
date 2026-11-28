@@ -129,6 +129,22 @@ describe("the pane's three chips", () => {
     expect(out.indexOf("Preview")).toBeLessThan(out.indexOf("Tests"));
   });
 
+  it("start the pane, as the board's do: Put up for review and Merge are the lane's top bar's (item 167e), and nothing offers a Commit, a Push or a Discard", () => {
+    for (const view of ["diff", "preview", "tests"] as const) {
+      // the Diff with its review's switches too (item 146), whose Commits and Not committed are views, not acts
+      const p = props({ view, files: [CHECKOUT, PROMPTPAY], scopes: { scope: "all", onScope: vi.fn(), review: null, failed: false } });
+      const out = html(p);
+      expect(out.indexOf("<aside")).toBeLessThan(out.indexOf('role="group"'));
+      // the chips are the pane's first thing: nothing stands between the pane's start and its group
+      expect(out.slice(out.indexOf("<aside"), out.indexOf('role="group"'))).not.toContain("<button");
+      for (const id of ["review", "review-start", "review-merge-start", "lane-step-button"]) expect(out, `${view} ${id}`).not.toContain(`data-testid="${id}"`);
+      for (const b of drawn(LanePaneView(p)).filter((e) => e.type === "button")) {
+        const name = renderToString(b).replace(/<[^>]*>/g, " ");
+        expect(name, view).not.toMatch(/\b(commit|push|discard|merge)\b|put up for review/i);
+      }
+    }
+  });
+
   it("press the one that is shown, Diff when nothing was picked", () => {
     const pressed = (view: LanePaneProps["view"]) => ["diff", "preview", "tests"].filter((v) => byId(props({ view }), `lane-chip-${v}`)[0].props["aria-pressed"] === true);
     expect(pressed("diff")).toEqual(["diff"]);
