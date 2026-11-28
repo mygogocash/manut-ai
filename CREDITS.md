@@ -160,6 +160,12 @@ word and styled-text links were left out. Its link parser is VS Code's (`termina
 MIT, Copyright (c) 2015 - present Microsoft Corporation, which stays in those files' headers); the licences are in
 `apps/desktop/THIRD_PARTY_NOTICES.md`. Later items name what they lift here too; the study lists the candidates, among them
 VS Code's fuzzy scorer as Paradev ported it, which keeps Microsoft's MIT notice beside Paradev's.
+Item 146 (review in the pane beside a lane) took one more thing from it, a form: its line that names where a comment on selected
+lines is, `<path>:L<start>-L<end>` with a few words for deleted lines and for a range across deletions and additions
+(`formatAgentPromptWithFileContext`, `apps/desktop/src/renderer/hooks/host-service/useSendToTerminalAgent/useSendToTerminalAgent.ts`),
+written here as `atText` in `apps/desktop/src/chat/box/carry.ts`, the first line of a note's quote, with its words changed to say
+which file's numbers the lines are; and it read, to write anew, its Changes pane's scope control (all changes, uncommitted, one
+commit; `DiffPaneScope`, `ChangesScopeControl`). Its diff library `@pierre/diffs` is not used.
 
 Libraries added for one feature are named here too: `qrcode` 1.5.4 (MIT, soldair/node-qrcode), already the web app's,
 pinned in the desktop for the pairing code's QR image (`apps/desktop/src/remote/QrCode.tsx`, lifted from

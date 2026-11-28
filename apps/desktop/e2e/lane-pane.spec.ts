@@ -90,8 +90,9 @@ test("Diff lists each file Kit changed with its counts, drawn as the timeline dr
   await expect(files.first()).toContainText("src/checkout.tsx");
   await expect(files.first().locator(".dv-add")).toHaveText("+6");
   await expect(files.first().locator(".dv-del")).toHaveText("−1");
-  await expect(files.first().locator(".dv-l.add")).toHaveText("  const qr = promptPayQR(SHOP_ID, total);");
-  await expect(files.first().locator(".dv-l.del")).toHaveText("  return <PayByTransfer amount={total} />;");
+  // the lines are numbered from the hunk's header (item 146), so a line's own words are in its text, not in the whole row
+  await expect(files.first().locator(".dv-l.add .dv-t")).toHaveText("  const qr = promptPayQR(SHOP_ID, total);");
+  await expect(files.first().locator(".dv-l.del .dv-t")).toHaveText("  return <PayByTransfer amount={total} />;");
   await expect(page.getByTestId("lane-diff-none")).toHaveCount(0);
   // the timeline's own diffs are drawn when a step is opened, and are the only ones with its ids
   await expect(page.getByTestId("diff-view")).toHaveCount(0);

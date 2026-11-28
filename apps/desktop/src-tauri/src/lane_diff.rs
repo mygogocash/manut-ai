@@ -20,6 +20,13 @@
 //! a file over `MAX_SOURCE` bytes is "too large to show", the diffs together stop at `MAX_TOTAL` bytes (later files are listed
 //! with no text), a binary file says it is binary, and the whole read stops at `BUDGET`. Every diff passes `mask_secrets`
 //! before it leaves this module.
+//!
+//! Review in the pane (item 146): `review` reads the same folder as two kinds of section instead of one list, the work not
+//! committed yet (the folder against HEAD, files git has not seen included) and the lane's own commits, newest first, each
+//! against its first parent. A merge is not one of the commits: a lane that took its base in by merging would otherwise show the
+//! base's work as the lane's. It is the same read through the same runner, so every rule above holds for it, and its caps are
+//! shared across the sections: `MAX_FILES` files, `MAX_TOTAL` bytes of text and `BUDGET` in all, `REVIEW_COMMITS` commits (the
+//! rest are counted), and a commit git cannot read or that the budget did not reach is said to be unread.
 
 use std::fs;
 use std::path::{Component, Path, PathBuf};
@@ -42,6 +49,10 @@ const MAX_TOTAL: usize = 1024 * 1024;
 const BUDGET: Duration = Duration::from_secs(15);
 /// The most paths git lists, so a folder with a million new files cannot fill memory.
 const MAX_NAMES: usize = 20_000;
+/// The most of a lane's commits the review reads files for, newest first; the rest are counted in `more_commits`.
+const REVIEW_COMMITS: usize = 30;
+/// The longest a commit's subject is kept, in characters.
+const SUBJECT_MAX: usize = 200;
 
 /// Set for every call: a path from a list is a path, never a pathspec; nothing pages.
 const ENV: &[(&str, &str)] = &[("GIT_LITERAL_PATHSPECS", "1"), ("GIT_PAGER", "cat")];
@@ -71,6 +82,35 @@ pub struct LaneDiff {
     pub more_files: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub history: Option<History>,
+}
+
+/// A list of changed files and how many more there were than the review had room to read (`MAX_FILES` in all, shared by every
+/// part of one answer).
+#[derive(Serialize, Debug, PartialEq, Default)]
+pub struct Part {
+    pub files: Vec<LaneFile>,
+    pub more_files: u32,
+}
+
+/// One of the lane's own commits: its short id, its subject with its keys masked, and its files against its first parent.
+/// `unread` when git could not list them or the answer's time ran out before this commit (the files are then none).
+#[derive(Serialize, Debug, PartialEq)]
+pub struct CommitPart {
+    pub id: String,
+    pub subject: String,
+    pub files: Vec<LaneFile>,
+    pub more_files: u32,
+    pub unread: bool,
+}
+
+/// The lane's folder as sections (item 146): `uncommitted` is the folder against HEAD, `commits` the lane's own commits newest
+/// first (at most `REVIEW_COMMITS`; `more_commits` counts the rest), and `start` the short id they are counted from.
+#[derive(Serialize, Debug, PartialEq)]
+pub struct LaneReview {
+    pub start: String,
+    pub uncommitted: Part,
+    pub commits: Vec<CommitPart>,
+    pub more_commits: u32,
 }
 
 /// The most commits a push's read goes through (item 120); with more, it says it could not read them all.
@@ -213,13 +253,33 @@ fn mtime_of(wt: &Path, p: &str) -> u64 {
     fs::symlink_metadata(wt.join(p)).and_then(|m| m.modified()).ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map(|d| d.as_secs()).unwrap_or(0)
 }
 
-/// Every file that differs from `start`: what git's own diff says about tracked files (renames paired), then the new files git
-/// does not ignore.
-fn entries(git: &Git, wt: &Path, start: &str) -> Result<Vec<Entry>, String> {
+/// What a diff compares. `Worktree(rev)`: the folder against the commit `rev`, with the files git has not seen yet, as the pane's
+/// whole list and its uncommitted section are. `Commits(from, to)`: one commit against another (a lane's commit against its
+/// first parent), where every file is one git holds already and nothing on disk is read.
+enum Span<'a> {
+    Worktree(&'a str),
+    Commits(&'a str, &'a str),
+}
+
+impl Span<'_> {
+    /// The revisions git is given, then `--`, so a file named like one is still only a file.
+    fn revs(&self) -> Vec<&str> {
+        match self {
+            Span::Worktree(r) => vec![*r, "--"],
+            Span::Commits(a, b) => vec![*a, *b, "--"],
+        }
+    }
+}
+
+/// Every file that differs across `span`: what git's own diff says about tracked files (renames paired), then, for a folder, the
+/// new files git does not ignore.
+fn entries(git: &Git, wt: &Path, span: &Span) -> Result<Vec<Entry>, String> {
     // a submodule is not one of the lane's files, and comparing one would run git inside it (`SUBMODULES`)
     let mut argv: Vec<&str> = vec!["diff", "--name-status", "-z", "-M", "--no-ext-diff", "--no-textconv", "--no-color"];
     argv.extend_from_slice(SUBMODULES);
-    argv.push(start);
+    argv.extend(span.revs());
+    let on_disk = matches!(span, Span::Worktree(_));
+    let mtime = |p: &str| if on_disk { mtime_of(wt, p) } else { 0 };
     let tracked = git.run_with(wt, &argv, Duration::from_secs(20), ENV)?;
     if tracked.code != Some(0) {
         return Err("unread".into());
@@ -245,33 +305,38 @@ fn entries(git: &Git, wt: &Path, start: &str) -> Result<Vec<Entry>, String> {
         if !plain(path) || from.is_some_and(|f| !plain(f)) {
             continue;
         }
-        out.push(Entry { path: path.to_string(), from: from.map(str::to_string), state, untracked: false, mtime: mtime_of(wt, path) });
+        out.push(Entry { path: path.to_string(), from: from.map(str::to_string), state, untracked: false, mtime: mtime(path) });
         if out.len() >= MAX_NAMES {
             break;
         }
     }
-    let fresh = git.run_with(wt, &["ls-files", "--others", "--exclude-standard", "-z"], Duration::from_secs(20), ENV)?;
-    if fresh.code != Some(0) {
-        return Err("unread".into());
-    }
-    for p in fresh.out.split('\0').filter(|s| !s.is_empty()) {
-        // a nested repository is listed as `dir/`: it is not a file of this one
-        if p.ends_with('/') || !plain(p) || out.iter().any(|e| e.path == p) {
-            continue;
+    if on_disk {
+        let fresh = git.run_with(wt, &["ls-files", "--others", "--exclude-standard", "-z"], Duration::from_secs(20), ENV)?;
+        if fresh.code != Some(0) {
+            return Err("unread".into());
         }
-        out.push(Entry { path: p.to_string(), from: None, state: "new", untracked: true, mtime: mtime_of(wt, p) });
-        if out.len() >= MAX_NAMES {
-            break;
+        for p in fresh.out.split('\0').filter(|s| !s.is_empty()) {
+            // a nested repository is listed as `dir/`: it is not a file of this one
+            if p.ends_with('/') || !plain(p) || out.iter().any(|e| e.path == p) {
+                continue;
+            }
+            out.push(Entry { path: p.to_string(), from: None, state: "new", untracked: true, mtime: mtime(p) });
+            if out.len() >= MAX_NAMES {
+                break;
+            }
         }
     }
-    // the file that changed last first, as the pane has always listed them
+    // the file that changed last first, as the pane has always listed them; a commit's files have no time on disk, so they stay
+    // in git's order, which is by path
     out.sort_by(|a, b| b.mtime.cmp(&a.mtime).then_with(|| a.path.cmp(&b.path)));
     Ok(out)
 }
 
 /// The diff text of one entry, or why there is none.
-fn diff_of(git: &Git, wt: &Path, start: &str, e: &Entry, left: Duration) -> Result<String, &'static str> {
-    if e.state != "deleted" && fs::symlink_metadata(wt.join(&e.path)).map(|m| m.len() > MAX_SOURCE).unwrap_or(false) {
+fn diff_of(git: &Git, wt: &Path, span: &Span, e: &Entry, left: Duration) -> Result<String, &'static str> {
+    // how big a file is on disk says how big its diff may be only for the folder's own files; a commit's are held by git, and the
+    // length of what git printed (read at most `tasks::MAX_OUT`) is checked below
+    if matches!(span, Span::Worktree(_)) && e.state != "deleted" && fs::symlink_metadata(wt.join(&e.path)).map(|m| m.len() > MAX_SOURCE).unwrap_or(false) {
         return Err("too_large");
     }
     let from = e.from.as_deref().unwrap_or("");
@@ -279,10 +344,14 @@ fn diff_of(git: &Git, wt: &Path, start: &str, e: &Entry, left: Duration) -> Resu
     argv.extend_from_slice(SUBMODULES);
     if e.untracked {
         argv.extend(["--no-index", "--", "/dev/null", &e.path]);
-    } else if e.from.is_some() {
-        argv.extend(["-M", start, "--", from, &e.path]);
     } else {
-        argv.extend(["--no-renames", start, "--", &e.path]);
+        argv.push(if e.from.is_some() { "-M" } else { "--no-renames" });
+        // each revision, then `--`, then the paths of this one file
+        argv.extend(span.revs());
+        if e.from.is_some() {
+            argv.push(from);
+        }
+        argv.push(&e.path);
     }
     let ran = git.run_with(wt, &argv, left.max(Duration::from_secs(1)), ENV).map_err(|_| "left_out")?;
     // `--no-index` ends with 1 when the files differ
@@ -306,8 +375,10 @@ pub fn read(home: &Path, dir: &str) -> Result<LaneDiff, String> {
     read_with(home, dir, false)
 }
 
-/// `read`, and with `with_history` what the commits a push would send hold (item 120), within the same budget.
-pub fn read_with(home: &Path, dir: &str, with_history: bool) -> Result<LaneDiff, String> {
+/// The runner, the folder and the record of the lane `dir`, once every check a read of a lane's folder needs has passed: the
+/// app made it, git still lists it as a worktree of the recorded repository, and the repository's own config names no program
+/// git would run (`not_a_lane`, `git_missing`, `config:<setting>`). Every read of a lane's folder by itself starts here.
+pub(crate) fn opened(home: &Path, dir: &str) -> Result<(Git, PathBuf, Record), String> {
     let (wt, rec) = own_folder(home, dir)?;
     let git = Git::automatic(home)?;
     let repo = real(Path::new(&rec.repo));
@@ -320,32 +391,116 @@ pub fn read_with(home: &Path, dir: &str, with_history: bool) -> Result<LaneDiff,
     if let Some(setting) = git.lane_config_risk(&wt, &repo) {
         return Err(format!("config:{setting}"));
     }
-    let begun = Instant::now();
-    let start = start_commit(&git, &wt, &rec).ok_or("unread")?;
-    let all = entries(&git, &wt, &start)?;
-    let more_files = all.len().saturating_sub(MAX_FILES) as u32;
-    let mut total = 0usize;
+    Ok((git, wt, rec))
+}
+
+/// What the answer in progress has taken so far, shared by every part of it: the files read and the bytes of diff text.
+#[derive(Default)]
+struct Spent {
+    files: usize,
+    total: usize,
+}
+
+/// The files across `span`, as many as the answer still has room for (`MAX_FILES` in all, `MAX_TOTAL` bytes of text, `BUDGET`
+/// from `begun`); the rest are counted, and a file the text or the time had no room for is listed with no text and says so.
+fn part(git: &Git, wt: &Path, span: &Span, begun: Instant, spent: &mut Spent) -> Result<Part, String> {
+    let all = entries(git, wt, span)?;
+    let room = MAX_FILES.saturating_sub(spent.files);
+    let more_files = all.len().saturating_sub(room) as u32;
     let mut files = Vec::new();
-    for e in all.iter().take(MAX_FILES) {
+    for e in all.iter().take(room) {
         let got = match BUDGET.checked_sub(begun.elapsed()) {
             None => Err("left_out"),
-            Some(_) if total >= MAX_TOTAL => Err("left_out"),
-            Some(left) => diff_of(&git, &wt, &start, e, left).and_then(|t| if total + t.len() > MAX_TOTAL { Err("left_out") } else { Ok(t) }),
+            Some(_) if spent.total >= MAX_TOTAL => Err("left_out"),
+            Some(left) => diff_of(git, wt, span, e, left).and_then(|t| if spent.total + t.len() > MAX_TOTAL { Err("left_out") } else { Ok(t) }),
         };
         let (diff, note) = match got {
             Ok(t) => {
-                total += t.len();
+                spent.total += t.len();
                 (t, None)
             }
             Err(n) => (String::new(), Some(n.to_string())),
         };
+        spent.files += 1;
         files.push(LaneFile { path: e.path.clone(), from: e.from.clone(), state: e.state.to_string(), diff, note });
     }
+    Ok(Part { files, more_files })
+}
+
+/// `read`, and with `with_history` what the commits a push would send hold (item 120), within the same budget.
+pub fn read_with(home: &Path, dir: &str, with_history: bool) -> Result<LaneDiff, String> {
+    let (git, wt, rec) = opened(home, dir)?;
+    let begun = Instant::now();
+    let start = start_commit(&git, &wt, &rec).ok_or("unread")?;
+    let Part { files, more_files } = part(&git, &wt, &Span::Worktree(&start), begun, &mut Spent::default())?;
     let history = with_history.then(|| match BUDGET.checked_sub(begun.elapsed()) {
         Some(left) => history(&git, &wt, left, MAX_COMMITS),
         None => History { files: Vec::new(), unread: true },
     });
     Ok(LaneDiff { start: start.chars().take(12).collect(), files, more_files, history })
+}
+
+/// The lane's own commits, newest first, from `start` to HEAD, each with its full id and its subject: at most `REVIEW_COMMITS`
+/// and one more, so a longer history can say so. A merge is left out (see the module's note), and so is everything `start`
+/// already holds.
+fn commits(git: &Git, wt: &Path, start: &str) -> Result<Vec<(String, String)>, String> {
+    let count = format!("--max-count={}", REVIEW_COMMITS + 1);
+    let range = format!("{start}..HEAD");
+    // each commit's full id and its subject, each ended by a NUL: git keeps no NUL in a message
+    let ran = git.run_with(wt, &["log", &count, "--no-merges", "--no-color", "--format=%H%x00%s%x00", &range, "--"], Duration::from_secs(20), ENV)?;
+    if ran.code != Some(0) {
+        return Err("unread".into());
+    }
+    let mut out = Vec::new();
+    let mut parts = ran.out.split('\0');
+    while let Some(id) = parts.next() {
+        let id = id.trim();
+        if id.is_empty() {
+            break;
+        }
+        // anything but a commit's id where one stands is output this does not understand
+        if !matches!(id.len(), 40 | 64) || !id.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return Err("unread".into());
+        }
+        let Some(subject) = parts.next() else { return Err("unread".into()) };
+        out.push((id.to_string(), subject.to_string()));
+    }
+    Ok(out)
+}
+
+/// A commit's subject as it leaves: on one line, its keys masked, cut at `SUBJECT_MAX` characters.
+fn subject_of(raw: &str) -> String {
+    let one = mask_secrets(&raw.split_whitespace().collect::<Vec<_>>().join(" "));
+    one.chars().take(SUBJECT_MAX).collect()
+}
+
+/// The lane's folder as sections (item 146): the work not committed yet, then each of the lane's commits, newest first. `Err`
+/// is a short code, as `read`'s. A commit whose files git could not list, or that the answer's time did not reach, is listed with
+/// no files and `unread`; the sections after the uncommitted one share what `MAX_FILES`, `MAX_TOTAL` and `BUDGET` have left.
+pub fn review(home: &Path, dir: &str) -> Result<LaneReview, String> {
+    let (git, wt, rec) = opened(home, dir)?;
+    let begun = Instant::now();
+    let start = start_commit(&git, &wt, &rec).ok_or("unread")?;
+    let mut spent = Spent::default();
+    let uncommitted = part(&git, &wt, &Span::Worktree("HEAD"), begun, &mut spent)?;
+    let list = commits(&git, &wt, &start)?;
+    // the list holds one more than is read, only to know there are more: how many more is one cheap count (and at least one if
+    // git does not give it)
+    let more_commits = if list.len() > REVIEW_COMMITS {
+        let total = git.line(&wt, &["rev-list", "--count", "--no-merges", &format!("{start}..HEAD"), "--"]).and_then(|n| n.parse::<usize>().ok());
+        total.map_or(1, |n| n.saturating_sub(REVIEW_COMMITS).max(1)) as u32
+    } else {
+        0
+    };
+    let mut out = Vec::new();
+    for (id, subject) in list.into_iter().take(REVIEW_COMMITS) {
+        let parent = format!("{id}^");
+        let read = if BUDGET.checked_sub(begun.elapsed()).is_some() { part(&git, &wt, &Span::Commits(&parent, &id), begun, &mut spent).ok() } else { None };
+        let unread = read.is_none();
+        let Part { files, more_files } = read.unwrap_or_default();
+        out.push(CommitPart { id: id.chars().take(12).collect(), subject: subject_of(&subject), files, more_files, unread });
+    }
+    Ok(LaneReview { start: start.chars().take(12).collect(), uncommitted, commits: out, more_commits })
 }
 
 #[cfg(test)]
@@ -679,6 +834,181 @@ mod tests {
         sh(&wt, &["add", "logo.bin"]);
         sh(&wt, &["commit", "-q", "-m", "logo"]);
         assert!(pushed(&home, &wt).unread);
+        let _ = fs::remove_dir_all(home);
+    }
+    /// Item 146: the pane's review reads the folder as two kinds of section, the work not committed yet and each commit.
+    fn reviewed(home: &Path, wt: &Path) -> LaneReview {
+        review(home, &wt.to_string_lossy()).unwrap()
+    }
+
+    fn files_of(p: &Part) -> Vec<&str> {
+        let mut v: Vec<&str> = p.files.iter().map(|f| f.path.as_str()).collect();
+        v.sort_unstable();
+        v
+    }
+
+    #[test]
+    fn the_review_has_the_work_not_committed_and_each_commit_with_its_files() {
+        let Some((home, _, wt)) = lane("ld-rv-sections") else { return };
+        // two commits, then a change not committed, a file added to the index only and a file git has not seen
+        commit_in(&wt, "kept.txt", "kept\n");
+        commit_in(&wt, "a.txt", "one\nchanged\n");
+        fs::write(wt.join("apps/web/b.txt"), "two\nedited\n").unwrap();
+        fs::write(wt.join("staged.txt"), "staged\n").unwrap();
+        sh(&wt, &["add", "staged.txt"]);
+        fs::write(wt.join("fresh.txt"), "fresh\n").unwrap();
+        let r = reviewed(&home, &wt);
+        // the folder against HEAD: nothing a commit already holds
+        assert_eq!(files_of(&r.uncommitted), vec!["apps/web/b.txt", "fresh.txt", "staged.txt"], "{r:?}");
+        let b = r.uncommitted.files.iter().find(|f| f.path == "apps/web/b.txt").unwrap();
+        assert!(b.state == "changed" && b.diff.contains("+edited"), "{b:?}");
+        let staged = r.uncommitted.files.iter().find(|f| f.path == "staged.txt").unwrap();
+        assert!(staged.state == "new" && staged.diff.contains("+staged"), "{staged:?}");
+        // the commits, newest first, each against its own parent
+        assert_eq!(r.commits.iter().map(|c| c.subject.as_str()).collect::<Vec<_>>(), vec!["a.txt", "kept.txt"], "{r:?}");
+        assert_eq!(r.more_commits, 0);
+        let (newest, older) = (&r.commits[0], &r.commits[1]);
+        assert_eq!(newest.id.len(), 12);
+        assert_eq!(files_of(&Part { files: newest.files.clone(), more_files: 0 }), vec!["a.txt"]);
+        assert!(newest.files[0].state == "changed" && newest.files[0].diff.contains("+changed") && !newest.files[0].diff.contains("kept"), "{newest:?}");
+        assert!(older.files[0].path == "kept.txt" && older.files[0].state == "new" && older.files[0].diff.contains("+kept"), "{older:?}");
+        assert!(!newest.unread && !older.unread);
+        // the folder's own read is as it was: one list, everything since the lane started
+        assert_eq!(get(&home, &wt).files.len(), 5);
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn a_clean_lane_has_no_sections_and_the_base_s_work_is_not_the_lane_s() {
+        let Some((home, d, wt)) = lane("ld-rv-clean") else { return };
+        let r = reviewed(&home, &wt);
+        assert!(r.uncommitted.files.is_empty() && r.commits.is_empty() && r.more_commits == 0, "{r:?}");
+        // the base moves on and the lane takes it in by a merge: the merge is not one of the lane's commits, and the base's own
+        // commits are not either, since the lane's start moved up to where they part
+        commit_in(&d, "from-main.txt", "main\n");
+        commit_in(&wt, "mine.txt", "mine\n");
+        sh(&wt, &["merge", "-q", "--no-edit", "main"]);
+        let r = reviewed(&home, &wt);
+        assert_eq!(r.commits.iter().map(|c| c.subject.as_str()).collect::<Vec<_>>(), vec!["mine.txt"], "{r:?}");
+        assert!(r.uncommitted.files.is_empty());
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn a_rename_in_a_commit_is_paired_and_a_deleted_file_says_so() {
+        let Some((home, _, wt)) = lane("ld-rv-rename") else { return };
+        sh(&wt, &["mv", "apps/web/b.txt", "apps/web/c.txt"]);
+        sh(&wt, &["rm", "-q", "a.txt"]);
+        sh(&wt, &["commit", "-q", "-m", "move and remove"]);
+        let r = reviewed(&home, &wt);
+        let c = &r.commits[0];
+        let mv = c.files.iter().find(|f| f.path == "apps/web/c.txt").unwrap();
+        assert!(mv.state == "renamed" && mv.from.as_deref() == Some("apps/web/b.txt"), "{mv:?}");
+        let gone = c.files.iter().find(|f| f.path == "a.txt").unwrap();
+        assert!(gone.state == "deleted" && gone.diff.contains("-one"), "{gone:?}");
+        assert!(r.uncommitted.files.is_empty());
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn more_commits_than_the_review_reads_are_counted() {
+        let Some((home, _, wt)) = lane("ld-rv-commits") else { return };
+        for i in 0..(REVIEW_COMMITS + 3) {
+            commit_in(&wt, &format!("c{i:02}.txt"), "x\n");
+        }
+        let r = reviewed(&home, &wt);
+        assert_eq!((r.commits.len(), r.more_commits), (REVIEW_COMMITS, 3), "{:?}", r.commits.iter().map(|c| &c.subject).collect::<Vec<_>>());
+        // the newest are the ones read
+        assert_eq!(r.commits[0].subject, format!("c{:02}.txt", REVIEW_COMMITS + 2));
+        assert!(r.commits.iter().all(|c| c.files.len() == 1 && !c.unread));
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn the_files_are_counted_across_the_sections_with_the_work_not_committed_first() {
+        let Some((home, _, wt)) = lane("ld-rv-files") else { return };
+        // two commits of 50 files each, then 30 files not committed: 100 files are room for 30, then 50 of the newer commit, then
+        // 20 of the older, whose other 30 are counted
+        for dir in ["old", "new"] {
+            fs::create_dir_all(wt.join(dir)).unwrap();
+            for i in 0..50 {
+                fs::write(wt.join(format!("{dir}/f{i:02}.txt")), "x\n").unwrap();
+            }
+            sh(&wt, &["add", dir]);
+            sh(&wt, &["commit", "-q", "-m", dir]);
+        }
+        fs::create_dir_all(wt.join("wip")).unwrap();
+        for i in 0..30 {
+            fs::write(wt.join(format!("wip/w{i:02}.txt")), "w\n").unwrap();
+        }
+        let r = reviewed(&home, &wt);
+        assert_eq!((r.uncommitted.files.len(), r.uncommitted.more_files), (30, 0));
+        assert_eq!(r.commits.iter().map(|c| c.subject.as_str()).collect::<Vec<_>>(), vec!["new", "old"]);
+        assert_eq!((r.commits[0].files.len(), r.commits[0].more_files), (50, 0));
+        assert_eq!((r.commits[1].files.len(), r.commits[1].more_files), (20, 30));
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn a_key_in_a_commit_or_its_subject_is_masked_before_it_leaves() {
+        let Some((home, _, wt)) = lane("ld-rv-key") else { return };
+        let key = format!("ghp_{}", "f".repeat(36));
+        commit_in(&wt, "notes.txt", &format!("token={key}\n"));
+        sh(&wt, &["commit", "-q", "--allow-empty", "-m", &format!("use {key} here")]);
+        fs::write(wt.join("a.txt"), format!("token={key}\n")).unwrap();
+        let r = reviewed(&home, &wt);
+        let all = format!("{r:?}");
+        assert!(!all.contains(&key), "{all}");
+        assert!(r.commits[0].subject.contains("••••"), "{:?}", r.commits[0]);
+        assert!(r.commits[1].files[0].diff.contains("••••"));
+        assert!(r.uncommitted.files[0].diff.contains("••••"));
+        // a long subject is cut, and a multi-line message gives its first line
+        sh(&wt, &["commit", "-q", "--allow-empty", "-m", &format!("{}\n\nbody line", "w".repeat(SUBJECT_MAX + 50))]);
+        let r = reviewed(&home, &wt);
+        assert_eq!(r.commits[0].subject.chars().count(), SUBJECT_MAX);
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn the_review_refuses_what_the_diff_refuses() {
+        let Some((home, d, wt)) = lane("ld-rv-refused") else { return };
+        for p in [d.to_string_lossy().into_owned(), wt.join("apps").to_string_lossy().into_owned(), "web-app".into(), format!("{}/../x", wt.display()), "/no/such/folder".into(), String::new()] {
+            assert_eq!(review(&home, &p).unwrap_err(), "not_a_lane", "{p}");
+        }
+        let marker = crate::lane::tests::filter_in(&home, &d, &wt);
+        assert_eq!(review(&home, &wt.to_string_lossy()).unwrap_err(), "config:filter.spy.clean");
+        assert!(!marker.exists(), "a program ran: {}", fs::read_to_string(&marker).unwrap_or_default());
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn no_program_the_repository_names_runs_to_review() {
+        use std::os::unix::fs::PermissionsExt;
+        let Some((home, d, wt)) = lane("ld-rv-programs") else { return };
+        // the commit is made first: git run by the test itself would run the hooks below, and only the app's own read is on trial
+        commit_in(&wt, "kept.txt", "kept\n");
+        let marker = home.join("ran");
+        let script = home.join("spy.sh");
+        fs::write(&script, format!("#!/bin/sh\necho ran >> '{}'\ncat \"$@\" 2>/dev/null\n", marker.display())).unwrap();
+        fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+        let s = script.to_string_lossy().into_owned();
+        sh(&d, &["config", "diff.external", &s]);
+        sh(&d, &["config", "diff.spy.textconv", &s]);
+        sh(&d, &["config", "core.fsmonitor", &s]);
+        fs::write(d.join(".gitattributes"), "*.txt diff=spy\n").unwrap();
+        for hook in ["post-index-change", "reference-transaction", "post-checkout"] {
+            let h = d.join(".git/hooks").join(hook);
+            fs::create_dir_all(h.parent().unwrap()).unwrap();
+            fs::write(&h, format!("#!/bin/sh\necho ran >> '{}'\n", marker.display())).unwrap();
+            fs::set_permissions(&h, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        fs::write(wt.join("a.txt"), "one\nchanged\n").unwrap();
+        fs::write(wt.join("fresh.txt"), "new\n").unwrap();
+        let r = reviewed(&home, &wt);
+        assert!(r.uncommitted.files.iter().any(|f| f.path == "a.txt" && f.diff.contains("+changed")), "{r:?}");
+        assert!(r.commits[0].files[0].diff.contains("+kept"), "{r:?}");
+        assert!(!marker.exists(), "a program ran: {}", fs::read_to_string(&marker).unwrap_or_default());
         let _ = fs::remove_dir_all(home);
     }
 }

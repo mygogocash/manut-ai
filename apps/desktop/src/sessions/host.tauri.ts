@@ -6,7 +6,8 @@ import type { RegistryList } from "../settings/agents/acpRegistry";
 import { t } from "../i18n";
 import type { DiskState } from "../lib/disk";
 import type { ImportApp, ImportProfile } from "./term/import";
-import { readLaneFolder } from "../code/laneFolder";
+import { readLaneFolder, readLaneReview } from "../code/laneFolder";
+import { readLaneRemote } from "../code/laneRemote";
 import { savedKeys } from "../code/secrets";
 import { readView } from "../code/moved";
 import { readCleaned, readKept, readMade, readReleased, readRemoved, type LaneLanded, type LaneRemoveAsk } from "../code/laneBranch";
@@ -294,6 +295,14 @@ export class TauriHost implements SessionHost, BuddyHost {
   async laneDiff(worktree: string) {
     const { invoke } = await this.core();
     return readLaneFolder(await invoke<unknown>("lane_diff", { worktree }));
+  }
+  async laneReview(worktree: string) {
+    const { invoke } = await this.core();
+    return readLaneReview(await invoke<unknown>("lane_review", { worktree }));
+  }
+  async laneRemote(worktree: string) {
+    const { invoke } = await this.core();
+    return readLaneRemote(await invoke<unknown>("lane_remote", { worktree }));
   }
   async laneKeys(worktree: string) {
     const { invoke } = await this.core();

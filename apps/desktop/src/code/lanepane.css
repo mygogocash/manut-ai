@@ -258,6 +258,112 @@
   color: var(--ink);
 }
 
+/* The Diff as a review (PaneDiff.tsx, item 146): a bar of switches (which changes, unified or side by side, the list or one file), then
+   sections of files. A commit's heading is a button that opens its files; Not committed yet is a plain heading. One file at a time
+   has Prev and Next around its place, and the file under them takes the height its lines need. */
+.lpane .pd {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.lpane .pd-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+}
+.lpane .pd-list,
+.lpane .pd-one {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.lpane .pd-sec {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.lpane .pd-sec-h {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 32px;
+  margin: 0;
+  padding: 0 6px;
+  border-radius: var(--rad);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.4;
+  text-align: left;
+  color: var(--ink);
+}
+.lpane button.pd-sec-h:hover {
+  background: var(--hov);
+}
+.lpane button.pd-sec-h:focus-visible {
+  outline: 2px solid var(--aui-border-strong);
+  outline-offset: 1px;
+}
+.lpane .pd-chev {
+  display: inline-flex;
+  flex: none;
+  width: 12px;
+  color: var(--aui-muted);
+}
+.lpane .pd-sec-h[aria-expanded="true"] .pd-chev {
+  transform: rotate(90deg);
+}
+.lpane .pd-id {
+  flex: none;
+  color: var(--aui-muted);
+}
+.lpane .pd-sub {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lpane .pd-n {
+  flex: none;
+  font-size: 12px;
+  font-weight: 400;
+}
+.lpane .pd-nav {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.lpane .pd-place {
+  min-width: 5ch;
+  text-align: center;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  color: var(--aui-muted);
+}
+.lpane .pd-in {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0;
+  font-size: 13px;
+  font-weight: 500;
+  min-width: 0;
+}
+/* The desktop's own: side by side needs more width than a diff read down the page, so while it is chosen and the chat has room beside
+   the pane the pane takes more of it (the container rule below puts the pane under the chat, full width, when there is none). */
+@container lane (min-width: 820px) {
+  .lpane[data-wide] {
+    flex-basis: 520px;
+    max-width: 880px;
+  }
+}
+
 /* Last, so it wins over the pane's own rules above it: the same selectors with the same weight go by their order. */
 @container lane (max-width: 819px) {
   .ss-lane-body {
