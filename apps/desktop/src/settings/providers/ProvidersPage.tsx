@@ -251,7 +251,14 @@ export function ProviderDetail({ v, version, signin, onSaved }: { v: ProviderVie
             // the App Store edition offers no install line (Guideline 2.4.5), and says why
             isAppStore() && <span data-testid="provider-install-store">{t("prov.installStore")}</span>
           )}
-          {v.signin ? null : v.found && <span className="prov-quiet">{t("prov.cannotTell")}</span>}
+          {/* its line says a chat tells; pi and OmO have no chat (item 139) */}
+          {v.signin || !asksFirst(v.id) ? null : v.found && <span className="prov-quiet">{t("prov.cannotTell")}</span>}
+          {/* pi and OmO cannot ask before a tool runs, so they run only as their own terminal (item 139): the status says why */}
+          {!asksFirst(v.id) && (
+            <span className="prov-noasks" data-testid="provider-no-asks">
+              {t("prov.noAsks", { agent: name })}
+            </span>
+          )}
         </div>
       </div>
       <Field id="name" label={t("prov.name")} hint={t("prov.nameHint", { agent: v.label })}>
@@ -340,12 +347,6 @@ export function ProviderDetail({ v, version, signin, onSaved }: { v: ProviderVie
       {(v.takes_args || v.takes_vars) && (
         <p className="st-note prov-guard" data-testid="provider-guard">
           {t("prov.guard", { agent: name })}
-        </p>
-      )}
-      {/* pi and OmO cannot ask before a tool runs, so they run only as their own terminal (item 139): the line says why */}
-      {!asksFirst(v.id) && (
-        <p className="st-note prov-noasks" data-testid="provider-no-asks">
-          {t("prov.noAsks", { agent: name })}
         </p>
       )}
       {(v.chat || v.terminal) && (
