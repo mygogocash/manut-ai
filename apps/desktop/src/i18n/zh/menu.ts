@@ -18,4 +18,6 @@ export const menu: Record<keyof typeof en, string> = {
   "menu.plans": "编程工具的套餐",
   "menu.plansNote": "每个编程工具的套餐用了多少，从这台电脑读取。",
   "menu.working": "进行中",
+  // the lanes listed in Recent's place while the code mode is open (item 167a): each project's list, for a screen reader
+  "menu.lanesIn": "{project} 的泳道",
 };

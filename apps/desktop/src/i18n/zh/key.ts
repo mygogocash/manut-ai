@@ -43,4 +43,7 @@ export const key: Record<keyof typeof en, string> = {
   "key.reserved.members": "{keys} 用于打开团队成员。",
   "key.ownHint": "点按更改，然后按下你想要的按键。你的快捷键只保存在这台 Mac 上。",
   "key.sidebar": "显示或隐藏侧边菜单",
+  // the previous and next lane in the side menu's order (item 167a)
+  "key.lanePrev": "上一个泳道",
+  "key.laneNext": "下一个泳道",
 };

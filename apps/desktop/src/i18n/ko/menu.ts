@@ -18,4 +18,6 @@ export const menu: Record<keyof typeof en, string> = {
   "menu.plans": "코딩 도구 요금제",
   "menu.plansNote": "각 코딩 도구의 요금제를 얼마나 썼는지 이 컴퓨터에서 읽어 옵니다.",
   "menu.working": "작업 중",
+  // the lanes listed in Recent's place while the code mode is open (item 167a): each project's list, for a screen reader
+  "menu.lanesIn": "{project}의 레인",
 };

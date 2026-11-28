@@ -43,4 +43,7 @@ export const key: Record<keyof typeof en, string> = {
   "key.reserved.members": "{keys} はチームメンバーを開きます。",
   "key.ownHint": "「変更」を押してから、使いたいキーを押してください。ショートカットはこの Mac にだけ保存されます。",
   "key.sidebar": "サイドメニューを表示または非表示",
+  // the previous and next lane in the side menu's order (item 167a)
+  "key.lanePrev": "前のレーン",
+  "key.laneNext": "次のレーン",
 };
