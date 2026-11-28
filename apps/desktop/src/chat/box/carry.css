@@ -118,7 +118,7 @@ button.bx-carry-n:hover {
   color: var(--ink);
 }
 /* where the selected lines of a diff are (item 146): a path can be long, so it breaks wherever it must */
-.sn-at {
+.sn-place {
   color: var(--ink);
   overflow-wrap: anywhere;
 }

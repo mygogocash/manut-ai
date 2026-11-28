@@ -156,7 +156,7 @@ export function SelectionNote({ chatKey, scope, box, onDone }: { chatKey: string
           />
           <p className="sn-line">{t("carry.what")}</p>
           {open?.at && (
-            <p className="sn-line sn-at" data-testid="note-at-place">
+            <p className="sn-line sn-place" data-testid="note-at-place">
               {t("carry.at.line", { place: atText(open.at) })}
             </p>
           )}
