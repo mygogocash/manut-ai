@@ -6,7 +6,9 @@
 //! the shell: `UpdaterBuilder::endpoints` overrides the `endpoints` in tauri.conf.json for one check. So the page names
 //! a channel and this file maps it to an address. The page never sends an address, so it cannot point the updater
 //! anywhere else, and whatever a feed names still installs only if its signature verifies against the key pinned in
-//! tauri.conf.json (both channels are signed with the same updater key).
+//! the build's tauri.conf.json. Since item 141 the two channels have different keys: the nightly signs with a key of its
+//! own and writes its public half, and Nightly's feed as the endpoint, into each nightly build's config, so a stable
+//! build refuses a nightly's files, and a nightly build trusts and reads only the nightly's (docs/releasing.md).
 //!
 //! Stable keeps using the plugin's own `check` command with tauri.conf.json's endpoint, so nothing changes for people who
 //! never open the setting. Only Nightly comes here. The update this makes goes into the same resource table the plugin's
