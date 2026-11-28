@@ -364,6 +364,9 @@ export interface ChatOpenResult {
   model: string;
   provider: string;
   reasoning: string;
+  /** A thread's `thread.open` says here that there are older messages than `messages`, as the cursor `thread.older` reads from (item
+   *  102l-6, threads/types.ts). A main chat's result has none. */
+  older?: string;
 }
 
 /** A Hermes chat the bridge created in a picked folder (SESSIONS > oh-my-hermes). */

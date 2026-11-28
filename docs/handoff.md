@@ -381,6 +381,11 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    and UX for the code mode, started (`docs/decisions/2026-11-28-paradev-ux.md`).
    146 merged at 13:55 (review in the pane beside a lane: side by side, one file at a time, scopes, notes on lines, ahead
    and behind); 139b (a project's own oh-my-pi extensions and hooks) and 143 (the chat API's two lows) started.
+   102l-6 merged at 14:30 (on Connected, Remove a conversation asked first, and Show older); the question's wording is
+   Claude's and the owner may change it.
+   At about 14:50 the limit stopped 167, 139b and 143 (167 and 143 had pushed green work); it reset at 17:50. 167 merged at
+   18:10 (`docs/paradev-ux.md`: Paradev's eight interface principles and rows 167a to 167k, no new dependency); 167a (lanes
+   in the side menu) and 167d (keys where the actions are) started, and 139b was sent on.
    The dev relay is on with its push key pair as dev secrets, deployed to dev 27 Nov; the owner's try on an iPhone is left.
    Two Rust tests that raced under load (the MCP relay's round trip, the Grok account check) now wait for their answers, and
    the 16 hook-dependency warnings `pnpm lint` found are settled. Fonts stay 99, the owner's. From 27 Nov the owner asked for English first: new words are English, copied into ja, ko and zh. Needs the owner from 101b: Grok signed in and `permission_mode = "ask"`

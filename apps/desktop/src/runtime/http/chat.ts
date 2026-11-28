@@ -1,7 +1,7 @@
 // Buddy's chat on the connected runtime (item 102l-2; docs/connected-chat.md, B; the routes are docs/pilot-api.md, "Chat"): a message
 // to Buddy, in its main chat or in one of its conversations, posted with the owner's session of the shop the chat is of, and Buddy's
-// answer shown as one turn; the shop's conversations listed beside its tasks, opened and made. Removing one is left out: no screen
-// offers it (the thread tree with its x is no longer drawn), so `thread.remove` stays `not_yet` (host.ts).
+// answer shown as one turn; the shop's conversations listed beside its tasks, opened, made, read further back (`older`, item 102l-6) and
+// removed (`remove`, item 102l-6: the one write here that deletes, which the screens ask about first and which cannot be taken back).
 //
 // Rules this module keeps:
 // - Only the owner chats. A message and a conversation's messages go with the owner session of the shop the chat is of:
@@ -20,8 +20,18 @@
 // - Buddy's answer is shown as one turn of the chat (`turn.start`, its `message`, `turn.end`), and only once the API answered. A turn
 //   that started before the API let the message through would end Failed for a refusal (a Failed line, a sound, a notification),
 //   where a refused message is a message not sent.
-// - Buddy only talks: the only write here is a message to Buddy. Nothing here starts, sends, posts, pays, deletes or decides anything
-//   of the shop's; approvals still settle only through the decide route (CLAUDE.md).
+// - Buddy only talks: the only writes here are a message to Buddy and the removal of one of Buddy's own conversations. Nothing here
+//   starts, sends, posts, pays or decides anything of the shop's, and nothing else of the shop's is deleted; approvals still settle only
+//   through the decide route (CLAUDE.md).
+// - A removal (item 102l-6) goes with the owner session of the shop the conversation was listed or made for, exactly `{ id }`, once, and
+//   never with the shop the switcher shows by the time it is pressed: the person asked about a conversation of the shop they saw. It
+//   waits for the messages of that conversation already on their way, so a message sent just before is kept and then removed with the
+//   rest, never left to make the conversation again. A conversation not yet made (no message sent) is just dropped, with nothing sent.
+//   Any refusal leaves the conversation where it was, but for `thread_not_found`, which drops it as the next read of the list would.
+//   The screens ask the person first (src/threads/RemoveConversation.tsx): this module does not decide that, and cannot be asked twice
+//   for one conversation, since a removed one is no longer known here.
+// - Older messages (item 102l-6) are read a page at a time with the owner session of the conversation's shop, from the cursor the
+//   screens hand back (the API's `next`, which `open` and each older page give), and nothing read is kept on disk.
 // - Nothing typed or answered is kept on disk or in the read of the shop kept for offline use: what this module holds (the
 //   conversations' ids, titles and counts) is in memory for this run, and goes when the person signs out. While only a kept read is
 //   shown, nothing here is sent or read: the kept read holds no chat.
@@ -48,6 +58,12 @@ export const CHAT_MESSAGES_PATH = "/v1/chat/messages";
 export const CHAT_THREADS_PATH = "/v1/chat/threads";
 /** One conversation and its newest messages (`GET`), oldest first. */
 export const chatThreadPath = (id: string) => `${CHAT_THREADS_PATH}/${encodeURIComponent(id)}`;
+/** Removes one conversation and every message in it, for good (`POST`, exactly `{ id }`). */
+export const CHAT_REMOVE_PATH = "/v1/chat/threads/remove";
+/** How many older messages a press of Show older reads: the API's own default page, written out so the request says it. */
+export const OLDER_PAGE = 50;
+/** The page of a conversation's messages before `before` (a message id), `GET`, oldest first. */
+export const chatOlderPath = (id: string, before: string) => `${chatThreadPath(id)}?before=${encodeURIComponent(before)}&limit=${OLDER_PAGE}`;
 
 /** The API's limits (apps/api chat-store.ts), said in the refusals when its answer does not carry them. */
 export const MAX_CHAT_TEXT = 8_000;
@@ -59,6 +75,11 @@ const PER_HOUR = 60;
  *  whose ids the API never starts so, and the API checks the id exactly. */
 const CHAT_ID = /^cht-[0-9a-z-]{1,60}$/;
 export const isChatId = (v: unknown): v is string => typeof v === "string" && CHAT_ID.test(v);
+/** The id `thread.create` gives a conversation it prepared and no message has made yet (`chat-new-…`, `create` below). */
+const PREPARED_ID = /^chat-new-[0-9a-z-]{1,40}$/;
+/** Whether `v` has the shape of a conversation's id, the API's or a prepared one's: a thread of that shape this run does not know is
+ *  a conversation that is gone (removed, or the sign-in ended), not the team's work and not something not built yet. */
+export const isConversationId = (v: unknown): v is string => isChatId(v) || (typeof v === "string" && PREPARED_ID.test(v));
 /** An id of the API's, to send back: short and plain. */
 const API_ID = /^[A-Za-z0-9._-]{1,64}$/;
 
@@ -136,14 +157,23 @@ export function decodeExchange(json: unknown): { thread: ChatThreadView; message
   return { thread, message, answer };
 }
 
-/** One conversation and its messages (`GET /v1/chat/threads/{id}`), or null when any of it cannot be read: a conversation with a
- *  message left out would not be the conversation. */
-export function decodeChatPage(json: unknown): { thread: ChatThreadView; messages: ChatMessageView[] } | null {
+/** One conversation and a page of its messages (`GET /v1/chat/threads/{id}`), or null when any of it cannot be read: a conversation with a
+ *  message left out would not be the conversation. `next` is the id the page before this one is asked with, null at the first message;
+ *  an answer with no `next`, or one that is not a message id, is not read as the end of the conversation, which would hide its older
+ *  messages without saying so. */
+export function decodeChatPage(json: unknown): { thread: ChatThreadView; messages: ChatMessageView[]; next: string | null } | null {
   if (!isObj(json) || !Array.isArray(json.messages)) return null;
   const thread = decodeChatThread(json.thread);
   const messages = json.messages.map(decodeChatMessage);
-  if (!thread || !messages.every((m): m is ChatMessageView => m !== null)) return null;
-  return { thread, messages };
+  const next = json.next === null ? null : typeof json.next === "string" && API_ID.test(json.next) ? json.next : undefined;
+  if (!thread || next === undefined || !messages.every((m): m is ChatMessageView => m !== null)) return null;
+  return { thread, messages, next };
+}
+
+/** What a removal came to (`POST /v1/chat/threads/remove`): the API answers `{ id }`, the conversation it deleted. Anything else is
+ *  not read as a removal, so the person is never told it worked on an answer that does not say so. */
+export function removed(json: unknown, api: string): boolean {
+  return isObj(json) && json.id === api;
 }
 
 /** Buddy's words as the chat shows them: an answer the provider refused with nothing said says so, and one cut at its length says
@@ -221,6 +251,9 @@ export class BuddyChat {
   private made = 0;
   /** How many messages Buddy's main chat has sent this run, so opening it can tell one sent while it was opening (`openingMark`). */
   private mainSent = 0;
+  /** The API's ids of the conversations removed this run. A read of the list that was on its way when one was removed may still name
+   *  it, and must not bring it back into the list; the ids are never reused, so keeping them for the run is safe. */
+  private readonly gone = new Set<string>();
 
   constructor(private readonly link: ChatLink) {}
 
@@ -251,6 +284,7 @@ export class BuddyChat {
     this.main = null;
     this.convs.clear();
     this.byApi.clear();
+    this.gone.clear();
   }
 
   /** `chat.send` to Buddy: one message, posted once with the owner session of the chat's shop, and Buddy's answer as one turn. `note`:
@@ -313,6 +347,8 @@ export class BuddyChat {
       // (a Map's own iteration goes on safely past an entry deleted under it)
       for (const conv of this.convs.values()) if (conv.shop === shop && conv.api !== null && before.has(conv.api) && !listed.has(conv.api)) this.drop(conv);
       for (const view of views) {
+        // one removed while the read was on its way is not brought back by an answer from before the removal
+        if (this.gone.has(view.id)) continue;
         // what a message answered while the read was on its way said of a conversation is newer than the read, and stays
         const known = this.convs.get(this.byApi.get(view.id) ?? view.id);
         if (!known || known.updatedAt <= view.updatedAt) this.remember(shop, view);
@@ -337,7 +373,40 @@ export class BuddyChat {
     const page = decodeChatPage(answer.json);
     if (!page) throw new OpError("unavailable", t("rt.chat.unreadable"));
     const conv = this.remember(shop.id, page.thread, known?.id);
-    return openOf(conv, page.messages);
+    return openOf(conv, page.messages, page.next);
+  }
+
+  /** `thread.older` of a conversation: the messages before `before` (the cursor `open` or the last older page gave), a page of
+   *  `OLDER_PAGE`, oldest first and drawn as `open` draws them, with the cursor for the page before them (null at the first message).
+   *  Read with the owner session of the conversation's shop, the one it was listed or made for, whichever the switcher shows by now. A
+   *  conversation this run does not know is refused: it was never opened here, so there is no cursor to read from. Nothing is kept. */
+  async older(id: string, before: unknown): Promise<{ messages: ThreadOpenResult["messages"]; older: string | null }> {
+    this.link.live();
+    const known = this.convs.get(id);
+    if (!known) throw new OpError("not_found", t("rt.notFound"));
+    const shop = this.owned(known.shop);
+    // a conversation not made yet has no messages, so no older ones: only a cursor this build was given is read from
+    if (known.api === null || typeof before !== "string" || !API_ID.test(before)) throw new OpError("invalid_request", t("rt.unavailable"));
+    const answer = await this.link.read(shop.id, chatOlderPath(known.api, before));
+    if (answer.kind !== "ok") {
+      if (answer.kind === "refused" && answer.code === "thread_not_found") this.drop(known);
+      throw this.refusal(answer, shop, "read");
+    }
+    const page = decodeChatPage(answer.json);
+    if (!page) throw new OpError("unavailable", t("rt.chat.unreadable"));
+    return { messages: shownMessages(known.api, page.messages), older: page.next };
+  }
+
+  /** `thread.remove` of a conversation: deletes it and every message in it for good, `POST /v1/chat/threads/remove` with exactly
+   *  `{ id }` and the owner session of the shop it was listed or made for (never the one the switcher shows by now), once, after the
+   *  messages of the conversation already on their way. The screens have asked the person first. A conversation not made yet is just
+   *  dropped, with nothing sent. A refusal is said in the person's words and leaves the conversation, but `thread_not_found`, which
+   *  drops it as the list would on its next read; both ways nothing is sent again from here. */
+  async remove(id: string): Promise<{ thread: string; archived: boolean }> {
+    this.link.live();
+    const conv = this.convs.get(id);
+    if (!conv) throw new OpError("not_found", t("rt.notFound"));
+    return this.inTurn(conv, () => this.erase(conv));
   }
 
   // ---- inside ------------------------------------------------------------------------------------------------------
@@ -355,12 +424,13 @@ export class BuddyChat {
     return { conv };
   }
 
-  /** The shop a chat is of, checked here with nothing sent: one of the person's shops, which they own. */
-  private owned(shop: string | null): ShopRow {
+  /** The shop a chat is of, checked here with nothing sent: one of the person's shops, which they own. `words` is what a helper's
+   *  shop is refused with: a message and a removal say it differently. */
+  private owned(shop: string | null, words: "rt.chat.ownerOnly" | "rt.chat.removeOwnerOnly" = "rt.chat.ownerOnly"): ShopRow {
     if (shop === null || !this.link.inShops()) throw new OpError("no_shop", t("rt.chat.noShop"));
     const row = this.link.shopRow(shop);
     if (!row) throw new OpError("not_found", t("rt.notFound"));
-    if (this.link.roleAt(shop) !== "owner") throw new OpError("owner_only", t("rt.chat.ownerOnly", { owner: row.owner, shop: row.name }));
+    if (this.link.roleAt(shop) !== "owner") throw new OpError("owner_only", t(words, { owner: row.owner, shop: row.name }));
     return row;
   }
 
@@ -406,6 +476,31 @@ export class BuddyChat {
     return { input_id: `${exchange.thread.id}/${exchange.message.id}` };
   }
 
+  /** The removal itself, once the conversation's own messages are done: the shop is checked again (the person may have stopped owning it
+   *  while the removal waited), then the conversation is deleted on the API, or just dropped when no message ever made it there. */
+  private async erase(conv: Conversation): Promise<{ thread: string; archived: boolean }> {
+    const shop = this.owned(conv.shop, "rt.chat.removeOwnerOnly");
+    if (conv.api !== null) {
+      const answer = await this.link.write(shop.id, CHAT_REMOVE_PATH, { id: conv.api });
+      if (answer.kind !== "ok") {
+        // the API has no such conversation: it is gone, as the list would say on its next read
+        if (answer.kind === "refused" && answer.code === "thread_not_found") this.dismiss(conv);
+        throw this.refusal(answer, shop, "remove");
+      }
+      if (!removed(answer.json, conv.api)) throw new OpError("unavailable", t("rt.chat.unreadable"));
+    }
+    this.dismiss(conv);
+    return { thread: conv.id, archived: false };
+  }
+
+  /** A conversation that is gone: no longer known here, never listed again by a read that began before it went, and the screens are
+   *  told (`thread.removed`), so its row and its chat go from the store. */
+  private dismiss(conv: Conversation): void {
+    if (conv.api !== null) this.gone.add(conv.api);
+    this.drop(conv);
+    this.link.emit({ event: "thread.removed", bot: TEAM, thread: conv.id });
+  }
+
   /** Keeps what the API said of a conversation of `shop`, under the id the screens already call it (`id`), else the one they called
    *  it by before, else its own. A conversation already known is updated in place: a message waiting behind the one that made it
    *  holds that same record (`inTurn`), and must see the API's id. Its name is the API's, the owner's first words (a started conversation's
@@ -425,8 +520,8 @@ export class BuddyChat {
     if (this.main && conv.api !== null && this.main.api === conv.api) this.main.api = null;
   }
 
-  /** The API's refusal of a message (`send`) or of a read of a conversation (`read`), in the person's words. */
-  private refusal(answer: Refused, shop: ShopRow, what: "send" | "read"): OpError {
+  /** The API's refusal of a message (`send`), of a read of a conversation (`read`) or of its removal (`remove`), in the person's words. */
+  private refusal(answer: Refused, shop: ShopRow, what: "send" | "read" | "remove"): OpError {
     if (answer.kind === "left") return this.link.departed(shop.id, answer.departure);
     if (answer.kind === "signed_out") return new OpError("signed_out", t("rt.signedOut"));
     if (answer.kind === "offline") return new OpError("offline", t("rt.offline"));
@@ -434,11 +529,20 @@ export class BuddyChat {
       // The API's own 5xx answers (`not_configured`, `meter_unavailable`, `provider_error`, `chat_unavailable`) come before anything is
       // kept. Any other, and a request that got no answer, may have come after: it is said as no answer, and nothing is sent again.
       if (what === "read") return new OpError("unavailable", t("rt.unavailable"));
+      // a removal that got no answer may have gone through, so it says that, and a second press is safe: a conversation already gone is
+      // `thread_not_found`, which leaves the list
+      if (what === "remove") return new OpError("unavailable", t("rt.chat.removeUnavailable"));
       if (answer.code === "not_configured" && what === "send") return new OpError("not_configured", t("rt.chat.notConfigured"));
       if (answer.code) return new OpError(answer.code, t("rt.chat.unavailable"));
       return new OpError("unavailable", t("rt.chat.noReply"));
     }
     const json = isObj(answer.json) ? answer.json : {};
+    if (what === "remove") {
+      // the removal route stays open with the chat switched off, so the chat's other refusals are not its own
+      if (answer.code === "thread_not_found") return new OpError(answer.code, t("rt.chat.threadGone"));
+      if (answer.code === "owner_only") return new OpError(answer.code, t("rt.chat.removeOwnerOnly", { owner: shop.owner, shop: shop.name }));
+      return new OpError(answer.code || "refused", t("rt.chat.removeRefused"));
+    }
     const said = (words: string) => new OpError(answer.code, words);
     switch (answer.code) {
       // an API from before the chat answers its routes 404 `not_found`, as one with the chat switched off would refuse it
@@ -512,7 +616,9 @@ function shownMessages(api: string, messages: ChatMessageView[]): ThreadOpenResu
   return out;
 }
 
-function openOf(conv: Conversation, messages: ChatMessageView[]): ThreadOpenResult {
+/** A conversation as `thread.open` gives it. `older` is the API's cursor for the messages before these, which Show older reads
+ *  (`thread.older`); it is left out when these are the first messages, or none have been read. */
+function openOf(conv: Conversation, messages: ChatMessageView[], older: string | null = null): ThreadOpenResult {
   const api = conv.api ?? conv.id;
   return {
     thread: conv.id,
@@ -524,5 +630,6 @@ function openOf(conv: Conversation, messages: ChatMessageView[]): ThreadOpenResu
     model: "",
     provider: "",
     reasoning: "",
+    ...(older === null ? {} : { older }),
   };
 }

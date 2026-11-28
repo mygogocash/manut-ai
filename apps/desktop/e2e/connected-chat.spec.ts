@@ -6,7 +6,11 @@
 // History lists the conversation, and opening it shows both messages, its header saying it is a conversation, not the team's work. It
 // runs on the app's own runtime, so the page asks for it (`__MANUT_IN_PROCESS__`, src/lib/bridge.ts): the suite's server is built for the
 // mock bridge, which has no Connected.
-// Shots: MANUT_SHOTS=<dir> -> connected-chat-{main,answering,thread}.png
+// Item 102l-6: a conversation's row menu ends with Remove, which asks (naming the conversation and saying it deletes every message in it
+// for good): Cancel keeps it and sends nothing, Remove sends `POST /v1/chat/threads/remove` once with exactly `{ id }` and the owner's
+// session, a refusal is said in the question and leaves the row. And a conversation of 120 messages opens with the newest 50 and
+// Show older, which reads the 50 before the oldest shown, twice, keeping the view where it was.
+// Shots: MANUT_SHOTS=<dir> -> connected-chat-{main,answering,thread,remove-menu,remove,remove-refused,older}.png
 import { expect, test, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -34,8 +38,10 @@ test.use({
 /** The owner session the stubbed API gives Baan Mali. */
 const OWNER_MALI = "mos1.pilot-shop-a";
 const CHAT_ID = "cht-000000001-abc-00000001";
+/** A conversation the API already holds, of 60 exchanges (120 messages), for Show older. */
+const LONG_ID = "cht-000000002-abc-00000002";
 
-type Call = { method?: string; path?: string; bearer?: string | null; body?: unknown };
+type Call = { method?: string; path?: string; search?: string; bearer?: string | null; body?: unknown };
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
@@ -51,10 +57,12 @@ async function shot(page: Page, name: string): Promise<void> {
 
 /** The desktop shell stood in the page. Baan Mali has one task, the team's work, and Buddy's chat on: a message is answered and kept
  *  in a conversation the first message makes, and a message that says "again" is refused as the 61st of the hour, keeping nothing.
- *  Every request is kept on `window.__calls`. */
-async function stubShell(page: Page) {
+ *  `long`: Baan Mali also holds a conversation of that many exchanges, m1 to m<2n>, "Question k" and "Answer k". A conversation is read a
+ *  page at a time as the API reads it (`before`, `limit`, `next`), and removed by `POST /v1/chat/threads/remove` with exactly `{ id }`,
+ *  unless the test sets `window.__removal` to the answer to give instead. Every request is kept on `window.__calls`. */
+async function stubShell(page: Page, long = 0) {
   await page.addInitScript(
-    ({ owner, chatId }) => {
+    ({ owner, chatId, longId, long }) => {
       localStorage.setItem("manut.runtime", JSON.stringify({ mode: "connected", origin: "https://dev.manut.xyz" }));
       const w = window as unknown as { __calls: Call[] };
       w.__calls = [];
@@ -72,6 +80,11 @@ async function stubShell(page: Page) {
       };
       const threads: { id: string; title: string; createdAt: string; updatedAt: string; messages: { id: string; from: string; text: string; at: string; stopReason?: string; sentOnFrom?: string; noted?: true }[] }[] = [];
       const view = (c: (typeof threads)[number]) => ({ id: c.id, title: c.title, createdAt: c.createdAt, updatedAt: c.updatedAt, messageCount: c.messages.length });
+      if (long) {
+        const at = iso(now - 7_200_000);
+        const messages = Array.from({ length: long * 2 }, (_, i) => ({ id: `m${i + 1}`, from: i % 2 ? "buddy" : "owner", text: `${i % 2 ? "Answer" : "Question"} ${Math.floor(i / 2) + 1}`, at, ...(i % 2 ? { stopReason: "end_turn" } : {}) }));
+        threads.push({ id: longId, title: "Question 1", createdAt: at, updatedAt: at, messages });
+      }
       let n = 0;
       (window as unknown as { __TAURI_INTERNALS__: unknown }).__TAURI_INTERNALS__ = {
         metadata: { currentWindow: { label: "main" }, currentWebview: { label: "main", windowLabel: "main" } },
@@ -84,7 +97,7 @@ async function stubShell(page: Page) {
           if (cmd !== "api_request") return null;
           const url = new URL(String(args.url));
           const body = args.body ? JSON.parse(args.body) : null;
-          w.__calls.push({ method: args.method, path: url.pathname, bearer: args.bearer ?? null, body });
+          w.__calls.push({ method: args.method, path: url.pathname, search: url.search, bearer: args.bearer ?? null, body });
           const key = `${args.method} ${url.pathname}`;
           if (key === "GET /v1/shops") return reply(200, { shops: [{ ...mali, role: "owner" }] });
           if (key === "POST /v1/shops/session") {
@@ -120,16 +133,33 @@ async function stubShell(page: Page) {
             return reply(200, { thread: view(c), message, answer, costSatang: 3 });
           }
           if (key === "GET /v1/chat/threads") return reply(200, { threads: threads.map(view) });
+          if (key === "POST /v1/chat/threads/remove") {
+            // exactly `{ id }`
+            if (!body || Object.keys(body).length !== 1 || typeof body.id !== "string") return reply(400, { error: "invalid_request" });
+            const refusal = (window as unknown as { __removal?: { status: number; json: unknown } }).__removal;
+            if (refusal) return reply(refusal.status, refusal.json);
+            const at = threads.findIndex((x) => x.id === body.id);
+            if (at < 0) return reply(404, { error: "thread_not_found" });
+            threads.splice(at, 1);
+            return reply(200, { id: body.id });
+          }
           const one = /^\/v1\/chat\/threads\/([^/]+)$/.exec(url.pathname);
           if (args.method === "GET" && one) {
             const c = threads.find((x) => x.id === decodeURIComponent(one[1]));
-            return c ? reply(200, { thread: view(c), messages: c.messages, next: null }) : reply(404, { error: "thread_not_found" });
+            if (!c) return reply(404, { error: "thread_not_found" });
+            // a page as the API gives it: the newest `limit` messages, or the `limit` before `before`, oldest first, and `next` is the id of the
+            // oldest message in the page when older ones remain
+            const before = url.searchParams.get("before");
+            const limit = Number(url.searchParams.get("limit") ?? 50);
+            const earlier = c.messages.filter((m) => before === null || Number(m.id.slice(1)) < Number(before.slice(1)));
+            const shown = earlier.slice(-limit);
+            return reply(200, { thread: view(c), messages: shown, next: earlier.length > limit ? shown[0].id : null });
           }
           return reply(404, { error: "not_found" });
         },
       };
     },
-    { owner: OWNER_MALI, chatId: CHAT_ID },
+    { owner: OWNER_MALI, chatId: CHAT_ID, longId: LONG_ID, long },
   );
 }
 
@@ -225,4 +255,169 @@ test("History lists the conversation, which opens with both messages and says it
 
   const reads = (await calls(page)).filter((c) => c.method === "GET" && c.path === `/v1/chat/threads/${CHAT_ID}`);
   expect(reads.map((c) => c.bearer)).toEqual([OWNER_MALI]);
+});
+
+/** Opens the row of `title` in History. */
+async function openFromHistory(page: Page, title: string) {
+  await page.getByTestId("menu-history").click();
+  await page.getByTestId("history-row").filter({ hasText: title }).click();
+  await expect(page.getByTestId("thread-chat")).toBeVisible();
+}
+
+const removals = async (page: Page) => (await calls(page)).filter((c) => c.method === "POST" && c.path === "/v1/chat/threads/remove");
+
+test("Remove asks first: Cancel keeps the conversation and sends nothing, and Remove deletes it with one request and closes it", async ({ page }) => {
+  await stubShell(page);
+  await page.goto("/");
+  await expect(page.getByTestId("page-home")).toBeVisible();
+  await openChat(page, "buddy", "Buddy");
+  await page.getByTestId("composer").fill("How were sales today?");
+  await page.getByTestId("send").click();
+  await expect(page.getByTestId("bubble-bot")).toHaveCount(1);
+  await openFromHistory(page, "How were sales today?");
+
+  // the row in Recent: its menu has its own choices, then Remove
+  const recent = page.getByTestId("sidebar").locator(".rec-li").filter({ hasText: "How were sales today?" });
+  await recent.hover();
+  await recent.getByTestId("row-more").click();
+  const menu = page.getByTestId("row-menu");
+  await expect(menu.getByTestId("row-pin")).toBeVisible();
+  await expect(menu.getByTestId("row-remove")).toHaveText("Remove conversation…");
+  if (SHOTS) await page.waitForTimeout(500);
+  await shot(page, "remove-menu");
+  await menu.getByTestId("row-remove").click();
+
+  // the question names the conversation and says what a removal does; Cancel holds the focus
+  const ask = page.getByTestId("remove-conversation");
+  await expect(ask).toBeVisible();
+  await expect(menu).toHaveCount(0);
+  await expect(ask.getByTestId("remove-title")).toHaveText("Remove this conversation?");
+  await expect(ask.getByTestId("remove-name")).toHaveText("“How were sales today?”");
+  await expect(ask.getByTestId("remove-body")).toHaveText("This deletes every message in it for good. It cannot be taken back.");
+  await expect(ask.getByTestId("remove-cancel")).toBeFocused();
+  await expect(ask.getByTestId("remove-yes")).toHaveText("Remove conversation");
+  // for the picture only: the question fades in, and the shot should be of the settled card
+  if (SHOTS) await page.waitForTimeout(700);
+  await shot(page, "remove");
+
+  // Cancel, Escape and a press outside send nothing, and the conversation stays open
+  await ask.getByTestId("remove-cancel").click();
+  await expect(ask).toHaveCount(0);
+  await recent.hover();
+  await recent.getByTestId("row-more").click();
+  await page.getByTestId("row-menu").getByTestId("row-remove").click();
+  await expect(ask).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(ask).toHaveCount(0);
+  await recent.hover();
+  await recent.getByTestId("row-more").click();
+  await page.getByTestId("row-menu").getByTestId("row-remove").click();
+  await page.getByTestId("remove-veil").click({ position: { x: 4, y: 4 } });
+  await expect(ask).toHaveCount(0);
+  expect(await removals(page)).toEqual([]);
+  await expect(page.getByTestId("thread-chat")).toBeVisible();
+  await expect(recent).toBeVisible();
+
+  // Remove: one request, with exactly { id } and the owner's session; the conversation closes and leaves Recent and History
+  await recent.hover();
+  await recent.getByTestId("row-more").click();
+  await page.getByTestId("row-menu").getByTestId("row-remove").click();
+  await ask.getByTestId("remove-yes").click();
+  await expect(ask).toHaveCount(0);
+  await expect(page.getByTestId("thread-chat")).toHaveCount(0);
+  await expect(page.getByTestId("sidebar").locator(".rec-li").filter({ hasText: "How were sales today?" })).toHaveCount(0);
+  expect((await removals(page)).map((c) => [c.bearer, c.body])).toEqual([[OWNER_MALI, { id: CHAT_ID }]]);
+  await page.getByTestId("menu-history").click();
+  await expect(page.getByTestId("history-row").filter({ hasText: "How were sales today?" })).toHaveCount(0);
+  // the team's work is still listed, and nothing else was sent to the chat's removal
+  await expect(page.getByTestId("history-row").filter({ hasText: "Reply to Khun Mali" })).toBeVisible();
+  expect((await removals(page)).length).toBe(1);
+});
+
+test("a refused removal is said in the question and leaves the row; the team's work offers no Remove", async ({ page }) => {
+  await stubShell(page);
+  await page.goto("/");
+  await expect(page.getByTestId("page-home")).toBeVisible();
+  await openChat(page, "buddy", "Buddy");
+  await page.getByTestId("composer").fill("How were sales today?");
+  await page.getByTestId("send").click();
+  await expect(page.getByTestId("bubble-bot")).toHaveCount(1);
+  await page.getByTestId("menu-history").click();
+  const row = page.locator(".hist-li").filter({ has: page.getByTestId("history-row").filter({ hasText: "How were sales today?" }) });
+  await expect(row).toBeVisible();
+
+  // the shop says only its owner may remove it, whatever the app thought
+  await page.evaluate(() => {
+    (window as unknown as { __removal: unknown }).__removal = { status: 403, json: { error: "owner_only" } };
+  });
+  await row.hover();
+  await row.getByTestId("row-more").click();
+  await page.getByTestId("row-menu").getByTestId("row-remove").click();
+  const ask = page.getByTestId("remove-conversation");
+  await ask.getByTestId("remove-yes").click();
+  await expect(ask.getByTestId("remove-error")).toHaveText("Only Fon can remove conversations at Baan Mali.");
+  await expect(ask).toBeVisible();
+  if (SHOTS) await page.waitForTimeout(700);
+  await shot(page, "remove-refused");
+  expect((await removals(page)).length).toBe(1);
+  await ask.getByTestId("remove-cancel").click();
+  await expect(ask).toHaveCount(0);
+  await expect(row).toBeVisible();
+
+  // the team's work, a job of its own, has no row menu at all, so no Remove
+  const work = page.locator(".hist-li").filter({ hasText: "Reply to Khun Mali" });
+  await expect(work).toBeVisible();
+  await expect(work.getByTestId("row-more")).toHaveCount(0);
+});
+
+test("a conversation of 120 messages opens with the newest 50, and Show older reads the 50 before, twice, keeping the view where it was", async ({ page }) => {
+  await stubShell(page, 60);
+  await page.goto("/");
+  await expect(page.getByTestId("page-home")).toBeVisible();
+  await openFromHistory(page, "Question 1");
+  const chat = page.getByTestId("thread-chat");
+  const bubbles = chat.getByTestId("bubble-user");
+  // the newest 50 messages are 25 exchanges: Question 36 to 60
+  await expect(bubbles).toHaveCount(25);
+  await expect(chat.getByTestId("bubble-bot")).toHaveCount(25);
+  await expect(bubbles.first()).toContainText("Question 36");
+  const reads = async () => (await calls(page)).filter((c) => c.method === "GET" && c.path === `/v1/chat/threads/${LONG_ID}`);
+  expect((await reads()).length).toBe(1);
+
+  // Show older is the first thing in the column, which opens at its bottom
+  const column = page.getByTestId("timeline");
+  await column.evaluate((el) => (el.scrollTop = 0));
+  const older = chat.getByTestId("chat-older");
+  await expect(older.getByTestId("chat-older-show")).toHaveText("Show older");
+  await expect(older).toBeInViewport();
+  await shot(page, "older");
+  const y = async () => (await bubbles.filter({ hasText: /^Question 36/ }).first().boundingBox())!.y;
+  const before = await y();
+
+  await older.getByTestId("chat-older-show").click();
+  await expect(bubbles).toHaveCount(50);
+  await expect(chat.getByTestId("bubble-bot")).toHaveCount(50);
+  // the 50 before are above, in order, and what was at the top is where it was
+  await expect(bubbles.first()).toContainText("Question 11");
+  await expect(older).toBeVisible();
+  expect(Math.abs((await y()) - before)).toBeLessThan(3);
+  // older messages are not new ones: the pill that brings the person back to the bottom counts none
+  await expect(page.getByTestId("jump-bottom")).toHaveAttribute("data-new", "0");
+
+  // back at the top, where the button is (the press kept the first message in place, so the button is far above it now)
+  await column.evaluate((el) => (el.scrollTop = 0));
+  const again = await y();
+  await older.getByTestId("chat-older-show").click();
+  await expect(bubbles).toHaveCount(60);
+  await expect(bubbles.first()).toContainText("Question 1");
+  // the first message is shown: nothing is left to ask for, and its line is gone from above, yet the view is where it was
+  await expect(older).toHaveCount(0);
+  expect(Math.abs((await y()) - again)).toBeLessThan(3);
+
+  // two reads after the open, each the page before the oldest shown, with the owner's session
+  expect((await reads()).map((c) => [c.bearer, c.search])).toEqual([
+    [OWNER_MALI, ""],
+    [OWNER_MALI, "?before=m71&limit=50"],
+    [OWNER_MALI, "?before=m21&limit=50"],
+  ]);
 });

@@ -2,9 +2,9 @@
 
 The design pass for item 102l, written 27 Nov 2026 after the owner chose to build it, deployed to the dev API only.
 Status: 102l-1 (A) built on 27 Nov 2026, not yet deployed; 102l-2 (B, the desktop's side) built on 27 Nov 2026; 102l-3 (C, the reach
-cards) built on 27 Nov 2026; 102l-5 (Manut AI's lines kept apart from the owner's words) built on 27 Nov 2026. The phases at the end are
-the order to build it in, and "What 102l-1 built", "What 102l-2 built", "What 102l-3 built" and "What 102l-5 changed" (below) say where the
-build differs from this design.
+cards) built on 27 Nov 2026; 102l-5 (Manut AI's lines kept apart from the owner's words) built on 27 Nov 2026; 102l-6 (the rest of B:
+remove a conversation, and Show older) built on 28 Nov 2026. The phases at the end are the order to build it in, and "What 102l-1 built",
+"What 102l-2 built", "What 102l-3 built", "What 102l-5 changed" and "What 102l-6 built" (below) say where the build differs from this design.
 
 ## Why 102l is bigger than its row
 
@@ -93,6 +93,7 @@ On Connected, a "chat" is a chat thread of A and B, and the asking chat is Buddy
 | 102l-2 | Chat threads (B) and the Connected runtime's `chat.send` and `thread.create` over them. **Built 27 Nov 2026** in the desktop (`apps/desktop/src/runtime/http/chat.ts`); the API needed nothing more | Nothing |
 | 102l-3 | The reach cards over Connected chat threads (C). **Built 27 Nov 2026** in the desktop (`apps/desktop/src/jobs/buddyReach.ts`); the API needed nothing | Nothing |
 | 102l-5 | Manut AI's lines kept apart from the owner's words: the note and the sent-on mark as `note` and `sentOnFrom` fields of a message, given to the model and not kept in the text. **Built 27 Nov 2026** (API, `packages/agent-prompts` and the desktop) | Nothing |
+| 102l-6 | The rest of B on the desktop: remove a conversation (asked first, deleted for good) and Show older (the 50 before the oldest shown). **Built 28 Nov 2026** in the desktop; the API needed nothing | Nothing. The question's wording is Claude's call, which the owner may change |
 | 102l-4 | Real answers: the owner's key set, first in dev, then staging and production at the owner's word | The paid Anthropic account, the cap (`MODEL_DEFAULT_CAP_SATANG`) and the rate (`MODEL_SATANG_PER_USD`) |
 
 ## What 102l-1 built
@@ -142,11 +143,11 @@ and their refusals are in `docs/runtime-adapter.md`, "Buddy's chat on Connected"
   API answered, and a refusal starts no turn: the message is marked not sent with its reason, as other failed sends are.
 - **Which is which.** Every thread row says what it is (`kind`: `chat` or `task`). A conversation's header says "Conversation" and a
   task's "Team's work"; History already lists each task once, as its job.
-- **No removal from the desktop yet.** The API's `POST /v1/chat/threads/remove` is not called: no screen offers to remove a thread now
-  (the thread tree with its x is no longer drawn), so `thread.remove` stays "not yet". Deleting the shop's data still wipes every
-  conversation (102l-1).
-- **Not built:** older messages than a conversation's newest 50 (the API pages them; the desktop reads the first page only), and a live
-  answer: the API answers whole, so nothing streams.
+- **No removal from the desktop yet** (built in 102l-6, below). The API's `POST /v1/chat/threads/remove` was not called: no screen offered
+  to remove a thread then (the thread tree with its x is no longer drawn), so `thread.remove` stayed "not yet". Deleting the shop's data
+  still wipes every conversation (102l-1).
+- **Not built:** older messages than a conversation's newest 50 (the API pages them; the desktop read the first page only; built in
+  102l-6, below), and a live answer: the API answers whole, so nothing streams.
 
 ## What 102l-3 built
 
@@ -227,6 +228,45 @@ changed:
   message was never kept outside tests), so there is nothing to read back.
 - **Left as it was:** a read card's text (item 97's copy of another conversation) is still the message's words, and Buddy's blocks still
   take at most 5,000 characters.
+
+## What 102l-6 built
+
+The two things 102l-2 left out, in the Connected runtime and the screens that draw Buddy's conversations (`apps/desktop/src/runtime/http/chat.ts`
+and `host.ts`; the question in `src/threads/removeAsk.ts` and `RemoveConversation.tsx`, the entry in `src/sidebar/Sidebar.tsx` and
+`src/pages/HistoryPage.tsx`; Show older in `src/threads/ShowOlderMessages.tsx`, `src/chat/parts/Timeline.tsx` and the store's `threadOlder`;
+tests in `chat.test.ts`, `removeAsk.test.ts`, `RemoveConversation.test.tsx`, `ShowOlderMessages.test.ts`, `chatOlder.test.ts`,
+`TimelineJump.test.ts`, and the browser spec `e2e/connected-chat.spec.ts`, over a stand-in of the API that pages and removes as apps/api
+does, `ownerChatRoutes` in `testkit.ts`). The ops and their refusals are in `docs/runtime-adapter.md`, "Buddy's chat on Connected"; the calls
+are Claude's (`docs/decisions/102l-connected-chat.md`). What a person sees:
+
+- **Remove.** A conversation's row menu (in Recent, in History and in History's Archive) ends, after a line, with "Remove conversation…" in
+  red. It opens a question over the app: "Remove this conversation?", the conversation's name, "This deletes every message in it for good.
+  It cannot be taken back.", Cancel (which holds the focus, as Forget's "Keep it" does) and the red "Remove conversation". Cancel, Escape and
+  a press outside send nothing. The red button sends one `POST /v1/chat/threads/remove` with exactly `{ id }` and the owner session of the
+  shop the conversation was listed or made for, never the shop the switcher shows by then; the conversation leaves the list, and its view
+  closes when it was open. The entry is for a conversation only, and only the owner has conversations (a helper sees none): the team's
+  work, several rows selected at once and Practice's threads never offer it.
+- **A refusal is said in the question, and the row stays**, with the runtime's words under the text and both buttons still there: the
+  API's 403 (only the owner may remove), no answer (it is not known whether it went through, and pressing again is safe), offline, signed
+  out, the person's place in the shop ended. One the API no longer has, `thread_not_found`, says "This conversation is not there any more."
+  and drops the row at once, as the list would on its next read.
+- **A conversation made in the desktop and never sent to** has nothing on the API: it is dropped there, with nothing sent (the question
+  is still asked, since the row's count can be a message behind). A message sent a moment before the removal is posted first, then the
+  conversation is removed with it.
+- **Show older.** A conversation with more than its newest 50 messages starts with a quiet "Show older" button above its first message. A
+  press reads the 50 before the oldest shown (`GET /v1/chat/threads/{id}?before=<the API's next>&limit=50`, with the owner session of the
+  conversation's shop) and puts them above, keeping what the person was reading where it was; the button stays while there are older ones
+  and is gone once the first message is shown. Messages read back are drawn as the first page is (a sent-on mark in front, no reach block
+  after `noted: true`). A page that cannot be read says why next to the button and offers Try again, and what is shown has not changed.
+  The "Jump to bottom" pill does not count them as new messages. Nothing read is kept on disk.
+
+Where it differs from the design above:
+
+- **The API needed nothing.** The removal route and the paged read were built in 102l-1; this item only calls them.
+- **The main chat is not a conversation's view**, so it has no Show older, and removing the conversation it posts to leaves what that chat
+  already shows on screen until it is opened again (its next message starts another conversation).
+- **Not built:** removing several conversations at once (deleting is one question for one conversation), an undo (the API deletes for good),
+  and a count of how many older messages there are (the API gives a cursor, not a total).
 
 ## Open questions for the owner
 

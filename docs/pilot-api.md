@@ -3444,7 +3444,11 @@ owner's deletion of their own account, all of which run the same wipe (`tenantDe
 
 **The desktop.** The Connected runtime's `chat.send`, `thread.create`, `thread.list` and `thread.open` use these routes with the owner
 session of the chat's shop (item 102l-2; `docs/runtime-adapter.md`, "Buddy's chat on Connected"): a conversation the desktop makes is made
-by its first message, as above. The removal route is not called yet: no screen of the desktop offers to remove a thread. The reach cards
+by its first message, as above. The removal route is called by `thread.remove` of a conversation (item 102l-6) with exactly `{ id }` and
+the owner session of the shop the conversation was listed or made for, once, and only after a question that names the conversation and says it
+deletes every message in it for good (one made in the desktop and not sent to is dropped there, with nothing sent). `thread.open` reads
+the newest page with no query, and `thread.older` reads `GET /v1/chat/threads/{id}?before=<the `next` of the page shown>&limit=50` with the same
+session, for Show older; an answer whose `next` is neither null nor a message id is not read as a page. The reach cards
 over conversations (item 102l-3, `docs/connected-chat.md`, "What 102l-3 built") use these routes and nothing more: a read, a message
 sent on and a new conversation are each one `POST /v1/chat/messages` the owner pressed for. Their lines are the message's `note` and
 `sentOnFrom` fields (item 102l-5), never part of its words: the desktop posts the words as `text`, Buddy's note as `note` and, for words

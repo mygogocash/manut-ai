@@ -46,4 +46,6 @@ export const row: Record<keyof typeof en, string> = {
   "row.why.quiet": "安静了 {n} 天，暂时完成",
   "row.why.quiet1": "安静了一天，暂时完成",
   "row.why.merged": "暂时完成：拉取请求已合并",
+  // Remove, on a conversation's row menu (item 102l-6)
+  "row.removeChat": "Remove conversation…",
 };

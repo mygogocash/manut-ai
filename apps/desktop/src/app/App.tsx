@@ -35,6 +35,7 @@ import { ActivityPage } from "../pages/ActivityPage";
 import { Onboarding } from "../onboarding/Onboarding";
 import { isFirstRunOpen } from "../onboarding/flow";
 import { ImportPast, useImportOffer } from "../importPast/ImportPast";
+import { RemoveConversation } from "../threads/RemoveConversation";
 import { McpCards } from "../threadsMcp/Cards";
 import { startMcp } from "../threadsMcp/start";
 import { useLookAttributes, useThemeAttribute } from "./theme";
@@ -178,6 +179,8 @@ export function App() {
       <Palette />
       {/* Bring over's offer, over whatever is showing: once on a first launch, then from History */}
       <ImportPast />
+      {/* the question before a conversation with Buddy is removed for good, over whatever is showing (item 102l-6) */}
+      <RemoveConversation />
       {/* a program outside Manut AI asking to be let in, to read a chat or to send one a message, over whatever is showing (item 103) */}
       <McpCards />
     </div>
