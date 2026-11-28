@@ -9,6 +9,7 @@ type LimitedEnv = Env & {
   LINEAR_INBOUND_LIMITER?: RateLimit;
   OUTPOST_LIMITER?: RateLimit;
   SELF_SERVE_SHOP_LIMITER?: RateLimit;
+  CHAT_LIMITER?: RateLimit;
 };
 const bindings = env as unknown as LimitedEnv;
 const routes = [
@@ -28,6 +29,12 @@ const routes = [
   // Making a shop of one's own (self-serve.ts) wakes AUTH and makes a shop, so while sign-ups are open (the test config opens
   // them) every try counts before anything is read.
   ["/v1/shops/new", "POST", "SELF_SERVE_SHOP_LIMITER"],
+  // Buddy's chat (chat.ts, item 143) checks the owner's session first, which wakes AUTH, so each of its four routes is limited
+  // before the session is read, all of them in one bucket per address. The reads count as the message does.
+  ["/v1/chat/messages", "POST", "CHAT_LIMITER"],
+  ["/v1/chat/threads", "GET", "CHAT_LIMITER"],
+  ["/v1/chat/threads/cht-0123456789", "GET", "CHAT_LIMITER"],
+  ["/v1/chat/threads/remove", "POST", "CHAT_LIMITER"],
 ] as const;
 
 function fixture(limit: (key: string) => Promise<boolean> = async () => true) {
@@ -39,7 +46,7 @@ function fixture(limit: (key: string) => Promise<boolean> = async () => true) {
   } } as RateLimit;
   const target: LimitedEnv = { ...bindings,
     AUTH_EXCHANGE_LIMITER: limiter, AUTH_CODE_LIMITER: limiter, AUTH_SESSION_LIMITER: limiter, LINEAR_INBOUND_LIMITER: limiter,
-    OUTPOST_LIMITER: limiter, SELF_SERVE_SHOP_LIMITER: limiter,
+    OUTPOST_LIMITER: limiter, SELF_SERVE_SHOP_LIMITER: limiter, CHAT_LIMITER: limiter,
     AUTH: { idFromName: (name: string) => bindings.AUTH.idFromName(name),
       get: () => ({ fetch: async () => { calls++; return Response.json({ fixture: true }); } }),
     } as unknown as DurableObjectNamespace,
@@ -52,7 +59,7 @@ function request(path: string, method: string, ip: string | null = "192.0.2.17")
   const headers = new Headers({ "content-type": "application/json", "content-length": "2",
     authorization: "Bearer fixture-token", "x-forwarded-for": "203.0.113.99" });
   if (ip !== null) headers.set("cf-connecting-ip", ip);
-  const body = method === "DELETE" ? undefined : new ReadableStream<Uint8Array>({
+  const body = method === "DELETE" || method === "GET" ? undefined : new ReadableStream<Uint8Array>({
     pull(controller) { pulls++; controller.enqueue(new TextEncoder().encode("{}")); controller.close(); },
   }, { highWaterMark: 0 });
   return { request: new Request(`https://test${path}`, { method, headers, ...(body ? { body } : {}) }),
@@ -138,7 +145,7 @@ describe("public ingress rate limits", () => {
 
   it.each([
     ["AUTH_EXCHANGE_LIMITER", 10], ["AUTH_CODE_LIMITER", 10], ["AUTH_SESSION_LIMITER", 60], ["LINEAR_INBOUND_LIMITER", 300],
-    ["OUTPOST_LIMITER", 300], ["SELF_SERVE_SHOP_LIMITER", 10],
+    ["OUTPOST_LIMITER", 300], ["SELF_SERVE_SHOP_LIMITER", 10], ["CHAT_LIMITER", 60],
   ] as const)("uses the real workerd %s binding at its configured boundary", async (binding, limit) => {
     const actual = bindings[binding];
     expect(actual).toBeDefined();
@@ -147,7 +154,7 @@ describe("public ingress rate limits", () => {
     const path = ({ AUTH_EXCHANGE_LIMITER: "/v1/auth/exchange", AUTH_CODE_LIMITER: "/v1/auth/email/code",
       AUTH_SESSION_LIMITER: "/v1/auth/refresh",
       LINEAR_INBOUND_LIMITER: "/v1/inbound/linear", OUTPOST_LIMITER: "/v1/outposts/heartbeat",
-      SELF_SERVE_SHOP_LIMITER: "/v1/shops/new" } as const)[binding];
+      SELF_SERVE_SHOP_LIMITER: "/v1/shops/new", CHAT_LIMITER: "/v1/chat/messages" } as const)[binding];
     // Fills one /64's real bucket to the limit, each request from another address inside it, and sends one more from
     // yet another: a whole IPv6 /64 is one source, so rotating addresses inside it gains nothing. The real limiter
     // counts in 60-second windows, so on a loaded machine the loop can cross into a new window and the extra request is
@@ -231,5 +238,72 @@ describe("public ingress rate limits", () => {
     let statuses = await run();
     if (statuses.slice(10).some((status) => status !== 429)) statuses = await run();
     expect(statuses).toEqual([...Array<number>(10).fill(200), ...Array<number>(5).fill(429)]);
+  });
+});
+
+// Buddy's chat (item 143, L5 of the sixth security read): every call under /v1/chat/ checked the owner's session first, which
+// wakes AUTH, with no limit of its own at the door. The generic tests above walk its four routes; these are the chat's own: which
+// paths and methods count, that the paths beside it do not, and that a call below the limit goes on to the session's own check.
+describe("Buddy's chat ingress limit", () => {
+  /// Every method and every path under /v1/chat/ counts, the unknown ones and the bare /v1/chat too: the chat route answers each
+  /// of them, and each is answered before the session is read, so each is counted first.
+  const everyCall = [
+    ["POST", "/v1/chat/messages"], ["PUT", "/v1/chat/messages"], ["GET", "/v1/chat/threads"], ["POST", "/v1/chat/threads"],
+    ["GET", "/v1/chat/threads/cht-0123456789"], ["DELETE", "/v1/chat/threads/cht-0123456789"],
+    ["POST", "/v1/chat/threads/remove"], ["GET", "/v1/chat/nothing-here"], ["GET", "/v1/chat/"], ["GET", "/v1/chat"],
+  ] as const;
+
+  it.each(everyCall)("counts %s %s, and past the limit answers 429 before the session is checked or anything is read",
+    async (method, path) => {
+      const counter = fixture(async () => false);
+      const input = request(path, method);
+      const response = await send(input.request, counter.target);
+      expect(response.status).toBe(429);
+      expect(response.headers.get("retry-after")).toBe("60");
+      expect(await response.json()).toEqual({ error: "rate_limited" });
+      expect(counter.keys).toEqual(["192.0.2.17"]);
+      expect(counter.calls()).toBe(0);
+      expect(input.pulls()).toBe(0);
+    });
+
+  it("lets a call below the limit through to the chat's own checks, counted once", async () => {
+    const counter = fixture();
+    // The fixture's AUTH knows no session, so the route's own first check refuses it: the call got past the gate and woke AUTH once.
+    const refused = await send(request("/v1/chat/threads", "GET").request, counter.target);
+    expect(refused.status).toBe(401);
+    expect(await refused.json()).toEqual({ error: "unauthorized" });
+    expect(counter.keys).toEqual(["192.0.2.17"]);
+    expect(counter.calls()).toBe(1);
+    // A path under /v1/chat/ that is no route of the chat is counted too, and answered 404 without reading any session.
+    const unknown = await send(request("/v1/chat/nothing-here", "GET").request, counter.target);
+    expect(unknown.status).toBe(404);
+    expect(await unknown.json()).toEqual({ error: "not_found" });
+    expect(counter.keys).toEqual(["192.0.2.17", "192.0.2.17"]);
+    expect(counter.calls()).toBe(1);
+  });
+
+  it("leaves the paths beside the chat's outside the limit", async () => {
+    const counter = fixture(async () => { throw new Error("must_not_limit"); });
+    for (const path of ["/v1/chatter", "/v1/chats", "/v1/chat-history", "/v1/memory/chat", "/v1/shops/chat"]) {
+      const response = await send(request(path, "GET").request, counter.target);
+      // A limiter that was asked would have failed this request closed (503) after recording its key.
+      expect(response.status, path).not.toBe(503);
+      await response.body?.cancel();
+    }
+    expect(counter.keys).toEqual([]);
+  });
+
+  it("counts the chat in a bucket of its own, not the auth routes' or the deletion's", async () => {
+    // One limiter per binding, so a source that has used up the chat's cannot lock the same source out of signing in, and the
+    // other way round: each route asks only its own binding.
+    const asked: string[] = [];
+    const named = (name: string) => ({ limit: async () => { asked.push(name); return { success: true }; } }) as RateLimit;
+    const counter = fixture();
+    const target: LimitedEnv = { ...counter.target, AUTH_EXCHANGE_LIMITER: named("exchange"), AUTH_SESSION_LIMITER: named("session"),
+      TENANT_DELETE_LIMITER: named("deletion"), SELF_SERVE_SHOP_LIMITER: named("self-serve"), CHAT_LIMITER: named("chat") } as LimitedEnv;
+    await (await send(request("/v1/chat/messages", "POST").request, target)).body?.cancel();
+    expect(asked).toEqual(["chat"]);
+    await (await send(request("/v1/auth/refresh", "POST").request, target)).body?.cancel();
+    expect(asked).toEqual(["chat", "session"]);
   });
 });

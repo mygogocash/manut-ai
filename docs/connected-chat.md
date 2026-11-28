@@ -47,7 +47,8 @@ the reach cards over them (C).
   most, and are part of the shop's export and its deletion (`DELETE /v1/tenant/data` and the owner's deletion link
   already wipe the tenant: chats join that wipe and the export, with tests). Nothing is logged but codes and ids.
 - **Limits.** A message is at most 8,000 characters; a shop at most 60 messages an hour (the gateway's cap is the money
-  limit; this is the abuse limit).
+  limit; this is the abuse limit). At the door, before the session is checked, one source address may make 60 calls a minute
+  under `/v1/chat/` (`CHAT_LIMITER`, item 143).
 
 ## B. Chat threads
 
