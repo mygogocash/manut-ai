@@ -3326,6 +3326,17 @@ context), an approval or deletion link's token, an outpost's credential, and the
 routes) answer 401 `unauthorized`; an unlinked owner's session 401 `unlinked`, a removed helper's 401 `removed`; 503
 `people_unavailable` when the session cannot be checked. The shop is always the session's, never a field.
 
+**The door** (item 143). Before anything else, every call under `/v1/chat/`, any method and any path (the four routes below, and a
+path that is no route of the chat), counts against `CHAT_LIMITER` in the Worker's ingress gate: 60 a minute per source address (an
+IPv4 address or an IPv6 /64, as every ingress limit counts), one bucket for all of them, **before the session is checked**. So a
+call with no session costs the AuthObject nothing past the limit, and a call over it reads nothing, counts nothing in the shop's
+hour and never reaches the gateway. Past the limit the answer is 429 `{ "error": "rate_limited" }` with `retry-after: 60` and no
+other field, in the shape every ingress limit answers; 503 `rate_limit_unavailable` without the binding, when it fails, or for a
+source that cannot be read. It counts while `buddyChat` is off too, since the reads and the removal stay open. It is not the shop's
+hour below, whose 429 also says `retryAfter` and `perHour`. Like every Workers rate limit it counts per Cloudflare location, which
+is abuse control, not accounting. The binding is in every environment (`apps/api/wrangler.jsonc`, `wrangler.test.json`), and
+`scripts/one-origin-contract.mjs` fails the API's tests if an environment lacks it or two limiters share a namespace id.
+
 | Method and path | Body or query | Answer |
 | --- | --- | --- |
 | `POST /v1/chat/messages` | `{ text }` (a new thread) or `{ thread, text }` (`thread` may be `null` for a new one), each with `note` and `sentOnFrom` if it has them, and no other key | `{ thread: Thread, message: Message, answer: Message, costSatang }` |
@@ -3368,6 +3379,7 @@ nothing is kept for any refusal:
 
 | Status | `error` | When |
 | --- | --- | --- |
+| 429, 503 | `rate_limited` (no other field, with `retry-after: 60`), `rate_limit_unavailable` | The door (above): this source address has used its 60 calls under `/v1/chat/` this minute, or the limiter cannot say. Nothing is read |
 | 401, 503 | `unauthorized`, `unlinked`, `removed`, `people_unavailable` | Who is asking (above) |
 | 403 | `owner_only` | A helper's session |
 | 405 | `method_not_allowed` | Not `POST` |
@@ -3394,7 +3406,7 @@ gateway answers, so a client retrying a refused message in a loop is stopped too
 gateway's monthly cap is the money limit. If the owner deletes the thread, or it fills, while Buddy answers, the call stays in
 the ledger and the answer is refused `thread_not_found` or `thread_full` with the call's `callId`, and not kept.
 
-**The reads and the removal** take the same order (who, role, method, query and body), then the shop's record, then the thread:
+**The reads and the removal** take the same order (the door, who, role, method, query and body), then the shop's record, then the thread:
 400 `invalid_request` for any other query or body (a `GET /v1/chat/threads` takes none, a `limit` outside 1 to 200, a `before`
 that is no message id, a name twice); 404 `thread_not_found` for an id of no thread of this shop; 503 `chat_unavailable`. They
 stay open with the switch off, so the owner can always read and delete what was kept. A removal cannot be taken back, so the
