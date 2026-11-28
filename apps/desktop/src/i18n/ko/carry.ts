@@ -38,4 +38,8 @@ export const carry: Record<keyof typeof en, string> = {
   "carry.ctx.filesMore": "외 {n}개",
   "carry.ctx.ask": "사람의 답을 기다리는 중: {v}",
   "carry.ctx.end": "채팅 \"{title}\"의 맥락 끝.",
+  // a note on lines selected in a diff (item 146): where the lines are
+  "carry.at.old": "deleted lines, numbered as before the change",
+  "carry.at.mixed": "across deleted and added lines, numbered after the change",
+  "carry.at.line": "It names where the lines are: {place}",
 };

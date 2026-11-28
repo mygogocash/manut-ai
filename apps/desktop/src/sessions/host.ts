@@ -10,7 +10,8 @@ import type { RegistryList } from "../settings/agents/acpRegistry";
 import type { ApprovalChoice, ClarifyAnswers } from "../lib/protocol";
 import type { DiskState } from "../lib/disk";
 import type { ImportApp, ImportProfile } from "./term/import";
-import { type LaneFolder } from "../code/laneFolder";
+import { type LaneFolder, type LaneReview } from "../code/laneFolder";
+import { type LaneRemote } from "../code/laneRemote";
 import type { SavedKeys } from "../code/secrets";
 import { type GitView } from "../code/moved";
 import { type KeptLane, type LaneCleaned, type LaneLanded, type LaneMade, type LaneReleased, type LaneRemoveAsk, type LaneRemoved } from "../code/laneBranch";
@@ -273,6 +274,14 @@ export interface SessionHost extends HistoryHost {
   /** What really changed in the lane's own folder `worktree` since the lane started, from git (the Diff beside the lane): each file
    *  with its state and text, bounded. null when this host cannot read a folder; rejects for a folder the app did not make. */
   laneDiff(worktree: string): Promise<LaneFolder | null>;
+  /** The same folder as sections for the pane's review (item 146, src-tauri/src/lane_diff.rs `review`): the work not committed yet and
+   *  each of the lane's own commits, newest first, each with its files, bounded and masked as `laneDiff` is. null when this host cannot
+   *  read a folder; rejects for a folder the app did not make. Absent on a shell older than the item. */
+  laneReview?(worktree: string): Promise<LaneReview | null>;
+  /** How many commits the lane's branch is ahead of and behind its remote (item 146, src-tauri/src/lane_remote.rs), counted from what
+   *  git already holds in the lane's folder: nothing is fetched. null when this host cannot read a folder; rejects for a folder the app
+   *  did not make. Absent on a shell older than the item. */
+  laneRemote?(worktree: string): Promise<LaneRemote | null>;
   /** The keys in what a commit or a push from the lane's folder `worktree` would save, from the same read-only, bounded read
    *  (code/secrets.ts `savedKeys`, item 117). null when this host cannot read a folder; rejects for a folder the app did not
    *  make. Kit's dial asks before a commit or a push unless this answered in time with nothing unread and no key. */
