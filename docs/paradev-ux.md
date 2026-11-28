@@ -213,7 +213,7 @@ ring turns, and the face's waiting look shows (KitFaces).
 
 ### Review
 
-**Paradev.** Item 146 takes its layout (split and unified, one file at a time, sections, a note on lines). Beside that: a
+**Paradev.** Item 146 took its layout (split and unified, one file at a time, sections, a note on lines). Beside that: a
 Viewed box on each file and "0/25 viewed" over the list (`W/hooks/useViewedFiles/useViewedFiles.ts`; picture
 `apps/docs/public/images/changes.png`); Collapse all and Expand all; generated and binary files hidden; a large diff waiting
 behind Load diff; "Unable to load diff" with Retry (`W/hooks/usePaneRegistry/components/DiffPane/`); the tab bar's changes
@@ -221,15 +221,19 @@ control, showing +746 -162 and opening the changes (`W/components/ChangesControl
 control's one face (principle 5). A note on a line offers Ask Claude Code, Reply and Resolve (picture
 `apps/marketing/public/images/readme/diff-viewer.png`).
 
-**Manut AI today.** The pane's Diff, newest change first and masked (`src/code/LanePane.tsx`); Put up for review and then
-Merge, each through one ask that names exactly what goes (`src/code/Review.tsx`, `src/code/reviewAsk.ts`, item 75), as a
-quiet link at the pane's top (picture 3). The Code board's top bar holds the lane's branch, its state and at most one dark
-button (`Code.dc.html`).
+**Manut AI today.** The pane's Diff, masked (`src/code/LanePane.tsx`); since item 146 (merged 28 Nov, after the pictures
+were taken) side by side or unified, one file at a time with Prev and Next, sections for the lane's commits and its
+uncommitted work, a note on selected lines with the file and the range, and each lane row's commits ahead of and behind its
+remote. A file past the shell's budget says "Too large to show." and a binary one says so (`src/chat/activity/Work.tsx`); a
+read that fails keeps what was shown (`docs/code-editor.md`, "The pane beside a lane"). Put up for review and then Merge go through one ask each that names
+exactly what goes (`src/code/Review.tsx`, `src/code/reviewAsk.ts`, item 75), from a quiet link at the pane's top (picture 3).
+The Code board's top bar holds the lane's branch, its state and at most one dark button (`Code.dc.html`).
 
 **Verdict: adopt** Viewed marks with their count, Collapse all and Expand all, lock and generated files folded with their
-counts, a file over the cap behind Show this diff, and a diff that could not be read saying so with Try again, in the app's
-words. **Adapt** Viewed so that a mark clears when its file changes again, since Kit keeps working on it (Paradev keeps a
-plain list of paths). **Adapt** the ship control as the lane's next step: one dark button in the lane's top bar, as the Code
+counts, and a diff that could not be read saying so with Try again, in the app's words. **Adapt** Viewed so that a mark
+clears when its file changes again, since Kit keeps working on it (Paradev keeps a plain list of paths). **Keep ours** the
+shell's budget for one diff: Paradev's Load diff would read past the cap that keeps the masking bounded, so a file past it
+keeps its note. **Adapt** the ship control as the lane's next step: one dark button in the lane's top bar, as the Code
 board draws it, naming the step the branch is at (Put up for review, then Merge once its request is open), each press opening
 its one ask, the request's state beside it. **Keep ours**: no Commit button (commits are Kit's, through the dial), no push or
 merge by a press alone, and no Discard changes in the diff (Rewind and Bring it back are the ways back).
@@ -343,7 +347,7 @@ The lead updates the canvas. These are the boards each change would touch, with 
 | The lane's next step in its top bar | 167e | Code, StatesCodeDev, KitApproval |
 | The pane's width and keys, and the panel's keys | 167f | Code, BrandLayout |
 | The empty Code page with its box | 167g | StatesCode, StatesSystem, KitForms |
-| Review: viewed, folded, the cap and Try again | 167h | KitCode, Code |
+| Review: viewed, folded, and Try again | 167h | KitCode, Code |
 | Search in Settings | 167i | Settings, StatesSystem |
 | A developer's first visit to the Code page | 167j | StatesCodeDev |
 | Back and forward | 167k | KitNavigation |
@@ -371,4 +375,4 @@ The rows are in `docs/plan.md` after row 167, in the order a developer using Kit
 empty Code page (167g), review (167h), Settings' search (167i), the first visit (167j), and back and forward (167k). Smaller
 pieces went into the rows they belong to: 149 (quick open in the palette), 151 (open threads first), 152 (a terminal's
 mark), 155 (ports on the menu's lane rows), 160 (a script's key shown) and 162 (the board in the switcher's order). Rows
-167e, 167f and 167h wait on item 146, which is being built, rather than changing its text.
+167e, 167f and 167h build on item 146, which was being built when they were written and merged the same day.
