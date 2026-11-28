@@ -138,6 +138,14 @@ describe("Recent with pinned, settled, snoozed and archived chats", () => {
   const key = (t: string) => threadRowKey("buddy", t);
   const ids = (xs: { thread: string }[]) => xs.map((x) => x.thread);
 
+  it("carries what the runtime says a thread is (item 102l-6), so a conversation's row can offer Remove and the team's work and Practice's threads cannot", () => {
+    const kinds = { buddy: [{ ...row("c1", "chat", 100, 900), kind: "chat" as const }, { ...row("t1", "task", 100, 800), kind: "task" as const }, row("p1", "plain", 100, 700)] };
+    const p = recentParts(kinds, ["buddy"], {}, calm, NOW);
+    expect(Object.fromEntries(p.recent.map((r) => [r.thread, r.kind]))).toEqual({ c1: "chat", t1: "task", p1: undefined });
+    // a thread of a runtime that marks none has no `kind` key at all
+    expect("kind" in p.recent[2]).toBe(false);
+  });
+
   it("is the three newest and nothing else when no chat is marked", () => {
     const p = recentParts(threads, ["buddy"], {}, calm, NOW);
     expect(ids(p.recent)).toEqual(["b1", "b2", "b3"]);
