@@ -1,0 +1,53 @@
+/* The chat's find bar and its matches (ChatFind.tsx, item 150). The bar is the terminal's own (sessions/term/find.css: the
+   same popover fill, one hairline, no shadow), at the top right of the chat's column. It arrives as an overlay does
+   (docs/motion.md): a short fade from just above, and goes at once when closed.
+
+   The colour of a match is the design kit's amber (tokens.css --aui-amber, the same in both themes). A plain match is a
+   tint of 12%, the most that the chat's muted grey (step rows, times) still reads on at 4.5 to 1 in both themes on every
+   band a message is drawn on; the current match, in a web view with the highlight API, is a solid amber with near-black
+   text on it. find.test.ts measures all of it from this file and the tokens. */
+.tfind.cfind {
+  top: 8px;
+  right: 20px;
+  max-width: calc(100% - 40px);
+  --rise-by: calc(var(--arrive-by) * -1);
+  animation: var(--anim-arrive);
+}
+.cfind .tfind-q {
+  flex: 1 1 150px;
+  width: auto;
+}
+
+/* A web view with the highlight API: the browser paints each match behind its text. Only these properties apply. */
+::highlight(chat-find) {
+  background-color: rgba(224, 180, 58, 0.12);
+}
+::highlight(chat-find-current) {
+  background-color: var(--aui-amber);
+  color: #14110a;
+}
+
+/* A web view without it: a layer of boxes over the column (paint.ts). It lies exactly over the column's visible box, takes
+   no click, and is empty until a match is drawn. A box lies over the text, not under it, so the layer blends with the page
+   as the browser's own highlight would read: screen in the dark theme (it only lightens the page, text included) and
+   multiply in the light one (it only darkens), which keeps every text colour as readable as under a highlight. The current
+   match has a ring of the warning colour, the amber in dark and a deep amber in light (3 to 1 on both pages). */
+.cf-layer {
+  position: absolute;
+  z-index: 2;
+  overflow: hidden;
+  pointer-events: none;
+  mix-blend-mode: screen;
+}
+[data-theme="light"] .cf-layer {
+  mix-blend-mode: multiply;
+}
+.cf-box {
+  position: absolute;
+  border-radius: 2px;
+  background: rgba(224, 180, 58, 0.12);
+}
+.cf-box.cf-cur {
+  outline: 2px solid var(--aui-warning);
+  outline-offset: -1px;
+}

@@ -12,10 +12,10 @@
 // Pure but for the small store at the end, so a test reads every rule without a DOM.
 import { changes } from "../lib/changes";
 
-export type KeyAction = "search" | "details" | "settings" | "next-ask" | "graph" | "new-session" | "session-next" | "session-prev" | "terminal" | "sidebar";
+export type KeyAction = "search" | "find" | "details" | "settings" | "next-ask" | "graph" | "new-session" | "session-next" | "session-prev" | "terminal" | "sidebar";
 
 /** In the order Settings lists them. */
-export const KEY_ACTIONS: readonly KeyAction[] = ["search", "details", "settings", "next-ask", "new-session", "session-next", "session-prev", "sidebar", "graph", "terminal"];
+export const KEY_ACTIONS: readonly KeyAction[] = ["search", "find", "details", "settings", "next-ask", "new-session", "session-next", "session-prev", "sidebar", "graph", "terminal"];
 
 export interface Chord {
   readonly meta: boolean;
@@ -61,6 +61,8 @@ export function defaultKeys(mac: boolean): Keys {
   const m = modOf(mac);
   return {
     search: [chord("KeyK", m)],
+    // find in the chat in view (item 150); a terminal's own find has the same keys and keeps them while a terminal has the keyboard
+    find: [chord("KeyF", m)],
     details: [chord("Period", m)],
     settings: [chord("Comma", m)],
     "next-ask": [chord("KeyJ", m)],

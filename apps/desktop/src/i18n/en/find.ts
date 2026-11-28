@@ -1,5 +1,6 @@
 export const find = {
   "find.label": "Find in the terminal",
+  "find.chatLabel": "Find in this chat",
   "find.placeholder": "Find",
   "find.count": "{n} of {total}",
   "find.countMore": "{n} of {total}+",

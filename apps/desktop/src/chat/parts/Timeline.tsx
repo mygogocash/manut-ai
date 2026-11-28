@@ -32,6 +32,7 @@ import { can } from "../../runtime";
 import { isMac } from "../../app/shortcuts";
 import { JumpPill, PinnedOwn, useTimelineNav } from "./TimelineJump";
 import { useArrivals } from "./arrival";
+import { ChatFind } from "../find/ChatFind";
 
 /** A time label goes in when the day changes, or after a quiet gap within the same day. */
 const GAP = 30 * 60;
@@ -253,6 +254,7 @@ export function Timeline({
   ) : null;
 
   return (
+    <>
     <div
       className={`thread${nav.pin ? " pin-on" : ""}`}
       ref={ref}
@@ -318,7 +320,7 @@ export function Timeline({
             {label && <div className="day">{label}</div>}
             {aboveLine && it.id === liveId && typingRow}
             <div
-              className={`row row-${it.kind}${liveLine ? " live-line" : ""}${fresh.has(it.id) && !liveLine ? (it.kind === "approval" || it.kind === "clarify" ? " arrived-ask" : " mo-rise") : ""}`} data-kind={it.kind} {...(it.kind === "user" ? { "data-item": it.id } : {})}>
+              className={`row row-${it.kind}${liveLine ? " live-line" : ""}${fresh.has(it.id) && !liveLine ? (it.kind === "approval" || it.kind === "clarify" ? " arrived-ask" : " mo-rise") : ""}`} data-kind={it.kind} data-row={it.id} {...(it.kind === "user" ? { "data-item": it.id } : {})}>
               {liveFace && <LiveFace bot={bot.name} face={face} />}
               {/* one row that cannot be drawn says so in its place; the rest of the chat, and the app, stay */}
               <ErrorBoundary source="chat" fallback={(_e, retry) => <RowFailed retry={retry} />}>
@@ -332,6 +334,10 @@ export function Timeline({
       {!slotId && !aboveLine && typingRow}
       <JumpPill nav={nav} />
     </div>
+    {/* ⌘F in this chat (src/chat/find): a bar at the column's top right while it is open. Looking at a match is the person's own
+        move off the bottom, so the column stops following new messages until they scroll back down. */}
+    <ChatFind chat={bot.name} scroller={ref} hold={() => void (pinned.current = false)} />
+    </>
   );
 }
 
