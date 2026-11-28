@@ -20,6 +20,7 @@ import { attachIme } from "./engine-ime";
 import { attachMarks } from "./engine-marks";
 import { attachOsc52 } from "./engine-osc52";
 import { attachReclaim, takeBackModes } from "./engine-reclaim";
+import { attachPathLinks } from "./engine-paths";
 import { FIND_EVENT, makeFinder, type FindRequest } from "./engine-find";
 import { attachImages, detachImages, loadImages, virtualImages } from "./engine-image";
 import { GPU_OPTIONS } from "./look";
@@ -308,6 +309,8 @@ export function afterOpen(term: Terminal, el: HTMLElement, settings: TermSetting
   // links (Cmd/Ctrl+click), find (Cmd/Ctrl+F, the bar listens for the event) and the two clipboard settings
   const finder = makeFinder(term);
   const undoLinks = attachLinks(term);
+  // a file path with its line (`src/app.ts:12:5`) inside the terminal's session folder opens in the person's editor (engine-paths.ts)
+  const undoPaths = attachPathLinks(term, el);
   const undoInput = attachInput(term, el, () => {
     const detail: FindRequest = { term, finder };
     el.dispatchEvent(new CustomEvent<FindRequest>(FIND_EVENT, { bubbles: true, detail }));
@@ -349,6 +352,7 @@ export function afterOpen(term: Terminal, el: HTMLElement, settings: TermSetting
     undoIme();
     undoInput();
     undoLinks();
+    undoPaths();
     finder.dispose();
     s.gone = true;
     s.held = null;

@@ -3,7 +3,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { setLang } from "../i18n";
 import { MockHost, type MockCall } from "../sessions/host";
-import { editorsOf, editorWhy, EDITOR_IDS, openFolderInEditor, readEditorPref, resolveEditor, setEditorPref, type EditorHost, type EditorInfo } from "./editor";
+import { editorsOf, editorWhy, EDITOR_IDS, openFileInEditor, openFolderInEditor, readEditorPref, resolveEditor, setEditorPref, type EditorAt, type EditorHost, type EditorInfo } from "./editor";
 
 const VS = { id: "vscode", label: "Visual Studio Code" };
 const CUR = { id: "cursor", label: "Cursor" };
@@ -127,6 +127,62 @@ describe("opening a folder", () => {
       setLang(lang);
       for (const text of ["the folder is not there", "not a folder", "not installed", "boom"]) expect(editorWhy(text), `${lang} ${text}`).not.toMatch(/^[\x20-\x7e]+$/);
     }
+  });
+});
+
+describe("opening a file at a line (item 148)", () => {
+  /** As `fake`, and the file each open names. */
+  function files(installed: EditorInfo[], refuse?: string) {
+    const opened: [string, string, EditorAt | undefined][] = [];
+    const host: EditorHost = {
+      async editors() {
+        return installed;
+      },
+      async openInEditor(cwd, editor, at) {
+        opened.push([cwd, editor, at]);
+        if (refuse) throw new Error(refuse);
+      },
+    };
+    return { host, opened };
+  }
+
+  it("sends the folder, the editor's id from the shell's list and the file with its line and column", async () => {
+    const a = files([VS, CUR]);
+    await openFileInEditor(a.host, "/w/shop", { path: "src/app.ts", row: 12, col: 5 }, "auto");
+    await openFileInEditor(a.host, "/w/shop", { path: "README.md" }, "cursor");
+    expect(a.opened).toEqual([
+      ["/w/shop", "vscode", { path: "src/app.ts", row: 12, col: 5 }],
+      ["/w/shop", "cursor", { path: "README.md" }],
+    ]);
+  });
+
+  it("only ever names an editor the shell found: a choice that is not installed, or not an editor at all, is the first installed", async () => {
+    const a = files([VS, CUR]);
+    for (const pref of ["zed", "xcode", "/usr/bin/code", "vscode; rm -rf ~", "", "VSCODE", "idea"]) await openFileInEditor(a.host, "/w/shop", { path: "a.ts", row: 1 }, pref);
+    expect(a.opened.map((o) => o[1])).toEqual(Array(7).fill("vscode"));
+    for (const id of a.opened.map((o) => o[1])) expect([VS.id, CUR.id]).toContain(id);
+  });
+
+  it("opens nothing, and says so plainly, with no editor installed or when the host cannot open", async () => {
+    const none = files([]);
+    await expect(openFileInEditor(none.host, "/w/shop", { path: "a.ts" }, "auto")).rejects.toThrow("No editor was found");
+    expect(none.opened).toEqual([]);
+    await expect(openFileInEditor({ editors: async () => [VS] }, "/w/shop", { path: "a.ts" }, "auto")).rejects.toThrow("No editor was found");
+    const gone = files([VS], "the folder is not there");
+    await expect(openFileInEditor(gone.host, "/w/shop", { path: "a.ts" }, "auto")).rejects.toThrow("The folder is not there any more");
+    const out = files([VS], "not a file inside the folder");
+    // the shell's own words never reach the person
+    await expect(openFileInEditor(out.host, "/w/shop", { path: "a.ts" }, "auto")).rejects.toThrow("The editor did not open. Nothing was changed.");
+  });
+
+  it("the mock host records the file and its line, and answers which paths are files inside the folder", async () => {
+    const g: Record<string, unknown> = {};
+    const host = new MockHost(g);
+    await openFileInEditor(host, "/w/shop", { path: "src/app.ts", row: 3, col: 9 }, "auto");
+    expect((g.__manutSessionCalls as MockCall[]).filter((c) => c.op === "editor")).toEqual([{ op: "editor", cwd: "/w/shop", editor: "vscode", file: "src/app.ts", row: 3, col: 9 }]);
+    expect(await host.filesInFolder("/w/shop", ["src/app.ts", "/w/shop/README.md", "./src/checkout/cart.ts", "../x/src/app.ts", "/etc/passwd", "src/../../src/app.ts", "nope.ts", ""])).toEqual(["src/app.ts", "README.md", "src/checkout/cart.ts", null, null, null, null, null]);
+    g.__manutFiles = ["a/b.ts"];
+    expect(await host.filesInFolder("/w/shop/", ["a/b.ts", "src/app.ts"])).toEqual(["a/b.ts", null]);
   });
 });
 

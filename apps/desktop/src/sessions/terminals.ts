@@ -10,6 +10,7 @@ import type { ITerminalInitOnlyOptions, ITerminalOptions, Terminal } from "@xter
 import { afterOpen, bracketedPaste, CELLS_EVENT, feed, gpuComing, isParked, live, onVisible, PARKING_EVENT, programEnded } from "./term/engine";
 import { TERM_INPUT_EVENT } from "./term/paste-guard";
 import { onCwd, onProgress } from "./term/engine-marks";
+import { setTermFolder } from "./term/engine-paths";
 import { applyLook, termOptions } from "./term/look";
 import { termFontsReady } from "./term/fonts";
 import { onTermSettings, readTermSettings } from "./term/settings";
@@ -455,6 +456,11 @@ export function createTerminals(d: TerminalsDeps) {
       };
       terms.set(id, t);
       const tt = t;
+      // file paths in its output open in the person's editor when they are inside the session's own folder (term/engine-paths.ts)
+      setTermFolder(el, () => {
+        const r = rec(id);
+        return r ? workDir(r) || null : null;
+      });
       // the person's own keys or paste reached the program (engine-input.ts, paste-guard.ts); the terminal's replies to
       // a program's queries also go out through onData and are not input
       // (keys while nothing runs there, or while its row waits to be undone, reach no program and do not count)
