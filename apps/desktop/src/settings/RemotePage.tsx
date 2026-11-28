@@ -4,12 +4,18 @@
 // once; the paired phones with Unpair; and, while a phone is connected, one quiet line saying so. Nothing else in the
 // app changes.
 //
+// Each paired phone also shows what it may do from afar, Watch or Answer (item 108b, remote/levels.ts), and the person
+// sets it here; it applies to that phone's next request. Work and its permissions are not offered until their requests
+// exist; a phone whose record already holds one (kept by a later build) shows it, and can be narrowed.
+//
 // `RemoteView` draws a given state so a test can draw it; `RemotePage` reads the app's RemoteMac (remote/state.ts).
 import { useEffect, useRef, useState } from "react";
 import "./remote.css";
 import { type Key, locale, t } from "../i18n";
 import { Toggle } from "../pages/kit";
+import { Modes } from "../ui/Modes";
 import type { RemoteSnapshot } from "../remote/host";
+import { type Level, OFFERED_LEVELS } from "../remote/levels";
 import type { PairingView } from "../remote/pairing";
 import { QrCode } from "../remote/QrCode";
 import { acceptAndTurnOn, acceptTailscaleAndTurnOn, consentCovers, readChoice, readTailscaleChoice, remoteMac, TAILSCALE_CONSENT_VERSION, turnOff, turnOn, turnTailscaleOff, turnTailscaleOn, useRemote } from "../remote/state";
@@ -27,6 +33,12 @@ const LINK_WORDS: Record<RemoteSnapshot["link"], Key> = {
   unavailable: "rm.state.unavailable",
   no_origin: "rm.state.noOrigin",
   no_keychain: "rm.state.noKeychain",
+};
+
+const LEVEL_WORDS: Record<Level, Key> = {
+  watch: "rm.level.watch",
+  answer: "rm.level.answer",
+  work: "rm.level.work",
 };
 
 const FAILED_WORDS: Record<Extract<PairingView, { phase: "failed" }>["reason"], Key> = {
@@ -60,6 +72,8 @@ export interface RemoteViewProps {
   onCopy(link: string): void;
   onCode(code: string): void;
   onUnpair(id: string): void;
+  /** Sets what a paired phone may do from afar (item 108b). */
+  onLevel?(id: string, level: Level): void;
   /** Tailscale on this Mac (item 78f-2b), read when the page opens; null until read, or where there is no shell. */
   readonly tailscaleHere?: TailscaleState | null;
   readonly tailscaleConsenting?: boolean;
@@ -292,6 +306,8 @@ export function RemoteView(props: RemoteViewProps) {
         ) : (
           snapshot.phones.map((phone) => {
             const line = phone.lastSeen && phone.lastSeen !== phone.pairedAt ? t("rm.pairedSeen", { paired: when(phone.pairedAt), seen: when(phone.lastSeen) }) : t("rm.pairedAt", { paired: when(phone.pairedAt) });
+            // Watch and Answer, and the phone's own level beside them when its record holds one not offered here.
+            const levels = OFFERED_LEVELS.includes(phone.grant.level) ? OFFERED_LEVELS : [...OFFERED_LEVELS, phone.grant.level];
             return (
               <Row
                 key={phone.id}
@@ -299,14 +315,28 @@ export function RemoteView(props: RemoteViewProps) {
                 // a phone that turned on "Tell me when my Mac needs me" on its Your Mac tab says so (item 78d)
                 hint={phone.push ? t("rm.pushOn", { line }) : line}
               >
-                <button type="button" className="btn" onClick={() => props.onUnpair(phone.id)} data-testid="remote-unpair">
-                  {t("rm.unpair")}
-                </button>
+                <span className="st-pair">
+                  <Modes
+                    label={t("rm.level", { name: phone.name })}
+                    value={phone.grant.level}
+                    options={levels.map((level) => ({ value: level, label: t(LEVEL_WORDS[level]) }))}
+                    onChange={(level) => props.onLevel?.(phone.id, level as Level)}
+                    testId="remote-level"
+                  />
+                  <button type="button" className="btn" onClick={() => props.onUnpair(phone.id)} data-testid="remote-unpair">
+                    {t("rm.unpair")}
+                  </button>
+                </span>
               </Row>
             );
           })
         )}
       </div>
+      {snapshot.phones.length > 0 && (
+        <div className="st-note" data-testid="remote-levels-note">
+          {t("rm.levels")}
+        </div>
+      )}
     </div>
   );
 }
@@ -370,6 +400,7 @@ export function RemotePage() {
       }}
       onCode={(code) => void remoteMac().typeCode(code)}
       onUnpair={(id) => void remoteMac().unpair(id)}
+      onLevel={(id, level) => void remoteMac().setLevel(id, level).catch(() => undefined)}
       tailscaleHere={here}
       tailscaleConsenting={tsConsenting}
       onTailscale={(on) => {

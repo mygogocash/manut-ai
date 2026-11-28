@@ -100,6 +100,8 @@ export type AskNote =
   | "no_turn"
   | "passkey_refused"
   | "forgotten"
+  /// The Mac does not let this phone do this (item 108b: a phone set to Watch is refused Allow once and answers).
+  | "level"
   | "no_answer";
 
 export interface AskState {
@@ -175,6 +177,8 @@ export function noteFor(reason: unknown): AskNote {
       return "no_turn";
     case "unknown_device":
       return "forgotten";
+    case "level":
+      return "level";
     case "malformed":
       return "no_answer";
     default:

@@ -18,7 +18,12 @@
 //   the switch is on), and each pairing adds one phone.
 // Nothing here is ever made while "Reach this Mac from your phone" is off: `RemoteVault.open(keyring, false)` reads
 // only, and then reads no K.
+//
+// Each phone's record also holds what it may do from afar (item 108b, levels.ts). A record kept before that item has no
+// level and reads as Answer, exactly what a phone could do then; a level this build does not understand makes the
+// record one the page does not hold, so that phone is refused rather than given a wider or a default level.
 import { type StoredPasskey, fromBase64Url, fromHex, importSharedSecret, toBase64Url, toHex } from "@manut/remote-channel";
+import { type Grant, type Level, DEFAULT_GRANT, isGrant, within } from "./levels";
 import type { HostIdentity } from "./link";
 
 /** The Mac's relay key as the keychain holds it: the JWK's three fields, each 43 base64url characters. Only the shell
@@ -35,7 +40,9 @@ export interface HostPublic {
   readonly y: string;
 }
 
-/** One paired phone as the keychain holds it. `k` is 64 lowercase hex digits; the rest is not secret. */
+/** One paired phone as the keychain holds it. `k` is 64 lowercase hex digits; the rest is not secret. `level`,
+ *  `terminal` and `manage` are what it may do from afar (item 108b), absent in a record kept before then and for a phone
+ *  at Answer, which is what absence means. */
 export interface DeviceRecord {
   readonly id: string;
   readonly name: string;
@@ -46,6 +53,21 @@ export interface DeviceRecord {
   readonly credentialId: string;
   readonly publicKey: string;
   readonly signCount: number;
+  readonly level?: Level;
+  readonly terminal?: boolean;
+  readonly manage?: boolean;
+}
+
+/** What a record says its phone may do: Answer when it says nothing (a record from before item 108b), and null for
+ *  anything this build does not understand, which is never read as a wider level or as the default. */
+export function grantOf(record: Pick<DeviceRecord, "level" | "terminal" | "manage">): Grant | null {
+  // Only a field left out is the default: a null, as any other value this build does not read, is refused.
+  const grant = {
+    level: record.level === undefined ? DEFAULT_GRANT.level : record.level,
+    terminal: record.terminal === undefined ? false : record.terminal,
+    manage: record.manage === undefined ? false : record.manage,
+  };
+  return isGrant(grant) ? grant : null;
 }
 
 /** One paired phone as the page is given it: K only while the shell's switch is on. */
@@ -76,6 +98,9 @@ export interface Keyring {
   addDevice(device: DeviceRecord): Promise<void>;
   /** Only the times and the counter, which may not go down; only while the switch is on. */
   touchDevice(id: string, lastSeen: number, signCount: number): Promise<void>;
+  /** What a phone may do from afar (item 108b). Taken switch on or off, as Unpair is: a level is only ever what the
+   *  person at this Mac gave, and narrowing one must never wait on the switch. */
+  setLevel(id: string, grant: Grant): Promise<void>;
   /** Always taken, switch on or off: Unpair must never wait on anything. */
   removeDevice(id: string): Promise<void>;
 }
@@ -118,7 +143,8 @@ export function isPageDeviceRecord(d: PageDeviceRecord): boolean {
     /^[A-Za-z0-9_-]{87}$/.test(d.publicKey) &&
     Number.isSafeInteger(d.signCount) &&
     d.signCount >= 0 &&
-    d.signCount <= 0xffff_ffff
+    d.signCount <= 0xffff_ffff &&
+    grantOf(d) !== null
   );
 }
 
@@ -202,6 +228,17 @@ export function memoryKeyring(start: KeyDoc | null = null): Keyring & { doc(): {
       if (signCount < known.signCount) throw new Error("counter");
       doc = { ...now, devices: now.devices.map((d) => (d.id === id ? { ...d, lastSeen, signCount } : d)) };
     },
+    setLevel: async (id, grant) => {
+      const now = base();
+      if (!isGrant(grant)) throw new Error("invalid");
+      if (!now.devices.some((d) => d.id === id)) throw new Error("not_found");
+      // Kept as the shell keeps it: Answer as no level at all.
+      const kept = (d: DeviceRecord): DeviceRecord => {
+        const { level: _level, terminal: _terminal, manage: _manage, ...rest } = d;
+        return grant.level === "answer" ? rest : { ...rest, level: grant.level, ...(grant.terminal ? { terminal: true } : {}), ...(grant.manage ? { manage: true } : {}) };
+      };
+      doc = { ...now, devices: now.devices.map((d) => (d.id === id ? kept(d) : d)) };
+    },
     removeDevice: async (id) => {
       const now = base();
       doc = { ...now, devices: now.devices.filter((d) => d.id !== id) };
@@ -216,12 +253,13 @@ export async function hostIdentity(host: HostPublic, sign: (message: string) => 
   return { hostId, publicKey: toBase64Url(raw), sign };
 }
 
-/** A paired phone as the page shows it. */
+/** A paired phone as the page shows it, with what it may do from afar. */
 export interface PairedPhone {
   readonly id: string;
   readonly name: string;
   readonly pairedAt: number;
   readonly lastSeen: number | null;
+  readonly grant: Grant;
 }
 
 interface Held {
@@ -262,6 +300,8 @@ export class RemoteVault {
   }
 
   async #hold(record: PageDeviceRecord): Promise<void> {
+    const grant = grantOf(record);
+    if (!grant) return;
     let secret: CryptoKey | null = null;
     if (record.k !== undefined) {
       const bytes = fromHex(record.k);
@@ -272,7 +312,7 @@ export class RemoteVault {
       }
     }
     this.#devices.set(record.id, {
-      phone: { id: record.id, name: record.name, pairedAt: record.pairedAt, lastSeen: record.lastSeen },
+      phone: { id: record.id, name: record.name, pairedAt: record.pairedAt, lastSeen: record.lastSeen, grant },
       secret,
       tokenHash: record.tokenHash,
       passkey: { credentialId: fromBase64Url(record.credentialId), publicKey: fromBase64Url(record.publicKey), signCount: record.signCount },
@@ -308,6 +348,26 @@ export class RemoteVault {
 
   passkey(id: string): StoredPasskey | undefined {
     return this.#devices.get(id)?.passkey;
+  }
+
+  /** What a phone may do from afar, as its record says; undefined for a phone this Mac does not hold, whose record it
+   *  could not read included (serve.ts refuses it everything). */
+  grant(id: string): Grant | undefined {
+    return this.#devices.get(id)?.phone.grant;
+  }
+
+  /** Sets what a phone may do from afar. A narrower level is held at once, before the keychain write is awaited, so the
+   *  phone's next request already meets it, and it stays narrower here even if the keychain refused; a wider one is held
+   *  only once the keychain took it, as every other change is. */
+  async setLevel(id: string, grant: Grant): Promise<void> {
+    const held = this.#devices.get(id);
+    if (!held) throw new Error("not_found");
+    const narrows = within(grant, held.phone.grant);
+    if (narrows) held.phone = { ...held.phone, grant };
+    await this.#keyring.setLevel(id, grant);
+    // Held again by id: the phone may have been forgotten while the keychain wrote.
+    const now = this.#devices.get(id);
+    if (!narrows && now) now.phone = { ...now.phone, grant };
   }
 
   tokenHashes(): [string, string][] {

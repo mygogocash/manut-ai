@@ -171,6 +171,40 @@ describe("Unpair", () => {
   });
 });
 
+describe("a phone's level (item 108b)", () => {
+  it("is Answer when paired, and a level set at this Mac applies to the phone's next request on its open session", async () => {
+    const h = macHarness();
+    await turnOn(h);
+    const { phone } = await pairPhone(h);
+    const id = phone.deviceId!;
+    expect(h.remote.snapshot().phones[0]?.grant).toEqual({ level: "answer", terminal: false, manage: false });
+    const session = await phone.connect();
+    await session.request({ t: "open", chat: "buddy" });
+    await h.remote.setLevel(id, "watch");
+    expect(h.remote.snapshot().phones[0]?.grant.level).toBe("watch");
+    expect(h.keyring.doc()?.devices[0]?.level).toBe("watch");
+    expect(await session.request({ t: "allow", chat: "buddy", ask: "req-1", revision: 1 })).toMatchObject({ t: "refused", reason: "level" });
+    expect(await session.request({ t: "stop", chat: "buddy" })).toMatchObject({ t: "done" });
+    expect(h.remote.challenges.size).toBe(0);
+    // Work is not offered until its requests exist, and nothing changed for asking.
+    await expect(h.remote.setLevel(id, "work")).rejects.toThrow("not_offered");
+    expect(h.keyring.doc()?.devices[0]?.level).toBe("watch");
+    await h.remote.setLevel(id, "answer");
+    expect(await session.request({ t: "allow", chat: "buddy", ask: "req-1", revision: 1 })).toMatchObject({ t: "challenge" });
+    expect(h.chats.done).toEqual([{ action: "stop", chat: "buddy" }]);
+  });
+
+  it("is set with the switch off too, read without making anything", async () => {
+    const h = macHarness();
+    await turnOn(h);
+    const { phone } = await pairPhone(h);
+    h.remote.turnOff();
+    await h.remote.setLevel(phone.deviceId!, "watch");
+    expect(h.keyring.doc()?.devices[0]?.level).toBe("watch");
+    expect(h.remote.snapshot().phones[0]?.grant.level).toBe("watch");
+  });
+});
+
 describe("turning the switch off", () => {
   it("ends the pairing, every session, every challenge and journal, and the socket", async () => {
     const h = macHarness();
