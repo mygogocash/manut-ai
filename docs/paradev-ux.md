@@ -61,8 +61,8 @@ replace the look, skip or blur an ask, or start an agent that does not ask), **k
    picture `apps/marketing/public/images/readme/agent-monitoring.gif`).
 4. **One place per thing, always in view.** Three columns that never move: the workspaces, grouped by project, in a
    sidebar that only folds to a rail (⌘B); the workspace's tabs and panes; and its Files, Changes and Review on the right
-   (`W/page.tsx`, `W/components/WorkspaceSidebar/WorkspaceSidebar.tsx`). Going to another workspace never leaves the page the
-   person is on, and the open row scrolls itself into view (pictures `apps/docs/public/images/changes.png`,
+   (`W/page.tsx`, `W/components/WorkspaceSidebar/WorkspaceSidebar.tsx`). The sidebar stays put as the person goes from
+   workspace to workspace, and the open row scrolls itself into view (pictures `apps/docs/public/images/changes.png`,
    `apps/marketing/public/images/readme/command-palette.gif`).
 5. **Progressive disclosure.** A row is one 28px line; its actions and its key show on hover and keyboard focus, and its
    details (the request, its checks, its task) in a hover card
@@ -92,8 +92,8 @@ Where Paradev parts from Manut AI on purpose, besides item 138's six differences
 apps differ on purpose"): its terminals start agents that skip their asks ("bypass permissions on" in
 `apps/marketing/public/images/readme/command-palette.gif`); its needs input and failed dots ping (`animate-ping` in
 `R/screens/main/components/StatusIndicator/StatusIndicator.tsx`); Enter confirms its delete dialog
-(`S/components/DashboardSidebarDeleteDialog/utils/shouldConfirmDeleteDialogKey.ts`); Commit, Push, Create PR and merge are
-a press each (ShipControl.tsx); a failure is often a toast holding the raw error (`toast.error(errorMessage(error))` across
+(`S/components/DashboardSidebarDeleteDialog/utils/shouldConfirmDeleteDialogKey.ts`); Commit, Push, Create PR and merge run
+on the person's press, with a short form at most in between (ShipControl.tsx); a failure is often a toast holding the raw error (`toast.error(errorMessage(error))` across
 the renderer); and its text runs down to 10 and 11px in 28px rows.
 
 ## What the pictures of Manut AI show
@@ -117,7 +117,7 @@ The spec was a scratch file and is not kept: `e2e/kit-lanes.spec.ts`'s `startIn`
    the working ring (`src/ui/Live.tsx`).
 5. **The palette** (`src/palette/Palette.tsx`): Go to (the menu's pages) and Actions. No row shows its key and no lane is a
    row; typed in a lane's chat, "lane" finds only Search History, since New lane is offered on the Code page alone.
-6. **The terminal panel** (`src/terminal/Panel.tsx`): under the chat column, which it shortens, with the box over its top.
+6. **The terminal panel** (`src/terminal/Panel.tsx`): under the chat column, which it shortens.
 7. **Settings** (`src/settings/Settings.slot.tsx`): one list with Under the hood's ten pages, and no search.
 
 ## Area by area
@@ -256,7 +256,7 @@ and an agent's Resume and Restart as presses.
 ### Notifications
 
 **Paradev.** One notification for each source, a newer one replacing the older; a click shows the window and that exact
-pane; an inline Reply (`apps/desktop/src/lib/trpc/routers/notifications.ts`); a ringtone for each event; toasts for results
+pane; an inline Reply (`apps/desktop/src/lib/trpc/routers/notifications.ts`); ringtones chosen in Settings; toasts for results
 and errors.
 
 **Manut AI today.** Every notification goes through `@manut/notify-rules` (`src/lib/notify.ts`, `src/lib/outside.ts`): quiet
@@ -326,8 +326,8 @@ mono.
 **Manut AI today.** The Motion board's named moves (`src/theme/motion.css`, `docs/motion.md`) and the type and rhythm of
 `docs/design-audit.md` (rows 44px, nothing under 12px, weight 600 the only emphasis).
 
-**Verdict: keep ours.** Both are the brand's look, which the owner's ask keeps. Paradev's restraint already matches the
-Motion board's rules but for the ping. The lane rows in the menu are the menu's own rows (KitNavigation), not Paradev's 28px
+**Verdict: keep ours.** Both are the brand's look, which the owner's ask keeps. Paradev's own motion is mostly what the
+Motion board allows (loops only for work in progress, short fades), but for the ping. The lane rows in the menu are the menu's own rows (KitNavigation), not Paradev's 28px
 ones.
 
 ## The changes and the boards they touch
@@ -352,8 +352,8 @@ The lead updates the canvas. These are the boards each change would touch, with 
 
 No change needs a new dependency. What may be lifted, under Paradev's MIT licence, with a credit in the file when it is:
 
-- `R/commandPalette/core/rankCommands.ts` (130 lines; it imports only Paradev's own `i18n`, and has 292 lines of tests on
-  `bun:test`): ranks rows of different kinds on one score. Lifted with its tests ported to vitest, it ranks lanes and the
+- `R/commandPalette/core/rankCommands.ts` (130 lines; it imports only Paradev's `i18n` and its own types, and has 292 lines
+  of tests on `bun:test`): ranks rows of different kinds on one score. Lifted with its tests ported to vitest, it ranks lanes and the
   palette's other rows together (167c).
 - `R/commandPalette/ui/WorkspaceList/utils/bucketWorkspaces/bucketWorkspaces.ts` (116 lines) and `useSwitcherCycle.ts`: read
   for the switcher's groups and the hold to cycle, and written again over `laneStatus` and the app's palette (167c).
