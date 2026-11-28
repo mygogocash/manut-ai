@@ -143,4 +143,6 @@ export const ss: Record<keyof typeof en, string> = {
   "ss.noAskPath": "{agent} はコマンドの実行やファイルの変更の前に確認しないため、Manut AI はターミナルでのみ実行します。",
   "ss.noAsksOmp": "{agent} 自身の設定で、確認せずにコマンドの実行やファイルの変更ができるようになっているため、起動しませんでした。{agent} 自身の設定とこのプロジェクトの設定で tools.approvalMode を always-ask にし、allow になっている tools.approval の項目を削除してから（omp config list --scope=global と --scope=project で確認できます）、もう一度チャットを始めてください。",
   "ss.noAsksCheck": "{agent} 自身の設定で実行前に確認するようになっているか Manut AI が確かめられなかったため、起動しませんでした。このフォルダーのターミナルで omp config list --json が動くこと、PI_CONFIG_FILES が設定されていないことを確かめてから、もう一度チャットを始めてください。",
+  // oh-my-pi in a folder whose own tools, plugins or .env variables would act as it starts (item 139b)
+  "ss.ompProjectCode": "このフォルダーには独自のコードや変数（{what}）があり、起動した時点で、何も確認されないうちに実行・適用されてしまうため、{agent} は起動しませんでした。それらを使うには、このフォルダーを {agent} のターミナルセッションで開いてください。使わない場合は {what} を削除して（.env なら PI_ か OMP_ で始まる行だけ）、もう一度チャットを始めてください。",
 };
