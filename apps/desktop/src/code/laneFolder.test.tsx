@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DiffFile } from "../lib/protocol";
 import type { ActivityItem, Step, SubagentRow } from "../state/store";
 import { changedFiles } from "./changes";
-import { changeMark, filesShown, folderReader, readLaneFolder, READ_GAP_MS, type LaneFolder, type ReadsLaneFolder } from "./laneFolder";
+import { changeMark, filesShown, folderReader, readLaneFolder, readLaneReview, READ_GAP_MS, type LaneFolder, type ReadsLaneFolder } from "./laneFolder";
 import { emptyLane, laneTests } from "./lane";
 import { LanePaneView, type LanePaneProps } from "./LanePane";
 import { NOT_STARTED } from "./previewRun";
@@ -229,5 +229,107 @@ describe("when the folder is read again", () => {
     r.poke();
     await vi.advanceTimersByTimeAsync(5 * READ_GAP_MS);
     expect(read).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe("the shell's review read as sections (item 146)", () => {
+  const part = (files: unknown[], more_files = 0) => ({ files, more_files });
+  const commit = (id: string, subject: string, files: unknown[], over: Record<string, unknown> = {}) => ({ id, subject, files, more_files: 0, unread: false, ...over });
+  const NEW = { path: "src/new.ts", state: "new", diff: diff("src/new.ts", ["@@ -0,0 +1,2 @@", "+a", "+b"], ["new file mode 100644"]) };
+
+  it("is null for anything that is not an answer", () => {
+    for (const x of [null, undefined, "x", 3, [], {}, { uncommitted: part([]) }, { uncommitted: "no", commits: [] }, { uncommitted: part([]), commits: "no" }]) expect(readLaneReview(x), String(x)).toBeNull();
+  });
+
+  it("reads the work not committed and each commit with its files, its subject and the files it had no room to list", () => {
+    const got = readLaneReview({
+      start: "abc123",
+      uncommitted: part([CHECKOUT], 2),
+      commits: [commit("3f2a1bcd9e01", "Add the QR", [NEW], { more_files: 5 }), commit("1a2b3c4d5e6f", "Start", [])],
+      more_commits: 3,
+    })!;
+    expect(got.uncommitted.files.map((f) => f.path)).toEqual(["src/checkout.tsx"]);
+    expect(got.uncommitted.moreFiles).toBe(2);
+    expect(got.commits.map((c) => [c.id, c.subject, c.files.length, c.moreFiles, c.unread])).toEqual([
+      ["3f2a1bcd9e01", "Add the QR", 1, 5, false],
+      ["1a2b3c4d5e6f", "Start", 0, 0, false],
+    ]);
+    // the files are read as the folder's are: a new file is added, its lines counted
+    expect(got.commits[0].files[0]).toMatchObject({ kind: "add", added: 2, removed: 0 });
+    expect(got.moreCommits).toBe(3);
+  });
+
+  it("keeps a commit whose files could not be read, as unread, with none", () => {
+    const got = readLaneReview({ uncommitted: part([]), commits: [commit("aaaaaaaaaaaa", "Old", [], { unread: true })], more_commits: 0 })!;
+    expect(got.commits[0]).toMatchObject({ unread: true, files: [] });
+  });
+
+  it("drops a commit with no id or no list of files, and takes a count that is not a number above zero as none", () => {
+    const got = readLaneReview({ uncommitted: part([]), commits: [{ subject: "no id", files: [] }, { id: "bbbbbbbbbbbb", subject: "no files" }, null, "x", commit("cccccccccccc", "kept", [])], more_commits: -4 })!;
+    expect(got.commits.map((c) => c.id)).toEqual(["cccccccccccc"]);
+    expect(got.moreCommits).toBe(0);
+  });
+
+  it("reads a file's lines the way the folder's are, so a key in a commit's text is not trusted to be hidden by the shell alone", () => {
+    const got = readLaneReview({ uncommitted: part([]), commits: [commit("dddddddddddd", "k", [{ path: "a.txt", state: "changed", diff: diff("a.txt", ["@@ -1 +1 @@", "-x", `+token=${KEY}`]) }])], more_commits: 0 })!;
+    // the page's own masker runs where the line is drawn (Work.tsx); here the line is a line, with its mark
+    expect(got.commits[0].files[0].lines).toEqual(["@@ -1 +1 @@", "-x", `+token=${KEY}`]);
+  });
+});
+
+describe("telling a view that a read failed", () => {
+  it("calls `fail` when a read rejects, keeps what was shown, and goes on to read again", async () => {
+    let calls = 0;
+    const shown: string[] = [];
+    let failed = 0;
+    let now = 0;
+    const r = folderReader(
+      async () => {
+        calls += 1;
+        if (calls === 2) throw new Error("git is busy");
+        return `read ${calls}`;
+      },
+      (x: string) => shown.push(x),
+      { fail: () => (failed += 1), now: () => now, setTimer: () => 1, clearTimer: () => undefined },
+    );
+    r.poke();
+    await Promise.resolve();
+    await Promise.resolve();
+    now += READ_GAP_MS;
+    r.poke();
+    await Promise.resolve();
+    await Promise.resolve();
+    now += READ_GAP_MS;
+    r.poke();
+    await Promise.resolve();
+    await Promise.resolve();
+    r.stop();
+    expect(shown).toEqual(["read 1", "read 3"]);
+    expect(failed).toBe(1);
+  });
+
+  it("does not call `fail` for a read that says nothing, or after it was stopped", async () => {
+    let failed = 0;
+    const r = folderReader(
+      async () => null,
+      () => undefined,
+      { fail: () => (failed += 1) },
+    );
+    r.poke();
+    await Promise.resolve();
+    await Promise.resolve();
+    r.stop();
+    const late = folderReader(
+      async () => {
+        throw new Error("late");
+      },
+      () => undefined,
+      { fail: () => (failed += 1) },
+    );
+    late.poke();
+    late.stop();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(failed).toBe(0);
   });
 });

@@ -8,7 +8,7 @@ import { useState } from "react";
 import { t } from "../../i18n";
 import { folderLabel, type Member } from "./context";
 import { Icon } from "../../ui/icons";
-import { chipWords, dropCarried, refusalWords, scopeRefusal, type Carried, type Scope } from "./carry";
+import { chipTitle, chipWords, dropCarried, refusalWords, scopeRefusal, type Carried, type Scope } from "./carry";
 
 const FolderMark = () => (
   <Icon name="folder" />
@@ -76,7 +76,7 @@ export function CarriedChips({ chatKey, list, scope, onRemoved }: { chatKey: str
           const why = refusalWords(scopeRefusal(c.scope, scope));
           const words = chipWords(c);
           return (
-            <div key={c.id} className={`att-chip bx-carry${why ? " bad" : ""}${open === c.id ? " on" : ""}`} title={why ? `${words} · ${why}` : words} data-testid="carry-chip" data-kind={c.kind} data-refused={why ? "true" : undefined}>
+            <div key={c.id} className={`att-chip bx-carry${why ? " bad" : ""}${open === c.id ? " on" : ""}`} title={why ? `${chipTitle(c)} · ${why}` : chipTitle(c)} data-testid="carry-chip" data-kind={c.kind} data-refused={why ? "true" : undefined}>
               <span className="att-thumb att-badge" aria-hidden="true">
                 <Icon name={c.kind === "note" ? "pencil" : "message"} />
               </span>

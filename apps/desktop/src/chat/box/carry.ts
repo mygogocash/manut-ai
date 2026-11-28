@@ -10,6 +10,12 @@
 // Blocks are parted by a blank line, and the typed message comes last. A block never holds a blank line of its own, so
 // `splitSent` can find each one again in a sent message.
 //
+// A note on lines selected in the Diff beside a lane (item 146) also carries where they are, `at`: the file, and the line range
+// when git's hunk headers numbered the lines. It goes out as the quote's first line, `path:L12-L18` (Paradev's form for a comment
+// on lines, with its words for lines that are not the new file's), so the agent is told the place as well as the lines, which are
+// quoted as a patch fragment with their `+` and `-`. A range of deleted lines is numbered as the file was before the change, and
+// says so. Nothing is sent by adding it: the chip waits above the box like any other.
+//
 // Kept on this computer by chat key (`manut.box.carry`), beside that chat's unsent text (app/drafts.ts), so a restart keeps
 // them. Each chip carries the shop or the coding account it was made under (`Scope`): a chip made under one is refused, and
 // never sent, in a chat under another (`scopeRefusal`). Since item 121 a chip also carries every shop whose chat's context the
@@ -18,6 +24,10 @@
 import { useSyncExternalStore } from "react";
 import { t } from "../../i18n";
 import { changes } from "../../lib/changes";
+import type { DiffRange, RangeSide } from "../activity/diffLayout";
+import type { NoteAt } from "../activity/diffNote";
+
+export type { NoteAt };
 
 /** The longest selection a note quotes, in characters; the rest is cut with a line that says how much. */
 export const QUOTE_MAX = 3_000;
@@ -48,6 +58,8 @@ export interface NoteChip {
   more: number;
   note: string;
   scope: Scope;
+  /** Where the quote is, for lines selected in a diff (item 146); none for a note on any other text. */
+  at?: NoteAt;
 }
 
 /** Another chat's context: `ref` names that chat (so the same one is not brought twice), `text` is exactly what goes. */
@@ -90,11 +102,23 @@ export function cutQuote(selection: string): { quote: string; more: number } {
   return { quote: clean.slice(0, at), more: clean.length - at };
 }
 
-/** A note chip for `selection` with the person's `note` (one line, at most NOTE_MAX), or null for an empty selection. */
-export function noteChip(selection: string, note: string, scope: Scope, id: string = newId()): NoteChip | null {
+/** A note chip for `selection` with the person's `note` (one line, at most NOTE_MAX), or null for an empty selection. `at` is where
+ *  the selection is, when it was lines of a diff. */
+export function noteChip(selection: string, note: string, scope: Scope, id: string = newId(), at?: NoteAt): NoteChip | null {
   const { quote, more } = cutQuote(selection);
   if (!quote.trim()) return null;
-  return { kind: "note", id, quote, more, note: note.replace(/\s+/g, " ").trim().slice(0, NOTE_MAX), scope };
+  return { kind: "note", id, quote, more, note: note.replace(/\s+/g, " ").trim().slice(0, NOTE_MAX), scope, ...(at ? { at } : {}) };
+}
+
+/** Where a note's lines are, as it says it: `src/a.ts:L12-L18`, `src/a.ts:L12` for one line, the file alone when no hunk header
+ *  numbered the lines. Lines that are not the new file's are named: deleted lines (numbered as the file was before the change) and a
+ *  range across deleted and added lines (numbered as the file is after it). */
+export function atText(at: NoteAt): string {
+  const r = at.range;
+  if (!r) return at.file;
+  const lines = r.from === r.to ? `L${r.from}` : `L${r.from}-L${r.to}`;
+  const side = r.side === "old" ? t("carry.at.old") : r.side === "mixed" ? t("carry.at.mixed") : "";
+  return `${at.file}:${lines}${side ? ` (${side})` : ""}`;
 }
 
 /** `list` with `chip` added at the end, or the reason it was not: a ninth note, a fourth chat, or the same chat again. */
@@ -108,8 +132,10 @@ export function addCarried(list: readonly Carried[], chip: Carried): { list: Car
 }
 
 /** A note as it goes out: its quoted lines, the cut line when it was cut, then the note. */
-export function noteBlock(c: Pick<NoteChip, "quote" | "more" | "note">): string {
+export function noteBlock(c: Pick<NoteChip, "quote" | "more" | "note" | "at">): string {
   const lines = c.quote.split("\n").map((l) => (l.trim() ? `> ${l}` : ">"));
+  // the place goes first, as a line of the quote, so a message read back (`splitSent`) keeps it with the lines it names
+  if (c.at) lines.unshift(`> ${atText(c.at)}`);
   if (c.more > 0) lines.push(`> ${t("carry.cut", { n: c.more.toLocaleString("en-US") })}`);
   if (c.note) lines.push(t("carry.noteLine", { note: c.note }));
   return lines.join("\n");
@@ -132,12 +158,23 @@ export function firstWords(text: string, max = 32): string {
   return one.length > max ? `${one.slice(0, max).trimEnd()}…` : one;
 }
 
-/** What a chip says: a note as “first words…” · the note, a chat's context as its title. */
-export function chipWords(c: Carried): string {
-  if (c.kind === "thread") return c.title;
+/** The last two parts of a path (`checkout/Pay.tsx`), for a chip that has little room: enough to tell two files of one name apart. */
+const shortPath = (file: string): string => file.split("/").filter(Boolean).slice(-2).join("/");
+
+const noteWords = (c: NoteChip): string => {
   const q = `“${firstWords(c.quote, 28)}”`;
   return c.note ? `${q} · ${c.note}` : q;
+};
+
+/** What a chip says: a note as “first words…” · the note, a chat's context as its title. A note on lines of a diff begins with the
+ *  file (its last two parts) and the lines. */
+export function chipWords(c: Carried): string {
+  if (c.kind === "thread") return c.title;
+  return c.at ? `${atText({ ...c.at, file: shortPath(c.at.file) })} · ${noteWords(c)}` : noteWords(c);
 }
+
+/** What a chip's tooltip says: its words, with the whole path of a note on lines of a diff. */
+export const chipTitle = (c: Carried): string => (c.kind === "note" && c.at ? `${atText(c.at)} · ${noteWords(c)}` : chipWords(c));
 
 // ---- reading a sent message back ------------------------------------------------------------------------------------
 
@@ -204,6 +241,25 @@ const isScope = (v: unknown): v is Scope => {
   );
 };
 
+const SIDES: readonly RangeSide[] = ["new", "old", "mixed"];
+const FILE_MAX = 500;
+
+/** A saved note's place, or undefined when it is not one: a file name, and a range only when both numbers are whole and above zero
+ *  with the first not past the last, and a side that is known. */
+function readAt(v: unknown): NoteAt | undefined {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return undefined;
+  const a = v as Record<string, unknown>;
+  if (typeof a.file !== "string" || !a.file.trim()) return undefined;
+  const file = a.file.slice(0, FILE_MAX);
+  const r = a.range as Record<string, unknown> | undefined;
+  const whole = (n: unknown): n is number => typeof n === "number" && Number.isInteger(n) && n > 0;
+  if (r && typeof r === "object" && whole(r.from) && whole(r.to) && r.from <= r.to && SIDES.includes(r.side as RangeSide)) {
+    const range: DiffRange = { from: r.from, to: r.to, side: r.side as RangeSide };
+    return { file, range };
+  }
+  return { file };
+}
+
 /** One saved chip, or null when it cannot be read (a field missing or of the wrong kind). */
 function readChip(v: unknown): Carried | null {
   if (!v || typeof v !== "object" || Array.isArray(v)) return null;
@@ -215,7 +271,8 @@ function readChip(v: unknown): Carried | null {
   const note = str("note");
   if (c.kind === "note" && quote?.trim() && note !== null) {
     const more = typeof c.more === "number" && Number.isInteger(c.more) && c.more > 0 ? c.more : 0;
-    return { kind: "note", id, quote: quote.slice(0, QUOTE_MAX), more, note: note.slice(0, NOTE_MAX), scope: c.scope };
+    const at = readAt(c.at);
+    return { kind: "note", id, quote: quote.slice(0, QUOTE_MAX), more, note: note.slice(0, NOTE_MAX), scope: c.scope, ...(at ? { at } : {}) };
   }
   const ref = str("ref");
   const title = str("title");

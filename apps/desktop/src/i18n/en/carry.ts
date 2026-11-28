@@ -37,4 +37,8 @@ export const carry = {
   "carry.ctx.filesMore": "and {n} more",
   "carry.ctx.ask": "Waiting on the person: {v}",
   "carry.ctx.end": "End of the context from \"{title}\".",
+  // a note on lines selected in a diff (item 146): where the lines are
+  "carry.at.old": "deleted lines, numbered as before the change",
+  "carry.at.mixed": "across deleted and added lines, numbered after the change",
+  "carry.at.line": "It names where the lines are: {place}",
 };
