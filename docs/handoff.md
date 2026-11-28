@@ -375,6 +375,10 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    started. Lead's note: push marks right after a merge, never while another item waits to merge on CI, or it must merge
    the lead's branch and run CI once more.
    141 merged at 09:55 (signing secrets in environments, a nightly key of its own; the owner's steps are under Needs the owner).
+   The account's limit stopped 102l-6, 146 and 108b at about 10:30; they were sent on at 12:55. 108b merged at 13:40 (a
+   Watch or Answer level for each paired phone, checked on the Mac). On the owner's word of 28 Nov the repository's commits
+   are authored as KunanonJ (its no-reply address, in the clone's own git config); item 167, a study of Paradev's interaction
+   and UX for the code mode, started (`docs/decisions/2026-11-28-paradev-ux.md`).
    The dev relay is on with its push key pair as dev secrets, deployed to dev 27 Nov; the owner's try on an iPhone is left.
    Two Rust tests that raced under load (the MCP relay's round trip, the Grok account check) now wait for their answers, and
    the 16 hook-dependency warnings `pnpm lint` found are settled. Fonts stay 99, the owner's. From 27 Nov the owner asked for English first: new words are English, copied into ja, ko and zh. Needs the owner from 101b: Grok signed in and `permission_mode = "ask"`

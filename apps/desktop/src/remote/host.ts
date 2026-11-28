@@ -33,6 +33,7 @@ import {
   pushAddressOk,
 } from "@manut/remote-channel";
 import { type Keyring, type PairedPhone, RemoteVault } from "./keys";
+import { type Level, OFFERED_LEVELS } from "./levels";
 import { type LinkState, type RelayProbe, type SocketFactory, type Timers, RelayLink, relaySocketUrl } from "./link";
 import { PairingDoor, type PairingView } from "./pairing";
 import { DoorLink, type DoorShell } from "./door";
@@ -397,6 +398,24 @@ export class RemoteMac {
     this.#link?.revokeDevice(id);
     try {
       await removing;
+    } finally {
+      this.#changed();
+    }
+  }
+
+  /** Sets what a paired phone may do from afar (item 108b), from Settings: only the levels offered there (Watch and
+   *  Answer until Work's requests exist). Serving reads each phone's level from the vault at every request, so it applies
+   *  to that phone's next request on any session it has open; a narrower level is held before the keychain write is
+   *  awaited (keys.ts). */
+  async setLevel(id: string, level: Level): Promise<void> {
+    if (!OFFERED_LEVELS.includes(level)) throw new Error("not_offered");
+    const vault = this.#vault ?? (await RemoteVault.open(this.#deps.keyring, false));
+    if (!this.#vault) this.#hold(vault);
+    const setting = vault.setLevel(id, { level, terminal: false, manage: false });
+    // Shown at once: a narrower level is already held.
+    this.#changed();
+    try {
+      await setting;
     } finally {
       this.#changed();
     }

@@ -7,8 +7,9 @@ the freest one, a terminal, a browser and pictures from that machine, a page tha
 all at once, a project moved from one to another, permissions for each connection, and routes by relay, Tailscale or
 the local network.
 
-Status on 27 Nov 2026: design only. Nothing is built. The decisions are in `docs/decisions/108-multi-machine.md`; the
-phases are at the end and are in `docs/plan.md` as 108a to 108j, proposed. This design follows item 78's
+Status on 27 Nov 2026: design only. The decisions are in `docs/decisions/108-multi-machine.md`; the phases are at the
+end and are in `docs/plan.md` as 108a to 108j, proposed. On 28 Nov 2026 108b was built (part 11, "What 108b built"),
+on the design's recommended answers, which the owner's goal of 27 Nov took as the go-ahead. This design follows item 78's
 (`docs/remote-access.md`) and builds on what it built: the relay, the channel, pairing, the decision challenge, the
 passkey and the Tailscale door. It revisits two of 78's refusals (78e): no port on the local network, and no counted
 tunnel service. Its answer to both is in "Roads".
@@ -68,9 +69,10 @@ to the Mac mini. It reaches the Mac mini through the relay, or through my tailne
 
 ## What is there today (read on 27 Nov 2026)
 
-- **A Mac that serves a phone.** `apps/desktop/src/remote/` (78b): `link.ts` dials the relay, `serve.ts` serves exactly six
-  requests (`REQUESTS`: `list`, `open`, `catchup`, `allow`, `reply`, `stop`) and refuses others by name (`STAYS_ON_MAC`:
-  Always allow, the session, a folder, the dial, pairing, Unpair, the switch and the consent), `project.ts` masks what a
+- **A Mac that serves a phone.** `apps/desktop/src/remote/` (78b): `link.ts` dials the relay, `serve.ts` serves exactly seven
+  requests (`REQUESTS`: `list`, `open`, `catchup`, `allow`, `reply`, `stop`, and 78d's `notify`) and refuses others by name
+  (`STAYS_ON_MAC`: Always allow, the session, a folder, the dial, pairing, Unpair, the switch and the consent; since 108b,
+  `levels.ts`'s `STAYS_ON_MACHINE`, part 11's fifteen names), `project.ts` masks what a
   phone sees, `journal.ts` lets it catch up, `roads.ts` (78f-2b) joins the relay and the Tailscale door into one link.
   The keys live in one keychain item through `src-tauri/src/remote_keys.rs`. All of it runs in the desktop's page,
   where the store and `settleApproval` live.
@@ -383,6 +385,7 @@ channel's device id, never by anything the client says.
 | `list`, `open`, `catchup` | The chats, one chat, what was missed | Watch | No |
 | `reply` with No, `stop` | Hold back | Watch | No |
 | `status`, `picture` | The machine's state; a picture in a chat | Watch | No |
+| `notify` | This device's push address (78d), so the machine can wake it with a push that says nothing | Watch | No |
 | `allow`, `reply` with an answer | As today | Answer | Each one |
 | `projects` | The projects there, with their identity | Work | No |
 | `start`, `send` | A new lane in Ask mode; a message to a coding chat | Work | The first of a session, and after 15 minutes without one |
@@ -397,6 +400,28 @@ channel's device id, never by anything the client says.
 Stays on the machine, as 78's list stays on the Mac: Kit's dial and a project's level, Always allow and Allow this
 folder, a lane's mode, turning a road or the main switch on, the consent sheets, the coding agents' sign-ins, the
 credential vault, and Settings. A connection with Manage changes levels and pairs devices, never these.
+
+**What 108b built** (28 Nov 2026, built switched off: nothing new reaches a phone that was not already paired).
+
+- `apps/desktop/src/remote/levels.ts`, pure: the levels and permissions, the whole table above as `REQUEST_TABLE` (with
+  each request's level, permission and passkey), `STAYS_ON_MACHINE`, `covers`, `ruleFor` and `mayGive`. The table's
+  grouped rows are read so: a move asks for a passkey at `move_out` and `move_in`, not at `move_list`; a terminal at
+  `term_open` only; `update` asks and `report` does not. `reply` is a No only when it says no and carries no `answer` or
+  `answers`, so no request passes as a No and is then read as an answer. `revoke` and `set_level` each have an `own` form
+  (removing itself; narrowing its own level, which `mayGive` checks narrows) that any level may send without a passkey.
+  `levels.test.ts` writes every cell out by hand.
+- `serve.ts` serves the same seven requests and no more; every other name of the table is still `unknown_request`. Each
+  request is checked against the level in the device's own record, read by `channel.deviceId`, before anything is looked
+  up, challenged or settled, and again right before anything is settled, as Unpair is. A request the level does not cover
+  is refused whole as `level`; a device whose record has no level this Mac can read is refused everything as
+  `unknown_device`. The names refused by name still answer `stays_on_mac` on the wire, which phones already read.
+- The level lives in the device's record in the keychain item (`remote_keys.rs`: `level`, `terminal`, `manage`). A record
+  from before has none and reads as Answer; Answer is written as no level at all, so a build from before 108b still reads
+  every record whose phone was never narrowed; a level this build does not know makes the whole item unreadable, as any
+  field it cannot read does, never Answer. A new pairing is Answer. `remote_keys_set_level` changes it, switch on or off.
+- Settings, Sharing and access shows each phone's level and sets Watch or Answer (`OFFERED_LEVELS`); a narrower level is
+  held in the page before the keychain write, so the phone's next request meets it. The phone says the Mac's `level` in
+  plain words on the ask it answered.
 
 ### 12. The desktop as a client
 
