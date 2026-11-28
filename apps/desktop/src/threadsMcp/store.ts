@@ -167,7 +167,7 @@ export function createMcp(d: McpDeps) {
       const base = d.laneBase(e.ref);
       if (!base) return reply(c.id, `Chat ${n} is not a coding chat with a project folder, so no lane can be made from it. Nothing was started.`, true);
       const agent = d.agentFor(typeof c.args.agent === "string" ? c.args.agent : base.agent);
-      if (!agent) return reply(c.id, "That agent is not one Manut AI can start here: it is not installed, or it is turned off in Settings. Nothing was started.", true);
+      if (!agent) return reply(c.id, "That agent is not one Manut AI can start here: it is not installed, it is turned off in Settings, or it cannot ask the person before it acts. Nothing was started.", true);
       card = { kind: "open", id: c.id, program: c.program, at: now(), gone: false, chat, title: oneLine(String(c.args.title ?? "")), brief: maskSecrets(String(c.args.brief ?? "")), agent: agent.id, agentLabel: agent.label, cwd: base.cwd };
     } else if (kind === "send") {
       if (!d.sendable(e.ref)) return reply(c.id, `Chat ${n} is not a coding chat whose agent runs in Manut AI, so a message cannot go there. Nothing was sent.`, true);

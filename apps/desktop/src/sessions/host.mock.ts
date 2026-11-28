@@ -418,7 +418,9 @@ export class MockHost implements SessionHost, BuddyHost {
     const custom = !!a.acp && "custom" in a.acp && !!a.acp.custom;
     const builtin = !custom;
     const args = p.args ?? [];
-    const fixed = a.acp?.args ?? (a.id === "claude" ? ["-p", "--input-format", "stream-json"] : a.id === "codex" ? ["app-server"] : []);
+    // oh-my-pi's chat and terminal start in its asking mode, as the shell's `chat_args` and `terminal_args` name it (item 139)
+    const fixed = a.acp?.args ?? (a.id === "claude" ? ["-p", "--input-format", "stream-json"] : a.id === "codex" ? ["app-server"] : a.id === "omp" ? ["--mode", "rpc", "--approval-mode=always-ask"] : []);
+    const termFixed = a.id === "omp" ? ["--approval-mode=always-ask"] : [];
     const found = a.path;
     return {
       id: a.id,
@@ -440,7 +442,7 @@ export class MockHost implements SessionHost, BuddyHost {
       version: versionAgent(a.id),
       signin: a.id === "claude" || a.id === "codex" || signinAgent(a.id),
       chat: found && (a.mode ?? "chat") === "chat" && a.id !== "dsh" ? [found, ...(custom ? (a.acp?.args ?? []) : fixed), ...(custom ? [] : args)].join(" ") : null,
-      terminal: found && !custom && a.id !== "dsh" ? [found, ...args].join(" ") : null,
+      terminal: found && !custom && a.id !== "dsh" ? [found, ...termFixed, ...args].join(" ") : null,
     };
   }
   async providers(): Promise<ProviderView[]> {
@@ -1274,6 +1276,15 @@ export class MockHost implements SessionHost, BuddyHost {
   }
 }
 
+/** Anthropic models by these labels, then two from another provider below the fold, as a pi-engine agent lists them. */
+function providerModels(anthropic: string[]): { id: string; label: string; provider: string }[] {
+  return [
+    ...anthropic.map((label) => ({ id: `anthropic/${label.toLowerCase().replace(/ /g, "-").replace(/\./g, "-")}`, label, provider: "anthropic" })),
+    { id: "opengateway/gpt-6", label: "GPT-6 (gateway)", provider: "opengateway" },
+    { id: "opengateway/gemini-4-carbon", label: "Gemini 4 Carbon (gateway)", provider: "opengateway" },
+  ];
+}
+
 const MOCK_MODELS: Record<string, { id: string; label: string; provider?: string }[]> = {
   claude: [
     { id: "opus", label: "Opus 5.5" },
@@ -1285,17 +1296,11 @@ const MOCK_MODELS: Record<string, { id: string; label: string; provider?: string
     { id: "gpt-6.1-terra", label: "GPT-6.1 Terra" },
   ],
   pi: [{ id: "anthropic/claude-sonnet-5-5", label: "Claude Sonnet 5.5" }],
-  omp: [{ id: "anthropic/claude-sonnet-5-5", label: "Claude Sonnet 5.5" }],
-  // as real omo lists them on this Mac: many anthropic models, then two from another provider below the fold
-  omo: [
-    ...["Claude Fable 5.1", "Claude Opus 5", "Claude Opus 4.7", "Claude Sonnet 5.5", "Claude Sonnet 5", "Claude Haiku 5.5", "Claude Haiku 4.5", "Claude Opus 4.5", "Claude Sonnet 4.5", "Claude Opus 4.1", "Claude Sonnet 4", "Claude Opus 4", "Claude Haiku 4", "Claude 3.7 Sonnet"].map((label) => ({
-      id: `anthropic/${label.toLowerCase().replace(/ /g, "-").replace(/\./g, "-")}`,
-      label,
-      provider: "anthropic",
-    })),
-    { id: "opengateway/gpt-6", label: "GPT-6 (gateway)", provider: "opengateway" },
-    { id: "opengateway/gemini-4-carbon", label: "Gemini 4 Carbon (gateway)", provider: "opengateway" },
-  ],
+  // as real omo lists them on this Mac: many anthropic models, then two from another provider below the fold. oh-my-pi lists its
+  // models across providers too (`--model` takes `provider/id`), so its chat shows the same list, its own default first: OmO, whose
+  // list this was, runs only as its own terminal since item 139
+  omp: providerModels(["Claude Sonnet 5.5", "Claude Fable 5.1", "Claude Opus 5", "Claude Opus 4.7", "Claude Sonnet 5", "Claude Haiku 5.5", "Claude Haiku 4.5", "Claude Opus 4.5", "Claude Sonnet 4.5", "Claude Opus 4.1", "Claude Sonnet 4", "Claude Opus 4", "Claude Haiku 4", "Claude 3.7 Sonnet"]),
+  omo: providerModels(["Claude Fable 5.1", "Claude Opus 5", "Claude Opus 4.7", "Claude Sonnet 5.5", "Claude Sonnet 5", "Claude Haiku 5.5", "Claude Haiku 4.5", "Claude Opus 4.5", "Claude Sonnet 4.5", "Claude Opus 4.1", "Claude Sonnet 4", "Claude Opus 4", "Claude Haiku 4", "Claude 3.7 Sonnet"]),
   opencode: [
     { id: "opencode/big-pickle", label: "OpenCode/Big Pickle" },
     { id: "opencode/beam-free", label: "OpenCode/Beam Free" },

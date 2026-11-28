@@ -24,6 +24,7 @@ export function rowAgentWords(row: HelperRow): string {
   if (row.problem === "unknown") return t("helpers.unknownAgent", { name: revealHidden(row.asked ?? row.agent) });
   const label = agentDef(row.agent).label;
   if (row.problem === "notInstalled") return `${label}: ${t("helpers.notInstalled")}`;
+  if (row.problem === "noAsks") return `${label}: ${t("helpers.noAsks")}`;
   const model = row.model
     ? row.modelUnlisted
       ? t("helpers.modelUnlisted", { name: revealHidden(row.model) })

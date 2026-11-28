@@ -6,7 +6,7 @@ import { bringToFront, showNote, windowWatched } from "../lib/notify";
 import { getStore, notifyEnabled, asksIn } from "../state/store";
 import { getSessions } from "../sessions/sessions";
 import { getHost } from "../sessions/host";
-import { agentLabel, sessionMode, type AgentInfo } from "../sessions/agents";
+import { agentLabel, laneAgentNamed, sessionMode, type AgentInfo } from "../sessions/agents";
 import { t } from "../i18n";
 import { getMcpShell } from "./shell";
 import { getMcp, provideMcpDeps, type McpCard } from "./store";
@@ -72,13 +72,8 @@ provideMcpDeps(() => {
       const r = ref.kind === "session" ? rec(ref.id) : undefined;
       return r && r.cwd ? { cwd: r.cwd, agent: r.agent } : null;
     },
-    // an agent this Mac has and the person has not turned off, named by its id or by the name Settings shows
-    agentFor: (name) => {
-      const want = name.trim().toLowerCase();
-      const agents = getSessions().getState().agents ?? [];
-      const a = agents.find((x) => !x.off && !!x.path && (x.id.toLowerCase() === want || x.label.toLowerCase() === want || (x.name ?? "").toLowerCase() === want));
-      return a ? { id: a.id, label: agentLabel(a.id, agents) } : null;
-    },
+    // an agent this Mac has and the person has not turned off, that runs as the app's chat and so asks before it acts (item 139)
+    agentFor: (name) => laneAgentNamed(name, getSessions().getState().agents ?? []),
     openLane: (p) => getSessions().openLane(p),
     notify: announce,
   };

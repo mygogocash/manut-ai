@@ -293,6 +293,45 @@ for (const [lang, title, off, add, card] of [
   });
 }
 
+// item 139: pi and OmO cannot ask before a tool runs, so their settings say why they run only in a terminal and their rows name
+// no chat; oh-my-pi's chat and terminal both start in its asking mode; the + menu offers pi and OmO only as terminal rows
+test("pi and OmO say they run only in a terminal, and oh-my-pi starts in its asking mode (item 139)", async ({ page }) => {
+  await open(page, { agents: ["claude", "codex", "omo", "pi", "omp"] });
+  await agentsPage(page);
+  for (const [id, label] of [
+    ["pi", "pi"],
+    ["omo", "OmO"],
+  ]) {
+    await page.getByTestId(`provider-open-${id}`).click();
+    await expect(page.getByTestId("provider-no-asks")).toHaveText(
+      `${label} does not ask before it runs a command or changes a file, so Manut AI does not start it as a chat or a lane. It still runs in a terminal, where you type to it yourself.`,
+    );
+    await expect(page.getByTestId("provider-runs-chat")).toHaveCount(0);
+    await expect(page.getByTestId("provider-runs-terminal")).toBeVisible();
+  }
+  await page.getByTestId("provider-open-omp").click();
+  await expect(page.getByTestId("provider-no-asks")).toHaveCount(0);
+  await expect(page.getByTestId("provider-runs-chat")).toHaveText(/ --mode rpc --approval-mode=always-ask$/);
+  await expect(page.getByTestId("provider-runs-terminal")).toHaveText(/ --approval-mode=always-ask$/);
+  if (SHOTS) {
+    mkdirSync(SHOTS, { recursive: true });
+    await page.getByTestId("provider-open-pi").click();
+    await page.mouse.move(1200, 780);
+    await page.screenshot({ path: join(SHOTS, `providers-no-asks-${TAG}.png`), animations: "disabled" });
+  }
+  await page.getByRole("button", { name: "Close settings" }).click();
+  await plus(page);
+  const menu = page.getByTestId("session-menu");
+  expect(await menu.locator("[role=menuitem][data-testid^=session-chat-]").evaluateAll((els) => els.map((e) => e.getAttribute("data-testid")))).toEqual(
+    ["claude", "codex", "omp"].map((a) => `session-chat-${a}`),
+  );
+  for (const a of ["omo", "pi", "omp"]) await expect(menu.getByTestId(`session-agent-${a}`)).toBeVisible();
+  if (SHOTS) {
+    await page.mouse.move(900, 400);
+    await page.screenshot({ path: join(SHOTS, `menu-no-asks-${TAG}.png`), animations: "disabled" });
+  }
+});
+
 // ---- shots --------------------------------------------------------------------------------------
 
 const FILE = [{ id: "acme-agent", label: "Acme Agent", program: "acme-agent", args: ["acp"], install: "" }];

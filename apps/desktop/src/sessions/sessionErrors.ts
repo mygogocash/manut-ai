@@ -16,6 +16,12 @@ const SIGNED_OUT = /^(.+) is not signed in\. Run `([^`]+)` in a terminal and sig
 export const NO_ASKS = /^(.+) did not start because its own settings let it run commands and change files without asking first\.$/;
 export const MODE_KEPT = /^(.+) stayed in its (.+) mode, which does not ask before it acts, so Manut AI sends it nothing more\. Close this chat and start a new one\.$/;
 
+/** The shell's sentence when oh-my-pi's own settings could not be checked before its chat (`no_check` in omp_asks.rs, item
+ *  139), and when a chat of pi or OmO, which cannot ask before a tool runs, was refused (`no_ask_path` in sessions.rs). A test
+ *  keeps each equal to the shell's. */
+export const NO_CHECK = /^(.+) did not start because Manut AI could not check that its own settings make it ask first\.$/;
+export const NO_ASK_PATH = /^(.+) does not ask before it runs a command or changes a file, so Manut AI runs it only in a terminal\.$/;
+
 /** The shell's sentence for a message that starts with an agent's own command that turns its asks off (`no_asks_command`
  *  in acp_chat.rs: Grok's `/always-approve`, item 101b), which it never sends. A test keeps it equal to the shell's. */
 export const NO_ASKS_COMMAND = /^(.+)'s \/(\S+) turns off its asks, so Manut AI does not send it\. Write your message without it\.$/;
@@ -28,8 +34,13 @@ export const signedOutSaid = (text: string): string => {
   const m = SIGNED_OUT.exec(t);
   if (m) return tr("ss.signedOut", { agent: m[1], cmd: m[2] });
   const n = NO_ASKS.exec(t);
-  // the setting to change is the agent's own: Cursor's Approval mode, Grok's permission_mode (item 101b)
-  if (n) return tr(n[1] === "Grok" ? "ss.noAsksGrok" : "ss.noAsks", { agent: n[1] });
+  // the setting to change is the agent's own: Cursor's Approval mode, Grok's permission_mode (item 101b), oh-my-pi's
+  // tools.approvalMode and tools.approval (item 139)
+  if (n) return tr(n[1] === "Grok" ? "ss.noAsksGrok" : n[1] === "oh-my-pi" ? "ss.noAsksOmp" : "ss.noAsks", { agent: n[1] });
+  const u = NO_CHECK.exec(t);
+  if (u) return tr("ss.noAsksCheck", { agent: u[1] });
+  const p = NO_ASK_PATH.exec(t);
+  if (p) return tr("ss.noAskPath", { agent: p[1] });
   const c = NO_ASKS_COMMAND.exec(t);
   if (c) return tr("ss.noAsksCommand", { agent: c[1], cmd: c[2] });
   const k = MODE_KEPT.exec(t);

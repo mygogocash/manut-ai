@@ -256,6 +256,7 @@ export function createHelperRuns(deps: RunDeps) {
   const notStartable = (row: HelperRow): string | null => {
     if (row.problem === "unknown") return tr("helpers.run.why.unknown", { name: row.asked ?? row.agent });
     if (row.problem === "notInstalled") return tr("helpers.run.why.notInstalled", { agent: agentDef(row.agent).label });
+    if (row.problem === "noAsks") return tr("ss.noAskPath", { agent: agentDef(row.agent).label });
     const limit = agentLimit(deps.groups(), row.agent as never);
     if (limit) {
       return limit.until

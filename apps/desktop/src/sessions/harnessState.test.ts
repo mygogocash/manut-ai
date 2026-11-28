@@ -8,7 +8,7 @@ import type { ChatEvent, ChatInput, SessionHost } from "./host";
 
 const bridge: BridgeLike = { connect: async () => undefined, onAny: () => () => {}, onStatus: () => () => {}, request: (async () => ({})) as BridgeLike["request"] };
 
-function setup(agent: "claude" | "codex" | "omo") {
+function setup(agent: "claude" | "codex" | "omp") {
   (globalThis as { localStorage?: unknown }).localStorage = { getItem: () => null, setItem: () => {}, removeItem: () => {} };
   const sinks = new Map<number, (e: ChatEvent) => void>();
   const inputs: ChatInput[] = [];
@@ -39,7 +39,7 @@ function setup(agent: "claude" | "codex" | "omo") {
   return { ss, store, emit: (e: ChatEvent) => sinks.get(1)!(e), inputs };
 }
 
-async function started(agent: "claude" | "codex" | "omo") {
+async function started(agent: "claude" | "codex" | "omp") {
   const t = setup(agent);
   await t.ss.loadAgents();
   const id = t.ss.draft(agent);
@@ -50,15 +50,16 @@ async function started(agent: "claude" | "codex" | "omo") {
 }
 
 test("H4: an agent that never answers in chat mode ends the message and the session with a plain reason", async () => {
-  const t = await started("omo");
+  // oh-my-pi, since OmO (this test's agent before item 139) runs only as its own terminal
+  const t = await started("omp");
   expect(t.chat().turn).not.toBeNull();
-  const raw = "OmO did not answer in chat mode; it may be an old version: update it, then Restart.";
+  const raw = "oh-my-pi did not answer in chat mode; it may be an old version: update it, then Restart.";
   // what the shell sends when the start deadline passes (agent_chat.rs)
   t.emit({ event: "session.error", kind: "no_chat_mode", message: raw });
   t.emit({ event: "turn.end", outcome: "error", error: raw });
   t.emit({ event: "exit", code: null, error: raw });
   expect(t.chat().turn).toBeNull();
-  const why = "OmO did not answer in chat mode; it may be an old version: npm i -g omo-ai";
+  const why = "oh-my-pi did not answer in chat mode; it may be an old version: curl -fsSL https://omp.sh/install | sh";
   expect(t.chat().lastTurn!.outcome).toBe("error");
   // the reason is said once, by the Ended line beside Restart: the failed turn does not repeat it
   expect(t.chat().lastTurn!.error).toBeUndefined();

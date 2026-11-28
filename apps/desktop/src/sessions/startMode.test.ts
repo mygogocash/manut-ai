@@ -8,7 +8,7 @@ import type { ChatEvent, ChatInput, SessionHost } from "./host";
 
 const bridge: BridgeLike = { connect: async () => undefined, onAny: () => () => {}, onStatus: () => () => {}, request: (async () => ({})) as BridgeLike["request"] };
 
-function setup(agent: "claude" | "codex" | "pi") {
+function setup(agent: "claude" | "codex" | "omp") {
   const modes: (string | undefined)[] = [];
   const inputs: ChatInput[] = [];
   const sinks = new Map<number, (e: ChatEvent) => void>();
@@ -47,7 +47,8 @@ afterEach(() => {
 });
 
 test("a new chat names no mode, so the shell starts its agent in the careful one", async () => {
-  for (const agent of ["claude", "codex", "pi"] as const) {
+  // oh-my-pi names no mode from the page either: its asking mode is one of the shell's fixed arguments for it (item 139)
+  for (const agent of ["claude", "codex", "omp"] as const) {
     const t = setup(agent);
     await t.ss.loadAgents();
     const id = t.ss.draft(agent);

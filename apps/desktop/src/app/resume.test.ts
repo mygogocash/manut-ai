@@ -219,7 +219,7 @@ function quietBridge(): BridgeLike {
 const saved = (): ResumeSnap["sessions"] => [
   { id: "s2", agent: "claude", cwd: "/w/web-app", startedAt: T, view: "chat", running: true, agentSession: "11111111-2222-4333-8444-555555555555", account: "work", messages: [{ id: "m1", role: "user", text: "fix it", ts: 1 }] },
   { id: "s3", agent: "codex", cwd: "/w/api", startedAt: T, view: "terminal", running: true, agentSession: "codex-thread-1" },
-  { id: "s4", agent: "pi", cwd: "/w/pi", startedAt: T, view: "chat", running: true, promptTitle: "Port the parser", agentTitle: "Parser port", title: "Mine" },
+  { id: "s4", agent: "omp", cwd: "/w/pi", startedAt: T, view: "chat", running: true, promptTitle: "Port the parser", agentTitle: "Parser port", title: "Mine" },
   { id: "s5", agent: "grok", cwd: "/w/g", startedAt: T, view: "terminal", running: true },
   { id: "s6", agent: "claude", cwd: "/w/done", startedAt: T, view: "chat", running: false, exitCode: 0, agentSession: "22222222-2222-4333-8444-555555555555" },
 ];
@@ -279,12 +279,33 @@ describe("sessions restore", () => {
     await ss.resume("s4");
     await ss.resume("s4");
     await ss.resume("s6"); // not paused: nothing
-    const pi = (g.__manutSessionCalls as { op: string; agent?: string }[]).filter((c) => c.op === "chat.start" && c.agent === "pi");
-    expect(pi).toHaveLength(1);
+    const omp = (g.__manutSessionCalls as { op: string; agent?: string }[]).filter((c) => c.op === "chat.start" && c.agent === "omp");
+    expect(omp).toHaveLength(1);
     expect(by("s4").paused).toBeUndefined();
     // new sessions get the next id, never a restored one's
     const id = ss.draft();
     expect(id).toBe("s7");
+  });
+
+  // item 139: pi and OmO cannot ask before a tool runs, so a chat of theirs saved before then comes back as their own terminal
+  // (OmO's continuing its conversation there), and nothing starts a chat of either
+  it("a pi or OmO chat saved before item 139 comes back as its own terminal and never starts as a chat", async () => {
+    const g: Record<string, unknown> = {};
+    const store = createStore(quietBridge());
+    const ss = createSessions(new MockHost(g), () => store);
+    ss.restore([
+      { id: "s8", agent: "pi", cwd: "/w/pi", startedAt: T, view: "chat", running: true },
+      { id: "s9", agent: "omo", cwd: "/w/omo", startedAt: T, view: "chat", running: false, exitCode: 0, agentSession: "01a1c85a-703a-72fe-ae88-c1f9ffb5c249" },
+    ]);
+    await new Promise((r) => setTimeout(r, 30));
+    const by = (id: string) => ss.getState().list.find((r) => r.id === id)!;
+    expect(by("s8")).toMatchObject({ view: "terminal", status: "exited", paused: true });
+    expect(by("s9")).toMatchObject({ view: "terminal", status: "exited", agentSession: "01a1c85a-703a-72fe-ae88-c1f9ffb5c249" });
+    await ss.resume("s8");
+    await ss.restart("s9");
+    expect(((g.__manutSessionCalls ?? []) as { op: string }[]).filter((c) => c.op === "chat.start")).toEqual([]);
+    expect(by("s8").status).toBe("starting");
+    expect(by("s9")).toMatchObject({ status: "starting", view: "terminal" });
   });
 
   it("a New session chat that never started comes back as a draft and is never started; its unsent text too", async () => {

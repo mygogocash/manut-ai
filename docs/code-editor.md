@@ -498,9 +498,11 @@ shell reads only a lane's folder.
 The Code page's + menu (the Terminals header's +, the empty section's New session, the background menu's New session, ⌘N and
 ⌘T) offers each coding agent two ways, as the owner chose on 25 November (item 66). Under its folder chip:
 
-- **Chat with Kit**, first: one row for each installed agent that runs as the app's chat (`chatAgents`: Claude Code, Codex, OmO,
-  pi, oh-my-pi, Grok (since item 101b), OpenCode, DeepSeek Harness, the ACP agents (Cursor and Antigravity among them since
-  item 74) and a person's own, in the menu's order), with the account a new session runs as. An agent turned off on Settings ›
+- **Chat with Kit**, first: one row for each installed agent that runs as the app's chat (`chatAgents`: Claude Code, Codex,
+  oh-my-pi, Grok (since item 101b), OpenCode, DeepSeek Harness, the ACP agents (Cursor and Antigravity among them since
+  item 74) and a person's own, in the menu's order), with the account a new session runs as. pi and OmO are not among them
+  since item 139: they cannot ask before a tool runs, so they are offered only In a terminal (see
+  [oh-my-pi asks first](#oh-my-pi-asks-first-pi-and-omo-run-in-a-terminal-item-139)). An agent turned off on Settings ›
   Providers is in neither part of the menu (`offeredAgents`), and the shell would refuse its start anyway (see [Providers](#providers-each-agents-settings)). Never oh-my-hermes. Picking one opens its New session chat in the
   folder the chip names (`draftChat`), as a chat whatever way the draft last kept for that agent. Nothing runs until the first
   message: it names the lane's branch, the shell makes the lane's folder (see [Where a lane works](#where-a-lane-works)), and the
@@ -541,6 +543,48 @@ The Code page's + menu (the Terminals header's +, the empty section's New sessio
 `newMenu.test.ts` pins which agents each part lists, `ChatWay.test.tsx` draws the part and presses a row, `lanes.test.ts` takes a
 pick through to the lane, and `e2e/kit-lanes.spec.ts`, `terminals.spec.ts` and `integrate.spec.ts` walk the menu in a browser.
 
+### oh-my-pi asks first; pi and OmO run in a terminal (item 139)
+
+The sixth security read (H1) found that oh-my-pi's own `tools.approvalMode` defaults to `yolo`, which "auto-approves all
+tiers", and that the app started its chats with `--mode rpc` alone: every command, write and edit of an oh-my-pi chat or lane
+ran with no card, while the cards that start a lane said every step asks. Everything below was read in oh-my-pi itself (18.22.0
+here): its `--help`, `omp config list --json --scope=…` in scratch folders, and its source at tag v18.22.0 (commit 3e8cff3).
+No message was sent to any agent.
+
+- **Its asking mode.** An oh-my-pi chat starts as `omp --mode rpc --approval-mode=always-ask` (`OMP_CHAT_ARGS` in
+  `src-tauri/src/sessions.rs`), and its terminal as `omp --approval-mode=always-ask`. omp applies the flag as a runtime override,
+  which outranks every settings layer (a `--config` overlay, the project's, the person's own), and reads it before any extension
+  could claim the same name. `always-ask` lets read-only tools run and asks before every write and every command, as Kit's dial
+  lets a read go alone. Settings › Providers shows both lines.
+- **Its helpers.** omp runs the helpers its `task` tool starts in `yolo` ("Subagents run headless"), so one card the person allowed
+  let a helper run every command and change after it with no card. Every chat therefore loads an overlay the app writes,
+  `~/.manut/omp/asks.yml` (`--config`, `src-tauri/src/omp_asks.rs`), which sets `tools.approval.task: deny`: an overlay outranks the
+  project's and the person's settings, and a `deny` wins in every mode. omp's chats in the app run without helpers. Code the person
+  allowed in an `eval` step can still start one, as a command they allow can run a script.
+- **Its own settings, before the start.** A per-tool `tools.approval` policy of `allow` is "honored in every approval mode", so one
+  would run that tool unasked under the flag. omp merges its project layer from the chat's folder alone, out of seven kinds of file
+  in six tools' folders (`.omp/config.yml`, `.omp/settings.json`, `.claude/settings.json`, `.codex/config.toml`,
+  `.cursor/settings.json`, `.gemini/settings.json`, `opencode.json(c)`, `.opencode/opencode.json(c)`), and its global layer from the
+  `config.yml` of the agent folder its profile or `PI_CODING_AGENT_DIR` picks. The shell asks omp itself for both, in the chat's
+  folder and with the chat's variables (`omp config list --json --scope=global` and `--scope=project`, about 0.06 s each), and the
+  chat does not start, with nothing sent, when a layer sets `tools.approvalMode` to anything but `always-ask` or
+  `always-ask-cached`, or any `tools.approval` policy to anything but `prompt` or `deny`. The chat says why and what to change.
+  It does not start either while `PI_CONFIG_FILES` is set (overlay files a listing does not show), or when a listing fails: then it
+  says Manut AI could not check. omp has no switch that leaves the project layer out. A change the agent makes to any of those
+  files during a chat asks at every level ([Files a change to which always asks](#files-a-change-to-which-always-asks-item-88)),
+  and omp's own folder is outside the project. A terminal of oh-my-pi gets the flag but no check: its dialogs are omp's own there.
+- **pi and OmO.** pi asks before nothing ("it does not ask for approval before every tool call", its own
+  `packages/coding-agent/docs/security.md`). OmO's engine, senpi, asks only under `--permission-preset ask`, its default being
+  `full-access`, and its dialog ("Permission required: …" with Allow once, Allow always, Deny) is not one the pi adapter turns into
+  a card; OmO is not installed here to check it. Both therefore run only as their own terminal (`NO_ASKS`, in the shell and in
+  `src/sessions/agents.ts`): the + menu's Chat with Kit does not list them, a card's lane, a helper row, a workflow, Ask several and
+  an outside program's `open_chat` refuse them before any folder is made, the shell refuses their chat start itself, and Settings ›
+  Providers says why in one line. A pi or OmO chat saved before item 139 comes back as its own terminal (OmO's continuing its
+  conversation there). In a terminal the person types to them themselves.
+
+`laneAsks.test.ts`, `omp_asks.rs` and the live start test in `agent_chat/live.rs` pin it; `real_omp_settings_refuse_each_unsafe_layer`
+(ignored, needs oh-my-pi) runs the real omp's listings over made-up layers in temporary folders.
+
 ### Providers: each agent's settings
 
 Settings › Providers (item 74, the owner's T3 Code screenshot) is one page for the coding agents. It replaced Settings ›
@@ -556,6 +600,8 @@ start, so a file changed by hand never starts what the page would refuse.
   `models`, item 101b; no check is made up
   for any other agent) and a switch. oh-my-hermes, offered nowhere, is not
   listed. Pressing a row opens its settings under it.
+- **Only a terminal (item 139).** pi's and OmO's settings say in one line that Manut AI does not start them as a chat or a lane,
+  since they cannot ask before a tool runs, and that they still run in a terminal. Their row shows no chat line.
 - **Off.** Offered nowhere: neither part of the + menu, the empty section's tooltip, a new draft, Buddy (which says where to turn
   it on). The shell refuses its start before any program is looked up: terminals and chats (`sessions::launch_with`), Buddy
   (`start_buddy_mine`), DeepSeek Harness, and a person's own agent before its entry is resolved. Sessions already running
@@ -1852,9 +1898,10 @@ held by the source list (neither can run a program or allow a tool on its own).
 | Cursor | `.cursor/cli.json` (`permissions.allow`), `.cursor/hooks.json` (needs workspace trust), `.cursor/mcp.json` (needs approval) | none found; `--trust` is the opposite and is refused | open |
 | Antigravity | not read: its hooks, MCP and project pages were not reached | `--include-default-customizations=false` is untested | open |
 | Grok | `.grok/config.toml` (`[permission]` rules, MCP servers, plugins, and `[env]` in a trusted folder), `.claude/settings.json` and `.claude/settings.local.json` up to the repository's root (permission rules, `defaultMode`), `.mcp.json`, and hooks, project skills and `AGENTS.md` after folder trust | folder trust (`--trust`, `GROK_FOLDER_TRUST`), whose `0` lets all of them in and is refused as a variable; none found that leaves out a project's permission rules | a `defaultMode` that skips asks refuses the start (item 101b); a project's allow rules: open |
-| pi | `.pi/extensions` (code), `.pi/settings.json` (`packages`, `extensions`), loaded after project trust (`defaultProjectTrust`, agent-folder settings only) | none for the rpc mode found | open (not installed here) |
-| oh-my-pi | `.omp/` hooks and extensions, `.omp/mcp.json` | `--no-extensions` also drops the person's own; `--approval-mode` unconfirmed against project settings | open |
-| OmO, DeepSeek Harness, a person's own agent | not read (not installed here, or the person's) | | open |
+| pi | `.pi/extensions` (code), `.pi/settings.json` (`packages`, `extensions`), loaded after project trust (`defaultProjectTrust`, agent-folder settings only) | none for the rpc mode found | no chat or lane since item 139: only its own terminal |
+| oh-my-pi | `.omp/` hooks and extensions, `.omp/mcp.json`, and a `tools.approval` policy in any of seven files of six tools' folders (`.omp/config.yml` and `settings.json`, `.claude/settings.json`, `.codex/config.toml`, `.cursor/settings.json`, `.gemini/settings.json`, `opencode.json(c)` and `.opencode/`) | `--no-extensions` also drops the person's own; none for the settings | item 139: `--approval-mode=always-ask` outranks every layer's mode, and a project or person that allows a tool refuses the start. Open: a project's hooks and extensions |
+| OmO | not read (not installed here) | | no chat or lane since item 139: only its own terminal |
+| DeepSeek Harness, a person's own agent | not read (not installed here, or the person's) | | open |
 
 Grok ran only as its own terminal until item 101b, where its own prompts apply. As a chat it reads a project's own files as
 in the row below; `docs/decisions/101b-grok-muse-chat.md` has the calls.
