@@ -88,7 +88,13 @@ export function makePainter(scroller: HTMLElement, layer: HTMLElement | null): P
       },
     };
   }
-  const clear = () => layer?.replaceChildren();
+  // what the layer holds now, so a repaint of a page that did not move (the page asks for one whenever a group opens or shuts)
+  // leaves the boxes where they are instead of replacing each of them
+  let drawn = "";
+  const clear = () => {
+    drawn = "";
+    layer?.replaceChildren();
+  };
   return {
     kind: "boxes",
     clear,
@@ -115,6 +121,9 @@ export function makePainter(scroller: HTMLElement, layer: HTMLElement | null): P
           boxes.push(box);
         }
       });
+      const now = `${layer.style.cssText}|${boxes.map((b) => `${b.className}:${b.style.cssText}`).join("|")}`;
+      if (now === drawn) return;
+      drawn = now;
       layer.replaceChildren(...boxes);
     },
   };

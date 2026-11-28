@@ -201,9 +201,11 @@ test("where the web view has no highlights, a layer of boxes marks each match in
   // nothing in the messages changed
   expect(await bubbles(page)).toEqual(before);
   // the boxes follow the column's scroll
-  const y0 = (await page.locator(".cf-cur").first().boundingBox())!.y;
+  const ringY = async () => (await page.locator(".cf-cur").first().boundingBox())?.y ?? Number.NaN;
+  await expect.poll(ringY).not.toBeNaN();
+  const y0 = await ringY();
   await tl(page).evaluate((el) => (el.scrollTop -= 60));
-  await expect.poll(async () => Math.round(((await page.locator(".cf-cur").first().boundingBox())?.y ?? 0) - y0)).toBe(60);
+  await expect.poll(async () => Math.round((await ringY()) - y0)).toBe(60);
   await expect.poll(over).toMatchObject({ dx: expect.any(Number) });
   const moved = await over();
   expect(moved!.dy).toBeLessThan(2);
