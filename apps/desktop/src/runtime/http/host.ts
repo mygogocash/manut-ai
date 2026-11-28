@@ -68,7 +68,7 @@ import { OpError } from "../mock/host";
 import { decisionPath, outcomeOf, type Closing, type Outcome } from "./answer";
 import { answerable, isAsk, optionFor, parseAskId, parseShopAskId, type ShopApproval } from "./approvals";
 import { CACHE_MAX_AGE_MS, type CachedRead, type ShopCache } from "./cache";
-import { BuddyChat, isChatId, type ChatLink } from "./chat";
+import { BuddyChat, isChatId, isConversationId, type ChatLink } from "./chat";
 import { connectionHandlers, type OwnerLink } from "./connections";
 import { googleHandlers } from "./google";
 import { shopRoutines, teamRoutineRow } from "./customize";
@@ -1426,7 +1426,14 @@ export class HttpHost {
       "thread.create": (p) => (member(p), p.bot === TEAM ? this.chat.create(p) : notYet()),
       // A conversation with Buddy is deleted on the API, with every message in it, only after a screen asked the person (chat.ts,
       // item 102l-6). The team's work is never removed from here, and a member has no conversations: "not yet", nothing sent.
-      "thread.remove": (p) => (member(p), p.bot === TEAM && this.chat.knows(p.thread) ? this.chat.remove(p.thread) : notYet()),
+      "thread.remove": (p) => {
+        member(p);
+        if (p.bot === TEAM && this.chat.knows(p.thread)) return this.chat.remove(p.thread);
+        // a conversation this run no longer knows is gone (removed already, or the sign-in ended): said so, not "not yet", which is what
+        // the team's work and a member's threads are told
+        if (p.bot === TEAM && isConversationId(p.thread)) throw notFound();
+        return notYet();
+      },
       // Show older, in a conversation: the page of messages before the one a screen already shows (chat.ts).
       "thread.older": (p) => {
         member(p);

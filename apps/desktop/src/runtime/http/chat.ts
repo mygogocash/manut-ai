@@ -75,6 +75,11 @@ const PER_HOUR = 60;
  *  whose ids the API never starts so, and the API checks the id exactly. */
 const CHAT_ID = /^cht-[0-9a-z-]{1,60}$/;
 export const isChatId = (v: unknown): v is string => typeof v === "string" && CHAT_ID.test(v);
+/** The id `thread.create` gives a conversation it prepared and no message has made yet (`chat-new-…`, `create` below). */
+const PREPARED_ID = /^chat-new-[0-9a-z-]{1,40}$/;
+/** Whether `v` has the shape of a conversation's id, the API's or a prepared one's: a thread of that shape this run does not know is
+ *  a conversation that is gone (removed, or the sign-in ended), not the team's work and not something not built yet. */
+export const isConversationId = (v: unknown): v is string => isChatId(v) || (typeof v === "string" && PREPARED_ID.test(v));
 /** An id of the API's, to send back: short and plain. */
 const API_ID = /^[A-Za-z0-9._-]{1,64}$/;
 

@@ -505,8 +505,8 @@ describe("removing a conversation (item 102l-6)", () => {
     expect(chatCalls(api)).toEqual([]);
     expect(goneEvents(events)).toEqual([{ event: "thread.removed", bot: "buddy", thread: row.thread }]);
     expect(chatRows((await req("thread.list", { bot: "buddy" })).threads)).toEqual([]);
-    // asked again, it is not known any more
-    expect(await refusal(req("thread.remove", { bot: "buddy", thread: row.thread }))).toMatchObject({ code: "not_yet" });
+    // asked again, it is gone: not "not yet", which is for what is never removed from here
+    expect(await refusal(req("thread.remove", { bot: "buddy", thread: row.thread }))).toEqual({ code: "not_found", message: t("rt.notFound") });
   });
 
   it("waits for the conversation's own message on its way: that message goes first, then the removal, and nothing makes the conversation again", async () => {
@@ -569,7 +569,7 @@ describe("removing a conversation (item 102l-6)", () => {
       }
     });
 
-    it("says a conversation the API no longer has is gone, and drops it as the list would on its next read", async () => {
+    it("says a conversation the API no longer has is gone, and drops it as the list would on its next read; pressed again, it is still said to be gone", async () => {
       const { api, shops, req, events } = await madeAtMali();
       // removed elsewhere (another window, the shop's deletion), after the list was read
       shops.chat[SHOP_A.id] = [];
@@ -578,6 +578,9 @@ describe("removing a conversation (item 102l-6)", () => {
       expect(removals(api)).toHaveLength(1);
       expect(goneEvents(events)).toEqual([{ event: "thread.removed", bot: "buddy", thread: chatId(1) }]);
       expect(chatRows((await req("thread.list", { bot: "buddy" })).threads)).toEqual([]);
+      // the question that named it is still open, and its button pressed again asks nothing: it is not "not yet", it is not there
+      expect(await refusal(req("thread.remove", { bot: "buddy", thread: chatId(1) }))).toEqual({ code: "not_found", message: t("rt.notFound") });
+      expect(removals(api)).toHaveLength(1);
     });
 
     it("signed out: the shop cannot be opened again, so it is said so, and the removal is not sent twice", async () => {
@@ -616,7 +619,10 @@ describe("removing a conversation (item 102l-6)", () => {
     await req("thread.list", { bot: "buddy" });
     expect(await refusal(req("thread.remove", { bot: "buddy", thread: "worker-task-nam" }))).toEqual({ code: "not_yet", message: t("rt.notYet") });
     expect(await refusal(req("thread.remove", { bot: "nam", thread: "worker-task-nam" }))).toEqual({ code: "not_yet", message: t("rt.notYet") });
-    expect(await refusal(req("thread.remove", { bot: "buddy", thread: chatId(1) }))).toEqual({ code: "not_yet", message: t("rt.notYet") });
+    // a conversation this run never knew, or knows no more, is not there; a thread that is no conversation's id is not built yet
+    expect(await refusal(req("thread.remove", { bot: "buddy", thread: chatId(1) }))).toEqual({ code: "not_found", message: t("rt.notFound") });
+    expect(await refusal(req("thread.remove", { bot: "buddy", thread: "chat-new-nothing" }))).toEqual({ code: "not_found", message: t("rt.notFound") });
+    expect(await refusal(req("thread.remove", { bot: "buddy", thread: "some-other-thread" }))).toEqual({ code: "not_yet", message: t("rt.notYet") });
     expect(removals(api)).toEqual([]);
   });
 
