@@ -78,7 +78,9 @@
   // every environment, dev included, as the other switches are: each message
   // is a model call billed to the shop's cap, so turning it on is the owner's
   // call. With it on and no ANTHROPIC_API_KEY, a message answers
-  // not_configured.
+  // not_configured. Its limiter, CHAT_LIMITER, is bound everywhere and counts
+  // every call under /v1/chat/ per source address before the owner's session is
+  // read, even while the switch is off, since the reads stay open.
   "main": "src/index.ts",
   "compatibility_date": "2026-09-16",
   // One origin for the pilot (docs/pilot-api.md): this Worker is the front
@@ -256,6 +258,15 @@
             "limit": 120,
             "period": 60
           }
+        },
+        // Buddy's chat (chat.ts): every call under /v1/chat/, any method, per source address, before the owner's session is read.
+        {
+          "name": "CHAT_LIMITER",
+          "namespace_id": "2026112358",
+          "simple": {
+            "limit": 60,
+            "period": 60
+          }
         }
       ]
     },
@@ -396,6 +407,15 @@
           "namespace_id": "2026112355",
           "simple": {
             "limit": 120,
+            "period": 60
+          }
+        },
+        // Buddy's chat (chat.ts): every call under /v1/chat/, any method, per source address, before the owner's session is read.
+        {
+          "name": "CHAT_LIMITER",
+          "namespace_id": "2026112359",
+          "simple": {
+            "limit": 60,
             "period": 60
           }
         }
@@ -540,6 +560,15 @@
             "limit": 120,
             "period": 60
           }
+        },
+        // Buddy's chat (chat.ts): every call under /v1/chat/, any method, per source address, before the owner's session is read.
+        {
+          "name": "CHAT_LIMITER",
+          "namespace_id": "2026112360",
+          "simple": {
+            "limit": 60,
+            "period": 60
+          }
         }
       ]
     }
@@ -571,7 +600,10 @@
   // account's limiters yet. Artifact links' public read comes next
   // (2026112353 here, 54, 55 and 56 in dev, staging and prod; artifacts.ts),
   // per source address on the artifact origin's host; not checked against the
-  // account's limiters either.
+  // account's limiters either. Buddy's chat follows (2026112357 here, 58, 59
+  // and 60 in dev, staging and prod; chat.ts, item 143), per source address,
+  // before the owner's session is read; not checked against the account's
+  // limiters either. The next limiter's ids start at 2026112361.
   "ratelimits": [
     {
       "name": "AUTH_EXCHANGE_LIMITER",
@@ -694,6 +726,15 @@
       "namespace_id": "2026112353",
       "simple": {
         "limit": 120,
+        "period": 60
+      }
+    },
+    // Buddy's chat (chat.ts): every call under /v1/chat/, any method, per source address, before the owner's session is read.
+    {
+      "name": "CHAT_LIMITER",
+      "namespace_id": "2026112357",
+      "simple": {
+        "limit": 60,
         "period": 60
       }
     }

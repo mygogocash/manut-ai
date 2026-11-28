@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,7 +13,9 @@ import { unstable_readConfig, unstable_startWorker } from "wrangler";
 //   1. in every environment, the API Worker has no assets and binds WEB to that environment's pages Worker;
 //   2. the pages Worker, started as `wrangler dev` starts it (custom build, assets, single-page fallback), serves
 //      every page with its headers, whether or not the browser sends fetch metadata (older phones do not);
-//   3. the API Worker, started beside it, hands it the pages and keeps every API path.
+//   3. the API Worker, started beside it, hands it the pages and keeps every API path;
+//   4. every environment, and the test Worker's own config, binds the same ingress limiters, and no limiter's namespace id is
+//      used twice in any of them (item 143).
 // Nothing leaves this machine: Worker fetches to the internet are refused, Miniflare's cf.json download is off,
 // the only env file is an empty one, and no Cloudflare account is used. It is not evidence of a deployed Worker.
 
@@ -51,6 +53,28 @@ for (const env of [undefined, "dev", "staging", "prod"]) {
 const dev = unstable_readConfig({ config: "wrangler.jsonc", env: "dev" }, { hideWarnings: true });
 assert.deepEqual(dev.routes, [{ pattern: "dev.manut.xyz", custom_domain: true }], "dev serves on dev.manut.xyz");
 checked++;
+
+// 4. The ingress limiters. A route a limiter guards fails closed with 503 `rate_limit_unavailable` when its binding is missing
+// (src/index.ts, `ingressRateGate`), so an environment that lacks one answers none of that route's calls, and a namespace id
+// that two limiters share would make them count in one bucket. So each environment binds every limiter the top level binds, and
+// no id is used twice across the four sets and the test Worker's own (wrangler.test.json, plain JSON).
+const limiterSets = [undefined, "dev", "staging", "prod"].map((env) => [env ?? "top level",
+  unstable_readConfig({ config: "wrangler.jsonc", env }, { hideWarnings: true }).ratelimits ?? []]);
+limiterSets.push(["wrangler.test.json",
+  JSON.parse(readFileSync(new URL("../wrangler.test.json", import.meta.url), "utf8")).ratelimits ?? []]);
+const topLimiters = limiterSets[0][1].map((limiter) => limiter.name).sort();
+const limiterIds = new Map();
+for (const [where, limiters] of limiterSets) {
+  assert.deepEqual(limiters.map((limiter) => limiter.name).sort(), topLimiters, `${where}: binds the limiters the top level binds`);
+  for (const { name, namespace_id: id } of limiters) {
+    assert.equal(limiterIds.get(id), undefined, `${where}: ${name}'s namespace id ${id} is already ${limiterIds.get(id)}'s`);
+    limiterIds.set(id, `${name} in ${where}`);
+  }
+  // Buddy's chat counts 60 calls a minute per source address, as docs/pilot-api.md, "Chat", says.
+  assert.deepEqual(limiters.find((limiter) => limiter.name === "CHAT_LIMITER")?.simple, { limit: 60, period: 60 },
+    `${where}: CHAT_LIMITER is bound at 60 a minute`);
+  checked++;
+}
 
 // One local registry for both Workers, so the API Worker's WEB binding finds the pages Worker the way the
 // deployed binding finds the deployed one.

@@ -140,13 +140,20 @@ async function shopConsented(env: Pick<ChatEnv, "TENANT">, tenant: string): Prom
   return record?.cloudWork === true;
 }
 
-/// `/v1/chat/*`. Answers null for any other path. Every route keeps the order the owner's routes keep: who is asking (401
-/// or 503), the role (403 `owner_only`), the method (405), the query and the body (400 or 413), then for a message the
-/// switch (403 `feature_disabled`), and only then the shop's record (404 for a person's own sign-in, which is no shop), so
-/// nothing is read, counted or sent for a request any of those refuse.
+/// Whether a path is the chat's: `/v1/chat` and everything under `/v1/chat/`. The Worker's ingress gate counts every call to
+/// one of these against `CHAT_LIMITER` before the session is read (index.ts, item 143), and `chatRoute` answers exactly these,
+/// so the limit and the route can never disagree about which paths are the chat's.
+export function isChatPath(pathname: string): boolean {
+  return pathname === "/v1/chat" || pathname.startsWith("/v1/chat/");
+}
+
+/// `/v1/chat/*`. Answers null for any other path. Every route keeps the order the owner's routes keep: the ingress limit
+/// (429, in the Worker's gate, before this runs), who is asking (401 or 503), the role (403 `owner_only`), the method (405), the
+/// query and the body (400 or 413), then for a message the switch (403 `feature_disabled`), and only then the shop's record
+/// (404 for a person's own sign-in, which is no shop), so nothing is read, counted or sent for a request any of those refuse.
 export async function chatRoute(request: Request, url: URL, env: ChatEnv, flags: ChatFlags, options: ChatOptions = {}):
   Promise<Response | null> {
-  if (url.pathname !== "/v1/chat" && !url.pathname.startsWith("/v1/chat/")) return null;
+  if (!isChatPath(url.pathname)) return null;
   const removing = url.pathname === CHAT_REMOVE_PATH;
   const threadMatch = removing ? null : THREAD_PATH.exec(url.pathname);
   if (url.pathname !== CHAT_MESSAGES_PATH && url.pathname !== CHAT_THREADS_PATH && !removing && !threadMatch) {

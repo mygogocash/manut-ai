@@ -23,7 +23,7 @@ import { readLinear } from "./connectors/linear";
 import { CredObject } from "./cred-object";
 import { googleRoute } from "./google-connect";
 import { receiveLinearWebhook } from "./inbound";
-import { chatRoute } from "./chat";
+import { chatRoute, isChatPath } from "./chat";
 import { memoryRoute } from "./memory";
 import { modelAdminRoute } from "./model-gateway";
 import { ACCOUNT_DELETION_PATH, accountRoute } from "./account-deletion";
@@ -146,6 +146,10 @@ export interface Env {
   SELF_SERVE_SHOP_LIMITER?: RateLimit;
   /// A person's deletion of their own data (`DELETE /v1/tenant/data`), counted per source address in the ingress gate.
   TENANT_DELETE_LIMITER?: RateLimit;
+  /// Buddy's chat (chat.ts; docs/pilot-api.md, "Chat"): every call under `/v1/chat/`, any method, counted per source address
+  /// in the ingress gate before the owner's session is checked, so a call with no session costs the AuthObject nothing past
+  /// the limit (item 143, L5 of the sixth security read). It counts while the chat's switch is off too: the reads stay open.
+  CHAT_LIMITER?: RateLimit;
   /// Opening a shop session (`POST /v1/shops/session`, `POST /v1/people/session`), counted per signed-in person
   /// (session-limits.ts).
   SHOP_SESSION_LIMITER?: RateLimit;
@@ -240,6 +244,11 @@ async function ingressRateGate(request: Request, pathname: string, env: Env, art
   // Deleting one's own account (account-deletion.ts) counts in the same bucket, any method, for the same reasons: it reads
   // the session and then deletes the person's shops, places and sessions.
   else if (pathname === ACCOUNT_DELETION_PATH) binding = env.TENANT_DELETE_LIMITER;
+  // Buddy's chat (chat.ts) checks the owner's session before anything else, which wakes the AuthObject or the shop's object for
+  // every call, so every try under /v1/chat/ counts, any method and any path, before the session is read: past the limit
+  // nothing is read, and the gateway is never asked. One bucket for the four routes, per source address. The model's money was
+  // never at stake here (the gateway is asked only after the session, the switch, the consent and the shop's own hour).
+  else if (isChatPath(pathname)) binding = env.CHAT_LIMITER;
   // Any method: the link is a bearer capability, so every probe counts. The
   // owner's two kinds of link share one limit, so probing both doubles nothing.
   else if (pathname.startsWith("/v1/pilot/approvals/") || pathname.startsWith("/v1/pilot/deletions/")) {

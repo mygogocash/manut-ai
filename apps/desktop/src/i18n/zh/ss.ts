@@ -143,4 +143,6 @@ export const ss: Record<keyof typeof en, string> = {
   "ss.noAskPath": "{agent} 在运行命令或修改文件之前不会询问，因此 Manut AI 只在终端中运行它。",
   "ss.noAsksOmp": "{agent} 自己的设置允许它不经询问就运行命令和修改文件，因此没有启动。请在 {agent} 自己的设置和这个项目的设置中把 tools.approvalMode 设为 always-ask，并删除所有设为 allow 的 tools.approval 条目（可用 omp config list --scope=global 和 --scope=project 查看），然后重新开始聊天。",
   "ss.noAsksCheck": "Manut AI 无法确认 {agent} 自己的设置会让它先询问，因此没有启动它。请确认在这个文件夹的终端中 omp config list --json 能正常运行，并且没有设置 PI_CONFIG_FILES，然后重新开始聊天。",
+  // oh-my-pi in a folder whose own tools, plugins or .env variables would act as it starts (item 139b)
+  "ss.ompProjectCode": "这个文件夹里有它自己的代码或变量（{what}），它们会在一启动、还没有询问你之前就运行或生效，因此没有启动 {agent}。要使用它们，请在 {agent} 的终端会话中打开这个文件夹；否则请删除 {what}（如果是 .env，只删除以 PI_ 或 OMP_ 开头的行），然后重新开始聊天。",
 };
