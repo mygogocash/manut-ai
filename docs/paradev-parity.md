@@ -122,7 +122,7 @@ undo them (`packages/chat-runtime/src/checkpoints/`).
 | Messages written while the agent works wait their turn | has (item 95): a coding chat holds a message until the answer is done, and a key adds it at once instead | |
 | An agent asks before it reads files outside its workspace | has: such a read is stopped and shown, with Allow this folder (Kit's dial, `apps/desktop/src/code/kitAsks.ts`) | |
 | Rewind a chat to an earlier message, and undo a turn's file changes | has: Rewind puts back a kept turn's files and its chat, and Bring it back undoes the rewind (Claude Code and Codex; `apps/desktop/src/sessions/rewind.ts`, `apps/desktop/src-tauri/src/turn_files.rs`) | |
-| Find in a chat (Command+F) | no: Find is the terminal's only | 150 |
+| Find in a chat (Command+F) | has (item 150): a bar at the chat's top right finds across its messages and its steps, folded groups included (a match in one opens it while it is the current match), with the count and Next and Previous; painted with the CSS Custom Highlight API where `CSS.highlights` exists and with a layer of boxes where it does not; the key is a settable action (`find`) that a terminal's own find, a pane or field with a find of its own and an open menu keep | |
 | Switch a running session between chat and terminal, keeping its context | part: a Claude Code chat's Terminal view continues the same conversation (`--resume`), and back; other agents start fresh in the terminal | |
 | Working, needs you and done on each row | part: has for a lane, from its chat's events; for an agent in a terminal, working and done from the program's own OSC 9;4, never needs you (`apps/desktop/src/sessions/term/engine-marks.ts`) | 152 |
 | A chime when an agent finishes | has (item 131) | |
