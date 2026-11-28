@@ -29,6 +29,7 @@ mod lane_config;
 mod lane_diff;
 mod lane_helper;
 mod lane_land;
+mod lane_remote;
 mod lock;
 mod machine;
 mod omp_asks;
@@ -1323,6 +1324,22 @@ async fn lane_diff(worktree: String, history: Option<bool>) -> Result<lane_diff:
     tauri::async_runtime::spawn_blocking(move || lane_diff::read_with(&home, &worktree, with_history)).await.map_err(|e| e.to_string())?
 }
 
+/// The same folder as sections for the pane's review (item 146): the work not committed yet and each of the lane's own commits,
+/// newest first, each with its files (lane_diff.rs `review`). Only reads; the same folder checks and caps as `lane_diff`.
+#[tauri::command]
+async fn lane_review(worktree: String) -> Result<lane_diff::LaneReview, String> {
+    let home = user_home()?;
+    tauri::async_runtime::spawn_blocking(move || lane_diff::review(&home, &worktree)).await.map_err(|e| e.to_string())?
+}
+
+/// How many commits the lane's branch is ahead of and behind its remote, for the line on its row (lane_remote.rs, item 146). Only
+/// reads what git holds, fetches nothing, and answers a short code for a folder the app did not make.
+#[tauri::command]
+async fn lane_remote(worktree: String) -> Result<lane_remote::Remote, String> {
+    let home = user_home()?;
+    tauri::async_runtime::spawn_blocking(move || lane_remote::read(&home, &worktree)).await.map_err(|e| e.to_string())?
+}
+
 /// Remove session `session`'s saved files (it was closed).
 #[tauri::command]
 async fn session_files_remove(session: String) -> Result<(), String> {
@@ -2042,6 +2059,8 @@ fn commands(invoke: tauri::ipc::Invoke) -> bool {
         review_withdraw,
         session_main_moved,
         lane_diff,
+        lane_review,
+        lane_remote,
         chat_close_all,
         buddy_start,
         buddy_input,
