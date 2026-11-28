@@ -23,6 +23,10 @@ const job = (name) => {
   const next = code.slice(start + 1).search(/\n  [a-z][a-z-]*:\n/);
   return next === -1 ? code.slice(start) : code.slice(start, start + 1 + next);
 };
+/** Every top-level job as [name, text]. */
+const jobs = () => [...code.slice(code.indexOf("\njobs:\n")).matchAll(/\n {2}([a-z][a-z-]*):\n/g)].map((m) => [m[1], job(m[1])]);
+/** A signing secret: Apple's five, the stable updater key, or the nightly's. */
+const SIGNING = /secrets\.(APPLE_|TAURI_SIGNING_|NIGHTLY_SIGNING_)/;
 
 describe("Release desktop: when it runs", () => {
   const on = code.slice(code.indexOf("\non:"), code.indexOf("\nconcurrency:"));
@@ -132,6 +136,28 @@ describe("Release desktop: secrets", () => {
       }
     }
     assert.doesNotMatch(workflow, /BEGIN [A-Z ]*PRIVATE KEY/);
+  });
+
+  // Item 141 (the sixth security read's M2): a secret a job reads without naming an environment is a repository secret,
+  // which a run of any branch can read. The release environment lets only main and desktop-v tags in, with the owner's
+  // approval, so every job that reads a signing secret must name it, and a job that reads none must not ask for approval.
+  it("names the release environment on every job that reads a signing secret, and on no other", () => {
+    const named = [];
+    for (const [name, text] of jobs()) {
+      const environment = text.match(/\n {4}environment: (\S+)\n/)?.[1];
+      if (SIGNING.test(text)) {
+        assert.equal(environment, "release", `${name} reads a signing secret`);
+        named.push(name);
+      } else assert.equal(environment, undefined, `${name} reads no signing secret`);
+    }
+    assert.deepEqual(named, ["mac", "linux", "windows"]);
+    // no secret is read above the jobs, where no environment could hold it
+    assert.doesNotMatch(code.slice(0, code.indexOf("\njobs:\n")), /secrets\./);
+    assert.equal([...code.matchAll(/environment:/g)].length, 3, "an environment is named only at a job's top level");
+  });
+
+  it("never reads the nightly's key, which signs only nightly builds", () => {
+    assert.doesNotMatch(code, /NIGHTLY_SIGNING|NIGHTLY_UPDATER/);
   });
 
   it("falls back to an unsigned build and says so in the summary, so a missing secret does not fail the run", () => {
