@@ -13,6 +13,11 @@
 # The builds run one after the other, in this order, because each one reads the draft's latest.json and adds its own
 # platform to it (see the Mac job's comment). The nightly channel is nightly-desktop.yml.
 #
+# The signing secrets (the five APPLE_ ones and the updater key) are secrets of the `release` GitHub Environment, not of
+# the repository (item 141, the sixth security read's M2): only runs of `main` or of a desktop-v tag may use it, and the
+# owner approves each job that names it before it starts. So a branch pushed with its own copy of this file reads no key.
+# Every job here names it, because every one signs update files; docs/releasing.md has the owner's steps.
+#
 # Lifted in outline from Oh My Hermes' omher-release.yml (MIT): the tag check and the matrix of targets.
 name: Release desktop
 
@@ -51,6 +56,8 @@ jobs:
             label: Intel
     runs-on: macos-latest
     timeout-minutes: 90
+    # The Apple secrets and the updater key are the `release` environment's (the header says why).
+    environment: release
     # Only this job writes: it makes the draft release and uploads into it.
     permissions:
       contents: write
@@ -192,6 +199,8 @@ jobs:
     if: ${{ !cancelled() && needs.mac.result == 'success' }}
     runs-on: ubuntu-22.04
     timeout-minutes: 60
+    # The updater key is the `release` environment's, as for the Mac job.
+    environment: release
     permissions:
       contents: write
     steps:
@@ -234,6 +243,8 @@ jobs:
     if: ${{ !cancelled() && needs.mac.result == 'success' }}
     runs-on: windows-latest
     timeout-minutes: 60
+    # The updater key is the `release` environment's, as for the Mac job.
+    environment: release
     permissions:
       contents: write
     steps:

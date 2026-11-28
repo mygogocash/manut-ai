@@ -21,6 +21,9 @@
 // Code), go to the top / bottom of the scrollback; Shift+PageUp / Shift+PageDown page through it (xterm's own). A
 // full-screen program (the alternate screen) has no scrollback, so there the keys stay the program's.
 //
+// What every copy puts on the clipboard (the keys, the menu's Copy, copy on select, Cmd+C) is the selection by Ghostty's
+// whitespace rules (engine-copy.ts), not xterm's text with the padding of each row.
+//
 // Copy and paste off macOS, as Windows Terminal and GNOME Terminal: Ctrl+Shift+C or Ctrl+Insert copies the selection
 // (never a Ctrl+C to the program, selection or not), Ctrl+Shift+V or Shift+Insert pastes through the page's own paste
 // (the multi-line confirm and a pasted picture's path included). macOS keeps Cmd+C / Cmd+V from the Edit menu.
@@ -36,6 +39,7 @@ import { kittyKeysOn } from "./park";
 import { TERM_MENU_EVENT, type TermMenuRequest } from "./menu-event";
 import { historyChanged } from "./history";
 import { attachPasteGuard, guardedPaste, saidInto } from "./paste-guard";
+import { getTerminalSelectionForCopy, installTerminalCopyHandler } from "./engine-copy";
 import type { FindOptions } from "./engine-find";
 
 type KeyLike = { key: string; code?: string; metaKey: boolean; ctrlKey: boolean; altKey: boolean; shiftKey: boolean };
@@ -180,7 +184,7 @@ export function attachInput(term: Terminal, host: HTMLElement, onFind: () => voi
     if (clip === "copy") {
       if (e.type === "keydown") {
         e.preventDefault();
-        const text = term.hasSelection() ? term.getSelection() : "";
+        const text = term.hasSelection() ? getTerminalSelectionForCopy(term) : "";
         if (text) void navigator.clipboard?.writeText(text).catch(() => undefined);
       }
       return false;
@@ -250,7 +254,7 @@ export function attachInput(term: Terminal, host: HTMLElement, onFind: () => voi
     if (!dragging || e.button !== 0) return;
     dragging = false;
     if (!readTermSettings().copyOnSelect || !term.hasSelection()) return;
-    const text = term.getSelection();
+    const text = getTerminalSelectionForCopy(term);
     if (text) void navigator.clipboard?.writeText(text).catch(() => undefined);
   };
   host.addEventListener("mousedown", down);
@@ -289,9 +293,13 @@ export function attachInput(term: Terminal, host: HTMLElement, onFind: () => voi
   host.addEventListener("contextmenu", menu, true);
   // Cmd/Ctrl+V and the Edit menu's Paste: a paste of several lines asks first
   const undoPaste = attachPasteGuard(term, host);
+  // Cmd+C from the Edit menu is the terminal's `copy` event, which xterm answers with the selection as it holds it, padding
+  // included: it is answered again with the text by Ghostty's rules (engine-copy.ts)
+  const undoCopy = installTerminalCopyHandler(term);
 
   return () => {
     undoPaste();
+    undoCopy();
     host.removeEventListener("mousedown", down);
     document.removeEventListener("mouseup", up);
     host.removeEventListener("mousedown", press, true);

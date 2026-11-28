@@ -145,9 +145,21 @@ registry's search: `searchRank` in `packages/provider-acp-registry/src/server/Ac
 in `apps/desktop/src/settings/agents/acpRegistry.ts`; its live fetch, downloads and `npx` runs were read and left out.
 
 Paradev (MIT, Copyright (c) 2025-2026 Superset Inc., `paradevai/paradev` at `2db3bbaf37ffbe24b78c8cdb974bf34632e6fb20`)
-for item 138's study of the code mode (`docs/paradev-parity.md`): read only, no code taken yet. Each module a later item
-lifts from it is named here with what it does; the study lists the candidates, among them VS Code's fuzzy scorer as
-Paradev ported it, which keeps Microsoft's MIT notice beside Paradev's.
+for item 138's study of the code mode (`docs/paradev-parity.md`), and for the code item 148 lifted from it, each file with its tests
+ported from bun:test to vitest and its Paradev notice kept in its header: `packages/shared/src/leaked-input-mode-reclaim.ts`
+(`apps/desktop/src/sessions/term/leaked-input-modes.ts`, which decides what a killed agent left on: the Kitty keyboard protocol,
+mouse and focus reporting) with the cases of `apps/desktop/src/renderer/lib/terminal/terminalInputModeReclaimer.ts`'s test;
+`apps/desktop/src/renderer/lib/terminal/terminal-copy.ts` with `terminal-copy.test.ts` and `terminal-copy.ghostty.test.ts`
+(`engine-copy.ts`: copying by Ghostty's whitespace rules, whose own `selectionString` tests at Ghostty `e88c6c099` are among
+the cases); `packages/shared/src/terminal-link-parsing/link-parsing.ts` and `fallback-matchers.ts` with their tests
+(`link-parsing.ts` and `link-fallbacks.ts`), `apps/desktop/src/renderer/lib/fileLocation/fileLocation.ts`
+(`file-location.ts`) and `apps/desktop/src/renderer/lib/terminal/links/buffer-helpers.ts` (`link-buffer.ts`). Paradev's
+`local-link-detector.ts`, `link-resolver.ts` and `link-detector-adapter.ts` were read and written again as
+`engine-paths.ts`, around the shell's own check of the files; its `bareWebUrl` (which needs the `tldts` package), `pathText`,
+word and styled-text links were left out. Its link parser is VS Code's (`terminalLinkParsing.ts`, `terminalLinkHelpers.ts`,
+MIT, Copyright (c) 2015 - present Microsoft Corporation, which stays in those files' headers); the licences are in
+`apps/desktop/THIRD_PARTY_NOTICES.md`. Later items name what they lift here too; the study lists the candidates, among them
+VS Code's fuzzy scorer as Paradev ported it, which keeps Microsoft's MIT notice beside Paradev's.
 
 Libraries added for one feature are named here too: `qrcode` 1.5.4 (MIT, soldair/node-qrcode), already the web app's,
 pinned in the desktop for the pairing code's QR image (`apps/desktop/src/remote/QrCode.tsx`, lifted from

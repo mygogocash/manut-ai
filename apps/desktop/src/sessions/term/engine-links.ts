@@ -64,17 +64,15 @@ export function tipTop(pointerY: number, host: HTMLElement, rows: number, tipHei
   return above >= screen.top ? above : rowTop + 2 * line;
 }
 
-/** Links for one terminal; returns what undoes it. */
-export function attachLinks(term: Terminal): () => void {
-  let gone = false;
-  let addon: WebLinksAddon | null = null;
+/** The hint that stands beside a link under the pointer: it names the key to hold (xterm's own underline and pointer say it is
+ *  a link), or says `text` instead (a file link that could not be opened says why). One at a time for a terminal. */
+export function linkTip(term: Terminal): { show: (e: MouseEvent, text?: string) => void; hide: () => void } {
   let tip: HTMLElement | null = null;
   const hide = () => {
     tip?.remove();
     tip = null;
   };
-  // the hover hint names the key to hold (xterm's own underline and pointer say it is a link)
-  const show = (e: MouseEvent) => {
+  const show = (e: MouseEvent, text?: string) => {
     const host = term.element;
     if (!host) return;
     hide();
@@ -82,12 +80,20 @@ export function attachLinks(term: Terminal): () => void {
     const el = document.createElement("div");
     el.className = "xterm-hover term-linktip";
     el.setAttribute("role", "tooltip");
-    el.textContent = t("term.linkHint", { key: isMacPlatform() ? "⌘" : "Ctrl" });
+    el.textContent = text ?? t("term.linkHint", { key: isMacPlatform() ? "⌘" : "Ctrl" });
     el.style.left = `${Math.max(0, e.clientX - r.left + 6)}px`;
     host.appendChild(el);
     el.style.top = `${tipTop(e.clientY, host, term.rows, el.offsetHeight) - r.top}px`;
     tip = el;
   };
+  return { show, hide };
+}
+
+/** Links for one terminal; returns what undoes it. */
+export function attachLinks(term: Terminal): () => void {
+  let gone = false;
+  let addon: WebLinksAddon | null = null;
+  const { show, hide } = linkTip(term);
   // a hyperlink the program marked (OSC 8): the same click rule, the same opener, the same hint. xterm passes only
   // http and https addresses to it (`allowNonHttpProtocols` stays off) and `activateLink` checks the address again.
   term.options.linkHandler = { activate: (e, uri) => void activateLink(e, uri), hover: (e) => show(e), leave: hide };

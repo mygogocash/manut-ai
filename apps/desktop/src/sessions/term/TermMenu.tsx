@@ -14,6 +14,7 @@ import { getSplit, groupOf } from "../splitState";
 import { getTermPanel } from "../../terminal/state";
 import { MAX_PANES, panesOf } from "../../terminal/layout";
 import { TERM_MENU_EVENT, type TermMenuRequest } from "./menu-event";
+import { getTerminalSelectionForCopy } from "./engine-copy";
 
 type ItemKey = "copy" | "paste" | "selectAll" | "find" | "clear" | "reset" | "splitRight" | "splitDown";
 
@@ -140,7 +141,7 @@ export function TermMenu() {
       key: "copy",
       label: "tmenu.copy",
       disabled: !term.hasSelection(),
-      run: () => void navigator.clipboard?.writeText(term.getSelection()).catch(() => undefined),
+      run: () => void navigator.clipboard?.writeText(getTerminalSelectionForCopy(term)).catch(() => undefined),
     },
     {
       key: "paste",
