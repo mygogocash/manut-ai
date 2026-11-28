@@ -68,7 +68,7 @@ const fallbackMatchers: RegExp[] = [
 
   // ESLint/Prettier/TypeScript style (with dash separator):
   // Example: /path/to/file.js:10:5 - error: Something went wrong
-  /^(?<link>(?<path>\/[^\s:]+):(?<line>\d+)(?::(?<col>\d+))?) [-–]/,
+  /^(?<link>(?<path>\/[^\s:]+):(?<line>\d+)(?::(?<col>\d+))?) [-\u2013]/,
 
   // Webpack/Vite error format:
   // Example: @ ./src/file.ts 10:5-20
