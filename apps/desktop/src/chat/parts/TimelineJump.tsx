@@ -88,7 +88,7 @@ export function useTimelineNav(ref: RefObject<HTMLDivElement | null>, items: Tim
 /** The sticky top anchor with the person's last message (one muted line; a click brings the bubble back). */
 export function PinnedOwn({ nav }: { nav: TimelineNav }) {
   return (
-    <div className="tl-anchor tl-anchor-top" aria-hidden={nav.pin ? undefined : true}>
+    <div className="tl-anchor tl-anchor-top" aria-hidden={nav.pin ? undefined : true} data-find-skip>
       {nav.pin && (
         <button type="button" className="tl-pin" data-testid="pinned-own" data-pin={nav.pin.id} title={nav.pin.text} aria-label={t("tl.pinnedOwn", { text: nav.pin.text })} onClick={nav.showPin}>
           <span className="tl-pin-t">{nav.pin.text}</span>
@@ -102,7 +102,7 @@ export function PinnedOwn({ nav }: { nav: TimelineNav }) {
 export function JumpPill({ nav }: { nav: TimelineNav }) {
   const label = nav.fresh ? `${t("tl.jump")} · ${t("tl.jumpNew", { n: nav.fresh })}` : t("tl.jump");
   return (
-    <div className="tl-anchor tl-anchor-bottom" aria-hidden={nav.away ? undefined : true}>
+    <div className="tl-anchor tl-anchor-bottom" aria-hidden={nav.away ? undefined : true} data-find-skip>
       {nav.away && (
         <button type="button" className="tl-jump" data-testid="jump-bottom" data-new={nav.fresh} onClick={nav.jump}>
           {label}

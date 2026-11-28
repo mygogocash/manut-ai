@@ -3,6 +3,7 @@ import type { key as en } from "../en/key";
 export const key: Record<keyof typeof en, string> = {
   "key.openBot": "ボット 1〜9 を開く",
   "key.search": "コマンドパレット: どこへでも移動、何でも操作",
+  "key.find": "チャット内を検索",
   "key.details": "詳細の表示/非表示",
   "key.settings": "設定",
   "key.nextAsk": "次の承認または質問",

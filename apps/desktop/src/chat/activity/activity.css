@@ -151,6 +151,10 @@
   padding: 2px 0 2px 14px;
   border-left: 1px solid var(--line);
 }
+/* a folded group the find bar reads (Activity.slot.tsx) is drawn with `hidden`, which a rule that names a display would undo */
+.act-det[hidden] {
+  display: none;
+}
 .act-step {
   display: flex;
   align-items: baseline;

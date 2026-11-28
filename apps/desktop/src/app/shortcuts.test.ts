@@ -1,6 +1,7 @@
 // Ctrl+` (the bottom terminal panel) on every OS, by the physical key, and never while an input method composes.
 import { describe, expect, it } from "vitest";
 import { shortcutFor } from "./shortcuts";
+import { defaultKeys } from "./keys";
 import { closePalette, openPalette, paletteOpen } from "../palette/state";
 
 type K = Parameters<typeof shortcutFor>[0];
@@ -73,15 +74,24 @@ describe("the shortcuts while the first-run setup fills the window", () => {
       onTerminalKey(ev);
       onShortcutKey(ev);
     };
+    // a chat on screen behind the setup (item 150): ⌘F must not open its bar there either
+    const { registerFindHost } = await import("../chat/find/host");
+    const chat = { opened: 0, holds: () => true, shown: () => true, open() { this.opened += 1; }, close() {}, isOpen: () => false };
+    const leave = registerFindHost(chat);
     const before = store.getState();
     press(k("k", "KeyK", mod)); // the command palette
     press(k(",", "Comma", mod)); // Settings
     press(k("2", "Digit2", mod)); // the second member's chat
     press(k("`", "Backquote", { ctrlKey: true })); // the terminal panel
+    press(k("f", "KeyF", mod)); // find in the chat
     expect(store.getState()).toBe(before);
     expect(getTermPanel().open).toBe(false);
     expect(paletteOpen()).toBe(false);
+    expect(chat.opened).toBe(0);
     store.actions.firstRunEnd();
+    press(k("f", "KeyF", mod));
+    expect(chat.opened).toBe(1);
+    leave();
     press(k("k", "KeyK", mod));
     // the palette opens over the page; it does not move to History any more
     expect(paletteOpen()).toBe(true);
@@ -141,5 +151,106 @@ describe("⌘K and the command palette", () => {
     await press(k("2", "Digit2", mod(isMac())));
     expect(store.getState().ui.view).toBe(view);
     closePalette({ restore: false });
+  });
+});
+
+describe("⌘F and the chat's find (item 150)", () => {
+  const mod = (mac: boolean) => (mac ? { metaKey: true } : { ctrlKey: true });
+  const fakeHost = () => {
+    const h = { opened: 0, holds: () => true, shown: () => true, open() { this.opened += 1; }, close() {}, isOpen: () => false };
+    return h;
+  };
+  /** Press ⌘F (Ctrl+F off macOS) at `target`; true when the page's own handling of the key was stopped. */
+  const press = async (target: unknown = null, e: Partial<K> = {}, defaultPrevented = false) => {
+    const { isMac, onShortcutKey } = await import("./shortcuts");
+    let prevented = false;
+    const ev = { ...k("f", "KeyF", { ...mod(isMac()), ...e }), target, repeat: false, defaultPrevented, preventDefault() { prevented = true; }, stopPropagation() {} };
+    onShortcutKey(ev as unknown as KeyboardEvent);
+    return prevented;
+  };
+  const ready = async () => {
+    const { getStore } = await import("../state/store");
+    const store = getStore();
+    await store.actions.init();
+    store.actions.firstRunEnd();
+    closePalette({ restore: false });
+  };
+  const inside = (...kept: string[]) => ({ closest: (sel: string) => (sel.split(/\s*,\s*/).some((s) => kept.includes(s)) ? {} : null) });
+
+  it("is ⌘F on macOS and Ctrl+F elsewhere, by the letter or, on another script's layout, by where F stands", () => {
+    expect(shortcutFor(k("f", "KeyF", { metaKey: true }), true)).toEqual({ kind: "find" });
+    expect(shortcutFor(k("f", "KeyF", { ctrlKey: true }), false)).toEqual({ kind: "find" });
+    // Korean 2-set, Thai Kedmanee and a Dvorak F: the key is where F stands, or the letter F is
+    expect(shortcutFor(k("ㄹ", "KeyF", { metaKey: true }), true)).toEqual({ kind: "find" });
+    expect(shortcutFor(k("ด", "KeyF", { ctrlKey: true }), false)).toEqual({ kind: "find" });
+    expect(shortcutFor(k("f", "KeyY", { metaKey: true }), true)).toEqual({ kind: "find" });
+  });
+
+  it("is a later default than any key a person set: ⌘F they gave to another action stays that action's", () => {
+    const own = { ...defaultKeys(true), details: [{ meta: true, ctrl: false, alt: false, shift: false, code: "KeyF" }] };
+    expect(shortcutFor(k("f", "KeyF", { metaKey: true }), true, own)).toEqual({ kind: "details" });
+    expect(shortcutFor(k("f", "KeyF", { metaKey: true }), true, defaultKeys(true))).toEqual({ kind: "find" });
+  });
+
+  it("is not ⌘⇧F, ⌘⌥F, Ctrl+F on a Mac or ⌘F elsewhere, and not while an input method composes", () => {
+    expect(shortcutFor(k("F", "KeyF", { metaKey: true, shiftKey: true }), true)).toBeNull();
+    expect(shortcutFor(k("ƒ", "KeyF", { metaKey: true, altKey: true }), true)).toBeNull();
+    expect(shortcutFor(k("f", "KeyF", { ctrlKey: true }), true)).toBeNull();
+    expect(shortcutFor(k("f", "KeyF", { metaKey: true }), false)).toBeNull();
+    expect(shortcutFor(k("f", "KeyF", { metaKey: true, isComposing: true }), true)).toBeNull();
+  });
+
+  it("opens the bar of a chat that is on screen, from its box or from anywhere, and the key stops there", async () => {
+    await ready();
+    const { registerFindHost } = await import("../chat/find/host");
+    const chat = fakeHost();
+    const off = registerFindHost(chat);
+    expect(await press(inside())).toBe(true);
+    expect(await press(null)).toBe(true);
+    expect(chat.opened).toBe(2);
+    off();
+  });
+
+  it("does nothing, and leaves the key alone, with no chat on screen", async () => {
+    await ready();
+    expect(await press(null)).toBe(false);
+    expect(await press(inside())).toBe(false);
+  });
+
+  it("is a terminal's, and the terminal's find bar's: the chat's bar does not open over either", async () => {
+    await ready();
+    const { registerFindHost } = await import("../chat/find/host");
+    const chat = fakeHost();
+    const off = registerFindHost(chat);
+    expect(await press(inside(".xterm"))).toBe(false);
+    expect(await press(inside(".tfind"))).toBe(false);
+    // a terminal that took the key for its own find says so with preventDefault, wherever the key went
+    expect(await press(null, {}, true)).toBe(false);
+    expect(chat.opened).toBe(0);
+    off();
+  });
+
+  it("is a field's or a pane's that has a find of its own, and an open menu's, list's or dialog's", async () => {
+    await ready();
+    const { registerFindHost } = await import("../chat/find/host");
+    const chat = fakeHost();
+    const off = registerFindHost(chat);
+    // the pane beside a lane (code/LanePane.tsx) marks itself; so will the files pane and its editor
+    for (const own of ["[data-own-find]", ".cfind", "[role=dialog]", "[role=menu]", "[role=listbox]"]) expect(await press(inside(own)), own).toBe(false);
+    expect(chat.opened).toBe(0);
+    off();
+  });
+
+  it("is not the chat's while the palette is open or while an input method composes", async () => {
+    await ready();
+    const { registerFindHost } = await import("../chat/find/host");
+    const chat = fakeHost();
+    const off = registerFindHost(chat);
+    openPalette(null);
+    expect(await press(null)).toBe(false);
+    closePalette({ restore: false });
+    expect(await press(null, { isComposing: true })).toBe(false);
+    expect(chat.opened).toBe(0);
+    off();
   });
 });

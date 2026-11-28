@@ -3,6 +3,7 @@ import type { key as en } from "../en/key";
 export const key: Record<keyof typeof en, string> = {
   "key.openBot": "봇 1~9 열기",
   "key.search": "명령 팔레트: 어디로든 이동, 무엇이든 실행",
+  "key.find": "채팅에서 찾기",
   "key.details": "상세 보기/숨기기",
   "key.settings": "설정",
   "key.nextAsk": "다음 승인이나 질문",
