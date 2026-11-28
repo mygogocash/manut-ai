@@ -35,7 +35,7 @@ async function setup(page: Page, theme: string, globals: Record<string, unknown>
       const w = window as unknown as Record<string, unknown>;
       localStorage.setItem("manut.theme", t as string);
       Object.assign(w, g);
-      w.__manutMockAgents = ["claude", "codex", "omo", "pi"];
+      w.__manutMockAgents = ["claude", "codex", "omo", "pi", "omp"];
       w.__manutPickFolder = "/home/you/code/web-app";
       if (!sessionStorage.getItem("__kept")) {
         sessionStorage.setItem("__kept", "1");
@@ -68,11 +68,12 @@ async function shot(page: Page, what: string, theme: string) {
 
 for (const theme of ["dark", "light"] as const) {
   test(`an old agent that never answers in chat mode ends with the reason, not Working (${theme})`, async ({ page }) => {
-    await setup(page, theme, { __manutMockNoChat: ["omo"] });
-    await start(page, "omo", "Summarize the README");
+    // oh-my-pi: OmO, this spec's agent before item 139, runs only as its own terminal now
+    await setup(page, theme, { __manutMockNoChat: ["omp"] });
+    await start(page, "omp", "Summarize the README");
     await expect(page.getByTestId("bubble-user").last()).toHaveText("Summarize the README");
     const ended = page.getByTestId("session-ended");
-    await expect(ended).toContainText("OmO did not answer in chat mode; it may be an old version: npm i -g omo-ai");
+    await expect(ended).toContainText("oh-my-pi did not answer in chat mode; it may be an old version: curl -fsSL https://omp.sh/install | sh");
     await expect(page.getByTestId("session-status")).toHaveText("Ended");
     // no Stop left behind, and Restart is there
     await expect(page.getByTestId("stop")).toHaveCount(0);

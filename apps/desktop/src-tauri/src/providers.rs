@@ -1193,8 +1193,10 @@ pub fn view_of(a: &Agent, s: &Stored, found: Option<PathBuf>, path_ok: bool) -> 
         (Some(p), Some(fixed)) => Some(line(&std::iter::once(p.clone()).chain(fixed.iter().map(OsString::from)).chain(extra.iter().cloned()).collect::<Vec<_>>())),
         _ => None,
     };
+    // a new terminal's own fixed arguments (oh-my-pi's asking mode, item 139), then the person's
+    let fixed = crate::sessions::terminal_args(a.id, None, None).unwrap_or_default();
     let terminal = match &program {
-        Some(p) if a.id != "dsh" => Some(line(&std::iter::once(p.clone()).chain(extra.iter().cloned()).collect::<Vec<_>>())),
+        Some(p) if a.id != "dsh" => Some(line(&std::iter::once(p.clone()).chain(fixed).chain(extra.iter().cloned()).collect::<Vec<_>>())),
         _ => None,
     };
     View {
@@ -1821,6 +1823,16 @@ mod tests {
         assert_eq!((v.kind, v.takes_args, v.version, v.signin), ("acp", true, true, false));
         let v = view_of(crate::sessions::agent("dsh").unwrap(), &Stored::default(), None, true);
         assert_eq!((v.chat, v.terminal, v.takes_vars, v.takes_args), (None, None, false, false));
+        // item 139: oh-my-pi's chat and terminal both start in its asking mode, the person's arguments after it; pi and OmO
+        // run only as their own terminal, so their view names no chat
+        let st = Stored { args: s(&["--model=opus"]), ..Stored::default() };
+        let v = view_of(crate::sessions::agent("omp").unwrap(), &st, Some(PathBuf::from("/opt/bin/omp")), true);
+        assert_eq!(v.chat.as_deref(), Some("/opt/bin/omp --mode rpc --approval-mode=always-ask --model=opus"));
+        assert_eq!(v.terminal.as_deref(), Some("/opt/bin/omp --approval-mode=always-ask --model=opus"));
+        for id in ["pi", "omo"] {
+            let v = view_of(crate::sessions::agent(id).unwrap(), &Stored::default(), Some(PathBuf::from("/opt/bin/x")), true);
+            assert_eq!((v.chat, v.terminal.as_deref(), v.mode), (None, Some("/opt/bin/x"), crate::sessions::Mode::Terminal), "{id}");
+        }
     }
 
     /// Item 101a: Cursor's and Antigravity's rows read their sign-in through their own fixed commands, and nothing but

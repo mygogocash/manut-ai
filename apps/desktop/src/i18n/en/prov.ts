@@ -37,6 +37,7 @@ export const prov = {
   "prov.varRemove": "Remove {name}",
   "prov.runsChat": "A chat runs",
   "prov.runsTerminal": "A terminal runs",
+  "prov.noAsks": "{agent} does not ask before it runs a command or changes a file, so Manut AI does not start it as a chat or a lane. It still runs in a terminal, where you type to it yourself.",
   "prov.save": "Save",
   "prov.cancel": "Cancel",
   "prov.saved": "Saved",

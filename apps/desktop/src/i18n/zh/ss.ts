@@ -140,4 +140,7 @@ export const ss: Record<keyof typeof en, string> = {
   // Grok as a chat (item 101b): its own settings that skip asks, and its command that turns them off
   "ss.noAsksGrok": "{agent} 自己的设置允许它不经询问就运行命令和修改文件，因此没有启动。请在 {agent} 的 config.toml 的 [ui] 中把 permission_mode 设为 ask，并确认 Claude 的设置文件中 defaultMode 只为 default 或 plan，然后重新开始聊天。",
   "ss.noAsksCommand": "{agent} 的 /{cmd} 会关闭它的询问，因此 Manut AI 不会发送。请不带它重新写消息。",
+  "ss.noAskPath": "{agent} 在运行命令或修改文件之前不会询问，因此 Manut AI 只在终端中运行它。",
+  "ss.noAsksOmp": "{agent} 自己的设置允许它不经询问就运行命令和修改文件，因此没有启动。请在 {agent} 自己的设置和这个项目的设置中把 tools.approvalMode 设为 always-ask，并删除所有设为 allow 的 tools.approval 条目（可用 omp config list --scope=global 和 --scope=project 查看），然后重新开始聊天。",
+  "ss.noAsksCheck": "Manut AI 无法确认 {agent} 自己的设置会让它先询问，因此没有启动它。请确认在这个文件夹的终端中 omp config list --json 能正常运行，并且没有设置 PI_CONFIG_FILES，然后重新开始聊天。",
 };

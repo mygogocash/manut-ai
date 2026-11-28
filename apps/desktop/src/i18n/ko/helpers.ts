@@ -19,6 +19,7 @@ export const helpers: Record<keyof typeof en, string> = {
   "helpers.effortUnlisted": "평소의 생각의 깊이 (Kit이 {name}을(를) 요청했지만 목록에 없습니다)",
   "helpers.unknownAgent": "{name}: Manut AI가 레인에서 실행하는 에이전트가 아니므로 시작하지 않습니다",
   "helpers.notInstalled": "설치되어 있지 않아 시작하지 않습니다",
+  "helpers.noAsks": "실행하기 전에 묻지 않아 시작하지 않습니다",
   "helpers.briefLabel": "도우미 {n}의 지시",
   "helpers.lines": "각각 지금 이 레인 작업의 사본에서 일합니다. 도우미 레인이 보고한 뒤 그 작업이 하나씩 반영되기 전까지 여기에는 아무것도 바뀌지 않습니다. 각각 최대 {minutes}분, {steps}단계까지이며, 답을 기다리는 시간은 세지 않습니다. 끝나면 Kit이 보고를 받고 이어서 일합니다.",
   "helpers.heldBack": "Kit이 {asked}개를 요청했습니다. 한 라운드는 최대 {max}개이므로 마지막 {left}개는 제외합니다.",

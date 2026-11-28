@@ -7,7 +7,7 @@
 // The request's kind is `command`: starting agents on this Mac changes what runs on it and spends the person's own plans, which only
 // the owner decides (approval-core's `mayDecide`). On this Mac the person is the owner of their own lanes.
 import { InMemoryApprovalStore, type ApprovalOption, type DecideResult, type Running } from "@manut/approval-core";
-import { agentDef, type AgentInfo } from "../sessions/agents";
+import { agentDef, asksFirst, type AgentInfo } from "../sessions/agents";
 import type { ModelOption } from "../sessions/sessionTypes";
 import type { HelperBrief } from "./helperBlocks";
 import { ROUND_MAX } from "./rules";
@@ -23,7 +23,7 @@ export const DECIDED_BY = "this-mac";
 
 /** Why a named agent will not start, as the card says it. Item 102h checks again when it starts each helper lane (signed in, its
  *  account's limit); the card says only what the app already knows from the agents it found on this Mac. */
-export type AgentProblem = "unknown" | "notInstalled";
+export type AgentProblem = "unknown" | "notInstalled" | "noAsks";
 
 /** One helper lane as its card row shows it: the block's words with what the app made of its agent, model and effort. */
 export interface HelperRow {
@@ -68,9 +68,11 @@ export interface LeadKnows {
 const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 
 /** The agent a block named, as this Mac has it: by its id or its name, in any case. One that is not found, or that does not run as a
- *  chat (an oh-my-hermes folder chat, a terminal), is not an agent a lane runs on. */
+ *  chat (an oh-my-hermes folder chat, a terminal), is not an agent a lane runs on; pi and OmO, which cannot ask before a tool runs,
+ *  are named as such (item 139). */
 export function resolveAgent(named: string, agents: readonly AgentInfo[] | null): { id: string; problem?: AgentProblem } {
   const found = (agents ?? []).find((a) => same(a.id, named) || same(a.label, named) || same(agentDef(a.id).label, named));
+  if (found && !asksFirst(found.id)) return { id: found.id, problem: "noAsks" };
   if (!found || (found.mode ?? agentDef(found.id).mode) !== "chat") return { id: named, problem: "unknown" };
   return found.path ? { id: found.id } : { id: found.id, problem: "notInstalled" };
 }

@@ -101,8 +101,10 @@ describe("the + menu's two ways", () => {
   });
 
   it("puts the last agent used at the top of its own tier in the chat part too, never above the main tier", () => {
-    const recent = [{ agent: "pi", cwd: "/a", at: 2 }];
-    expect(both(info(["claude", "omp", "pi"]), recent).chat).toEqual(["claude", "pi", "omp"]);
+    const recent = [{ agent: "grok", cwd: "/a", at: 2 }];
+    expect(both(info(["claude", "omp", "grok"]), recent).chat).toEqual(["claude", "grok", "omp"]);
+    // pi and OmO cannot ask before a tool runs, so the chat part never lists them, whatever was used last (item 139)
+    expect(both(info(["claude", "omo", "omp", "pi"]), [{ agent: "pi", cwd: "/a", at: 2 }]).chat).toEqual(["claude", "omp"]);
   });
 });
 

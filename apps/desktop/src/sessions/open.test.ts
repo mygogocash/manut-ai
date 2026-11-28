@@ -38,10 +38,11 @@ describe("opensAs", () => {
     expect(table).toEqual({
       claude: { chat: true, terminal: true },
       codex: { chat: true, terminal: true },
-      omo: { chat: true, terminal: true },
+      // item 139: pi and OmO cannot ask before a tool runs, so only their own terminal
+      omo: { chat: false, terminal: true },
       dsh: { chat: true, terminal: false },
       omh: { chat: true, terminal: true },
-      pi: { chat: true, terminal: true },
+      pi: { chat: false, terminal: true },
       omp: { chat: true, terminal: true },
       grok: { chat: true, terminal: true },
       opencode: { chat: true, terminal: true },

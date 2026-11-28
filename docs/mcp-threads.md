@@ -84,7 +84,9 @@ program before the press that named it. It is item 102k's promise ("chats that r
 4. **A message.** "Claude asks to send this to <chat>", the words whole. Send there, or Keep out. In the chat, the message is
    drawn under "From Claude, sent on by you" and waits as 102k's held row while that chat works or an ask of it waits.
 5. **A new lane.** "Claude asks to start a lane in <project>", with its title, agent and the brief whole. Start lane, or Not
-   now. It is an ordinary lane in its agent's Ask mode, beside the person's drafts.
+   now. It is an ordinary lane in its agent's Ask mode, beside the person's drafts. The agent named must be one that runs as
+   the app's chat, so it asks before it acts: pi and OmO, which run only as their own terminal, are refused with nothing
+   started (item 139, `laneAgentNamed` in `src/sessions/agents.ts`).
 6. **A call nobody answered.** When the program gives up (it cancels, or its server ends) or ten minutes pass, the card shows
    "No longer open" and nothing happens.
 

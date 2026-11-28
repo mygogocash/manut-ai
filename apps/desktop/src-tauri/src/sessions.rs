@@ -48,9 +48,8 @@ pub enum Mode {
     Chat,
     /// oh-my-hermes: a Hermes chat through the bridge, no new program.
     Hermes,
-    /// The agent's own terminal UI in a pseudo-terminal. No built-in opens only this way since Grok became a chat (item
-    /// 101b); every chat agent can still be opened as its terminal, and the page's agent list keeps the kind.
-    #[allow(dead_code)]
+    /// The agent's own terminal UI in a pseudo-terminal, and nothing else: since item 139 the agents that cannot ask before
+    /// a tool runs ([`NO_ASKS`]: pi and OmO). Every chat agent can still be opened as its terminal too.
     Terminal,
 }
 
@@ -61,14 +60,18 @@ pub const AGENTS: [Agent; 9] = [
     Agent { id: "claude", program: "claude", label: "Claude Code", mode: Mode::Chat },
     Agent { id: "codex", program: "codex", label: "Codex", mode: Mode::Chat },
     // OmO (`omo-ai`, oh-my-openagent on the senpi engine) speaks pi's RPC: `omo --mode rpc`, checked against omo
-    // 5.0.0-beta.65 (get_state, prompt, agent_end; `--session <id>` continues a conversation).
-    Agent { id: "omo", program: "omo", label: "OmO", mode: Mode::Chat },
+    // 5.0.0-beta.65 (get_state, prompt, agent_end; `--session <id>` continues a conversation). It runs only as its own
+    // terminal since item 139: its engine asks only under a preset that is not its default, and its dialog is not one the
+    // app carries as a card yet ([`NO_ASKS`]).
+    Agent { id: "omo", program: "omo", label: "OmO", mode: Mode::Terminal },
     // DSH is DeepSeek Harness (deepseek-ai/deepseek-harness), found only where the harness installs its CLI
     // ([`dsh_harness`]), never another `dsh` on PATH. It ships no terminal profile, so its chat runs one
     // `dsh --profile headless --json` per message ([`dsh_turn_args`], crate::dsh_chat), continued by `--session-id`.
     Agent { id: "dsh", program: "dsh", label: "DSH", mode: Mode::Chat },
     Agent { id: "omh", program: "omh", label: "oh-my-hermes", mode: Mode::Hermes },
-    Agent { id: "pi", program: "pi", label: "pi", mode: Mode::Chat },
+    // pi asks before nothing (its own docs/security.md), so it runs only as its own terminal since item 139 ([`NO_ASKS`])
+    Agent { id: "pi", program: "pi", label: "pi", mode: Mode::Terminal },
+    // oh-my-pi's chat is held to its asking mode ([`OMP_CHAT_ARGS`]) and its own settings (crate::omp_asks, item 139)
     Agent { id: "omp", program: "omp", label: "oh-my-pi", mode: Mode::Chat },
     // Grok Build speaks the Agent Client Protocol (`grok agent stdio`, crate::acp_chat, item 101b), held there to its asking
     // mode and its own settings; a session opened as a terminal runs its own TUI, as before.
@@ -119,9 +122,40 @@ pub const CLAUDE_SUGGEST_ARGS: [&str; 2] = ["--prompt-suggestions", "true"];
 /// checked without a sign-in, so those settings are read before the start as well (`acp_chat::GROK_SETTINGS`).
 pub const GROK_CHAT_ARGS: [&str; 4] = ["--permission-mode", "default", "agent", "stdio"];
 
+/// oh-my-pi held to its asking mode (item 139, the sixth security read's H1). omp 18.22.0's own `tools.approvalMode`
+/// defaults to `yolo`, which "auto-approves all tiers" (its settings table, read from its binary and its source at tag
+/// v18.22.0), so a chat started with `--mode rpc` alone ran every command, write and edit with no card. `omp --help` lists
+/// `--approval-mode=<value>  Override tools.approvalMode for this session (always-ask|always-ask-cached|write|yolo)`. Its
+/// `main.ts` applies the flag as a runtime override, which outranks every settings layer (`Settings.getProvenance`: runtime,
+/// then a `--config` overlay, then the project's, then the person's own), and it reads the flag from the first parse of the
+/// command line, before any extension could claim the same name. `always-ask` lets read-only tools run and asks before
+/// every write and every command, as Kit's dial lets a read go alone. Written as one argument, the form the help prints.
+pub const OMP_ASKS: &str = "--approval-mode=always-ask";
+
+/// oh-my-pi's chat: its RPC mode in its asking mode ([`OMP_ASKS`]). What else holds it to the cards (an overlay that
+/// denies its `task` tool, and its own settings read before the start) is in [`crate::omp_asks`].
+pub const OMP_CHAT_ARGS: [&str; 3] = ["--mode", "rpc", OMP_ASKS];
+
+/// The built-in agents that never run as the app's chat or lane, only as their own terminal, because they cannot ask the
+/// person before a tool runs (item 139). pi has no ask at all: "it does not ask for approval before every tool call" (its
+/// `packages/coding-agent/docs/security.md`, pi-mono at cdf7406, pi 1.7.0), and the repository's own pi fixture runs a
+/// command with no dialog. OmO's engine (senpi, `@code-yeongyu/senpi` 2026.11.23, the version omo-ai 5.1.84 names) asks
+/// only under a `--permission-preset` that is not its default (`full-access`, its `docs/security.md`), and its dialog
+/// ("Permission required: …" with Allow once, Allow always, Deny) is not one the pi adapter turns into a card, so its asks
+/// would reach the person as an ordinary choice, outside approval-core. OmO is not installed here to check either against.
+/// Their mode is [`Mode::Terminal`], so [`chat_args`] has none and a chat start is refused with [`no_ask_path`]; the page
+/// keeps the same list (`NO_ASKS` in src/sessions/agents.ts).
+pub const NO_ASKS: [&str; 2] = ["pi", "omo"];
+
+/// Why a chat of an agent in [`NO_ASKS`] did not start (the UI shows it translated, `ss.noAskPath`).
+pub fn no_ask_path(label: &str) -> String {
+    format!("{label} does not ask before it runs a command or changes a file, so Manut AI runs it only in a terminal.")
+}
+
 /// The fixed arguments that start agent `id` in its structured mode, or `None` when it has none here. These
-/// are the only arguments manut ever adds besides a conversation id ([`resume_args`]). A generic ACP agent's are
-/// its row in [`crate::acp_agents::ACP_LIST`] (`acp` or `--acp`).
+/// are the only arguments manut ever adds besides a conversation id ([`resume_args`]) and, for oh-my-pi, its overlay
+/// ([`crate::omp_asks::overlay_args`]). A generic ACP agent's are its row in [`crate::acp_agents::ACP_LIST`] (`acp` or
+/// `--acp`).
 pub fn chat_args(id: &str) -> Option<&'static [&'static str]> {
     if let Some(e) = acp_agents::entry(id) {
         return Some(e.args);
@@ -130,7 +164,7 @@ pub fn chat_args(id: &str) -> Option<&'static [&'static str]> {
         Mode::Chat => Some(match id {
             "claude" => &CLAUDE_CHAT_ARGS[..],
             "codex" => &["app-server"][..],
-            "pi" | "omp" | "omo" => &["--mode", "rpc"][..],
+            "omp" => &OMP_CHAT_ARGS[..],
             "opencode" => &["acp"][..],
             "grok" => &GROK_CHAT_ARGS[..],
             _ => return None,
@@ -184,9 +218,12 @@ pub fn dsh_turn_args(patch: &Path, session: Option<&str>) -> Result<Vec<OsString
 /// Code conversation whose id manut made (`new_session`), so the same conversation can be continued after manut
 /// restarts; `--resume <uuid>` (Claude Code) or `resume <uuid>` (Codex, a thread id it wrote) to continue one; and
 /// the chat-era `--session <uuid>` for OmO ([`resume_args`]). Never both; every id must be a UUID; any other agent
-/// or shape is refused.
+/// or shape is refused. oh-my-pi's terminal starts in its asking mode as its chat does ([`OMP_ASKS`], item 139): the app
+/// starts that program itself, and omp's own default would run every tool unasked in its own screen too. Its dialogs are
+/// then omp's own, which the person answers there.
 pub fn terminal_args(id: &str, new_session: Option<&str>, resume: Option<&str>) -> Result<Vec<OsString>, String> {
     match (new_session, resume) {
+        (None, None) if id == "omp" => Ok(vec![OMP_ASKS.into()]),
         (None, None) => Ok(Vec::new()),
         (Some(_), Some(_)) => Err("a new conversation or one to continue, not both".into()),
         (Some(s), None) => {
@@ -1927,10 +1964,10 @@ mod tests {
             [
                 ("claude", Mode::Chat),
                 ("codex", Mode::Chat),
-                ("omo", Mode::Chat),
+                ("omo", Mode::Terminal),
                 ("dsh", Mode::Chat),
                 ("omh", Mode::Hermes),
-                ("pi", Mode::Chat),
+                ("pi", Mode::Terminal),
                 ("omp", Mode::Chat),
                 ("grok", Mode::Chat),
                 ("opencode", Mode::Chat)
@@ -1941,9 +1978,19 @@ mod tests {
             ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--permission-prompt-tool", "stdio", "--replay-user-messages", "--setting-sources", "user"]
         );
         assert_eq!(chat_args("codex").unwrap(), ["app-server"]);
-        assert_eq!(chat_args("pi").unwrap(), ["--mode", "rpc"]);
-        assert_eq!(chat_args("omp").unwrap(), ["--mode", "rpc"]);
-        assert_eq!(chat_args("omo").unwrap(), ["--mode", "rpc"]);
+        // item 139: oh-my-pi's chat is its RPC mode in its asking mode, the flag as one argument (`omp --help`'s form), and
+        // no other approval mode is ever named
+        assert_eq!(chat_args("omp").unwrap(), ["--mode", "rpc", "--approval-mode=always-ask"]);
+        for loose in ["yolo", "write", "--auto-approve", "--yolo", "--plan-yolo"] {
+            assert!(!chat_args("omp").unwrap().iter().any(|a| a.contains(loose)), "{loose}");
+        }
+        // pi and OmO cannot ask before a tool runs: no chat at all, only their own terminal, with a reason for a chat start
+        assert_eq!(NO_ASKS, ["pi", "omo"]);
+        for id in NO_ASKS {
+            assert_eq!(agent(id).map(|a| a.mode), Some(Mode::Terminal), "{id}");
+            assert!(chat_args(id).is_none(), "{id}");
+        }
+        assert_eq!(no_ask_path("pi"), "pi does not ask before it runs a command or changes a file, so Manut AI runs it only in a terminal.");
         assert_eq!(chat_args("opencode").unwrap(), ["acp"]);
         // the generic ACP agents: the list drives both the allow-list row and the one argument that starts its ACP
         // server, as 0.2.8 had them (Gemini's `--experimental-acp` is deprecated)
@@ -2088,6 +2135,12 @@ mod tests {
         assert_eq!(terminal_args("claude", Some(id), None).unwrap(), os(&["--session-id", id]));
         assert_eq!(terminal_args("claude", None, Some(id)).unwrap(), os(&["--resume", id]));
         assert_eq!(terminal_args("codex", None, Some(x)).unwrap(), os(&["resume", x]));
+        // item 139: oh-my-pi's terminal starts in its asking mode, written as the one argument its help prints; no other
+        // agent's terminal gets it, and none gets a mode that skips asks
+        assert_eq!(terminal_args("omp", None, None).unwrap(), os(&["--approval-mode=always-ask"]));
+        for agent in ["claude", "codex", "omo", "pi", "grok", "opencode", "gemini", "omh"] {
+            assert_eq!(terminal_args(agent, None, None).unwrap(), Vec::<OsString>::new(), "{agent}");
+        }
         // never both, and a new id only for Claude Code
         assert!(terminal_args("claude", Some(id), Some(id)).is_err());
         for agent in ["codex", "grok", "pi", "omp", "omh", "opencode", "shell", "gemini"] {

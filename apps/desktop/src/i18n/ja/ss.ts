@@ -140,4 +140,7 @@ export const ss: Record<keyof typeof en, string> = {
   // Grok as a chat (item 101b): its own settings that skip asks, and its command that turns them off
   "ss.noAsksGrok": "{agent} 自身の設定で、確認せずにコマンドの実行やファイルの変更ができるようになっているため、起動しませんでした。{agent} の config.toml の [ui] で permission_mode を ask にし、Claude の設定ファイルで defaultMode が default か plan 以外になっていないことを確かめてから、もう一度チャットを始めてください。",
   "ss.noAsksCommand": "{agent} の /{cmd} は確認をオフにするため、Manut AI は送信しません。これを含めずにメッセージを書いてください。",
+  "ss.noAskPath": "{agent} はコマンドの実行やファイルの変更の前に確認しないため、Manut AI はターミナルでのみ実行します。",
+  "ss.noAsksOmp": "{agent} 自身の設定で、確認せずにコマンドの実行やファイルの変更ができるようになっているため、起動しませんでした。{agent} 自身の設定とこのプロジェクトの設定で tools.approvalMode を always-ask にし、allow になっている tools.approval の項目を削除してから（omp config list --scope=global と --scope=project で確認できます）、もう一度チャットを始めてください。",
+  "ss.noAsksCheck": "{agent} 自身の設定で実行前に確認するようになっているか Manut AI が確かめられなかったため、起動しませんでした。このフォルダーのターミナルで omp config list --json が動くこと、PI_CONFIG_FILES が設定されていないことを確かめてから、もう一度チャットを始めてください。",
 };
