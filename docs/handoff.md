@@ -387,6 +387,9 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    18:10 (`docs/paradev-ux.md`: Paradev's eight interface principles and rows 167a to 167k, no new dependency); 167a (lanes
    in the side menu) and 167d (keys where the actions are) started, and 139b was sent on.
    143 merged at 18:40 (the shop's name masked in Buddy's prompt; CHAT_LIMITER on /v1/chat/*; the deploy is the owner's).
+   139b merged at 19:20: omp chats start with --no-extensions --no-lsp, the person's own extensions and hooks passed back;
+   a folder with omp custom tools, project plugins or a PI_/OMP_ line in its .env refuses the chat (a .env PI_CONFIG_FILES had
+   slipped past item 139's check). 167e (the lane's next step in its top bar) started.
    The dev relay is on with its push key pair as dev secrets, deployed to dev 27 Nov; the owner's try on an iPhone is left.
    Two Rust tests that raced under load (the MCP relay's round trip, the Grok account check) now wait for their answers, and
    the 16 hook-dependency warnings `pnpm lint` found are settled. Fonts stay 99, the owner's. From 27 Nov the owner asked for English first: new words are English, copied into ja, ko and zh. Needs the owner from 101b: Grok signed in and `permission_mode = "ask"`
