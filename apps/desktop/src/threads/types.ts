@@ -23,6 +23,10 @@ export interface ThreadRow {
   kind?: "chat" | "task";
 }
 
+/** Whether a thread's row offers Remove: a conversation with Buddy, on a runtime that marks its threads (the connected runtime). The
+ *  team's work (`task`) is never removed from here, and Practice's threads carry no kind and are archived where a screen offers it. */
+export const canRemove = (row: Pick<ThreadRow, "kind">): boolean => row.kind === "chat";
+
 export interface ThreadOpenResult {
   thread: string;
   session_id: string;
@@ -33,12 +37,21 @@ export interface ThreadOpenResult {
   model: string;
   provider: string;
   reasoning: string;
+  /** Where a runtime that pages a thread's messages (the connected runtime's conversations, item 102l-6) says there are older ones:
+   *  the cursor `thread.older` reads the page before `messages` with. Left out when these are the first messages, and by every
+   *  runtime that gives a thread whole. */
+  older?: string;
 }
 
 export interface ThreadOps {
   "thread.create": { params: { bot: string; title?: string; cwd?: string; key?: string }; result: ThreadRow & { model: string; provider: string; reasoning: string } };
   "thread.list": { params: { bot: string }; result: { threads: ThreadRow[] } };
   "thread.open": { params: { bot: string; thread: string }; result: ThreadOpenResult };
+  /** The page of messages before `before` (the cursor `thread.open`'s `older`, or the last page, gave), oldest first, as `thread.open`
+   *  draws them, and the cursor for the page before those (null at the first message). Only a runtime that gave an `older` is asked. */
+  "thread.older": { params: { bot: string; thread: string; before: string }; result: { messages: ThreadOpenResult["messages"]; older: string | null } };
+  /** Practice archives a thread (hidden, kept, restorable). The connected runtime deletes one of Buddy's conversations and every
+   *  message in it for good (`archived: false`), which a screen asks the person about first. */
   "thread.remove": { params: { bot: string; thread: string }; result: { thread: string; archived: boolean } };
 }
 

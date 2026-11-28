@@ -34,6 +34,9 @@ import { RowsWatcher } from "./RowsWatcher";
 import { useInbox } from "./inbox";
 import { useRowSelect, useSelectionEscape } from "./useRowSelect";
 import { dragRef, type ThreadRef } from "../chat/box/threadContext";
+import { removeEntry } from "../threads/RemoveConversation";
+import type { ConversationRef } from "../threads/removeAsk";
+import { canRemove, type ThreadRow } from "../threads/types";
 
 type RowSelect = ReturnType<typeof useRowSelect>;
 import { togglePalette } from "../palette/state";
@@ -71,6 +74,8 @@ export interface RecentItem {
   why?: string | null;
   /** The chat it is, for a drag onto an open chat's box (item 97); none: not draggable. */
   drag?: ThreadRef;
+  /** A conversation with Buddy (item 102l-6): its menu ends with Remove, which asks first. None for any other row. */
+  remove?: ConversationRef;
 }
 
 /** One chat of Recent: the row, and the menu of what can be done to it (Pin, Snooze, Done for now, Archive), to it alone or to every
@@ -79,7 +84,7 @@ function RecentRow({ item, select }: { item: RecentItem; select: RowSelect }) {
   const marks = useRowMarks();
   const keys = item.rowKey ? select.actsOn(item.rowKey) : [];
   const many = keys.length > 1;
-  const menu = useRowMenu({ rowKey: item.rowKey ?? "", kind: "chat", mark: item.rowKey ? marks[item.rowKey] : undefined, name: many ? t("row.count", { n: keys.length }) : item.title, working: item.working, keys });
+  const menu = useRowMenu({ rowKey: item.rowKey ?? "", kind: "chat", mark: item.rowKey ? marks[item.rowKey] : undefined, name: many ? t("row.count", { n: keys.length }) : item.title, working: item.working, keys, extra: item.remove ? removeEntry(item.remove) : undefined });
   const selected = select.selected(item.rowKey);
   return (
     <li className={`rec-li${item.place ? ` ${item.place}` : ""}${menu.isOpen ? " menu-open" : ""}`} data-place={item.place} data-flip={item.key} data-row-key={item.rowKey} data-sel={selected || undefined} onContextMenu={item.rowKey ? menu.onContextMenu : undefined}>
@@ -288,7 +293,7 @@ export function Sidebar() {
   const marks = useRowMarks();
   const inbox = useInbox();
   const parts = recentParts(s.threads, members, marks, (bot, row) => rowStatus(s, bot, row) === "needs_you", Date.now(), 3, { working: (bot, row) => rowStatus(s, bot, row) === "running", group: inbox.working });
-  const item = (place: RecentItem["place"]) => (r: { bot: string; thread: string; title: string; working?: boolean }): RecentItem => ({
+  const item = (place: RecentItem["place"]) => (r: { bot: string; thread: string; title: string; working?: boolean; kind?: ThreadRow["kind"] }): RecentItem => ({
     key: `${r.bot}:${r.thread}`,
     title: r.title || untitled,
     open: () => void s.openThread(r.bot, r.thread),
@@ -297,6 +302,7 @@ export function Sidebar() {
     working: r.working,
     why: place === "settled" ? settledWhy(marks[threadRowKey(r.bot, r.thread)]) : null,
     drag: { kind: "thread", bot: r.bot, thread: r.thread },
+    ...(canRemove(r) ? { remove: { bot: r.bot, thread: r.thread, title: r.title || untitled } } : {}),
   });
   const recent = [...parts.pinned.map(item("pinned")), ...parts.recent.map(item(undefined)), ...parts.settled.map(item("settled"))];
   // New (and the brand mark) opens Home; every other row opens its own page.

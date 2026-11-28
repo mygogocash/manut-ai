@@ -44,4 +44,6 @@ export const row = {
   "row.why.quiet": "Done after {n} quiet days",
   "row.why.quiet1": "Done after a quiet day",
   "row.why.merged": "Done: its pull request merged",
+  // Remove, on a conversation's row menu (item 102l-6)
+  "row.removeChat": "Remove conversation…",
 };

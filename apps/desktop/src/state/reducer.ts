@@ -178,6 +178,9 @@ export type Action =
   /** A SESSIONS chat ended with `error`: its last turn, failed with that same reason, no longer repeats it (the
    *  Ended line above the composer says it once, beside Restart). */
   | { type: "turn.reasonMoved"; bot: string; error: string }
+  /** A page of older messages read for a conversation (Show older, item 102l-6): its rows go above everything the chat holds, the
+   *  ones it already holds skipped, and `older` is the cursor of the page before them (null: these reach the first message). */
+  | { type: "chat.older"; bot: string; messages: { id: string; role: "user" | "assistant"; text: string; ts: number }[]; older: string | null }
   /** A bot's threads as `thread.list` read them (rows the app already holds keep their live title and time). */
   | { type: "threads"; bot: string; threads: ThreadRow[] }
   /** One thread joined (made here, or the bot opened one) or changed (named, active). */
@@ -648,6 +651,15 @@ export function reduce(state: AppState, a: Action): AppState {
           c.items.map((i) => (i.kind === "threadRoute" && i.id === a.id ? { ...i, done: a.done, error: a.error } : i)),
         ),
       );
+    case "chat.older":
+      // a page that lands after its chat was removed or forgotten brings no chat back
+      if (!state.chats[a.bot]) return state;
+      return touchChat(state, a.bot, (c) => {
+        const have = new Set(c.items.map((i) => i.id));
+        const rows: MessageItem[] = a.messages.filter((m) => !have.has(m.id)).map((m) => ({ kind: m.role, id: m.id, ts: m.ts, text: m.text }));
+        const { older: _older, ...rest } = withItems(c, [...rows, ...c.items]);
+        return a.older === null ? rest : { ...rest, older: a.older };
+      });
     case "thread.gone": {
       const list = state.threads[a.bot];
       const key = threadKey(a.bot, a.thread);

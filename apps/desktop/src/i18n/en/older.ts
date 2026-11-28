@@ -8,4 +8,8 @@ export const older = {
   "older.again": "Try again",
   "older.failed": "Older work could not be read. What is shown here has not changed.",
   "older.offline": "Show older needs a connection. What is shown here has not changed.",
+  // Show older at the top of a conversation (item 102l-6)
+  "older.messages.show": "Show older",
+  "older.messages.reading": "Reading older messages…",
+  "older.messages.failed": "Older messages could not be read. What is shown here has not changed.",
 };

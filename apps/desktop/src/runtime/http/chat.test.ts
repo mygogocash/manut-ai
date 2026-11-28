@@ -3,7 +3,8 @@
 // request it sends (the route, the owner session of the chat's shop, exactly the fields the route reads), for Buddy's answer shown as one
 // turn, for every refusal and the words it is said in, with the message marked not sent and posted once, for a shop the person only
 // helps at, for the shop the chat was opened for after the switcher moved, while only a kept read is shown, and for a task told from a
-// conversation. Removing a conversation is left out (no screen offers it), so `thread.remove` stays `not_yet`.
+// conversation. Item 102l-6 adds the removal of a conversation (exactly `{ id }`, the owner session of the shop it was listed or made
+// for, once, every refusal in words, the team's work never removed) and older messages read a page at a time (`thread.older`).
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { dayTime } from "../../app/time";
 import { setLang, t } from "../../i18n";
@@ -11,14 +12,14 @@ import type { BridgeError, BridgeEvent } from "../../lib/protocol";
 import type { ThreadRow } from "../../threads/types";
 import { createStore } from "../../state/store";
 import { ShopCache } from "./cache";
-import { answerText, CHAT_MESSAGES_PATH, decodeChatMessage, decodeChatPage, decodeChatThreads, decodeExchange, MAX_CHAT_TEXT } from "./chat";
+import { answerText, CHAT_MESSAGES_PATH, CHAT_REMOVE_PATH, chatOlderPath, decodeChatMessage, decodeChatPage, decodeChatThreads, decodeExchange, MAX_CHAT_TEXT, removed } from "./chat";
 import { BUDDY_GRAMMAR } from "../../jobs/reachBlocks";
 import { buddyNote, fromChatText } from "../../jobs/reachMarks";
 import { HttpHost } from "./host";
 import { HttpRuntime } from "./index";
 import { ApiSession } from "./session";
 import type { FetchLike } from "./shell";
-import { chatId, fakeApi, keptPlain, memoryCacheStore, memoryVault, ORIGIN, serveShops, SHOP_A, SHOP_B, shopToken, storedSession, T0, useMicrotaskCrypto, workerTaskJson, type FakeAnswer, type FakeApi, type ShopWorkJson } from "./testkit";
+import { chatId, fakeApi, keptPlain, memoryCacheStore, memoryVault, ORIGIN, serveShops, SHOP_A, SHOP_B, shopToken, storedSession, T0, useMicrotaskCrypto, workerTaskJson, type FakeAnswer, type FakeApi, type FakeChatThread, type ShopWorkJson } from "./testkit";
 
 /** A character outside the basic plane (an ideograph in Japanese names): two UTF-16 units, one character as the API counts them. */
 const ASTRAL = String.fromCodePoint(0x20bb7);
@@ -65,6 +66,8 @@ const chatCalls = (api: FakeApi) => api.calls.filter((c) => c.path.startsWith("/
 /** The events of a turn, and a conversation listed, in the order they came. */
 const turn = (events: BridgeEvent[]) => events.filter((e) => ["turn.start", "message", "turn.end", "thread.added", "bot.status"].includes(e.event));
 const chatRows = (threads: ThreadRow[]) => threads.filter((r) => r.kind === "chat");
+/** The `thread.removed` events: a thread event is not in the bridge's own union of events, so the comparison is made on the name as text. */
+const goneEvents = (events: BridgeEvent[]) => events.filter((e) => (e.event as string) === "thread.removed");
 const answerTo = (text: string) => `Buddy's answer to: ${text}`;
 
 beforeEach(() => {
@@ -449,15 +452,346 @@ describe("the shop a chat is of", () => {
   });
 });
 
-describe("removing a conversation", () => {
-  it("is not offered: no screen asks for it, so it stays not yet, and nothing is sent", async () => {
+describe("removing a conversation (item 102l-6)", () => {
+  const OF = (error: string, more: Record<string, unknown> = {}) => ({ error, ...more });
+  const removals = (api: FakeApi) => api.to("POST", CHAT_REMOVE_PATH);
+  /** The conversation Buddy's main chat made at Baan Mali, listed. */
+  async function madeAtMali() {
+    const run = await opened();
+    await run.req("chat.open", { bot: "buddy" });
+    await run.req("chat.send", { bot: "buddy", text: "Keep me" });
+    await run.req("thread.list", { bot: "buddy" });
+    return run;
+  }
+
+  it("posts exactly { id } with the owner session of the conversation's shop, once, whichever shop the switcher shows, and the conversation is gone", async () => {
+    const { api, shops, req, events } = await madeAtMali();
+    // the switcher moved to another shop the person owns by the time Remove was pressed
+    await req("shops.switch", { shop: SHOP_C.id });
+    events.length = 0;
+    expect(await req("thread.remove", { bot: "buddy", thread: chatId(1) })).toEqual({ thread: chatId(1), archived: false });
+    expect(removals(api).map((c) => [c.bearer, c.body])).toEqual([[OWNER_A, { id: chatId(1) }]]);
+    expect(shops.chat[SHOP_A.id]).toEqual([]);
+    // the screens are told, so its row and its chat go; nothing else was written
+    expect(goneEvents(events)).toEqual([{ event: "thread.removed", bot: "buddy", thread: chatId(1) }]);
+    expect(chatCalls(api).filter(([method]) => method === "POST").map(([, path]) => path)).toEqual([CHAT_MESSAGES_PATH, CHAT_REMOVE_PATH]);
+    // it is not listed or opened again, and nothing can be sent to it
+    await req("shops.switch", { shop: SHOP_A.id });
+    expect(chatRows((await req("thread.list", { bot: "buddy" })).threads)).toEqual([]);
+    expect(await refusal(req("thread.open", { bot: "buddy", thread: chatId(1) }))).toEqual({ code: "thread_not_found", message: t("rt.chat.threadGone") });
+    expect(await refusal(req("chat.send", { bot: "buddy", session: chatId(1), text: "Still there?" }))).toMatchObject({ code: "not_found" });
+  });
+
+  it("takes the shop from the conversation, never from the switcher: a conversation of another shop of the person's goes with that shop's session", async () => {
     const { api, shops, req } = await opened();
+    await req("shops.switch", { shop: SHOP_C.id });
+    const atC = await req("thread.create", { bot: "buddy", key: "c" });
+    await req("chat.send", { bot: "buddy", session: atC.thread, text: "Baan Suk's" });
+    await req("shops.switch", { shop: SHOP_A.id });
+    await req("chat.send", { bot: "buddy", text: "Baan Mali's" });
+    await req("thread.list", { bot: "buddy" });
+    // the switcher shows Baan Mali; Baan Suk's conversation is removed with Baan Suk's own session
+    expect(await req("thread.remove", { bot: "buddy", thread: atC.thread })).toEqual({ thread: atC.thread, archived: false });
+    expect(removals(api).map((c) => [c.bearer, c.body])).toEqual([[OWNER_C, { id: chatId(1) }]]);
+    expect(shops.chat[SHOP_C.id]).toEqual([]);
+    expect(shops.chat[SHOP_A.id]).toHaveLength(1);
+  });
+
+  it("just drops a conversation prepared and never sent to, and sends nothing", async () => {
+    const { api, req, events } = await opened();
+    const row = await req("thread.create", { bot: "buddy", key: "k9" });
+    events.length = 0;
+    expect(await req("thread.remove", { bot: "buddy", thread: row.thread })).toEqual({ thread: row.thread, archived: false });
+    expect(chatCalls(api)).toEqual([]);
+    expect(goneEvents(events)).toEqual([{ event: "thread.removed", bot: "buddy", thread: row.thread }]);
+    expect(chatRows((await req("thread.list", { bot: "buddy" })).threads)).toEqual([]);
+    // asked again, it is gone: not "not yet", which is for what is never removed from here
+    expect(await refusal(req("thread.remove", { bot: "buddy", thread: row.thread }))).toEqual({ code: "not_found", message: t("rt.notFound") });
+  });
+
+  it("waits for the conversation's own message on its way: that message goes first, then the removal, and nothing makes the conversation again", async () => {
+    const { api, shops, req } = await opened();
+    const row = await req("thread.create", { bot: "buddy", key: "k8" });
+    await Promise.all([req("chat.send", { bot: "buddy", session: row.thread, text: "First" }), req("thread.remove", { bot: "buddy", thread: row.thread })]);
+    expect(chatCalls(api).filter(([method]) => method === "POST")).toEqual([
+      ["POST", CHAT_MESSAGES_PATH, OWNER_A],
+      ["POST", CHAT_REMOVE_PATH, OWNER_A],
+    ]);
+    expect(removals(api).map((c) => c.body)).toEqual([{ id: chatId(1) }]);
+    expect(shops.chat[SHOP_A.id]).toEqual([]);
+  });
+
+  it("is not brought back by a read of the list that began before it was removed", async () => {
+    let release = () => {};
+    const gate = new Promise<void>((done) => (release = done));
+    let hold = false;
+    const { req } = await opened({}, (path) => (hold && path === "/v1/chat/threads" ? gate : null));
     await req("chat.open", { bot: "buddy" });
     await req("chat.send", { bot: "buddy", text: "Keep me" });
+    hold = true;
+    const listing = req("thread.list", { bot: "buddy" });
+    await vi.advanceTimersByTimeAsync(0);
+    // the API answered the list while the conversation was there, and that answer is still on its way
+    await req("thread.remove", { bot: "buddy", thread: chatId(1) });
+    release();
+    expect(chatRows((await listing).threads)).toEqual([]);
+  });
+
+  describe("a refusal", () => {
+    // each leaves the conversation where it was (the API still holds it, and the list still shows it)
+    const cases: [FakeAnswer, string, () => string][] = [
+      [{ status: 403, json: OF("owner_only") }, "owner_only", () => t("rt.chat.removeOwnerOnly", { owner: "Fon", shop: "Baan Mali" })],
+      [{ status: 400, json: OF("invalid_request") }, "invalid_request", () => t("rt.chat.removeRefused")],
+      [{ status: 404, json: OF("not_found") }, "not_found", () => t("rt.chat.removeRefused")],
+      [{ status: 503, json: OF("chat_unavailable") }, "unavailable", () => t("rt.chat.removeUnavailable")],
+      [{ status: 502, text: "<html>bad gateway</html>" }, "unavailable", () => t("rt.chat.removeUnavailable")],
+      ["failed", "unavailable", () => t("rt.chat.removeUnavailable")],
+      ["offline", "offline", () => t("rt.offline")],
+    ];
+
+    it("is said in the person's words, posted once, never sent again, and leaves the conversation in the list", async () => {
+      for (const [answer, code, words] of cases) {
+        const { api, shops, req, events } = await madeAtMali();
+        events.length = 0;
+        shops.chatRemoval = typeof answer === "string" ? null : answer;
+        if (typeof answer === "string") api.on("POST", CHAT_REMOVE_PATH, answer);
+        const label = `${code} ${JSON.stringify(answer)}`;
+        expect(await refusal(req("thread.remove", { bot: "buddy", thread: chatId(1) })), label).toEqual({ code, message: words() });
+        await vi.advanceTimersByTimeAsync(130_000);
+        expect(removals(api), label).toHaveLength(1);
+        expect(shops.chat[SHOP_A.id], label).toHaveLength(1);
+        expect(goneEvents(events), label).toEqual([]);
+        expect(chatRows((await req("thread.list", { bot: "buddy" })).threads).map((r) => r.thread), label).toEqual([chatId(1)]);
+        // and it can be removed once the API answers: the conversation was kept as it was
+        shops.chatRemoval = null;
+        api.on("POST", CHAT_REMOVE_PATH, (req) => ({ status: 200, json: { id: (req.body as { id: string }).id } }));
+        expect(await req("thread.remove", { bot: "buddy", thread: chatId(1) }), label).toEqual({ thread: chatId(1), archived: false });
+      }
+    });
+
+    it("says a conversation the API no longer has is gone, and drops it as the list would on its next read; pressed again, it is still said to be gone", async () => {
+      const { api, shops, req, events } = await madeAtMali();
+      // removed elsewhere (another window, the shop's deletion), after the list was read
+      shops.chat[SHOP_A.id] = [];
+      events.length = 0;
+      expect(await refusal(req("thread.remove", { bot: "buddy", thread: chatId(1) }))).toEqual({ code: "thread_not_found", message: t("rt.chat.threadGone") });
+      expect(removals(api)).toHaveLength(1);
+      expect(goneEvents(events)).toEqual([{ event: "thread.removed", bot: "buddy", thread: chatId(1) }]);
+      expect(chatRows((await req("thread.list", { bot: "buddy" })).threads)).toEqual([]);
+      // the question that named it is still open, and its button pressed again asks nothing: it is not "not yet", it is not there
+      expect(await refusal(req("thread.remove", { bot: "buddy", thread: chatId(1) }))).toEqual({ code: "not_found", message: t("rt.notFound") });
+      expect(removals(api)).toHaveLength(1);
+    });
+
+    it("signed out: the shop cannot be opened again, so it is said so, and the removal is not sent twice", async () => {
+      const { api, req } = await madeAtMali();
+      api
+        .on("POST", CHAT_REMOVE_PATH, { status: 401, json: OF("unauthorized") })
+        .on("POST", "/v1/shops/session", { status: 401, json: OF("unauthorized") })
+        .on("POST", "/v1/auth/refresh", { status: 401, json: OF("invalid_grant") });
+      expect(await refusal(req("thread.remove", { bot: "buddy", thread: chatId(1) }))).toEqual({ code: "signed_out", message: t("rt.signedOut") });
+      expect(removals(api)).toHaveLength(1);
+    });
+
+    it("says an answer that is not a removal is not one, and keeps the conversation", async () => {
+      const { api, req } = await madeAtMali();
+      api.on("POST", CHAT_REMOVE_PATH, { status: 200, json: { id: "cht-somebody-elses" } });
+      expect(await refusal(req("thread.remove", { bot: "buddy", thread: chatId(1) }))).toEqual({ code: "unavailable", message: t("rt.chat.unreadable") });
+      expect(chatRows((await req("thread.list", { bot: "buddy" })).threads)).toHaveLength(1);
+      expect(removed({ id: chatId(1) }, chatId(1))).toBe(true);
+      for (const bad of [null, "ok", {}, { id: 1 }, { removed: chatId(1) }]) expect(removed(bad, chatId(1)), JSON.stringify(bad)).toBe(false);
+    });
+
+    it("says the person's place in the shop ended, in the host's words, and then the shop is no longer theirs: refused here, with nothing sent", async () => {
+      const { api, shops, req } = await madeAtMali();
+      shops.ended[SHOP_A.id] = { error: "removed", at: new Date(NOW - 60_000).toISOString() };
+      const out = await refusal(req("thread.remove", { bot: "buddy", thread: chatId(1) }));
+      expect(out).toMatchObject({ code: "removed" });
+      expect(out?.message).not.toBe("");
+      expect(removals(api)).toHaveLength(1);
+      expect(await refusal(req("thread.remove", { bot: "buddy", thread: chatId(1) }))).toMatchObject({ code: "not_found" });
+      expect(removals(api)).toHaveLength(1);
+    });
+  });
+
+  it("is refused with nothing sent for the team's work and for a member: it is the team's work, kept as Buddy's notes", async () => {
+    const { api, req } = await opened({ [SHOP_A.id]: { tasks: [workerTaskJson({ id: "worker-task-nam" })] } });
     await req("thread.list", { bot: "buddy" });
-    expect(await refusal(req("thread.remove", { bot: "buddy", thread: chatId(1) }))).toEqual({ code: "not_yet", message: t("rt.notYet") });
-    expect(api.calls.filter((c) => c.method === "POST" && c.path.startsWith("/v1/chat/threads"))).toEqual([]);
-    expect(shops.chat[SHOP_A.id]).toHaveLength(1);
+    expect(await refusal(req("thread.remove", { bot: "buddy", thread: "worker-task-nam" }))).toEqual({ code: "not_yet", message: t("rt.notYet") });
+    expect(await refusal(req("thread.remove", { bot: "nam", thread: "worker-task-nam" }))).toEqual({ code: "not_yet", message: t("rt.notYet") });
+    // a conversation this run never knew, or knows no more, is not there; a thread that is no conversation's id is not built yet
+    expect(await refusal(req("thread.remove", { bot: "buddy", thread: chatId(1) }))).toEqual({ code: "not_found", message: t("rt.notFound") });
+    expect(await refusal(req("thread.remove", { bot: "buddy", thread: "chat-new-nothing" }))).toEqual({ code: "not_found", message: t("rt.notFound") });
+    expect(await refusal(req("thread.remove", { bot: "buddy", thread: "some-other-thread" }))).toEqual({ code: "not_yet", message: t("rt.notYet") });
+    expect(removals(api)).toEqual([]);
+  });
+
+  it("says the words the brief names, in English", () => {
+    expect(t("thread.chatRemoveTitle")).toBe("Remove this conversation?");
+    expect(t("thread.chatRemoveName", { title: "Keep me" })).toBe("“Keep me”");
+    expect(t("thread.chatRemoveBody")).toBe("This deletes every message in it for good. It cannot be taken back.");
+    expect(t("row.removeChat")).toBe("Remove conversation…");
+  });
+});
+
+/** A conversation as the API keeps it with `pairs` exchanges: m1 (the owner) to m<2*pairs> (Buddy), each saying which it is. */
+function longThread(id: string, pairs: number, over: (n: number) => Partial<FakeChatThread["messages"][number]> = () => ({})): FakeChatThread {
+  const at = new Date(NOW).toISOString();
+  const messages = Array.from({ length: pairs * 2 }, (_, i) => {
+    const from = i % 2 === 0 ? ("owner" as const) : ("buddy" as const);
+    return { id: `m${i + 1}`, from, text: `${from === "owner" ? "Question" : "Answer"} ${Math.floor(i / 2) + 1}`, at, ...(from === "buddy" ? { stopReason: "end_turn" } : {}), ...over(i + 1) };
+  });
+  return { id, title: "Question 1", createdAt: at, updatedAt: at, messages };
+}
+const range = (api: string, from: number, to: number) => Array.from({ length: to - from + 1 }, (_, i) => `${api}/m${from + i}`);
+
+describe("older messages (item 102l-6)", () => {
+  const LONG = chatId(7);
+  const readsOf = (api: FakeApi) => api.calls.filter((c) => c.method === "GET" && c.path === `/v1/chat/threads/${LONG}`).map((c) => [c.bearer, new URL(c.url).search]);
+  async function withLong(pairs = 60, over?: (n: number) => Partial<FakeChatThread["messages"][number]>) {
+    const run = await opened();
+    run.shops.seedChat(SHOP_A.id, longThread(LONG, pairs, over));
+    await run.req("thread.list", { bot: "buddy" });
+    return run;
+  }
+
+  it("opens a conversation with its newest 50 messages, oldest first, and says where the older ones start", async () => {
+    const { api, req } = await withLong();
+    const open = await req("thread.open", { bot: "buddy", thread: LONG });
+    expect(open.messages.map((m: { id: string }) => m.id)).toEqual(range(LONG, 71, 120));
+    expect(open.older).toBe("m71");
+    expect(readsOf(api)).toEqual([[OWNER_A, ""]]);
+  });
+
+  it("says nothing of older messages for a conversation of 50 or fewer, and does for 52", async () => {
+    const { shops, req } = await withLong(25);
+    expect((await req("thread.open", { bot: "buddy", thread: LONG })).older).toBeUndefined();
+    shops.chat[SHOP_A.id] = [longThread(LONG, 26)];
+    const open = await req("thread.open", { bot: "buddy", thread: LONG });
+    expect(open.messages.map((m: { id: string }) => m.id)).toEqual(range(LONG, 3, 52));
+    expect(open.older).toBe("m3");
+    expect((await req("thread.older", { bot: "buddy", thread: LONG, before: "m3" })).messages.map((m: { id: string }) => m.id)).toEqual(range(LONG, 1, 2));
+    // a conversation that holds none has none to say, and a prepared one has no messages to read
+    expect((await req("thread.open", { bot: "buddy", thread: (await req("thread.create", { bot: "buddy", key: "new" })).thread })).older).toBeUndefined();
+  });
+
+  it("reads the 50 before the oldest shown with the owner session of the conversation's shop, then the 50 before those, in order, with `next` as the cursor", async () => {
+    const { api, req } = await withLong();
+    const open = await req("thread.open", { bot: "buddy", thread: LONG });
+    // the switcher moved to another shop by the time Show older is pressed: the conversation's own shop reads it
+    await req("shops.switch", { shop: SHOP_C.id });
+    const second = await req("thread.older", { bot: "buddy", thread: LONG, before: open.older });
+    expect(second.messages.map((m: { id: string }) => m.id)).toEqual(range(LONG, 21, 70));
+    expect(second.older).toBe("m21");
+    const third = await req("thread.older", { bot: "buddy", thread: LONG, before: second.older });
+    expect(third.messages.map((m: { id: string }) => m.id)).toEqual(range(LONG, 1, 20));
+    // `next: null` says the first message is shown: nothing is left to show
+    expect(third.older).toBeNull();
+    expect(readsOf(api)).toEqual([
+      [OWNER_A, ""],
+      [OWNER_A, "?before=m71&limit=50"],
+      [OWNER_A, "?before=m21&limit=50"],
+    ]);
+    expect(chatOlderPath(LONG, "m71")).toBe(`/v1/chat/threads/${LONG}?before=m71&limit=50`);
+    // each message is as the first page draws it: the author, the words and the time
+    expect(second.messages[0]).toEqual({ id: `${LONG}/m21`, role: "user", text: "Question 11", ts: NOW / 1000 });
+    expect(second.messages[1]).toMatchObject({ id: `${LONG}/m22`, role: "assistant", text: "Answer 11" });
+  });
+
+  it("draws a page as thread.open draws one: a sent-on mark in front, and no reach block in an answer to a message with `noted`", async () => {
+    const asked = 'I will look.\n\n```manut-read\n{"chat":"1"}\n```';
+    const { req } = await withLong(60, (n) => (n === 1 ? { sentOnFrom: "Supplier" } : n === 3 ? { noted: true } : n === 4 ? { text: asked } : {}));
+    const open = await req("thread.open", { bot: "buddy", thread: LONG });
+    const older = await req("thread.older", { bot: "buddy", thread: LONG, before: (await req("thread.older", { bot: "buddy", thread: LONG, before: open.older })).older });
+    expect(older.messages.slice(0, 4).map((m: { role: string; text: string }) => [m.role, m.text])).toEqual([
+      ["user", fromChatText("Supplier", "Question 1")],
+      ["assistant", "Answer 1"],
+      ["user", "Question 2"],
+      ["assistant", "I will look."],
+    ]);
+  });
+
+  it("refuses a cursor that is not a message id, a conversation it does not know and one the API no longer has, and changes nothing", async () => {
+    const { api, shops, req } = await withLong();
+    await req("thread.open", { bot: "buddy", thread: LONG });
+    const before = readsOf(api).length;
+    for (const bad of ["", "m71&limit=200", "../m1", "m 7", 71, null]) {
+      expect(await refusal(req("thread.older", { bot: "buddy", thread: LONG, before: bad })), JSON.stringify(bad)).toMatchObject({ code: "invalid_request" });
+    }
+    expect(await refusal(req("thread.older", { bot: "buddy", thread: "cht-nothing-here", before: "m71" }))).toMatchObject({ code: "not_found" });
+    expect(await refusal(req("thread.older", { bot: "nam", thread: LONG, before: "m71" }))).toMatchObject({ code: "not_found" });
+    expect(readsOf(api)).toHaveLength(before);
+    // removed elsewhere meanwhile: said so, and dropped as a read of it would
+    shops.chat[SHOP_A.id] = [];
+    expect(await refusal(req("thread.older", { bot: "buddy", thread: LONG, before: "m71" }))).toEqual({ code: "thread_not_found", message: t("rt.chat.threadGone") });
+    expect(chatRows((await req("thread.list", { bot: "buddy" })).threads)).toEqual([]);
+  });
+
+  it("is refused offline, unreadable and for an API that is not answering, each in words, and a page that cannot be read is no page", async () => {
+    const { api, req } = await withLong();
+    await req("thread.open", { bot: "buddy", thread: LONG });
+    const ask = () => refusal(req("thread.older", { bot: "buddy", thread: LONG, before: "m71" }));
+    api.on("GET", `/v1/chat/threads/${LONG}`, "offline");
+    expect(await ask()).toEqual({ code: "offline", message: t("rt.offline") });
+    api.on("GET", `/v1/chat/threads/${LONG}`, { status: 503, json: { error: "chat_unavailable" } });
+    expect(await ask()).toEqual({ code: "unavailable", message: t("rt.unavailable") });
+    // a `next` that is no message id is not the end of the conversation: the page is not read at all
+    api.on("GET", `/v1/chat/threads/${LONG}`, { status: 200, json: { thread: { id: LONG, title: "Hi", createdAt: new Date(NOW).toISOString(), updatedAt: new Date(NOW).toISOString(), messageCount: 120 }, messages: [], next: 5 } });
+    expect(await ask()).toEqual({ code: "unavailable", message: t("rt.chat.unreadable") });
+    expect(decodeChatPage({ thread: { id: LONG, title: "Hi", createdAt: new Date(NOW).toISOString(), updatedAt: new Date(NOW).toISOString(), messageCount: 2 }, messages: [] })).toBeNull();
+  });
+
+  it("while only a kept read of the shop is shown, answers offline and reads nothing", async () => {
+    const { api, host, req } = await withLong();
+    await req("thread.open", { bot: "buddy", thread: LONG });
+    api.on("GET", "/v1/shops", "offline");
+    await vi.advanceTimersByTimeAsync(61_000);
+    expect(host.cache.kind).toBe("showing");
+    const before = api.calls.length;
+    expect(await refusal(req("thread.older", { bot: "buddy", thread: LONG, before: "m71" }))).toEqual({ code: "offline", message: t("rt.offline") });
+    expect(api.calls).toHaveLength(before);
+  });
+
+  it("keeps nothing it read on disk", async () => {
+    const { disk, req } = await withLong(60, (n) => (n === 25 ? { text: "Our supplier Somchai sells wax at ฿40 a kilo" } : {}));
+    const open = await req("thread.open", { bot: "buddy", thread: LONG });
+    const older = await req("thread.older", { bot: "buddy", thread: LONG, before: open.older });
+    expect(JSON.stringify(older.messages)).toContain("Somchai");
+    await vi.advanceTimersByTimeAsync(130_000);
+    expect(disk.files.size).toBe(1);
+    const kept = JSON.stringify(await keptPlain(disk));
+    for (const word of ["Somchai", "Question 11", LONG]) expect(kept, word).not.toContain(word);
+  });
+
+  it("is what the app's own store shows: the newest 50, Show older puts 50 above, and the last page ends it", async () => {
+    const { api, rt, shops } = await opened();
+    shops.seedChat(SHOP_A.id, longThread(LONG, 60));
+    const store = createStore(rt, { firstRoster: "all", watchSeen: { get: () => null, set: () => {} } });
+    await store.actions.init();
+    for (let i = 0; i < 12; i += 1) await vi.advanceTimersByTimeAsync(5);
+    await store.actions.loadThreads("buddy");
+    await store.actions.openThread("buddy", LONG);
+    const key = `fold:buddy:${LONG}`;
+    const ids = () => store.getState().chats[key].items.map((i) => i.id);
+    expect(ids()).toEqual(range(LONG, 71, 120));
+    expect(store.getState().chats[key].older).toBe("m71");
+    await store.actions.threadOlder("buddy", LONG);
+    expect(ids()).toEqual(range(LONG, 21, 120));
+    expect(store.getState().chats[key].older).toBe("m21");
+    await store.actions.threadOlder("buddy", LONG);
+    expect(ids()).toEqual(range(LONG, 1, 120));
+    expect(store.getState().chats[key].older).toBeUndefined();
+    // nothing is left to read: a press asks nothing
+    const asked = readsOf(api).length;
+    await store.actions.threadOlder("buddy", LONG);
+    expect(ids()).toEqual(range(LONG, 1, 120));
+    expect(readsOf(api)).toHaveLength(asked);
+    // the reads were the open, then 50 before m71, then 50 before m21, each with the conversation's shop's session
+    expect(readsOf(api)).toEqual([
+      [OWNER_A, ""],
+      [OWNER_A, "?before=m71&limit=50"],
+      [OWNER_A, "?before=m21&limit=50"],
+    ]);
   });
 });
 

@@ -140,7 +140,9 @@ The protocol ops are answered from the latest read (`src/runtime/http/host.ts`, 
 | `hello` | the runtime itself (`bridge: "real"`) |
 | `bots.list` | for a shop the person owns, Buddy and the members it has on (A shop the person owns, below); otherwise Buddy alone, standing for the team: online once the shop has been read, working while any task is `running`, `verifying` or `recovering`, or its newest run can still act |
 | `thread.list` (Buddy) | every task as one of Buddy's threads, marked the team's work (`kind: "task"`), and beside them, for a shop the person owns, the shop's conversations with Buddy, marked conversations (`kind: "chat"`), read from `GET /v1/chat/threads` with that shop's owner session each time the list is asked for (Buddy's chat on Connected, below); newest activity first, and `needs` marks a task with a request waiting for an answer. History and Recent list them. A member has none: their work is their jobs. |
-| `thread.open` | a task: the task as Buddy's notes, what it is for, each action it asked for and how that settled, the draft a member wrote on it (saying nothing was sent), and where it stands now, in the app's language. A conversation: its newest 50 messages, oldest first, from `GET /v1/chat/threads/{id}` with the owner session of its shop; one made here and not sent to yet has none, and nothing is read for it |
+| `thread.open` | a task: the task as Buddy's notes, what it is for, each action it asked for and how that settled, the draft a member wrote on it (saying nothing was sent), and where it stands now, in the app's language. A conversation: its newest 50 messages, oldest first, from `GET /v1/chat/threads/{id}` with the owner session of its shop, and `older`, the API's `next`, when it has older messages (`thread.older`, below); one made here and not sent to yet has none, and nothing is read for it |
+| `thread.older` (Buddy) | Show older, in a conversation (item 102l-6): the messages before the cursor `thread.open` or the last page gave, `GET /v1/chat/threads/{id}?before=<cursor>&limit=50` with the owner session of the conversation's shop, oldest first and drawn as `thread.open` draws them, with the cursor for the page before them (`older`, null at the first message). Refused: a cursor that is not a message id (`invalid_request`), a conversation this run does not know (`not_found`), one the API no longer has (`thread_not_found`), offline, and a page this version cannot read (`unavailable`: an answer whose `next` is no message id is not read as the end of the conversation) |
+| `thread.remove` (Buddy) | removes one of Buddy's conversations (item 102l-6): `POST /v1/chat/threads/remove` with exactly `{ id }` and the owner session of the shop the conversation was listed or made for, once, after the conversation's own messages already on their way; answers `{ thread, archived: false }` and tells the screens (`thread.removed`). One made here and not sent to yet is just dropped, with nothing sent. A task and a member are refused `not_yet`, and a conversation this run no longer knows (removed already, or the sign-in ended) `not_found` ("That is not in this shop any more."), with nothing sent. Refusals are in Buddy's chat on Connected, below |
 | `chat.send` (Buddy) | for a shop the person owns, one message to `POST /v1/chat/messages`, exactly `{ text }` for a new conversation or `{ thread, text }`, with the owner session of the shop the chat is of: Buddy's main chat is the shop it was opened for, a conversation the shop it was made or listed for, never the one the switcher shows by then. Buddy's answer is the turn's events, `turn.start`, `message`, `turn.end`, once the API answered. A refusal is refused in the person's words, so the store marks the message not sent with its reason; nothing is queued or sent again. A helper's shop is refused `owner_only` and a person in no shop `no_shop`, with nothing sent; a task (`task_thread`) and a member (`not_yet`) are said nothing |
 | `thread.create` (Buddy) | a conversation prepared here for the shop the switcher shows, with nothing sent (the API makes one only with its first message); the same `key` gives the same one. Refused as `chat.send` is for a helper's shop and a person in no shop; `not_yet` for a member |
 | `chat.open` (Buddy) | the attention items as notes ("A Linear issue was changed (ISS-9)"), then, as a runtime replays asks, one approval ask per request still open, oldest first, naming the exact action ("Send on LINE: “…”"). The answers offered are yes once and no. Needs you and Home show them. |
@@ -158,7 +160,7 @@ The protocol ops are answered from the latest read (`src/runtime/http/host.ts`, 
 | `connections.add`, `connections.password`, `connections.members`, `connections.rename`, `connections.remove` | the owner's change, to `POST /v1/vault/sign-ins`, `/v1/vault/sign-ins/password`, `/v1/vault/sign-ins/members`, `/v1/vault/outposts/rename` or `/remove` (below) |
 | `people.list` | who can use Manut AI for the shop the switcher shows, `GET /v1/people`, for Settings › People (below) |
 | `people.invite`, `people.cancelInvite`, `people.remove`, `people.setAway`, `people.clearAway` | the owner's change, to `POST /v1/people/invites`, `/invites/revoke`, `/remove`, `/away` or `/away/clear` (below) |
-| every other write (`chat.steer`, `thread.remove`, `automations.add`, …) | refused with `not_yet` and a translated "Not yet: Connected mode answers approvals, looks after what your team knows and its routines, and manages Connections and People for now." Nothing is sent to the API. |
+| every other write (`chat.steer`, `automations.add`, …) | refused with `not_yet` and a translated "Not yet: Connected mode answers approvals, looks after what your team knows and its routines, and manages Connections and People for now." Nothing is sent to the API. |
 
 The runtime's capabilities are `automations` only, so the Automations page shows and the screens that need a runtime on
 this computer (other places, plugins, restarts, coding-CLI logins) stay hidden. So does the chat box's model menu, and the
@@ -673,14 +675,33 @@ words in `src/threads/kind.ts`), the desktop's half of `docs/connected-chat.md`,
   has no route that makes an empty one, and a model call needs a message), and the store asks for the conversation before the person
   has typed anything. Its first message makes it. It keeps the id the screens gave it (`chat-new-…`) for the rest of the run, and is
   listed by the API's id from the next start.
-- **Removal is left out.** The API can delete a conversation (`POST /v1/chat/threads/remove`), but no screen offers to remove a thread
-  now: the thread tree with its x (`ThreadTree.tsx`) is no longer drawn, and History's Archive only hides a row on this computer. So
-  `thread.remove` stays `not_yet`, for a conversation as for a task. When a screen offers it again, its question must say the conversation
-  is deleted for good, where Practice's threads are archived and can be restored.
+- **Removal** (item 102l-6). `thread.remove` of a conversation deletes it and every message in it, for good (`archived: false`, where
+  Practice's threads are archived and can be restored). It posts exactly `{ id }` to `POST /v1/chat/threads/remove` with the owner session of
+  the shop the conversation was listed or made for, never the one the switcher shows by the time it is pressed, once. It goes after the
+  messages of that conversation already on their way (the same queue as its messages), so a message sent just before is kept and then
+  removed, and nothing makes the conversation again; the shop is checked again then, since the person may have stopped owning it. A
+  conversation made here and not sent to yet is just dropped, with nothing sent. A conversation removed is no longer known here, and a read
+  of the list that began before it was removed does not bring it back. A refusal is said in the person's words and leaves the conversation
+  where it was, but `thread_not_found` ("This conversation is not there any more."), which drops it as the list would on its next read; each
+  way `thread.removed` tells the screens when it is dropped, and nothing is sent again from here. `owner_only`: "Only Fon can remove
+  conversations at Baan Mali." (the API's 403, or a shop the person no longer owns, refused here with nothing sent), `unavailable`: "No reply
+  from the API, so it is not known whether this conversation was removed. Try again: if it is already gone, it leaves the list." (pressing
+  again is safe), any other refusal and a 200 that is not `{ id }`: "The API did not remove this conversation. It is still in the
+  list." / "This version of the app cannot read the API's answer.", offline and signed out in the runtime's own words, and a person whose
+  place in the shop ended in the host's words. While only a kept read is shown it answers `offline`, as every write does. The removal route
+  stays open with the chat switched off, so the chat's own refusals (`feature_disabled`, `consent_required`, `rate_limited`) are not its
+  own. No screen removes anything by itself: the row menu's Remove asks first (`docs/connected-chat.md`, "What 102l-6 built").
 - **What it keeps.** Nothing on disk: the read kept for offline use holds no chat, and the ids, titles and counts of the conversations
   this run knows are in memory only, and go at sign-out.
+- **Show older** (item 102l-6). A conversation with more than its newest 50 messages says so in `thread.open` (`older`: the API's `next`,
+  the id of the oldest message in the page), and `thread.older` reads the 50 before it with the owner session of the conversation's shop,
+  whichever shop the switcher shows by then, giving the next cursor, null at the first message. The store holds the cursor beside the chat
+  (`Chat.older`) and puts each page above everything the chat holds, without a message it already has; a chat read again shows its newest
+  page and its own cursor. Pages are drawn as `thread.open` draws them (a sent-on mark in front from `sentOnFrom`, no reach block after
+  `noted: true`; a page never splits an exchange, as the API's counts are even). Nothing read is kept on disk, and the main chat, which
+  shows none of an earlier conversation, has none.
 - **What it does not do.** Buddy only talks: nothing here starts, sends, posts, pays or decides anything of the shop's, and approvals
-  still settle only through the decide route; nothing is deleted. Older messages than a conversation's newest 50 are not read yet.
+  still settle only through the decide route; the one thing deleted is a conversation with Buddy, only after the person was asked.
   Buddy's chat has no model menu and never says a model is missing: the runtime names no model (`models.options` lists none, and the
   API chooses Buddy's), so its `models` capability is off and the chat shows neither.
 - **The reach cards' lines** (items 102l-3 and 102l-5, `docs/connected-chat.md`, "What 102l-3 built" and "What 102l-5 changed";
@@ -695,9 +716,12 @@ words in `src/threads/kind.ts`), the desktop's half of `docs/connected-chat.md`,
   block is left out). A conversation's name is the API's.
 - **Tests.** `chat.test.ts` (each op over the fake API: the session, the body, the turn, the conversation listed and opened, two at
   once, every refusal in words with one request and no turn, blank and too long, signed out, the store marking a refused message
-  "Not sent", offline, a helper's shop, a task told from a conversation, the shop after the switcher moved, removal not offered, and
-  nothing kept),
-  `src/threads/kind.test.ts` (the words), and `ownerChatRoutes` in `testkit.ts`, which answers as apps/api's chat does.
+  "Not sent", offline, a helper's shop, a task told from a conversation, the shop after the switcher moved, removal (exactly `{ id }`, the
+  shop it was listed for, queued behind its messages, every refusal, a stale list read, a prepared conversation, the team's work) and
+  older messages (the pages, the cursor, the session, the refusals, nothing kept), and nothing kept),
+  `src/threads/kind.test.ts` (the words), `src/threads/removeAsk.test.ts`, `RemoveConversation.test.tsx` and `ShowOlderMessages.test.ts`
+  (the question and Show older), `src/state/chatOlder.test.ts` (the store's pages), and `ownerChatRoutes` in `testkit.ts`, which answers as
+  apps/api's chat does (pages by `before` and `limit`, removal by `{ id }`).
 
 ## Older tasks
 

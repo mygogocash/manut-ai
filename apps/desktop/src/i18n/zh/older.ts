@@ -8,4 +8,8 @@ export const older: Record<keyof typeof en, string> = {
   "older.again": "重试",
   "older.failed": "无法加载更早的工作。这里显示的内容没有变化。",
   "older.offline": "显示更早的工作需要网络连接。这里显示的内容没有变化。",
+  // Show older at the top of a conversation (item 102l-6)
+  "older.messages.show": "Show older",
+  "older.messages.reading": "Reading older messages…",
+  "older.messages.failed": "Older messages could not be read. What is shown here has not changed.",
 };

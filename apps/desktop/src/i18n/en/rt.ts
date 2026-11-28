@@ -157,4 +157,8 @@ export const rt = {
   "rt.chat.unreadable": "This version of the app cannot read the API's answer. Open the conversation again to see it.",
   "rt.chat.answerRefused": "Buddy did not answer this one.",
   "rt.chat.answerCut": "(The answer was cut short.)",
+  // what a removal says when the API did not do it, and who may remove (item 102l-6)
+  "rt.chat.removeOwnerOnly": "Only {owner} can remove conversations at {shop}.",
+  "rt.chat.removeRefused": "The API did not remove this conversation. It is still in the list.",
+  "rt.chat.removeUnavailable": "No reply from the API, so it is not known whether this conversation was removed. Try again: if it is already gone, it leaves the list.",
 };

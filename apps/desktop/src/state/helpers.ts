@@ -274,8 +274,12 @@ export function applyOpened(chat: Chat, res: ChatOpenResult, now: number, bot: s
     }
     return i.ts >= lastServerTs;
   });
+  // what the read says of older messages replaces what the chat knew: a chat read again shows its newest page, so the older rows a
+  // press of Show older added are not kept (above), and the cursor is the page's own
+  const { older: _older, ...held } = withItems(chat, mergeByTs(server, keep));
   let next: Chat = {
-    ...withItems(chat, mergeByTs(server, keep)),
+    ...held,
+    ...(res.older !== undefined ? { older: res.older } : {}),
     model: res.model,
     provider: res.provider,
     reasoning: res.reasoning,
