@@ -143,4 +143,6 @@ export const ss = {
   "ss.noAskPath": "{agent} does not ask before it runs a command or changes a file, so Manut AI runs it only in a terminal.",
   "ss.noAsksOmp": "{agent} did not start because its own settings let it run commands and change files without asking first. In {agent}'s own settings and this project's, set tools.approvalMode to always-ask and remove any tools.approval entry that says allow (omp config list --scope=global and --scope=project show them), then start the chat again.",
   "ss.noAsksCheck": "{agent} did not start because Manut AI could not check that its own settings make it ask first. Check that omp config list --json works in a terminal in this folder and that PI_CONFIG_FILES is not set, then start the chat again.",
+  // oh-my-pi in a folder whose own tools, plugins or .env variables would act as it starts (item 139b)
+  "ss.ompProjectCode": "{agent} did not start because this folder holds its own code or variables for it ({what}), which would run or apply as soon as it starts, before anything asks you. To use them, open this folder in a terminal session of {agent}; otherwise remove {what} (for .env, only its lines that start with PI_ or OMP_), then start the chat again.",
 };

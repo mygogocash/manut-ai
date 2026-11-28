@@ -132,9 +132,16 @@ pub const GROK_CHAT_ARGS: [&str; 4] = ["--permission-mode", "default", "agent", 
 /// every write and every command, as Kit's dial lets a read go alone. Written as one argument, the form the help prints.
 pub const OMP_ASKS: &str = "--approval-mode=always-ask";
 
-/// oh-my-pi's chat: its RPC mode in its asking mode ([`OMP_ASKS`]). What else holds it to the cards (an overlay that
-/// denies its `task` tool, and its own settings read before the start) is in [`crate::omp_asks`].
-pub const OMP_CHAT_ARGS: [&str; 3] = ["--mode", "rpc", OMP_ASKS];
+/// oh-my-pi's chat: its RPC mode in its asking mode ([`OMP_ASKS`]), with no extension or hook it discovers itself
+/// (`--no-extensions`: "Disable extension discovery (explicit -e paths still work)", `omp --help`) and no language server
+/// or formatter (`--no-lsp`: "Disable LSP tools, formatting, and diagnostics"), item 139b. omp imports a project's own
+/// extensions and hooks as a session starts and has no switch that leaves out only those, so all of them are left out and
+/// the person's own are named again with `-e` and `--hook` ([`crate::omp_asks::own_files`]); and it looks for a language
+/// server and a formatter in the project's own folders first, so they would run the project's code after a step the
+/// person allowed, as item 114 found for OpenCode. What else holds it to the cards (an overlay that denies its `task` tool
+/// and leaves out the project's MCP servers, its own settings read before the start, and a refusal in a folder whose own
+/// tools, plugins or `.env` would still act) is in [`crate::omp_asks`].
+pub const OMP_CHAT_ARGS: [&str; 5] = ["--mode", "rpc", OMP_ASKS, "--no-extensions", "--no-lsp"];
 
 /// The built-in agents that never run as the app's chat or lane, only as their own terminal, because they cannot ask the
 /// person before a tool runs (item 139). pi has no ask at all: "it does not ask for approval before every tool call" (its
@@ -1980,7 +1987,8 @@ mod tests {
         assert_eq!(chat_args("codex").unwrap(), ["app-server"]);
         // item 139: oh-my-pi's chat is its RPC mode in its asking mode, the flag as one argument (`omp --help`'s form), and
         // no other approval mode is ever named
-        assert_eq!(chat_args("omp").unwrap(), ["--mode", "rpc", "--approval-mode=always-ask"]);
+        // item 139b: no extension, hook, language server or formatter it finds itself (the person's own are named at the start)
+        assert_eq!(chat_args("omp").unwrap(), ["--mode", "rpc", "--approval-mode=always-ask", "--no-extensions", "--no-lsp"]);
         for loose in ["yolo", "write", "--auto-approve", "--yolo", "--plan-yolo"] {
             assert!(!chat_args("omp").unwrap().iter().any(|a| a.contains(loose)), "{loose}");
         }

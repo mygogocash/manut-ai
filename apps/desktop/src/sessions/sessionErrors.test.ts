@@ -3,7 +3,7 @@
 // shell writes them, so a change on either side fails here.
 import { afterEach, describe, expect, it } from "vitest";
 import { setLang, t } from "../i18n";
-import { MODE_KEPT, NO_ASK_PATH, NO_ASKS, NO_ASKS_COMMAND, NO_CHECK, signedOutSaid } from "./sessionErrors";
+import { MODE_KEPT, NO_ASK_PATH, NO_ASKS, NO_ASKS_COMMAND, NO_CHECK, OMP_PROJECT_CODE, signedOutSaid } from "./sessionErrors";
 
 afterEach(() => setLang("en"));
 
@@ -64,5 +64,22 @@ describe("an agent that would not ask before it acts", () => {
     setLang("en");
     expect(signedOutSaid(omp)).toContain("set tools.approvalMode to always-ask and remove any tools.approval entry that says allow");
     expect(signedOutSaid(pi)).toBe(pi);
+  });
+
+  // item 139b: omp_asks.rs `project_code_refusal("oh-my-pi", what)`, word for word, with what it found named in every language
+  it("oh-my-pi's refusal in a folder with its own tools, plugins or .env variables names what it found", () => {
+    const shell = (what: string) => `oh-my-pi did not start because this folder holds its own code or variables for it (${what}), which would run or apply as it starts, before anything asks you.`;
+    for (const what of [".omp/tools", ".env", "/Users/k/work/.omp/plugins"]) {
+      expect(OMP_PROJECT_CODE.exec(shell(what))?.slice(1)).toEqual(["oh-my-pi", what]);
+      for (const lang of ["en", "ja", "ko", "zh"] as const) {
+        setLang(lang);
+        const said = signedOutSaid(shell(what));
+        expect(said).toBe(t("ss.ompProjectCode", { agent: "oh-my-pi", what }));
+        expect(said).toContain(what);
+        expect(said).toContain("PI_");
+      }
+    }
+    setLang("en");
+    expect(signedOutSaid(shell(".omp/tools"))).toContain("open this folder in a terminal session of oh-my-pi");
   });
 });
