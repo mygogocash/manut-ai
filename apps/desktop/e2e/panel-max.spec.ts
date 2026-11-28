@@ -517,11 +517,11 @@ test("Esc in a field inside the panel does not restore it", async ({ page }) => 
 test("the graph's expand button maximises the panel on Plans, and restores it", async ({ page }) => {
   await openPanel(page, "runs");
   const expand = page.getByTestId("graph-expand");
-  await expect(expand).toHaveAttribute("title", /^Full view (⌘⇧G|Ctrl\+Shift\+G)$/);
+  await expect(expand).toHaveAttribute("title", /^Full view \((⇧⌘G|Ctrl\+Shift\+G)\)$/);
   await expand.click();
   await expectMaxed(page);
   await expect(page.getByTestId("details-panel")).toHaveAttribute("data-tab", "runs");
-  await expect(expand).toHaveAttribute("title", /^Restore (⌘⇧G|Ctrl\+Shift\+G)$/);
+  await expect(expand).toHaveAttribute("title", /^Restore \((⇧⌘G|Ctrl\+Shift\+G)\)$/);
   await expand.click();
   await expect(page.getByTestId("window")).not.toHaveClass(/\bpanel-max\b/);
 });
