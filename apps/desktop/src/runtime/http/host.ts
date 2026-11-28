@@ -68,7 +68,7 @@ import { OpError } from "../mock/host";
 import { decisionPath, outcomeOf, type Closing, type Outcome } from "./answer";
 import { answerable, isAsk, optionFor, parseAskId, parseShopAskId, type ShopApproval } from "./approvals";
 import { CACHE_MAX_AGE_MS, type CachedRead, type ShopCache } from "./cache";
-import { BuddyChat, isChatId, type ChatLink } from "./chat";
+import { BuddyChat, isChatId, isConversationId, type ChatLink } from "./chat";
 import { connectionHandlers, type OwnerLink } from "./connections";
 import { googleHandlers } from "./google";
 import { shopRoutines, teamRoutineRow } from "./customize";
@@ -250,9 +250,10 @@ const teamSig = (s: ShopSnapshot | null) => JSON.stringify(team(s).map((b) => [b
 
 /** The writes the owner makes to a shop's team (`change`): refused while only a kept read is shown, as every write is. */
 const TEAM_CHANGES = new Set(["team.pause", "team.resume", "routine.create", "routine.pause", "routine.resume", "routine.remove", "automations.pause", "automations.resume"]);
-/** Buddy's chat's writes (chat.ts): a message, and a conversation prepared. Refused while only a kept read is shown, as every write
- *  is: a conversation made then could not be sent to, and a message is never held to be sent later. */
-const CHAT_WRITES = new Set(["chat.send", "thread.create"]);
+/** Buddy's chat's writes (chat.ts): a message, a conversation prepared, and a conversation removed. Refused while only a kept read is
+ *  shown, as every write is: a conversation made then could not be sent to, a message is never held to be sent later, and a removal
+ *  needs the live API to delete anything. */
+const CHAT_WRITES = new Set(["chat.send", "thread.create", "thread.remove"]);
 
 export class HttpHost {
   readonly session: ApiSession;
@@ -1423,9 +1424,22 @@ export class HttpHost {
       "folder.resume": notYet,
       // A conversation with Buddy, prepared here; its first message makes it on the API (chat.ts).
       "thread.create": (p) => (member(p), p.bot === TEAM ? this.chat.create(p) : notYet()),
-      // No screen offers to remove a thread now (the thread tree with its x is no longer drawn), so a conversation is not removed
-      // from here, though the API has a route for it; a task never is.
-      "thread.remove": notYet,
+      // A conversation with Buddy is deleted on the API, with every message in it, only after a screen asked the person (chat.ts,
+      // item 102l-6). The team's work is never removed from here, and a member has no conversations: "not yet", nothing sent.
+      "thread.remove": (p) => {
+        member(p);
+        if (p.bot === TEAM && this.chat.knows(p.thread)) return this.chat.remove(p.thread);
+        // a conversation this run no longer knows is gone (removed already, or the sign-in ended): said so, not "not yet", which is what
+        // the team's work and a member's threads are told
+        if (p.bot === TEAM && isConversationId(p.thread)) throw notFound();
+        return notYet();
+      },
+      // Show older, in a conversation: the page of messages before the one a screen already shows (chat.ts).
+      "thread.older": (p) => {
+        member(p);
+        if (p.bot !== TEAM || !this.chat.knows(p.thread)) throw notFound();
+        return this.chat.older(p.thread, p.before);
+      },
       "bots.rename": notYet,
       "bots.set_avatar": notYet,
       "bots.restart": notYet,

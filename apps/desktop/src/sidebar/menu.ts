@@ -88,6 +88,8 @@ export interface RecentThread {
   ts: number;
   /** Its turn runs now (item 94). */
   working?: boolean;
+  /** What the runtime says it is (a conversation with Buddy, or the team's work, item 102l-2); a row's menu offers Remove for a conversation. */
+  kind?: ThreadRow["kind"];
 }
 
 /** The `n` threads of the listed members with the newest activity, newest first. */
@@ -123,7 +125,7 @@ export function recentParts(
   const working = opts.working ?? (() => false);
   const all = threadsNewestFirst(threads, members).map((e) => ({ key: threadRowKey(e.bot, e.row.thread), needs: needs(e.bot, e.row), working: working(e.bot, e.row), e }));
   const places = arrange(all, marks, now);
-  const of = (x: (typeof all)[number]): RecentThread => ({ bot: x.e.bot, thread: x.e.row.thread, title: x.e.row.title, ts: x.e.ts, working: x.working });
+  const of = (x: (typeof all)[number]): RecentThread => ({ bot: x.e.bot, thread: x.e.row.thread, title: x.e.row.title, ts: x.e.ts, working: x.working, ...(x.e.row.kind ? { kind: x.e.row.kind } : {}) });
   // a chat that needs the person stays in Recent whatever else it is doing
   const away = (x: (typeof all)[number]) => !!opts.group && x.working && !x.needs;
   return {

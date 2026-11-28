@@ -46,4 +46,6 @@ export const row: Record<keyof typeof en, string> = {
   "row.why.quiet": "{n}일 동안 조용해서 일단 완료",
   "row.why.quiet1": "하루 동안 조용해서 일단 완료",
   "row.why.merged": "일단 완료: 풀 리퀘스트가 병합되었습니다",
+  // Remove, on a conversation's row menu (item 102l-6)
+  "row.removeChat": "Remove conversation…",
 };

@@ -306,7 +306,13 @@ export interface Actions {
    *  it went. */
   postFromCard(key: string, shown: string, wire: { text: string; sentOnFrom?: string }): Promise<string | null>;
   threadInterrupt(bot: string, thread: string): Promise<void>;
-  /** Stop the thread when it runs, then archive it in Hermes (hidden, kept, restorable). Rejects on refusal. */
+  /** Show older, in a conversation of a runtime that pages its messages (the connected runtime, item 102l-6): reads the page before the
+   *  oldest message the chat shows, from the cursor the chat holds (`Chat.older`), and puts it above. Nothing happens when the chat holds
+   *  no cursor. Rejects with the runtime's refusal in its own words, and the chat is as it was. */
+  threadOlder(bot: string, thread: string): Promise<void>;
+  /** Stop the thread when it runs, then archive it in Hermes (hidden, kept, restorable); on the connected runtime a conversation with
+   *  Buddy is deleted for good with every message in it (item 102l-6), so a screen asks the person first (src/threads/removeAsk.ts).
+   *  Rejects on refusal. */
   removeThread(bot: string, thread: string): Promise<void>;
   /** A route card's answer: `send` sends the person's message to the card's thread (and adds a link line); `keep`
    *  only closes the card. */
@@ -1526,6 +1532,16 @@ export function createStore(bridge: BridgeLike, opts: StoreOptions = {}): Store 
       } catch (e) {
         fail(e);
       }
+    },
+    async threadOlder(bot, thread) {
+      const key = threadKey(bot, thread);
+      const before = state.chats[key]?.older;
+      if (!before) return;
+      const res = await threadReq("thread.older", { bot, thread, before });
+      // read again or removed while the page was on its way: then the cursor it was read from is not the chat's any more, and a
+      // page put above would not meet the messages below it. The person presses again.
+      if (state.chats[key]?.older !== before) return;
+      dispatch({ type: "chat.older", bot: key, messages: res.messages, older: res.older });
     },
     async removeThread(bot, thread) {
       const key = threadKey(bot, thread);

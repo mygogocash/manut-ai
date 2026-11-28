@@ -153,6 +153,43 @@ describe("the days built from the store", () => {
   });
 });
 
+describe("Remove on History's rows (item 102l-6)", () => {
+  const at = Date.now() / 1000;
+  const thread = (id: string, title: string, kind?: "chat" | "task") => ({ thread: id, title, cwd: "", started_at: at, running: false, needs: false, message_count: 2, ...(kind ? { kind } : {}) });
+  async function withKinds() {
+    const store = await demoStore();
+    store.dispatch({ type: "threads", bot: "buddy", threads: [thread("cht-1", "Which prices changed?", "chat"), thread("task-1", "Reply to Khun Mali", "task"), thread("plain-1", "A thread of Practice")] });
+    return store;
+  }
+
+  it("is carried by a conversation's row only: not the team's work, and not a thread of a runtime that marks none", async () => {
+    const store = await withKinds();
+    const rows = historyDays(store.getSnapshot(), "", Date.now()).flatMap((d) => d.rows);
+    expect(Object.fromEntries(rows.map((r) => [r.title, r.remove]))).toEqual({
+      "Which prices changed?": { bot: "buddy", thread: "cht-1", title: "Which prices changed?" },
+      "Reply to Khun Mali": undefined,
+      "A thread of Practice": undefined,
+    });
+  });
+
+  it("is carried by a conversation in History's Archive too, which brings it back by its menu and can remove it", async () => {
+    const store = await withKinds();
+    const marks: RowMarks = { [threadRowKey("buddy", "cht-1")]: { archived: 5 }, [threadRowKey("buddy", "task-1")]: { archived: 5 } };
+    const archived = historyArchive(store.getSnapshot(), marks);
+    expect(Object.fromEntries(archived.map((r) => [r.title, r.remove]))).toEqual({
+      "Which prices changed?": { bot: "buddy", thread: "cht-1", title: "Which prices changed?" },
+      "Reply to Khun Mali": undefined,
+    });
+  });
+
+  it("names a conversation no message has named yet as a new thread is named", async () => {
+    const store = await demoStore();
+    store.dispatch({ type: "threads", bot: "buddy", threads: [thread("chat-new-1", "", "chat")] });
+    const rows = historyDays(store.getSnapshot(), "", Date.now()).flatMap((d) => d.rows);
+    expect(rows[0].remove).toEqual({ bot: "buddy", thread: "chat-new-1", title: "New thread" });
+  });
+});
+
 describe("the Archive (item 76)", () => {
   afterEach(() => vi.useRealTimers());
 

@@ -29,6 +29,9 @@ import { MoreButton, settledWhy, useRowMenu } from "../sidebar/RowMenu";
 import { NO_SELECT, useRowSelect, useSelectionEscape, type RowSelect } from "../sidebar/useRowSelect";
 import { placeOf, threadRowKey, untilWord, useRowMarks, type RowMark, type RowMarks, type RowPlace } from "../sidebar/rows";
 import { dragRef } from "../chat/box/threadContext";
+import { removeEntry } from "../threads/RemoveConversation";
+import type { ConversationRef } from "../threads/removeAsk";
+import { canRemove } from "../threads/types";
 import type { PastChat } from "../sessions/host";
 import { AgentMark } from "../sessions/AgentMark";
 import { folderName } from "../sessions/agents";
@@ -57,6 +60,8 @@ export interface HistoryRowView {
   /** What the person did to the chat (pinned, snoozed, done for now) and where it stands now: shown as a quiet tag. */
   mark?: RowMark;
   place?: RowPlace;
+  /** A conversation with Buddy (item 102l-6): its menu ends with Remove, which asks first. None for any other row. */
+  remove?: ConversationRef;
   /** "job": a job of the team (its page opens), not a thread. Its tag is its stage's, not a thread's status. "past": a Claude
    *  Code or Codex conversation of a folder brought over (item 101e), which continues as a session when opened. */
   kind?: "job" | "past";
@@ -154,6 +159,7 @@ export function historyDays(
         time: hhmm(new Date(e.ts * 1000)),
         open: () => void s.openThread(e.bot, e.row.thread),
         lane: threadLane(e.bot, who),
+        ...(canRemove(e.row) ? { remove: { bot: e.bot, thread: e.row.thread, title: e.row.title || untitled } } : {}),
       } satisfies HistoryRowView,
     }))
     .filter((x) => lane === "all" || x.row.lane === lane);
@@ -223,6 +229,7 @@ export function historyArchive(s: AppState & Actions, marks: RowMarks): HistoryR
       time: hhmm(new Date(e.ts * 1000)),
       open: () => void s.openThread(e.bot, e.row.thread),
       lane: threadLane(e.bot, who),
+      ...(canRemove(e.row) ? { remove: { bot: e.bot, thread: e.row.thread, title: e.row.title || untitled } } : {}),
     }));
 }
 
@@ -235,13 +242,14 @@ function markWord(r: HistoryRowView, nowMs: number): { text: string; tip?: strin
   return null;
 }
 
-/** A chat's menu on its History row: the same Pin, Snooze, Done for now and Archive (or Bring back) as everywhere. It keeps state, so
- *  it is its own element and `HistoryView` stays a function of its props. */
+/** A chat's menu on its History row: the same Pin, Snooze, Done for now and Archive (or Bring back) as everywhere, and for a
+ *  conversation with Buddy a last entry, Remove, which asks first. It keeps state, so it is its own element and `HistoryView` stays a
+ *  function of its props. */
 export function HistoryMore({ row, keys = [] }: { row: HistoryRowView; keys?: readonly string[] }) {
   const marks = useRowMarks();
   // the rows selected with it (item 94), when it is one of two or more: the menu acts on all of them
   const many = keys.length > 1;
-  const menu = useRowMenu({ rowKey: row.rowKey ?? "", kind: "chat", mark: marks[row.rowKey ?? ""], name: many ? t("row.count", { n: keys.length }) : row.title, working: row.status === "running", keys });
+  const menu = useRowMenu({ rowKey: row.rowKey ?? "", kind: "chat", mark: marks[row.rowKey ?? ""], name: many ? t("row.count", { n: keys.length }) : row.title, working: row.status === "running", keys, extra: row.remove ? removeEntry(row.remove) : undefined });
   return (
     <>
       <MoreButton name={row.title} onOpen={menu.open} className="hist-more" />

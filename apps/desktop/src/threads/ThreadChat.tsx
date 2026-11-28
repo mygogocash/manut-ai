@@ -15,6 +15,7 @@ import { AgentBoxTools, pickFolder, teammates, useAgentBox } from "../chat/box/A
 import { chatScope } from "../chat/box/scope";
 import { answersOnSend, runtimeKind } from "../runtime";
 import { BuddyMayReach } from "../jobs/MayReach";
+import { ShowOlderMessages } from "./ShowOlderMessages";
 
 export function ThreadChat({ bot, thread }: { bot: Bot; thread: string }) {
   const s = useStore();
@@ -54,6 +55,8 @@ export function ThreadChat({ bot, thread }: { bot: Bot; thread: string }) {
           face={<Avatar bot={bot.name} size={28} />}
           connectionNotice={false}
           answersOnSend={answersOnSend()}
+          // on Connected, a conversation with more than its newest 50 messages starts with Show older (item 102l-6)
+          before={<ShowOlderMessages key={key} bot={bot.name} thread={thread} />}
           emptyHint={
             !chat?.turn && (
               <div className="th-empty" data-testid="thread-empty">

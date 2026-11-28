@@ -356,3 +356,47 @@
   padding: 0 24px;
   word-break: keep-all;
 }
+/* Show older, at the top of a conversation with Buddy (ShowOlderMessages.tsx, item 102l-6): one quiet row, the same height whether it
+   holds only its button or a line beside it, since the column is kept where it was by the first row's place (chat/parts/Timeline.tsx)
+   and a row that grew or shrank above it would move the view. The line is cut short, with its words in the tooltip, rather than wrap. */
+.thread > .th-older {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  height: 30px;
+  margin: 0 auto;
+}
+.th-older > p {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--muted);
+}
+.th-older > p[role="alert"] {
+  color: var(--aui-danger);
+}
+.th-older-btn {
+  flex: none;
+  height: 24px;
+  padding: 0 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  color: var(--body);
+  background: var(--raise2);
+}
+.th-older-btn:hover {
+  color: var(--ink);
+  background: var(--line-strong);
+}
+.th-older-btn:focus-visible {
+  outline: 2px solid var(--line-strong);
+  outline-offset: 2px;
+}
+.th-older-btn[aria-disabled="true"] {
+  opacity: 0.55;
+  cursor: progress;
+}
