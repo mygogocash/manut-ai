@@ -6,6 +6,7 @@ import { HOUR_MS, MAX_TEXT_CHARS, MAX_THREADS, MESSAGES_PER_HOUR, type ThreadRec
 import worker, { type Env } from "../src/index";
 import { proposeFact } from "../src/memory";
 import { ProviderError, standInProvider, type ChatRequest, type ModelProvider } from "../src/model-provider";
+import { readShop } from "../src/people";
 import { tenantCall } from "../src/tenant-data";
 import { adminFetch, tenantSession } from "./authenticated-fixtures";
 import {
@@ -370,6 +371,23 @@ describe("R3: the shop's and customers' words are context, never instructions", 
     await direct(owner.headers, { thread: sent.body.thread.id, text: "And now?" }, { provider: recorder.provider });
     expect(recorder.requests[1]!.messages.map((one) => one.role)).toEqual(["user", "assistant", "user"]);
     expect(recorder.requests[1]!.messages.at(-1)).toEqual({ role: "user", content: "And now?" });
+  });
+
+  // Item 143 (L4 of the sixth security read): the shop's name went into Buddy's instructions raw while every fact was masked.
+  it("masks a key typed into the shop's name, with the app's real masker, in every request the model is sent", async () => {
+    const { shop, owner } = await chattingShop(`Baan ${KEY}`);
+    const recorder = recording();
+    // The premise: the shop's record holds the name as the operator typed it, key and all.
+    expect((await readShop(bindings, shop.tenant))?.name).toBe(`Baan ${KEY}`);
+    const first = await direct(owner.headers, { text: "Which shop is this?" }, { provider: recorder.provider });
+    expect(first.status).toBe(200);
+    // The model reads the name with the key hidden, and on the next turn too.
+    await direct(owner.headers, { thread: first.body.thread.id, text: "And the one after?" }, { provider: recorder.provider });
+    expect(recorder.requests).toHaveLength(2);
+    for (const request of recorder.requests) {
+      expect(request.system).toContain("You are talking with the owner of Baan •••• in the app's chat.");
+      expect(JSON.stringify(request)).not.toContain(KEY);
+    }
   });
 });
 

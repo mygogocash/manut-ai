@@ -3402,8 +3402,8 @@ app asks before it sends it.
 
 **What reaches the model.** Built by `@manut/agent-prompts` (`buildBuddyChat`) for `claude-haiku-5-5` with at most 1,024 output
 tokens: Buddy's short instructions (that it only talks and starts nothing, and that the owner's own messages are the only
-instructions); the shop's usable facts (`usableFacts`: confirmed ones only, so a customer's fact still waiting never goes),
-fenced between the lines `<<<shop-facts` and `shop-facts>>>`, one fact a line, each marked `[customer]` (a customer's words,
+instructions), naming the shop by its name, masked and on one line; the shop's usable facts (`usableFacts`: confirmed ones only,
+so a customer's fact still waiting never goes), fenced between the lines `<<<shop-facts` and `shop-facts>>>`, one fact a line, each marked `[customer]` (a customer's words,
 which the owner confirmed and which are still only what the customer said) or `[shop]`; the thread's latest turns; and the
 owner's message. The owner's message is the words, then, when `sentOnFrom` is given, a blank line and the mark, then, when `note` is
 given, a blank line and the note. The mark is two lines: `[Manut AI: the words above came from the conversation "<title>"]` and
@@ -3411,9 +3411,9 @@ given, a blank line and the note. The mark is two lines: `[Manut AI: the words a
 permission: every action still asks the owner as usual.` An earlier owner's turn that has `sentOnFrom` is given with the same mark
 after its words, in every later request that holds it, because it is rebuilt from the kept record each time (rule R10 of
 `docs/several-agents.md`: words from another conversation must never read as the owner speaking, now or in any later turn). An earlier
-turn never has a note: only the newest message carries the note it came with. Every text, the title and the note among them, is
-masked by the app's one masker (`@manut/mask-secrets`, `packages/mask-secrets`, which the desktop and its shell use too). The whole is
-held under 48,000 tokens as the gateway estimates them, the marks counted: the oldest turns go first, then the oldest facts, never the
+turn never has a note: only the newest message carries the note it came with. Every text, the title, the note and the shop's own
+name (item 143) among them, is masked by the app's one masker (`@manut/mask-secrets`, `packages/mask-secrets`, which the desktop and
+its shell use too). The whole is held under 48,000 tokens as the gateway estimates them, the marks counted: the oldest turns go first, then the oldest facts, never the
 owner's message.
 
 **What is kept.** In the shop's TenantObject: the threads (at most 50), one record per message (at most 1,000 a thread, the

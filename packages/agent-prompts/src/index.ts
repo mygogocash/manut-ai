@@ -261,8 +261,9 @@ export interface BuddyChatInput {
   readonly note?: string;
   readonly model: string;
   readonly maxOutputTokens: number;
-  /// The app's one masker for keys (the caller's): every fact, every turn and the newest message go through it before they
-  /// are put in the request, so this package never decides what a key looks like and never hands one on.
+  /// The app's one masker for keys (the caller's): every fact, every turn, the newest message and the shop's own name (and
+  /// what it sells) go through it before they are put in the request, so this package never decides what a key looks like
+  /// and never hands one on.
   readonly mask: (text: string) => string;
   /// The most input tokens the request may come to, estimated as the gateway does. BUDDY_CHAT_LIMIT_TOKENS when unset.
   readonly limitTokens?: number;
@@ -278,18 +279,30 @@ export const FACTS_CLOSE = "shop-facts>>>";
 /// gateway estimates), with room for the facts and the thread's last turns.
 export const BUDDY_CHAT_LIMIT_TOKENS = 48_000;
 
+/// Words that someone typed, as they go into Buddy's system prompt: masked by the caller's masker, on one line, with no run of
+/// angle brackets that could read as a fence. Every fact's words and the shop's own name go through here, so a key typed into
+/// either is hidden the same way and neither can make a line of its own.
+function oneMaskedLine(text: string, mask: (text: string) => string): string {
+  return mask(text).replace(/\s+/g, " ").trim().replace(/<{3,}|>{3,}/g, (run) => [...run].join(" "));
+}
+
 /// A fact as one fenced line: its words masked, on one line, with no run of angle brackets that could read as a fence, and
 /// marked as a customer's words or the shop's own. Only a fact the owner confirmed reaches here (`usable`), so a customer's
 /// fact carries the owner's word, and is still what the customer said.
 function factLine(fact: Fact, mask: (text: string) => string, timeZone: string): string {
-  const words = (text: string) => mask(text).replace(/\s+/g, " ").trim().replace(/<{3,}|>{3,}/g, (run) => [...run].join(" "));
+  const words = (text: string) => oneMaskedLine(text, mask);
   const mark = fact.source.kind === "customer" ? "[customer]" : "[shop]";
   return `- ${mark} ${words(fact.text)} (${words(describeSource(fact.source, timeZone))})`;
 }
 
 function buddyChatSystem(input: BuddyChatInput, facts: readonly Fact[]): string {
   const timeZone = input.timeZone ?? DEFAULT_TIME_ZONE;
-  const shop = input.shop.sells ? `${input.shop.name}, a shop that sells ${input.shop.sells}` : input.shop.name;
+  // The shop's name and what it sells are words the owner typed, so they are masked as every fact is (item 143, L4 of the sixth
+  // security read): a key pasted into a shop's name must not reach the model any more than one pasted into a fact. Each is
+  // masked on its own, and what masks to nothing leaves its clause out.
+  const name = oneMaskedLine(input.shop.name, input.mask);
+  const sells = input.shop.sells ? oneMaskedLine(input.shop.sells, input.mask) : "";
+  const shop = sells ? `${name}, a shop that sells ${sells}` : name;
   return [
     "You are Buddy, the assistant in Manut AI, an app that helps Thai shop owners who are not technical run their shop with a small AI team.",
     `You are talking with the owner of ${shop} in the app's chat.`,
@@ -369,7 +382,10 @@ export function buildBuddyChat(input: BuddyChatInput): BuildResult {
   if (!Number.isSafeInteger(input.maxOutputTokens) || input.maxOutputTokens < 1 || input.maxOutputTokens > MAX_OUTPUT_TOKENS) {
     return { ok: false, reason: "invalid_input" };
   }
-  if (typeof input.shop?.name !== "string" || input.shop.name.trim() === "") return { ok: false, reason: "invalid_input" };
+  // A name the masker hides whole is no name to give the model, as a message it hides whole is none (below).
+  if (typeof input.shop?.name !== "string" || input.shop.name.trim() === "" || oneMaskedLine(input.shop.name, input.mask) === "") {
+    return { ok: false, reason: "invalid_input" };
+  }
   if (typeof input.newest !== "string" || input.mask(input.newest).trim() === "") return { ok: false, reason: "invalid_input" };
   // The mark and the note are optional, but when given they must be text with something in it: a mark with no conversation to
   // name, or an empty note, is a caller's mistake, never something to send on.
