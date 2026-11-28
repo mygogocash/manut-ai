@@ -200,8 +200,10 @@ describe("R1: the owner's session only, inside the shop's cap", () => {
     // The operator key, bare and with the console's Access context: no session at all.
     expect(await message({ authorization: "Bearer test-key" }, { text: "Spend the shop's money" })).toMatchObject({
       status: 401, body: { error: "unauthorized" } });
+    // Like every call the Worker's gate counts, it comes from a source address, as Cloudflare gives one to the console's too.
     const viaConsole = await adminFetch("https://api.manut.test/v1/chat/messages", { method: "POST",
-      headers: { authorization: "Bearer test-key", "content-type": "application/json" }, body: JSON.stringify({ text: "Hi" }) });
+      headers: { authorization: "Bearer test-key", "content-type": "application/json", "cf-connecting-ip": "198.51.100.251" },
+      body: JSON.stringify({ text: "Hi" }) });
     expect(viaConsole.status).toBe(401);
     // The owner's approval link, as a bearer: a link names one reply and is no session.
     const reply = await proposeReply(shop, "We open at nine.");
@@ -498,6 +500,70 @@ describe("the limits", () => {
     // An hour later the first message has left the hour.
     const later = await direct(owner.headers, { thread, text: "An hour on" }, { now: () => Date.now() + HOUR_MS + 1_000 });
     expect(later.status).toBe(200);
+  });
+
+  // Item 143 (L5 of the sixth security read): no call under /v1/chat/ was counted at the door, so each one that carried no session
+  // still woke the AuthObject. Now the Worker's gate counts every call per source address before the session is read.
+  it("counts every call at the door: past the limit, even with the owner's own session, nothing is read and the gateway is never asked", async () => {
+    const { shop, owner } = await chattingShop();
+    const first = await message(owner.headers, { text: "Hello Buddy" });
+    expect(first.status).toBe(200);
+    const thread = first.body.thread.id;
+    const before = await usage(shop.tenant);
+    const hourBefore = await hourCount(shop.tenant);
+
+    // Every call the Worker makes to the AuthObject or to a shop's object, and a limiter that answers as the test says.
+    const reached: string[] = [];
+    const watched = (name: "AUTH" | "TENANT") => ({
+      idFromName: (id: string) => bindings[name].idFromName(id),
+      get: (id: DurableObjectId) => {
+        const stub = bindings[name].get(id);
+        return { fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
+          const request = new Request(input, init);
+          reached.push(`${name} ${request.method} ${new URL(request.url).pathname}`);
+          return stub.fetch(request);
+        } };
+      },
+    });
+    let allow = false;
+    const keys: string[] = [];
+    const limiter = { limit: async ({ key }: { key: string }) => {
+      keys.push(key);
+      return { success: allow };
+    } } as RateLimit;
+    const target = { ...standIn, AUTH: watched("AUTH"), TENANT: watched("TENANT"), CHAT_LIMITER: limiter } as unknown as Env;
+
+    const calls: [string, string, unknown?][] = [
+      ["POST", "/v1/chat/messages", { thread, text: "Spend the shop's money" }],
+      ["GET", "/v1/chat/threads"],
+      ["GET", `/v1/chat/threads/${thread}`],
+      ["POST", "/v1/chat/threads/remove", { id: thread }],
+    ];
+    for (const [method, path, body] of calls) {
+      const refused = await send(owner.headers, method, path, body, target);
+      expect(refused.status, `${method} ${path}`).toBe(429);
+      expect(refused.body).toEqual({ error: "rate_limited" });
+      expect(refused.headers.get("retry-after")).toBe("60");
+    }
+    // Not a call to the AuthObject or to the shop's object, no hold or call in the ledger, nothing counted in the shop's hour, and
+    // the removal did not happen: the thread is still there, with both its messages.
+    expect(reached).toEqual([]);
+    expect(keys).toHaveLength(calls.length);
+    expect(await usage(shop.tenant)).toEqual(before);
+    expect(await hourCount(shop.tenant)).toBe(hourBefore);
+    expect((await send<{ threads: Thread[] }>(owner.headers, "GET", "/v1/chat/threads")).body.threads.map((one) =>
+      [one.id, one.messageCount])).toEqual([[thread, 2]]);
+
+    // Under the limit the same calls go on as they did before the limit: the session is read, the shop answers, the gateway is asked.
+    allow = true;
+    for (const [method, path, body] of calls.slice(0, 3)) {
+      expect((await send(owner.headers, method, path, body, target)).status, `${method} ${path}`).toBe(200);
+    }
+    expect(reached.length).toBeGreaterThan(0);
+    expect(reached.some((call) => call.startsWith("TENANT POST /people/owner-session-check"))).toBe(true);
+    expect(keys).toHaveLength(calls.length + 3);
+    expect((await usage(shop.tenant)).counts.ok).toBe(before.counts.ok + 1);
+    expect(await hourCount(shop.tenant)).toBe(hourBefore + 1);
   });
 
   it("keeps 50 threads and refuses a 51st, and refuses a message a full thread cannot take, dropping nothing", async () => {
