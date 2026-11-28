@@ -166,6 +166,12 @@ lines is, `<path>:L<start>-L<end>` with a few words for deleted lines and for a 
 written here as `atText` in `apps/desktop/src/chat/box/carry.ts`, the first line of a note's quote, with its words changed to say
 which file's numbers the lines are; and it read, to write anew, its Changes pane's scope control (all changes, uncommitted, one
 commit; `DiffPaneScope`, `ChangesScopeControl`). Its diff library `@pierre/diffs` is not used.
+Item 167a (lanes in the side menu) took, at `b0b0cdc6bd7eadf205a3fe8c45801affefbd89c5`, its previous and next workspace keys and
+their rule (`PREV_WORKSPACE` and `NEXT_WORKSPACE` in `apps/desktop/src/renderer/hotkeys/registry.ts`: ⌘⌥↑ and ⌘⌥↓ on macOS,
+Ctrl+Shift+Alt with the arrow elsewhere, through the sidebar's order and wrapping at its ends, as
+`useDashboardSidebarShortcuts.ts` steps), as the `lane-prev` and `lane-next` actions of `apps/desktop/src/app/keys.ts`; and it read
+its workspaces sidebar's rows (one line, a status glyph before the name, actions on hover) for the menu's lane rows, drawn in Manut
+AI's look (`apps/desktop/src/sidebar/MenuLanes.tsx`).
 
 Libraries added for one feature are named here too: `qrcode` 1.5.4 (MIT, soldair/node-qrcode), already the web app's,
 pinned in the desktop for the pairing code's QR image (`apps/desktop/src/remote/QrCode.tsx`, lifted from
