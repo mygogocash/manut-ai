@@ -20,7 +20,7 @@ state that needs the owner: a real GitHub account, money, a real sign-in or real
 | The lane's own branch (`kit/promptpay-qr`): "Kit works on a separate branch. Nothing is live." | Has (this branch): a chat session gets a branch of its own as it starts, named from its first message and made from the branch the developer's folder is on, checked out in a folder of its own (a git worktree under `~/.manut/lanes`), where its agent works. Several lanes work at once, none touching another's files or the developer's folder, whose branch, index, stash and HEAD never change because of a lane. The row and the composer's foot show the branch. Nothing is pushed or merged but through the asks of [Source control](#source-control). See [Where a lane works](#where-a-lane-works) | `code/laneBranch.ts`, `src-tauri/src/lane.rs`, `sessions/sessions.ts` (`startLane`) |
 | "Checked: 14 tests passed" | Has (this branch): read from the test run's output (vitest, jest, node's own runner, pytest, `go test`, `cargo test`, mocha, Playwright Test and Python's `unittest`). A run that cannot be read is Not confirmed, never Checked | `code/testRun.ts`, `code/lane.ts` |
 | Revert this turn | Has: Rewind, on the line under the box beside the branch, puts back the files and the chat of a kept turn; the newest is picked first. Claude Code and Codex only. The agent's own Edit on the last message still takes back the chat only, and then the lane says the files stay as they are | `sessions/RewindPanel.tsx`, `sessions/rewind.ts`, `src-tauri/src/turn_files.rs`, `code/lane.ts` |
-| Open pull request | Has (item 75): Put up for review under a lane's row and in its pane pushes the lane's branch and opens its pull request through `gh` or `glab`, after one ask that names the repository, branch, base, title and body exactly as sent, settled once; an open one then offers Merge, asked with its method and exact message. A lane whose branch has an open pull request shows "Pull request #12 (Open)" quietly under its title, and pressing it opens Tasks on that repository with the request selected (item 76, [Pinned, snoozed, settled and archived](#pinned-snoozed-settled-and-archived)). See [Source control](#source-control) | `code/Review.tsx`, `code/reviewAsk.ts`, `src-tauri/src/review.rs`, `tasks/pulls.ts`, `code/Lanes.tsx` |
+| Open pull request | Has (item 75): Put up for review under a lane's row and (item 167e) as the one dark button in the lane's top bar pushes the lane's branch and opens its pull request through `gh` or `glab`, after one ask that names the repository, branch, base, title and body exactly as sent, settled once; an open one then offers Merge, asked with its method and exact message. A lane whose branch has an open pull request shows "Pull request #12 (Open)" quietly under its title, and pressing it opens Tasks on that repository with the request selected (item 76, [Pinned, snoozed, settled and archived](#pinned-snoozed-settled-and-archived)). The top bar holds the lane's branch and its state as the board's tags, and names the request's checks and review beside Merge (see [The lane's top bar](#the-lanes-top-bar)). See [Source control](#source-control) | `code/LaneStep.tsx`, `code/Review.tsx`, `code/reviewAsk.ts`, `src-tauri/src/review.rs`, `tasks/pulls.ts`, `code/Lanes.tsx` |
 | The request, "Edited 3 files and ran 14 tests", Kit's note, the changed files with their counts | Part: the session's timeline shows each step and a file edit's diff, and (this branch) the pane beside a lane lists the changed files with their counts. No line that counts the files and the tests together | `chat/activity/Work.tsx` (`DiffView`), `code/LanePane.tsx` |
 | Tell Kit what to change, add a file, the Code chip | Has: the session's composer (item 80, the same box as Buddy's), in two rows as the canvas draws it: the text, then a + for Add context (Files; Folder, named in the message by its path and never copied; Actions and skills, the agent's `/` menu, also over text already typed), the agent, the model with its effort, the approval level, the microphone and voice mode (item 81, the Mac app: speak the message, or talk with Kit and hear the answer, the asks still on their cards; `docs/voice.md`) and Send. No Mention: a coding agent knows no team | `sessions/SessionView.tsx`, `chat/box/`, `chat/parts/Attach.tsx`, `chat/parts/Composer.tsx`, `voice/` |
 | "Your Claude Code plan" in the composer | Part: a session runs on the developer's own sign-in; the box names the model (moved there from the header) and its effort, not the plan. Since item 132 (GoSpark's flow) the model chip opens the effort card: the level large by GoSpark's words (High, Extra High, Max), the model under it, which opens the agent's model list as the card's second view (Back, or a pick, returns), Reset to the default level, and a slider with one stop for each level the agent reported, moved by a drag (which sends only the level it lets go on), a click or the arrow, Home and End keys, each stop crossed ticking with item 131's effort sound. At the top level the title and the track take the provider's colour from its mark (Claude Code's terracotta; Codex in the ink). A Claude Code chat's card adds "Ultrathink this message", which puts a visible `Ultrathink:` line at the top of the draft and takes it out again; a word typed by hand or a slash command locks it. Nothing new reaches the agent: a level goes by the same effort input as before. No fast mode (no agent reports one) and no Ultracode | `sessions/SessionView.tsx` (`SessionModel`), `chat/box/ModelMenu.tsx`, `chat/box/EffortCard.tsx`, `chat/box/effort.ts`, `chat/box/ultrathink.ts`, `docs/decisions/132-effort-card.md` |
@@ -1120,6 +1120,48 @@ scroll, `lane_diff.rs` and `lane_remote.rs` hold the shell's reads against real 
 `e2e/lane-review.spec.ts` walk the pane in a browser, the review's with the shell's answers staged (`e2e/preview-run.spec.ts` the
 preview's run).
 
+### The lane's top bar
+
+Item 167e (`docs/paradev-ux.md`, "Review"): the canvas's Code board draws the lane's top bar with its branch, its state and one dark
+button. The desktop draws them in the session's header while a lane's chat is open (`code/LaneStep.tsx`; the header itself is
+`sessions/SessionView.tsx`'s, as for every session), with Paradev's one-face ship control as the idea: one button that names the step
+the branch is at. Its `ShipControl.tsx` was read at `b0b0cdc6` and none of its presses taken: Paradev commits, pushes and opens a
+pull request on a press, and Manut AI asks first.
+
+- **The branch and the state.** After the header's own words (Ready, Working, Needs you), the lane's branch as a mono tag with where
+  it was made as its tooltip, and the lane's state as the band's row says it (`laneRowOf`, `laneTag`): Checked, Tests failed, Not
+  confirmed, Not run yet or Reverted, with the row's line as its tooltip. Working, Needs you and an ending are the header's own words
+  already, so no tag repeats them.
+- **The one button.** Put up for review while the branch has no open pull request; Merge once its request is open and not a draft.
+  Beside it, before it, the request's number (`#12`, which opens Tasks › Pull requests with the request selected, as the chat's own
+  link does) and its state in the words a row of Tasks › Pull requests says it: its checks (`Checks passed`, `1 running`,
+  `1 failing`, `No checks`, coloured as Tasks colours them), its review (`Review needed`, `Changes asked`, `Approved`) and
+  `Conflicts with its base`. A draft says Draft and offers no button, as the row's Merge never did; once the host said the request
+  merged (`mergedFor`, item 94) the bar says `Pull request merged` and offers none. Which button, if any, is decided by one function,
+  `nextStep`. A lane with no folder of its own (one in the developer's folder) has no step, as before.
+- **A press opens item 75's very steps.** The draft (its words from the lane's commits) or the method, in a panel under the header at
+  its right, above the chat and the pane, which keep their place under it; then Ask; then the one ask through approval-core, settled
+  once (`code/reviewAsk.ts`). The steps are `ReviewFlow` (`code/Review.tsx`), which the panel under a lane's row on the Code page
+  walks too, so the words and the settling are the same. A press asks the shell for nothing that writes and answers no ask, and a
+  second press while a step is open starts nothing over (`pressStep`). The panel shows what the last answer did until the next press,
+  and leaving the lane takes a waiting ask back.
+- **What is not there, on purpose.** No Commit button (commits are Kit's, through the dial), no Push of its own, no merge or request
+  made by a press alone, and no Discard in the Diff: Rewind and Bring it back are the ways back. The pane beside the lane starts with
+  its chips, as the board's does: its quiet link went (the row's under a lane on the Code page stays).
+- **Where the request's state comes from.** The same cache the lane's row reads (`tasks/pulls.ts`), now read with the Pull requests
+  list's own call (`pulls_board`, item 100), which carries each request's review and whether it conflicts beside its checks; one
+  call for the repository, at most every five minutes and never on a timer, as before, and GitHub answers an unchanged list without
+  counting it. A request the app noted itself as it opened it says no checks until the next read.
+- **How the header gives way.** A lane's header gives way one item after another: the path first, then the branch (to a few letters),
+  then the request's state (to its number), then the title (to its ellipsis); the state tag and the button never do. Flex shares a
+  shortfall by factor and size, so the factors are far apart enough that a word is never cut while the path has room
+  (`code/lanestep.css`).
+
+`LaneStep.test.tsx` holds the button for each branch state (no request, checks running, passing, failing, review asked, merged,
+draft), the request's words, that no state offers a Commit, a Push or a Discard, and the flow from a press to the settle (with
+stand-ins and with the app's stand-in shell itself), mutation-checked; `e2e/lane-next-step.spec.ts` walks both buttons in a browser
+with pictures in dark and light.
+
 ### The preview of a lane
 
 The canvas's Code board has a Preview beside an open lane. The desktop runs the lane's project with its own dev server, in the
@@ -1595,7 +1637,7 @@ included; the variables that would send git to another repository's files or obj
 of what git inherits; an alternates file names only where objects are read and runs nothing; and git's own `safe.directory`
 and `safe.bareRepository` are left as the person set them (the app never widens them).
 
-**Put up for review** (`code/Review.tsx`, under a lane's row and at the top of its pane, for a lane with a folder and a branch of
+**Put up for review** (`code/Review.tsx`, under a lane's row and, since item 167e, from the lane's top bar, for a lane with a folder and a branch of
 its own and no open pull request yet). The link opens a draft: a title (the one commit's subject, else the lane's title) and a
 description (the commits' subjects), both the person's to change. Ask has the shell read the lane now (`review.rs` `ask_open`):
 the app's own folder, on its own branch, with commits the base on the remote lacks, a GitHub or GitLab remote that is not a

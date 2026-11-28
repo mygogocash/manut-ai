@@ -344,7 +344,7 @@ The lead updates the canvas. These are the boards each change would touch, with 
 | One mark a lane, not looked at, and a wait that looks waiting | 167b | KitStatus, StatesCode, KitCode, KitFaces |
 | The lane switcher, and lanes in the palette | 167c | Search |
 | Keys where the actions are, and the key sheet | 167d | Search, Settings, KitActions |
-| The lane's next step in its top bar | 167e | Code, StatesCodeDev, KitApproval |
+| The lane's next step in its top bar | 167e | Code, StatesCodeDev (built 28 Nov: KitApproval needs no change, since each press opens item 75's ask as it was) |
 | The pane's width and keys, and the panel's keys | 167f | Code, BrandLayout |
 | The empty Code page with its box | 167g | StatesCode, StatesSystem, KitForms |
 | Review: viewed, folded, and Try again | 167h | KitCode, Code |
