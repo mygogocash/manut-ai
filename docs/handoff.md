@@ -379,6 +379,8 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    Watch or Answer level for each paired phone, checked on the Mac). On the owner's word of 28 Nov the repository's commits
    are authored as KunanonJ (its no-reply address, in the clone's own git config); item 167, a study of Paradev's interaction
    and UX for the code mode, started (`docs/decisions/2026-11-28-paradev-ux.md`).
+   146 merged at 13:55 (review in the pane beside a lane: side by side, one file at a time, scopes, notes on lines, ahead
+   and behind); 139b (a project's own oh-my-pi extensions and hooks) and 143 (the chat API's two lows) started.
    The dev relay is on with its push key pair as dev secrets, deployed to dev 27 Nov; the owner's try on an iPhone is left.
    Two Rust tests that raced under load (the MCP relay's round trip, the Grok account check) now wait for their answers, and
    the 16 hook-dependency warnings `pnpm lint` found are settled. Fonts stay 99, the owner's. From 27 Nov the owner asked for English first: new words are English, copied into ja, ko and zh. Needs the owner from 101b: Grok signed in and `permission_mode = "ask"`
