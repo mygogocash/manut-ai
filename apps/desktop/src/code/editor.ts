@@ -16,7 +16,15 @@ export interface EditorInfo {
 /** The part of a host this needs: optional, so a shell older than item 107 offers no editor and the menus show none. */
 export interface EditorHost {
   editors?(): Promise<EditorInfo[]>;
-  openInEditor?(cwd: string, editor: string): Promise<void>;
+  openInEditor?(cwd: string, editor: string, at?: EditorAt): Promise<void>;
+}
+
+/** A file inside the folder to open instead of the folder, and where (item 148: a Cmd+click on `path:row:col` in a terminal). */
+export interface EditorAt {
+  /** from the folder, as the shell found it */
+  path: string;
+  row?: number;
+  col?: number;
 }
 
 /** The ids the shell knows, in the order "Automatic" takes the first installed. A saved id outside it is Automatic. */
@@ -125,6 +133,21 @@ export async function openFolderInEditor(host: EditorHost, folder: string, pref:
   if (!choice) throw new Error(t("editor.fail.missing"));
   try {
     await host.openInEditor(folder, choice.id);
+  } catch (e) {
+    throw new Error(editorWhy(e));
+  }
+}
+
+/** Open file `at` of `folder` in the editor the saved choice names (else the first installed) through `host`, at its line where
+ *  the editor's own documentation says how (the shell knows which; item 148). The editor is always one the shell found, from its
+ *  fixed list: a saved choice that is not one of them is Automatic, never an id the page makes up. Rejects with the app's plain
+ *  words, as `openFolderInEditor` does. */
+export async function openFileInEditor(host: EditorHost, folder: string, at: EditorAt, pref: string = readEditorPref()): Promise<void> {
+  if (!host.openInEditor) throw new Error(t("editor.fail.missing"));
+  const choice = resolveEditor(pref, await editorsOf(host));
+  if (!choice) throw new Error(t("editor.fail.missing"));
+  try {
+    await host.openInEditor(folder, choice.id, at);
   } catch (e) {
     throw new Error(editorWhy(e));
   }

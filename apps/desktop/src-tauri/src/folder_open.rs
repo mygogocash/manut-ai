@@ -55,6 +55,21 @@ pub fn launchers(desk: Desk, dir: &Path) -> Vec<(String, Vec<OsString>)> {
     }
 }
 
+/// How an editor is told a line to open a file at. Each is what the editor's own documentation (or its own `--help`) says;
+/// an editor whose documentation was not found has `File`, which opens the file and names no line. A flag is not guessed.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Line {
+    /// `--goto <file>:<row>[:<col>]`: VS Code's `code --help` ("-g --goto <file:line[:character]>", read on this Mac) and its
+    /// command line page (code.visualstudio.com/docs/configure/command-line); Cursor's `cursor --help` says the same
+    Goto,
+    /// `<file>:<row>[:<col>]`: Zed's CLI reference (zed.dev/docs/reference/cli: `zed myfile.txt:42:10`)
+    Suffix,
+    /// `--line <row> <file>`: Xcode's `xed --help` ("-l, --line <number>  Select line <number> after opening file", read on this Mac)
+    Xed,
+    /// the file alone: Windsurf's documentation (docs.windsurf.com) names no option for a line
+    File,
+}
+
 /// One editor manut knows. `app` is its macOS bundle name (`open -a <app>`), `command` its own command on the PATH, which
 /// takes the folder as its one argument.
 pub struct Editor {
@@ -64,16 +79,21 @@ pub struct Editor {
     command: Option<&'static str>,
     /// Xcode exists on macOS only
     mac_only: bool,
+    /// The program inside the app bundle that opens a file at a line, from the bundle's own folder: VS Code's and Cursor's
+    /// `Contents/Resources/app/bin/<command>` (both read on this Mac; VS Code's documentation adds it to the PATH from there),
+    /// Zed's `Contents/MacOS/cli` (zed.dev/docs/macos), Xcode's `xed` (read on this Mac). Not used to open a folder.
+    bundle_cli: Option<&'static str>,
+    line: Line,
 }
 
 /// The editors, in the order "Automatic" takes the first installed. JetBrains' launchers are not here: how each takes a
 /// folder was not confirmed from its documentation or from a `--help` on a computer that has one, and a flag is not guessed.
 pub const EDITORS: &[Editor] = &[
-    Editor { id: "vscode", label: "Visual Studio Code", app: "Visual Studio Code", command: Some("code"), mac_only: false },
-    Editor { id: "cursor", label: "Cursor", app: "Cursor", command: Some("cursor"), mac_only: false },
-    Editor { id: "windsurf", label: "Windsurf", app: "Windsurf", command: Some("windsurf"), mac_only: false },
-    Editor { id: "zed", label: "Zed", app: "Zed", command: Some("zed"), mac_only: false },
-    Editor { id: "xcode", label: "Xcode", app: "Xcode", command: None, mac_only: true },
+    Editor { id: "vscode", label: "Visual Studio Code", app: "Visual Studio Code", command: Some("code"), mac_only: false, bundle_cli: Some("Contents/Resources/app/bin/code"), line: Line::Goto },
+    Editor { id: "cursor", label: "Cursor", app: "Cursor", command: Some("cursor"), mac_only: false, bundle_cli: Some("Contents/Resources/app/bin/cursor"), line: Line::Goto },
+    Editor { id: "windsurf", label: "Windsurf", app: "Windsurf", command: Some("windsurf"), mac_only: false, bundle_cli: None, line: Line::File },
+    Editor { id: "zed", label: "Zed", app: "Zed", command: Some("zed"), mac_only: false, bundle_cli: Some("Contents/MacOS/cli"), line: Line::Suffix },
+    Editor { id: "xcode", label: "Xcode", app: "Xcode", command: None, mac_only: true, bundle_cli: Some("Contents/Developer/usr/bin/xed"), line: Line::Xed },
 ];
 
 /// How an installed editor is started: its app bundle through `open -a`, or its own command.
@@ -119,6 +139,105 @@ pub fn editor_launch<D: Fn(&Path) -> bool, X: Fn(&Path) -> bool>(id: &str, dir: 
     }
 }
 
+/// Longest path the page may name, and most paths in one question (a path in a terminal's line is far shorter and a line holds
+/// few of them).
+const PATH_MAX: usize = 1024;
+const PATHS_MAX: usize = 20;
+/// The line and column a link may carry: a number far past any file's length is no line.
+const LINE_MAX: u32 = 10_000_000;
+
+/// The file `path` names, when it is a file that exists inside folder `dir` (which must already be the folder's real path,
+/// `folder()`). `path` is as a terminal printed it: absolute, relative to `dir`, or under `~/` (`home`). Links are followed
+/// and `..` is resolved before the check, so a link inside the folder to a file outside it, or a path that climbs out of
+/// the folder, is outside. A folder, a missing file and a file outside all answer the same, so the page learns nothing of
+/// what is outside.
+pub fn file_in_folder(dir: &Path, path: &str, home: Option<&Path>) -> Result<PathBuf, String> {
+    let no = || "not a file inside the folder".to_string();
+    if path.is_empty() || path.len() > PATH_MAX || path.contains('\0') {
+        return Err(no());
+    }
+    let named = match path.strip_prefix("~/") {
+        Some(rest) => home.ok_or_else(no)?.join(rest),
+        None => PathBuf::from(path),
+    };
+    let full = if named.is_absolute() { named } else { dir.join(named) };
+    let real = full.canonicalize().map_err(|_| no())?;
+    if !real.starts_with(dir) || !real.is_file() {
+        return Err(no());
+    }
+    Ok(real)
+}
+
+/// Which of `paths` are files inside folder `cwd`: each answer is the file's path from the folder (as the shell found it, so a
+/// `..` or a link is gone), or none for a path that is not a file inside it. At most `PATHS_MAX` paths are asked about.
+pub fn files_in_folder(cwd: &str, paths: &[String]) -> Result<Vec<Option<String>>, String> {
+    let dir = folder(cwd)?;
+    if paths.len() > PATHS_MAX {
+        return Err("too many paths".into());
+    }
+    let home = host_env("HOME").filter(|h| !h.is_empty()).map(PathBuf::from);
+    Ok(paths
+        .iter()
+        .map(|p| file_in_folder(&dir, p, home.as_deref()).ok().and_then(|f| f.strip_prefix(&dir).ok().map(|r| r.to_string_lossy().into_owned())))
+        .collect())
+}
+
+/// `file` and a line as one argument, `file:row[:col]`.
+fn at_line(file: &Path, row: u32, col: Option<u32>) -> OsString {
+    let mut s = file.as_os_str().to_owned();
+    s.push(format!(":{row}"));
+    if let Some(c) = col {
+        s.push(format!(":{c}"));
+    }
+    s
+}
+
+/// The arguments that open `file` in an editor, at `row` and `col` when the editor's own documentation says how (`Line`). A
+/// `:` in the path (other than a Windows drive's) would be read as the start of a line, so such a file is opened with no line.
+fn file_args(style: Line, file: &Path, row: Option<u32>, col: Option<u32>) -> Vec<OsString> {
+    let plain = || vec![file.as_os_str().to_owned()];
+    let Some(row) = row.filter(|r| (1..=LINE_MAX).contains(r)) else { return plain() };
+    let col = col.filter(|c| (1..=LINE_MAX).contains(c));
+    let colon = file.to_string_lossy().chars().skip(2).any(|c| c == ':');
+    match style {
+        Line::Goto if !colon => vec!["--goto".into(), at_line(file, row, col)],
+        Line::Suffix if !colon => vec![at_line(file, row, col)],
+        Line::Xed => vec!["--line".into(), row.to_string().into(), file.as_os_str().to_owned()],
+        _ => plain(),
+    }
+}
+
+/// The program and arguments that open `file` (a file `file_in_folder` accepted) in editor `id`, at a line where the editor can
+/// be told one. On a Mac with the app bundle, the program inside the bundle that takes a line (never the `code` on the PATH,
+/// which may be another editor's: this Mac's `code` is Cursor's) or, with none, `open -a <app> <file>` with no line;
+/// otherwise the editor's own command. An id that is not on the list, or an editor not installed, is refused, as for a folder.
+pub fn editor_file_launch<D: Fn(&Path) -> bool, X: Fn(&Path) -> bool>(
+    id: &str,
+    file: &Path,
+    row: Option<u32>,
+    col: Option<u32>,
+    pr: &Probe,
+    is_dir: D,
+    is_program: X,
+) -> Result<(PathBuf, Vec<OsString>), String> {
+    let e = EDITORS.iter().find(|e| e.id == id).ok_or_else(|| "not an editor".to_string())?;
+    let missing = || "the editor is not installed".to_string();
+    if pr.desk == Desk::Mac {
+        let bundle = format!("{}.app", e.app);
+        if let Some(found) = pr.app_dirs.iter().map(|d| d.join(&bundle)).find(|b| is_dir(b)) {
+            return Ok(match e.bundle_cli.map(|c| found.join(c)).filter(|c| is_program(c)) {
+                Some(cli) => (cli, file_args(e.line, file, row, col)),
+                None => (PathBuf::from("open"), vec!["-a".into(), e.app.into(), file.as_os_str().to_owned()]),
+            });
+        }
+    }
+    if e.mac_only && pr.desk != Desk::Mac {
+        return Err(missing());
+    }
+    let exe = resolve(e.command.ok_or_else(missing)?, pr.dirs, &is_program, pr.os).ok_or_else(missing)?;
+    Ok((exe, file_args(e.line, file, row, col)))
+}
+
 fn probe_dirs() -> (Os, Desk, Vec<PathBuf>, Vec<PathBuf>) {
     let os = Os::current();
     let desk = Desk::current();
@@ -143,12 +262,31 @@ pub fn editors_installed() -> Vec<(String, String)> {
     installed(&pr, is_folder, is_program).into_iter().map(|e| (e.id.to_string(), e.label.to_string())).collect()
 }
 
-/// Open folder `cwd` in editor `id`. Returns once the editor's launcher has handed off (or exited).
-pub fn open_in_editor(cwd: &str, id: &str) -> Result<(), String> {
+/// A file inside the folder to open, and where: what a Cmd+click on `path:row:col` in a terminal names.
+pub struct At {
+    pub path: String,
+    pub row: Option<u32>,
+    pub col: Option<u32>,
+}
+
+/// Open folder `cwd` in editor `id`, or, with `at`, the file it names (which must be a file inside the folder) at its line where
+/// the editor can be told one. The file is checked before an editor is looked for or anything is started. Returns once the
+/// editor's launcher has handed off (or exited).
+pub fn open_in_editor(cwd: &str, id: &str, at: Option<&At>) -> Result<(), String> {
     let dir = folder(cwd)?;
+    let file = match at {
+        Some(a) => {
+            let home = host_env("HOME").filter(|h| !h.is_empty()).map(PathBuf::from);
+            Some(file_in_folder(&dir, &a.path, home.as_deref())?)
+        }
+        None => None,
+    };
     let (os, desk, apps, dirs) = probe_dirs();
     let pr = Probe { desk, os, app_dirs: &apps, dirs: &dirs };
-    let (exe, argv) = editor_launch(id, &dir, &pr, is_folder, is_program)?;
+    let (exe, argv) = match (&file, at) {
+        (Some(f), Some(a)) => editor_file_launch(id, f, a.row, a.col, &pr, is_folder, is_program)?,
+        _ => editor_launch(id, &dir, &pr, is_folder, is_program)?,
+    };
     let mut cmd = Command::new(&exe);
     cmd.args(&argv).current_dir(&dir).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
     crate::appimage::host_env(&mut cmd);
@@ -297,6 +435,17 @@ mod tests {
                 std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
             }
         }
+        /// A program inside an app bundle, at `rel` from the bundle's own folder.
+        fn bundle_cli(&self, app: &str, rel: &str) {
+            let p = self.apps[0].join(format!("{app}.app")).join(rel);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(&p, "#!/bin/sh\n").unwrap();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+            }
+        }
         fn probe(&self, desk: Desk) -> Probe<'_> {
             Probe { desk, os: Os::Unix, app_dirs: &self.apps, dirs: &self.bin }
         }
@@ -393,9 +542,9 @@ mod tests {
         // `open_in_editor` checks the folder before it looks for an editor or starts anything
         let d = std::env::temp_dir().join(format!("manut-editors-dir-{}", std::process::id()));
         for bad in ["", "relative/dir", "~/code", d.join("missing").to_str().unwrap(), "/tmp/a\0b"] {
-            assert!(open_in_editor(bad, "vscode").is_err(), "{bad:?}");
+            assert!(open_in_editor(bad, "vscode", None).is_err(), "{bad:?}");
         }
-        assert_eq!(open_in_editor("relative/dir", "vscode").unwrap_err(), "not a folder");
+        assert_eq!(open_in_editor("relative/dir", "vscode", None).unwrap_err(), "not a folder");
     }
 
     #[test]
@@ -410,6 +559,210 @@ mod tests {
             assert_eq!(argv.len(), 1, "{id}: the folder alone");
         }
     }
+
+    /// A folder with a file in it, a file beside it (outside), a link out of it and a link inside it.
+    struct Tree {
+        root: PathBuf,
+        dir: PathBuf,
+    }
+    impl Tree {
+        fn new(tag: &str) -> Tree {
+            let root = std::env::temp_dir().join(format!("manut-filelink-{tag}-{}", std::process::id())).canonicalize().unwrap_or_else(|_| std::env::temp_dir().join(format!("manut-filelink-{tag}-{}", std::process::id())));
+            let _ = std::fs::remove_dir_all(&root);
+            let dir = root.join("proj");
+            std::fs::create_dir_all(dir.join("src")).unwrap();
+            std::fs::write(dir.join("src/a.ts"), "x").unwrap();
+            std::fs::write(dir.join("README.md"), "x").unwrap();
+            std::fs::write(root.join("outside.txt"), "x").unwrap();
+            #[cfg(unix)]
+            {
+                std::os::unix::fs::symlink("../outside.txt", dir.join("link-out")).unwrap();
+                std::os::unix::fs::symlink("src/a.ts", dir.join("link-in")).unwrap();
+            }
+            let dir = dir.canonicalize().unwrap();
+            Tree { root: root.canonicalize().unwrap(), dir }
+        }
+    }
+    impl Drop for Tree {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.root);
+        }
+    }
+
+    #[test]
+    fn a_file_inside_the_folder_is_taken_however_the_terminal_wrote_it() {
+        let t = Tree::new("in");
+        let a = t.dir.join("src/a.ts");
+        let abs = a.to_string_lossy().into_owned();
+        for ok in [abs.as_str(), "src/a.ts", "./src/a.ts", "src/../src/a.ts", "README.md"] {
+            assert!(file_in_folder(&t.dir, ok, None).is_ok(), "{ok:?}");
+        }
+        assert_eq!(file_in_folder(&t.dir, "src/a.ts", None).unwrap(), a);
+        // under ~/, when the home is known
+        assert_eq!(file_in_folder(&t.dir, "~/proj/src/a.ts", Some(&t.root)).unwrap(), a);
+        // a link inside the folder to a file inside it is that file
+        #[cfg(unix)]
+        assert_eq!(file_in_folder(&t.dir, "link-in", None).unwrap(), a);
+    }
+
+    #[test]
+    fn a_path_outside_the_folder_a_link_out_a_folder_or_a_missing_file_is_not_a_file_inside_it() {
+        let t = Tree::new("out");
+        let outside = t.root.join("outside.txt").to_string_lossy().into_owned();
+        let long = format!("src/{}", "a".repeat(2000));
+        for bad in [
+            outside.as_str(),
+            "/etc/hosts",
+            "../outside.txt",
+            "src/../../outside.txt",
+            "~/outside.txt",
+            "~/proj/../outside.txt",
+            "src",
+            ".",
+            "missing.ts",
+            "",
+            "src/a.ts\0",
+            long.as_str(),
+        ] {
+            assert_eq!(file_in_folder(&t.dir, bad, Some(&t.root)).unwrap_err(), "not a file inside the folder", "{bad:?}");
+        }
+        // no home known: a ~ path is nothing
+        assert!(file_in_folder(&t.dir, "~/proj/src/a.ts", None).is_err());
+        // a link inside the folder to a file outside it is outside, once its target is read
+        #[cfg(unix)]
+        assert!(file_in_folder(&t.dir, "link-out", None).is_err());
+    }
+
+    #[test]
+    fn the_page_is_told_only_which_paths_are_files_inside_the_folder_and_where() {
+        let t = Tree::new("many");
+        let cwd = t.dir.to_str().unwrap();
+        let paths: Vec<String> = ["src/a.ts", "./README.md", "../outside.txt", "/etc/hosts", "src", "nope.ts", "src/../src/a.ts"].iter().map(|p| p.to_string()).collect();
+        assert_eq!(
+            files_in_folder(cwd, &paths).unwrap(),
+            vec![Some("src/a.ts".to_string()), Some("README.md".to_string()), None, None, None, None, Some("src/a.ts".to_string())]
+        );
+        // a link out is none, a link in is the file it points to
+        #[cfg(unix)]
+        assert_eq!(files_in_folder(cwd, &["link-out".to_string(), "link-in".to_string()]).unwrap(), vec![None, Some("src/a.ts".to_string())]);
+        let too_many: Vec<String> = (0..21).map(|i| format!("src/{i}.ts")).collect();
+        assert_eq!(files_in_folder(cwd, &too_many).unwrap_err(), "too many paths");
+        assert_eq!(files_in_folder("relative/dir", &paths).unwrap_err(), "not a folder");
+    }
+
+    #[test]
+    fn a_file_outside_the_folder_opens_nothing_and_is_refused_before_an_editor_is_looked_for() {
+        let t = Tree::new("open");
+        let cwd = t.dir.to_str().unwrap();
+        let outside = t.root.join("outside.txt").to_string_lossy().into_owned();
+        for bad in [outside.as_str(), "/etc/hosts", "../outside.txt", "missing.ts", "src"] {
+            let at = At { path: bad.to_string(), row: Some(3), col: None };
+            assert_eq!(open_in_editor(cwd, "vscode", Some(&at)).unwrap_err(), "not a file inside the folder", "{bad:?}");
+        }
+        // the folder is still checked first
+        let at = At { path: "src/a.ts".into(), row: Some(3), col: None };
+        assert_eq!(open_in_editor("relative/dir", "vscode", Some(&at)).unwrap_err(), "not a folder");
+    }
+
+    #[test]
+    fn each_editor_is_told_the_line_the_way_its_own_documentation_says_and_none_is_guessed() {
+        let f = Fake::new("lines");
+        // macOS with every bundle and the program inside it that takes a line (Xcode's xed, Zed's cli)
+        f.bundle_cli("Visual Studio Code", "Contents/Resources/app/bin/code");
+        f.bundle_cli("Cursor", "Contents/Resources/app/bin/cursor");
+        f.bundle_cli("Zed", "Contents/MacOS/cli");
+        f.bundle_cli("Xcode", "Contents/Developer/usr/bin/xed");
+        f.app("Windsurf");
+        let app = |name: &str, rel: &str| f.apps[0].join(format!("{name}.app")).join(rel);
+        let file = Path::new("/p/it's; rm -rf ~ & x/a.ts");
+        let os = |v: &[&str]| v.iter().map(OsString::from).collect::<Vec<_>>();
+        let go = |id: &str, row, col| editor_file_launch(id, file, row, col, &f.probe(Desk::Mac), is_folder, is_program).unwrap();
+        let (prog, argv) = go("vscode", Some(12), Some(5));
+        assert_eq!(prog, app("Visual Studio Code", "Contents/Resources/app/bin/code"));
+        assert_eq!(argv, os(&["--goto", "/p/it's; rm -rf ~ & x/a.ts:12:5"]));
+        assert_eq!(go("vscode", Some(12), None).1, os(&["--goto", "/p/it's; rm -rf ~ & x/a.ts:12"]));
+        let (prog, argv) = go("cursor", Some(7), Some(1));
+        assert_eq!(prog, app("Cursor", "Contents/Resources/app/bin/cursor"));
+        assert_eq!(argv, os(&["--goto", "/p/it's; rm -rf ~ & x/a.ts:7:1"]));
+        let (prog, argv) = go("zed", Some(42), Some(10));
+        assert_eq!(prog, app("Zed", "Contents/MacOS/cli"));
+        assert_eq!(argv, os(&["/p/it's; rm -rf ~ & x/a.ts:42:10"]));
+        let (prog, argv) = go("xcode", Some(9), Some(4));
+        assert_eq!(prog, app("Xcode", "Contents/Developer/usr/bin/xed"));
+        assert_eq!(argv, os(&["--line", "9", "/p/it's; rm -rf ~ & x/a.ts"]));
+        // Windsurf's documentation names no line option: the file opens through the system, with no line
+        let (prog, argv) = go("windsurf", Some(3), Some(2));
+        assert_eq!((prog, argv), (PathBuf::from("open"), os(&["-a", "Windsurf", "/p/it's; rm -rf ~ & x/a.ts"])));
+        // no row, or one that is not a line: the file alone
+        for row in [None, Some(0), Some(LINE_MAX + 1)] {
+            assert_eq!(go("vscode", row, Some(5)).1, os(&["/p/it's; rm -rf ~ & x/a.ts"]), "{row:?}");
+            assert_eq!(go("zed", row, None).1, os(&["/p/it's; rm -rf ~ & x/a.ts"]), "{row:?}");
+        }
+        // a column that is not one is left off
+        assert_eq!(go("zed", Some(5), Some(0)).1, os(&["/p/it's; rm -rf ~ & x/a.ts:5"]));
+        // a `:` in the path would be read as the start of a line: such a file opens with none
+        let odd = Path::new("/p/a:b/c.ts");
+        assert_eq!(editor_file_launch("vscode", odd, Some(3), None, &f.probe(Desk::Mac), is_folder, is_program).unwrap().1, os(&["/p/a:b/c.ts"]));
+        assert_eq!(editor_file_launch("zed", odd, Some(3), None, &f.probe(Desk::Mac), is_folder, is_program).unwrap().1, os(&["/p/a:b/c.ts"]));
+    }
+
+    #[test]
+    fn a_bundle_without_its_line_program_opens_the_file_through_the_system_and_never_the_command_on_the_path() {
+        // this Mac's `code` on the PATH is Cursor's shim: the bundle decides which editor opens
+        let f = Fake::new("nocli");
+        f.app("Visual Studio Code");
+        f.cmd("code");
+        let (prog, argv) = editor_file_launch("vscode", Path::new("/p/a.ts"), Some(3), None, &f.probe(Desk::Mac), is_folder, is_program).unwrap();
+        assert_eq!((prog, argv), (PathBuf::from("open"), vec![OsString::from("-a"), "Visual Studio Code".into(), "/p/a.ts".into()]));
+    }
+
+    #[test]
+    fn off_macos_the_editors_own_command_gets_the_file_and_the_line_where_documented() {
+        let f = Fake::new("cmdlines");
+        for n in ["code", "cursor", "windsurf", "zed"] {
+            f.cmd(n);
+        }
+        let file = Path::new("/home/k/a b/a.ts");
+        let os = |v: &[&str]| v.iter().map(OsString::from).collect::<Vec<_>>();
+        let go = |id: &str| editor_file_launch(id, file, Some(12), Some(5), &f.probe(Desk::Linux), is_folder, is_program).unwrap();
+        assert_eq!(go("vscode"), (f.bin[0].join("code"), os(&["--goto", "/home/k/a b/a.ts:12:5"])));
+        assert_eq!(go("cursor"), (f.bin[0].join("cursor"), os(&["--goto", "/home/k/a b/a.ts:12:5"])));
+        assert_eq!(go("zed"), (f.bin[0].join("zed"), os(&["/home/k/a b/a.ts:12:5"])));
+        assert_eq!(go("windsurf"), (f.bin[0].join("windsurf"), os(&["/home/k/a b/a.ts"])));
+        // Xcode is a macOS editor
+        assert_eq!(editor_file_launch("xcode", file, Some(1), None, &f.probe(Desk::Linux), is_folder, is_program).unwrap_err(), "the editor is not installed");
+    }
+
+    #[test]
+    fn a_file_opens_only_in_an_editor_from_the_fixed_list_that_is_installed() {
+        let f = Fake::new("fileids");
+        f.cmd("code");
+        let file = Path::new("/p/a.ts");
+        for bad in ["", "code", "/usr/bin/code", "vscode; rm -rf ~", "VSCODE", "idea", "../bin/code", " vscode"] {
+            assert_eq!(editor_file_launch(bad, file, Some(1), None, &f.probe(Desk::Linux), is_folder, is_program).unwrap_err(), "not an editor", "{bad:?}");
+        }
+        assert_eq!(editor_file_launch("zed", file, Some(1), None, &f.probe(Desk::Linux), is_folder, is_program).unwrap_err(), "the editor is not installed");
+        assert_eq!(editor_file_launch("vscode", file, Some(1), None, &Fake::new("nothing").probe(Desk::Mac), is_folder, is_program).unwrap_err(), "the editor is not installed");
+    }
+
+    #[test]
+    fn no_file_launch_carries_a_command_to_run() {
+        let f = Fake::new("fileflags");
+        for n in ["code", "cursor", "windsurf", "zed"] {
+            f.cmd(n);
+        }
+        let file = Path::new("/p/a.ts");
+        for id in ["vscode", "cursor", "windsurf", "zed"] {
+            let (_, argv) = editor_file_launch(id, file, Some(3), Some(4), &f.probe(Desk::Linux), is_folder, is_program).unwrap();
+            // only the file (with its line) and, for the VS Code family, --goto: no -e, --command, --folder-uri or other flag
+            assert!(argv.len() <= 2, "{id}: {argv:?}");
+            for a in &argv {
+                let a = a.to_string_lossy();
+                assert!(!a.starts_with('-') || a == "--goto", "{id}: {a}");
+            }
+        }
+    }
+
 
     #[test]
     fn the_overlay_dot_is_a_round_16px_picture() {
