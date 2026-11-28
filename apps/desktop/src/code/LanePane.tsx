@@ -147,8 +147,9 @@ function TestsPane({ tests, time }: { tests: LaneTests; time: (ms: number) => st
 
 export function LanePaneView({ view, onView, files, moreFiles, needs, asked, onAdd, preview, tests, time = (ms) => hhmm(new Date(ms)), review }: LanePaneProps) {
   return (
-    // the diff, the tests and a preview's text can be selected and noted for the chat beside it (item 97, chat/box/SelectionNote.tsx)
-    <aside className="lpane" data-testid="lane-pane" data-view={view} data-note-source>
+    // the diff, the tests and a preview's text can be selected and noted for the chat beside it (item 97, chat/box/SelectionNote.tsx);
+    // ⌘F here is not the chat's find (item 150): this pane keeps the key for a find of its own (src/chat/find/host.ts)
+    <aside className="lpane" data-testid="lane-pane" data-view={view} data-note-source data-own-find>
       {review}
       <div className="fgroup" role="group" aria-label={t("lane.pane.title")}>
         {VIEWS.map((v) => (

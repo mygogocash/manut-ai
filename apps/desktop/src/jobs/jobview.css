@@ -136,6 +136,8 @@
 }
 /* the lane's own timeline, smaller: its column is a third of the page, so its rows use all of it */
 .jv-chat {
+  /* the chat's find bar lies over this column's top right (src/chat/find) */
+  position: relative;
   flex: 1;
   min-height: 0;
   display: flex;

@@ -25,6 +25,9 @@ describe("the defaults", () => {
     expect(keysText(defaultKeys(true).terminal, true)).toBe("⌃`");
     expect(keysText(defaultKeys(true).graph, true)).toBe("⇧⌘G");
     expect(keysText(defaultKeys(false)["session-next"], false)).toBe("Ctrl+Shift+]");
+    // find in the chat in view (item 150): the key a terminal's own find has, which the terminal keeps while it has the keyboard
+    expect(keysText(defaultKeys(true).find, true)).toBe("⌘F");
+    expect(keysText(defaultKeys(false).find, false)).toBe("Ctrl+F");
     // the side menu, as ChatGPT's
     expect(keysText(defaultKeys(true).sidebar, true)).toBe("⇧⌘S");
     expect(keysText(defaultKeys(false).sidebar, false)).toBe("Ctrl+Shift+S");
@@ -75,6 +78,7 @@ describe("a press that sets keys", () => {
   it("names the action that already has it", () => {
     expect(takenBy(defaultKeys(true), "details", c("KeyK", { meta: true }))).toBe("search");
     expect(takenBy(defaultKeys(true), "search", c("KeyK", { meta: true }))).toBeNull();
+    expect(takenBy(defaultKeys(true), "details", c("KeyF", { meta: true }))).toBe("find");
   });
 });
 

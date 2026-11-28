@@ -11,6 +11,7 @@ import { useClock } from "../../app/clock";
 import { t, t as tr, tx, type Key } from "../../i18n";
 import { FanoutCard, rowMs } from "./Subagents";
 import { DiffView, PlanList, ThinkingText } from "./Work";
+import { foldId, releaseFold, useFinding, useForced } from "../find/folds";
 import "./activity.css";
 
 /** A fan-out still counts as running this long after its last event, though its turn ended (background). */
@@ -204,6 +205,14 @@ export function StepRow({ step, live, now, io }: { step: Step; live: boolean; no
 export default function Activity({ bot, item, live }: SlotProps["activity"]) {
   const t = item.turn;
   const [open, setOpen] = useState(false);
+  // The chat's find bar (src/chat/find). While it is open, the steps are drawn even when the line is folded, hidden, so the
+  // bar reads them the way it reads every other row; the group a match is in is held open while that match is the current
+  // one (`forced`), and let go of when the person moves on. The steps show when the person opened the line or the find
+  // holds it, so letting go puts it back as it was: shut if they never opened it, open if they had.
+  const fold = foldId(bot, item.id);
+  const finding = useFinding(bot);
+  const forced = useForced(fold);
+  const shown = open || forced;
   // the app's one clock: the elapsed time here and a subagent row's time below read the same instant
   const now = useClock(live);
   const total = elapsed((t.endedAt ?? now) - t.startedAt);
@@ -227,14 +236,20 @@ export default function Activity({ bot, item, live }: SlotProps["activity"]) {
   else if (state === "error") summary = `${tr("act.failedAfter", { t: total })}${t.error ? ` · ${t.error}` : ""}`;
 
   return (
-    <div className={`act${open ? " open" : ""}`} data-testid="activity" data-state={state}>
+    <div className={`act${shown ? " open" : ""}`} data-testid="activity" data-state={state}>
       <button
         type="button"
         className="act-h"
         data-testid="activity-toggle"
-        aria-expanded={canOpen ? open : undefined}
+        aria-expanded={canOpen ? shown : undefined}
         disabled={!canOpen}
-        onClick={() => setOpen((o) => !o)}
+        // a line the find holds open is shut by a click, as it looks open: the find lets go of it, and the person's own state is shut
+        onClick={() => {
+          if (forced) {
+            releaseFold(fold);
+            setOpen(false);
+          } else setOpen((o) => !o);
+        }}
       >
         {state === "live" ? (
           <Spinner size={11} label={tr("ui.working")} />
@@ -273,8 +288,8 @@ export default function Activity({ bot, item, live }: SlotProps["activity"]) {
       {t.fanouts?.map((f) => (
         <FanoutCard key={f.key} fan={f} live={live || now - f.updatedAt < FANOUT_QUIET_MS} bot={bot} />
       ))}
-      {open && canOpen && (
-        <div className="act-det" data-testid="activity-details">
+      {(shown || finding) && canOpen && (
+        <div className="act-det" data-testid="activity-details" hidden={!shown} {...(finding ? { "data-find-folded": "", "data-fold": fold } : {})}>
           {t.steps.map((s) => (
             <StepRow key={s.id} step={s} live={live} now={now} />
           ))}

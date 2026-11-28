@@ -1,7 +1,8 @@
 // Find in a session terminal (mock host, the engine's real feed()): Cmd+F (macOS) / Ctrl+F opens a small bar at the
 // terminal's top right, typing shows the match count, Enter and Shift+Enter move, Esc closes it and the terminal
-// has the keyboard again. It does nothing in a chat session or a bot chat, and on Windows and Linux a full-screen
-// program keeps its Ctrl+F (Ctrl+Shift+F is always find).
+// has the keyboard again. The terminal's bar does not open in a chat session or a bot chat (the key opens the chat's own
+// find there, item 150, e2e/chat-find.spec.ts), and on Windows and Linux a full-screen program keeps its Ctrl+F
+// (Ctrl+Shift+F is always find).
 import { expect, test, type Page } from "@playwright/test";
 import { feed, mock, modKey, newTerminal, openApp, platformIsMac, pointAt, settle, typed } from "./term-find-helpers";
 import { openChat, openCode } from "./start";
@@ -147,7 +148,7 @@ test.skip("the shortcut does nothing in a chat session", async ({ page }) => {
   await expect(page.getByTestId("terminal")).toHaveCount(0);
 });
 
-test("the shortcut does nothing in a bot chat", async ({ page }) => {
+test("the terminal's bar does not open in a bot chat: the key is the chat's own find there", async ({ page }) => {
   await openApp(page);
   await expect(page.getByTestId("composer")).toBeVisible();
   await page.getByTestId("composer").click();

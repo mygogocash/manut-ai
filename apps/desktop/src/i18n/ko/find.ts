@@ -2,6 +2,7 @@ import type { find as en } from "../en/find";
 
 export const find: Record<keyof typeof en, string> = {
   "find.label": "터미널에서 찾기",
+  "find.chatLabel": "Find in this chat",
   "find.placeholder": "찾기",
   "find.count": "{n} / {total}",
   "find.countMore": "{n} / {total}+",
