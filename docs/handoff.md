@@ -370,6 +370,10 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    and 139, 150 and 148 were sent on. 139 merged at 08:25: oh-my-pi asks before every tool, pi and OmO run only In a
    terminal (row 139b: a project's own omp hooks and extensions still run in a lane).
    150 merged at 08:40 (find in a chat: Command+F across messages and folded steps).
+   148 merged at 09:20 (terminal fixes lifted from Paradev: keys back after an agent dies, Command+click on path:line
+   opens the editor at that line, Ghostty's copy rules); the owner can try the link with VS Code installed. 102l-6 and 146
+   started. Lead's note: push marks right after a merge, never while another item waits to merge on CI, or it must merge
+   the lead's branch and run CI once more.
    The dev relay is on with its push key pair as dev secrets, deployed to dev 27 Nov; the owner's try on an iPhone is left.
    Two Rust tests that raced under load (the MCP relay's round trip, the Grok account check) now wait for their answers, and
    the 16 hook-dependency warnings `pnpm lint` found are settled. Fonts stay 99, the owner's. From 27 Nov the owner asked for English first: new words are English, copied into ja, ko and zh. Needs the owner from 101b: Grok signed in and `permission_mode = "ask"`

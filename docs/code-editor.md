@@ -2455,6 +2455,51 @@ is never put into a shell string, and nothing is run in it.
   developer's own. When no editor is installed the action is not offered; a failure is said in the app's own words under the
   chat, under the lane, or at the top of the Code page.
 
+## Terminal fixes from Paradev (item 148)
+
+Three fixes lifted from Paradev's terminal (`docs/paradev-parity.md`, "Terminals"; the files are in `CREDITS.md`), each with its
+tests ported to vitest, all in `src/sessions/term/`, and no new dependency.
+
+- **The keyboard and mouse given back when an agent dies uncleanly** (`engine-reclaim.ts`, `leaked-input-modes.ts`). An agent
+  killed or crashed in the middle of its screen never writes the escapes that turn its input modes off, so every key reached
+  the shell encoded (Ctrl+C as `^[[99;5u`) and the mouse printed reports until Reset. Paradev's reclaimer decides which of the
+  Kitty keyboard protocol, mouse reporting and focus reporting the program left on, from the escapes xterm's parser saw it
+  send. Paradev knows the shell is back by a marker its own shell wrappers print; Manut AI puts no hook into the person's
+  shell and never edits its configuration, so the sign is the end of the agent program the shell of this app started for the
+  terminal: `terminals.ts` calls `programEnded` from that program's exit, the same exit that makes the row go on as the login
+  shell. It writes the escapes at once (so the line that says the agent ended is drawn on the screen the terminal goes back
+  to) and again once what the program printed has been read, and writes nothing when the agent turned its modes off itself.
+  Bracketed paste and application cursor keys it left on are turned off too (what Paradev turns off for a brand-new shell over
+  stale content), and so is the alternate screen when the program entered it with `?1049h`; Paradev does not leave it. The
+  shell then draws on the screen and the scrollback it had, and the last frame of the dead agent goes, as after a clean exit.
+  A Shell row, and an agent the person starts by hand inside one, give nothing back: `session-fg` says only which program is
+  in front, so the app cannot tell an agent that ended from one stopped with Ctrl+Z, whose modes it still needs. Reset in the
+  terminal's menu is still there for that.
+- **Cmd+click on a file path** (`engine-paths.ts`, with Paradev's parser as `link-parsing.ts` and `link-fallbacks.ts`).
+  `path:line:col`, `path:line`, a path alone and the other forms compilers and agents print (`path(12,5)`, `File "path", line 3`,
+  `path#L12`) are links across rows the terminal wrapped. Only a file that exists inside the terminal's session folder (a TERMINALS
+  row's folder, or a lane's own; a bottom-panel pane's when its shell started in the folder it was asked for) is one. The page asks
+  the shell about the paths of a line at once (`session_files_in_folder`: the real path is read, so a `..` that climbs out and a link
+  that leads out are outside, and a folder, a missing file and an outside file all answer none), and it never asks about a path that
+  reads as outside the folder. The click goes through item 107's call (`openFileInEditor`, `session_open_in_editor` with the file):
+  the editor is one of its fixed list named by id, the file is named from the folder and checked again by the shell before anything
+  starts, and with no editor installed there is no link. The line goes only where the editor's own documentation says how: VS Code
+  and Cursor `--goto <file>:<line>:<col>` (each one's `--help`, read on this Mac; VS Code's command line page), Zed
+  `<file>:<line>:<col>` (zed.dev/docs/reference/cli; Zed is not installed here), Xcode `xed --line <n> <file>` (`xed --help`, read on
+  this Mac). Windsurf's documentation (docs.windsurf.com) names no option, so its file opens with no line. On a Mac with the app
+  bundle, the program inside the bundle that takes a line is run (VS Code's and Cursor's `Contents/Resources/app/bin/`, read here;
+  Zed's `Contents/MacOS/cli`, zed.dev/docs/macos; Xcode's `xed`), never the `code` on the PATH, which on this Mac is Cursor's; with
+  none, `open -a <app> <file>` and no line. No editor was started to check: the argument lists are tested. A refusal is said beside
+  the link in the app's own words (`editorWhy`). Left out of Paradev's: `bareWebUrl` (it needs the `tldts` package), the word and
+  styled-text links and the whole-line fallback (each would ask the shell about every hovered line), and its search for a file by name.
+- **Copying by Ghostty's whitespace rules** (`engine-copy.ts`). The spaces a row is padded with are not copied, blank lines at the end
+  go, rows the terminal wrapped join into the line they were, a wide character is copied once, and a rectangular selection is copied
+  cell by cell. Every copy uses it: the copy key off macOS, copy on select, the menu's Copy, and the terminal's `copy` event (Cmd+C from
+  the Edit menu), which is answered again after xterm's own raw text. Paradev's 48 test cases run, its Ghostty `selectionString` cases
+  among them, on a real xterm 6 (it used `@xterm/headless`, which is not a dependency here). The selection mode lives in a private field
+  of xterm; `e2e/term-copy.spec.ts` fails when a bump of xterm takes it away, and copying then falls back to xterm's text with the
+  padding trimmed.
+
 ## Bring over Claude Code and Codex work (item 101e)
 
 A person who already used Claude Code or Codex on this Mac is offered their folders as projects, and those folders'

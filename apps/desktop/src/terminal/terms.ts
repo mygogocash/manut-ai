@@ -6,6 +6,7 @@
 import type { ITerminalInitOnlyOptions, ITerminalOptions, Terminal } from "@xterm/xterm";
 import type { FitAddon } from "@xterm/addon-fit";
 import { afterOpen, bracketedPaste, CELLS_EVENT, feed, isParked, live, onVisible, type Remake } from "../sessions/term/engine";
+import { setTermFolder } from "../sessions/term/engine-paths";
 import { TERM_INPUT_EVENT } from "../sessions/term/paste-guard";
 import { onCwd } from "../sessions/term/engine-marks";
 import { applyLook, termOptions } from "../sessions/term/look";
@@ -52,6 +53,9 @@ interface PanelTerm {
   saved: boolean;
   settle: ReturnType<typeof setTimeout> | null;
   undo: () => void;
+  /** the folder its shell started in when that is the one the pane was asked for, else null: where a file path in its output may
+   *  open from (a shell that started in the home folder because its folder was gone has no folder of its own) */
+  folder: string | null;
   /** stops following the shell's foreground CLI */
   fgOff?: () => void;
   /** stops following the folder its shell reports */
@@ -138,10 +142,13 @@ function create([{ Terminal }, { FitAddon }]: Xterm, key: number): PanelTerm {
     ended: false,
     typed: false,
     saved: false,
+    folder: null,
     settle: null,
     undo: () => undefined,
   };
   terms.set(key, p);
+  // file paths in its output (term/engine-paths.ts); the element outlives a parked terminal made again
+  setTermFolder(el, () => p.folder);
   wire(first.term);
   // the person's own keys or paste (engine-input.ts, engine-ime.ts, paste-guard.ts)
   el.addEventListener(TERM_INPUT_EVENT, () => {
@@ -195,6 +202,7 @@ async function start(key: number, p: PanelTerm, want: string | null, restored: b
           return;
         }
         p.id = started.id;
+        p.folder = want && started.cwd === want ? want : null;
         // the tab's mark follows the CLI in the shell's foreground
         p.fgOff = onSessionFg(started.id, (agent) => setPaneFg(key, agent));
         if (p.owed) host.ack(p.id, p.owed);
