@@ -1827,7 +1827,7 @@ mod tests {
         // run only as their own terminal, so their view names no chat
         let st = Stored { args: s(&["--model=opus"]), ..Stored::default() };
         let v = view_of(crate::sessions::agent("omp").unwrap(), &st, Some(PathBuf::from("/opt/bin/omp")), true);
-        assert_eq!(v.chat.as_deref(), Some("/opt/bin/omp --mode rpc --approval-mode=always-ask --model=opus"));
+        assert_eq!(v.chat.as_deref(), Some("/opt/bin/omp --mode rpc --approval-mode=always-ask --no-extensions --no-lsp --model=opus"));
         assert_eq!(v.terminal.as_deref(), Some("/opt/bin/omp --approval-mode=always-ask --model=opus"));
         for id in ["pi", "omo"] {
             let v = view_of(crate::sessions::agent(id).unwrap(), &Stored::default(), Some(PathBuf::from("/opt/bin/x")), true);

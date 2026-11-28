@@ -435,7 +435,7 @@ export class MockHost implements SessionHost, BuddyHost {
     const builtin = !custom;
     const args = p.args ?? [];
     // oh-my-pi's chat and terminal start in its asking mode, as the shell's `chat_args` and `terminal_args` name it (item 139)
-    const fixed = a.acp?.args ?? (a.id === "claude" ? ["-p", "--input-format", "stream-json"] : a.id === "codex" ? ["app-server"] : a.id === "omp" ? ["--mode", "rpc", "--approval-mode=always-ask"] : []);
+    const fixed = a.acp?.args ?? (a.id === "claude" ? ["-p", "--input-format", "stream-json"] : a.id === "codex" ? ["app-server"] : a.id === "omp" ? ["--mode", "rpc", "--approval-mode=always-ask", "--no-extensions", "--no-lsp"] : []);
     const termFixed = a.id === "omp" ? ["--approval-mode=always-ask"] : [];
     const found = a.path;
     return {

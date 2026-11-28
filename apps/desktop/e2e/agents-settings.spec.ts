@@ -311,7 +311,7 @@ test("pi and OmO say they run only in a terminal, and oh-my-pi starts in its ask
   }
   await page.getByTestId("provider-open-omp").click();
   await expect(page.getByTestId("provider-no-asks")).toHaveCount(0);
-  await expect(page.getByTestId("provider-runs-chat")).toHaveText(/ --mode rpc --approval-mode=always-ask$/);
+  await expect(page.getByTestId("provider-runs-chat")).toHaveText(/ --mode rpc --approval-mode=always-ask --no-extensions --no-lsp$/);
   await expect(page.getByTestId("provider-runs-terminal")).toHaveText(/ --approval-mode=always-ask$/);
   if (SHOTS) {
     mkdirSync(SHOTS, { recursive: true });
