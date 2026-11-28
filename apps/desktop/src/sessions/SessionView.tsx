@@ -892,7 +892,8 @@ export function SessionView() {
             : rec.status;
   return (
     <>
-      <header className="head" data-testid="header">
+      {/* a lane's header gives way in its own order (code/lanestep.css) */}
+      <header className={lane ? "head ss-lane-head" : "head"} data-testid="header">
         <span className="ss-head-mark">
           {mode === "terminal" ? <TermRowMark agent={termMarkAgent(rec)} size={18} /> : <AgentMark agent={rec.agent} size={18} />}
         </span>

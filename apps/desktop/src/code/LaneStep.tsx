@@ -100,7 +100,15 @@ export function LaneStepView({ next, open = false, onPress, onPull }: LaneStepVi
         <span className="ss-step-state" data-testid="lane-step-state">
           {pull ? (
             <>
-              <button type="button" className="ss-step-pull" title={t("lane.prTip")} onClick={() => onPull?.(pull)} data-testid="lane-step-pull" data-state={pull.state}>
+              <button
+                type="button"
+                className="ss-step-pull"
+                aria-label={t("prs.detail", { n: pull.number })}
+                title={t("lane.prTip")}
+                onClick={() => onPull?.(pull)}
+                data-testid="lane-step-pull"
+                data-state={pull.state}
+              >
                 {t("lane.step.pull", { n: pull.number })}
               </button>
               {requestWords(pull).map((w) => (

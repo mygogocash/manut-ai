@@ -4,15 +4,10 @@
    token names map onto the desktop's (src/theme/tokens.css): --band is --aui-subtle, --oki and --erri are --aui-success and
    --aui-danger, --pri and --onpri are --aui-primary and --aui-on-primary. Lines that are the desktop's own say so. */
 
-/* The branch and the state, after the header's own words. They give way after the path and before the title, and the branch, which
-   can be a long name, ends in an ellipsis. */
+/* The branch and the state, after the header's own words, each the header's own item. The desktop's own: the branch, which can be a long
+   name and is also under the composer, gives way first after the path, down to a few letters and an ellipsis; the state never does. */
 .ss-head-lane {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex: 0 100000 auto;
-  min-width: 0;
-  overflow: hidden;
+  display: contents;
 }
 .ss-head-lane .tag {
   display: inline-flex;
@@ -29,8 +24,8 @@
 }
 .ss-head-lane .tag.mono {
   display: block;
-  flex: 0 1 auto;
-  min-width: 0;
+  flex: 0 10000000 auto;
+  min-width: 5.5em;
   max-width: 240px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -60,10 +55,11 @@
   margin-left: 0;
 }
 
-/* The request's state, as quiet as the header's second words; it gives way first after the path, so the title keeps its room. */
+/* The request's state, as quiet as the header's second words. It gives way after the path and the branch and before the title, and
+   keeps the request's number. */
 .ss-step-state {
   flex: 0 1000000 auto;
-  min-width: 0;
+  min-width: 3.5em;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -117,6 +113,23 @@
 .ss-step-btn:focus-visible {
   outline: 2px solid var(--aui-border-strong);
   outline-offset: 1px;
+}
+
+/* The desktop's own: a lane's header gives way one item after another, each only once the one before is at its least: the path, then
+   the branch (to a few letters), then the request's state (to its number), then the title (to its ellipsis). Flex shares a shortfall
+   by factor and size, so an item with a lower factor still gives up a fraction of a pixel, and that is enough for an ellipsis to cut
+   a word while the path has room to spare; factors this far apart leave the next item less than a browser draws. */
+.ss-lane-head .ss-head-path {
+  flex-shrink: 1e20;
+}
+.ss-lane-head .ss-head-lane .tag.mono {
+  flex-shrink: 1e15;
+}
+.ss-lane-head .ss-step-state {
+  flex-shrink: 1e10;
+}
+.ss-lane-head .head-title[data-testid="session-title"] {
+  flex-shrink: 1e5;
 }
 
 /* The desktop's own: the step's panel (the draft or the method, then the ask, and what the answer did) opens under the header, at the

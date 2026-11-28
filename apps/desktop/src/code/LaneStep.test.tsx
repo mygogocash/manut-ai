@@ -9,6 +9,7 @@ import type { LanePull } from "../tasks/pulls";
 import { resetPulls } from "../tasks/pulls";
 import type { LaneStatus } from "./lane";
 import { LaneHeadTagsView, LaneStepView, nextStep, pressStep, requestWords, type NextStep, type NextStepInput } from "./LaneStep";
+import { MockHost, type MockGlobals } from "../sessions/host";
 import { ReviewFlow, type FlowHost } from "./Review";
 import { resetReviewAsks, reviewAskRecord } from "./reviewAsk";
 import type { ReviewAsk, ReviewDone } from "./source";
@@ -47,12 +48,12 @@ const OPENED: ReviewDone = { outcome: "opened", pushed: true, url: "https://gith
 /** Every branch state the brief names, with the button and the words the top bar must show. */
 const STATES: { name: string; in: Partial<NextStepInput>; button: "review" | "merge" | null; says: string[] }[] = [
   { name: "no request", in: {}, button: "review", says: [] },
-  { name: "open, checks running", in: { pull: { ...PULL, checks: checks(1, 0, 2) } }, button: "merge", says: ["Pull request #12", "2 running"] },
-  { name: "open, checks passing", in: { pull: PULL }, button: "merge", says: ["Pull request #12", "Checks passed"] },
-  { name: "open, checks failing", in: { pull: { ...PULL, checks: checks(2, 1, 0) } }, button: "merge", says: ["Pull request #12", "1 failing"] },
-  { name: "open, review asked", in: { pull: { ...PULL, review: "required" } }, button: "merge", says: ["Pull request #12", "Checks passed", "Review needed"] },
+  { name: "open, checks running", in: { pull: { ...PULL, checks: checks(1, 0, 2) } }, button: "merge", says: ["#12", "2 running"] },
+  { name: "open, checks passing", in: { pull: PULL }, button: "merge", says: ["#12", "Checks passed"] },
+  { name: "open, checks failing", in: { pull: { ...PULL, checks: checks(2, 1, 0) } }, button: "merge", says: ["#12", "1 failing"] },
+  { name: "open, review asked", in: { pull: { ...PULL, review: "required" } }, button: "merge", says: ["#12", "Checks passed", "Review needed"] },
   { name: "merged", in: { merged: true }, button: null, says: ["Pull request merged"] },
-  { name: "draft", in: { pull: { ...PULL, state: "draft" } }, button: null, says: ["Pull request #12", "Draft"] },
+  { name: "draft", in: { pull: { ...PULL, state: "draft" } }, button: null, says: ["#12", "Draft"] },
 ];
 const input = (over: Partial<NextStepInput>): NextStepInput => ({ own: true, can: true, canMerge: true, pull: null, merged: false, ...over });
 const drawStep = (next: NextStep, open = false) => renderToString(<LaneStepView next={next} open={open} onPress={noop} />);
@@ -127,8 +128,10 @@ describe("the one button names the step the branch is at", () => {
     expect(drawStep(nextStep(input({})), true)).toContain('aria-expanded="true"');
     expect(drawStep(nextStep(input({})), false)).toContain('aria-expanded="false"');
     const html = drawStep(nextStep(input({ pull: PULL })));
-    expect(html).toMatch(/data-testid="lane-step-pull"[^>]*>Pull request #12</);
+    expect(html).toMatch(/data-testid="lane-step-pull"[^>]*>#12</);
     expect(html).toContain(`title="${t("lane.prTip")}"`);
+    // the number alone is short for the header; its name to a screen reader is the whole of it
+    expect(html).toContain('aria-label="Pull request #12"');
   });
 
   it("reads in every language, with no key left showing", () => {
@@ -241,6 +244,33 @@ describe("a press opens exactly item 75's ask, and nothing is sent until it is s
     expect(h.reviewWithdraw).toHaveBeenCalledWith(ASK.id);
     expect((await reviewAskRecord(ASK.id))?.status).not.toBe("pending");
     expect(h.reviewSettle).not.toHaveBeenCalled();
+  });
+
+  it("asks a host that keeps its own state as its own methods: the app's stand-in shell, from the press to the settle", async () => {
+    // the stand-in reads its lanes and its asks through `this`, as the Mac's shell bridge reads its own: a step that called a host's
+    // method apart from the host would fail here, and did in the browser before this test
+    const g = { __manutLanes: [{ worktree: WT, dir: WT, branch: "kit/promptpay-qr", base: "main", project: "/home/you/code/shop", made: 1 }], __manutSessionCalls: [] } as unknown as MockGlobals;
+    const flow = new ReviewFlow(new MockHost(g), WT);
+    flow.title = "PromptPay QR";
+    pressStep(flow, "review");
+    await settle();
+    expect(flow.get()).toMatchObject({ at: "draft", title: "Work in this lane" });
+    await flow.ask();
+    expect(flow.get()).toMatchObject({ at: "ask", ask: { kind: "open", repo: "you/shop", branch: "kit/promptpay-qr" } });
+    const ops = () => ((g as unknown as { __manutSessionCalls: { op: string }[] }).__manutSessionCalls ?? []).map((c) => c.op);
+    expect(ops()).toContain("review.ask");
+    expect(ops()).not.toContain("review.settle");
+    await flow.answer(true);
+    expect(ops().filter((o) => o === "review.settle")).toHaveLength(1);
+    expect(flow.get()).toMatchObject({ at: "closed", done: { outcome: "opened" } });
+
+    const merging = new ReviewFlow(new MockHost(g), WT);
+    merging.pull = { ...PULL, repo: "you/shop" };
+    pressStep(merging, "merge");
+    await merging.mergeAsk();
+    expect(merging.get()).toMatchObject({ at: "ask", ask: { kind: "merge", number: 12 } });
+    expect(ops().filter((o) => o === "review.settle")).toHaveLength(1);
+    merging.close();
   });
 
   it("the shell's refusal of an ask is said in words, and nothing is opened in approval-core", async () => {

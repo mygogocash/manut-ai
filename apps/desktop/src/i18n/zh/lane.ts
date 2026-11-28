@@ -152,8 +152,9 @@ export const lane: Record<keyof typeof en, string> = {
   "lane.away": "已稍后提醒和已归档 ({n})",
   "lane.pr": "拉取请求 #{n}（{state}）",
   "lane.prTip": "在任务中打开",
-  // the lane's next step in its top bar (code/LaneStep.tsx, item 167e): the request's number beside its one button, and a merged one
-  "lane.step.pull": "Pull request #{n}",
+  // the lane's next step in its top bar (code/LaneStep.tsx, item 167e): the request's number beside its one button (its name to a
+  // screen reader is prs.detail), and a merged one
+  "lane.step.pull": "#{n}",
   "lane.step.merged": "Pull request merged",
   // review in the pane beside a lane (item 146): scopes, layout, one file at a time, sections, and a lane's branch against its remote
   "lane.pane.diff.scope": "Which changes",

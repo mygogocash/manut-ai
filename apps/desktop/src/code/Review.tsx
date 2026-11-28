@@ -417,24 +417,25 @@ export class ReviewFlow {
   /** Ask (the draft's): the shell reads the lane now and answers the ask, or why not. Writes nothing. */
   ask = async (): Promise<void> => {
     const s = this.step;
-    const make = this.host.reviewAsk;
-    if (s.at !== "draft" || !make) return;
+    const host = this.host;
+    if (s.at !== "draft" || !host.reviewAsk) return;
     const { title, body } = s;
     this.set({ ...s, busy: true, why: null });
-    await this.asking(() => make(this.worktree, title, body), { at: "draft", title, body, busy: false, why: null });
+    // called on the host, as its own method: a host's asks read its own state
+    await this.asking(() => host.reviewAsk!(this.worktree, title, body), { at: "draft", title, body, busy: false, why: null });
   };
 
   /** Ask (the method's): the shell reads the pull request now and answers the merge's ask, or why not. Writes nothing. */
   mergeAsk = async (): Promise<void> => {
     const s = this.step;
     const pull = this.pull;
-    const make = this.host.reviewMerge;
-    if (s.at !== "method" || !pull || !make) return;
+    const host = this.host;
+    if (s.at !== "method" || !pull || !host.reviewMerge) return;
     const { method } = s;
     // the method the person chose is the one "the last one I chose" starts with next time
     setSourceSettings({ lastMethod: method });
     this.set({ ...s, busy: true, why: null });
-    await this.asking(() => make(this.worktree, pull.number, method, sourceSettings().dropCredits), { at: "method", method, busy: false, why: null });
+    await this.asking(() => host.reviewMerge!(this.worktree, pull.number, method, sourceSettings().dropCredits), { at: "method", method, busy: false, why: null });
   };
 
   /** The person's Yes or No to the ask shown: approval-core settles it, and only then does the shell hear of it, once. */
@@ -481,14 +482,14 @@ export class ReviewFlow {
    *  the two fields to be read and changed. Nothing is asked of the host's pull request path: Ask is still the person's. */
   suggest = async (): Promise<void> => {
     const s = this.step;
-    const run = this.host.titleRun;
-    if (s.at !== "draft" || s.writing || !run) return;
+    const host = this.host;
+    if (s.at !== "draft" || s.writing || !host.titleRun) return;
     this.set({ ...s, writing: true, why: null });
     const settings = titleModel();
     try {
       const draft = await this.host.reviewDraft?.(this.worktree).catch(() => null);
       const folder = await this.host.laneDiff(this.worktree).catch(() => null);
-      const got = await run({ agent: "claude", model: settings.model, effort: settings.effort, purpose: "pull", key: this.worktree, material: pullMaterial(draft?.commits ?? [], folder?.files ?? []) });
+      const got = await host.titleRun({ agent: "claude", model: settings.model, effort: settings.effort, purpose: "pull", key: this.worktree, material: pullMaterial(draft?.commits ?? [], folder?.files ?? []) });
       if (!got.title) throw new Error("empty");
       this.set((x) => (x.at === "draft" ? { ...x, title: got.title, body: got.body, writing: false, why: null } : x));
     } catch (e) {

@@ -152,8 +152,9 @@ export const lane: Record<keyof typeof en, string> = {
   "lane.away": "다시 알림과 보관됨 ({n})",
   "lane.pr": "풀 리퀘스트 #{n} ({state})",
   "lane.prTip": "작업에서 열기",
-  // the lane's next step in its top bar (code/LaneStep.tsx, item 167e): the request's number beside its one button, and a merged one
-  "lane.step.pull": "Pull request #{n}",
+  // the lane's next step in its top bar (code/LaneStep.tsx, item 167e): the request's number beside its one button (its name to a
+  // screen reader is prs.detail), and a merged one
+  "lane.step.pull": "#{n}",
   "lane.step.merged": "Pull request merged",
   // review in the pane beside a lane (item 146): scopes, layout, one file at a time, sections, and a lane's branch against its remote
   "lane.pane.diff.scope": "Which changes",
