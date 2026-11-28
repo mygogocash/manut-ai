@@ -374,6 +374,7 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    opens the editor at that line, Ghostty's copy rules); the owner can try the link with VS Code installed. 102l-6 and 146
    started. Lead's note: push marks right after a merge, never while another item waits to merge on CI, or it must merge
    the lead's branch and run CI once more.
+   141 merged at 09:55 (signing secrets in environments, a nightly key of its own; the owner's steps are under Needs the owner).
    The dev relay is on with its push key pair as dev secrets, deployed to dev 27 Nov; the owner's try on an iPhone is left.
    Two Rust tests that raced under load (the MCP relay's round trip, the Grok account check) now wait for their answers, and
    the 16 hook-dependency warnings `pnpm lint` found are settled. Fonts stay 99, the owner's. From 27 Nov the owner asked for English first: new words are English, copied into ja, ko and zh. Needs the owner from 101b: Grok signed in and `permission_mode = "ask"`
@@ -655,6 +656,14 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
 
 Every switch that turns a built part on, and what each needs from the owner, is in `docs/turning-on.md`.
 
+- **Signing secrets into GitHub Environments (item 141, `docs/releasing.md`):** make environment `release` (you as
+  required reviewer, administrators' bypass off, allowed on `main` and tags `desktop-v*`) and `nightly` (allowed on `main`);
+  move `TAURI_SIGNING_PRIVATE_KEY`, its password and the five `APPLE_*` secrets into `release` and delete the repository
+  copies; make a nightly key pair (`pnpm --filter @manut/desktop exec tauri signer generate -w ~/manut-ai-nightly-key/nightly.key`):
+  the key and its password as `nightly` secrets `NIGHTLY_SIGNING_PRIVATE_KEY` and `_PASSWORD`, the `.pub` as the repository
+  variable `NIGHTLY_UPDATER_PUBKEY`. Until then a release job names an environment with no secrets, and the nightly fails
+  before building and says why. This replaces your 27 Nov decision that the nightly signs with the stable key; say if you
+  want that back. Also yours: row 141c, whether a stable build's update row offers Nightly at all.
 - **Manut AI on more than one machine (item 108, `docs/multi-machine.md`, "Open questions for the owner"):** nine
   questions, each with a recommendation (a local-network road, the relay's cost, Macs only, a terminal from afar, others'
   devices, pairing from afar, when updates install, agents reaching other machines, and the consent words). On the
