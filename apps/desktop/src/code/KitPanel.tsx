@@ -25,6 +25,7 @@ import { usePlace } from "../palette/places";
 import { getHost } from "../sessions/host";
 import { openFolderInEditor } from "./editor";
 import { KeptLanes, useLaneProjects } from "./KeptLanes";
+import { LaneSync } from "./LaneSync";
 import { MainMoved } from "./MainMoved";
 import { AutoPull } from "./AutoPull";
 import { LaneReview } from "./Review";
@@ -202,8 +203,9 @@ export function codeProjects(cwds: readonly string[], added: readonly string[], 
 }
 
 /** What a lane's row shows under its line: Bring it back's panel, while the person has it open and the lane can still bring its
- *  files back, then the note that the branch it was made from changed the files it changed (read in the lane's own folder for its
- *  own base, while that folder is on its branch), then Put up for review for a lane with a folder and a branch of its own. */
+ *  files back, then how far its branch is from its remote (item 146), then the note that the branch it was made from changed the
+ *  files it changed (read in the lane's own folder for its own base, while that folder is on its branch), then Put up for review for
+ *  a lane with a folder and a branch of its own. */
 function LaneBelow({ root, row, backOpen, onCloseBack }: { root: string; row: LaneRow; backOpen: boolean; onCloseBack: () => void }) {
   // a lane that can no longer bring its files back (a turn began, or they were brought back) shuts its panel for good
   useEffect(() => {
@@ -215,6 +217,7 @@ function LaneBelow({ root, row, backOpen, onCloseBack }: { root: string; row: La
   return (
     <>
       {backOpen && row.canBringBack ? <BringBack id={row.id} onClose={onCloseBack} /> : null}
+      {own && row.worktree && <LaneSync worktree={row.worktree} mark={`${row.status}:${row.lastAt ?? 0}`} />}
       {own && <MainMoved root={root} {...(row.dir ? { dir: row.dir } : {})} base={own.base} branch={own.branch} lane={row.id} />}
       {own && row.worktree && <LaneReview root={root} worktree={row.worktree} branch={own.branch} title={row.title} />}
     </>

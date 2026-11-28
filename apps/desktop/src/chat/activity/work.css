@@ -116,6 +116,69 @@
   color: var(--muted);
 }
 
+/* The numbered layouts (item 146): the pane beside a lane draws the line numbers git's hunk headers give, in a gutter that is no part
+   of what is selected or copied, so a drag takes the code and nothing else. A row is the old number, the new number, the mark and the
+   text; a removed line has no new number and an added line no old one. The mark is a character of its own here (the plain rows
+   draw it with ::before at the left edge, which would sit over the gutter). */
+.dv-l.n {
+  display: grid;
+  grid-template-columns: 34px 34px 14px minmax(0, 1fr);
+  padding: 0 10px 0 0;
+}
+.dv-l.n::before {
+  content: none;
+}
+.dv-n,
+.dv-m {
+  -webkit-user-select: none;
+  user-select: none;
+  color: var(--muted);
+}
+.dv-n {
+  padding-right: 6px;
+  font-size: 11px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.dv-m {
+  text-align: center;
+}
+.dv-l.add .dv-m {
+  color: var(--ok);
+}
+.dv-l.del .dv-m {
+  color: var(--danger);
+}
+.dv-t {
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+/* The split layout: two columns that share the width, the file before the change on the left. Each cell has one number. */
+.dv-sr {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+.dv-l.n.s {
+  grid-template-columns: 34px 14px minmax(0, 1fr);
+}
+.dv-sr > .dv-l + .dv-l {
+  border-left: 1px solid var(--line-soft);
+}
+.dv-l.empty {
+  background: color-mix(in srgb, var(--muted) 6%, transparent);
+}
+/* A press on one side leaves the other out of what the drag selects (Work.tsx `pick`): a note on selected lines is of one side. */
+.dv-body[data-pick="old"] .dv-l[data-side="new"],
+.dv-body[data-pick="new"] .dv-l[data-side="old"] {
+  -webkit-user-select: none;
+  user-select: none;
+}
+/* One file shown by itself takes the height its lines need; the pane scrolls it. */
+.dv.tall .dv-body {
+  max-height: none;
+}
+
 /* the agent's todo list: one compact checklist that changes in place; under way reads in ink */
 .pl {
   margin: 4px 0 2px;
