@@ -34,6 +34,7 @@ import { ProjectIconView, useProjectIcon } from "./ProjectIcon";
 import { allowFolder, dropRule, mayAllow, removeFolder, setLevel, updateKitProjects, useKitProject, type KitProject } from "./project";
 import { Empty } from "../pages/MenuPage";
 import { MenuIcon } from "../sidebar/menuIcons";
+import { setCodeProject, shownProject, useCodeProject } from "./codeProject";
 
 /** A session of this project whose changes hold a key. */
 export interface KeyNote {
@@ -249,8 +250,9 @@ export function KitPanel({ onJobView }: { onJobView?: (job: string) => void } = 
     addedFolders(prefs),
     lanesMadeIn,
   );
-  const [picked, setPicked] = useState<string | null>(null);
-  const root = picked && projects.includes(picked) ? picked : (projects[0] ?? "");
+  // the project picked here, kept where the side menu reads it too: its lanes are listed there first (item 167a)
+  const picked = useCodeProject();
+  const root = shownProject(projects, picked);
   const project = useKitProject(root);
   const icon = useProjectIcon(getHost(), root);
   const lanes = useLaneRows(root);
@@ -328,7 +330,7 @@ export function KitPanel({ onJobView }: { onJobView?: (job: string) => void } = 
           onJob: (job) => setJobsOpen((cur) => (cur.includes(job) ? cur.filter((j) => j !== job) : [...cur, job])),
           onJobView,
         }}
-        onProject={setPicked}
+        onProject={setCodeProject}
         onLevel={(level) => updateKitProjects((x) => setLevel(x, root, level))}
         onAllow={(folder) => updateKitProjects((x) => allowFolder(x, root, folder))}
         onDropRule={(rule) => updateKitProjects((x) => dropRule(x, root, rule))}

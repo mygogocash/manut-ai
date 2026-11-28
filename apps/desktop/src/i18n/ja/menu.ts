@@ -18,4 +18,6 @@ export const menu: Record<keyof typeof en, string> = {
   "menu.plans": "コーディングツールのプラン",
   "menu.plansNote": "各コーディングツールのプランをどれだけ使ったか。このコンピューターから読み取ります。",
   "menu.working": "作業中",
+  // the lanes listed in Recent's place while the code mode is open (item 167a): each project's list, for a screen reader
+  "menu.lanesIn": "{project} のレーン",
 };

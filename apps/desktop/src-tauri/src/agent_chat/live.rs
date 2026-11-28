@@ -194,8 +194,9 @@ fn list_once(argv: &[OsString], args: &[&str], cwd: &Path, path_env: &OsString, 
 
 /// oh-my-pi's own settings before its chat starts in `cwd` ([`crate::omp_asks::settings_allow`]): its two layer listings
 /// run with the program `argv`, the chat's `PATH` and variables, and `overlays` (its overlay variable as the chat would
-/// have it). Refused, with nothing started, when a layer would let a tool run unasked or could not be checked.
-fn omp_settings(label: &str, argv: &[OsString], cwd: &Path, path_env: &OsString, env: &[(String, String)], overlays: Option<&str>) -> Result<(), String> {
+/// have it). Refused, with nothing started, when a layer would let a tool run unasked or could not be checked; else what the
+/// person's own layer's listing printed.
+fn omp_settings(label: &str, argv: &[OsString], cwd: &Path, path_env: &OsString, env: &[(String, String)], overlays: Option<&str>) -> Result<String, String> {
     if !cwd.is_absolute() || !cwd.is_dir() {
         return Err(format!("not a folder: {}", cwd.display()));
     }
@@ -418,12 +419,24 @@ impl ChatSessions {
         // itself in the chat's folder with the chat's variables, and an overlay of the app's own denies its `task` tool, whose
         // helpers it runs unasked (crate::omp_asks). The overlay is written in the app's own folder, the person's home (in
         // tests a temporary one), and goes before the person's arguments as the app's own do.
+        // Item 139b: `--no-extensions` (on its command line too) keeps the project's extensions and hooks out, so a folder whose
+        // own tools, plugins or `.env` variables would still act as omp starts refuses first, with nothing run; then the
+        // person's own extensions and hooks are named, found in the folder omp prints as its own (run in the overlay's folder,
+        // so no project chooses it), less the ones their own layer turns off.
         if agent_id == "omp" {
+            let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).filter(|h| !h.is_empty()).map(PathBuf::from);
+            if let Some(what) = crate::omp_asks::project_code(cwd, home.as_deref()) {
+                return Err(crate::omp_asks::project_code_refusal(a.label, &what));
+            }
             let overlays = env.iter().rev().find(|(n, _)| n == crate::omp_asks::OVERLAYS_VAR).map(|(_, v)| v.clone()).or_else(|| std::env::var(crate::omp_asks::OVERLAYS_VAR).ok());
-            omp_settings(a.label, &program, cwd, &path_env, &env, overlays.as_deref())?;
+            let own_listing = omp_settings(a.label, &program, cwd, &path_env, &env, overlays.as_deref())?;
             let overlay = crate::omp_asks::overlay_path(&self.notes_home().ok_or("no home folder")?);
             crate::omp_asks::write_overlay(&overlay)?;
             argv.extend(crate::omp_asks::overlay_args(&overlay, through_cmd)?);
+            let app_folder = overlay.parent().ok_or("no folder")?;
+            let agent_dir = list_once(&program, &crate::omp_asks::AGENT_DIR, app_folder, &path_env, &env).as_deref().and_then(crate::omp_asks::agent_dir_of).ok_or_else(|| crate::omp_asks::no_check(a.label))?;
+            let own = crate::omp_asks::own_files(&agent_dir, &crate::omp_asks::disabled_of(&own_listing));
+            argv.extend(crate::omp_asks::own_args(&own, through_cmd)?);
         }
         // an agent whose own default runs tools unasked (OpenCode) gets ask rules built from its own
         // resolved rules, so nothing the person allows runs unasked and nothing they deny becomes askable; or it does
@@ -1267,8 +1280,10 @@ mod tests {
     /// Item 139: an oh-my-pi chat starts only while both of its own settings layers keep it asking, as omp itself lists them:
     /// the person's (here in the agent folder the chat's own variable names) and the project's (the chat's folder). An unsafe
     /// layer, a listing that fails or an overlay variable starts nothing. Once both ask it starts as `omp --mode rpc
-    /// --approval-mode=always-ask --config <overlay>`, the overlay written in the app's own folder, denying the task tool;
-    /// pi and OmO start no chat at all.
+    /// --approval-mode=always-ask --no-extensions --no-lsp --config <overlay>`, the overlay written in the app's own folder,
+    /// denying the task tool, then the person's own extensions and hooks from the folder omp prints as its own, less the ones
+    /// their layer turns off (item 139b). A folder whose own tools or `.env` variables would still act refuses before omp is
+    /// run at all. pi and OmO start no chat at all.
     #[cfg(unix)]
     #[test]
     fn an_omp_chat_starts_asking_and_only_while_its_own_settings_ask() {
@@ -1282,11 +1297,14 @@ mod tests {
         let dir = base.canonicalize().unwrap();
         let proj = dir.join("proj");
         let seen = dir.join("omp.seen");
-        // a stand-in omp: its two listings print the layer files (the person's from the agent folder its variable names, the
-        // project's from the folder it runs in), and its chat start records its arguments
+        // a stand-in omp: every run is logged; its two listings print the layer files (the person's from the agent folder its
+        // variable names, the project's from the folder it runs in), `config path` prints that agent folder, and its chat
+        // start records its arguments
         let prog = dir.join("fake-omp");
+        let calls = dir.join("omp.calls");
         let body = format!(
-            "#!/bin/sh\nif [ \"$1\" = config ]; then\n  case \"$4\" in\n    --scope=global) exec cat \"$PI_CODING_AGENT_DIR/global.json\" ;;\n    --scope=project) exec cat ./project.json ;;\n  esac\n  exit 3\nfi\nfor a in \"$@\"; do printf '%s\\n' \"$a\"; done > '{s}.tmp'\nmv '{s}.tmp' '{s}'\n",
+            "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{c}'\nif [ \"$1\" = config ]; then\n  case \"$2\" in path) exec printf '%s\\n' \"$PI_CODING_AGENT_DIR\" ;; esac\n  case \"$4\" in\n    --scope=global) exec cat \"$PI_CODING_AGENT_DIR/global.json\" ;;\n    --scope=project) exec cat ./project.json ;;\n  esac\n  exit 3\nfi\nfor a in \"$@\"; do printf '%s\\n' \"$a\"; done > '{s}.tmp'\nmv '{s}.tmp' '{s}'\n",
+            c = calls.display(),
             s = seen.display()
         );
         std::fs::write(&prog, body).unwrap();
@@ -1314,11 +1332,49 @@ mod tests {
         assert_eq!(start(&c, &with_overlay).unwrap_err(), unchecked);
         thread::sleep(Duration::from_millis(200));
         assert!(!seen.exists() && c.count() == 0, "oh-my-pi started while it would not ask");
-        // both layers ask: it starts in its asking mode, with the app's overlay, and the overlay denies the task tool
+        // item 139b: a project's own custom tool, or a `.env` that sets one of omp's variables, refuses before omp is run
+        let _ = std::fs::remove_file(&calls);
+        std::fs::create_dir_all(proj.join(".omp/tools")).unwrap();
+        std::fs::write(proj.join(".omp/tools/t.ts"), "export default () => [];\n").unwrap();
+        assert_eq!(start(&c, &env).unwrap_err(), crate::omp_asks::project_code_refusal("oh-my-pi", ".omp/tools"));
+        std::fs::remove_dir_all(proj.join(".omp")).unwrap();
+        std::fs::write(proj.join(".env"), "API_URL=x\nPI_CONFIG_FILES=/tmp/allow-all.yml\n").unwrap();
+        assert_eq!(start(&c, &env).unwrap_err(), crate::omp_asks::project_code_refusal("oh-my-pi", ".env"));
+        std::fs::write(proj.join(".env"), "API_URL=x\n").unwrap();
+        thread::sleep(Duration::from_millis(200));
+        assert!(!calls.exists() && !seen.exists() && c.count() == 0, "oh-my-pi ran in a folder whose own code would act");
+        // the person's own extension modules and hooks, one of each turned off in their own layer
+        for rel in ["extensions/own.ts", "extensions/off.ts", "hooks/pre/bash.ts", "hooks/post/edit.ts"] {
+            std::fs::create_dir_all(dir.join("agent").join(rel).parent().unwrap()).unwrap();
+            std::fs::write(dir.join("agent").join(rel), "export default function () {}\n").unwrap();
+        }
+        let global = layer(r#""always-ask""#, r#"{"bash":"prompt"}"#);
+        let off = r#","disabledExtensions":{"value":["extension-module:off","hook:post:edit:edit.ts"],"type":"array","description":"x"}}"#;
+        std::fs::write(dir.join("agent/global.json"), format!("{}{off}", &global[..global.len() - 1])).unwrap();
+        // both layers ask: it starts in its asking mode with no extension of its own finding, with the app's overlay (which
+        // denies the task tool and leaves out the project's MCP servers), then the person's own files
         c.start_agent_mine("omp", &proj, None, &env, None, false, &mine, |_| {}).unwrap();
         let overlay = crate::omp_asks::overlay_path(&dir.join("home"));
-        assert_eq!(seen_lines(&seen), ["--mode", "rpc", "--approval-mode=always-ask", "--config", &overlay.to_string_lossy()]);
+        let agent = dir.join("agent");
+        assert_eq!(
+            seen_lines(&seen),
+            [
+                "--mode",
+                "rpc",
+                "--approval-mode=always-ask",
+                "--no-extensions",
+                "--no-lsp",
+                "--config",
+                &overlay.to_string_lossy(),
+                "-e",
+                &agent.join("extensions/own.ts").to_string_lossy(),
+                "--hook",
+                &agent.join("hooks/pre/bash.ts").to_string_lossy(),
+            ]
+        );
         assert_eq!(std::fs::read_to_string(&overlay).unwrap(), crate::omp_asks::OVERLAY);
+        let ran = std::fs::read_to_string(&calls).unwrap();
+        assert!(ran.lines().any(|l| l == "config path"), "{ran}");
         // pi and OmO cannot ask, so no chat of theirs starts, whatever program is set for them
         for (id, label) in [("pi", "pi"), ("omo", "OmO")] {
             assert_eq!(c.start_agent_mine(id, &proj, None, &[], None, false, &mine, |_| {}).unwrap_err(), crate::sessions::no_ask_path(label), "{id}");
@@ -1343,7 +1399,7 @@ mod tests {
         let dir = base.canonicalize().unwrap();
         let proj = dir.join("proj");
         let env = vec![("HOME".to_string(), dir.join("home").to_string_lossy().into_owned()), ("PI_CODING_AGENT_DIR".to_string(), dir.join("agent").to_string_lossy().into_owned())];
-        let check = || omp_settings("oh-my-pi", &argv, &proj, &path_env, &env, None);
+        let check = || omp_settings("oh-my-pi", &argv, &proj, &path_env, &env, None).map(|_| ());
         let refused = Err(crate::acp_chat::no_asks("oh-my-pi"));
         let put = |rel: &str, text: &str| {
             let p = proj.join(rel);
@@ -1381,6 +1437,62 @@ mod tests {
         put(".omp/config.yml", "tools:\n  approval:\n    bash: deny\n");
         put(".claude/settings.json", r#"{"permissions":{"allow":["Bash(ls)"]}}"#);
         assert_eq!(check(), Ok(()));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Item 139b with the real oh-my-pi of this Mac: started in its RPC mode with the arguments a chat gets (its folder from
+    /// `omp config path`, the overlay, the person's own files) in a made-up project and home, with no model and nothing sent,
+    /// then stopped. Each module writes a mark when omp imports it, and the project's `.mcp.json` server one when it starts:
+    /// only the person's own extension and hook load, and the project's extension, hooks and MCP server do not. Its custom
+    /// tool still loads, which is why a folder with one refuses before omp starts (`omp_asks::project_code`).
+    /// `cargo test real_omp_loads_only -- --ignored`.
+    #[cfg(unix)]
+    #[test]
+    #[ignore]
+    fn real_omp_loads_only_the_persons_own_extensions_and_hooks() {
+        let (program, path_env) = crate::sessions::launch_for("omp").expect("oh-my-pi is installed");
+        let base = std::env::temp_dir().join(format!("manut-139b-real-omp-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        for d in ["home", "agent", "proj", "marks"] {
+            std::fs::create_dir_all(base.join(d)).unwrap();
+        }
+        let dir = base.canonicalize().unwrap();
+        let (proj, marks) = (dir.join("proj"), dir.join("marks"));
+        let module = |at: PathBuf, mark: &str| {
+            std::fs::create_dir_all(at.parent().unwrap()).unwrap();
+            std::fs::write(at, format!("import * as fs from \"node:fs\";\nfs.writeFileSync({:?}, \"1\");\nexport default function () {{}}\n", marks.join(mark).to_string_lossy())).unwrap();
+        };
+        module(dir.join("agent/extensions/own.ts"), "own-extension");
+        module(dir.join("agent/hooks/pre/bash.ts"), "own-hook");
+        module(proj.join(".omp/extensions/p.ts"), "project-extension");
+        module(proj.join(".omp/hooks/pre/edit.ts"), "project-hook");
+        module(proj.join(".claude/hooks/post/write.ts"), "project-claude-hook");
+        module(proj.join(".omp/tools/t.ts"), "project-tool");
+        std::fs::write(proj.join(".mcp.json"), format!(r#"{{"mcpServers":{{"m":{{"command":"/bin/sh","args":["-c","touch '{}'"]}}}}}}"#, marks.join("project-mcp").display())).unwrap();
+        let env = vec![("HOME".to_string(), dir.join("home").to_string_lossy().into_owned()), ("PI_CODING_AGENT_DIR".to_string(), dir.join("agent").to_string_lossy().into_owned())];
+        // the arguments a chat gets, built by the same functions
+        let overlay = crate::omp_asks::overlay_path(&dir.join("home"));
+        crate::omp_asks::write_overlay(&overlay).unwrap();
+        let printed = list_once(&program, &crate::omp_asks::AGENT_DIR, overlay.parent().unwrap(), &path_env, &env).expect("omp config path ran");
+        assert_eq!(crate::omp_asks::agent_dir_of(&printed), Some(dir.join("agent")), "{printed}");
+        let mut argv = program.clone();
+        argv.extend(crate::sessions::chat_args("omp").unwrap().iter().map(OsString::from));
+        argv.extend(crate::omp_asks::overlay_args(&overlay, false).unwrap());
+        argv.extend(crate::omp_asks::own_args(&crate::omp_asks::own_files(&dir.join("agent"), &[]), false).unwrap());
+        let mut cmd = command_for(&argv, &proj, Some(path_env.clone()), &env).unwrap();
+        cmd.stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::null());
+        let mut child = cmd.spawn().unwrap();
+        let tree = ProcessTree::adopt(&child);
+        // modules import early; the MCP server would start a little later, so wait for the slower of the two
+        thread::sleep(Duration::from_secs(8));
+        if let Some(t) = tree {
+            t.kill();
+        }
+        let _ = child.kill();
+        let _ = child.wait();
+        let mut seen: Vec<String> = std::fs::read_dir(&marks).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        seen.sort();
+        assert_eq!(seen, ["own-extension", "own-hook", "project-tool"]);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -357,36 +357,41 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    what was wrong. The high: oh-my-pi lanes and chats ran every tool with no card (omp's own default is `yolo`), item 139.
    The rest are items 140 to 144. Found sound: item 103's door, the Tailscale road but two lows, the phone's push, and the
    landing of helper patches.
-   Item 144 (the lead's tools) merged on 28 Nov. At about 02:30 on 28 Nov the account reached its five-hour limit with
+   Item 144 (the lead's tools) merged on 28 Nov. Early on 28 Nov the account reached its five-hour limit with
    five helpers mid-work (102l-5, 108b, 138, 139, 140; only 102l-5 had commits). It reset at 02:50, and 102l-5, 139 and
    138 were sent on in their own threads; 140 and 108b wait for a slot, as five heavy helpers at once reached the limit.
-   102l-5 merged at 03:20 on 28 Nov (Manut AI's note and sent-on mark are fields of a chat message, never the owner's
+   102l-5 merged at 03:08 on 28 Nov (Manut AI's note and sent-on mark are fields of a chat message, never the owner's
    words), the first merge through the fixed `finish-item.sh`; 140 was sent on in its slot.
-   138 merged at 03:45 (`docs/paradev-parity.md`: Paradev, MIT, checked feature by feature for the code mode, 117 features,
+   138 merged at 03:25 (`docs/paradev-parity.md`: Paradev, MIT, checked feature by feature for the code mode, 117 features,
    rows 145 to 166, iOS design pass last). Then 148 (terminal fixes lifted from Paradev) and 150 (find in a chat) started.
    Needs the owner from 138: CodeMirror 6 for row 165's editor, and which iOS app (111e).
-   140 merged at 04:05 (a former owner can no longer finish a stopped deletion on a shop they lost); 141 started.
-   At about 04:30 the account reached its five-hour limit again with four helpers (139, 141, 148, 150); it reset at 07:50
-   and 139, 150 and 148 were sent on. 139 merged at 08:25: oh-my-pi asks before every tool, pi and OmO run only In a
+   140 merged at 03:32 (a former owner can no longer finish a stopped deletion on a shop they lost); 141 started.
+   The account then reached its five-hour limit again with four helpers (139, 141, 148, 150); it reset at 07:50
+   and 139, 150 and 148 were sent on. 139 merged at 08:16: oh-my-pi asks before every tool, pi and OmO run only In a
    terminal (row 139b: a project's own omp hooks and extensions still run in a lane).
-   150 merged at 08:40 (find in a chat: Command+F across messages and folded steps).
-   148 merged at 09:20 (terminal fixes lifted from Paradev: keys back after an agent dies, Command+click on path:line
+   150 merged at 08:35 (find in a chat: Command+F across messages and folded steps).
+   148 merged at 08:50 (terminal fixes lifted from Paradev: keys back after an agent dies, Command+click on path:line
    opens the editor at that line, Ghostty's copy rules); the owner can try the link with VS Code installed. 102l-6 and 146
    started. Lead's note: push marks right after a merge, never while another item waits to merge on CI, or it must merge
    the lead's branch and run CI once more.
-   141 merged at 09:55 (signing secrets in environments, a nightly key of its own; the owner's steps are under Needs the owner).
-   The account's limit stopped 102l-6, 146 and 108b at about 10:30; they were sent on at 12:55. 108b merged at 13:40 (a
+   141 merged at 09:02 (signing secrets in environments, a nightly key of its own; the owner's steps are under Needs the owner).
+   The account's limit then stopped 102l-6, 146 and 108b; it reset at 12:50 and they were sent on at 12:55. 108b merged at 13:40 (a
    Watch or Answer level for each paired phone, checked on the Mac). On the owner's word of 28 Nov the repository's commits
    are authored as KunanonJ (its no-reply address, in the clone's own git config); item 167, a study of Paradev's interaction
    and UX for the code mode, started (`docs/decisions/2026-11-28-paradev-ux.md`).
    146 merged at 13:55 (review in the pane beside a lane: side by side, one file at a time, scopes, notes on lines, ahead
    and behind); 139b (a project's own oh-my-pi extensions and hooks) and 143 (the chat API's two lows) started.
-   102l-6 merged at 14:30 (on Connected, Remove a conversation asked first, and Show older); the question's wording is
+   102l-6 merged at 14:07 (on Connected, Remove a conversation asked first, and Show older); the question's wording is
    Claude's and the owner may change it.
-   At about 14:50 the limit stopped 167, 139b and 143 (167 and 143 had pushed green work); it reset at 17:50. 167 merged at
-   18:10 (`docs/paradev-ux.md`: Paradev's eight interface principles and rows 167a to 167k, no new dependency); 167a (lanes
+   The limit then stopped 167, 139b and 143 (167 and 143 had pushed green work); it reset at 17:50. 167 merged at
+   18:08 (`docs/paradev-ux.md`: Paradev's eight interface principles and rows 167a to 167k, no new dependency); 167a (lanes
    in the side menu) and 167d (keys where the actions are) started, and 139b was sent on.
-   143 merged at 18:40 (the shop's name masked in Buddy's prompt; CHAT_LIMITER on /v1/chat/*; the deploy is the owner's).
+   143 merged at 18:21 (the shop's name masked in Buddy's prompt; CHAT_LIMITER on /v1/chat/*; the deploy is the owner's).
+   139b merged at 18:33: omp chats start with --no-extensions --no-lsp, the person's own extensions and hooks passed back;
+   a folder with omp custom tools, project plugins or a PI_/OMP_ line in its .env refuses the chat (a .env PI_CONFIG_FILES had
+   slipped past item 139's check). 167e (the lane's next step in its top bar) started.
+   167a merged at 18:50 (lanes in the side menu in the code mode, previous and next lane on Option+Command+Up/Down); 167b
+   (one mark a lane) started. The design canvas boards the 167 rows touch are updated by the lead once a few have merged.
    The dev relay is on with its push key pair as dev secrets, deployed to dev 27 Nov; the owner's try on an iPhone is left.
    Two Rust tests that raced under load (the MCP relay's round trip, the Grok account check) now wait for their answers, and
    the 16 hook-dependency warnings `pnpm lint` found are settled. Fonts stay 99, the owner's. From 27 Nov the owner asked for English first: new words are English, copied into ja, ko and zh. Needs the owner from 101b: Grok signed in and `permission_mode = "ask"`

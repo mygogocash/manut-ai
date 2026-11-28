@@ -2,7 +2,7 @@
 // presses can become keys, which keys are refused and why, how they are kept on this Mac and read back, and that the app's
 // shortcuts follow them.
 import { beforeEach, describe, expect, it } from "vitest";
-import { chordFromEvent, chordString, chordText, currentKeys, defaultKeys, forgetKeys, keysText, KEYS_KEY, matches, parseChord, parseKeys, reservedFor, resetKeys, setKeys, takenBy, type Chord } from "./keys";
+import { chordFromEvent, chordString, chordText, currentKeys, defaultKeys, forgetKeys, KEY_ACTIONS, keysText, KEYS_KEY, matches, parseChord, parseKeys, reservedFor, resetKeys, setKeys, takenBy, type Chord } from "./keys";
 import { shortcutFor } from "./shortcuts";
 
 const storage = new Map<string, string>();
@@ -31,6 +31,23 @@ describe("the defaults", () => {
     // the side menu, as ChatGPT's
     expect(keysText(defaultKeys(true).sidebar, true)).toBe("⇧⌘S");
     expect(keysText(defaultKeys(false).sidebar, false)).toBe("Ctrl+Shift+S");
+    // the previous and next lane (item 167a), as Paradev's previous and next workspace: ⌘⌥ and the arrow on macOS
+    expect(keysText(defaultKeys(true)["lane-prev"], true)).toBe("⌥⌘↑");
+    expect(keysText(defaultKeys(true)["lane-next"], true)).toBe("⌥⌘↓");
+    expect(keysText(defaultKeys(false)["lane-prev"], false)).toBe("Ctrl+Alt+Shift+↑");
+    expect(keysText(defaultKeys(false)["lane-next"], false)).toBe("Ctrl+Alt+Shift+↓");
+  });
+
+  it("are listed in Settings after the terminal sessions', previous before next, and can each be set like any other (item 167a)", () => {
+    const at = (a: string) => KEY_ACTIONS.indexOf(a as never);
+    expect(at("lane-prev")).toBe(at("session-prev") + 1);
+    expect(at("lane-next")).toBe(at("lane-prev") + 1);
+    for (const mac of [true, false]) for (const a of ["lane-prev", "lane-next"] as const) for (const k of defaultKeys(mac)[a]) expect(reservedFor(k, mac), a).toBeNull();
+    // no two actions share a default
+    for (const mac of [true, false]) for (const a of KEY_ACTIONS) for (const k of defaultKeys(mac)[a]) expect(takenBy(defaultKeys(mac), a, k), a).toBeNull();
+    expect(setKeys("lane-next", [c("KeyL", { meta: true, alt: true })], true)).toEqual({ ok: true });
+    expect(keysText(currentKeys(true)["lane-next"], true)).toBe("⌥⌘L");
+    expect(shortcutFor(press("l", "KeyL", { metaKey: true, altKey: true }), true)).toEqual({ kind: "lane", step: 1 });
   });
 });
 

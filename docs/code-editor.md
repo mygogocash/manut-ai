@@ -16,7 +16,7 @@ state that needs the owner: a real GitHub account, money, a real sign-in or real
 
 | State | Desktop | Where |
 | --- | --- | --- |
-| Lanes: a band with New lane, a row per lane with its title, "Kit, Careful" and a status tag | Part (this branch): the Kit panel opens with a Lanes band with a quiet New lane link (drawn even while the project has no lane), a row for each coding session that runs as a chat, with its title, "Kit · Claude Code", its branch and a state tag. Terminals stay in their folder groups below. Under the lanes, Kit's folders kept: a lane's folder that outlived its session, with Show folder and Remove. A lane is started from the + menu's Chat with Kit (item 66), or from New lane in the band, which opens that menu (item 68; see [Starting a lane](#starting-a-lane)). No effort word | `code/Lanes.tsx`, `code/KeptLanes.tsx`, `code/KitPanel.tsx`, `sessions/SessionsSection.tsx` (`ChatWay`) |
+| Lanes: a band with New lane, a row per lane with its title, "Kit, Careful" and a status tag | Part (this branch): the Kit panel opens with a Lanes band with a quiet New lane link (drawn even while the project has no lane), a row for each coding session that runs as a chat, with its title, "Kit · Claude Code", its branch and a state tag. Terminals stay in their folder groups below. Under the lanes, Kit's folders kept: a lane's folder that outlived its session, with Show folder and Remove. A lane is started from the + menu's Chat with Kit (item 66), or from New lane in the band, which opens that menu (item 68; see [Starting a lane](#starting-a-lane)). No effort word. The board keeps the band over an open lane; since item 167a the side menu lists every project's lanes instead while the code mode is open, each with one state mark and the open one marked, and ⌥⌘↑ and ⌥⌘↓ open the previous and next (see [Lanes in the side menu](#lanes-in-the-side-menu-item-167a)) | `code/Lanes.tsx`, `code/KeptLanes.tsx`, `code/KitPanel.tsx`, `sessions/SessionsSection.tsx` (`ChatWay`), `sidebar/MenuLanes.tsx` |
 | The lane's own branch (`kit/promptpay-qr`): "Kit works on a separate branch. Nothing is live." | Has (this branch): a chat session gets a branch of its own as it starts, named from its first message and made from the branch the developer's folder is on, checked out in a folder of its own (a git worktree under `~/.manut/lanes`), where its agent works. Several lanes work at once, none touching another's files or the developer's folder, whose branch, index, stash and HEAD never change because of a lane. The row and the composer's foot show the branch. Nothing is pushed or merged but through the asks of [Source control](#source-control). See [Where a lane works](#where-a-lane-works) | `code/laneBranch.ts`, `src-tauri/src/lane.rs`, `sessions/sessions.ts` (`startLane`) |
 | "Checked: 14 tests passed" | Has (this branch): read from the test run's output (vitest, jest, node's own runner, pytest, `go test`, `cargo test`, mocha, Playwright Test and Python's `unittest`). A run that cannot be read is Not confirmed, never Checked | `code/testRun.ts`, `code/lane.ts` |
 | Revert this turn | Has: Rewind, on the line under the box beside the branch, puts back the files and the chat of a kept turn; the newest is picked first. Claude Code and Codex only. The agent's own Edit on the last message still takes back the chat only, and then the lane says the files stay as they are | `sessions/RewindPanel.tsx`, `sessions/rewind.ts`, `src-tauri/src/turn_files.rs`, `code/lane.ts` |
@@ -551,7 +551,7 @@ ran with no card, while the cards that start a lane said every step asks. Everyt
 here): its `--help`, `omp config list --json --scope=…` in scratch folders, and its source at tag v18.22.0 (commit 3e8cff3).
 No message was sent to any agent.
 
-- **Its asking mode.** An oh-my-pi chat starts as `omp --mode rpc --approval-mode=always-ask` (`OMP_CHAT_ARGS` in
+- **Its asking mode.** An oh-my-pi chat starts as `omp --mode rpc --approval-mode=always-ask --no-extensions --no-lsp` (`OMP_CHAT_ARGS` in
   `src-tauri/src/sessions.rs`), and its terminal as `omp --approval-mode=always-ask`. omp applies the flag as a runtime override,
   which outranks every settings layer (a `--config` overlay, the project's, the person's own), and reads it before any extension
   could claim the same name. `always-ask` lets read-only tools run and asks before every write and every command, as Kit's dial
@@ -573,6 +573,30 @@ No message was sent to any agent.
   says Manut AI could not check. omp has no switch that leaves the project layer out. A change the agent makes to any of those
   files during a chat asks at every level ([Files a change to which always asks](#files-a-change-to-which-always-asks-item-88)),
   and omp's own folder is outside the project. A terminal of oh-my-pi gets the flag but no check: its dialogs are omp's own there.
+  Since item 139b a project's `.env` that sets one of omp's own variables refuses the chat too (below).
+- **A project's own code (item 139b).** omp imports a project's extension modules and hooks as a chat starts (`.omp/extensions`,
+  an `extensions` entry in any of its project settings files, `.omp/hooks/pre` and `post`, `.claude/hooks`, `.codex/hooks`), with no
+  card, and has no switch that leaves out only the project's. So every chat starts with `--no-extensions`, which turns off all of
+  omp's own discovery of extensions and hooks, and the shell names the person's own again, `-e` for each extension module and
+  `--hook` for each hook (`omp_asks::own_files`). They are found as omp finds them in its own folder, the one `omp config path`
+  prints when run in the app's folder `~/.manut/omp` with the chat's variables (so no project chooses it; a failure says Manut AI
+  could not check): each `.ts` or `.js` file of its `extensions/`, the files a folder there declares in its `package.json`
+  (`omp.extensions`, else `pi.extensions`), else the folder's `index.ts` or `index.js`, and each `.ts` or `.js` file of `hooks/pre/`
+  and `hooks/post/`, less the ones their own layer's `disabledExtensions` turns off. Three things act whatever `--no-extensions`
+  says. A project's MCP servers are programs omp starts with the chat, so the overlay also sets `mcp.enableProjectConfig: false`,
+  which leaves out every server a project file names and keeps the person's own. A folder with its own custom tools (anything in
+  `.omp/tools`, `.claude/tools` or `.codex/tools`), with plugins installed for the project (a `.omp/plugins` in the folder or one
+  above it, below the home folder), or with a `.env` line that sets a `PI_` or `OMP_` variable refuses the chat before omp runs,
+  naming what it found (`omp_asks::project_code`, `ss.ompProjectCode`): omp imports such tools for every session, and sets each
+  variable of the project's `.env` that the chat did not set before it reads its folders and overlays (`.env.local` and the other
+  dotenv files set nothing). With omp 18.22.0 here, a project's `PI_CODING_AGENT_DIR` became omp's own folder and its
+  `PI_CONFIG_FILES` an overlay that allowed every command, which neither layer listing showed. `--no-lsp` keeps omp from starting a
+  language server or a formatter it finds in the project's own folders first, as item 114 did for OpenCode. Skills, rules and
+  context files (`AGENTS.md`, `.omp/rules`, a project's skills) are words, not code, and still load: every step they lead to asks,
+  as the project's instructions reach Claude Code and OpenCode as text (item 93). Seen with omp itself, started in its RPC mode in
+  scratch folders with no model and nothing sent: with these arguments only the person's own extension and hook loaded, while the
+  project's extension, its two hooks and its MCP server did not, and its custom tool still did. A terminal of oh-my-pi is
+  unchanged: there the person runs omp themselves, as in any terminal.
 - **pi and OmO.** pi asks before nothing ("it does not ask for approval before every tool call", its own
   `packages/coding-agent/docs/security.md`). OmO's engine, senpi, asks only under `--permission-preset ask`, its default being
   `full-access`, and its dialog ("Permission required: …" with Allow once, Allow always, Deny) is not one the pi adapter turns into
@@ -583,7 +607,9 @@ No message was sent to any agent.
   conversation there). In a terminal the person types to them themselves.
 
 `laneAsks.test.ts`, `omp_asks.rs` and the live start test in `agent_chat/live.rs` pin it; `real_omp_settings_refuse_each_unsafe_layer`
-(ignored, needs oh-my-pi) runs the real omp's listings over made-up layers in temporary folders.
+(ignored, needs oh-my-pi) runs the real omp's listings over made-up layers in temporary folders, and
+`real_omp_loads_only_the_persons_own_extensions_and_hooks` (ignored) starts the real omp with a chat's arguments in made-up
+folders, sends nothing, and checks which modules it imported.
 
 ### Providers: each agent's settings
 
@@ -873,6 +899,41 @@ undo toast, the picked time, the Working group and a quiet chat settling, in lig
   repository, never one per lane and never on a timer: it runs when the Code page shows a lane with a branch of its own, a failed read
   is not tried again within the five minutes, and a missing or signed-out `gh` shows no pull request. Nothing is written to GitHub or
   GitLab. `tasks/pulls.ts`.
+
+### Lanes in the side menu (item 167a)
+
+Paradev keeps its workspaces in a sidebar that is always there (`docs/paradev-ux.md`, "Navigation: where a lane is"). The code
+mode keeps its lanes in view the same way, in the side menu rather than a new column. `sidebar/laneGroups.ts` decides which lanes
+and in what order, `sidebar/MenuLanes.tsx` draws them, each with its tests beside it, and `e2e/menu-lanes.spec.ts` walks them
+from the menu and by the keys (`MENU_LANES_SHOTS=<dir>` keeps pictures in light and dark).
+
+- **When.** While the Code row is current (the Code page, Tasks, or a lane or a terminal open) and a lane is listed, the lanes take
+  the place of Recent and the Working group, which are Buddy's chats. Recent is back on Home, History, a member's page and anywhere
+  else, and stays where it is while no lane is listed.
+- **Which, and in what order.** Every project's lanes, each project under a quiet heading with its name (its list named "Lanes in
+  <project>" for a screen reader). The project the Code page shows leads (its picker; the newest session's by default), then the
+  others in the Code page's order. In a group the lanes are in the Lanes band's order and marks (`Lanes.tsx` `laneOrder`, fed by the
+  band's own functions, so the two cannot part): pinned on top with the pin, then the rest newest first, with a job's lanes where
+  its first lane stands and a helper lane indented under its lead, then the settled ones, small and quiet, with their reason.
+  Snoozed and archived lanes are left out, as Recent leaves out snoozed and archived chats; the band's line still opens them, and a
+  lane that asks is never put away.
+- **A row** is Recent's (`.rec`) with the kit's status dot before the title, in the colour of the band's tag (Checked green, Working
+  blue, Needs you amber, Failed and Tests failed red, the rest grey), and the state's words after the title for a screen reader and
+  in the tooltip. Only the working dot pulses. The open lane has the hover fill and the ink, as KitNavigation marks an open Recent
+  item (`aria-current="true"`; the Code row keeps `aria-current="page"`). Its More menu is the band's (`LaneMore`: Pin, Snooze, Done
+  for now, Archive, Open in the editor), on the "more" button that shows on hover and while the row has the keyboard focus, and on
+  a right-click. Dragged onto an open chat's box, a row brings its lane's context, as the band's row does.
+- **The project the Code page shows** is kept while the app runs (`code/codeProject.ts`) rather than in Kit's panel, so the menu reads
+  it too. Opening a lane does not change it: the groups stay where they are as the person goes from lane to lane, and the keys step
+  through one order.
+- **The previous and next lane.** Two settable actions in Settings › General › Keyboard, after the terminal sessions' (`keys.ts`
+  `lane-prev` and `lane-next`): ⌥⌘↑ and ⌥⌘↓ on macOS, Ctrl+Alt+Shift+↑ and ↓ elsewhere, Paradev's keys for its previous and next
+  workspace. They open the previous and next lane in the menu's order, wrapping at the ends, and the first or the last with no lane
+  open. They work from anywhere, as ⌘⇧] does for terminal sessions; off macOS a terminal keeps them, as it keeps every Ctrl key.
+- **Opening a lane answers nothing.** A row and a key only open the lane (`openSession`, as the band's row does): no ask is answered,
+  nothing is sent, no approval is touched, and a lane that asks opens with its card in view. `sidebar/MenuLanes.test.tsx` watches
+  every action of the app's store and every call of the sessions store while the keys and a row open lanes, and the spec checks that
+  no input reached an agent and that the card still waits.
 
 ### Titles and words by a model (item 96)
 
@@ -1969,7 +2030,12 @@ text, and what that still leaves out is in [A project's own instructions, as tex
 not read back. Buddy's chat, in its own empty folder, no longer reads a CLAUDE.md in the folders above it (`~/CLAUDE.md`).
 OpenCode: the project's `opencode.json` and `.opencode` folder no longer apply; its instruction files come as text from the app
 too (item 93); and the formatters and language servers the person's own config switches on are off (item 114), so files the
-agent writes are not formatted for it and it gets no diagnostics from a language server. What stays,
+agent writes are not formatted for it and it gets no diagnostics from a language server. oh-my-pi (item 139b): the project's
+extensions, hooks and MCP servers do not load, a folder with its own tools, plugins or `PI_` and `OMP_` lines in `.env` starts no
+chat, and there is no language server, formatter or diagnostics; of the person's own, the extension paths in their settings,
+installed plugins' extensions and hooks, hooks in another tool's folder they turned on, and omp's code-written commands (its own
+`/green`, `/annotate` and `/review` among them) are left out too, since `--no-extensions` turns them off with the project's and
+the app names back only the files in omp's own folder; those load as before. What stays,
 as a terminal would have it: the person's own settings, CLAUDE.md, rules, skills, commands, subagents and the plugins their
 own settings turn on, the MCP servers in `~/.claude.json` and their claude.ai connectors (read whatever the sources, Agent SDK
 page), managed settings, and auto memory. Kit's dial and the cards are unchanged. A developer who wants a project's own setup
@@ -1993,7 +2059,7 @@ held by the source list (neither can run a program or allow a tool on its own).
 | Antigravity | not read: its hooks, MCP and project pages were not reached | `--include-default-customizations=false` is untested | open |
 | Grok | `.grok/config.toml` (`[permission]` rules, MCP servers, plugins, and `[env]` in a trusted folder), `.claude/settings.json` and `.claude/settings.local.json` up to the repository's root (permission rules, `defaultMode`), `.mcp.json`, and hooks, project skills and `AGENTS.md` after folder trust | folder trust (`--trust`, `GROK_FOLDER_TRUST`), whose `0` lets all of them in and is refused as a variable; none found that leaves out a project's permission rules | a `defaultMode` that skips asks refuses the start (item 101b); a project's allow rules: open |
 | pi | `.pi/extensions` (code), `.pi/settings.json` (`packages`, `extensions`), loaded after project trust (`defaultProjectTrust`, agent-folder settings only) | none for the rpc mode found | no chat or lane since item 139: only its own terminal |
-| oh-my-pi | `.omp/` hooks and extensions, `.omp/mcp.json`, and a `tools.approval` policy in any of seven files of six tools' folders (`.omp/config.yml` and `settings.json`, `.claude/settings.json`, `.codex/config.toml`, `.cursor/settings.json`, `.gemini/settings.json`, `opencode.json(c)` and `.opencode/`) | `--no-extensions` also drops the person's own; none for the settings | item 139: `--approval-mode=always-ask` outranks every layer's mode, and a project or person that allows a tool refuses the start. Open: a project's hooks and extensions |
+| oh-my-pi | extensions, hooks and custom tools in `.omp/` (hooks and tools in `.claude/` and `.codex/` too), plugins in `.omp/plugins`, MCP servers in its own and other tools' files, `PI_` and `OMP_` variables in `.env`, and a `tools.approval` policy in any of seven files of six tools' folders (`.omp/config.yml` and `settings.json`, `.claude/settings.json`, `.codex/config.toml`, `.cursor/settings.json`, `.gemini/settings.json`, `opencode.json(c)` and `.opencode/`) | none that leaves out only the project's extensions, hooks, tools or settings (`--no-extensions` drops the person's own too); `mcp.enableProjectConfig` for MCP | item 139: `--approval-mode=always-ask` outranks every layer's mode, and a project or person that allows a tool refuses the start. Item 139b: `--no-extensions` and `--no-lsp`, the person's own extensions and hooks named again, the project's MCP servers left out by the overlay, and a folder with its own tools, plugins or omp variables in `.env` refuses the start |
 | OmO | not read (not installed here) | | no chat or lane since item 139: only its own terminal |
 | DeepSeek Harness, a person's own agent | not read (not installed here, or the person's) | | open |
 

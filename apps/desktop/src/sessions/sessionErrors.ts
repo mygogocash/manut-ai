@@ -22,6 +22,11 @@ export const MODE_KEPT = /^(.+) stayed in its (.+) mode, which does not ask befo
 export const NO_CHECK = /^(.+) did not start because Manut AI could not check that its own settings make it ask first\.$/;
 export const NO_ASK_PATH = /^(.+) does not ask before it runs a command or changes a file, so Manut AI runs it only in a terminal\.$/;
 
+/** The shell's sentence when an oh-my-pi chat did not start in a folder that holds its own tools, plugins or `.env` variables
+ *  for omp, which would act as it starts (`project_code_refusal` in omp_asks.rs, item 139b), naming what it found. A test
+ *  keeps it equal to the shell's. */
+export const OMP_PROJECT_CODE = /^(.+) did not start because this folder holds its own code or variables for it \((.+)\), which would run or apply as it starts, before anything asks you\.$/;
+
 /** The shell's sentence for a message that starts with an agent's own command that turns its asks off (`no_asks_command`
  *  in acp_chat.rs: Grok's `/always-approve`, item 101b), which it never sends. A test keeps it equal to the shell's. */
 export const NO_ASKS_COMMAND = /^(.+)'s \/(\S+) turns off its asks, so Manut AI does not send it\. Write your message without it\.$/;
@@ -39,6 +44,8 @@ export const signedOutSaid = (text: string): string => {
   if (n) return tr(n[1] === "Grok" ? "ss.noAsksGrok" : n[1] === "oh-my-pi" ? "ss.noAsksOmp" : "ss.noAsks", { agent: n[1] });
   const u = NO_CHECK.exec(t);
   if (u) return tr("ss.noAsksCheck", { agent: u[1] });
+  const o = OMP_PROJECT_CODE.exec(t);
+  if (o) return tr("ss.ompProjectCode", { agent: o[1], what: o[2] });
   const p = NO_ASK_PATH.exec(t);
   if (p) return tr("ss.noAskPath", { agent: p[1] });
   const c = NO_ASKS_COMMAND.exec(t);
