@@ -19,6 +19,7 @@ export const helpers: Record<keyof typeof en, string> = {
   "helpers.effortUnlisted": "平常的思考深度（Kit 请求了 {name}，但它的列表里没有）",
   "helpers.unknownAgent": "{name}：不是 Manut AI 在泳道中运行的代理，不会启动",
   "helpers.notInstalled": "未安装，不会启动",
+  "helpers.noAsks": "执行前不会询问，不会启动",
   "helpers.briefLabel": "给助手 {n} 的说明",
   "helpers.lines": "每条都在这条泳道当前工作的副本中进行。在助手泳道报告、它的工作逐一并入之前，这里什么都不会变。每条最多 {minutes} 分钟、{steps} 步；等待你回复的时间不计。完成后，Kit 会收到报告并继续。",
   "helpers.heldBack": "Kit 请求了 {asked} 条。一轮最多 {max} 条，所以最后 {left} 条不包括在内。",

@@ -12,7 +12,7 @@ import "../accounts/accounts.css";
 import { AgentMark } from "../../sessions/AgentMark";
 import { getHost } from "../../sessions/host";
 import { getSessions } from "../../sessions/sessions";
-import { installLine } from "../../sessions/agents";
+import { asksFirst, installLine } from "../../sessions/agents";
 import { isAppStore } from "../../appStore";
 import { Toggle } from "../../pages/kit";
 import { t } from "../../i18n";
@@ -340,6 +340,12 @@ export function ProviderDetail({ v, version, signin, onSaved }: { v: ProviderVie
       {(v.takes_args || v.takes_vars) && (
         <p className="st-note prov-guard" data-testid="provider-guard">
           {t("prov.guard", { agent: name })}
+        </p>
+      )}
+      {/* pi and OmO cannot ask before a tool runs, so they run only as their own terminal (item 139): the line says why */}
+      {!asksFirst(v.id) && (
+        <p className="st-note prov-noasks" data-testid="provider-no-asks">
+          {t("prov.noAsks", { agent: name })}
         </p>
       )}
       {(v.chat || v.terminal) && (

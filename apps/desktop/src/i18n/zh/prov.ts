@@ -39,6 +39,7 @@ export const prov: Record<keyof typeof en, string> = {
   "prov.varRemove": "移除 {name}",
   "prov.runsChat": "聊天运行",
   "prov.runsTerminal": "终端运行",
+  "prov.noAsks": "{agent} 在运行命令或修改文件之前不会询问，因此 Manut AI 不会把它作为聊天或泳道启动。它仍可在终端中运行，由你自己输入。",
   "prov.save": "保存",
   "prov.cancel": "取消",
   "prov.saved": "已保存",

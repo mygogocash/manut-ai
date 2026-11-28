@@ -17,6 +17,7 @@ export const helpers = {
   "helpers.effortUnlisted": "its usual effort (Kit asked for {name}, which it does not list)",
   "helpers.unknownAgent": "{name}: not an agent Manut AI runs in a lane, will not start",
   "helpers.notInstalled": "not installed, will not start",
+  "helpers.noAsks": "does not ask before it acts, will not start",
   "helpers.briefLabel": "The brief for helper {n}",
   "helpers.lines": "Each works in its own copy of this lane's work as it is now. Nothing here changes until a helper lane's work lands, one at a time, after it reports. Each has up to {minutes} minutes and {steps} steps; time waiting for you does not count. When they are done, Kit gets their reports and carries on.",
   "helpers.heldBack": "Kit asked for {asked}. A round takes at most {max}, so the last {left} are left out.",

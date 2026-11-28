@@ -179,9 +179,10 @@ test("a rewind the agent refused leaves nothing to bring back", async () => {
 });
 
 test("an agent that cannot take its chat back keeps no turn's files, and closing a session drops its turns", async () => {
-  const pi = await setup("pi");
-  expect(pi.calls).toEqual(["forget"]);
-  expect(pi.ss.turns.marksOf(pi.id)).toEqual([]);
+  // oh-my-pi's chat has no rewind of its own (pi's, this test's agent before item 139, runs only as its own terminal now)
+  const omp = await setup("omp");
+  expect(omp.calls).toEqual(["forget"]);
+  expect(omp.ss.turns.marksOf(omp.id)).toEqual([]);
   const t = await setup();
   t.ss.close(t.id);
   await t.tick();

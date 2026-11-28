@@ -39,6 +39,7 @@ export const prov: Record<keyof typeof en, string> = {
   "prov.varRemove": "{name} を削除",
   "prov.runsChat": "チャットで実行するもの",
   "prov.runsTerminal": "ターミナルで実行するもの",
+  "prov.noAsks": "{agent} はコマンドの実行やファイルの変更の前に確認しないため、Manut AI はチャットやレーンとしては起動しません。ご自身で入力するターミナルでは引き続き使えます。",
   "prov.save": "保存",
   "prov.cancel": "キャンセル",
   "prov.saved": "保存しました",
