@@ -392,6 +392,8 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    slipped past item 139's check). 167e (the lane's next step in its top bar) started.
    167a merged at 18:50 (lanes in the side menu in the code mode, previous and next lane on Option+Command+Up/Down); 167b
    (one mark a lane) started. The design canvas boards the 167 rows touch are updated by the lead once a few have merged.
+   167d merged at 19:20 (keys shown where the actions are; Command+/ opens a sheet of every key); 167g (the empty Code
+   page offers the next step) started.
    The dev relay is on with its push key pair as dev secrets, deployed to dev 27 Nov; the owner's try on an iPhone is left.
    Two Rust tests that raced under load (the MCP relay's round trip, the Grok account check) now wait for their answers, and
    the 16 hook-dependency warnings `pnpm lint` found are settled. Fonts stay 99, the owner's. From 27 Nov the owner asked for English first: new words are English, copied into ja, ko and zh. Needs the owner from 101b: Grok signed in and `permission_mode = "ask"`
