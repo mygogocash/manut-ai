@@ -366,6 +366,9 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    rows 145 to 166, iOS design pass last). Then 148 (terminal fixes lifted from Paradev) and 150 (find in a chat) started.
    Needs the owner from 138: CodeMirror 6 for row 165's editor, and which iOS app (111e).
    140 merged at 04:05 (a former owner can no longer finish a stopped deletion on a shop they lost); 141 started.
+   At about 04:30 the account reached its five-hour limit again with four helpers (139, 141, 148, 150); it reset at 07:50
+   and 139, 150 and 148 were sent on. 139 merged at 08:25: oh-my-pi asks before every tool, pi and OmO run only In a
+   terminal (row 139b: a project's own omp hooks and extensions still run in a lane).
    The dev relay is on with its push key pair as dev secrets, deployed to dev 27 Nov; the owner's try on an iPhone is left.
    Two Rust tests that raced under load (the MCP relay's round trip, the Grok account check) now wait for their answers, and
    the 16 hook-dependency warnings `pnpm lint` found are settled. Fonts stay 99, the owner's. From 27 Nov the owner asked for English first: new words are English, copied into ja, ko and zh. Needs the owner from 101b: Grok signed in and `permission_mode = "ask"`
