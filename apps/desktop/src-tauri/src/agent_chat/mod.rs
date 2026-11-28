@@ -330,8 +330,9 @@ pub fn adapter_for(id: &str, cwd: &str, resume: Option<&str>) -> Option<Box<dyn 
     match id {
         "claude" => Some(Box::new(Claude::new(cwd))),
         "codex" => Some(Box::new(Codex::new(cwd, resume))),
-        // OmO speaks pi's RPC (senpi engine): the same adapter, under its own name
-        "pi" | "omp" | "omo" => Some(Box::new(Pi::new(cwd, label))),
+        // oh-my-pi speaks pi's RPC. pi and OmO (which speaks it too) have no chat since item 139 (`sessions::NO_ASKS`), so the
+        // adapter's OmO parts serve its tests and a later chat of OmO, not a start
+        "omp" => Some(Box::new(Pi::new(cwd, label))),
         _ if acp_agent(id).is_some() => Some(Box::new(Acp::new(acp_agent(id)?, cwd, resume))),
         _ => None,
     }

@@ -162,29 +162,44 @@ fn agent_rules(probe: &RuleProbe, label: &str, argv: &[OsString], cwd: &Path, pa
     if std::env::var_os(probe.var).is_some() {
         return Err(no_rules(label));
     }
-    let list = |args: &[&str], env: &[(String, String)]| -> Option<String> {
-        let mut argv = argv.to_vec();
-        argv.extend(args.iter().map(OsString::from));
-        let mut cmd = command_for(&argv, cwd, Some(path_env.clone()), env).ok()?;
-        cmd.stdin(Stdio::null());
-        let child = cmd.spawn().ok()?;
-        let tree = ProcessTree::adopt(&child);
-        let (tx, rx) = mpsc::channel();
-        thread::spawn(move || {
-            let _ = tx.send(child.wait_with_output());
-        });
-        match rx.recv_timeout(RULES_DEADLINE) {
-            Ok(Ok(o)) if o.status.success() => Some(String::from_utf8_lossy(&o.stdout).into_owned()),
-            Err(_) => {
-                if let Some(t) = tree {
-                    t.kill();
-                }
-                None
-            }
-            _ => None,
-        }
-    };
+    let list = |args: &[&str], env: &[(String, String)]| list_once(argv, args, cwd, path_env, env);
     crate::acp_chat::probe_rules(probe, account_env, &list, notes).ok_or_else(|| no_rules(label))
+}
+
+/// One listing an agent prints before its chat starts: the program `argv` with `args`, in `cwd`, on pipes with no input,
+/// with the chat's `PATH` and variables (`env`), stopped with everything it started after [`RULES_DEADLINE`]. What it
+/// printed when it ended well, else `None` (it could not start, failed, or ran out of time).
+fn list_once(argv: &[OsString], args: &[&str], cwd: &Path, path_env: &OsString, env: &[(String, String)]) -> Option<String> {
+    let mut argv = argv.to_vec();
+    argv.extend(args.iter().map(OsString::from));
+    let mut cmd = command_for(&argv, cwd, Some(path_env.clone()), env).ok()?;
+    cmd.stdin(Stdio::null());
+    let child = cmd.spawn().ok()?;
+    let tree = ProcessTree::adopt(&child);
+    let (tx, rx) = mpsc::channel();
+    thread::spawn(move || {
+        let _ = tx.send(child.wait_with_output());
+    });
+    match rx.recv_timeout(RULES_DEADLINE) {
+        Ok(Ok(o)) if o.status.success() => Some(String::from_utf8_lossy(&o.stdout).into_owned()),
+        Err(_) => {
+            if let Some(t) = tree {
+                t.kill();
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
+/// oh-my-pi's own settings before its chat starts in `cwd` ([`crate::omp_asks::settings_allow`]): its two layer listings
+/// run with the program `argv`, the chat's `PATH` and variables, and `overlays` (its overlay variable as the chat would
+/// have it). Refused, with nothing started, when a layer would let a tool run unasked or could not be checked.
+fn omp_settings(label: &str, argv: &[OsString], cwd: &Path, path_env: &OsString, env: &[(String, String)], overlays: Option<&str>) -> Result<(), String> {
+    if !cwd.is_absolute() || !cwd.is_dir() {
+        return Err(format!("not a folder: {}", cwd.display()));
+    }
+    crate::omp_asks::settings_allow(label, overlays, &|args: &[&str]| list_once(argv, args, cwd, path_env, env))
 }
 
 /// Computer use for a chat of Claude Code that is starting (`on`): when the hub runs and macOS has given the app
@@ -306,6 +321,10 @@ impl ChatSessions {
         }
         let a = agent(agent_id).ok_or_else(|| format!("unknown agent \"{agent_id}\""))?;
         crate::providers::may_start(a.label, mine)?;
+        // pi and OmO cannot ask before a tool runs, so they run only as their own terminal (item 139)
+        if crate::sessions::NO_ASKS.contains(&a.id) {
+            return Err(crate::sessions::no_ask_path(a.label));
+        }
         if a.mode != Mode::Chat {
             return Err(format!("{} has no chat mode", a.label));
         }
@@ -395,6 +414,17 @@ impl ChatSessions {
             let var = |k: &str| env.iter().rev().find(|(n, _)| n == k).map(|(_, v)| v.clone()).or_else(|| std::env::var(k).ok());
             crate::acp_chat::settings_allow(checks, a.label, &var, cwd)?;
         }
+        // oh-my-pi (item 139): its asking mode is on its command line already; its own two settings layers are listed by omp
+        // itself in the chat's folder with the chat's variables, and an overlay of the app's own denies its `task` tool, whose
+        // helpers it runs unasked (crate::omp_asks). The overlay is written in the app's own folder, the person's home (in
+        // tests a temporary one), and goes before the person's arguments as the app's own do.
+        if agent_id == "omp" {
+            let overlays = env.iter().rev().find(|(n, _)| n == crate::omp_asks::OVERLAYS_VAR).map(|(_, v)| v.clone()).or_else(|| std::env::var(crate::omp_asks::OVERLAYS_VAR).ok());
+            omp_settings(a.label, &program, cwd, &path_env, &env, overlays.as_deref())?;
+            let overlay = crate::omp_asks::overlay_path(&self.notes_home().ok_or("no home folder")?);
+            crate::omp_asks::write_overlay(&overlay)?;
+            argv.extend(crate::omp_asks::overlay_args(&overlay, through_cmd)?);
+        }
         // an agent whose own default runs tools unasked (OpenCode) gets ask rules built from its own
         // resolved rules, so nothing the person allows runs unasked and nothing they deny becomes askable; or it does
         // not start. Its rules are read with the variables it will run with, so one of the person's that changes them is
@@ -432,8 +462,9 @@ impl ChatSessions {
         started
     }
 
-    /// The home whose `~/.manut/project-notes` holds a chat's instructions file: the person's own, and in tests a
-    /// temporary one unless a test names its own, so no test ever writes there.
+    /// The home whose `~/.manut/project-notes` holds a chat's instructions file, and whose `~/.manut/omp` holds oh-my-pi's
+    /// overlay (item 139): the person's own, and in tests a temporary one unless a test names its own, so no test ever
+    /// writes there.
     fn notes_home(&self) -> Option<PathBuf> {
         if let Some(h) = &self.notes_home {
             return Some(h.clone());
@@ -1070,11 +1101,12 @@ mod tests {
     #[test]
     fn only_chat_agents_have_adapters() {
         let generic = crate::acp_agents::ACP_LIST.iter().map(|e| e.agent.id);
-        for id in ["claude", "codex", "omo", "pi", "omp", "opencode", "grok"].into_iter().chain(generic) {
+        for id in ["claude", "codex", "omp", "opencode", "grok"].into_iter().chain(generic) {
             assert!(adapter_for(id, "/w", None).is_some(), "{id}");
         }
-        // DSH has no adapter: its chat is a run per message (dsh_chat); Kilo Code is no longer offered
-        for id in ["omh", "dsh", "sh", "", "kilo"] {
+        // DSH has no adapter: its chat is a run per message (dsh_chat); Kilo Code is no longer offered; pi and OmO cannot ask
+        // before a tool runs, so they have no chat (item 139)
+        for id in ["omh", "dsh", "sh", "", "kilo", "pi", "omo"] {
             assert!(adapter_for(id, "/w", None).is_none(), "{id}");
         }
         let c = ChatSessions::default();
@@ -1229,6 +1261,126 @@ mod tests {
         std::fs::remove_file(proj.join(".claude/settings.json")).unwrap();
         c.start_agent_mine("grok", &proj, None, &env, None, false, &mine, |_| {}).unwrap();
         assert_eq!(seen_lines(&seen)[..4], ["--permission-mode", "default", "agent", "stdio"]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Item 139: an oh-my-pi chat starts only while both of its own settings layers keep it asking, as omp itself lists them:
+    /// the person's (here in the agent folder the chat's own variable names) and the project's (the chat's folder). An unsafe
+    /// layer, a listing that fails or an overlay variable starts nothing. Once both ask it starts as `omp --mode rpc
+    /// --approval-mode=always-ask --config <overlay>`, the overlay written in the app's own folder, denying the task tool;
+    /// pi and OmO start no chat at all.
+    #[cfg(unix)]
+    #[test]
+    fn an_omp_chat_starts_asking_and_only_while_its_own_settings_ask() {
+        use crate::providers::Stored;
+        use std::os::unix::fs::PermissionsExt;
+        let base = std::env::temp_dir().join(format!("manut-139-omp-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(base.join("agent")).unwrap();
+        std::fs::create_dir_all(base.join("proj")).unwrap();
+        std::fs::create_dir_all(base.join("home")).unwrap();
+        let dir = base.canonicalize().unwrap();
+        let proj = dir.join("proj");
+        let seen = dir.join("omp.seen");
+        // a stand-in omp: its two listings print the layer files (the person's from the agent folder its variable names, the
+        // project's from the folder it runs in), and its chat start records its arguments
+        let prog = dir.join("fake-omp");
+        let body = format!(
+            "#!/bin/sh\nif [ \"$1\" = config ]; then\n  case \"$4\" in\n    --scope=global) exec cat \"$PI_CODING_AGENT_DIR/global.json\" ;;\n    --scope=project) exec cat ./project.json ;;\n  esac\n  exit 3\nfi\nfor a in \"$@\"; do printf '%s\\n' \"$a\"; done > '{s}.tmp'\nmv '{s}.tmp' '{s}'\n",
+            s = seen.display()
+        );
+        std::fs::write(&prog, body).unwrap();
+        std::fs::set_permissions(&prog, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let mine = Stored { path: prog.to_string_lossy().into_owned(), ..Stored::default() };
+        let env = vec![("PI_CODING_AGENT_DIR".to_string(), dir.join("agent").to_string_lossy().into_owned())];
+        let mut c = ChatSessions::default();
+        c.notes_home = Some(dir.join("home"));
+        let layer = |mode: &str, policies: &str| format!(r#"{{"tools.approvalMode":{{"value":{mode},"type":"enum","description":"x"}},"tools.approval":{{"value":{policies},"type":"record","description":"x"}}}}"#);
+        let start = |c: &ChatSessions, env: &[(String, String)]| c.start_agent_mine("omp", &proj, None, env, None, false, &mine, |_| {});
+        let refused = crate::acp_chat::no_asks("oh-my-pi");
+        let unchecked = crate::omp_asks::no_check("oh-my-pi");
+        // the person's own layer runs every tool, then a project allows one, then the project's listing fails
+        std::fs::write(dir.join("agent/global.json"), layer(r#""yolo""#, "{}")).unwrap();
+        std::fs::write(proj.join("project.json"), "{}").unwrap();
+        assert_eq!(start(&c, &env).unwrap_err(), refused);
+        std::fs::write(dir.join("agent/global.json"), layer(r#""always-ask""#, r#"{"bash":"prompt"}"#)).unwrap();
+        std::fs::write(proj.join("project.json"), layer("null", r#"{"bash":"allow"}"#)).unwrap();
+        assert_eq!(start(&c, &env).unwrap_err(), refused);
+        std::fs::remove_file(proj.join("project.json")).unwrap();
+        assert_eq!(start(&c, &env).unwrap_err(), unchecked);
+        // an overlay file omp would load from its variable is not one a listing shows
+        std::fs::write(proj.join("project.json"), "{}").unwrap();
+        let with_overlay = [env.clone(), vec![("PI_CONFIG_FILES".to_string(), "/tmp/more.yml".to_string())]].concat();
+        assert_eq!(start(&c, &with_overlay).unwrap_err(), unchecked);
+        thread::sleep(Duration::from_millis(200));
+        assert!(!seen.exists() && c.count() == 0, "oh-my-pi started while it would not ask");
+        // both layers ask: it starts in its asking mode, with the app's overlay, and the overlay denies the task tool
+        c.start_agent_mine("omp", &proj, None, &env, None, false, &mine, |_| {}).unwrap();
+        let overlay = crate::omp_asks::overlay_path(&dir.join("home"));
+        assert_eq!(seen_lines(&seen), ["--mode", "rpc", "--approval-mode=always-ask", "--config", &overlay.to_string_lossy()]);
+        assert_eq!(std::fs::read_to_string(&overlay).unwrap(), crate::omp_asks::OVERLAY);
+        // pi and OmO cannot ask, so no chat of theirs starts, whatever program is set for them
+        for (id, label) in [("pi", "pi"), ("omo", "OmO")] {
+            assert_eq!(c.start_agent_mine(id, &proj, None, &[], None, false, &mine, |_| {}).unwrap_err(), crate::sessions::no_ask_path(label), "{id}");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Item 139 with the real oh-my-pi of this Mac, where only its two settings listings run (no chat starts and no message is
+    /// sent): made-up layers in temporary folders, never the person's own `~/.omp`, each read by omp itself. Every project file
+    /// it merges, and the person's own layer, refuses with an unsafe value and passes with a safe one.
+    /// `cargo test real_omp_settings -- --ignored`.
+    #[cfg(unix)]
+    #[test]
+    #[ignore]
+    fn real_omp_settings_refuse_each_unsafe_layer() {
+        let (argv, path_env) = crate::sessions::launch_for("omp").expect("oh-my-pi is installed");
+        let base = std::env::temp_dir().join(format!("manut-139-real-omp-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        for d in ["home", "agent", "proj"] {
+            std::fs::create_dir_all(base.join(d)).unwrap();
+        }
+        let dir = base.canonicalize().unwrap();
+        let proj = dir.join("proj");
+        let env = vec![("HOME".to_string(), dir.join("home").to_string_lossy().into_owned()), ("PI_CODING_AGENT_DIR".to_string(), dir.join("agent").to_string_lossy().into_owned())];
+        let check = || omp_settings("oh-my-pi", &argv, &proj, &path_env, &env, None);
+        let refused = Err(crate::acp_chat::no_asks("oh-my-pi"));
+        let put = |rel: &str, text: &str| {
+            let p = proj.join(rel);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, text).unwrap();
+        };
+        assert_eq!(check(), Ok(()), "nothing set anywhere asks");
+        // the person's own layer: the agent folder's config.yml
+        let global = dir.join("agent/config.yml");
+        for (text, want) in [
+            ("tools:\n  approvalMode: yolo\n", refused.clone()),
+            ("tools:\n  approvalMode: write\n", refused.clone()),
+            ("tools:\n  approvalMode: always-ask\n  approval:\n    bash: allow\n", refused.clone()),
+            ("tools:\n  approvalMode: always-ask-cached\n  approval:\n    bash: prompt\n    task: deny\n", Ok(())),
+        ] {
+            std::fs::write(&global, text).unwrap();
+            assert_eq!(check(), want, "{text}");
+        }
+        // each project file omp merges into its project layer, then a safe one
+        for (rel, text) in [
+            (".omp/config.yml", "tools:\n  approvalMode: yolo\n"),
+            (".omp/config.yml", "tools:\n  approval:\n    edit: allow\n"),
+            (".omp/settings.json", r#"{"tools":{"approval":{"write":"ALLOW"}}}"#),
+            (".claude/settings.json", r#"{"tools":{"approval":{"bash":"allow"}}}"#),
+            (".codex/config.toml", "[tools.approval]\nbrowser = \"allow\"\n"),
+            (".cursor/settings.json", r#"{"tools":{"approval":{"eval":"allow"}}}"#),
+            (".gemini/settings.json", r#"{"tools":{"approvalMode":"write"}}"#),
+            ("opencode.json", r#"{"tools":{"approval":{"task":"allow"}}}"#),
+            (".opencode/opencode.json", r#"{"tools":{"approval":{"ssh":"allow"}}}"#),
+        ] {
+            put(rel, text);
+            assert_eq!(check(), refused, "{rel}: {text}");
+            std::fs::remove_file(proj.join(rel)).unwrap();
+        }
+        put(".omp/config.yml", "tools:\n  approval:\n    bash: deny\n");
+        put(".claude/settings.json", r#"{"permissions":{"allow":["Bash(ls)"]}}"#);
+        assert_eq!(check(), Ok(()));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -1812,42 +1964,7 @@ mod tests {
         assert!(deltas.len() < 200, "{} delta events", deltas.len());
     }
 
-    /// The real OmO through `start_agent` (`omo --mode rpc`): "hi" gets an answer, then a second process started
-    /// with the session id it reported (`--session`) still knows the first turn. Needs omo signed in.
-    #[test]
-    #[ignore]
-    fn real_omo_chat_says_hi_and_resumes() {
-        let dir = std::env::temp_dir().join(format!("manut-real-omo-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let dir = dir.canonicalize().unwrap();
-        let turn = |resume: Option<&str>, text: &str| -> (String, Vec<String>) {
-            let c = ChatSessions::default();
-            let out = Arc::new(Mutex::new(Vec::new()));
-            let o = out.clone();
-            let id = c.start_agent("omo", &dir, resume, &[], None, move |x| o.lock().unwrap().push(x)).unwrap();
-            c.input(id, Input::send(text)).unwrap();
-            let deadline = Instant::now() + Duration::from_secs(150);
-            while Instant::now() < deadline && !out.lock().unwrap().iter().any(|x| matches!(x, ChatOut::Event(e) if s(e, "event") == "turn.end")) {
-                thread::sleep(Duration::from_millis(100));
-            }
-            let got = out.lock().unwrap().clone();
-            c.close(id);
-            thread::sleep(Duration::from_millis(500));
-            let session = got.iter().find_map(|x| match x { ChatOut::Event(e) if s(e, "event") == "session.info" && !s(e, "agent_session").is_empty() => Some(s(e, "agent_session")), _ => None }).unwrap_or_default();
-            let msgs: Vec<String> = got.iter().filter_map(|x| match x { ChatOut::Event(e) if s(e, "event") == "message" => Some(s(e, "text")), _ => None }).collect();
-            println!("omo session {session} (resume {resume:?}): {msgs:?}");
-            (session, msgs)
-        };
-        let (session, first) = turn(None, "hi. reply with just the word pineapple");
-        assert!(is_uuid(&session), "{session:?}");
-        assert!(first.iter().any(|m| m.to_lowercase().contains("pineapple")), "{first:?}");
-        let (again, second) = turn(Some(&session), "which fruit word did you just reply with? one word");
-        assert_eq!(again, session);
-        assert!(second.iter().any(|m| m.to_lowercase().contains("pineapple")), "{second:?}");
-        let _ = std::fs::remove_dir_all(dir);
-    }
-
-    /// The real OmO, Claude Code and Codex, one short message each through `start_agent`: every event the chat
+    /// The real Claude Code and Codex, one short message each through `start_agent`: every event the chat
     /// gets (and the ones that come within 4 s after the answer) leaves no turn open and says nothing outside one.
     /// `MANUT_REAL_OUT=<dir>` keeps each agent's events as `<agent>.json` for a replay through the store.
     /// Spends one small turn per agent: `cargo test real_agents_answer_and_go_idle -- --ignored --nocapture`.
@@ -1857,23 +1974,18 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("manut-real-idle-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let dir = dir.canonicalize().unwrap();
-        for agent in ["omo", "claude", "codex"] {
+        // OmO was the first of these until item 139, which keeps it to its own terminal
+        for agent in ["claude", "codex"] {
             let c = ChatSessions::default();
             let out = Arc::new(Mutex::new(Vec::new()));
             let o = out.clone();
             let id = c.start_agent(agent, &dir, None, &[], None, move |x| o.lock().unwrap().push(x)).unwrap();
-            if agent == "omo" {
-                // OmO's own default can be a model its provider refuses on this machine: pick one it serves
-                thread::sleep(Duration::from_secs(3));
-                c.input(id, Input::Model { model: std::env::var("MANUT_REAL_OMO_MODEL").unwrap_or("anthropic/claude-fable-5-1".into()) }).unwrap();
-                thread::sleep(Duration::from_secs(1));
-            }
             c.input(id, Input::Send { text: "hi. reply with just the word ok".into(), images: vec![], id: String::new() }).unwrap();
             let deadline = Instant::now() + Duration::from_secs(150);
             while Instant::now() < deadline && !out.lock().unwrap().iter().any(|x| matches!(x, ChatOut::Event(e) if s(e, "event") == "turn.end")) {
                 thread::sleep(Duration::from_millis(100));
             }
-            // what the agent says after its turn (OmO's setStatus, agent_settled, …)
+            // what the agent says after its turn
             thread::sleep(Duration::from_secs(4));
             let events: Vec<Event> = out.lock().unwrap().iter().filter_map(|x| match x { ChatOut::Event(e) => Some(e.clone()), _ => None }).collect();
             c.close(id);
