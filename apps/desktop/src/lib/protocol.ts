@@ -402,8 +402,12 @@ export interface OpMap extends MissionOps, MemoryOps, RoutineOps, ConnectionOps,
    *  manut posts nothing. */
   /** `queued`: a held message (steer queue); a still-busy Hermes runs it after its current work, never steers it. */
   /** `note`: on the Connected runtime, Buddy's note naming the conversations it may reach (item 102l-3, src/jobs/reachMarks.ts), which
-   *  the runtime posts after `text`; every other runtime has no such list, and nothing sends it there. */
-  "chat.send": { params: { bot: string; text: string; session?: string; reply_to?: string; queued?: boolean; note?: string }; result: { input_id: string } };
+   *  the runtime posts as the message's `note`, a field of its own that the API gives the model and never keeps in the words (item
+   *  102l-5); every other runtime has no such list, and nothing sends it there. `sent_on_from`: on the Connected runtime, the title of the
+   *  conversation whose words (`text`, and nothing else) a reach card's Send there or Start conversation posts, posted as `sentOnFrom`
+   *  for the API to give the model as the mark, now and in every later turn; every other runtime has no reach cards on Connected's
+   *  conversations, and nothing sends it there. */
+  "chat.send": { params: { bot: string; text: string; session?: string; reply_to?: string; queued?: boolean; note?: string; sent_on_from?: string }; result: { input_id: string } };
   "chat.interrupt": { params: { bot: string; session?: string }; result: Record<string, never> };
   /** Steer the main chat's running turn (Hermes' `session.steer`): `queued` = taken, `rejected` = not (no turn runs,
    *  or Hermes refused). The bridge never sends a refused steer another way. */

@@ -357,6 +357,15 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    what was wrong. The high: oh-my-pi lanes and chats ran every tool with no card (omp's own default is `yolo`), item 139.
    The rest are items 140 to 144. Found sound: item 103's door, the Tailscale road but two lows, the phone's push, and the
    landing of helper patches.
+   Item 144 (the lead's tools) merged on 28 Nov. At about 02:30 on 28 Nov the account reached its five-hour limit with
+   five helpers mid-work (102l-5, 108b, 138, 139, 140; only 102l-5 had commits). It reset at 02:50, and 102l-5, 139 and
+   138 were sent on in their own threads; 140 and 108b wait for a slot, as five heavy helpers at once reached the limit.
+   102l-5 merged at 03:20 on 28 Nov (Manut AI's note and sent-on mark are fields of a chat message, never the owner's
+   words), the first merge through the fixed `finish-item.sh`; 140 was sent on in its slot.
+   138 merged at 03:45 (`docs/paradev-parity.md`: Paradev, MIT, checked feature by feature for the code mode, 117 features,
+   rows 145 to 166, iOS design pass last). Then 148 (terminal fixes lifted from Paradev) and 150 (find in a chat) started.
+   Needs the owner from 138: CodeMirror 6 for row 165's editor, and which iOS app (111e).
+   140 merged at 04:05 (a former owner can no longer finish a stopped deletion on a shop they lost); 141 started.
    The dev relay is on with its push key pair as dev secrets, deployed to dev 27 Nov; the owner's try on an iPhone is left.
    Two Rust tests that raced under load (the MCP relay's round trip, the Grok account check) now wait for their answers, and
    the 16 hook-dependency warnings `pnpm lint` found are settled. Fonts stay 99, the owner's. From 27 Nov the owner asked for English first: new words are English, copied into ja, ko and zh. Needs the owner from 101b: Grok signed in and `permission_mode = "ask"`

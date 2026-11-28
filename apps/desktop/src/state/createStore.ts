@@ -299,9 +299,12 @@ export interface Actions {
   /** Send in a thread; the first message names it. `how` as `send`'s. */
   threadSend(bot: string, thread: string, text: string, how?: FollowUp): Promise<void>;
   /** What one of Buddy's reach cards posts once the person pressed it (item 102l-3, src/jobs/buddyReach.ts): `wire` sent once to chat
-   *  `key` (a bot's main chat, or a thread's `fold:` key), its bubble showing `shown`. It is never held, steered or sent again: a
-   *  refusal, or a request that got no answer, marks the bubble not sent and is the reason this resolves with; null when it went. */
-  postFromCard(key: string, shown: string, wire: string): Promise<string | null>;
+   *  `key` (a bot's main chat, or a thread's `fold:` key), its bubble showing `shown`. `wire.text` is the message's words alone and is
+   *  what names a conversation it starts; `wire.sentOnFrom`, when the words came from another conversation, is that conversation's
+   *  title, sent as `chat.send`'s `sent_on_from` for the API to give the model as the mark (item 102l-5). It is never held, steered or
+   *  sent again: a refusal, or a request that got no answer, marks the bubble not sent and is the reason this resolves with; null when
+   *  it went. */
+  postFromCard(key: string, shown: string, wire: { text: string; sentOnFrom?: string }): Promise<string | null>;
   threadInterrupt(bot: string, thread: string): Promise<void>;
   /** Stop the thread when it runs, then archive it in Hermes (hidden, kept, restorable). Rejects on refusal. */
   removeThread(bot: string, thread: string): Promise<void>;
@@ -1477,10 +1480,11 @@ export function createStore(bridge: BridgeLike, opts: StoreOptions = {}): Store 
       const id = `local-${++localSeq}`;
       dispatch({ type: "local.user", bot: key, id, text: shown, now: now() });
       const row = to.session ? (state.threads[to.bot] ?? []).find((r) => r.thread === to.session) : undefined;
-      // a conversation the card started reads its first words at once, as the API names it by them
-      if (row && !row.title) dispatch({ type: "thread.upsert", bot: to.bot, row: { ...row, title: firstWords(bareText(wire)), last: now() / 1000 } });
+      // a conversation the card started reads its first words at once, as the API names it by them: the words alone, since the mark
+      // and the note are fields of their own and never part of the text
+      if (row && !row.title) dispatch({ type: "thread.upsert", bot: to.bot, row: { ...row, title: firstWords(bareText(wire.text)), last: now() / 1000 } });
       try {
-        await bridge.request("chat.send", { ...to, text: wire });
+        await bridge.request("chat.send", { ...to, text: wire.text, ...(wire.sentOnFrom !== undefined ? { sent_on_from: wire.sentOnFrom } : {}) });
         dispatch({ type: "send.ok", bot: key, id, now: now() });
         return null;
       } catch (e) {
