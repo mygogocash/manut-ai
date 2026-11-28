@@ -1,8 +1,10 @@
 // What the page holds of the keychain item (keys.ts): the relay key made only when asked and kept as a key script cannot
 // read back, K the same way, phone names cleaned, and every change kept by the keychain before the page holds it.
+import { toBase64Url } from "@manut/remote-channel";
 import { describe, expect, it } from "vitest";
 import vectors from "../../../api/test/fixtures/relay-v1-vectors.json";
-import { type DeviceRecord, MAX_PHONES, RemoteVault, cleanName, hostIdentity, isDeviceRecord, isRelayChallenge, memoryKeyring } from "./keys";
+import { type DeviceRecord, MAX_PHONES, RemoteVault, cleanName, grantOf, hostIdentity, isDeviceRecord, isPageDeviceRecord, isRelayChallenge, memoryKeyring } from "./keys";
+import { DEFAULT_GRANT, type Grant } from "./levels";
 
 const passkey = { credentialId: new Uint8Array(16).fill(1), publicKey: Uint8Array.of(4, ...new Uint8Array(64).fill(2)), signCount: 0 };
 const PHONE = "0B5C2D11-7E4A-4F0B-9C3D-2A1B3C4D5E6F";
@@ -101,7 +103,9 @@ describe("the remote keys as the page holds them", () => {
     const secret = vault.secretFor(PHONE)!;
     expect(secret.extractable).toBe(false);
     await expect(crypto.subtle.exportKey("raw", secret)).rejects.toThrow();
-    expect(vault.phones()).toEqual([{ id: PHONE, name: "iPhone, Safari", pairedAt: 5, lastSeen: 5 }]);
+    // A new pairing is Answer, and its record says nothing of a level.
+    expect(vault.phones()).toEqual([{ id: PHONE, name: "iPhone, Safari", pairedAt: 5, lastSeen: 5, grant: DEFAULT_GRANT }]);
+    expect(Object.keys(keyring.doc()!.devices[0]!)).not.toContain("level");
     expect(keyring.doc()?.devices[0]?.k).toBe("07".repeat(32));
     // Read again from the keychain, it is the same phone.
     const reread = await RemoteVault.open(keyring, false);
@@ -166,5 +170,81 @@ describe("the remote keys as the page holds them", () => {
       expect(isDeviceRecord({ ...good, ...bad })).toBe(false);
     }
     expect(MAX_PHONES).toBe(7);
+  });
+});
+
+describe("what each phone may do from afar (item 108b)", () => {
+  const WATCH: Grant = { level: "watch", terminal: false, manage: false };
+  const ANSWER: Grant = DEFAULT_GRANT;
+  const record = (more: Partial<DeviceRecord> = {}): DeviceRecord => ({ id: PHONE, name: "Pixel", pairedAt: 1, lastSeen: null, k: "ab".repeat(32), tokenHash: vectors.deviceToken.tokenHash, credentialId: "AQID", publicKey: toBase64Url(passkey.publicKey), signCount: 0, ...more });
+  /** A keyring that already holds one phone kept as `more` says, as a record written by the shell. */
+  const holding = (more: Partial<DeviceRecord>) => memoryKeyring({ v: 1, host: null, devices: [record(more)] });
+
+  it("reads a record kept before this item, with no level, as Answer", async () => {
+    expect(grantOf(record())).toEqual(ANSWER);
+    const vault = await RemoteVault.open(holding({}), false);
+    expect(vault.grant(PHONE)).toEqual(ANSWER);
+    expect(vault.phones()[0]?.grant).toEqual(ANSWER);
+  });
+
+  it("reads a level the record holds, and refuses one it does not understand rather than widening it", async () => {
+    expect((await RemoteVault.open(holding({ level: "watch" }), false)).grant(PHONE)).toEqual(WATCH);
+    expect((await RemoteVault.open(holding({ level: "work", terminal: true, manage: true }), false)).grant(PHONE)).toEqual({ level: "work", terminal: true, manage: true });
+    const odd: Partial<DeviceRecord>[] = [
+      { level: "admin" as never },
+      { level: "Answer" as never },
+      { level: null as never },
+      { level: "answer", terminal: true },
+      { terminal: true },
+      { level: "watch", manage: true },
+      { level: "work", manage: "yes" as never },
+    ];
+    for (const more of odd) {
+      expect(grantOf(record(more)), JSON.stringify(more)).toBeNull();
+      expect(isPageDeviceRecord(record(more)), JSON.stringify(more)).toBe(false);
+      // Not held at all: no K, no passkey, no level, so its hello is refused and nothing it asks is served.
+      const vault = await RemoteVault.open(holding(more), false);
+      expect([vault.has(PHONE), vault.grant(PHONE), vault.phones()], JSON.stringify(more)).toEqual([false, undefined, []]);
+    }
+  });
+
+  it("narrows a phone at once, before the keychain write is awaited, and keeps Answer as no level at all", async () => {
+    const keyring = holding({});
+    const vault = await RemoteVault.open(keyring, false);
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    const write = keyring.setLevel;
+    keyring.setLevel = async (id, grant) => {
+      await held;
+      return write(id, grant);
+    };
+    // Taken with the switch off, as Unpair is.
+    const narrowing = vault.setLevel(PHONE, WATCH);
+    expect(vault.grant(PHONE)).toEqual(WATCH);
+    expect(keyring.doc()!.devices[0]!.level).toBeUndefined();
+    release();
+    await narrowing;
+    expect(keyring.doc()!.devices[0]!.level).toBe("watch");
+    expect((await RemoteVault.open(keyring, false)).grant(PHONE)).toEqual(WATCH);
+    // Back to Answer: held only once the keychain took it, which keeps it as no level.
+    keyring.setLevel = write;
+    await vault.setLevel(PHONE, ANSWER);
+    expect(vault.grant(PHONE)).toEqual(ANSWER);
+    expect(Object.keys(keyring.doc()!.devices[0]!)).not.toContain("level");
+  });
+
+  it("holds a wider level only once the keychain took it, and stays narrow when it refused", async () => {
+    const keyring = holding({ level: "watch" });
+    const vault = await RemoteVault.open(keyring, false);
+    keyring.setLevel = async () => {
+      throw new Error("keychain");
+    };
+    await expect(vault.setLevel(PHONE, ANSWER)).rejects.toThrow("keychain");
+    expect(vault.grant(PHONE)).toEqual(WATCH);
+    await expect(vault.setLevel("E621E1F8-C36C-495A-93FC-0C247A3E6E5F", WATCH)).rejects.toThrow("not_found");
+    // The keychain refuses a level it does not understand, and one for a phone it does not hold.
+    const plain = holding({});
+    await expect(plain.setLevel(PHONE, { level: "answer", terminal: true, manage: false })).rejects.toThrow("invalid");
+    await expect(plain.setLevel("E621E1F8-C36C-495A-93FC-0C247A3E6E5F", WATCH)).rejects.toThrow("not_found");
   });
 });

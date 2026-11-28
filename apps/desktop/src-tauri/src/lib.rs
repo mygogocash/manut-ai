@@ -699,6 +699,16 @@ async fn remote_keys_touch_device(id: String, last_seen: u64, sign_count: u32) -
         .map_err(|_| "keychain".to_string())?
 }
 
+/// Sets what a paired phone may do from afar (item 108b), from Settings, switch on or off. A level this build does not
+/// know does not deserialize, and Terminal or Manage without Work is refused (`invalid`), so nothing is widened by a
+/// value the page sent; refused (`not_found`) for a phone not kept.
+#[tauri::command]
+async fn remote_keys_set_level(id: String, level: remote_keys::Level, terminal: bool, manage: bool) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || remote_keys::set_level(&id, level, terminal, manage))
+        .await
+        .map_err(|_| "keychain".to_string())?
+}
+
 /// Forgets a phone at Unpair, its K and passkey with it.
 #[tauri::command]
 async fn remote_keys_remove_device(id: String) -> Result<(), String> {
@@ -2138,6 +2148,7 @@ fn commands(invoke: tauri::ipc::Invoke) -> bool {
         remote_host_sign,
         remote_keys_add_device,
         remote_keys_touch_device,
+        remote_keys_set_level,
         remote_keys_remove_device,
         term_link::term_link_take,
         disk::disk_watch,

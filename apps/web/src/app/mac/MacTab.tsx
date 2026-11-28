@@ -63,6 +63,7 @@ const NOTE_TONE: Readonly<Record<AskNote, "ok" | "info" | "warn" | "err">> = {
   no_turn: "info",
   passkey_refused: "err",
   forgotten: "err",
+  level: "warn",
   no_answer: "warn",
 };
 

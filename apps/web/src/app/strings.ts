@@ -224,6 +224,7 @@ export type MacStrings = {
     | "no_turn"
     | "passkey_refused"
     | "forgotten"
+    | "level"
     | "no_answer",
     string
   >;
@@ -547,6 +548,7 @@ export const en: AppStrings = {
       no_turn: "Nothing is running in this chat now.",
       passkey_refused: "Your Mac did not accept this phone's passkey. Answer it on your Mac instead.",
       forgotten: "Your Mac doesn't know this phone any more.",
+      level: "Your Mac doesn't let this phone do that. Answer it on your Mac, or change what this phone can do in Settings, Sharing and access on your Mac.",
       no_answer: "Your Mac did not answer, so nothing was done. Try again once it is back.",
     },
     outcomes: { allowed: "Allowed", declined: "Declined", expired: "Nobody answered in time", answered: "Answered" },

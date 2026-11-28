@@ -297,8 +297,18 @@ describe("answering from the phone", () => {
     await openBuddy(remote);
     await remote.no("req-1");
     expect(paired(remote.view).open!.asks.get("req-1")?.note).toBe("changed");
-    expect(["changed", "ask_closed", "no_ask", "stays_on_mac", "needs_update", "busy", "expired", "not_taken", "no_turn", "unknown_device", "malformed", "no_verification"].map(noteFor))
-      .toEqual(["changed", "closed", "gone", "not_offered", "needs_update", "busy", "late", "not_taken", "no_turn", "forgotten", "no_answer", "passkey_refused"]);
+    expect(["changed", "ask_closed", "no_ask", "stays_on_mac", "needs_update", "busy", "expired", "not_taken", "no_turn", "unknown_device", "level", "malformed", "no_verification"].map(noteFor))
+      .toEqual(["changed", "closed", "gone", "not_offered", "needs_update", "busy", "late", "not_taken", "no_turn", "forgotten", "level", "no_answer", "passkey_refused"]);
+  });
+
+  it("says plainly when the Mac does not let this phone do it (item 108b), and opens no passkey prompt", async () => {
+    const { remote, passkeys } = await setup({ answer: macAnswers((m) => (m.t === "allow" || m.t === "reply" ? { t: "refused", request: m.t, reason: "level" } : null)) });
+    await openBuddy(remote);
+    await remote.allowOnce("req-1");
+    await remote.answer("q-1", "Friday");
+    const open = paired(remote.view).open!;
+    expect([open.asks.get("req-1")?.note, open.asks.get("q-1")?.note]).toEqual(["level", "level"]);
+    expect(passkeys.signed).toEqual([]);
   });
 });
 
