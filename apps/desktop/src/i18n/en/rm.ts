@@ -63,4 +63,10 @@ export const rm = {
   "rm.ts.consent.decline": "Not now",
   // item 78d: a phone that turned on "Tell me when my Mac needs me"; English first (the owner, 27 Nov 2026), the same English in every language until translated
   "rm.pushOn": "{line}. It gets a notification when this Mac needs you.",
+  // item 108b: what each paired phone may do from afar; English first (the owner, 27 Nov 2026), the same English in every language until translated
+  "rm.level": "What {name} can do",
+  "rm.level.watch": "Watch",
+  "rm.level.answer": "Answer",
+  "rm.level.work": "Work",
+  "rm.levels": "Watch: the phone sees your chats and their asks, can say No and can stop a turn. Answer: it can also allow once and answer questions, each with Face ID or its passcode. A change applies to the phone's next request.",
 };

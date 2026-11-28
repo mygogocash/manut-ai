@@ -67,9 +67,19 @@ for (const theme of ["light", "dark"] as const) {
       await expect(page.getByTestId("remote-page")).toBeVisible();
       if (state === "showing") await expect(page.getByTestId("remote-qr")).toBeVisible();
       if (state === "code") await expect(page.getByTestId("remote-code")).toBeFocused();
+      if (state === "ready") {
+        // Each paired phone shows its level (item 108b): Watch and Answer offered, its own chosen, Work not offered.
+        const levels = page.getByTestId("remote-level");
+        await expect(levels).toHaveCount(2);
+        await expect(levels.nth(0)).toHaveAttribute("aria-label", "What Somchai's iPhone can do");
+        await expect(levels.nth(0).getByRole("radio", { name: "Answer" })).toHaveAttribute("aria-checked", "true");
+        await expect(levels.nth(1).getByRole("radio", { name: "Watch" })).toHaveAttribute("aria-checked", "true");
+        await expect(levels.nth(1).getByRole("radio")).toHaveText(["Watch", "Answer"]);
+        await expect(page.getByTestId("remote-levels-note")).toContainText("A change applies to the phone's next request.");
+      }
       // No text under 12px, and no capitals by style, on what this page adds.
       const small = await page.evaluate(() =>
-        [...document.querySelectorAll(".rm-card *, .rm-live, .rm .btn")].filter((el) => parseFloat(getComputedStyle(el).fontSize) < 12).map((el) => el.textContent),
+        [...document.querySelectorAll(".rm-card *, .rm-live, .rm .btn, .rm .ui-mode")].filter((el) => parseFloat(getComputedStyle(el).fontSize) < 12).map((el) => el.textContent),
       );
       expect(small).toEqual([]);
       if (DIR) {
