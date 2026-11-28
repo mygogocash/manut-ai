@@ -43,6 +43,8 @@ What went wrong before, so it does not again:
   loses them at every update: say so in the notes until builds are signed (five Apple secrets, `docs/releasing.md`).
 - Windows SmartScreen warns on the unsigned installer until the owner buys a code-signing certificate: say so in the
   notes (`docs/release-notes-template.md`). The nightly channel (`nightly-desktop.yml`) is not cut by hand; its feed
-  `nightly.json` can be checked with the same script, pointing at the `nightly-<date>` release's folder.
+  `nightly.json` can be checked with the same script, pointing at the `nightly-<date>` release's folder and, in place
+  of `tauri.conf.json`, at a file holding the nightly's own public key, since nightly builds trust only that key (item
+  141): `printf '{"plugins":{"updater":{"pubkey":"%s"}}}' "$(gh variable get NIGHTLY_UPDATER_PUBKEY --repo mygogocash/manut-ai)" > "$dir.key.json"`.
 - What a person sees when they download in a browser (the quarantine warning) is not what a copy fetched with `gh`
   shows. Only a person can check that.

@@ -9,13 +9,19 @@
 # Nothing here can reach the stable channel: a prerelease is never GitHub's `latest`, so the stable updater's
 # releases/latest/download/latest.json keeps naming the owner's published release (docs/releasing.md).
 #
-# Signing: the updater files are signed with the same updater key the stable releases use (TAURI_SIGNING_PRIVATE_KEY and
-# its password, by name), so one pinned public key in the app verifies both channels. Nothing else is signed: no Apple
-# secret is read, the Mac app takes an ad hoc identity, and the Windows installer is unsigned (SmartScreen warns).
+# Signing (item 141, the sixth security read's M2 and M3): the updater files are signed with a key of the nightly's own,
+# never the stable one, because this builds whatever pilot/week-1 holds, dependency bumps merged on a green run included,
+# and that build runs with the key in its environment. The private half is NIGHTLY_SIGNING_PRIVATE_KEY and its password,
+# secrets of the `nightly` GitHub Environment, which only runs of `main` may use; the public half is the repository
+# variable NIGHTLY_UPDATER_PUBKEY, which each build writes into its updater config with Nightly's feed as the endpoint, so
+# a nightly build trusts only the nightly key and a stable build refuses a nightly's files. With no such variable the
+# run stops before building and says why. Nothing else is signed: no Apple secret is read, the Mac app takes an ad hoc
+# identity, and the Windows installer is unsigned (SmartScreen warns).
 #
 # Two things the owner should know. A `schedule` trigger runs only from the repository's DEFAULT branch, so this file does
-# nothing nightly until it is on main; the "Run workflow" button works from any branch that has it. And each night's
-# release stays: nothing deletes old nightlies (deleting a release is the owner's call).
+# nothing nightly until it is on main, and the `nightly` environment lets only `main` reach the key, so the "Run
+# workflow" button works from main only. And each night's release stays: nothing deletes old nightlies (deleting a
+# release is the owner's call).
 #
 # The decisions (the tag, the version, "did the branch move", the feed's checks) are in .github/scripts/nightly.mjs and
 # tested by nightly.test.mjs, because this workflow cannot be run without spending build minutes.
@@ -55,6 +61,8 @@ jobs:
       tag: ${{ steps.pick.outputs.tag }}
       date: ${{ steps.pick.outputs.date }}
       version: ${{ steps.pick.outputs.version }}
+      pubkey: ${{ steps.key.outputs.pubkey }}
+      updater: ${{ steps.key.outputs.updater }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -82,6 +90,22 @@ jobs:
             echo "version=$(node .github/scripts/nightly.mjs version "$base" "$date")"
           } >> "$GITHUB_OUTPUT"
           echo "### Nightly: $build (pilot/week-1 at $sha)" >> "$GITHUB_STEP_SUMMARY"
+      # Tonight's builds trust only the nightly key's public half (nightly.mjs `nightlyUpdater`). Without it they would
+      # trust nothing, so the run stops here, before a build minute is spent, and says why. It is public by nature, so a
+      # repository variable and not a secret; it reaches the script through the environment, never the script's text.
+      - name: Check the nightly's own updater key
+        id: key
+        if: steps.pick.outputs.build == 'true'
+        env:
+          NIGHTLY_UPDATER_PUBKEY: ${{ vars.NIGHTLY_UPDATER_PUBKEY }}
+        run: |
+          if ! out="$(node .github/scripts/nightly.mjs updater "$NIGHTLY_UPDATER_PUBKEY" 2>"$RUNNER_TEMP/key-error")"; then
+            why="$(cat "$RUNNER_TEMP/key-error")"
+            echo "::error::$why"
+            echo "### Nightly: not built. $why" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          echo "$out" >> "$GITHUB_OUTPUT"
 
   build:
     name: ${{ matrix.label }}
@@ -118,9 +142,23 @@ jobs:
             extra: ""
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
+    # The nightly key is a secret of this environment, which only runs of `main` may use, so a branch pushed with its own
+    # copy of this file reads nothing. Only this job names it: the other two read no signing secret.
+    environment: nightly
     permissions:
       contents: write
     steps:
+      # A build with no private key fails only at its very end, after the macOS minutes are spent, so look first. Names
+      # only, never a value.
+      - name: Check the nightly signing key is there
+        shell: bash
+        env:
+          NIGHTLY_SIGNING_PRIVATE_KEY: ${{ secrets.NIGHTLY_SIGNING_PRIVATE_KEY }}
+        run: |
+          if [ -z "$NIGHTLY_SIGNING_PRIVATE_KEY" ]; then
+            echo "::error::The nightly environment has no NIGHTLY_SIGNING_PRIVATE_KEY, so this build could not sign its update files. docs/releasing.md says how to add it."
+            exit 1
+          fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.decide.outputs.sha }}
@@ -142,14 +180,16 @@ jobs:
           workspaces: apps/desktop/src-tauri -> target
           key: nightly-${{ matrix.label }}
           save-if: false
-      # --config merges over tauri.conf.json for this build only, and tauri-action reads the merged version for the
-      # release's latest.json. Nothing in the repository's files changes.
+      # --config merges over tauri.conf.json for this build only (a JSON merge patch in Tauri CLI 2.12.6, which also hands
+      # it to the compiled app), and tauri-action reads the merged version for the release's latest.json. The updater
+      # part is the decide job's checked key and Nightly's feed. Nothing in the repository's files changes. The Tauri CLI
+      # reads the key under the name TAURI_SIGNING_PRIVATE_KEY; its value is the nightly's own.
       - name: Build and add to the night's prerelease
         uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # action-v1.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.NIGHTLY_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.NIGHTLY_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: apps/desktop
           tagName: ${{ needs.decide.outputs.tag }}
@@ -159,7 +199,7 @@ jobs:
           releaseDraft: false
           prerelease: true
           updaterJsonPreferNsis: true
-          args: ${{ matrix.args }} --config '{"version":"${{ needs.decide.outputs.version }}"${{ matrix.extra }}}'
+          args: ${{ matrix.args }} --config '{"version":"${{ needs.decide.outputs.version }}","plugins":{"updater":${{ needs.decide.outputs.updater }}}${{ matrix.extra }}}'
 
   feed:
     # Last, and only when all four builds passed: the feed is what Nightly Macs read, so it never names a half-built night.
@@ -182,11 +222,13 @@ jobs:
           VERSION: ${{ needs.decide.outputs.version }}
           SHA: ${{ needs.decide.outputs.sha }}
           DATE: ${{ needs.decide.outputs.date }}
+          PUBKEY: ${{ needs.decide.outputs.pubkey }}
         run: |
           work="$(mktemp -d)"
           gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern latest.json --dir "$work"
-          # Refuses a feed for another version or one that misses a platform, signature or https address.
-          node .github/scripts/nightly.mjs feed "$work/latest.json" "$work/nightly.json" "$VERSION"
+          # Refuses a feed for another version, one that misses a platform, signature or https address, and one signed
+          # with another key than the one tonight's builds trust.
+          node .github/scripts/nightly.mjs feed "$work/latest.json" "$work/nightly.json" "$VERSION" "$PUBKEY"
           if ! gh release view "$FEED_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release create "$FEED_TAG" --repo "$GITHUB_REPOSITORY" --prerelease --latest=false \
               --title "Nightly feed" --notes "Holds nightly.json, the update feed of the nightly channel."
