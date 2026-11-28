@@ -40,7 +40,8 @@ export const thread = {
   "thread.kind.chat": "Conversation",
   "thread.kind.task": "Team's work",
   // the question before a conversation is deleted for good (item 102l-6)
-  "thread.chatRemoveTitle": "Remove “{title}”?",
+  "thread.chatRemoveTitle": "Remove this conversation?",
+  "thread.chatRemoveName": "“{title}”",
   "thread.chatRemoveBody": "This deletes every message in it for good. It cannot be taken back.",
   "thread.chatRemoveYes": "Remove conversation",
 };

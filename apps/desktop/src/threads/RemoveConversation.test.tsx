@@ -23,7 +23,8 @@ describe("the question", () => {
     const html = draw();
     expect(html).toContain('role="alertdialog"');
     expect(html).toContain('aria-modal="true"');
-    expect(html).toMatch(/<h2[^>]*data-testid="remove-title"[^>]*>Remove “Which prices changed\?”\?<\/h2>/);
+    expect(html).toMatch(/<h2[^>]*data-testid="remove-title"[^>]*>Remove this conversation\?<\/h2>/);
+    expect(html).toMatch(/data-testid="remove-name"[^>]*>“Which prices changed\?”<\/p>/);
     expect(html).toMatch(/data-testid="remove-body"[^>]*>This deletes every message in it for good\. It cannot be taken back\.<\/p>/);
     // Cancel is the safe answer, and holds the focus
     expect(html).toMatch(/<button[^>]*data-autofocus[^>]*data-testid="remove-cancel"[^>]*>Cancel<\/button>/);
@@ -34,7 +35,7 @@ describe("the question", () => {
 
   it("names a conversation no message has named yet by the name a new thread shows", () => {
     setLang("en");
-    expect(draw({}, { ...PRICES, title: "" })).toContain(`Remove “${t("thread.untitled")}”?`);
+    expect(draw({}, { ...PRICES, title: "" })).toContain(`“${t("thread.untitled")}”</p>`);
   });
 
   it("does not let a name be taken for markup", () => {
@@ -61,12 +62,12 @@ describe("the question", () => {
     expect(draw({ asked: null })).toBe("");
   });
 
-  it("has its words in every language, with the conversation's name in the title", () => {
-    const keys: Key[] = ["row.removeChat", "thread.chatRemoveTitle", "thread.chatRemoveBody", "thread.chatRemoveYes", "thread.cancel", "rt.chat.removeOwnerOnly", "rt.chat.removeRefused", "rt.chat.removeUnavailable", "older.messages.show", "older.messages.reading", "older.messages.failed"];
+  it("has its words in every language, with the conversation's name in its own line", () => {
+    const keys: Key[] = ["row.removeChat", "thread.chatRemoveTitle", "thread.chatRemoveName", "thread.chatRemoveBody", "thread.chatRemoveYes", "thread.cancel", "rt.chat.removeOwnerOnly", "rt.chat.removeRefused", "rt.chat.removeUnavailable", "older.messages.show", "older.messages.reading", "older.messages.failed"];
     for (const lang of LANGS) {
       setLang(lang);
       for (const key of keys) expect(t(key, { title: "X", owner: "O", shop: "S" }), `${lang} ${key}`).not.toBe(key);
-      expect(t("thread.chatRemoveTitle", { title: "Which prices changed?" }), lang).toContain("Which prices changed?");
+      expect(t("thread.chatRemoveName", { title: "Which prices changed?" }), lang).toContain("Which prices changed?");
     }
   });
 });

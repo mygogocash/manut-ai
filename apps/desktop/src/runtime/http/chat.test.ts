@@ -621,7 +621,8 @@ describe("removing a conversation (item 102l-6)", () => {
   });
 
   it("says the words the brief names, in English", () => {
-    expect(t("thread.chatRemoveTitle", { title: "Keep me" })).toBe("Remove “Keep me”?");
+    expect(t("thread.chatRemoveTitle")).toBe("Remove this conversation?");
+    expect(t("thread.chatRemoveName", { title: "Keep me" })).toBe("“Keep me”");
     expect(t("thread.chatRemoveBody")).toBe("This deletes every message in it for good. It cannot be taken back.");
     expect(t("row.removeChat")).toBe("Remove conversation…");
   });

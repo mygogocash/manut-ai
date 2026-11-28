@@ -87,10 +87,14 @@ export function RemoveConversationView({ state, onCancel, onConfirm }: { state: 
   if (!asked) return null;
   return (
     <div className="rm-veil" data-testid="remove-veil" onMouseDown={(e) => e.target === e.currentTarget && onCancel()}>
-      <div ref={box} className="rm-dlg" role="alertdialog" aria-modal="true" aria-labelledby="rm-t" aria-describedby="rm-b" aria-busy={busy || undefined} data-testid="remove-conversation">
+      <div ref={box} className="rm-dlg" role="alertdialog" aria-modal="true" aria-labelledby="rm-t" aria-describedby="rm-n rm-b" aria-busy={busy || undefined} data-testid="remove-conversation">
         <h2 id="rm-t" className="rm-t" data-testid="remove-title">
-          {t("thread.chatRemoveTitle", { title: asked.title || t("thread.untitled") })}
+          {t("thread.chatRemoveTitle")}
         </h2>
+        {/* the name has a line of its own: a conversation is named by its first words, which are often a question, and "…?”?" reads badly */}
+        <p id="rm-n" className="rm-n" data-testid="remove-name">
+          {t("thread.chatRemoveName", { title: asked.title || t("thread.untitled") })}
+        </p>
         <p id="rm-b" className="rm-b" data-testid="remove-body">
           {t("thread.chatRemoveBody")}
         </p>
