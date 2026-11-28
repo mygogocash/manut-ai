@@ -6,7 +6,7 @@ export const termpanel: Record<keyof typeof en, string> = {
   "termpanel.tabs": "터미널 탭",
   "termpanel.newTab": "새 터미널",
   "termpanel.closeTab": "{name} 닫기",
-  "termpanel.hide": "터미널 숨기기 (Ctrl+`)",
+  "termpanel.hide": "터미널 숨기기",
   "termpanel.resize": "터미널 높이",
   "termpanel.home": "홈 폴더",
   "termpanel.ended": "shell이 종료됐어요",

@@ -134,7 +134,8 @@ test("Code opens on the grey Lanes band and its empty state; each coding tool is
   await start(page);
   await page.getByTestId("menu-code").click();
   const code = page.getByTestId("page-code");
-  await expect(code.getByTestId("lanes-band")).toHaveText("LanesNew lane");
+  // the + menu's key stands beside New lane, as the palette's rows carry theirs (item 167d): ⌘N here, Ctrl+N off a Mac
+  await expect(code.getByTestId("lanes-band")).toHaveText(/^Lanes(⌘N|CtrlN)New lane$/);
   await expect(code.getByTestId("lanes-empty-state")).toContainText("No lanes yet");
   // the lanes come first; the terminals' list is under them, under a grey band in sentence case
   const [lanes, terms] = await Promise.all([code.getByTestId("lanes-band").boundingBox(), code.getByTestId("side-sessions").boundingBox()]);

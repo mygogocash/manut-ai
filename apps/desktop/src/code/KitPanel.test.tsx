@@ -4,6 +4,7 @@ import { createElement, isValidElement, type ReactElement, type ReactNode } from
 import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { setLang } from "../i18n";
+import { forgetKeys } from "../app/keys";
 import { KitPanelView, LanesEmpty, codeProjects, onlyInOwnFolders, type KitPanelProps } from "./KitPanel";
 import { laneRowOf } from "./Lanes";
 import { emptyLane, noteLane } from "./lane";
@@ -213,8 +214,13 @@ describe("the main-moved note under the dial", () => {
 describe("the Code page with no project yet (item 85i)", () => {
   it("opens on the canvas's grey Lanes band with New lane, over an empty state that says what a lane is", () => {
     setLang("en");
+    vi.stubGlobal("navigator", { platform: "MacIntel" });
+    forgetKeys();
     const html = renderToString(<LanesEmpty onNew={() => {}} />);
-    expect(html).toMatch(/<div class="band" data-testid="lanes-band"><span id="lanes-empty-h">Lanes<\/span><button[^>]*data-testid="lane-new"[^>]*>New lane<\/button><\/div>/);
+    // the + menu's key stands beside the link that opens the same menu (item 167d), the person's own, here the default
+    expect(html).toMatch(/<div class="band" data-testid="lanes-band"><span id="lanes-empty-h">Lanes<\/span><span class="lk-w"><span class="kcaps"[^>]*><kbd class="kcap">⌘<\/kbd><kbd class="kcap">N<\/kbd><\/span><button[^>]*data-testid="lane-new"[^>]*>New lane<\/button><\/span><\/div>/);
+    expect(html).toContain("It starts with your first message. (⌘N)");
+    vi.unstubAllGlobals();
     expect(html).toContain('data-testid="lanes-empty-state"');
     expect(html).toContain("No lanes yet");
     expect(html).toContain("nothing goes live until you approve");

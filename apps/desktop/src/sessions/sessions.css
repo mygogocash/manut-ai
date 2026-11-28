@@ -452,6 +452,10 @@ body.side-resizing * {
   height: 16px;
   color: var(--muted);
 }
+/* the key of what it opens, at the row's end (item 167d) */
+.ss-start .ss-keys {
+  margin-left: auto;
+}
 .ss-start:hover,
 .ss-start[aria-expanded="true"] {
   color: var(--ink);

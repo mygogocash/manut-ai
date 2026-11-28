@@ -57,6 +57,7 @@ import { inbox } from "./en/inbox";
 import { job } from "./en/job";
 import { jobview } from "./en/jobview";
 import { key } from "./en/key";
+import { keysheet } from "./en/keysheet";
 import { kit } from "./en/kit";
 import { lane } from "./en/lane";
 import { lang } from "./en/lang";
@@ -221,6 +222,7 @@ export const en = {
   ...job,
   ...jobview,
   ...key,
+  ...keysheet,
   ...kit,
   ...lane,
   ...lang,

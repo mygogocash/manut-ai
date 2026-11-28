@@ -43,4 +43,6 @@ export const key: Record<keyof typeof en, string> = {
   "key.reserved.members": "{keys} 키는 팀원을 엽니다.",
   "key.ownHint": "변경을 누른 다음 원하는 키를 누르세요. 단축키는 이 Mac에만 저장됩니다.",
   "key.sidebar": "사이드 메뉴 표시 또는 숨기기",
+  "key.hint": "{label} ({keys})",
+  "key.sheet": "모든 단축키 보기",
 };

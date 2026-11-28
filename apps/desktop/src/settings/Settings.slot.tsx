@@ -38,6 +38,9 @@ import { QUIET_DAYS, setInbox, useInbox } from "../sidebar/inbox";
 import { TITLE_EFFORTS, TITLE_MODELS, setTitleModel, useTitleModel } from "../lib/titleModel";
 import { Icon, type IconName } from "../ui/icons";
 import { KeysRows } from "./KeysRows";
+import { Row as BareRow } from "./DevRow";
+import { fixedKeys, membersKey } from "../app/keyList";
+import { openKeySheet } from "../keysheet/state";
 import { parseChannel, setUpdateChannel, updateChannel, type UpdateChannel } from "../sidebar/updateChannel";
 
 export const slot = "settings";
@@ -438,31 +441,8 @@ function BotCard({ bot }: { bot: Bot }) {
   );
 }
 
-const MOD = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+";
-/** The fixed keys, listed after the ones the person sets (KeysRows.tsx, item 99): set by the terminal, the split panes and the
- *  cards themselves, so they are shown, not changed, here. */
-const SHORTCUTS: [string, Key][] = [
-  [MOD === "⌘" ? "⌘D · ⌘⇧D" : "Ctrl+Shift+D · Alt+Shift+D", "key.splitPane"],
-  [MOD === "⌘" ? "⌘W" : "Ctrl+Shift+W", "key.closePane"],
-  [MOD === "⌘" ? "⌘⌥ ←↑↓→" : "Ctrl+Alt+ ←↑↓→", "key.focusPane"],
-  [MOD === "⌘" ? "⌘] · ⌘[" : "Ctrl+Tab · Ctrl+Shift+Tab", "key.stepPane"],
-  [MOD === "⌘" ? "⌘⇧⌥ ←↑↓→" : "Ctrl+Alt+Shift+ ←↑↓→", "key.movePane"],
-  [MOD === "⌘" ? "⌘⇧↩" : "Ctrl+Shift+Enter", "key.zoomPane"],
-  [MOD === "⌘" ? "⌘⌃=" : "Ctrl+Alt+=", "key.equalizePanes"],
-  [MOD === "⌘" ? "⌘= · ⌘- · ⌘0" : "Ctrl+= · Ctrl+- · Ctrl+0", "key.termFont"],
-  ...(MOD === "⌘"
-    ? ([
-        ["⌘← · ⌘→ · ⌘⌫ · ⌘⌦", "key.termLine"],
-        ["⌥← · ⌥→", "key.termWord"],
-        ["⌘K", "key.termClear"],
-      ] as [string, Key][])
-    : ([["Ctrl+Shift+C · Ctrl+Shift+V · Ctrl+Insert · Shift+Insert", "key.termCopyPaste"]] as [string, Key][])),
-  [MOD === "⌘" ? "⌘Home · ⌘End" : "Ctrl+Home · Ctrl+End", "key.termScroll"],
-  [MOD === "⌘" ? "⌘⇧C" : "Alt+Shift+C", "key.copyLink"],
-  ["1 · 2 · 3", "key.cardKeys"],
-  ["Esc", "key.stop"],
-];
-
+/** Whether this keyboard is a Mac's: the Keyboard list writes its fixed keys for it (keyList.ts). */
+const ON_MAC = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
 function NotifySeg() {
   const [on, setOn] = useState(notifyEnabled());
   return (
@@ -875,22 +855,31 @@ function GeneralPage() {
           </Row>
         )}
       </div>
-      <div className="st-gh">{t("set.keyboard")}</div>
+      <div className="st-gh" data-testid="keyboard-head">
+        {t("set.keyboard")}
+      </div>
       <div className="st-note">{t("key.ownHint")}</div>
       <div className="st-grp" data-testid="shortcuts">
-        <Row title={t("key.openBot")}>
+        <Row title={t(membersKey(ON_MAC).what)}>
           <Value>
-            <kbd className="st-kbd">{`${MOD}1 … ${MOD}9`}</kbd>
+            <kbd className="st-kbd">{membersKey(ON_MAC).keys}</kbd>
           </Value>
         </Row>
         <KeysRows />
-        {SHORTCUTS.map(([keys, what]) => (
+        {/* the fixed keys (keyList.ts), the same list the key sheet shows, as they were listed here before it */}
+        {fixedKeys(ON_MAC).map(({ keys, what }) => (
           <Row key={keys} title={t(what)}>
             <Value>
               <kbd className="st-kbd">{keys}</kbd>
             </Value>
           </Row>
         ))}
+        {/* the key sheet lists all of these, and the fixed ones, by group with a search (item 167d) */}
+        <BareRow>
+          <button type="button" className="st-btn" onClick={() => openKeySheet()} data-testid="keys-sheet-open">
+            {t("key.sheet")}
+          </button>
+        </BareRow>
       </div>
       <div className="st-gh">{t("set.runtime")}</div>
       <div className="st-grp">

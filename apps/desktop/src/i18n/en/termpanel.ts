@@ -4,7 +4,7 @@ export const termpanel = {
   "termpanel.tabs": "Terminal tabs",
   "termpanel.newTab": "New terminal",
   "termpanel.closeTab": "Close {name}",
-  "termpanel.hide": "Hide terminal (Ctrl+`)",
+  "termpanel.hide": "Hide terminal",
   "termpanel.resize": "Terminal height",
   "termpanel.home": "Home folder",
   "termpanel.ended": "shell ended",

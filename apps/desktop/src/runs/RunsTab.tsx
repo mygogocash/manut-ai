@@ -8,7 +8,7 @@ import type { Bot } from "../lib/protocol";
 import { cliName, lengthOf, sortRuns, span, type AgentRunSummary, type NodePr, type RunDetail } from "../lib/runs";
 import { getStore, useStore } from "../state/store";
 import { ExpandIcon, ModelIcon, Spinner } from "../ui";
-import { isMac } from "../app/shortcuts";
+import { useKeyShown, withKey } from "../app/keyHints";
 import { useNow } from "../elsewhere/useNow";
 import { t, tx } from "../i18n";
 import { frontiers } from "./boxView";
@@ -269,10 +269,11 @@ function PanelRun({ bot, summary, nowS }: { bot: Bot; summary: AgentRunSummary; 
   useEffect(() => {
     if (open) drawer.current?.scrollIntoView({ block: "nearest" });
   }, [open]);
-  const fullKey = isMac() ? "⌘⇧G" : "Ctrl+Shift+G";
-  // the panel maximised in place: the same graph at full size, panned and zoomed, the node's detail over its right
+  // the panel maximised in place: the same graph at full size, panned and zoomed, the node's detail over its right; its key is the
+  // panel's own key as the person set it (item 167d)
+  const fullShown = useKeyShown("graph");
   const max = s.ui.panelMax;
-  const fullLabel = `${max ? t("panel.restore") : t("graph.full")} ${fullKey}`;
+  const fullLabel = withKey(max ? t("panel.restore") : t("graph.full"), fullShown);
   return (
     <div className={`rn-run${max ? " max" : ""}`} data-testid="run-graph-box" data-run={summary.id} data-state={summary.state}>
       <PlanHeader

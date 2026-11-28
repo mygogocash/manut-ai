@@ -2,7 +2,7 @@ import type { Bot } from "../../lib/protocol";
 import { useStore } from "../../state/store";
 import { slots } from "../../features";
 import { Avatar } from "../../ui";
-import { isMac } from "../../app/shortcuts";
+import { keyedProps, useKeyShown } from "../../app/keyHints";
 import { reasoningLabel } from "../model/levels";
 import { t } from "../../i18n";
 import { PanelButton } from "./PanelButton";
@@ -15,6 +15,8 @@ export { reasoningLabel };
 export function Header({ bot }: { bot: Bot }) {
   const s = useStore();
   const Places = slots.headerPlaces;
+  // the person's own key for Details, not a ⌘. written here (item 167d)
+  const details = useKeyShown("details");
   return (
     <header className="head" data-testid="header">
       <button
@@ -22,7 +24,7 @@ export function Header({ bot }: { bot: Bot }) {
         className="who-btn"
         onClick={() => s.togglePanel()}
         aria-expanded={s.ui.panelOpen}
-        title={t("head.details", { key: isMac() ? "⌘." : "Ctrl+." })}
+        {...keyedProps(t("head.details"), details)}
         data-testid="who"
       >
         <Avatar bot={bot.name} size={26} />

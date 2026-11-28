@@ -309,3 +309,28 @@ button.ui-pill:hover {
 .mi-ic > * {
   display: block;
 }
+
+/* An action's key drawn as caps, one for each key (KeyCaps.tsx), as the canvas's Search board draws a row's tail (`.kbd`: 22px,
+   a hairline and a heavier bottom edge, the mono face, muted). The Esc cap in the palette's field is the same cap. */
+.kcaps {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+}
+.kcap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-bottom-width: 2px;
+  border-radius: var(--rad-sm);
+  background: var(--main);
+  font-family: var(--aui-font-mono);
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--aui-muted);
+}

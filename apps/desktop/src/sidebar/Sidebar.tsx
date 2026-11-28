@@ -48,6 +48,8 @@ import { ShopSwitcher } from "./ShopSwitcher";
 import { UpdateButton } from "./UpdateButton";
 import { satangText } from "../pages/job";
 import { setSideHidden, useSide } from "./sideState";
+import { keyedProps, keyShown, useKeys } from "../app/keyHints";
+import { isMacHere, type KeyAction } from "../app/keys";
 
 const LABEL: Record<MenuRow, Key> = {
   new: "menu.new",
@@ -164,6 +166,9 @@ export function SideMenu({
   const order = [...recent, ...working].flatMap((r) => (r.rowKey ? [r.rowKey] : []));
   const select = useRowSelect("recent", order);
   useSelectionEscape();
+  // the person's keys for the buttons that have one, in their tooltips (item 167d)
+  const keys = useKeys();
+  const keyed = (label: string, a: KeyAction) => keyedProps(label, keyShown(keys, a, isMacHere()));
   return (
     <nav className="sb" aria-label={t("menu.label")} data-testid="sidebar" data-select-scope="recent" inert={hidden} aria-hidden={hidden || undefined}>
       <div className="brand">
@@ -171,11 +176,11 @@ export function SideMenu({
         <button type="button" className="sb-home" aria-label={t("menu.home")} onClick={() => onRow("new")} data-testid="menu-home">
           <BrandMark />
         </button>
-        <button type="button" className="ib" aria-label={t("nav.search")} title={t("nav.search")} onClick={onSearch} data-testid="menu-search">
+        <button type="button" className="ib" aria-label={t("nav.search")} {...keyed(t("nav.search"), "search")} onClick={onSearch} data-testid="menu-search">
           <SearchGlyph />
         </button>
         {onHide && (
-          <button type="button" className="ib" aria-label={t("side.hide")} title={t("side.hide")} onClick={onHide} data-testid="menu-hide">
+          <button type="button" className="ib" aria-label={t("side.hide")} {...keyed(t("side.hide"), "sidebar")} onClick={onHide} data-testid="menu-hide">
             <Icon name="panel-left" />
           </button>
         )}
@@ -239,7 +244,7 @@ export function SideMenu({
             numbers. */}
         {budget && <BudgetPill budget={budget} />}
         <div className="acct-row">
-          <button type="button" className="acct" aria-current={settings ? "page" : undefined} title={t("nav.settings")} onClick={onAccount} data-testid="nav-settings">
+          <button type="button" className="acct" aria-current={settings ? "page" : undefined} {...keyed(t("nav.settings"), "settings")} onClick={onAccount} data-testid="nav-settings">
             <span className="av" aria-hidden="true">
               {account.initial}
             </span>

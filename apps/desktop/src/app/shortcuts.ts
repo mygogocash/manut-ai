@@ -6,7 +6,10 @@
 //   ⌘F     find in the chat in view (src/chat/find): a bar over its messages and steps; in a terminal, in a pane or field that
 //          has a find of its own, or over an open menu or dialog it is theirs, and with no chat on screen it does nothing
 //   ⌘.     show or hide Details                    ⌘,  Settings
+//   ⌘/     the key sheet (src/keysheet, item 167d): every key below and the fixed ones, by group, with a search, read only; each
+//          settable one opens its row in Settings › General › Keyboard. While it is open it has the keyboard, as the palette does
 //   ⌘J     jump to the next approval or question waiting on you (any bot or SESSIONS chat)
+//   ⌘⇧S   show or hide the side menu
 //   ⌘⇧G   maximise the side panel in place, or restore it (Esc restores; a closed panel opens on Plans)
 //   ⌘N ⌘T  the Code page's TERMINALS + menu (a CLI as a chat with Kit, or the Shell or a CLI in a terminal, which has
 //          the focus); the Code page opens first
@@ -30,6 +33,7 @@ import { getTermPanel, toggleTerminal } from "../terminal/state";
 import { isFirstRunOpen } from "../onboarding/flow";
 import { listenMenuClose } from "./menuClose";
 import { paletteOpen, togglePalette } from "../palette/state";
+import { keySheetOpen, toggleKeySheet } from "../keysheet/state";
 import { currentKeys, keysRecording, matches, type KeyAction, type Keys } from "./keys";
 import { toggleSide } from "../sidebar/sideState";
 import { keepsFind, openChatFind } from "../chat/find/host";
@@ -42,7 +46,7 @@ export function shortcutFor(
   e: { key: string; code?: string; metaKey: boolean; ctrlKey: boolean; altKey: boolean; shiftKey: boolean; isComposing?: boolean; keyCode?: number },
   mac: boolean,
   keys: Keys = currentKeys(mac),
-): { kind: "bot"; index: number } | { kind: "session"; step: 1 | -1 } | { kind: "search" | "find" | "details" | "settings" | "stop" | "next-ask" | "graph" | "new-session" | "terminal" | "sidebar" } | null {
+): { kind: "bot"; index: number } | { kind: "session"; step: 1 | -1 } | { kind: "search" | "find" | "details" | "settings" | "key-sheet" | "stop" | "next-ask" | "graph" | "new-session" | "terminal" | "sidebar" } | null {
   if (composing(e)) return null;
   const hit = (a: KeyAction) => keys[a].some((c) => matches(c, e));
   // the bottom terminal panel first: its key is taken before a terminal sees it (onTerminalKey)
@@ -58,8 +62,10 @@ export function shortcutFor(
   if (hit("settings")) return { kind: "settings" };
   if (hit("next-ask")) return { kind: "next-ask" };
   if (hit("new-session")) return { kind: "new-session" };
-  // last of the settable keys: find is a newer default than any key the person has set, so ⌘F they gave another action stays theirs
+  // last of the settable keys: find and the key sheet are newer defaults than any key the person has set, so a ⌘F or ⌘/ they gave
+  // another action stays theirs
   if (hit("find")) return { kind: "find" };
+  if (hit("key-sheet")) return { kind: "key-sheet" };
   if (e.key === "Escape" && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) return { kind: "stop" };
   return null;
 }
@@ -134,6 +140,8 @@ export function onShortcutKey(e: KeyboardEvent): void {
   if (hit.kind === "search" && inTerminal(e.target)) return;
   // While the palette is open its field has the keys: only ⌘K (which closes it) is still a shortcut.
   if (paletteOpen() && hit.kind !== "search") return;
+  // The key sheet is as modal: its own key closes it, and nothing behind it takes a key meanwhile (Esc is its own, in its field).
+  if (keySheetOpen() && hit.kind !== "key-sheet") return;
   if (hit.kind === "find") {
     // ⌘F is first the place that already took it (a terminal's find says so with preventDefault, as does a field with its own),
     // then any place that keeps it (a terminal, its bar, a pane marked data-own-find, an open menu or dialog); the chat's bar
@@ -202,6 +210,8 @@ export function onShortcutKey(e: KeyboardEvent): void {
     a.togglePanel();
   } else if (hit.kind === "sidebar") {
     toggleSide();
+  } else if (hit.kind === "key-sheet") {
+    toggleKeySheet();
   } else if (hit.kind === "settings") {
     if (s.ui.view === "settings") a.closeSettings();
     else a.openSettings();

@@ -56,6 +56,7 @@ import { inbox } from "./zh/inbox";
 import { job } from "./zh/job";
 import { jobview } from "./zh/jobview";
 import { key } from "./zh/key";
+import { keysheet } from "./zh/keysheet";
 import { kit } from "./zh/kit";
 import { lane } from "./zh/lane";
 import { lang } from "./zh/lang";
@@ -220,6 +221,7 @@ export const zh: Record<Key, string> = {
   ...job,
   ...jobview,
   ...key,
+  ...keysheet,
   ...kit,
   ...lane,
   ...lang,

@@ -33,6 +33,8 @@ import { PreviewSample } from "./PreviewSample";
 import { ProjectIconView, useProjectIcon } from "./ProjectIcon";
 import { allowFolder, dropRule, mayAllow, removeFolder, setLevel, updateKitProjects, useKitProject, type KitProject } from "./project";
 import { Empty } from "../pages/MenuPage";
+import { KeyCaps } from "../ui/KeyCaps";
+import { useKeyShown, withKey, type KeyShown } from "../app/keyHints";
 import { MenuIcon } from "../sidebar/menuIcons";
 
 /** A session of this project whose changes hold a key. */
@@ -55,6 +57,8 @@ export interface KitPanelProps {
   onOpenLane?: (id: string) => void;
   /** New lane in the Lanes band (KitPanel fills it: the + menu's Chat with Kit for this project). Without it the band has no link. */
   onNewLane?: () => void;
+  /** The key of the + menu New lane opens (item 167d), as the person set it: KeyCaps beside the link while the project has no lane. */
+  newKey?: KeyShown | null;
   /** The lane whose Bring it back is open, the link on its line that opens it, and what a lane's row shows under its line
    *  (KitPanel fills these: the panel under a Reverted lane reads the stores). */
   /** The pull request on a lane's row was pressed: Tasks opens on it (tasks/state.ts `showPull`). */
@@ -83,7 +87,7 @@ export function KitPanelView(p: KitPanelProps) {
   return (
     <section className="kitp" aria-labelledby="kit-dial-title" data-testid="kit-panel">
       {/* the project's lanes come first, as the canvas's Code board draws them: the work, then how much Kit does alone */}
-      <LanesView rows={p.lanes ?? []} now={p.now ?? 0} onOpen={p.onOpenLane ?? (() => undefined)} onPull={p.onOpenPull} onNew={p.onNewLane} {...p.laneBack} />
+      <LanesView rows={p.lanes ?? []} now={p.now ?? 0} onOpen={p.onOpenLane ?? (() => undefined)} onPull={p.onOpenPull} onNew={p.onNewLane} newKey={p.newKey} {...p.laneBack} />
       {p.kept}
       <div className="band">
         <span id="kit-dial-title">{t("kit.dial")}</span>
@@ -226,13 +230,18 @@ function LaneBelow({ root, row, backOpen, onCloseBack }: { root: string; row: La
 
 /** The Lanes band with nothing under it yet: what a lane is, and New lane, which opens the + menu on its Chat with Kit. */
 export function LanesEmpty({ onNew }: { onNew: () => void }) {
+  // the + menu's key, beside the link that opens the same menu (item 167d), as the person set it
+  const key = useKeyShown("new-session");
   return (
     <section className="lanes-empty" aria-labelledby="lanes-empty-h" data-testid="lanes-empty">
       <div className="band" data-testid="lanes-band">
         <span id="lanes-empty-h">{t("lane.title")}</span>
-        <button type="button" className="lk" onClick={onNew} title={t("lane.newTip")} data-testid="lane-new">
-          {t("lane.new")}
-        </button>
+        <span className="lk-w">
+          {key && <KeyCaps shown={key} />}
+          <button type="button" className="lk" onClick={onNew} title={withKey(t("lane.newTip"), key)} data-testid="lane-new">
+            {t("lane.new")}
+          </button>
+        </span>
       </div>
       <Empty icon={<MenuIcon row="code" />} title={t("lane.emptyTitle")} text={t("lane.emptyText")} testId="lanes-empty-state" />
     </section>
@@ -240,6 +249,7 @@ export function LanesEmpty({ onNew }: { onNew: () => void }) {
 }
 
 export function KitPanel({ onJobView }: { onJobView?: (job: string) => void } = {}) {
+  const newKey = useKeyShown("new-session");
   const ss = useSessions();
   const prefs = useFolderPrefs();
   useKeysVersion();
@@ -313,6 +323,7 @@ export function KitPanel({ onJobView }: { onJobView?: (job: string) => void } = 
         now={now}
         onOpenLane={openLane}
         onNewLane={() => openNewSessionMenu({ chat: true, folder: root })}
+        newKey={newKey}
         onOpenPull={(pull) => {
           // the same place Tasks opens a request: its list for that repository, with the request selected
           if (showPull(pull.source, pull.repo, pull.number, root)) getStore().actions.openTasks();

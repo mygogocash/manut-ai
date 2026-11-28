@@ -10,6 +10,7 @@ import { t } from "../i18n";
 import { askFrom, askText, isSessionChat, useStore, type Ask } from "../state/store";
 import { SessionFace } from "../sessions/SessionFace";
 import { Avatar, ChevronDown } from "../ui";
+import { useKeyShown } from "../app/keyHints";
 
 /** An ask as one plain line, with `code` spans set in mono instead of showing raw backticks. */
 export function AskLine({ text }: { text: string }) {
@@ -51,6 +52,8 @@ const SHOW = 3;
 
 export function NeedsStrip({ asks }: { asks: Ask[] }) {
   const s = useStore();
+  // the key for the next ask, as the person set it (item 167d)
+  const nextKey = useKeyShown("next-ask");
   const [open, setOpen] = useState(false);
   const [all, setAll] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -104,9 +107,11 @@ export function NeedsStrip({ asks }: { asks: Ask[] }) {
           {line.count}
           <span className="needs-who">{glued(line.rest)}</span>
         </span>
-        <span className="needs-k" aria-hidden="true">
-          {/Mac|iPhone|iPad/.test(navigator.platform) ? "⌘J" : "Ctrl+J"}
-        </span>
+        {nextKey && (
+          <span className="needs-k" aria-hidden="true" data-testid="needs-key">
+            {nextKey.text}
+          </span>
+        )}
         <span className="needs-chev" aria-hidden="true">
           <ChevronDown />
         </span>

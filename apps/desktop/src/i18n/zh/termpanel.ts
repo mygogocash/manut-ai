@@ -6,7 +6,7 @@ export const termpanel: Record<keyof typeof en, string> = {
   "termpanel.tabs": "终端标签页",
   "termpanel.newTab": "新建终端",
   "termpanel.closeTab": "关闭 {name}",
-  "termpanel.hide": "隐藏终端 (Ctrl+`)",
+  "termpanel.hide": "隐藏终端",
   "termpanel.resize": "终端高度",
   "termpanel.home": "主文件夹",
   "termpanel.ended": "shell 已结束",

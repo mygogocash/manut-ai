@@ -1,7 +1,8 @@
 // The command palette (item 77a): the box ⌘K opens. A text field over a short list of where to go, what to do and what was
 // said before, in the look of the app's other popovers. `PaletteView` draws a given list so tests can draw any state;
 // `Palette` keeps the typing and the cursor and acts. Picking a row closes the palette, gives the focus back to where it
-// was, and then does the one thing the row says: open a page, or press what a button elsewhere presses.
+// was, and then does the one thing the row says: open a page, or press what a button elsewhere presses. A row whose action has
+// a key shows it at its tail, the person's own (item 167d), and the foot says what Return and Esc do and which key opens this box.
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type RefObject } from "react";
 import "./palette.css";
 import { t, type Key } from "../i18n";
@@ -25,6 +26,11 @@ import { buildGroups, flat, type Group } from "./groups";
 import type { PaletteCtx, Row } from "./registry";
 import { Icon } from "../ui/icons";
 import { AgentIcon } from "../ui/AgentIcon";
+import { KeyCaps } from "../ui/KeyCaps";
+import { enterName, keyShown, useKeys } from "../app/keyHints";
+import { isMacHere } from "../app/keys";
+import { toggleSide } from "../sidebar/sideState";
+import { openKeySheet } from "../keysheet/state";
 
 const LIST_ID = "palette-list";
 const optionId = (i: number) => `palette-opt-${i}`;
@@ -51,6 +57,10 @@ export function pointerMoved(last: { x: number; y: number } | null, x: number, y
 
 export function PaletteView(p: PaletteViewProps) {
   let at = -1;
+  // the person's keys, drawn again when they change one while the palette is open
+  const keys = useKeys();
+  const mac = isMacHere();
+  const searchKey = keyShown(keys, "search", mac);
   const total = flat(p.groups).length;
   // where the pointer was at its last move over the list (none yet: the first move only notes it)
   const pointer = useRef<{ x: number; y: number } | null>(null);
@@ -93,6 +103,7 @@ export function PaletteView(p: PaletteViewProps) {
                 {g.rows.map((r) => {
                   at += 1;
                   const i = at;
+                  const shown = r.keyAction ? keyShown(keys, r.keyAction, mac) : null;
                   return (
                     <li
                       key={r.id}
@@ -110,10 +121,12 @@ export function PaletteView(p: PaletteViewProps) {
                       onClick={() => p.onPick(r)}
                       data-testid="palette-row"
                       data-row={r.id}
+                      {...(shown ? { "aria-keyshortcuts": shown.aria } : {})}
                     >
                       {r.mark ? <AgentIcon id={r.mark.id} title={r.mark.title} size={16} /> : <Icon name={r.icon ?? g.icon} />}
                       <span className="pal-n">{r.label}</span>
                       {r.hint && <span className="pal-sub">{r.hint}</span>}
+                      {shown && <KeyCaps shown={shown} />}
                     </li>
                   );
                 })}
@@ -126,6 +139,24 @@ export function PaletteView(p: PaletteViewProps) {
             </li>
           )}
         </ul>
+        {/* The Search board's foot: what Return and Esc do, and, at the end, the key that opens this box (the person's own, and
+            nothing when they gave it none). */}
+        <div className="pal-foot" data-testid="palette-foot">
+          <span className="pal-fh">
+            <KeyCaps shown={{ caps: [enterName(mac)] }} />
+            {t("pal.footOpen")}
+          </span>
+          <span className="pal-fh">
+            <KeyCaps shown={{ caps: ["Esc"] }} />
+            {t("pal.footClose")}
+          </span>
+          {searchKey && (
+            <span className="pal-fh pal-fe" data-testid="palette-foot-key">
+              <KeyCaps shown={searchKey} />
+              {t("pal.footSearch")}
+            </span>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -165,6 +196,9 @@ function OpenPalette({ leaving }: { leaving: boolean }) {
         if (getStore().getState().ui.view !== "code") s.openPage("code");
         openNewSessionMenu();
       },
+      // the key sheet opens over the page and asks nothing; the side menu's switch is its Hide button's and ⇧⌘S's
+      openKeySheet: () => openKeySheet(),
+      toggleSide: () => toggleSide(),
       // what Settings › Workflows offers Run now for: none while Workflows is off, a file that is no workflow, one the person has
       // not allowed as it is now (item 91), or a run going
       workflows: wfOn ? wf.files.flatMap((f) => ("workflow" in f && !wf.live[f.file] && standingOf(f.workflow, wf.allowed) === "allowed" ? [{ file: f.file, name: f.workflow.name }] : [])) : [],

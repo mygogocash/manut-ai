@@ -8,4 +8,7 @@ export const pal: Record<keyof typeof en, string> = {
   "pal.chats": "채팅",
   "pal.history": "기록에서 \"{q}\" 검색",
   "pal.none": "찾은 것이 없습니다",
+  "pal.footOpen": "opens the marked row",
+  "pal.footClose": "closes",
+  "pal.footSearch": "opens this menu from any screen",
 };

@@ -6,4 +6,7 @@ export const pal = {
   "pal.chats": "Chats",
   "pal.history": "Search History for \"{q}\"",
   "pal.none": "Nothing found",
+  "pal.footOpen": "opens the marked row",
+  "pal.footClose": "closes",
+  "pal.footSearch": "opens this menu from any screen",
 };

@@ -6,7 +6,7 @@ export const termpanel: Record<keyof typeof en, string> = {
   "termpanel.tabs": "ターミナルのタブ",
   "termpanel.newTab": "新しいターミナル",
   "termpanel.closeTab": "{name} を閉じる",
-  "termpanel.hide": "ターミナルを隠す (Ctrl+`)",
+  "termpanel.hide": "ターミナルを隠す",
   "termpanel.resize": "ターミナルの高さ",
   "termpanel.home": "ホームフォルダ",
   "termpanel.ended": "シェルが終了しました",

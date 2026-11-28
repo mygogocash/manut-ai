@@ -56,6 +56,7 @@ import { inbox } from "./ja/inbox";
 import { job } from "./ja/job";
 import { jobview } from "./ja/jobview";
 import { key } from "./ja/key";
+import { keysheet } from "./ja/keysheet";
 import { kit } from "./ja/kit";
 import { lane } from "./ja/lane";
 import { lang } from "./ja/lang";
@@ -220,6 +221,7 @@ export const ja: Record<Key, string> = {
   ...job,
   ...jobview,
   ...key,
+  ...keysheet,
   ...kit,
   ...lane,
   ...lang,

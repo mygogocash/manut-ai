@@ -19,6 +19,7 @@ import { TermMenu } from "../sessions/term/TermMenu";
 import { CloseToasts } from "../sessions/CloseToasts";
 import { SnapshotNotice } from "../computer/SnapshotNotice";
 import { Palette } from "../palette/Palette";
+import { KeySheet } from "../keysheet/KeySheet";
 import { SettingsView } from "./SettingsView";
 import { AutomationsPage } from "../pages/Automations";
 import { PluginsPage } from "../pages/Plugins";
@@ -177,6 +178,8 @@ export function App() {
       <SnapshotNotice />
       {/* ⌘K and the menu's Search open it over whatever is showing */}
       <Palette />
+      {/* ⌘/, the palette's Show every shortcut and Settings' button open the key sheet, over whatever is showing (item 167d) */}
+      <KeySheet />
       {/* Bring over's offer, over whatever is showing: once on a first launch, then from History */}
       <ImportPast />
       {/* the question before a conversation with Buddy is removed for good, over whatever is showing (item 102l-6) */}

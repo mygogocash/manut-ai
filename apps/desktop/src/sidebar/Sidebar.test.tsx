@@ -1,9 +1,10 @@
 // The side menu as the design canvas draws it, drawn with react-dom/server: the rows in order, the one current row,
 // the Needs-you count, Recent, Search and the account row. The last test draws the connected menu on the app's own
 // store, where menu.ts decides the current row.
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderToString } from "react-dom/server";
 import { setLang } from "../i18n";
+import { forgetKeys, KEYS_KEY, setKeys } from "../app/keys";
 import { getStore } from "../state/store";
 import { SideMenu, Sidebar, type Budget, type RecentItem } from "./Sidebar";
 import type { MenuRow } from "./menu";
@@ -162,5 +163,59 @@ describe("the menu on the app's store", () => {
     a.firstRunDo({ type: "next" });
     expect(renderToString(<Sidebar />)).toMatch(/<span class="av" aria-hidden="true">F<\/span><span class="acct-n">Fon, Baan Mali<\/span>/);
     a.firstRunEnd();
+  });
+});
+
+describe("the buttons that have a key say it in their tooltip (item 167d)", () => {
+  const storage = new Map<string, string>();
+  const mac = (on: boolean) => vi.stubGlobal("navigator", { platform: on ? "MacIntel" : "Linux x86_64" });
+  beforeEach(() => {
+    storage.clear();
+    (globalThis as { localStorage?: unknown }).localStorage = { getItem: (k: string) => storage.get(k) ?? null, setItem: (k: string, v: string) => void storage.set(k, v), removeItem: (k: string) => void storage.delete(k) };
+    forgetKeys();
+    mac(true);
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  const withHide = () => renderToString(<SideMenu current="new" needs={0} recent={[]} settings={false} onRow={noop} onSearch={noop} onAccount={noop} onHide={noop} />);
+  /** A button's tooltip and the key it names to assistive technology, found by its test id. */
+  const tip = (html: string, id: string) => {
+    const tag = new RegExp(`<button[^>]*data-testid="${id}"[^>]*>`).exec(html)?.[0] ?? "";
+    return { title: /title="([^"]*)"/.exec(tag)?.[1], keys: /aria-keyshortcuts="([^"]*)"/.exec(tag)?.[1], label: /aria-label="([^"]*)"/.exec(tag)?.[1] };
+  };
+
+  it("names the palette's, the side menu's and Settings' keys on Search, Hide and the account row", () => {
+    setLang("en");
+    const html = withHide();
+    expect(tip(html, "menu-search")).toEqual({ title: "Search (⌘K)", keys: "Meta+K", label: "Search" });
+    expect(tip(html, "menu-hide")).toEqual({ title: "Hide the side menu (⇧⌘S)", keys: "Shift+Meta+S", label: "Hide the side menu" });
+    expect(tip(html, "nav-settings")).toEqual({ title: "Settings (⌘,)", keys: "Meta+,", label: undefined });
+  });
+
+  it("draws the keys of the keyboard it is on", () => {
+    setLang("en");
+    mac(false);
+    forgetKeys();
+    expect(tip(withHide(), "menu-search").title).toBe("Search (Ctrl+K)");
+    expect(tip(withHide(), "menu-hide").title).toBe("Hide the side menu (Ctrl+Shift+S)");
+  });
+
+  it("names the key the person set, and the words alone when they gave none", () => {
+    setLang("en");
+    setKeys("search", [{ meta: true, ctrl: false, alt: false, shift: false, code: "KeyP" }], true);
+    expect(tip(withHide(), "menu-search").title).toBe("Search (⌘P)");
+    expect(tip(withHide(), "menu-search").keys).toBe("Meta+P");
+    storage.set(KEYS_KEY, JSON.stringify({ search: [], sidebar: [] }));
+    forgetKeys();
+    expect(tip(withHide(), "menu-search")).toEqual({ title: "Search", keys: undefined, label: "Search" });
+    expect(tip(withHide(), "menu-hide")).toEqual({ title: "Hide the side menu", keys: undefined, label: "Hide the side menu" });
+    // the other keys are as they were
+    expect(tip(withHide(), "nav-settings").title).toBe("Settings (⌘,)");
+  });
+
+  it("writes the tooltip in the language's own brackets", () => {
+    setLang("ja");
+    expect(tip(withHide(), "menu-search").title).toMatch(/（⌘K）$/);
+    setLang("en");
   });
 });

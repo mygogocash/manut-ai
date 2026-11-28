@@ -388,7 +388,7 @@ test("the run's header is plain text in the app's font: the title leads, a statu
     await expect(page.locator(gone)).toHaveCount(0);
   // the full view opens from a 24px icon button on the title's row, named in its tooltip, inside the panel
   const expand = head.getByTestId("graph-expand");
-  await expect(expand).toHaveAttribute("title", /^Full view (⌘⇧G|Ctrl\+Shift\+G)$/);
+  await expect(expand).toHaveAttribute("title", /^Full view \((⇧⌘G|Ctrl\+Shift\+G)\)$/);
   await expect(expand).toHaveText("");
   // read the three boxes in one frame once the panel has stopped sliding in (three boundingBox() calls are three
   // round trips, so on a slow runner they came from different frames of the slide: 2.7 px apart on Windows CI)

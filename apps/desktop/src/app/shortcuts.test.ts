@@ -1,8 +1,9 @@
 // Ctrl+` (the bottom terminal panel) on every OS, by the physical key, and never while an input method composes.
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { shortcutFor } from "./shortcuts";
 import { defaultKeys } from "./keys";
 import { closePalette, openPalette, paletteOpen } from "../palette/state";
+import { closeKeySheet, keySheetOpen, openKeySheet } from "../keysheet/state";
 
 type K = Parameters<typeof shortcutFor>[0];
 const k = (key: string, code: string | undefined, m: Partial<K> = {}): K => ({ key, code, metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, ...m });
@@ -252,5 +253,88 @@ describe("⌘F and the chat's find (item 150)", () => {
     expect(await press(null, { isComposing: true })).toBe(false);
     expect(chat.opened).toBe(0);
     off();
+  });
+});
+
+describe("⌘/ and the key sheet (item 167d)", () => {
+  const mod = (mac: boolean) => (mac ? { metaKey: true } : { ctrlKey: true });
+  const press = async (e: K, target: unknown = null) => {
+    const { onShortcutKey } = await import("./shortcuts");
+    onShortcutKey({ ...e, target, repeat: false, defaultPrevented: false, preventDefault() {}, stopPropagation() {} } as unknown as KeyboardEvent);
+  };
+  const ready = async () => {
+    const { getStore } = await import("../state/store");
+    const store = getStore();
+    await store.actions.init();
+    store.actions.firstRunEnd();
+    closePalette({ restore: false });
+    closeKeySheet({ restore: false });
+    return store;
+  };
+  afterEach(() => {
+    closePalette({ restore: false });
+    closeKeySheet({ restore: false });
+  });
+
+  it("is ⌘/ on macOS and Ctrl+/ elsewhere, by where the key stands or the character it types", () => {
+    expect(shortcutFor(k("/", "Slash", { metaKey: true }), true)).toEqual({ kind: "key-sheet" });
+    expect(shortcutFor(k("/", "Slash", { ctrlKey: true }), false)).toEqual({ kind: "key-sheet" });
+    // an engine with no `code`: the character decides; a layout that types / elsewhere still has it where Slash stands
+    expect(shortcutFor(k("/", undefined, { metaKey: true }), true)).toEqual({ kind: "key-sheet" });
+    expect(shortcutFor(k("-", "Slash", { metaKey: true }), true)).toEqual({ kind: "key-sheet" });
+  });
+
+  it("is not ⌘⇧/ (⌘?), ⌘⌥/, Ctrl+/ on a Mac or ⌘/ elsewhere, and not while an input method composes", () => {
+    expect(shortcutFor(k("?", "Slash", { metaKey: true, shiftKey: true }), true)).toBeNull();
+    expect(shortcutFor(k("÷", "Slash", { metaKey: true, altKey: true }), true)).toBeNull();
+    expect(shortcutFor(k("/", "Slash", { ctrlKey: true }), true)).toBeNull();
+    expect(shortcutFor(k("/", "Slash", { metaKey: true }), false)).toBeNull();
+    expect(shortcutFor(k("/", "Slash", { metaKey: true, isComposing: true }), true)).toBeNull();
+  });
+
+  it("follows a key the person set for it, and is a later default than any key they gave another action", () => {
+    const own = { ...defaultKeys(true), "key-sheet": [{ meta: true, ctrl: false, alt: true, shift: false, code: "KeyU" }] };
+    expect(shortcutFor(k("u", "KeyU", { metaKey: true, altKey: true }), true, own)).toEqual({ kind: "key-sheet" });
+    expect(shortcutFor(k("/", "Slash", { metaKey: true }), true, own)).toBeNull();
+    const taken = { ...defaultKeys(true), details: [{ meta: true, ctrl: false, alt: false, shift: false, code: "Slash" }] };
+    expect(shortcutFor(k("/", "Slash", { metaKey: true }), true, taken)).toEqual({ kind: "details" });
+  });
+
+  it("opens on the key and closes on a second press, with the focus given back", async () => {
+    await ready();
+    const { isMac } = await import("./shortcuts");
+    const focus = { calls: 0, isConnected: true, focus() { this.calls += 1; } };
+    openKeySheet(focus);
+    expect(keySheetOpen()).toBe(true);
+    await press(k("/", "Slash", mod(isMac())));
+    expect(keySheetOpen()).toBe(false);
+    expect(focus.calls).toBe(1);
+    await press(k("/", "Slash", mod(isMac())));
+    expect(keySheetOpen()).toBe(true);
+  });
+
+  it("holds the keyboard while open: the palette, Settings, a member and find do nothing behind it", async () => {
+    const { isMac } = await import("./shortcuts");
+    const store = await ready();
+    openKeySheet(null);
+    const view = store.getState().ui.view;
+    await press(k("k", "KeyK", mod(isMac())));
+    await press(k(",", "Comma", mod(isMac())));
+    await press(k("2", "Digit2", mod(isMac())));
+    await press(k("Escape", "Escape"));
+    expect(paletteOpen()).toBe(false);
+    expect(store.getState().ui.view).toBe(view);
+    expect(keySheetOpen()).toBe(true);
+  });
+
+  it("is not opened over the palette, whose field has the keys, or by an input method's key", async () => {
+    const { isMac } = await import("./shortcuts");
+    await ready();
+    openPalette(null);
+    await press(k("/", "Slash", mod(isMac())));
+    expect(keySheetOpen()).toBe(false);
+    closePalette({ restore: false });
+    await press(k("/", "Slash", { ...mod(isMac()), isComposing: true }));
+    expect(keySheetOpen()).toBe(false);
   });
 });
