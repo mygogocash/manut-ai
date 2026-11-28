@@ -45,4 +45,7 @@ export const key: Record<keyof typeof en, string> = {
   "key.sidebar": "显示或隐藏侧边菜单",
   "key.hint": "{label}（{keys}）",
   "key.sheet": "显示所有快捷键",
+  // the previous and next lane in the side menu's order (item 167a)
+  "key.lanePrev": "上一个泳道",
+  "key.laneNext": "下一个泳道",
 };

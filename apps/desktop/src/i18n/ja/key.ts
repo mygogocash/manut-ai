@@ -45,4 +45,7 @@ export const key: Record<keyof typeof en, string> = {
   "key.sidebar": "サイドメニューを表示または非表示",
   "key.hint": "{label}（{keys}）",
   "key.sheet": "すべてのショートカットを表示",
+  // the previous and next lane in the side menu's order (item 167a)
+  "key.lanePrev": "前のレーン",
+  "key.laneNext": "次のレーン",
 };

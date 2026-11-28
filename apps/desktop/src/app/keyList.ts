@@ -29,6 +29,9 @@ export const GROUP_OF: Record<KeyAction, KeyGroup> = {
   search: "go",
   settings: "go",
   "next-ask": "go",
+  // the previous and next lane in the side menu's order (item 167a)
+  "lane-prev": "go",
+  "lane-next": "go",
   find: "chat",
   details: "panels",
   sidebar: "panels",

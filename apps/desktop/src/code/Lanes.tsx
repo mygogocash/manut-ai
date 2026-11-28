@@ -25,8 +25,9 @@ import { getHost } from "../sessions/host";
 import { workDir } from "./laneBranch";
 import { openFolderInEditor, useEditorChoice } from "./editor";
 import { getSessions, useSessions, type AgentLive } from "../sessions/sessions";
+import type { SessionsState } from "../sessions/sessionTypes";
 import { pickTitle } from "../sessions/titles";
-import { askText, getStore, selectAsks, useStore } from "../state/store";
+import { askText, getStore, selectAsks, useStore, type AppState } from "../state/store";
 import { failedNames, laneLine, laneStatus, laneTag, testState, type LaneRecord, type LaneStatus } from "./lane";
 import { isLaneChat, laneOf, useLanesVersion } from "./laneStore";
 import type { Say } from "./command";
@@ -166,8 +167,18 @@ export function laneRowOf(i: LaneRowInput, time: (ms: number) => string = (ms) =
   };
 }
 
-/** The lanes of the project at `root`: its coding sessions that run as a chat, newest first. */
-export function useLaneRows(root: string): LaneRow[] {
+/** What the lanes are read from: the sessions, the app's chats and asks, the sessions whose last rewind's files the shell still
+ *  keeps (the turn book's `backs`), and each session's chat. */
+export interface LaneStores {
+  ss: Pick<SessionsState, "list" | "agents" | "live">;
+  app: AppState;
+  backs: Readonly<Record<string, unknown>>;
+  chatKey: (id: string) => string | null;
+}
+
+/** The stores the lanes are read from, followed while the caller is drawn: the Lanes band reads one project's, the side menu every
+ *  project's (item 167a). */
+export function useLaneStores(): LaneStores {
   const ss = useSessions();
   const app = useStore();
   useLanesVersion();
@@ -175,12 +186,23 @@ export function useLaneRows(root: string): LaneRow[] {
   // the sessions whose last rewind's files the shell still keeps (the turn book): a lane offers Bring it back for those
   const book = sessions.turns;
   const { backs } = useSyncExternalStore(book.subscribe, book.getState, book.getState);
-  const here = pathKey(root);
+  return { ss, app, backs, chatKey: sessions.chatKey };
+}
+
+/** The same stores as they are now, for what reads them outside a component (the previous and next lane keys, item 167a). */
+export function laneStoresNow(): LaneStores {
+  const sessions = getSessions();
+  return { ss: sessions.getState(), app: getStore().getState(), backs: sessions.turns.getState().backs, chatKey: sessions.chatKey };
+}
+
+/** The lanes among the sessions `keep` keeps: the coding sessions that run as a chat, in the sessions' order (newest first). No pull
+ *  request is read here: `useLaneRows` adds them for the band. */
+export function laneRowsFrom({ ss, app, backs, chatKey }: LaneStores, keep: (rec: SessionRec) => boolean): LaneRow[] {
   const asks = selectAsks(app);
-  const rows = ss.list.flatMap((rec) => {
-    if (!root || rec.status === "draft" || pathKey(rec.cwd) !== here) return [];
+  return ss.list.flatMap((rec) => {
+    if (rec.status === "draft" || !keep(rec)) return [];
     // a session in its own terminal has no chat to read a lane from, and a Hermes folder chat is not a coding agent's
-    const key = sessions.chatKey(rec.id);
+    const key = chatKey(rec.id);
     if (!isLaneChat(key)) return [];
     const turn = app.chats[key]?.turn;
     // a helper lane names its lead (item 102h)
@@ -201,6 +223,14 @@ export function useLaneRows(root: string): LaneRow[] {
       }),
     ];
   });
+}
+
+/** The lanes of the project at `root`: its coding sessions that run as a chat, newest first. */
+export function useLaneRows(root: string): LaneRow[] {
+  const stores = useLaneStores();
+  const sessions = getSessions();
+  const here = pathKey(root);
+  const rows = laneRowsFrom(stores, (rec) => !!root && pathKey(rec.cwd) === here);
   useChatPullsVersion();
   usePullsVersion();
   // each lane with a branch of its own gets the open pull request made from it, when the app has read one (tasks/pulls.ts)
@@ -308,6 +338,46 @@ export function helperGroups(rows: readonly LaneRow[]): { of: Map<string, LaneRo
   }
   for (const list of of.values()) list.sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0) || (a.helper!.n - b.helper!.n));
   return { of, under };
+}
+
+/** One lane where the band draws it, read top to bottom: its place by its marks, and whether it is a helper drawn under its lead. */
+export interface LaneInOrder {
+  row: LaneRow;
+  place: Exclude<RowPlace, "snoozed" | "archived">;
+  helper: boolean;
+}
+
+/** The lanes the band lists, in the order it draws them with every job's lanes shown: pinned on top in the order pinned, then the rest
+ *  as given (newest first), then the settled ones; a job's lanes where its first lane stands, in the order they started; a helper lane
+ *  right under its lead. Snoozed and archived lanes are left out, as the band puts them behind its one line, and a lane that asks is
+ *  never put away (rows.ts `placeOf`). The side menu lists lanes in this order (item 167a), and the previous and next lane keys step
+ *  through it, so `LanesView` and the menu read one order from the same functions. */
+export function laneOrder(rows: readonly LaneRow[], marks: RowMarks, now: number): LaneInOrder[] {
+  const places = arrange(
+    rows.map((r) => ({ key: laneKey(r), needs: r.status === "needs_you", working: r.status === "working", r })),
+    marks,
+    now,
+  );
+  const shown: { r: LaneRow; place: LaneInOrder["place"] }[] = [
+    ...places.pinned.map((x) => ({ r: x.r, place: "pinned" as const })),
+    ...places.normal.map((x) => ({ r: x.r, place: "normal" as const })),
+    ...places.settled.map((x) => ({ r: x.r, place: "settled" as const })),
+  ];
+  const placeOfId = new Map(shown.map((x) => [x.r.id, x.place]));
+  const jobs = jobGroups(shown.map((x) => x.r));
+  const helpers = helperGroups(shown.map((x) => x.r));
+  const out: LaneInOrder[] = [];
+  // a lane, then its helpers, each in its own place, as the band's `item` draws them
+  const item = (r: LaneRow, place: LaneInOrder["place"]) => {
+    out.push({ row: r, place, helper: false });
+    for (const h of helpers.of.get(r.id) ?? []) out.push({ row: h, place: placeOfId.get(h.id) ?? place, helper: true });
+  };
+  for (const { r, place } of shown) {
+    const group = jobs.head.get(r.id);
+    if (group) for (const l of group.lanes) item(l, placeOfId.get(l.id) ?? place);
+    else if (!jobs.skip.has(r.id) && !helpers.under.has(r.id)) item(r, place);
+  }
+  return out;
 }
 
 function JobItem({ group, now, open, onToggle, onView, lane }: { group: JobGroup; now: number; open: boolean; onToggle: () => void; onView?: () => void; lane: (r: LaneRow) => ReactNode }) {
@@ -456,8 +526,9 @@ function LaneItem({ row, now, onOpen, onPull, backOpen, onBack, below, place, ma
 }
 
 /** A lane's menu (Pin, Snooze, Done for now, Archive): the one part of a row that keeps state, so the rest of the view stays a
- *  function of its props. It draws the quiet "more" button, and a right-click anywhere on the row opens the menu too. */
-export function LaneMore({ row, mark }: { row: LaneRow; mark: RowMark | undefined }) {
+ *  function of its props. It draws the quiet "more" button, and a right-click anywhere on the row opens the menu too. `className`
+ *  is the button's: the band's `lane-more`, or the side menu's `rec-more` for a lane listed there (item 167a). */
+export function LaneMore({ row, mark, className = "lane-more" }: { row: LaneRow; mark: RowMark | undefined; className?: string }) {
   // Open in <editor>, for the lane's own folder (never the developer's), only while an editor is installed here (code/editor.ts)
   const editor = useEditorChoice(getHost());
   const [why, setWhy] = useState("");
@@ -502,7 +573,7 @@ export function LaneMore({ row, mark }: { row: LaneRow; mark: RowMark | undefine
   }, [open]);
   return (
     <span ref={here} className="lane-more-wrap">
-      <MoreButton name={row.title} onOpen={menu.open} className="lane-more" />
+      <MoreButton name={row.title} onOpen={menu.open} className={className} />
       {menu.menu}
       {why && (
         <span className="lane-editor-why" role="alert" data-testid="lane-editor-why">

@@ -1,6 +1,7 @@
 // The side menu, as the design canvas draws it (`<nav class="sb">` in Main.dc.html and KitNavigation.dc.html, 196px
 // wide): the brand mark and Search, then New, Needs you (with the count of open asks), Team, Code, Artifacts, Customize and
-// History, a Recent list of the three newest threads, and at the foot the budget pill and the account row, which names
+// History, a Recent list of the three newest threads (while the code mode is open, the lanes in its place: MenuLanes.tsx,
+// item 167a), and at the foot the budget pill and the account row, which names
 // the person with their shop and opens Settings. New and the brand mark open Home. A person in two or more shops also has
 // the shop switcher at the end of the account row (ShopSwitcher.tsx), and is told above the row when their place in a
 // shop ended (docs/several-shops.md). It replaces the sidebar the fork took from Oh My Hermes (a search box, a tasks bar, a
@@ -50,6 +51,8 @@ import { satangText } from "../pages/job";
 import { setSideHidden, useSide } from "./sideState";
 import { keyedProps, keyShown, useKeys } from "../app/keyHints";
 import { isMacHere, type KeyAction } from "../app/keys";
+import { MenuLanesView, useMenuLanes, type MenuLanesProps } from "./MenuLanes";
+import { openLane } from "../code/Lanes";
 
 const LABEL: Record<MenuRow, Key> = {
   new: "menu.new",
@@ -132,6 +135,7 @@ export function SideMenu({
   hidden = false,
   foot,
   budget = null,
+  lanes,
 }: {
   /** the row marked current, or none (a thread, Settings) */
   current: MenuRow | null;
@@ -161,9 +165,13 @@ export function SideMenu({
   foot?: ReactNode;
   /** the shop's AI spend this month against its cap, in integer satang, when the runtime gives them; none draws no pill */
   budget?: Budget | null;
+  /** Every project's lanes (item 167a). While the Code row is current and a lane is listed they take the place of Recent and the
+   *  Working group, which are Buddy's chats; anywhere else, or with no lane listed, Recent is drawn as before. */
+  lanes?: MenuLanesProps;
 }) {
+  const showLanes = current === "code" && !!lanes && lanes.groups.length > 0;
   // Recent and the Working group are one list to select in, in the order they are drawn
-  const order = [...recent, ...working].flatMap((r) => (r.rowKey ? [r.rowKey] : []));
+  const order = showLanes ? [] : [...recent, ...working].flatMap((r) => (r.rowKey ? [r.rowKey] : []));
   const select = useRowSelect("recent", order);
   useSelectionEscape();
   // the person's keys for the buttons that have one, in their tooltips (item 167d)
@@ -203,7 +211,8 @@ export function SideMenu({
           )}
         </button>
       ))}
-      {recent.length > 0 && (
+      {showLanes && lanes && <MenuLanesView {...lanes} />}
+      {!showLanes && recent.length > 0 && (
         <>
           <div className="sb-h" id="menu-recent-h">
             {t("menu.recent")}
@@ -215,7 +224,7 @@ export function SideMenu({
           </ul>
         </>
       )}
-      {working.length > 0 && (
+      {!showLanes && working.length > 0 && (
         <>
           <div className="sb-h" id="menu-working-h">
             {t("menu.working")}
@@ -312,11 +321,14 @@ export function Sidebar() {
   const recent = [...parts.pinned.map(item("pinned")), ...parts.recent.map(item(undefined)), ...parts.settled.map(item("settled"))];
   // New (and the brand mark) opens Home; every other row opens its own page.
   const go = (row: MenuRow) => s.openPage(rowPage(row));
+  const current = currentRow(s.ui, s.selectedBot);
+  // the lanes are read only while the code mode is open, where they are drawn
+  const lanes = useMenuLanes(current === "code");
   return (
     <>
     <RowsWatcher />
     <SideMenu
-      current={currentRow(s.ui, s.selectedBot)}
+      current={current}
       needs={selectAsks(s).length}
       recent={recent}
       working={parts.working.map(item(undefined))}
@@ -330,6 +342,7 @@ export function Sidebar() {
       onHide={() => setSideHidden(true)}
       hidden={side.hidden}
       onAccount={() => s.openSettings()}
+      lanes={{ groups: lanes.groups, marks: lanes.marks, open: s.ui.view === "session" ? s.ui.session : null, onOpen: openLane }}
       foot={
         <>
           {/* A chip when the home folder's volume is low on space (src/lib/disk.ts), and nothing while it is fine. */}

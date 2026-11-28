@@ -3,7 +3,7 @@
 import { renderToString } from "react-dom/server";
 import { beforeEach, describe, expect, it } from "vitest";
 import { setLang } from "../i18n";
-import { defaultKeys, forgetKeys } from "../app/keys";
+import { defaultKeys, forgetKeys, KEY_ACTIONS } from "../app/keys";
 import { sheetGroups } from "../app/keyList";
 import { KeySheetView, type KeySheetViewProps } from "./KeySheet";
 
@@ -46,7 +46,8 @@ describe("the key sheet", () => {
     const rows = html.split('data-testid="keysheet-row"').slice(1);
     const withChange = rows.filter((r) => r.includes('data-testid="keysheet-change"'));
     expect(withChange).toHaveLength(count(html, 'data-testid="keysheet-change"'));
-    expect(withChange.length).toBe(12);
+    // one for each action keys.ts registers (the lane keys of item 167a and the sheet's own among them)
+    expect(withChange.length).toBe(KEY_ACTIONS.length);
     expect(html).toContain('aria-label="Change the keys for “Show or hide Details”"');
     // a fixed key: listed, with nothing to press
     const card = rows.find((r) => r.includes("1 · 2 · 3"))!;

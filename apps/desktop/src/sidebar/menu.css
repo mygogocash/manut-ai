@@ -383,3 +383,48 @@
   font-size: 12px;
   color: var(--muted);
 }
+
+/* The desktop's own (item 167a): the lanes listed in Recent's place while the code mode is open (MenuLanes.tsx). A lane is a Recent
+   row with the kit's status dot before its title (KitStatus's dotst, in the tone of the band's tag); the open lane takes the hover
+   fill and the ink, as KitNavigation marks an open Recent item; a helper lane sits indented under its lead, as the band draws it;
+   and the More button shows while the row has the keyboard focus too, as well as on hover. Only the working dot pulses: Needs you
+   and a failure appear and stay still (docs/motion.md). */
+.sb .lane-li .rec[aria-current="true"] {
+  background: var(--hov);
+  color: var(--ink);
+}
+.sb .lane-li .dotst {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 8px;
+  border-radius: var(--rad-pill);
+  background: var(--aui-muted);
+  vertical-align: middle;
+}
+.sb .lane-li .dotst.ok {
+  background: var(--ok);
+}
+.sb .lane-li .dotst.run {
+  background: var(--aui-blue);
+  animation: var(--anim-pulse);
+}
+.sb .lane-li .dotst.warn {
+  background: var(--aui-amber);
+}
+.sb .lane-li .dotst.err {
+  background: var(--aui-red);
+}
+.sb .lane-li.helper .rec {
+  padding-left: 22px;
+}
+.sb .lane-li:focus-within .rec-more {
+  opacity: 1;
+}
+/* Why Open in <editor> failed (item 107), under the row, in the band's quiet words */
+.sb .lane-li .lane-editor-why {
+  display: block;
+  padding: 2px 10px 4px;
+  font-size: 12px;
+  color: var(--muted);
+}

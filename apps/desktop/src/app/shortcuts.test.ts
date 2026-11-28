@@ -47,6 +47,24 @@ describe("Ctrl+` opens the terminal panel", () => {
   });
 });
 
+describe("⌥⌘↑ ⌥⌘↓ the previous and next lane (item 167a)", () => {
+  it("are ⌘⌥ with the arrow on macOS and Ctrl+Shift+Alt with it elsewhere, as Paradev's previous and next workspace", () => {
+    expect(shortcutFor(k("ArrowUp", "ArrowUp", { metaKey: true, altKey: true }), true)).toEqual({ kind: "lane", step: -1 });
+    expect(shortcutFor(k("ArrowDown", "ArrowDown", { metaKey: true, altKey: true }), true)).toEqual({ kind: "lane", step: 1 });
+    expect(shortcutFor(k("ArrowUp", "ArrowUp", { ctrlKey: true, shiftKey: true, altKey: true }), false)).toEqual({ kind: "lane", step: -1 });
+    expect(shortcutFor(k("ArrowDown", "ArrowDown", { ctrlKey: true, shiftKey: true, altKey: true }), false)).toEqual({ kind: "lane", step: 1 });
+  });
+
+  it("are not ⌘ or ⌥ with the arrow alone, which move the caret in text, nor the other system's keys", () => {
+    expect(shortcutFor(k("ArrowDown", "ArrowDown", { metaKey: true }), true)).toBeNull();
+    expect(shortcutFor(k("ArrowDown", "ArrowDown", { altKey: true }), true)).toBeNull();
+    expect(shortcutFor(k("ArrowDown", "ArrowDown", { metaKey: true, altKey: true, shiftKey: true }), true)).toBeNull();
+    expect(shortcutFor(k("ArrowDown", "ArrowDown", { ctrlKey: true, shiftKey: true, altKey: true }), true)).toBeNull();
+    expect(shortcutFor(k("ArrowDown", "ArrowDown", { metaKey: true, altKey: true }), false)).toBeNull();
+    expect(shortcutFor(k("ArrowDown", "ArrowDown", { metaKey: true, altKey: true, isComposing: true }), true)).toBeNull();
+  });
+});
+
 describe("⌘⇧[ ] step order", () => {
   it("follows the sidebar: one folder spelled with and without a trailing slash is one group", async () => {
     const { terminalOrder } = await import("./shortcuts");

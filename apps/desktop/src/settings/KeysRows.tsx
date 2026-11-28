@@ -27,6 +27,8 @@ export const ACTION_WORDS: Record<KeyAction, Key> = {
   graph: "key.graph",
   terminal: "key.terminal",
   sidebar: "key.sidebar",
+  "lane-prev": "key.lanePrev",
+  "lane-next": "key.laneNext",
 };
 
 export interface KeysRowsViewProps {
