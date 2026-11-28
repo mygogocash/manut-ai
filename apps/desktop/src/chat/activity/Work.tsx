@@ -6,14 +6,12 @@ import type { DiffFile, PlanItem } from "../../lib/protocol";
 import { maskSecrets } from "../../lib/secrets";
 import { t, type Key } from "../../i18n";
 import { ChevronRight } from "../../ui";
-import { pairRows, rowsOf, type DiffRow } from "./diffLayout";
+import { pairRows, rowsOf, type DiffLayout, type DiffRow } from "./diffLayout";
 import "./work.css";
 
 const NOTE: Record<NonNullable<DiffFile["note"]>, Key> = { binary: "diff.binary", too_large: "diff.tooLarge", left_out: "diff.leftOut" };
 
-/** Unified: each line under the one before it. Split: the file before the change on the left and after it on the right, a change's
- *  removed and added lines side by side (diffLayout.ts `pairRows`). */
-export type DiffLayout = "unified" | "split";
+export type { DiffLayout };
 
 // a key typed into the code is never shown, here or anywhere: the app's one masker hides it
 const lineText = (text: string): string => maskSecrets(text) || " ";

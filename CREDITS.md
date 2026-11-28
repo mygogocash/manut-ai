@@ -145,9 +145,14 @@ registry's search: `searchRank` in `packages/provider-acp-registry/src/server/Ac
 in `apps/desktop/src/settings/agents/acpRegistry.ts`; its live fetch, downloads and `npx` runs were read and left out.
 
 Paradev (MIT, Copyright (c) 2025-2026 Superset Inc., `paradevai/paradev` at `2db3bbaf37ffbe24b78c8cdb974bf34632e6fb20`)
-for item 138's study of the code mode (`docs/paradev-parity.md`): read only, no code taken yet. Each module a later item
-lifts from it is named here with what it does; the study lists the candidates, among them VS Code's fuzzy scorer as
-Paradev ported it, which keeps Microsoft's MIT notice beside Paradev's.
+for item 138's study of the code mode (`docs/paradev-parity.md`): read only so far, with one form taken. Each module a later
+item lifts from it is named here with what it does; the study lists the candidates, among them VS Code's fuzzy scorer as
+Paradev ported it, which keeps Microsoft's MIT notice beside Paradev's. Item 146 (review in the pane beside a lane) took the
+form of its line that names where a comment on selected lines is, `<path>:L<start>-L<end>` with a few words for deleted lines
+and for a range across deletions and additions (`formatAgentPromptWithFileContext`, `apps/desktop/src/renderer/hooks/host-service/useSendToTerminalAgent/useSendToTerminalAgent.ts`),
+written here as `atText` in `apps/desktop/src/chat/box/carry.ts`, the first line of a note's quote, with its words changed to say
+which file's numbers the lines are; and read, to write anew, its Changes pane's scope control (all changes, uncommitted, one
+commit; `DiffPaneScope`, `ChangesScopeControl`). Its diff library `@pierre/diffs` is not used.
 
 Libraries added for one feature are named here too: `qrcode` 1.5.4 (MIT, soldair/node-qrcode), already the web app's,
 pinned in the desktop for the pairing code's QR image (`apps/desktop/src/remote/QrCode.tsx`, lifted from

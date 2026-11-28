@@ -3,9 +3,8 @@
 // in every lane after a restart. Nothing here is sent anywhere; the Diff's scope (All changes, Not committed, Commits) is not kept,
 // since it is the question of the moment and opens on the whole list.
 import { useSyncExternalStore } from "react";
+import type { DiffLayout } from "../chat/activity/diffLayout";
 import { changes } from "../lib/changes";
-
-export type DiffLayout = "unified" | "split";
 
 export interface DiffPrefs {
   layout: DiffLayout;

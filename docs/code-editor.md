@@ -24,7 +24,7 @@ state that needs the owner: a real GitHub account, money, a real sign-in or real
 | The request, "Edited 3 files and ran 14 tests", Kit's note, the changed files with their counts | Part: the session's timeline shows each step and a file edit's diff, and (this branch) the pane beside a lane lists the changed files with their counts. No line that counts the files and the tests together | `chat/activity/Work.tsx` (`DiffView`), `code/LanePane.tsx` |
 | Tell Kit what to change, add a file, the Code chip | Has: the session's composer (item 80, the same box as Buddy's), in two rows as the canvas draws it: the text, then a + for Add context (Files; Folder, named in the message by its path and never copied; Actions and skills, the agent's `/` menu, also over text already typed), the agent, the model with its effort, the approval level, the microphone and voice mode (item 81, the Mac app: speak the message, or talk with Kit and hear the answer, the asks still on their cards; `docs/voice.md`) and Send. No Mention: a coding agent knows no team | `sessions/SessionView.tsx`, `chat/box/`, `chat/parts/Attach.tsx`, `chat/parts/Composer.tsx`, `voice/` |
 | "Your Claude Code plan" in the composer | Part: a session runs on the developer's own sign-in; the box names the model (moved there from the header) and its effort, not the plan. Since item 132 (GoSpark's flow) the model chip opens the effort card: the level large by GoSpark's words (High, Extra High, Max), the model under it, which opens the agent's model list as the card's second view (Back, or a pick, returns), Reset to the default level, and a slider with one stop for each level the agent reported, moved by a drag (which sends only the level it lets go on), a click or the arrow, Home and End keys, each stop crossed ticking with item 131's effort sound. At the top level the title and the track take the provider's colour from its mark (Claude Code's terracotta; Codex in the ink). A Claude Code chat's card adds "Ultrathink this message", which puts a visible `Ultrathink:` line at the top of the draft and takes it out again; a word typed by hand or a slash command locks it. Nothing new reaches the agent: a level goes by the same effort input as before. No fast mode (no agent reports one) and no Ultracode | `sessions/SessionView.tsx` (`SessionModel`), `chat/box/ModelMenu.tsx`, `chat/box/EffortCard.tsx`, `chat/box/effort.ts`, `chat/box/ultrathink.ts`, `docs/decisions/132-effort-card.md` |
-| Diff, Preview and Tests beside the lane | Part (this branch): the chat of a lane has a pane beside it, "What to look at", with the chips Diff, Preview and Tests, Diff first; it goes under the chat when the column is too narrow for both. Diff: each file that really differs in the lane's own folder from where the lane started, read from git (so it holds after a restart and shows a subagent's edits), with the added and removed counts, drawn as the timeline draws a change; from the chat's own events where the shell cannot read. Tests: the last finished run's result as the lane read it, when it finished, the command that ran it, whether a file changed since, and any run in progress; none of the run's output, which the lane never kept. Preview (this branch): the lane's project run with its own dev server in the lane's own folder: the command named first (`$ pnpm run dev`) with Start, then Running at its address with Open in browser and Stop, Stopped, Ended with its exit code and its last lines, or Could not start with why; the Sample rows under it. While it runs at an address of this computer, its page is drawn in a frame that fills the view, as the board draws the page in a box, with Reload and Open in browser above it (this branch). See [The pane beside a lane](#the-pane-beside-a-lane), [The preview of a lane](#the-preview-of-a-lane) and [The page in the pane](#the-page-in-the-pane) | `code/LanePane.tsx`, `code/LanePreview.tsx`, `code/previewFrame.ts`, `code/previewStore.ts`, `src-tauri/src/preview.rs`, `code/changes.ts`, `code/laneFolder.ts`, `src-tauri/src/lane_diff.rs`, `code/lanepane.css`, `sessions/SessionView.tsx` (`LaneSplit`) |
+| Diff, Preview and Tests beside the lane | Part (this branch): the chat of a lane has a pane beside it, "What to look at", with the chips Diff, Preview and Tests, Diff first; it goes under the chat when the column is too narrow for both. Diff: each file that really differs in the lane's own folder from where the lane started, read from git (so it holds after a restart and shows a subagent's edits), with the added and removed counts, drawn as the timeline draws a change, and (item 146) a review: unified or side by side, the list or one file at a time, and the lane's commits and uncommitted work as sections; from the chat's own events where the shell cannot read. Tests: the last finished run's result as the lane read it, when it finished, the command that ran it, whether a file changed since, and any run in progress; none of the run's output, which the lane never kept. Preview (this branch): the lane's project run with its own dev server in the lane's own folder: the command named first (`$ pnpm run dev`) with Start, then Running at its address with Open in browser and Stop, Stopped, Ended with its exit code and its last lines, or Could not start with why; the Sample rows under it. While it runs at an address of this computer, its page is drawn in a frame that fills the view, as the board draws the page in a box, with Reload and Open in browser above it (this branch). See [The pane beside a lane](#the-pane-beside-a-lane), [The preview of a lane](#the-preview-of-a-lane) and [The page in the pane](#the-page-in-the-pane) | `code/LanePane.tsx`, `code/PaneDiff.tsx`, `code/paneReview.ts`, `code/LanePreview.tsx`, `code/previewFrame.ts`, `code/previewStore.ts`, `src-tauri/src/preview.rs`, `code/changes.ts`, `code/laneFolder.ts`, `src-tauri/src/lane_diff.rs`, `code/lanepane.css`, `sessions/SessionView.tsx` (`LaneSplit`) |
 | The owner sees only the note; a developer gets the diff, the preview and the tests | Lacks: the Code page is the developer's view only | |
 
 ## StatesCode: lanes, test output and artifacts
@@ -1043,6 +1043,53 @@ thing it starts is the lane's preview, when the person presses Start.
     commit where the lane and the base branch parted stands in, so only the lane's own work shows.
   - **Renames.** Git pairs a deleted and an added file among the tracked ones (its default 50% similarity); a new file git has
     not tracked yet shows as new next to the deleted old one until it is added.
+- **Review (item 146).** The same Diff, read as a review (`code/PaneDiff.tsx`, `code/paneReview.ts`, `code/diffPrefs.ts`, drawn by
+  the same `DiffView`; no new dependency: Paradev draws its diffs with `@pierre/diffs`, which is not used). A bar of three switches
+  heads it:
+  - **Which changes** (where the shell can read the folder). *All changes* is the list above, as it always was. *Not committed*
+    is the folder against HEAD, files git has not seen yet included, under the heading "Not committed yet". *Commits* is one section
+    for each of the lane's own commits, newest first (at most 30, then "and N more commits"): its short id, its subject (masked, one
+    line) and how many files it changed, its heading a button that opens its files, the newest open and the rest shut. A commit
+    whose files git could not list, or that the answer's time did not reach, says so; a merge is not one of the lane's commits, so a
+    lane that took its base in by merging does not show the base's work as its own. Where the shell cannot read (a plain browser, the
+    developer's own folder) there are no scopes and the list is the chat's events, as before.
+  - **Unified or side by side.** Each line is numbered from its hunk's header (old and new beside a line of context, the old alone
+    beside a removed line, the new alone beside an added one; a line no header placed has none, never a guess). Side by side puts the
+    file before the change on the left and after it on the right, a change's removed and added lines paired one against one, the
+    extra lines opposite an empty cell and a line of context on both sides (`chat/activity/diffLayout.ts`). It wraps each side in the
+    pane's width, and while it is chosen the pane takes more of the chat's room (up to 880px, only while the column holds both).
+  - **The list or one at a time.** One at a time shows one file under Prev, its place ("2 of 7") and Next, which stop at the ends,
+    walking the files of the scope in the order they are drawn (a file changed in two commits is two). The place follows the file
+    by its path and section when the list is read again and it has moved, and holds its number once it is gone. The file takes the
+    height its lines need; the pane scrolls it.
+  - Unified or side by side, and the list or one at a time, are kept on this computer (`manut.pane.diff` in `localStorage`), so every
+    lane opens as the person left it, after a restart too. The scope is not kept: the pane opens on All changes.
+  - **What the shell reads for the sections** (`lane_review`, `lane_diff::review`): the same folder through the same runner and the
+    same checks as the Diff (a folder the app made, listed by git as a worktree of the recorded repository, in a repository whose own
+    config names no program git would run; `--no-ext-diff --no-textconv`; no hook, no file monitor, no prompt, no optional lock; a
+    submodule never read), and it only reads. Its caps are shared by every section of one answer: 100 files in all (the work not
+    committed first, then the commits newest first; the rest counted), 1 MiB of diff text, a file's diff over 256 KiB "Too large to
+    show", 15 seconds, and 30 commits. Every diff and every subject passes `mask_secrets` before it leaves and the page's masker
+    again where it is drawn. It is read only while the pane shows Not committed or Commits, by the Diff's own rule (when the lane
+    opens and when the chat's events say something changed, at most once a second, never on a timer, never two at once); a read that
+    fails keeps what was shown and says it could not read.
+  - **A note on selected lines.** Text selected in the Diff's lines and added as a note (item 97's "Add a note", Cmd+Shift+N) is quoted
+    as the patch lines they are, with their `+` and `-`, and carries where they are: the file and the line range
+    (`chat/activity/diffNote.ts`). The popover says where before it is added, the chip above the box begins with the file's last two
+    parts and the lines, and the message goes out with the place as the quote's first line, `src/checkout.tsx:L13-L14`, Paradev's
+    form for a comment on lines (`formatAgentPromptWithFileContext`). Deleted lines are numbered as the file was before the change
+    and say so, a range across deleted and added lines is the new file's numbers and says so. In the side by side layout a selection
+    takes the side it began on, so the two sides' words are never mixed. A selection that begins in one file and ends in another,
+    or that is not in the Diff's lines, is a note on text as before. Nothing is sent by adding it: the chip waits above the box,
+    kept like any chip, and the person sends it as any message; where Paradev's comment goes to an agent at once, this never does.
+- **Ahead and behind.** Each lane row with a branch of its own says, under its line, how far the branch is from its remote
+  (`code/LaneSync.tsx`, `code/laneRemote.ts`, `src-tauri/src/lane_remote.rs`): "2 ahead of origin/kit/x", "5 behind", "2 ahead and 1
+  behind", "Level with", or for a branch no remote has "3 not pushed yet" (and nothing for one with none, or in a repository with no
+  remote). The remote branch is the upstream when git has one set, else the branch of the same name on `origin`, which a push leaves
+  behind as a remote-tracking branch without setting an upstream. It counts what git already holds, at most 1,000 commits each way
+  (shown `999+`), and fetches nothing, so "behind" is as of the last fetch or push (the row's tooltip says so). It is read when the
+  row appears, when the window is looked at again, when the lane's state changes and once a minute, as the main-moved note is, and
+  never two at once, through the same runner and checks as the Diff; a failed read keeps what was shown.
 - **Preview.** The lane's project run with its own dev server in the lane's own folder (`LanePreview.tsx`; see
   [The preview of a lane](#the-preview-of-a-lane)): the command named first with Start, its state as it runs, its page in a frame
   that fills the view while it runs ([The page in the pane](#the-page-in-the-pane)), the names of the
@@ -1064,9 +1111,14 @@ thing it starts is the lane's preview, when the person presses Start.
   so the list holds what the chat still holds. A subagent's own edits come as `subagent` events, not `tool.diff`, and are not
   listed.
 
-The words are in en, ko, ja and zh. `LanePane.test.tsx` draws each view and the chips from props, the preview's states among
-them, `changes.test.ts` drives the chat's own reducer through a rewind, `Work.test.tsx` holds the diff view's ids and its scroll,
-and `e2e/lane-pane.spec.ts` walks the pane in a browser (`e2e/preview-run.spec.ts` the preview's run).
+The words are in en, ko, ja and zh (the review's, item 146, in English first, copied into the other three). `LanePane.test.tsx`
+draws each view and the chips from props, the preview's states among them, and the review's scopes, layouts, one file at a time and
+sections; `diffLayout.test.ts` holds the numbering and the side by side pairing, `diffNote.test.ts` and `carry.test.ts` the note's
+file and lines, `paneReview.test.ts` the scopes, Prev and Next and the kept choices, `laneRemote.test.ts` and `LaneSync.test.tsx`
+the row's line, `changes.test.ts` drives the chat's own reducer through a rewind, `Work.test.tsx` holds the diff view's ids and its
+scroll, `lane_diff.rs` and `lane_remote.rs` hold the shell's reads against real git, and `e2e/lane-pane.spec.ts` and
+`e2e/lane-review.spec.ts` walk the pane in a browser, the review's with the shell's answers staged (`e2e/preview-run.spec.ts` the
+preview's run).
 
 ### The preview of a lane
 

@@ -61,7 +61,7 @@ function Heading({ s }: { s: Section }) {
   if (!s.commit) return <span className="pd-sub">{t("lane.pane.diff.sec.uncommitted")}</span>;
   return (
     <>
-      <span className="mono pd-id">{s.commit.id}</span>
+      <span className="mono pd-id">{s.commit.id}</span>{" "}
       <span className="pd-sub">{maskSecrets(s.commit.subject) || t("lane.pane.diff.sec.noSubject")}</span>
     </>
   );
@@ -105,7 +105,7 @@ function CommitSection({ s, layout, first }: { s: Section; layout: DiffLayout; f
         <span className="pd-chev" aria-hidden="true">
           <ChevronRight />
         </span>
-        <Heading s={s} />
+        <Heading s={s} />{" "}
         <span className="mut pd-n">{s.commit?.unread ? "" : filesWords(s.files.length + s.moreFiles)}</span>
       </button>
       {open && <SectionFiles s={s} layout={layout} />}
@@ -226,7 +226,7 @@ export function PaneDiffView({ whole, scopes, prefs, onPrefs, current, onCurrent
               <section key={s.id} className="pd-sec" data-testid={s.id === "all" ? undefined : "lane-diff-section"} data-section={s.id}>
                 {s.id !== "all" && (
                   <h3 className="pd-sec-h pd-sec-static">
-                    <Heading s={s} />
+                    <Heading s={s} />{" "}
                     <span className="mut pd-n">{filesWords(s.files.length + s.moreFiles)}</span>
                   </h3>
                 )}

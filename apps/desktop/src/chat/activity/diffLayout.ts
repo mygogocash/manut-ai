@@ -6,6 +6,10 @@
 // with ` `, `+` or `-`. The numbers are only as good as those headers: lines before the first header, or after one that cannot
 // be read (an agent's own, shorter diff), have none, and everything below says so by leaving a number out, never by guessing one.
 
+/** Unified: each line under the one before it. Split: the file before the change on the left and after it on the right, a change's
+ *  removed and added lines side by side (`pairRows`). */
+export type DiffLayout = "unified" | "split";
+
 export type RowKind = "hunk" | "add" | "del" | "ctx";
 
 /** One line of a file's diff. `index` is its place in the file's `lines`, `text` the line without its `+`, `-` or space (a hunk's
