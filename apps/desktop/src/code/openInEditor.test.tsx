@@ -127,6 +127,8 @@ describe("the command palette", () => {
     newThread: () => {},
     setLanguage: () => {},
     openNewSessionMenu: () => {},
+    openKeySheet: () => {},
+    toggleSide: () => {},
     workflows: [],
     runWorkflow: () => {},
     ...over,

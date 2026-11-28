@@ -41,6 +41,8 @@ export const key = {
   "key.reserved.members": "{keys} opens a team member.",
   "key.ownHint": "Press Change and then the keys you want. Your shortcuts are kept on this Mac only.",
   "key.sidebar": "Show or hide the side menu",
+  "key.hint": "{label} ({keys})",
+  "key.sheet": "Show every shortcut",
   // the previous and next lane in the side menu's order (item 167a)
   "key.lanePrev": "Previous lane",
   "key.laneNext": "Next lane",

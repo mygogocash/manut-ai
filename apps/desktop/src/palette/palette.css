@@ -133,3 +133,25 @@
   font-size: 13px;
   color: var(--aui-muted);
 }
+/* The foot, as the Search board draws it under the last row: a hairline, then what Return and Esc do on the left and the key that
+   opens the box on the right, muted, wrapping on a narrow window. */
+.pal-foot {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  margin-top: 2px;
+  padding: 8px 10px 2px;
+  border-top: 1px solid var(--line);
+  font-size: 12.5px;
+  color: var(--aui-muted);
+}
+.pal-fh {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.pal-fe {
+  margin-left: auto;
+}

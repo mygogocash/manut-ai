@@ -30,6 +30,9 @@ async function open(page: Page) {
   await chatOpen(page);
 }
 const mod = (page: Page) => page.evaluate(() => (/Mac/.test(navigator.platform) ? "Meta" : "Control"));
+/** The caps a key is drawn with in a row or in the foot, one text for each cap: ⌘ and N, or Ctrl and N. */
+const capsOf = (where: ReturnType<Page["getByTestId"]>) => where.getByTestId("keycaps").first().locator("kbd").allTextContents();
+const caps = (page: Page, ...k: string[]) => page.evaluate((keys) => (/Mac/.test(navigator.platform) ? ["⌘", ...keys] : ["Ctrl", ...keys]), k);
 
 test.beforeEach(async () => {
   await mock("mock.reset");
@@ -113,4 +116,57 @@ test("an action whose place is not open is not listed: the microphone only with 
   // only the page's own question opened (or, on a bridge that cannot pause, its own "not yet"); nothing was paused
   await expect(page.getByTestId("pause-dialog").or(page.getByTestId("pause-error"))).toBeVisible();
   expect((await calls("team.pause")).length).toBe(0);
+});
+
+test("a row shows the key of its action as the person set it, and the foot says what Return and Esc do and which key opens the palette (item 167d)", async ({ page }) => {
+  await open(page);
+  const key = await mod(page);
+  await page.keyboard.press(`${key}+k`);
+  const foot = page.getByTestId("palette-foot");
+  await expect(foot).toBeVisible();
+  await expect(foot).toContainText("opens the marked row");
+  await expect(foot).toContainText("closes");
+  await expect(foot.getByTestId("palette-foot-key")).toContainText("opens this menu from any screen");
+  expect(await capsOf(page.getByTestId("palette-foot-key"))).toEqual(await caps(page, "K"));
+  await expect(foot.locator("kbd").first()).toHaveText(await page.evaluate(() => (/Mac/.test(navigator.platform) ? "Return" : "Enter")));
+  const row = (id: string) => page.locator(`[data-testid=palette-row][data-row="${id}"]`);
+  // New chat or terminal: its key opens the same + menu; the side menu's and the key sheet's own rows carry theirs
+  expect(await capsOf(row("do:new-session"))).toEqual(await caps(page, "N"));
+  await expect(row("do:new-session")).toHaveAttribute("aria-keyshortcuts", /^(Meta|Control)\+N$/);
+  expect(await capsOf(row("do:key-sheet"))).toEqual(await caps(page, "/"));
+  await expect(row("do:key-sheet")).toContainText("Show every shortcut");
+  await expect(row("do:side-menu")).toContainText("Show or hide the side menu");
+  // Settings › General is found by typing, and ⌘, opens Settings
+  await page.getByTestId("palette-input").fill("settings general");
+  expect(await capsOf(row("go:settings:general"))).toEqual(await caps(page, ","));
+  // a row whose action has no key shows none
+  await page.getByTestId("palette-input").fill("report");
+  await expect(row("do:report-problem")).toBeVisible();
+  await expect(row("do:report-problem").getByTestId("keycaps")).toHaveCount(0);
+  // picking the key sheet's row opens it, with the palette gone and nothing else changed
+  await page.getByTestId("palette-input").fill("every shortcut");
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("palette")).toHaveCount(0);
+  await expect(page.getByTestId("keysheet")).toBeVisible();
+  await expect(page.getByTestId("who").locator(".head-title")).toHaveText("Kami");
+});
+
+test("the palette follows the key set on the key page: its foot and its rows name the new key, and a key the person gave none is not shown", async ({ page }) => {
+  await open(page);
+  const key = await mod(page);
+  await page.keyboard.press(`${key}+,`);
+  await page.getByTestId("keys-new-session").getByTestId("keys-change").click();
+  await page.keyboard.press(`${key}+u`);
+  await page.getByTestId("keys-search").getByTestId("keys-change").click();
+  await page.keyboard.press(`${key}+b`);
+  await page.keyboard.press(`${key}+,`);
+  await expect(page.getByTestId("settings-view")).toHaveCount(0);
+  await page.keyboard.press(`${key}+b`);
+  await expect(page.getByTestId("palette")).toBeVisible();
+  expect(await capsOf(page.getByTestId("palette-foot-key"))).toEqual(await caps(page, "B"));
+  expect(await capsOf(page.locator('[data-testid=palette-row][data-row="do:new-session"]'))).toEqual(await caps(page, "U"));
+  // the old key opens nothing now
+  await page.keyboard.press("Escape");
+  await page.keyboard.press(`${key}+k`);
+  await expect(page.getByTestId("palette")).toHaveCount(0);
 });

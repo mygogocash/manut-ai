@@ -11,6 +11,7 @@ import { MENU_ROWS, rowPage, type MenuRow } from "../sidebar/menu";
 import type { Places } from "./places";
 import type { IconName } from "../ui/icons";
 import type { EditorInfo } from "../code/editor";
+import type { KeyAction } from "../app/keys";
 
 /** What the registry needs of the app: plain data and the functions the app's own buttons call. */
 export interface PaletteCtx {
@@ -33,6 +34,10 @@ export interface PaletteCtx {
   setLanguage(lang: Lang): void;
   /** the Code page's + menu, as ⌘N opens it */
   openNewSessionMenu(): void;
+  /** the key sheet, as ⌘/ opens it (item 167d) */
+  openKeySheet(): void;
+  /** the side menu, shown or hidden, as its Hide button and ⇧⌘S do (item 167d) */
+  toggleSide(): void;
   /** the workflows Settings › Workflows offers Run now for at this moment (Workflows on, the file readable, no run going) */
   workflows: { file: string; name: string }[];
   /** Settings › Workflows' Run now for workflow `file`, on its page */
@@ -49,6 +54,9 @@ export interface Row {
   icon?: IconName;
   /** a product the row names (an editor), drawn by its own logo in the icon's place: an id AgentIcon knows, and its name */
   mark?: { id: string; title: string };
+  /** the app's key for this row's action, if it has one: drawn at the row's tail as the canvas's Search board does, always as the
+   *  person set it on Settings › General › Keyboard (item 167d), and nothing when they gave it none */
+  keyAction?: KeyAction;
   run(): void;
 }
 
@@ -78,10 +86,11 @@ export function goRows(c: PaletteCtx): Row[] {
   const pages: Row[] = MENU_ROWS.map((row) => ({ id: `go:${row}`, label: t(MENU_WORDS[row]), icon: MENU_ICON[row], run: () => c.openPage(rowPage(row)) }));
   const settings = t("set.title");
   // each Settings page by the icon its entry in Settings' list leads with (item 122); a member's page by Settings' own
-  const own = (id: string, name: string, icon: IconName = "gear"): Row => ({ id: `go:settings:${id}`, label: `${settings} › ${name}`, icon, run: () => c.openSettings(id) });
+  const own = (id: string, name: string, icon: IconName = "gear", keyAction?: KeyAction): Row => ({ id: `go:settings:${id}`, label: `${settings} › ${name}`, icon, ...(keyAction ? { keyAction } : {}), run: () => c.openSettings(id) });
   return [
     ...pages,
-    own("general", t("set.general")),
+    // ⌘, opens Settings, on General until the person has been to another page, so the key is this row's
+    own("general", t("set.general"), "gear", "settings"),
     own("bots", t("set.allBots"), LIST_ICON.bots),
     ...c.bots.map((b) => own(`bot:${b.name}`, b.displayName)),
     ...(c.people ? [own("people", t("set.people"), LIST_ICON.people)] : []),
@@ -110,7 +119,7 @@ export const ACTIONS: ActionDef[] = [
   {
     id: "new-session",
     elsewhere: "session-new",
-    offer: (c) => [{ id: "do:new-session", label: t("sessions.new"), icon: "terminal", run: () => c.openNewSessionMenu() }],
+    offer: (c) => [{ id: "do:new-session", label: t("sessions.new"), icon: "terminal", keyAction: "new-session", run: () => c.openNewSessionMenu() }],
   },
   {
     id: "new-lane",
@@ -128,6 +137,18 @@ export const ACTIONS: ActionDef[] = [
     id: "open-editor-session",
     elsewhere: "lane-open-editor",
     offer: (c) => (c.editor && c.places.editorSession ? [{ id: "do:open-editor:session", label: t("editor.openSession", { name: c.editor.label }), icon: "code", mark: { id: c.editor.id, title: c.editor.label }, run: () => c.places.editorSession!.open() }] : []),
+  },
+  {
+    // the side menu's Hide button and the top left button that shows it again: the same switch as ⇧⌘S
+    id: "side-menu",
+    elsewhere: "menu-hide",
+    offer: (c) => [{ id: "do:side-menu", label: t("key.sidebar"), icon: "panel-left", keyAction: "sidebar", run: () => c.toggleSide() }],
+  },
+  {
+    // the key sheet opens over the page and changes nothing; Settings › General › Keyboard has the same button
+    id: "key-sheet",
+    elsewhere: "keys-sheet-open",
+    offer: (c) => [{ id: "do:key-sheet", label: t("key.sheet"), icon: "keyboard", keyAction: "key-sheet", run: () => c.openKeySheet() }],
   },
   {
     id: "microphone",

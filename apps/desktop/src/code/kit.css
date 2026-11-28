@@ -38,6 +38,12 @@
 .kitp .lk:hover {
   color: var(--ink);
 }
+/* New lane with its key beside it (item 167d): the caps first, then the link, at the band's end */
+.lk-w {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
 
 /* How much Kit does alone: one stop pressed. */
 .kitp .dial {

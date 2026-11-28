@@ -157,6 +157,20 @@ describe("the Lanes band", () => {
     expect(out.indexOf("New lane")).toBeLessThan(out.indexOf('data-testid="lanes"'));
   });
 
+  it("names the + menu's key in New lane's tooltip, and draws it beside the link only while the project has no lane (item 167d)", () => {
+    const key = { caps: ["⌘", "N"], text: "⌘N", aria: "Meta+N" };
+    const link = (rows: LaneRow[]) => drawn(LanesView({ rows, now: 100_000, onOpen: vi.fn(), onNew: vi.fn(), newKey: key })).filter((e) => e.props["data-testid"] === "lane-new")[0]!;
+    expect(link(canvas()).props.title).toBe("Start a lane: choose an agent and a folder. It starts with your first message. (⌘N)");
+    const caps = (rows: LaneRow[]) => renderToString(createElement(LanesView, { rows, now: 100_000, onOpen: vi.fn(), onNew: vi.fn(), newKey: key })).includes('data-testid="keycaps"');
+    // with lanes the key is in the tooltip only; with none, the empty state shows it beside what it opens
+    expect(caps(canvas())).toBe(false);
+    expect(caps([])).toBe(true);
+    expect(renderToString(createElement(LanesView, { rows: [], now: 100_000, onOpen: vi.fn(), onNew: vi.fn(), newKey: key }))).toMatch(/<kbd class="kcap">⌘<\/kbd><kbd class="kcap">N<\/kbd><\/span><button[^>]*data-testid="lane-new"/);
+    // no key, no cap and the tooltip as it was
+    expect(drawn(LanesView({ rows: [], now: 100_000, onOpen: vi.fn(), onNew: vi.fn(), newKey: null })).filter((e) => e.props["data-testid"] === "keycaps")).toHaveLength(0);
+    expect(link([]).props.title).toContain("(⌘N)");
+  });
+
   it("draws the band with only New lane while the project has no lane, since a person with none needs it most", () => {
     const out = renderToString(createElement(LanesView, { rows: [], now: 100_000, onOpen: vi.fn(), onNew: vi.fn() }));
     expect(out).toContain("Lanes");

@@ -9,6 +9,7 @@ import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } fr
 import { t } from "../i18n";
 import { Icon } from "../ui/icons";
 import { clampSide, setSideHidden, setSideWidth, useSide } from "./sideState";
+import { keyedProps, useKeyShown } from "../app/keyHints";
 
 const STEP = 16;
 const win = () => document.querySelector<HTMLElement>("[data-testid=window]");
@@ -76,9 +77,10 @@ export function SideResizer({ drag, onDrag }: { drag: number | null; onDrag: (w:
 /** The top-left button that shows the hidden menu again. */
 export function SideShow() {
   const { hidden } = useSide();
+  const shown = useKeyShown("sidebar");
   if (!hidden) return null;
   return (
-    <button type="button" className="side-show" aria-label={t("side.show")} title={t("side.show")} onClick={() => setSideHidden(false)} data-testid="side-show">
+    <button type="button" className="side-show" aria-label={t("side.show")} {...keyedProps(t("side.show"), shown)} onClick={() => setSideHidden(false)} data-testid="side-show">
       <Icon name="panel-left" />
     </button>
   );

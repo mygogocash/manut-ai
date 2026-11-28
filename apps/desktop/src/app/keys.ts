@@ -1,6 +1,8 @@
 // The app-wide shortcuts the person can set (item 99): each action's keys, as defaults for this computer's system and the
 // person's own choices, kept on this Mac only (`manut.keys`, never sent). `shortcuts.ts` reads them for every key press, and
-// Settings › General's Keyboard list sets them.
+// Settings › General's Keyboard list sets them. The key sheet (item 167d, ⌘/ by default) lists every one of them, and the fixed
+// keys, in one place; each place that shows an action's key (the palette's rows, a button's tooltip, an empty state) reads it
+// from here, so it is always the key the person set (keyHints.ts).
 //
 // A chord is the exact modifiers held and one key, named by where it stands (`KeyboardEvent.code`): a letter is still matched
 // by the letter it types on a Latin layout (so Dvorak's ⌘K is the K key), and by where it stands on another script's layout
@@ -12,10 +14,10 @@
 // Pure but for the small store at the end, so a test reads every rule without a DOM.
 import { changes } from "../lib/changes";
 
-export type KeyAction = "search" | "find" | "details" | "settings" | "next-ask" | "graph" | "new-session" | "session-next" | "session-prev" | "terminal" | "sidebar" | "lane-prev" | "lane-next";
+export type KeyAction = "search" | "find" | "details" | "settings" | "key-sheet" | "next-ask" | "graph" | "new-session" | "session-next" | "session-prev" | "terminal" | "sidebar" | "lane-prev" | "lane-next";
 
 /** In the order Settings lists them. */
-export const KEY_ACTIONS: readonly KeyAction[] = ["search", "find", "details", "settings", "next-ask", "new-session", "session-next", "session-prev", "lane-prev", "lane-next", "sidebar", "graph", "terminal"];
+export const KEY_ACTIONS: readonly KeyAction[] = ["search", "find", "details", "settings", "key-sheet", "next-ask", "new-session", "session-next", "session-prev", "lane-prev", "lane-next", "sidebar", "graph", "terminal"];
 
 export interface Chord {
   readonly meta: boolean;
@@ -65,6 +67,8 @@ export function defaultKeys(mac: boolean): Keys {
     find: [chord("KeyF", m)],
     details: [chord("Period", m)],
     settings: [chord("Comma", m)],
+    // the key sheet, as Paradev's ⌘/ (item 167d): nothing else in the app takes a slash chord
+    "key-sheet": [chord("Slash", m)],
     "next-ask": [chord("KeyJ", m)],
     graph: [chord("KeyG", { ...m, shift: true })],
     // ⌘T too on macOS, like a new tab; Ctrl+T elsewhere stays a terminal program's (transpose)
@@ -150,11 +154,24 @@ const KEY_LABEL: Record<string, string> = {
 };
 const keyLabel = (code: string) => /^Key([A-Z])$/.exec(code)?.[1] ?? /^Digit([0-9])$/.exec(code)?.[1] ?? KEY_LABEL[code] ?? code;
 
-/** A chord as the person reads it: `⌘⇧G` on macOS (⌃⌥⇧⌘ in Apple's order), `Ctrl+Shift+G` elsewhere. */
-export function chordText(c: Chord, mac: boolean): string {
+/** A chord as one cap for each key, as the canvas's Search board draws a row's key (`⌘` and `N` side by side): `["⇧", "⌘", "G"]` on
+ *  macOS (⌃⌥⇧⌘ in Apple's order), `["Ctrl", "Shift", "G"]` elsewhere. */
+export function chordCaps(c: Chord, mac: boolean): string[] {
   const k = keyLabel(c.code);
-  if (mac) return `${c.ctrl ? "⌃" : ""}${c.alt ? "⌥" : ""}${c.shift ? "⇧" : ""}${c.meta ? "⌘" : ""}${k}`;
-  return [c.ctrl && "Ctrl", c.meta && "Win", c.alt && "Alt", c.shift && "Shift", k].filter(Boolean).join("+");
+  const mods = mac ? [c.ctrl && "⌃", c.alt && "⌥", c.shift && "⇧", c.meta && "⌘"] : [c.ctrl && "Ctrl", c.meta && "Win", c.alt && "Alt", c.shift && "Shift"];
+  return [...mods.filter((m): m is string => !!m), k];
+}
+
+/** A chord as the person reads it: `⇧⌘G` on macOS (⌃⌥⇧⌘ in Apple's order), `Ctrl+Shift+G` elsewhere. */
+export const chordText = (c: Chord, mac: boolean): string => chordCaps(c, mac).join(mac ? "" : "+");
+
+/** A chord for `aria-keyshortcuts` (WAI-ARIA 1.2): the modifiers as `Control`, `Alt`, `Shift` and `Meta`, then the key, joined with `+`:
+ *  `Meta+Shift+G`. A letter is upper case, a punctuation key is its character, a named key (an arrow, Enter, an F key) its name. */
+export function chordAria(c: Chord): string {
+  const letter = /^Key([A-Z])$/.exec(c.code)?.[1];
+  const digit = /^Digit([0-9])$/.exec(c.code)?.[1];
+  const key = letter ?? digit ?? (c.code === "Space" ? "Space" : (CHARS[c.code]?.[0] ?? c.code));
+  return [c.ctrl && "Control", c.alt && "Alt", c.shift && "Shift", c.meta && "Meta", key].filter(Boolean).join("+");
 }
 
 /** An action's keys as Settings shows them: `⌘N · ⌘T`. */
@@ -197,7 +214,7 @@ export function parseKeys(raw: string | null, mac: boolean): Partial<Record<KeyA
 // ---- the person's keys on this Mac ------------------------------------------------------------------------------------
 
 export const KEYS_KEY = "manut.keys";
-const isMacHere = () => typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
+export const isMacHere = () => typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
 const listeners = changes();
 let own: Partial<Record<KeyAction, Chord[]>> | null = null;
 
@@ -260,7 +277,8 @@ export const keysRecording = () => recording;
 export function setKeysRecording(on: boolean): void {
   recording = on;
 }
-/** For tests: forget what was read, so the next read is from storage. */
+/** For tests: forget what was read, so the next read is from storage; whoever shows keys reads them again. */
 export function forgetKeys(): void {
   own = null;
+  listeners.emitSnapshot();
 }

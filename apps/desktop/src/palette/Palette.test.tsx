@@ -1,9 +1,11 @@
 // The overlay, drawn with react-dom/server as the other component tests draw theirs.
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderToString } from "react-dom/server";
 import { setLang } from "../i18n";
+import { forgetKeys, KEYS_KEY, setKeys } from "../app/keys";
 import { PaletteView, pointerMoved, type PaletteViewProps } from "./Palette";
 import type { Group } from "./groups";
+import type { KeyAction } from "../app/keys";
 
 const noop = () => {};
 const row = (id: string, label: string, hint?: string) => ({ id, label, hint, run: noop });
@@ -77,5 +79,77 @@ describe("the cursor follows the pointer only when the pointer moves", () => {
     expect(pointerMoved({ x: 10, y: 20 }, 10, 20)).toBe(false);
     expect(pointerMoved({ x: 10, y: 20 }, 11, 20)).toBe(true);
     expect(pointerMoved({ x: 10, y: 20 }, 10, 19)).toBe(true);
+  });
+});
+
+// ---- keys where the actions are (item 167d) -------------------------------------------------------------------------------------
+
+describe("the keys the palette teaches", () => {
+  const storage = new Map<string, string>();
+  const mac = (on: boolean) => vi.stubGlobal("navigator", { platform: on ? "MacIntel" : "Linux x86_64" });
+  beforeEach(() => {
+    storage.clear();
+    (globalThis as { localStorage?: unknown }).localStorage = { getItem: (k: string) => storage.get(k) ?? null, setItem: (k: string, v: string) => void storage.set(k, v), removeItem: (k: string) => void storage.delete(k) };
+    forgetKeys();
+    setLang("en");
+    mac(true);
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  const keyed = (id: string, label: string, keyAction: KeyAction) => ({ ...row(id, label), keyAction });
+  const withKeys: Group[] = [
+    { key: "do", heading: "pal.do", rows: [keyed("do:new-session", "New chat or terminal", "new-session"), row("do:new-chat", "New thread with Buddy")], icon: "chevron-right" },
+  ];
+  const rowHtml = (html: string, id: string) => new RegExp(`<li[^>]*data-row="${id}"[^>]*>.*?</li>`).exec(html)![0];
+
+  it("shows a row's key at its tail as the Search board draws it, a cap for each key, and names it to assistive technology", () => {
+    const html = draw({ groups: withKeys });
+    const keyedRow = rowHtml(html, "do:new-session");
+    expect(keyedRow).toContain('aria-keyshortcuts="Meta+N"');
+    expect(keyedRow).toMatch(/<span class="pal-n">New chat or terminal<\/span><span class="kcaps" aria-hidden="true" data-testid="keycaps"><kbd class="kcap">⌘<\/kbd><kbd class="kcap">N<\/kbd><\/span><\/li>/);
+    // a row whose action has no key shows none
+    const plain = rowHtml(html, "do:new-chat");
+    expect(plain).not.toContain("kcap");
+    expect(plain).not.toContain("aria-keyshortcuts");
+  });
+
+  it("draws the keys of the keyboard it is on: Ctrl and N off a Mac", () => {
+    mac(false);
+    forgetKeys();
+    const keyedRow = rowHtml(draw({ groups: withKeys }), "do:new-session");
+    expect(keyedRow).toContain('aria-keyshortcuts="Control+N"');
+    expect(keyedRow).toContain('<kbd class="kcap">Ctrl</kbd><kbd class="kcap">N</kbd>');
+  });
+
+  it("shows the key the person set, and follows when they change it", () => {
+    setKeys("new-session", [{ meta: true, ctrl: false, alt: true, shift: false, code: "KeyB" }], true);
+    const keyedRow = rowHtml(draw({ groups: withKeys }), "do:new-session");
+    expect(keyedRow).toContain('<kbd class="kcap">⌥</kbd><kbd class="kcap">⌘</kbd><kbd class="kcap">B</kbd>');
+    expect(keyedRow).toContain('aria-keyshortcuts="Alt+Meta+B"');
+    expect(keyedRow).not.toContain(">N<");
+  });
+
+  it("shows no key for an action the person gave none", () => {
+    storage.set(KEYS_KEY, JSON.stringify({ "new-session": [], search: [] }));
+    forgetKeys();
+    const html = draw({ groups: withKeys });
+    expect(rowHtml(html, "do:new-session")).not.toContain("kcap");
+    expect(rowHtml(html, "do:new-session")).not.toContain("aria-keyshortcuts");
+    expect(html).not.toContain('data-testid="palette-foot-key"');
+  });
+
+  it("ends on a foot that says what Return does, what Esc does and which key opens the palette (the person's own)", () => {
+    const foot = /<div class="pal-foot" data-testid="palette-foot">(.*?)<\/div><\/div><\/div>$/.exec(draw())![1]!;
+    expect(foot).toMatch(/<kbd class="kcap">Return<\/kbd><\/span>opens the marked row/);
+    expect(foot).toMatch(/<kbd class="kcap">Esc<\/kbd><\/span>closes/);
+    expect(foot).toMatch(/data-testid="palette-foot-key"><span class="kcaps"[^>]*><kbd class="kcap">⌘<\/kbd><kbd class="kcap">K<\/kbd><\/span>opens this menu from any screen/);
+    // the first of the three, Return, leads; the palette's own key is last
+    expect(foot.indexOf("Return")).toBeLessThan(foot.indexOf("Esc"));
+    expect(foot.indexOf("Esc")).toBeLessThan(foot.indexOf("opens this menu"));
+    setKeys("search", [{ meta: true, ctrl: false, alt: false, shift: false, code: "KeyP" }], true);
+    expect(draw()).toMatch(/data-testid="palette-foot-key">.*<kbd class="kcap">P<\/kbd>.*opens this menu/);
+    mac(false);
+    forgetKeys();
+    expect(draw()).toContain('<kbd class="kcap">Enter</kbd>');
   });
 });

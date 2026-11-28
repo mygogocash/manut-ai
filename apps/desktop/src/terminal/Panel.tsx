@@ -20,6 +20,7 @@ import { clampRatio, isPane, MAX_PANES, paneKey, panesOf, PANE_MIN_ROWS, PANE_MI
 import { readTermSettings } from "../sessions/term/settings";
 import { useDimStyle } from "../sessions/SplitView";
 import { isMac } from "../app/shortcuts";
+import { keyedProps, useKeyShown } from "../app/keyHints";
 import { composing } from "../lib/ime";
 import { markPaneClosed } from "../app/menuClose";
 import { fgName, TermRowMark } from "../sessions/TermRowMark";
@@ -298,6 +299,8 @@ export function TerminalPanel() {
     };
   }, []);
   const front = p.tabs.find((x) => x.key === p.active);
+  // Hide's key is the panel's own key as the person set it (item 167d), not a Ctrl+` written into the words
+  const hideKey = useKeyShown("terminal");
 
   const set = (v: number) => {
     const c = clampPanelH(v, window.innerHeight);
@@ -400,7 +403,7 @@ export function TerminalPanel() {
         >
           <SplitIcon />
         </button>
-        <button type="button" className="termpanel-ib" aria-label={t("termpanel.hide")} title={t("termpanel.hide")} data-testid="termpanel-hide" onClick={toggleTerminal}>
+        <button type="button" className="termpanel-ib" aria-label={t("termpanel.hide")} {...keyedProps(t("termpanel.hide"), hideKey)} data-testid="termpanel-hide" onClick={toggleTerminal}>
           <ChevronDown />
         </button>
       </div>

@@ -5,11 +5,13 @@
 // after these by Settings.slot.tsx, as before.
 //
 // `KeysRowsView` draws from props alone, so a test draws each state; `KeysRows` reads and sets the keys.
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useState } from "react";
 import { t, type Key } from "../i18n";
 import { isMac } from "../app/shortcuts";
-import { chordFromEvent, currentKeys, defaultKeys, keysText, KEY_ACTIONS, onKeysChange, resetKeys, sameChord, setKeys, setKeysRecording, chordText, type Chord, type KeyAction, type Keys } from "../app/keys";
+import { chordFromEvent, defaultKeys, keysText, KEY_ACTIONS, resetKeys, sameChord, setKeys, setKeysRecording, chordText, type Chord, type KeyAction, type Keys } from "../app/keys";
 import { Row } from "./DevRow";
+import { onKeysFocus, takeKeysFocus } from "./keysFocus";
+import { useKeys } from "../app/keyHints";
 
 /** Each action's words, as the fixed list's are (`key.*`). */
 export const ACTION_WORDS: Record<KeyAction, Key> = {
@@ -17,6 +19,7 @@ export const ACTION_WORDS: Record<KeyAction, Key> = {
   find: "key.find",
   details: "key.details",
   settings: "key.settings",
+  "key-sheet": "key.sheet",
   "next-ask": "key.nextAsk",
   "new-session": "key.newSession",
   "session-next": "key.sessionNext",
@@ -99,9 +102,23 @@ export function refusalWords(r: ReturnType<typeof setKeys>, c: Chord, mac: boole
 
 export function KeysRows() {
   const mac = isMac();
-  const keys = useSyncExternalStore(onKeysChange, () => currentKeysCached(mac), () => currentKeysCached(mac));
+  const keys = useKeys();
   const [recording, setRecording] = useState<KeyAction | null>(null);
   const [refused, setRefused] = useState<string | null>(null);
+
+  // the key sheet's Change (or its link) lands here: the action's row comes to the middle with its Change focused, or the list's head
+  useEffect(() => {
+    const go = () => {
+      const what = takeKeysFocus();
+      if (!what) return;
+      if (what === "list") return void document.querySelector('[data-testid="keyboard-head"]')?.scrollIntoView?.({ block: "start" });
+      const row = document.querySelector<HTMLElement>(`[data-testid="keys-${what}"]`);
+      row?.closest(".st-row")?.scrollIntoView?.({ block: "center" });
+      row?.querySelector<HTMLElement>('[data-testid="keys-change"]')?.focus({ preventScroll: true });
+    };
+    go();
+    return onKeysFocus(go);
+  }, []);
 
   useEffect(() => {
     if (!recording) return;
@@ -148,12 +165,4 @@ export function KeysRows() {
       }}
     />
   );
-}
-
-/** The current keys, the same object until they change, as `useSyncExternalStore` needs. */
-let cached: { mac: boolean; keys: Keys } | null = null;
-onKeysChange(() => (cached = null));
-function currentKeysCached(mac: boolean): Keys {
-  if (!cached || cached.mac !== mac) cached = { mac, keys: currentKeys(mac) };
-  return cached.keys;
 }

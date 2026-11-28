@@ -36,6 +36,8 @@ import { asLanePull, chatPullOf, useChatPullsVersion } from "./chatPull";
 import { MoreButton, settledWhy, useRowMenu } from "../sidebar/RowMenu";
 import { MenuIcon } from "../ui/MenuIcon";
 import { Icon } from "../ui/icons";
+import { KeyCaps } from "../ui/KeyCaps";
+import { withKey, type KeyShown } from "../app/keyHints";
 import "../jobs/ask.css";
 import { AgentMark } from "../sessions/AgentMark";
 import { arrange, sessionRowKey, settleDue, settleRows, untilWord, useRowMarks, type RowMark, type RowMarks, type RowPlace } from "../sidebar/rows";
@@ -279,6 +281,9 @@ export interface LanesProps {
   onPull?: (pull: LanePull, id: string) => void;
   /** New lane: opens the + menu's Chat with Kit choice for this project. Without it the band has no link, and none draws no band. */
   onNew?: () => void;
+  /** The key that opens the + menu New lane opens (item 167d), as the person set it: in New lane's tooltip, and drawn beside it while the
+   *  project has no lane, as an empty state shows the key beside what it opens. None: no key is shown. */
+  newKey?: KeyShown | null;
   /** The lane whose Bring it back is open, and the link on its line that opens or closes it. */
   backOpen?: string | null;
   onBack?: (id: string) => void;
@@ -587,7 +592,7 @@ function awayWord(mark: RowMark | undefined, now: number): string {
 }
 
 
-export function LanesView({ rows, now, onOpen, onPull, onNew, backOpen = null, onBack, below, marks = {}, away = false, onAway, jobOpen = [], onJob, onJobView }: LanesProps) {
+export function LanesView({ rows, now, onOpen, onPull, onNew, newKey = null, backOpen = null, onBack, below, marks = {}, away = false, onAway, jobOpen = [], onJob, onJobView }: LanesProps) {
   if (rows.length === 0 && !onNew) return null;
   // pinned on top, in the order pinned, then the rest, then the settled ones, small and quiet. Snoozed and archived lanes are put
   // away: a line under the list counts them and opens them. A lane that asks something is never put away (rows.ts `placeOf`).
@@ -625,9 +630,12 @@ export function LanesView({ rows, now, onOpen, onPull, onNew, backOpen = null, o
       <div className="band" data-testid="lanes-band">
         <span>{t("lane.title")}</span>
         {onNew && (
-          <button type="button" className="lk" onClick={onNew} title={t("lane.newTip")} data-testid="lane-new">
-            {t("lane.new")}
-          </button>
+          <span className="lk-w">
+            {newKey && rows.length === 0 && <KeyCaps shown={newKey} />}
+            <button type="button" className="lk" onClick={onNew} title={withKey(t("lane.newTip"), newKey)} data-testid="lane-new">
+              {t("lane.new")}
+            </button>
+          </span>
         )}
       </div>
       {rows.length > 0 && (

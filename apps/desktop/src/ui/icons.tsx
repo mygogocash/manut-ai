@@ -80,6 +80,8 @@ export const BOARD = {
 
 /** Drawn for the app in the set's style, where the board has no such drawing. */
 export const DRAWN = {
+  // item 167d: the palette's Show every shortcut row (an icon shows a thing you can see: a keyboard)
+  "keyboard": <><rect x="2" y="4" width="12" height="8" rx="1.5" /><path d="M4.6 6.8v.2M7 6.8v.2M9 6.8v.2M11.4 6.8v.2M5.5 9.4h5" /></>,
   "arrow-left": <><path d="M13 8H3M7 4L3 8l4 4" /></>,
   "panel-right": <><rect x="2.5" y="3" width="11" height="10" rx="2" /><path d="M9.5 3v10" /></>,
   "terminal": <><rect x="2.5" y="3" width="11" height="10" rx="2" /><path d="M5 6.5L7 8l-2 1.5M8.5 10H11" /></>,

@@ -4,7 +4,7 @@
 import { useStore } from "../../state/store";
 import type { Bot } from "../../lib/protocol";
 import { IconButton, PanelIcon } from "../../ui";
-import { isMac } from "../../app/shortcuts";
+import { useKeyShown, withKey } from "../../app/keyHints";
 import { t } from "../../i18n";
 import { useBotRuns, useRunsPoll, workingCount } from "../../runs/live";
 
@@ -34,11 +34,13 @@ export function PanelButton({ bot }: { bot: Bot }) {
 export function PanelToggle({ working: n }: { working: number }) {
   const s = useStore();
   const open = s.ui.panelOpen;
-  const key = isMac() ? "⌘." : "Ctrl+.";
-  const label = n > 0 ? t(n === 1 ? "head.panelLive1" : "head.panelLive", { n, key }) : t("head.panel", { key });
+  // Details' key, as the person set it (item 167d)
+  const shown = useKeyShown("details");
+  const label = withKey(n > 0 ? t(n === 1 ? "head.panelLive1" : "head.panelLive", { n }) : t("head.panel"), shown);
   return (
     <IconButton
       label={label}
+      aria-keyshortcuts={shown?.aria}
       className={`head-pb${open ? " on" : ""}`}
       aria-pressed={open}
       data-testid="panel-button"

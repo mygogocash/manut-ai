@@ -18,7 +18,8 @@
 import { ProjectIcon } from "../code/ProjectIcon";
 import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
 import { getStore, useStore } from "../state/store";
-import { CloseIcon, PlusIcon, Popover } from "../ui";
+import { CloseIcon, KeyCaps, PlusIcon, Popover } from "../ui";
+import { keyedProps, useKeyShown } from "../app/keyHints";
 import { t } from "../i18n";
 import { composing } from "../lib/ime";
 import { AgentMark } from "./AgentMark";
@@ -103,6 +104,8 @@ export function SessionsHeader() {
   // how the menu was asked for: the + button asks for none, the Lanes band's New lane asks for the chat choice in its folder
   const [start, setStart] = useState<NewMenuStart | undefined>(undefined);
   const plus = useRef<HTMLButtonElement>(null);
+  // the + menu's key, as the person set it, in the button's tooltip (item 167d)
+  const newKey = useKeyShown("new-session");
   useEffect(
     () =>
       onOpenNewSessionMenu((s) => {
@@ -122,7 +125,7 @@ export function SessionsHeader() {
           type="button"
           className="ss-plus"
           aria-label={t("sessions.new")}
-          title={t("sessions.new")}
+          {...keyedProps(t("sessions.new"), newKey)}
           aria-haspopup="menu"
           aria-expanded={open}
           onClick={() => {
@@ -780,6 +783,8 @@ function PastList({ agent, onBack, onPick }: { agent: PastAgent; onBack: () => v
  *  nothing else shows, nothing is centred or boxed. */
 function SessionStart() {
   const ss = useSessions();
+  // the key beside what the empty section opens, as the person set it (item 167d)
+  const newKey = useKeyShown("new-session");
   const [open, setOpen] = useState(false);
   const btn = useRef<HTMLButtonElement>(null);
   useEffect(() => {
@@ -800,11 +805,13 @@ function SessionStart() {
           title={tip}
           aria-haspopup="menu"
           aria-expanded={open}
+          aria-keyshortcuts={newKey?.aria}
           onClick={() => setOpen((v) => !v)}
           data-testid="session-start"
         >
           <PlusIcon />
           {t("sessions.new")}
+          {newKey && <KeyCaps shown={newKey} className="ss-keys" />}
         </button>
         {open && <NewSessionMenu onClose={() => setOpen(false)} trigger={btn} />}
       </div>

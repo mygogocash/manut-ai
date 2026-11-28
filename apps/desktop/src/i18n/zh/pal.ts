@@ -8,4 +8,7 @@ export const pal: Record<keyof typeof en, string> = {
   "pal.chats": "聊天",
   "pal.history": "在历史记录中搜索“{q}”",
   "pal.none": "没有找到",
+  "pal.footOpen": "opens the marked row",
+  "pal.footClose": "closes",
+  "pal.footSearch": "opens this menu from any screen",
 };

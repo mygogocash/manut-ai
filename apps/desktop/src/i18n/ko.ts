@@ -56,6 +56,7 @@ import { inbox } from "./ko/inbox";
 import { job } from "./ko/job";
 import { jobview } from "./ko/jobview";
 import { key } from "./ko/key";
+import { keysheet } from "./ko/keysheet";
 import { kit } from "./ko/kit";
 import { lane } from "./ko/lane";
 import { lang } from "./ko/lang";
@@ -220,6 +221,7 @@ export const ko: Record<Key, string> = {
   ...job,
   ...jobview,
   ...key,
+  ...keysheet,
   ...kit,
   ...lane,
   ...lang,

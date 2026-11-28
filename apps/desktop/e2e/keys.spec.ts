@@ -35,9 +35,10 @@ test("a shortcut set in Settings: refused when taken, works at once and after a 
   await expect(row.getByTestId("keys-now")).toHaveText(shown("B"));
   await expect(row.getByTestId("keys-reset")).toBeVisible();
 
-  // they work at once: Details opens from the chat
+  // they work at once: Details opens from the chat, and the button that opens it names the new key, not the one it came with
   await page.keyboard.press(`${mod}+,`);
   await expect(page.getByTestId("settings-view")).toHaveCount(0);
+  await expect(page.getByTestId("who")).toHaveAttribute("title", `Details (${shown("B")})`);
   const details = page.getByTestId("details");
   await page.keyboard.press(`${mod}+b`);
   await expect.poll(async () => Math.round((await details.boundingBox())?.width ?? 0)).toBe(300);
@@ -50,9 +51,26 @@ test("a shortcut set in Settings: refused when taken, works at once and after a 
   await page.keyboard.press(`${mod}+b`);
   await expect.poll(async () => Math.round((await details.boundingBox())?.width ?? 0)).toBe(300);
 
-  // Reset all: the default is back
+  // Reset all: the default is back, in the list and in the button's tooltip
   await page.keyboard.press(`${mod}+,`);
   await page.getByTestId("keys-reset-all").click();
   await expect(page.getByTestId("keys-details").getByTestId("keys-now")).toHaveText(shown("."));
   await expect(page.getByTestId("keys-reset-all")).toHaveCount(0);
+  await page.keyboard.press(`${mod}+,`);
+  await expect(page.getByTestId("who")).toHaveAttribute("title", `Details (${shown(".")})`);
+  await page.keyboard.press(`${mod}+,`);
+
+  // the key sheet's own key is on the list like the others (item 167d): ⌘/ to begin with, settable, and its button opens the sheet
+  await expect(page.getByTestId("keys-key-sheet").getByTestId("keys-now")).toHaveText(shown("/"));
+  await page.getByTestId("keys-sheet-open").click();
+  await expect(page.getByTestId("keysheet")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("keysheet")).toHaveCount(0);
+  await page.getByTestId("keys-key-sheet").getByTestId("keys-change").click();
+  await page.keyboard.press(`${mod}+u`);
+  await expect(page.getByTestId("keys-key-sheet").getByTestId("keys-now")).toHaveText(shown("U"));
+  await page.keyboard.press(`${mod}+/`);
+  await expect(page.getByTestId("keysheet")).toHaveCount(0);
+  await page.keyboard.press(`${mod}+u`);
+  await expect(page.getByTestId("keysheet")).toBeVisible();
 });

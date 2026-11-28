@@ -20,6 +20,15 @@ describe("the keyboard rows", () => {
     expect(html).not.toContain("keys-reset");
   });
 
+  it("list the key sheet's own key as one more action to set, ⌘/ to begin with (item 167d)", () => {
+    const html = draw({});
+    expect(html).toContain("Show every shortcut");
+    expect(html).toContain('data-testid="keys-key-sheet"');
+    expect(html).toContain("⌘/");
+    // Windows and Linux begin with Ctrl+/
+    expect(renderToString(createElement(KeysRowsView, { ...base, mac: false, defaults: defaultKeys(false), keys: defaultKeys(false) }))).toContain("Ctrl+/");
+  });
+
   it("offer Reset on a changed one and Reset all, wait for new keys, and say why keys were refused", () => {
     const keys = { ...defaultKeys(true), search: [{ meta: true, ctrl: false, alt: false, shift: false, code: "KeyP" }] };
     const html = draw({ keys, recording: "details", refused: "⌘Q belongs to macOS or the window." });

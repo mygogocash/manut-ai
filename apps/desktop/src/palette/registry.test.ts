@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { LANGS, setLang } from "../i18n";
+import { KEY_ACTIONS } from "../app/keys";
 import { ACTIONS, doRows, goRows, type PaletteCtx } from "./registry";
 import { buildGroups, CHAT_LIMIT, flat } from "./groups";
 import type { Places } from "./places";
@@ -41,6 +42,8 @@ function ctx(over: Partial<PaletteCtx> = {}, places: Places = {}): PaletteCtx {
     newThread: spy("newThread"),
     setLanguage: spy("setLanguage"),
     openNewSessionMenu: spy("openNewSessionMenu"),
+    openKeySheet: spy("openKeySheet"),
+    toggleSide: spy("toggleSide"),
     workflows: [],
     runWorkflow: spy("runWorkflow"),
     ...over,
@@ -176,6 +179,37 @@ describe("an action that needs a place that is not open is not listed", () => {
     expect(row.label).toBe("New thread with Buddy");
     row.run();
     expect(calls).toEqual(["newThread(buddy)"]);
+  });
+});
+
+describe("a row shows the key of its action (item 167d)", () => {
+  it("names the action only for the rows whose action is that key's: New session, Settings, the side menu and the key sheet", () => {
+    const rows = [...goRows(ctx({ people: true })), ...doRows(ctx({}, everyPlace()))];
+    const keyed = rows.filter((r) => r.keyAction).map((r) => [r.id, r.keyAction]);
+    expect(keyed).toEqual([
+      ["go:settings:general", "settings"],
+      ["do:new-session", "new-session"],
+      ["do:side-menu", "sidebar"],
+      ["do:key-sheet", "key-sheet"],
+    ]);
+    // each names an action keys.ts registers, so Settings' list and the sheet hold the key the row shows
+    for (const [, a] of keyed) expect(KEY_ACTIONS).toContain(a);
+  });
+
+  it("opens the key sheet and switches the side menu: what Settings' button and the menu's Hide press", () => {
+    const rows = new Map(doRows(ctx()).map((r) => [r.id, r]));
+    rows.get("do:key-sheet")!.run();
+    rows.get("do:side-menu")!.run();
+    expect(calls).toEqual(["openKeySheet()", "toggleSide()"]);
+    expect(rows.get("do:key-sheet")!.label).toBe("Show every shortcut");
+    expect(rows.get("do:side-menu")!.label).toBe("Show or hide the side menu");
+    expect(rows.get("do:key-sheet")!.icon).toBe("keyboard");
+  });
+
+  it("finds them by the words shown", () => {
+    const found = (q: string) => flat(buildGroups(ctx(), q, [])).map((r) => r.id);
+    expect(found("every shortcut")).toContain("do:key-sheet");
+    expect(found("side menu")).toContain("do:side-menu");
   });
 });
 

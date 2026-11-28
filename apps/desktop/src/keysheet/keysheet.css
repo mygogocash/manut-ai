@@ -1,0 +1,107 @@
+/* The key sheet (item 167d): the palette's box (palette.css `.pal`), wider and taller because it lists every key, with the
+   palette's groups under their grey bands and one row for each key: its words, its keys as caps, and Change. */
+.ks {
+  width: min(720px, 94vw);
+  max-height: 78vh;
+}
+.ks-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 4px 0 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+.ks-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.ks-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 34px;
+  padding: 3px 10px;
+  border-radius: var(--rad);
+  font-size: 13.5px;
+  color: var(--ink);
+}
+.ks-row:hover,
+.ks-row:focus-within {
+  background: var(--hov);
+}
+/* the words may take two lines beside long keys, never one cut short */
+.ks-row .pal-n {
+  white-space: normal;
+  overflow: visible;
+}
+.ks-keys {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 4px;
+  max-width: 55%;
+}
+/* one cap holds a whole chord (`⇧⌘G`, `Ctrl+Shift+G`), and a fixed key's list of them may be long: it wraps instead of running out */
+.ks-k {
+  height: auto;
+  min-height: 22px;
+  padding-block: 2px;
+  line-height: 1.35;
+  text-align: center;
+  white-space: normal;
+}
+.ks-none {
+  font-size: 12.5px;
+  color: var(--aui-muted);
+}
+/* Change shows on hover and on keyboard focus, as a row's actions do in the menu; its room is kept, so the keys never move */
+.ks-change {
+  flex: none;
+  width: 56px;
+  padding: 2px 0;
+  border: 0;
+  border-radius: var(--rad-sm);
+  background: transparent;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--aui-muted);
+  text-align: center;
+  cursor: pointer;
+  opacity: 0;
+}
+.ks-row:hover .ks-change,
+.ks-row:focus-within .ks-change,
+.ks-change:focus-visible {
+  opacity: 1;
+}
+.ks-change:hover {
+  color: var(--ink);
+  background: var(--hov);
+}
+.ks-fixed {
+  cursor: default;
+}
+/* the foot: the link to the list where a key is set, and Esc */
+.ks-foot {
+  padding-top: 8px;
+}
+.ks-link {
+  padding: 2px 4px;
+  margin-left: -4px;
+  border: 0;
+  border-radius: var(--rad-sm);
+  background: transparent;
+  font: inherit;
+  color: var(--aui-muted);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.ks-link:hover {
+  color: var(--ink);
+}
