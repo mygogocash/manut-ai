@@ -20,7 +20,8 @@ describe("pairing a phone", () => {
     expect(outcome).toBe("paired");
     expect(h.views.map((v) => v.phase)).toEqual(["showing", "checking", "code", "finishing", "paired"]);
     const phones = h.remote.snapshot().phones;
-    expect(phones).toEqual([{ id: phone.deviceId, name: "iPhone, Safari", pairedAt: h.clock.now, lastSeen: h.clock.now, connected: false, push: false }]);
+    // A new pairing is Answer, as every phone paired before item 108b is.
+    expect(phones).toEqual([{ id: phone.deviceId, name: "iPhone, Safari", pairedAt: h.clock.now, lastSeen: h.clock.now, connected: false, push: false, grant: { level: "answer", terminal: false, manage: false } }]);
     // The keychain holds the phone, and the relay lets it in with its own door; the pairing door is revoked.
     expect(h.keyring.doc()?.devices.map((d) => d.id)).toEqual([phone.deviceId]);
     expect([...h.relay.devices.keys()]).toEqual([phone.deviceId]);

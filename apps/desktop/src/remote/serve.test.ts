@@ -3,8 +3,9 @@
 // one-use challenge the phone's passkey answered for that device, that ask, the revision it saw and Allow once.
 import { DecisionChallenges, type StoredPasskey, decisionChallenge, fromBase64Url, toBase64Url, verifyPasskeyRegistration } from "@manut/remote-channel";
 import { describe, expect, it } from "vitest";
+import { DEFAULT_GRANT, type Grant, REQUEST_TABLE, STAYS_ON_MACHINE } from "./levels";
 import type { SourceApproval } from "./project";
-import { type ServeDeps, Server, STAYS_ON_MAC } from "./serve";
+import { REQUESTS, type ServeDeps, Server } from "./serve";
 import { FakeChats } from "./testkit/chats";
 import { RP } from "./testkit/harness";
 import { TestAuthenticator } from "./testkit/phone";
@@ -40,8 +41,9 @@ const secondApproval: SourceApproval = {
   choices: ["once", "deny"],
 };
 
-/** A Mac's server over chats a test controls, with two paired phones. Both have opened "buddy" (so they were shown its
- *  asks at revision 1), unless `open` is false. */
+/** A Mac's server over chats a test controls, with two paired phones at Answer, as every phone paired before item 108b
+ *  is. Both have opened "buddy" (so they were shown its asks at revision 1), unless `open` is false. `levels` holds what
+ *  each phone's record says it may do; a phone missing from it has a record this Mac cannot read. */
 async function setup(options: { open?: boolean; notify?: ServeDeps["notify"] } = {}) {
   const chats = new FakeChats();
   chats.update("buddy", (items) => [...items, secondApproval]);
@@ -52,6 +54,10 @@ async function setup(options: { open?: boolean; notify?: ServeDeps["notify"] } =
   const passkeys = new Map<string, StoredPasskey>();
   for (const [id, a] of authenticators) passkeys.set(id, await stored(a));
   const paired = new Set([PHONE, OTHER]);
+  const levels = new Map<string, Grant>([
+    [PHONE, DEFAULT_GRANT],
+    [OTHER, DEFAULT_GRANT],
+  ]);
   const pushed: { device: string; message: Record<string, unknown> }[] = [];
   let now = 1_800_000_000_000;
   let onSeen: (() => void) | null = null;
@@ -65,6 +71,7 @@ async function setup(options: { open?: boolean; notify?: ServeDeps["notify"] } =
       phones: {
         has: (id) => paired.has(id),
         passkey: (id) => passkeys.get(id),
+        grant: (id) => levels.get(id),
         seen: async (id, _at, signCount) => {
           onSeen?.();
           const known = passkeys.get(id);
@@ -151,6 +158,7 @@ async function setup(options: { open?: boolean; notify?: ServeDeps["notify"] } =
     restart: () => (server = start()),
     challenges,
     paired,
+    levels,
     pushed,
     send,
     allow,
@@ -220,10 +228,10 @@ describe("the six requests", () => {
 
   it("refuses everything else by name, and does nothing for it", async () => {
     const s = await setup();
-    for (const name of STAYS_ON_MAC) {
+    for (const name of STAYS_ON_MACHINE) {
       expect(await s.send(PHONE, { t: name, chat: "buddy", ask: "req-1" })).toMatchObject({ t: "refused", request: name, reason: "stays_on_mac" });
     }
-    for (const name of ["send", "mode", "diff", "files", "delete", "push", "__proto__", "constructor", "toString", "LIST"]) {
+    for (const name of ["send", "start", "status", "diff", "files", "delete", "push", "__proto__", "constructor", "toString", "LIST"]) {
       expect(await s.send(PHONE, { t: name, chat: "buddy" })).toMatchObject({ t: "refused", reason: "unknown_request" });
     }
     // Not JSON, not an object, no number id, no name: malformed, naming nothing.
@@ -644,5 +652,141 @@ describe("the revision a phone was shown", () => {
     s.server.left(OTHER);
     expect(await s.allow(PHONE, { chat: "buddy", ask: "req-1", revision: 1 })).toMatchObject({ t: "done" });
     expect(await s.answer(PHONE, { chat: "buddy", ask: "q-1", revision: 1 }, { answer: "Friday" })).toMatchObject({ t: "done" });
+  });
+});
+
+describe("levels (item 108b)", () => {
+  const WATCH: Grant = { level: "watch", terminal: false, manage: false };
+  const EVERYTHING: Grant = { level: "work", terminal: true, manage: true };
+  /** The store actions that settle something on the Mac's behalf from a phone: an Allow or an answer. */
+  const settled = (s: Awaited<ReturnType<typeof setup>>) => s.chats.done.filter((d) => d.action === "allowOnce" || d.action === "answer");
+
+  it("serves the seven requests it served before and no more, each of them a request of the table", async () => {
+    expect([...REQUESTS].sort()).toEqual(["allow", "catchup", "list", "notify", "open", "reply", "stop"]);
+    for (const name of REQUESTS) expect(REQUEST_TABLE.has(name), name).toBe(true);
+    // Every other name of the table is refused as before, at every level, until a later phase serves it.
+    const s = await setup();
+    for (const grant of [WATCH, DEFAULT_GRANT, EVERYTHING]) {
+      s.levels.set(PHONE, grant);
+      for (const name of [...REQUEST_TABLE.keys()].filter((n) => !(REQUESTS as readonly string[]).includes(n))) {
+        expect(await s.send(PHONE, { t: name, chat: "buddy" }), `${grant.level} ${name}`).toMatchObject({ t: "refused", request: name, reason: "unknown_request" });
+      }
+    }
+    expect(s.chats.done).toEqual([]);
+  });
+
+  it("lets a Watch phone list, open, catch up, say No, stop and give its push address", async () => {
+    const asked: string[] = [];
+    const s = await setup({ notify: (device) => (asked.push(device), null) });
+    s.levels.set(PHONE, WATCH);
+    expect(await s.send(PHONE, { t: "list" })).toMatchObject({ t: "chats" });
+    const opened = await s.send(PHONE, { t: "open", chat: "buddy" });
+    expect(opened).toMatchObject({ t: "chat", view: { chat: "buddy" } });
+    expect(await s.send(PHONE, { t: "catchup", chat: "buddy", cursor: opened.cursor })).toMatchObject({ t: "events" });
+    expect(await s.send(PHONE, { t: "reply", chat: "buddy", ask: "req-2", revision: 1, no: true })).toMatchObject({ t: "done" });
+    expect(await s.send(PHONE, { t: "stop", chat: "buddy" })).toMatchObject({ t: "done" });
+    expect(await s.send(PHONE, { t: "notify", endpoint: null })).toMatchObject({ t: "done" });
+    expect(s.chats.done).toEqual([
+      { action: "decline", chat: "buddy", ask: "req-2", by: PHONE },
+      { action: "stop", chat: "buddy" },
+    ]);
+    expect(asked).toEqual([PHONE]);
+  });
+
+  it("refuses a Watch phone Allow once and an answer, whole: no challenge, nothing settled", async () => {
+    const s = await setup();
+    s.levels.set(PHONE, WATCH);
+    expect(await s.send(PHONE, { t: "allow", chat: "buddy", ask: "req-1", revision: 1 })).toEqual({ t: "refused", id: expect.any(Number), request: "allow", reason: "level" });
+    expect(await s.send(PHONE, { t: "reply", chat: "buddy", ask: "q-1", revision: 1, answer: "Friday" })).toMatchObject({ t: "refused", request: "reply", reason: "level" });
+    // Not as a No either: one that also carries an answer is an answer.
+    expect(await s.send(PHONE, { t: "reply", chat: "buddy", ask: "q-1", revision: 1, no: true, answer: "Friday" })).toMatchObject({ reason: "level" });
+    expect(await s.send(PHONE, { t: "reply", chat: "buddy", ask: "req-1", revision: 1, no: true, answers: { a: "yes" } })).toMatchObject({ reason: "level" });
+    // A No to a question is no answer at all.
+    expect(await s.send(PHONE, { t: "reply", chat: "buddy", ask: "q-1", revision: 1, no: true })).toMatchObject({ reason: "malformed" });
+    // A step two sent straight away, with a passkey answer, is refused before it is read.
+    const madeUp = { challengeId: toBase64Url(new Uint8Array(32).fill(4)), credentialId: "AA", clientDataJSON: "AA", authenticatorData: "AA", signature: "AA" };
+    expect(await s.send(PHONE, { t: "allow", chat: "buddy", ask: "req-1", revision: 1, option: "once", answer: madeUp })).toMatchObject({ reason: "level" });
+    expect(await s.send(PHONE, { t: "reply", chat: "buddy", ask: "q-1", revision: 1, answer: "Friday", passkey: madeUp })).toMatchObject({ reason: "level" });
+    // The whole two steps, as a phone would make them: refused at the first.
+    expect(await s.allow(PHONE, { chat: "buddy", ask: "req-1", revision: 1 })).toMatchObject({ reason: "level" });
+    expect(await s.answer(PHONE, { chat: "buddy", ask: "q-1", revision: 1 }, { answer: "Friday" })).toMatchObject({ reason: "level" });
+    expect(s.challenges.size).toBe(0);
+    expect(s.chats.done).toEqual([]);
+    // The other phone, still at Answer, is not held back by it.
+    expect(await s.allow(OTHER, { chat: "buddy", ask: "req-1", revision: 1 })).toMatchObject({ t: "done" });
+    expect(settled(s)).toEqual([{ action: "allowOnce", chat: "buddy", ask: "req-1", by: OTHER }]);
+  });
+
+  it("lets an Answer phone do exactly what a phone did before, and Work with every permission no more", async () => {
+    for (const grant of [DEFAULT_GRANT, EVERYTHING]) {
+      const s = await setup();
+      s.levels.set(PHONE, grant);
+      expect(await s.allow(PHONE, { chat: "buddy", ask: "req-1", revision: 1 })).toMatchObject({ t: "done" });
+      expect(await s.send(PHONE, { t: "reply", chat: "buddy", ask: "req-2", revision: 1, no: true })).toMatchObject({ t: "done" });
+      expect(await s.answer(PHONE, { chat: "buddy", ask: "q-1", revision: 1 }, { answer: "Friday" })).toMatchObject({ t: "done" });
+      expect(await s.send(PHONE, { t: "stop", chat: "buddy" })).toMatchObject({ t: "done" });
+      expect(s.chats.done.map((d) => d.action), grant.level).toEqual(["allowOnce", "decline", "answer", "stop"]);
+      for (const name of ["start", "send", "term_open", "update", "set_level", "always", "dial"]) {
+        expect((await s.send(PHONE, { t: name, chat: "buddy" })).t, `${grant.level} ${name}`).toBe("refused");
+      }
+      expect(s.chats.done).toHaveLength(4);
+    }
+  });
+
+  it("reads no level a request names: only the record's, by the channel's device id", async () => {
+    const s = await setup();
+    s.levels.set(PHONE, WATCH);
+    for (const claim of [{ level: "answer" }, { level: "work", terminal: true, manage: true }, { grant: EVERYTHING }, { device: OTHER }, { deviceId: OTHER }]) {
+      expect(await s.send(PHONE, { t: "allow", chat: "buddy", ask: "req-1", revision: 1, ...claim }), JSON.stringify(claim)).toMatchObject({ reason: "level" });
+      expect(await s.send(PHONE, { t: "reply", chat: "buddy", ask: "q-1", revision: 1, answer: "Friday", ...claim }), JSON.stringify(claim)).toMatchObject({ reason: "level" });
+    }
+    // And a phone at Answer is not narrowed by naming Watch.
+    expect(await s.send(OTHER, { t: "allow", chat: "buddy", ask: "req-1", revision: 1, level: "watch" })).toMatchObject({ t: "challenge" });
+    expect(settled(s)).toEqual([]);
+  });
+
+  it("refuses everything to a phone whose record holds no level this Mac can read", async () => {
+    const s = await setup();
+    s.levels.delete(PHONE);
+    for (const request of [{ t: "list" }, { t: "open", chat: "buddy" }, { t: "stop", chat: "buddy" }, { t: "reply", chat: "buddy", ask: "req-2", revision: 1, no: true }, { t: "allow", chat: "buddy", ask: "req-1", revision: 1 }]) {
+      expect(await s.send(PHONE, request), request.t).toMatchObject({ t: "refused", reason: "unknown_device" });
+    }
+    expect(s.challenges.size).toBe(0);
+    expect(s.chats.done).toEqual([]);
+  });
+
+  it("refuses every name that stays on the machine at every level", async () => {
+    const s = await setup();
+    for (const grant of [WATCH, DEFAULT_GRANT, EVERYTHING]) {
+      s.levels.set(PHONE, grant);
+      for (const name of STAYS_ON_MACHINE) {
+        expect(await s.send(PHONE, { t: name, chat: "buddy", ask: "req-1" }), `${grant.level} ${name}`).toMatchObject({ t: "refused", request: name, reason: "stays_on_mac" });
+      }
+    }
+    expect(s.chats.done).toEqual([]);
+  });
+
+  it("applies a level at once to the phone's next request, a step two included", async () => {
+    const s = await setup();
+    const challenge = await s.send(PHONE, { t: "allow", chat: "buddy", ask: "req-1", revision: 1 });
+    expect(challenge).toMatchObject({ t: "challenge" });
+    s.levels.set(PHONE, WATCH);
+    const signed = await decisionChallenge(fromBase64Url(String(challenge.nonce)), { deviceId: PHONE, requestId: JSON.stringify(["buddy", "req-1"]), revision: 1, optionId: "once" });
+    const passkey = await s.authenticators.get(PHONE)!.get(RP, signed);
+    const answer = { challengeId: String(challenge.nonce), credentialId: toBase64Url(passkey.credentialId), clientDataJSON: toBase64Url(passkey.clientDataJSON), authenticatorData: toBase64Url(passkey.authenticatorData), signature: toBase64Url(passkey.signature) };
+    expect(await s.send(PHONE, { t: "allow", chat: "buddy", ask: "req-1", revision: 1, option: "once", answer })).toMatchObject({ reason: "level" });
+    expect(s.chats.done).toEqual([]);
+    // Given Answer again, it allows as before.
+    s.levels.set(PHONE, DEFAULT_GRANT);
+    expect(await s.allow(PHONE, { chat: "buddy", ask: "req-1", revision: 1 })).toMatchObject({ t: "done" });
+  });
+
+  it("acts on nothing once the phone was narrowed while its passkey answer was checked", async () => {
+    const s = await setup();
+    s.whenSeen(() => s.levels.set(PHONE, WATCH));
+    expect(await s.allow(PHONE, { chat: "buddy", ask: "req-1", revision: 1 })).toMatchObject({ reason: "level" });
+    s.levels.set(PHONE, DEFAULT_GRANT);
+    expect(await s.answer(PHONE, { chat: "buddy", ask: "q-1", revision: 1 }, { answer: "Friday" })).toMatchObject({ reason: "level" });
+    expect(s.chats.done).toEqual([]);
   });
 });

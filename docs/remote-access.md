@@ -15,7 +15,8 @@ A paired phone watches Buddy and Kit's lanes live from anywhere, and answers the
 to a question needs Face ID.
 
 It covers: network access (through the relay, not a port on the local network), approval of new devices (always on),
-permissions (one fixed set for every phone), and notifications with no content in them (the last phase).
+permissions (one fixed set for every phone; since item 108b each phone has a level, Watch or Answer, set in Settings,
+below), and notifications with no content in them (the last phase).
 
 What a person does:
 
@@ -150,8 +151,12 @@ needs a QR reader, which the repository does not have: the browser's own is used
   interview, then again with the same answer and the passkey's answer to the challenge as `passkey`), `stop`
   (`chat`). The Mac answers `chats`, `chat` (a view and a cursor), `events`, `challenge`, `done` or `refused`
   (`request`, `reason`), and pushes `event` for each change of a chat the phone has open. Anything else is refused by
-  name: `stays_on_mac` for Always allow, the session, a folder, the dial, pairing, Unpair, the switch and the consent;
-  `unknown_request` for the rest. The challenge binds the device, `["<chat>","<ask>"]` as JSON, the revision and the
+  name: `stays_on_mac` for Always allow, the session, a folder, the dial, a mode, pairing, Unpair, the switch, the
+  consent, a road, a sign-in, the vault and Settings (`STAYS_ON_MACHINE` in `levels.ts` since item 108b);
+  `unknown_request` for the rest, the requests later phases of item 108 will serve included. Since item 108b each phone
+  holds a level in its record: Watch may `list`, `open`, `catchup`, say No, `stop` and send `notify`; Answer, which every
+  phone paired before then holds and every new pairing gets, may also `allow` and answer. A request the phone's level
+  does not cover is refused whole as `level`, with no challenge and nothing settled (`docs/multi-machine.md`, part 11). The challenge binds the device, `["<chat>","<ask>"]` as JSON, the revision and the
   choice: `once` for an Allow, and for an answer `answer:` with a digest of the exact words (the package's
   `answerOption`), so the words sent, the words challenged and the words the passkey signed must all be the same.
 - **Answers need Face ID too** (third review, 26 Nov 2026). An answer to a question steers the agent as much as an
@@ -515,8 +520,12 @@ installed iPhone web app opens the socket, what Android Chrome asks, and how fas
 - **An approval from the phone is as trustworthy as one on the Mac.** It goes through the same `settleApproval`, on the
   same revision, with the whole words shown, and needs two things only that phone holds: K, and Face ID or the passcode
   at that moment.
-- **Stays on the Mac:** the dial, Always allow, Allow this folder, pairing, Unpair, the switch, and any ask the card
-  marks as needing an app update.
+- **Stays on the Mac:** the dial, Always allow, Allow this folder, a lane's mode, pairing, Unpair, the switch and the
+  roads, the consent sheets, the agents' sign-ins, the credential vault, Settings, and any ask the card marks as needing
+  an app update.
+- **Each phone's level** (item 108b): Settings, Sharing and access sets each paired phone to Watch (it sees the chats, says
+  No and stops a turn) or Answer (also Allow once and answers, each with Face ID). The Mac reads it from the phone's own
+  record for every request, never from what the phone sends, and it applies to the phone's next request.
 - **A lost or stolen phone** can read the chats, say No and Stop. It cannot Allow, or answer an agent's question,
   without Face ID or the passcode.
   Unpair on the Mac sends `revoke`: the relay closes that phone's door and the Mac deletes its K. A copied token opens

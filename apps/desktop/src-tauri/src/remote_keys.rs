@@ -24,6 +24,13 @@
 //! still gets K and can still add a phone; what it can no longer do is read the relay key, or read K or add a phone with
 //! one plain call while the switch is off. macOS only for now: elsewhere the commands answer `unavailable`, and the page
 //! keeps nothing.
+//!
+//! Each phone's record also says what it may do from afar (item 108b, src/remote/levels.ts): a level, Watch, Answer or
+//! Work, and Terminal and Manage, which only Work may hold. A record kept before that item has none and reads as Answer,
+//! exactly what a phone could do then, and Answer is written as no level at all, so a build from before the item still
+//! reads every record whose phone was never narrowed. A level this build does not know is refused with the whole
+//! document, as any field it cannot read is: never read as Answer or anything wider. The page checks the level for every
+//! request; the shell only keeps it.
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -56,7 +63,30 @@ impl Drop for HostKey {
     }
 }
 
-/// One paired phone. `k` is wiped when dropped; nothing else in it is secret.
+/// What a phone may do from afar (item 108b): each level has everything of the one before. Answer is the default, for a
+/// record kept before the level existed and for every new pairing.
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum Level {
+    Watch,
+    #[default]
+    Answer,
+    Work,
+}
+
+impl Level {
+    fn is_answer(&self) -> bool {
+        *self == Level::Answer
+    }
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
+/// One paired phone. `k` is wiped when dropped; nothing else in it is secret. `level`, `terminal` and `manage` are left
+/// out when they are the default (Answer, neither permission), so a record of a phone never narrowed reads in a build
+/// from before them.
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct Device {
@@ -69,6 +99,12 @@ pub struct Device {
     pub credential_id: String,
     pub public_key: String,
     pub sign_count: u32,
+    #[serde(default, skip_serializing_if = "Level::is_answer")]
+    pub level: Level,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub terminal: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub manage: bool,
 }
 
 impl Drop for Device {
@@ -125,8 +161,14 @@ pub fn valid_host(host: &HostKey) -> bool {
     is_b64url(&host.d, 43, 43) && is_b64url(&host.x, 43, 43) && is_b64url(&host.y, 43, 43)
 }
 
+/// Terminal and Manage only beside Work.
+fn valid_grant(level: Level, terminal: bool, manage: bool) -> bool {
+    level == Level::Work || (!terminal && !manage)
+}
+
 pub fn valid_device(device: &Device) -> bool {
-    is_device_id(&device.id)
+    valid_grant(device.level, device.terminal, device.manage)
+        && is_device_id(&device.id)
         && is_name(&device.name)
         && device.last_seen.is_none_or(|seen| seen <= u64::MAX / 2)
         && is_hex64(&device.k)
@@ -167,6 +209,9 @@ struct PageDevice<'a> {
     credential_id: &'a str,
     public_key: &'a str,
     sign_count: u32,
+    level: Level,
+    terminal: bool,
+    manage: bool,
 }
 
 #[derive(Serialize)]
@@ -196,6 +241,9 @@ pub fn page_text(doc: &Doc, with_k: bool) -> Result<Zeroizing<String>, &'static 
                 credential_id: &d.credential_id,
                 public_key: &d.public_key,
                 sign_count: d.sign_count,
+                level: d.level,
+                terminal: d.terminal,
+                manage: d.manage,
             })
             .collect(),
     };
@@ -426,6 +474,18 @@ pub fn with_touch(mut doc: Doc, id: &str, last_seen: u64, sign_count: u32) -> Re
     Ok(doc)
 }
 
+/// Sets what a phone may do from afar. Refused for a phone not kept, and for Terminal or Manage without Work.
+pub fn with_level(mut doc: Doc, id: &str, level: Level, terminal: bool, manage: bool) -> Result<Doc, &'static str> {
+    if !valid_grant(level, terminal, manage) {
+        return Err("invalid");
+    }
+    let device = doc.devices.iter_mut().find(|d| d.id == id).ok_or("not_found")?;
+    device.level = level;
+    device.terminal = terminal;
+    device.manage = manage;
+    Ok(doc)
+}
+
 /// Forgets a phone, K and passkey with it. Forgetting one that is not there is not an error.
 pub fn without_device(mut doc: Doc, id: &str) -> Doc {
     doc.devices.retain(|d| d.id != id);
@@ -479,6 +539,12 @@ pub fn add_device(device: Device) -> Result<(), String> {
 pub fn touch_device(id: &str, last_seen: u64, sign_count: u32) -> Result<(), String> {
     gate().require_on()?;
     change(|doc| with_touch(doc, id, last_seen, sign_count))
+}
+
+/// Sets what a phone may do from afar, switch on or off, as Unpair is: a level is only what the person at this Mac gave,
+/// and narrowing one must never wait on the switch.
+pub fn set_level(id: &str, level: Level, terminal: bool, manage: bool) -> Result<(), String> {
+    change(|doc| with_level(doc, id, level, terminal, manage))
 }
 
 /// Runs one change on the held document and writes it back.
@@ -655,6 +721,9 @@ mod tests {
             credential_id: format!("credential-{n}"),
             public_key: "B".repeat(87),
             sign_count: 0,
+            level: Level::Answer,
+            terminal: false,
+            manage: false,
         }
     }
 
@@ -687,6 +756,73 @@ mod tests {
         }
         // Names in other scripts are kept as they are.
         assert!(valid_device(&device_with(1, |d| { d.name = "สมชาย の iPhone".into(); })));
+    }
+
+    /// A record kept before item 108b, as that build wrote it: no level, terminal or manage.
+    const OLD_RECORD: &str = r#"{"v":1,"host":null,"devices":[{"id":"00000000-0000-4000-8000-000000000001","name":"Phone 1","pairedAt":1800000000000,"lastSeen":null,"k":"0101010101010101010101010101010101010101010101010101010101010101","tokenHash":"okZozeX-5QrWGv0EoFHBLlAgh6-UCySRqSr_W8iAhqw","credentialId":"credential-1","publicKey":"BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB","signCount":0}]}"#;
+
+    #[test]
+    fn reads_a_record_kept_before_levels_as_answer_and_writes_answer_as_it_was() {
+        let doc = parse(OLD_RECORD).expect("an old record is read");
+        assert_eq!((doc.devices[0].level, doc.devices[0].terminal, doc.devices[0].manage), (Level::Answer, false, false));
+        assert_eq!(doc.devices[0], device(1));
+        // Written back unchanged, so a build from before levels still reads it.
+        assert_eq!(write_text(&doc).unwrap().as_str(), OLD_RECORD);
+        // A new pairing is Answer, and is kept with no level either.
+        let text = write_text(&with_device(Doc::default(), device(2)).unwrap()).unwrap();
+        assert!(!text.contains("level") && !text.contains("terminal") && !text.contains("manage"), "{}", text.as_str());
+    }
+
+    #[test]
+    fn keeps_a_level_and_reads_it_back() {
+        let id = device(1).id.clone();
+        let doc = with_device(Doc::default(), device(1)).unwrap();
+        let watch = with_level(doc.clone(), &id, Level::Watch, false, false).unwrap();
+        let text = write_text(&watch).unwrap();
+        assert!(text.contains(r#""level":"watch""#) && !text.contains("terminal"), "{}", text.as_str());
+        assert_eq!(parse(&text).unwrap().devices[0].level, Level::Watch);
+        let all = with_level(doc.clone(), &id, Level::Work, true, true).unwrap();
+        let back = parse(&write_text(&all).unwrap()).unwrap();
+        assert_eq!((back.devices[0].level, back.devices[0].terminal, back.devices[0].manage), (Level::Work, true, true));
+        // Back to Answer is no level at all again.
+        let answer = with_level(watch, &id, Level::Answer, false, false).unwrap();
+        assert_eq!(answer, doc);
+        // The page's read always says the level, so the page never guesses it.
+        let page = page_text(&doc, false).unwrap();
+        assert!(page.contains(r#""level":"answer","terminal":false,"manage":false"#), "{}", page.as_str());
+        assert!(page_text(&all, false).unwrap().contains(r#""level":"work","terminal":true,"manage":true"#));
+        // Refused for a phone not kept, and for a permission without Work.
+        assert_eq!(with_level(doc.clone(), &device(2).id, Level::Watch, false, false), Err("not_found"));
+        assert_eq!(with_level(doc.clone(), &id, Level::Answer, true, false), Err("invalid"));
+        assert_eq!(with_level(doc, &id, Level::Watch, false, true), Err("invalid"));
+    }
+
+    #[test]
+    fn refuses_a_level_it_does_not_know_rather_than_widening_it() {
+        let watch = OLD_RECORD.replace(r#""signCount":0"#, r#""signCount":0,"level":"watch""#);
+        assert_eq!(parse(&watch).unwrap().devices[0].level, Level::Watch);
+        for bad in [
+            r#""level":"admin""#,
+            r#""level":"Answer""#,
+            r#""level":"owner""#,
+            r#""level":null"#,
+            r#""level":2"#,
+            r#""terminal":true"#,
+            r#""level":"answer","manage":true"#,
+            r#""level":"work","terminal":"yes""#,
+            r#""grant":"work""#,
+        ] {
+            let text = OLD_RECORD.replace(r#""signCount":0"#, &format!(r#""signCount":0,{bad}"#));
+            assert_eq!(parse(&text), None, "{bad}");
+        }
+        // The page's command takes only a level this build knows: anything else does not deserialize.
+        assert_eq!(serde_json::from_str::<Level>(r#""work""#).ok(), Some(Level::Work));
+        for bad in [r#""admin""#, r#""WATCH""#, "null", "1", r#""""#] {
+            assert!(serde_json::from_str::<Level>(bad).is_err(), "{bad}");
+        }
+        // Nor does a document hold Terminal or Manage without Work.
+        let wrong = Doc { devices: vec![device_with(1, |d| { d.terminal = true; })], ..Doc::default() };
+        assert!(write_text(&wrong).is_err());
     }
 
     #[test]
@@ -850,7 +986,7 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     mod keychain {
-        use super::super::{mac, parse, with_device, with_host, with_touch, without_device, write_text, ACCOUNT};
+        use super::super::{mac, parse, with_device, with_host, with_level, with_touch, without_device, write_text, Level, ACCOUNT};
         /// What the item keeps, whole and checked (None for a damaged one), for the tests that look at what was kept;
         /// the page's own read is `mac::read`.
         fn read(keychain: &security_framework::os::macos::keychain::SecKeychain) -> Result<Option<zeroize::Zeroizing<String>>, &'static str> {
@@ -931,6 +1067,16 @@ mod tests {
             let twin = device_with(1, |d| { d.id = device(2).id.clone(); });
             assert_eq!(mac::change(&s.keychain, |doc| with_device(doc, twin)), Err("credential_taken"));
             assert_eq!(read_item(&s.keychain, ACCOUNT).unwrap().unwrap().as_str(), before.as_str());
+        }
+
+        #[test]
+        fn keeps_a_phone_level_in_the_item() {
+            let s = scratch("remote-keys-level");
+            mac::change(&s.keychain, |doc| with_device(doc, device(1))).unwrap();
+            mac::change(&s.keychain, |doc| with_level(doc, &device(1).id, Level::Watch, false, false)).unwrap();
+            assert_eq!(parse(&read(&s.keychain).unwrap().unwrap()).unwrap().devices[0].level, Level::Watch);
+            assert!(mac::read(&s.keychain, false).unwrap().unwrap().contains(r#""level":"watch""#));
+            assert_eq!(mac::change(&s.keychain, |doc| with_level(doc, &device(1).id, Level::Answer, true, false)), Err("invalid"));
         }
 
         #[test]

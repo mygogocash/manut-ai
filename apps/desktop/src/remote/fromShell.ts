@@ -35,6 +35,7 @@ export function shellKeyring(): Keyring {
     setPairing: (open) => invoke<void>("remote_pairing", { open }),
     addDevice: (device) => invoke<void>("remote_keys_add_device", { device }),
     touchDevice: (id, lastSeen, signCount) => invoke<void>("remote_keys_touch_device", { id, lastSeen, signCount }),
+    setLevel: (id, grant) => invoke<void>("remote_keys_set_level", { id, level: grant.level, terminal: grant.terminal, manage: grant.manage }),
     removeDevice: (id) => invoke<void>("remote_keys_remove_device", { id }),
   };
 }

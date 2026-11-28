@@ -15,9 +15,16 @@
 //             with a push that carries nothing. It needs no passkey: it acts on nothing of the Mac's and reaches no one
 //             but the phone that asked, and only an address on a known push service is taken (`push_address`).
 //
-// Always allow, Allow for the session, Kit's dial, pairing, Unpair and the switch stay on the Mac whatever a phone sends
-// (`STAYS_ON_MAC`), and an ask the card marks as needing an app update is answered by nothing. Who is speaking is always
-// the channel's own device id (the package's `channel.deviceId`), never anything the relay or the request says.
+// Always allow, Allow for the session, Kit's dial, a mode, pairing, Unpair, a road, the switch, the consent, a sign-in,
+// the vault and Settings stay on the Mac whatever a phone sends (levels.ts's `STAYS_ON_MACHINE`), and an ask the card
+// marks as needing an app update is answered by nothing. Who is speaking is always the channel's own device id (the
+// package's `channel.deviceId`), never anything the relay or the request says.
+//
+// Each phone holds a level (item 108b, levels.ts): Watch may list, open, catch up, say No, stop and give its push
+// address; Answer, which every phone paired before that item holds, may also Allow once and answer. Every request is
+// checked against the level in that phone's own record, read by the channel's device id, before anything is done, and
+// again right before anything is settled, as Unpair is; a level named in a hello or a request is never read. A request
+// the level does not cover is refused whole as `level`, with no challenge issued and nothing settled.
 //
 // Messages in the channel are JSON. Every request carries a number `id` the phone chose, and every answer names it:
 //   phone -> Mac   {"t":"allow","id",chat,ask,revision}, then again with "option":"once" and "answer":<passkey answer>
@@ -43,28 +50,17 @@ import {
   toBase64Url,
 } from "@manut/remote-channel";
 import { type Cursor, EventJournal } from "./journal";
+import { type Grant, type Rule, STAYS_ON_MACHINE, covers, ruleFor } from "./levels";
 import { type AskView, type ChatEvent, type ChatSource, type ChatView, Projector, askBinding, chatEvents, chatRow } from "./project";
 
-/** The seven requests a phone may make. */
+/** The seven requests a phone may make. Every other name of levels.ts's table is refused as `unknown_request` until a
+ *  later phase serves it, so a phone sees no difference before then. */
 export const REQUESTS = ["list", "open", "catchup", "allow", "reply", "stop", "notify"] as const;
 export type RequestName = (typeof REQUESTS)[number];
 
-/** Asked for by name from a phone, and refused as staying on the Mac. */
-export const STAYS_ON_MAC: ReadonlySet<string> = new Set([
-  "always",
-  "allow_always",
-  "session",
-  "allow_session",
-  "folder",
-  "dial",
-  "pair",
-  "unpair",
-  "switch",
-  "consent",
-]);
-
-/** Why a request was refused. `stays_on_mac` and `unknown_request` name a request the phone may never make; the rest
- *  say why this one was not done; and every `DecisionChallenges.verify` refusal is passed on by its own name. */
+/** Why a request was refused. `stays_on_mac` and `unknown_request` name a request the phone may never make; `level`
+ *  one its level does not cover; the rest say why this one was not done; and every `DecisionChallenges.verify` refusal
+ *  is passed on by its own name. */
 export type Refusal = string;
 
 /** What the Mac does for a phone, each through the same store action its own buttons use (fromStore.ts). Each answers
@@ -82,10 +78,12 @@ export interface ChatSources {
   get(chat: string): ChatSource | null;
 }
 
-/** What serving needs of the paired phones: each one's passkey and a place to note it was seen. */
+/** What serving needs of the paired phones: each one's passkey, what it may do, and a place to note it was seen. */
 export interface PhoneRecords {
   has(id: string): boolean;
   passkey(id: string): StoredPasskey | undefined;
+  /** The level its own record holds; undefined when there is no record this Mac can read, which is refused everything. */
+  grant(id: string): Grant | undefined;
   seen(id: string, at: number, signCount?: number): Promise<void>;
 }
 
@@ -172,9 +170,14 @@ export class Server {
     const name = typeof request.t === "string" ? request.t : null;
     const refuse = (reason: Refusal): Message[] => [{ t: "refused", id, request: name !== null && /^[a-z_.]{1,32}$/.test(name) ? name : null, reason }];
     if (name === null || id === null) return refuse("malformed");
-    if (!(REQUESTS as readonly string[]).includes(name)) return refuse(STAYS_ON_MAC.has(name) ? "stays_on_mac" : "unknown_request");
+    if (!(REQUESTS as readonly string[]).includes(name)) return refuse(STAYS_ON_MACHINE.has(name) ? "stays_on_mac" : "unknown_request");
     // A phone unpaired while its session was open is answered by nothing: the host closes its channels too.
     if (!this.#deps.phones.has(deviceId)) return refuse("unknown_device");
+    // What it may do, from its own record, before anything is looked up, challenged or settled.
+    const rule = ruleFor(name, request);
+    if (rule === null) return refuse("unknown_request");
+    const allowed = this.#covered(deviceId, rule);
+    if (allowed !== null) return refuse(allowed);
     switch (name as RequestName) {
       case "list":
         return [{ t: "chats", id, chats: this.#deps.chats.list().map(chatRow) }];
@@ -183,22 +186,31 @@ export class Server {
       case "catchup":
         return this.#catchUp(deviceId, id, request, refuse);
       case "allow":
-        return this.#allow(deviceId, id, request, refuse);
+        return this.#allow(deviceId, id, request, refuse, rule);
       case "reply":
-        return this.#reply(deviceId, id, request, refuse);
+        return this.#reply(deviceId, id, request, refuse, rule);
       case "stop":
-        return this.#stop(deviceId, id, request, refuse);
+        return this.#stop(deviceId, id, request, refuse, rule);
       case "notify":
-        return this.#notify(deviceId, id, request, refuse);
+        return this.#notify(deviceId, id, request, refuse, rule);
     }
   }
 
+  /** Whether the device's own record covers `rule`: null when it does, `level` when it does not, and `unknown_device`
+   *  for a record this Mac cannot read, which is never read as Answer. */
+  #covered(deviceId: string, rule: Rule): Refusal | null {
+    const grant = this.#deps.phones.grant(deviceId);
+    if (!grant) return "unknown_device";
+    return covers(grant, rule) ? null : "level";
+  }
+
   /** This phone's push address, or null to take it away: only ever for the device the channel proved. */
-  #notify(deviceId: string, id: number, request: Message, refuse: (r: Refusal) => Message[]): Message[] {
+  #notify(deviceId: string, id: number, request: Message, refuse: (r: Refusal) => Message[], rule: Rule): Message[] {
     const endpoint = request.endpoint;
     if (endpoint !== null && typeof endpoint !== "string") return refuse("malformed");
     if (!this.#deps.notify) return refuse("not_offered");
-    if (!this.#mayAct(deviceId)) return refuse("unknown_device");
+    const may = this.#mayAct(deviceId, rule);
+    if (may !== null) return refuse(may);
     const why = this.#deps.notify(deviceId, endpoint);
     return why === null ? [{ t: "done", id }] : refuse(why);
   }
@@ -255,9 +267,9 @@ export class Server {
     return { source, ask };
   }
 
-  async #allow(deviceId: string, id: number, request: Message, refuse: (r: Refusal) => Message[]): Promise<Message[]> {
+  async #allow(deviceId: string, id: number, request: Message, refuse: (r: Refusal) => Message[], rule: Rule): Promise<Message[]> {
     const option = request.option ?? "once";
-    if (option !== "once") return refuse(typeof option === "string" && STAYS_ON_MAC.has(option) ? "stays_on_mac" : "not_offered");
+    if (option !== "once") return refuse(typeof option === "string" && STAYS_ON_MACHINE.has(option) ? "stays_on_mac" : "not_offered");
     const chat = text(request.chat);
     const askId = text(request.ask);
     const revision = request.revision;
@@ -279,8 +291,10 @@ export class Server {
     return this.#oneAtATime(deviceId, async () => {
       const why = await this.#checkPasskey(deviceId, { chat, askId, revision, optionId: "once" }, request.answer);
       if (why !== null) return refuse(why);
-      // The ask may have moved on while the person looked at Face ID: what is allowed must be what they saw.
-      if (!this.#mayAct(deviceId)) return refuse("unknown_device");
+      // The ask may have moved on while the person looked at Face ID: what is allowed must be what they saw, by a phone
+      // still paired and still at a level that allows it.
+      const may = this.#mayAct(deviceId, rule);
+      if (may !== null) return refuse(may);
       const found = this.#approval(chat, askId);
       if (typeof found === "string") return refuse(found);
       if (found.ask.revision !== revision) return refuse("changed");
@@ -350,7 +364,7 @@ export class Server {
     return given === null ? null : { answer: given, bound: given };
   }
 
-  async #reply(deviceId: string, id: number, request: Message, refuse: (r: Refusal) => Message[]): Promise<Message[]> {
+  async #reply(deviceId: string, id: number, request: Message, refuse: (r: Refusal) => Message[], rule: Rule): Promise<Message[]> {
     const chat = text(request.chat);
     const askId = text(request.ask);
     const source = chat === null ? null : this.#deps.chats.get(chat);
@@ -365,7 +379,8 @@ export class Server {
       if (typeof found === "string") return refuse(found);
       if (request.revision !== found.ask.revision || !this.#projector.wasShown(deviceId, chat, askId, found.ask.revision)) return refuse("changed");
       if (!found.ask.offers.includes("deny")) return refuse("not_offered");
-      if (!this.#mayAct(deviceId)) return refuse("unknown_device");
+      const may = this.#mayAct(deviceId, rule);
+      if (may !== null) return refuse(may);
       const why = await this.#deps.actions.decline(chat, askId, deviceId);
       return why === null ? [{ t: "done", id }] : refuse("not_taken");
     }
@@ -390,7 +405,8 @@ export class Server {
     return this.#oneAtATime(deviceId, async () => {
       const why = await this.#checkPasskey(deviceId, { chat, askId, revision, optionId }, request.passkey);
       if (why !== null) return refuse(why);
-      if (!this.#mayAct(deviceId)) return refuse("unknown_device");
+      const may = this.#mayAct(deviceId, rule);
+      if (may !== null) return refuse(may);
       const found = this.#question(chat, askId);
       if (typeof found === "string") return refuse(found);
       if (found.revision !== revision) return refuse("changed");
@@ -399,19 +415,22 @@ export class Server {
     });
   }
 
-  async #stop(deviceId: string, id: number, request: Message, refuse: (r: Refusal) => Message[]): Promise<Message[]> {
+  async #stop(deviceId: string, id: number, request: Message, refuse: (r: Refusal) => Message[], rule: Rule): Promise<Message[]> {
     const chat = text(request.chat);
     const source = chat === null ? null : this.#deps.chats.get(chat);
     if (!source) return refuse("no_chat");
     if (!source.working) return refuse("no_turn");
-    if (!this.#mayAct(deviceId)) return refuse("unknown_device");
+    const may = this.#mayAct(deviceId, rule);
+    if (may !== null) return refuse(may);
     const why = await this.#deps.actions.stop(source.key);
     return why === null ? [{ t: "done", id }] : refuse("not_taken");
   }
 
-  /** Checked again right before acting: the phone may have been unpaired, or the switch turned off, while this waited. */
-  #mayAct(deviceId: string): boolean {
-    return !this.#closed && this.#deps.phones.has(deviceId);
+  /** Checked again right before acting: the phone may have been unpaired, or narrowed to a level that no longer allows
+   *  this, or the switch turned off, while this waited. Null when it may act; otherwise why not. */
+  #mayAct(deviceId: string, rule: Rule): Refusal | null {
+    if (this.#closed || !this.#deps.phones.has(deviceId)) return "unknown_device";
+    return this.#covered(deviceId, rule);
   }
 
   #advance(chat: string, watched: { view: ChatView; devices: Set<string> }, view: ChatView): { event: ChatEvent; cursor: Cursor }[] {

@@ -11,6 +11,7 @@ import { FakeChats } from "../remote/testkit/chats";
 import { APP_PAGES, inHood } from "./pages";
 import { CONSENT_POINTS, RemoteView, type RemoteViewProps } from "./RemotePage";
 
+const ANSWER = { level: "answer", terminal: false, manage: false } as const;
 const words = (html: string) => html.replace(/<[^>]*>/g, " ").replace(/&#x27;/g, "'").replace(/&quot;/g, '"').replace(/\s+/g, " ");
 const NOW = 1_800_000_000_000;
 const LINK = `https://dev.manut.xyz/app/#pair=${"A".repeat(151)}`;
@@ -118,8 +119,8 @@ describe("Settings › Sharing and access", () => {
 
   it("lists the paired phones with Unpair, and says quietly which one is connected", () => {
     const phones = [
-      { id: "A", name: "Somchai's iPhone", pairedAt: NOW - 86_400_000, lastSeen: NOW, connected: true, push: true },
-      { id: "B", name: "Pixel", pairedAt: NOW, lastSeen: NOW, connected: false, push: false },
+      { id: "A", name: "Somchai's iPhone", pairedAt: NOW - 86_400_000, lastSeen: NOW, connected: true, push: true, grant: ANSWER },
+      { id: "B", name: "Pixel", pairedAt: NOW, lastSeen: NOW, connected: false, push: false, grant: ANSWER },
     ];
     const html = view({ on: true, link: "ready", phones });
     const text = words(html);
@@ -132,6 +133,43 @@ describe("Settings › Sharing and access", () => {
     expect(text).toContain("Somchai's iPhone is connected.");
     expect(words(view({ on: true, link: "ready", phones: phones.map((p) => ({ ...p, connected: true })) }))).toContain("2 phones are connected.");
     expect(view({ on: true, link: "ready", phones: phones.map((p) => ({ ...p, connected: false })) })).not.toContain("remote-connected");
+  });
+});
+
+describe("what each phone may do from afar (item 108b)", () => {
+  const phone = (id: string, name: string, level: "watch" | "answer" | "work") => ({ id, name, pairedAt: NOW, lastSeen: NOW, connected: false, push: false, grant: { ...ANSWER, level } });
+  /** Each phone's level choices as drawn: its label, and each offered level with whether it is the one chosen. */
+  const choices = (html: string) =>
+    [...html.matchAll(/<div class="ui-modes" role="radiogroup" aria-label="([^"]*)" data-testid="remote-level">(.*?)<\/div>/g)].map(([, label, radios]) => [
+      label!.replace(/&#x27;/g, "'"),
+      [...radios!.matchAll(/aria-checked="(true|false)"[^>]*>([^<]*)</g)].map(([, on, word]) => `${word}${on === "true" ? " (chosen)" : ""}`),
+    ]);
+
+  it("shows each phone's level, offers Watch and Answer only, and says what each lets a phone do", () => {
+    const html = view({ on: true, link: "ready", phones: [phone("A", "Somchai's iPhone", "answer"), phone("B", "Pixel", "watch")] });
+    expect(choices(html)).toEqual([
+      ["What Somchai's iPhone can do", ["Watch", "Answer (chosen)"]],
+      ["What Pixel can do", ["Watch (chosen)", "Answer"]],
+    ]);
+    expect(words(html)).not.toContain("Work");
+    const note = words(html);
+    expect(note).toContain("Watch: the phone sees your chats and their asks, can say No and can stop a turn.");
+    expect(note).toContain("Answer: it can also allow once and answer questions, each with Face ID or its passcode.");
+    expect(note).toContain("A change applies to the phone's next request.");
+    // Shown with the switch off too, as the phones are; and no note with no phones.
+    expect(choices(view({ phones: [phone("B", "Pixel", "watch")] }))).toEqual([["What Pixel can do", ["Watch (chosen)", "Answer"]]]);
+    expect(view({ on: true, link: "ready" })).not.toContain("remote-levels-note");
+  });
+
+  it("shows a level it does not offer when a phone's record holds one, so it can be narrowed", () => {
+    expect(choices(view({ on: true, link: "ready", phones: [phone("C", "Mac mini", "work")] }))).toEqual([["What Mac mini can do", ["Watch", "Answer", "Work (chosen)"]]]);
+  });
+
+  it("has its words in every language", () => {
+    for (const l of LANGS) {
+      for (const key of ["rm.level", "rm.level.watch", "rm.level.answer", "rm.level.work", "rm.levels"] as const) expect(DICT[l][key], `${l} ${key}`).toBeTruthy();
+      expect(DICT[l]["rm.level"]).toContain("{name}");
+    }
   });
 });
 
