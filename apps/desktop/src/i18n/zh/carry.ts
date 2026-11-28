@@ -38,4 +38,8 @@ export const carry: Record<keyof typeof en, string> = {
   "carry.ctx.filesMore": "另有 {n} 个",
   "carry.ctx.ask": "正在等待本人回复：{v}",
   "carry.ctx.end": "来自聊天“{title}”的上下文到此结束。",
+  // a note on lines selected in a diff (item 146): where the lines are
+  "carry.at.old": "deleted lines, numbered as before the change",
+  "carry.at.mixed": "across deleted and added lines, numbered after the change",
+  "carry.at.line": "It names where the lines are: {place}",
 };

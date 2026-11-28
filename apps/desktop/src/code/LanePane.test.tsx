@@ -7,6 +7,8 @@ import { renderToString } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setLang } from "../i18n";
 import type { DiffFile } from "../lib/protocol";
+import type { LaneReview } from "./laneFolder";
+import type { PaneScopes } from "./PaneDiff";
 import { emptyLane, laneTests, noteLane, type LaneRecord } from "./lane";
 import { isLaneChat } from "./laneStore";
 import type { LanePreviewProps } from "./LanePreview";
@@ -176,11 +178,11 @@ describe("Diff", () => {
     expect(words(props({ files: [CHECKOUT] }))).not.toContain("Kit has not changed any file yet.");
   });
 
-  it("draws the changes as the timeline draws them: the added and removed lines, and the lines about them", () => {
+  it("draws the changes as the timeline draws them, and numbers the lines: the added and removed lines, and the lines about them", () => {
     const out = html(props({ files: [CHECKOUT] }));
-    expect(out).toContain('class="dv-l add"');
-    expect(out).toContain('class="dv-l del"');
-    expect(out).toContain('class="dv-l ctx"');
+    expect(out).toContain('class="dv-l add n"');
+    expect(out).toContain('class="dv-l del n"');
+    expect(out).toContain('class="dv-l ctx n"');
     expect(out).toContain("const qr = promptPayQR(SHOP_ID, total);");
     expect(out).toContain('class="dv-l hunk"');
   });
@@ -596,5 +598,239 @@ describe("the pane's words", () => {
       expect(byId(running, "lane-preview-frame")[0].props.title, lang).toBe(title);
       expect(String(byId(running, "lane-preview-frame-note")[0].props.children).length, lang).toBeGreaterThan(10);
     }
+  });
+});
+
+// The Diff as a review (item 146): scopes, the unified and side by side layouts, one file at a time, and the lane's commits and
+// uncommitted work as sections. The sections hold state (whether a commit is open), so they are read from the markup, not from the
+// elements the view returns.
+describe("the Diff as a review", () => {
+  const REVIEW: LaneReview = {
+    uncommitted: { files: [PROMPTPAY], moreFiles: 0 },
+    commits: [
+      { id: "3f2a1bcd9e01", subject: "Add the PromptPay QR", files: [CHECKOUT, PROMPTPAY], moreFiles: 1, unread: false },
+      { id: "9c8d7e6f5a43", subject: "Start the checkout page", files: [file("src/start.ts", ["+export const a = 1;"], 1)], moreFiles: 0, unread: false },
+      { id: "5b4a39281706", subject: "Old commit", files: [], moreFiles: 0, unread: true },
+      { id: "0f1e2d3c4b5a", subject: "An empty one", files: [], moreFiles: 0, unread: false },
+    ],
+    moreCommits: 2,
+  };
+  const scopes = (over: Partial<PaneScopes> = {}): PaneScopes => ({ scope: "all", onScope: vi.fn(), review: null, failed: false, ...over });
+  const diff = (over: Partial<LanePaneProps> = {}) => props({ files: [CHECKOUT, PROMPTPAY], scopes: scopes(), ...over });
+  const radios = (p: LanePaneProps, id: string) => drawn(byId(p, id)[0]).filter((e) => e.props.role === "radio");
+  const prefs = (layout: "unified" | "split", one = false) => ({ layout, one });
+
+  it("numbers the lines from the hunk's header: old and new beside a line of context, the old alone beside a removed line, the new alone beside an added one", () => {
+    const out = html(diff());
+    // CHECKOUT's hunk starts at 12 on both sides: the context line is 12 | 12, the removed line is 13 in the old file and the added one 13 in the new
+    expect(out).toContain('data-kind="ctx" data-row="1" data-old="12" data-new="12"');
+    expect(out).toContain('data-kind="del" data-row="2" data-old="13"');
+    expect(out).not.toMatch(/data-kind="del" data-row="2" data-old="13" data-new/);
+    expect(out).toContain('data-kind="add" data-row="3" data-new="13"');
+    expect(out).not.toMatch(/data-kind="add" data-row="3" data-old/);
+    // the file is named on its box, for a note on its lines
+    expect(out).toContain('data-path="src/checkout.tsx"');
+  });
+
+  it("draws side by side as pairs: the removed line on the left against the added line on the right, a line of context on both", () => {
+    const out = html(diff({ prefs: prefs("split") }));
+    expect(out).toContain('class="dv-sr"');
+    const rows = out.split('<div class="dv-sr">').slice(1);
+    // the first row of CHECKOUT after the rule is its line of context: one line, on both sides
+    expect(rows[0]).toContain('class="dv-l ctx n s" data-kind="ctx" data-row="1" data-side="old"');
+    expect(rows[0]).toContain('class="dv-l ctx n s" data-kind="ctx" data-row="1" data-side="new"');
+    // the change is one row: removed on the left, added on the right
+    const change = rows.find((r) => r.includes('data-kind="del"'))!;
+    expect(change).toContain('data-kind="del" data-row="2" data-side="old"');
+    expect(change).toContain('data-kind="add" data-row="3" data-side="new"');
+    expect(change.indexOf('data-kind="del"')).toBeLessThan(change.indexOf('data-kind="add"'));
+    // one number on each side
+    expect(change).toContain('<span class="dv-n" aria-hidden="true">13</span>');
+  });
+
+  it("gives the split layout's empty cell to a line only one file has", () => {
+    const lone = file("src/lone.ts", ["+only added"], 1);
+    const out = html(diff({ files: [lone], prefs: prefs("split") }));
+    expect(out).toContain('class="dv-l n s empty" aria-hidden="true"');
+    expect(out.indexOf("dv-l n s empty")).toBeLessThan(out.indexOf('data-kind="add"'));
+  });
+
+  it("gives the pane room for side by side while it is chosen, and only then", () => {
+    expect(html(diff({ prefs: prefs("split") }))).toContain("data-wide");
+    expect(html(diff({ prefs: prefs("unified") }))).not.toContain("data-wide");
+    expect(html(diff({ prefs: prefs("split"), view: "tests" }))).not.toContain("data-wide");
+  });
+
+  it("switches between unified and side by side with a radio group that says which is chosen, and calls back with the other", () => {
+    const onPrefs = vi.fn();
+    const unified = diff({ onPrefs });
+    expect(radios(unified, "lane-diff-layout").map((r) => [r.props.children, r.props["aria-checked"]])).toEqual([
+      ["Unified", true],
+      ["Side by side", false],
+    ]);
+    (radios(unified, "lane-diff-layout")[1].props.onClick as () => void)();
+    expect(onPrefs).toHaveBeenLastCalledWith({ layout: "split" });
+    (radios(unified, "lane-diff-layout")[0].props.onClick as () => void)();
+    expect(onPrefs).toHaveBeenCalledTimes(1);
+    const split = diff({ onPrefs, prefs: prefs("split") });
+    expect(radios(split, "lane-diff-layout").map((r) => r.props["aria-checked"])).toEqual([false, true]);
+    (radios(split, "lane-diff-layout")[0].props.onClick as () => void)();
+    expect(onPrefs).toHaveBeenLastCalledWith({ layout: "unified" });
+  });
+
+  it("offers the layout and the list or one at a time only when there is a file to show", () => {
+    expect(byId(diff({ files: [] }), "lane-diff-layout")).toHaveLength(0);
+    expect(byId(diff({ files: [] }), "lane-diff-show")).toHaveLength(0);
+    expect(byId(diff(), "lane-diff-layout")).toHaveLength(1);
+    expect(byId(diff(), "lane-diff-show")).toHaveLength(1);
+  });
+
+  it("shows the whole list by default, with no Prev and Next, and every file", () => {
+    const out = html(diff());
+    expect(out.match(/data-testid="lane-diff-file"/g)).toHaveLength(2);
+    expect(out).not.toContain("lane-diff-prev");
+    expect(out).toContain('data-one="false"');
+  });
+
+  it("shows one file at a time with its place, and Prev and Next that stop at the ends", () => {
+    const first = diff({ prefs: prefs("unified", true) });
+    const out = html(first);
+    expect(out.match(/data-testid="lane-diff-file"/g)).toHaveLength(1);
+    expect(out).toContain("src/checkout.tsx");
+    expect(out).not.toContain("src/promptpay.ts");
+    expect(words(first)).toContain("1 of 2");
+    expect(byId(first, "lane-diff-prev")[0].props.disabled).toBe(true);
+    expect(byId(first, "lane-diff-next")[0].props.disabled).toBe(false);
+    expect(words(first)).toContain("Prev");
+    expect(words(first)).toContain("Next");
+    // the file takes the height its lines need
+    expect(out).toContain('class="dv tall"');
+    // Next goes to the second file, by its key and its place
+    const onCurrent = vi.fn();
+    (byId(diff({ prefs: prefs("unified", true), onCurrent }), "lane-diff-next")[0].props.onClick as () => void)();
+    expect(onCurrent).toHaveBeenLastCalledWith({ key: "all\u0000src/promptpay.ts", was: 1 });
+    // on the second file the place says so, Prev is back and Next is not
+    const second = diff({ prefs: prefs("unified", true), current: { key: "all\u0000src/promptpay.ts", was: 1 }, onCurrent });
+    expect(words(second)).toContain("2 of 2");
+    expect(html(second)).toContain("src/promptpay.ts");
+    expect(html(second)).not.toContain("src/checkout.tsx");
+    expect(byId(second, "lane-diff-prev")[0].props.disabled).toBe(false);
+    expect(byId(second, "lane-diff-next")[0].props.disabled).toBe(true);
+    (byId(second, "lane-diff-prev")[0].props.onClick as () => void)();
+    expect(onCurrent).toHaveBeenLastCalledWith({ key: "all\u0000src/checkout.tsx", was: 0 });
+  });
+
+  it("follows the file it shows when the list is read again and it has moved, and holds its place when it is gone", () => {
+    const moved = diff({ files: [PROMPTPAY, CHECKOUT], prefs: prefs("unified", true), current: { key: "all\u0000src/checkout.tsx", was: 0 } });
+    expect(words(moved)).toContain("2 of 2");
+    expect(html(moved)).toContain("src/checkout.tsx");
+    const gone = diff({ files: [PROMPTPAY], prefs: prefs("unified", true), current: { key: "all\u0000src/checkout.tsx", was: 1 } });
+    expect(words(gone)).toContain("1 of 1");
+  });
+
+  it("starts one at a time at the first file when it is chosen, and says so by the switch", () => {
+    const onCurrent = vi.fn();
+    const onPrefs = vi.fn();
+    const p = diff({ onCurrent, onPrefs });
+    expect(radios(p, "lane-diff-show").map((r) => [r.props.children, r.props["aria-checked"]])).toEqual([
+      ["List", true],
+      ["One at a time", false],
+    ]);
+    (radios(p, "lane-diff-show")[1].props.onClick as () => void)();
+    expect(onCurrent).toHaveBeenLastCalledWith({ key: "all\u0000src/checkout.tsx", was: 0 });
+    expect(onPrefs).toHaveBeenLastCalledWith({ one: true });
+  });
+
+  it("has three scopes where the shell can read the folder, none where it cannot, and says which is chosen", () => {
+    expect(radios(diff(), "lane-diff-scope").map((r) => [r.props.children, r.props["aria-checked"]])).toEqual([
+      ["All changes", true],
+      ["Not committed", false],
+      ["Commits", false],
+    ]);
+    expect(byId(diff({ scopes: null }), "lane-diff-scope")).toHaveLength(0);
+    // the list is as it always was where the folder cannot be read
+    expect(html(diff({ scopes: null })).match(/data-testid="lane-diff-file"/g)).toHaveLength(2);
+    const onScope = vi.fn();
+    (radios(diff({ scopes: scopes({ onScope }) }), "lane-diff-scope")[2].props.onClick as () => void)();
+    expect(onScope).toHaveBeenCalledWith("commits");
+  });
+
+  it("lists the work not committed under its own heading, with its files", () => {
+    const p = diff({ scopes: scopes({ scope: "uncommitted", review: REVIEW }) });
+    const out = html(p);
+    expect(out).toContain('data-section="uncommitted"');
+    expect(words(p)).toContain("Not committed yet 1 file");
+    expect(out.match(/data-testid="lane-diff-file"/g)).toHaveLength(1);
+    expect(out).toContain("src/promptpay.ts");
+    expect(out).not.toContain("src/checkout.tsx");
+  });
+
+  it("lists each commit as a section with its short id, its subject and how many files it has, the newest open and the rest shut", () => {
+    const p = diff({ scopes: scopes({ scope: "commits", review: REVIEW }) });
+    const out = html(p);
+    expect(out.match(/data-testid="lane-diff-commit"/g)).toHaveLength(4);
+    const text = words(p);
+    expect(text).toContain("3f2a1bcd9e01 Add the PromptPay QR 3 files");
+    expect(text).toContain("9c8d7e6f5a43 Start the checkout page 1 file");
+    // only the newest commit's files are drawn: its two, and the one more it could not list is counted
+    expect(out.match(/data-testid="lane-diff-file"/g)).toHaveLength(2);
+    expect(out).toContain('aria-expanded="true"');
+    expect(out.match(/aria-expanded="false"/g)).toHaveLength(3);
+    expect(text).toContain("and 1 more files");
+    expect(text).toContain("and 2 more commits");
+    expect(out).not.toContain("src/start.ts");
+  });
+
+  it("says in words for a commit whose files could not be read, and for one that changed none, when they are opened", () => {
+    // each of those two is the newest in a review of its own, so it is open
+    const unread = diff({ scopes: scopes({ scope: "commits", review: { ...REVIEW, commits: [REVIEW.commits[2]], moreCommits: 0 } }) });
+    expect(words(unread)).toContain("This commit's files could not be read.");
+    expect(html(unread)).toContain('data-testid="lane-diff-unread"');
+    const empty = diff({ scopes: scopes({ scope: "commits", review: { ...REVIEW, commits: [REVIEW.commits[3]], moreCommits: 0 } }) });
+    expect(words(empty)).toContain("This commit changed no file.");
+  });
+
+  it("walks the files of every commit one at a time, a file changed in two commits being two of them", () => {
+    const p = diff({ prefs: prefs("unified", true), scopes: scopes({ scope: "commits", review: REVIEW }) });
+    // the commits hold 2 + 1 + 0 + 0 files that were listed: three
+    expect(words(p)).toContain("1 of 3");
+    expect(words(p)).toContain("3f2a1bcd9e01 Add the PromptPay QR");
+    const third = diff({ prefs: prefs("unified", true), current: { key: "9c8d7e6f5a43\u0000src/start.ts", was: 2 }, scopes: scopes({ scope: "commits", review: REVIEW }) });
+    expect(words(third)).toContain("3 of 3");
+    expect(words(third)).toContain("9c8d7e6f5a43 Start the checkout page");
+    expect(html(third)).toContain("src/start.ts");
+  });
+
+  it("says it is reading the folder until it has, and that it could not when it could not, in a scope that needs the review", () => {
+    expect(byId(diff({ scopes: scopes({ scope: "commits" }) }), "lane-diff-reading")).toHaveLength(1);
+    expect(words(diff({ scopes: scopes({ scope: "commits" }) }))).toContain("Reading the lane's folder…");
+    expect(words(diff({ scopes: scopes({ scope: "uncommitted", failed: true }) }))).toContain("The lane's folder could not be read just now.");
+    expect(byId(diff({ scopes: scopes({ scope: "uncommitted", failed: true }) }), "lane-diff-failed")).toHaveLength(1);
+    // not for All changes, which needs no review
+    expect(byId(diff(), "lane-diff-reading")).toHaveLength(0);
+  });
+
+  it("says in words when a scope has nothing to list", () => {
+    const none: LaneReview = { uncommitted: { files: [], moreFiles: 0 }, commits: [], moreCommits: 0 };
+    expect(words(diff({ scopes: scopes({ scope: "uncommitted", review: none }) }))).toContain("Nothing is waiting to be committed.");
+    expect(words(diff({ scopes: scopes({ scope: "commits", review: none }) }))).toContain("This lane has no commits of its own yet.");
+    expect(words(diff({ files: [], scopes: scopes() }))).toContain("Kit has not changed any file yet.");
+    // the scope switch stays, so a lane with nothing net can still be looked at by commit
+    expect(byId(diff({ files: [], scopes: scopes() }), "lane-diff-scope")).toHaveLength(1);
+  });
+
+  it("hides a key in a commit's subject and in its lines", () => {
+    const keyed = file("src/config.ts", [`+export const K = "${KEY}";`], 1);
+    const review: LaneReview = { uncommitted: { files: [], moreFiles: 0 }, commits: [{ id: "aaaaaaaaaaaa", subject: `use ${KEY} here`, files: [keyed], moreFiles: 0, unread: false }], moreCommits: 0 };
+    const out = html(diff({ scopes: scopes({ scope: "commits", review }) }));
+    expect(out).not.toContain(KEY);
+    expect(out).not.toContain("sk-FAKE");
+    expect(out).toContain("••••");
+  });
+
+  it("keeps a long subject to one line and the whole of it in the markup", () => {
+    const long = "x".repeat(300);
+    const review: LaneReview = { uncommitted: { files: [], moreFiles: 0 }, commits: [{ id: "bbbbbbbbbbbb", subject: long, files: [], moreFiles: 0, unread: false }], moreCommits: 0 };
+    expect(html(diff({ scopes: scopes({ scope: "commits", review }) }))).toContain(long);
   });
 });

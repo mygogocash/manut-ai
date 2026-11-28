@@ -1,6 +1,8 @@
 // The pane beside a lane (the design canvas's Code board, "What to look at"): three chips, Diff, Preview and Tests, and what the one
 // picked shows for the coding session whose chat is beside it. Diff lists each file the session changed, the newest change to each,
-// drawn as the timeline draws a file edit's change (chat/activity/Work.tsx) with the same masker. Preview is the lane's project run
+// drawn as the timeline draws a file edit's change (chat/activity/Work.tsx) with the same masker; it is also a review (item 146,
+// PaneDiff.tsx): unified or side by side, the list or one file at a time, and the lane's commits and uncommitted work as sections.
+// Preview is the lane's project run
 // with its own dev server in the lane's own folder (LanePreview.tsx, previewStore.ts): the command first, then Start, its address
 // with Open in browser and Stop, its page in a frame that fills the view while it runs, and how it ended; under it the Sample
 // rows of the secrets Kit's changed code reads (PreviewSample.tsx).
@@ -9,15 +11,17 @@
 // (it can print anything), so the board's sample output is not drawn: what is shown is the result that was read.
 // `LanePaneView` takes everything it shows as props and uses no hooks, so a test can draw it; `LanePane` reads the stores.
 import "./lanepane.css";
-import { memo, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { hhmm } from "../app/time";
-import { DiffView } from "../chat/activity/Work";
 import { t, type Key } from "../i18n";
 import type { DiffFile } from "../lib/protocol";
 import type { Chat } from "../state/store";
 import { diffsOf, newestFirst, sameDiffs } from "./changes";
+import { DIFF_DEFAULTS, setDiffPrefs, useDiffPrefs, type DiffPrefs } from "./diffPrefs";
 import { changeMark, filesShown } from "./laneFolder";
-import { useLaneFolder } from "./useLaneFolder";
+import { PaneDiffView, type PaneScopes } from "./PaneDiff";
+import type { Current, Scope } from "./paneReview";
+import { useLaneFolder, useLaneReview } from "./useLaneFolder";
 import { laneTests, type LaneTests } from "./lane";
 import { laneOf, useLanesVersion } from "./laneStore";
 import { LanePreviewView, type LanePreviewProps } from "./LanePreview";
@@ -51,32 +55,14 @@ export interface LanePaneProps {
   time?: (ms: number) => string;
   /** Put up for review and its ask (Review.tsx), over the chips, for a lane with a folder and a branch of its own. */
   review?: ReactNode;
-}
-
-// Memoised on its files, which stay the same array while no step's change moved: a long diff is not drawn again for each word of
-// an answer that streams in beside it.
-const ChangedFiles = memo(function ChangedFiles({ files }: { files: DiffFile[] }) {
-  return <DiffView files={files} scroll={false} testId="lane-diff" />;
-});
-
-function DiffPane({ files, moreFiles = 0 }: { files: DiffFile[]; moreFiles?: number }) {
-  if (files.length === 0) {
-    return (
-      <p className="mut lp-none" data-testid="lane-diff-none">
-        {t("lane.pane.diff.none")}
-      </p>
-    );
-  }
-  return (
-    <>
-      <ChangedFiles files={files} />
-      {moreFiles > 0 && (
-        <p className="mut lp-none" data-testid="lane-diff-more-files">
-          {t("lane.pane.diff.moreFiles", { n: moreFiles })}
-        </p>
-      )}
-    </>
-  );
+  /** The Diff's scopes (All changes, Not committed, Commits) and the review that fills the last two (item 146): none where only the
+   *  chat's events say what changed, which is the whole list alone. */
+  scopes?: PaneScopes | null;
+  /** The Diff's layout and whether it shows one file at a time, kept on this computer (diffPrefs.ts), and which file that is. */
+  prefs?: DiffPrefs;
+  onPrefs?: (patch: Partial<DiffPrefs>) => void;
+  current?: Current;
+  onCurrent?: (current: Current) => void;
 }
 
 function PreviewPane({ needs, asked, onAdd, preview }: Pick<LanePaneProps, "needs" | "asked" | "onAdd" | "preview">) {
@@ -145,11 +131,14 @@ function TestsPane({ tests, time }: { tests: LaneTests; time: (ms: number) => st
   );
 }
 
-export function LanePaneView({ view, onView, files, moreFiles, needs, asked, onAdd, preview, tests, time = (ms) => hhmm(new Date(ms)), review }: LanePaneProps) {
+const NONE: Current = { key: null, was: 0 };
+const nothing = () => undefined;
+
+export function LanePaneView({ view, onView, files, moreFiles, needs, asked, onAdd, preview, tests, time = (ms) => hhmm(new Date(ms)), review, scopes = null, prefs = DIFF_DEFAULTS, onPrefs = nothing, current = NONE, onCurrent = nothing }: LanePaneProps) {
   return (
     // the diff, the tests and a preview's text can be selected and noted for the chat beside it (item 97, chat/box/SelectionNote.tsx);
     // ⌘F here is not the chat's find (item 150): this pane keeps the key for a find of its own (src/chat/find/host.ts)
-    <aside className="lpane" data-testid="lane-pane" data-view={view} data-note-source data-own-find>
+    <aside className="lpane" data-testid="lane-pane" data-view={view} data-note-source data-own-find {...(view === "diff" && prefs.layout === "split" ? { "data-wide": "" } : {})}>
       {review}
       <div className="fgroup" role="group" aria-label={t("lane.pane.title")}>
         {VIEWS.map((v) => (
@@ -159,7 +148,7 @@ export function LanePaneView({ view, onView, files, moreFiles, needs, asked, onA
         ))}
       </div>
       <div className="lp-view" data-testid={`lane-view-${view}`}>
-        {view === "diff" && <DiffPane files={files} moreFiles={moreFiles} />}
+        {view === "diff" && <PaneDiffView whole={{ files, moreFiles: moreFiles ?? 0 }} scopes={scopes} prefs={prefs} onPrefs={onPrefs} current={current} onCurrent={onCurrent} />}
         {view === "preview" && <PreviewPane needs={needs} asked={asked} onAdd={onAdd} preview={preview} />}
         {view === "tests" && <TestsPane tests={tests} time={time} />}
       </div>
@@ -191,8 +180,26 @@ export function LanePane({ chatKey, chat, laneDir = null, review }: { chatKey: s
   const here = useMemo(frameHere, []);
   const fromEvents = useChangedFiles(chat);
   // The folder is the truth where the shell can read it; the chat's events are the hint to read again, and the files shown where it cannot.
-  const folder = useLaneFolder(laneDir, changeMark(chat));
+  const mark = changeMark(chat);
+  const folder = useLaneFolder(laneDir, mark);
   const files = filesShown(folder, fromEvents);
+  // The review (item 146): the Diff's scopes exist where the shell can read the folder, and the review itself is read only while the
+  // Diff shows a scope that needs it.
+  const [scope, setScope] = useState<Scope>("all");
+  const [current, setCurrent] = useState<Current>(NONE);
+  const prefs = useDiffPrefs();
+  const read = useLaneReview(laneDir, mark, view === "diff" && scope !== "all" && folder !== null);
+  const scopes: PaneScopes | null = folder
+    ? {
+        scope,
+        onScope: (to) => {
+          setScope(to);
+          setCurrent(NONE);
+        },
+        review: read.got,
+        failed: read.failed,
+      }
+    : null;
   const record = usePreviewRecord(chatKey);
   const live = isLive(record.run);
   // The folder is read each time its Preview is looked at, so the command named is chosen from what the folder holds now.
@@ -214,5 +221,23 @@ export function LanePane({ chatKey, chat, laneDir = null, review }: { chatKey: s
     reloads,
     onReload: () => setReloads((n) => n + 1),
   };
-  return <LanePaneView view={view} onView={setView} files={files} moreFiles={folder?.moreFiles ?? 0} needs={onSample(all)} asked={asked} onAdd={setAsked} preview={preview} tests={laneTests(laneOf(chatKey))} review={review} />;
+  return (
+    <LanePaneView
+      view={view}
+      onView={setView}
+      files={files}
+      moreFiles={folder?.moreFiles ?? 0}
+      needs={onSample(all)}
+      asked={asked}
+      onAdd={setAsked}
+      preview={preview}
+      tests={laneTests(laneOf(chatKey))}
+      review={review}
+      scopes={scopes}
+      prefs={prefs}
+      onPrefs={setDiffPrefs}
+      current={current}
+      onCurrent={setCurrent}
+    />
+  );
 }

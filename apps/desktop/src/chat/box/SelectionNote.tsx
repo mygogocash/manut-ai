@@ -2,13 +2,16 @@
 // tests, a preview's text), brings a quiet button beside the end of the selection; the button, or ⌘⇧N (Ctrl+Shift+N
 // elsewhere) from the keyboard, opens the kit's small popover with one field for the note. Add puts the selection and the note
 // above the box as a chip (carry.ts); nothing is sent. The person's own messages, the box and any field are never a source.
+// Lines selected in the Diff beside a lane (item 146) are quoted as the patch lines they are and carry the file and the line range
+// (activity/diffNote.ts): the popover says where, and the chip keeps it.
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { t } from "../../i18n";
 import { isMac } from "../../app/shortcuts";
 import { composing } from "../../lib/ime";
 import { Popover } from "../../ui";
-import { carry, noteChip, QUOTE_MAX, type Scope } from "./carry";
+import { pickedFromRange, type NoteAt } from "../activity/diffNote";
+import { atText, carry, noteChip, QUOTE_MAX, type Scope } from "./carry";
 import "../cards/cards.css";
 import "./carry.css";
 
@@ -21,6 +24,8 @@ export const isNoteKey = (e: { key: string; code?: string; metaKey: boolean; ctr
 
 interface Picked {
   text: string;
+  /** Where the lines are, when the selection is lines of one file in a diff (item 146); then `text` is those lines as a patch. */
+  at?: NoteAt;
   /** Where the selection ends on screen: the button and the popover sit just under it, or above where it starts (`top`) when
    *  the window has no room under it. */
   x: number;
@@ -40,7 +45,9 @@ export function pickedIn(root: HTMLElement | null, sel: Selection | null): Picke
   const rects = range.getClientRects();
   const end = rects.length ? rects[rects.length - 1] : range.getBoundingClientRect();
   const first = rects.length ? rects[0] : end;
-  return { text, x: end.right, y: end.bottom, top: first.top };
+  // lines of one file in a diff are quoted from the page's own lines, with their marks, and say where they are
+  const lines = pickedFromRange(range);
+  return { text: lines?.quote ?? text, ...(lines ? { at: lines.at } : {}), x: end.right, y: end.bottom, top: first.top };
 }
 
 export function SelectionNote({ chatKey, scope, box, onDone }: { chatKey: string; scope: Scope; box: RefObject<HTMLElement | null>; onDone?: () => void }) {
@@ -87,7 +94,7 @@ export function SelectionNote({ chatKey, scope, box, onDone }: { chatKey: string
   };
   const add = () => {
     if (!open) return;
-    const chip = noteChip(open.text, note, scope);
+    const chip = noteChip(open.text, note, scope, undefined, open.at);
     if (!chip) return close(true);
     if (carry(chatKey, chip) === "notes") return setFull(true);
     document.getSelection()?.removeAllRanges();
@@ -148,6 +155,11 @@ export function SelectionNote({ chatKey, scope, box, onDone }: { chatKey: string
             data-testid="note-field"
           />
           <p className="sn-line">{t("carry.what")}</p>
+          {open?.at && (
+            <p className="sn-line sn-at" data-testid="note-at-place">
+              {t("carry.at.line", { place: atText(open.at) })}
+            </p>
+          )}
           {open && open.text.length > QUOTE_MAX && (
             <p className="sn-line" data-testid="note-long">
               {t("carry.long", { max: QUOTE_MAX.toLocaleString("en-US") })}

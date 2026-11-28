@@ -3,14 +3,18 @@
 import { createElement } from "react";
 import { renderToString } from "react-dom/server";
 import { beforeEach, describe, expect, it } from "vitest";
+import { rowsOf } from "../activity/diffLayout";
+import { pickedLines } from "../activity/diffNote";
 import { Bubble } from "../parts/Bubble";
 import { CarriedChips } from "./BoxParts";
 import { isNoteKey } from "./SelectionNote";
 import {
   addCarried,
+  atText,
   bareText,
   carry,
   CARRY_KEY,
+  chipTitle,
   chipWords,
   cutQuote,
   dropCarried,
@@ -282,5 +286,94 @@ describe("drawn", () => {
     expect(html).toContain("check the fee");
     expect(html).toContain("Is this right?");
     expect(html).not.toContain("&gt; The fee");
+  });
+});
+
+describe("a note on lines selected in a diff (item 146)", () => {
+  // the canvas's change, in a hunk that starts at line 12: a line of context, one removed, two added
+  const rows = rowsOf(["@@ -12,4 +12,5 @@", "   const total = order.items.reduce(sum, 0);", "-  return <PayByTransfer amount={total} />;", "+  const qr = promptPayQR(SHOP_ID, total);", "+  return <PromptPayQR value={qr} />;", " }"]);
+  const picked = (...i: number[]) => pickedLines("apps/web/src/checkout.tsx", i.map((n) => rows[n]))!;
+  const added = picked(3, 4);
+  const chip = () => noteChip(added.quote, "check the QR", SHOP, "d1", added.at)!;
+
+  it("carries the file and the line range, with the person's words beside them", () => {
+    expect(chip()).toMatchObject({ kind: "note", id: "d1", note: "check the QR", at: { file: "apps/web/src/checkout.tsx", range: { from: 13, to: 14, side: "new" } } });
+    expect(chip().quote).toBe(["+  const qr = promptPayQR(SHOP_ID, total);", "+  return <PromptPayQR value={qr} />;"].join("\n"));
+  });
+
+  it("names the place in Paradev's form: the path, then L12 or L12-L18, and what is not the new file's said in words", () => {
+    expect(atText({ file: "src/a.ts", range: { from: 12, to: 18, side: "new" } })).toBe("src/a.ts:L12-L18");
+    expect(atText({ file: "src/a.ts", range: { from: 12, to: 12, side: "new" } })).toBe("src/a.ts:L12");
+    expect(atText({ file: "src/a.ts", range: { from: 40, to: 42, side: "old" } })).toBe("src/a.ts:L40-L42 (deleted lines, numbered as before the change)");
+    expect(atText({ file: "src/a.ts", range: { from: 12, to: 13, side: "mixed" } })).toBe("src/a.ts:L12-L13 (across deleted and added lines, numbered after the change)");
+    // no hunk header numbered the lines: the file alone
+    expect(atText({ file: "src/a.ts" })).toBe("src/a.ts");
+  });
+
+  it("goes out with the place as the quote's first line, the lines as a patch, and the note under them", () => {
+    expect(noteBlock(chip())).toBe(["> apps/web/src/checkout.tsx:L13-L14", "> +  const qr = promptPayQR(SHOP_ID, total);", "> +  return <PromptPayQR value={qr} />;", "Note: check the QR"].join("\n"));
+    // a note on any other text is as it was
+    expect(noteBlock(noteChip("The fee is 2%", "check", SHOP, "n1")!)).toBe("> The fee is 2%\nNote: check");
+  });
+
+  it("keeps the removed lines marked, so the agent can tell them from the added", () => {
+    const mixed = picked(1, 2, 3);
+    const block = noteBlock(noteChip(mixed.quote, "", SHOP, "d2", mixed.at)!);
+    expect(block.split("\n")).toEqual([
+      "> apps/web/src/checkout.tsx:L12-L13 (across deleted and added lines, numbered after the change)",
+      ">    const total = order.items.reduce(sum, 0);",
+      "> -  return <PayByTransfer amount={total} />;",
+      "> +  const qr = promptPayQR(SHOP_ID, total);",
+    ]);
+  });
+
+  it("is read back from a sent message as part of the quote, with the person's words and message after it", () => {
+    const sent = withCarried("Please fix it.", [chip()], SHOP);
+    const parts = splitSent(sent);
+    expect(parts.quotes).toHaveLength(1);
+    expect(parts.quotes[0].quote.split("\n")[0]).toBe("apps/web/src/checkout.tsx:L13-L14");
+    expect(parts.quotes[0].note).toBe("check the QR");
+    expect(parts.rest).toBe("Please fix it.");
+  });
+
+  it("says the file's last two parts and the lines on its chip, and the whole path in its tooltip", () => {
+    const words = chipWords(chip());
+    expect(words.startsWith("src/checkout.tsx:L13-L14 · “+ const qr")).toBe(true);
+    expect(words.endsWith(" · check the QR")).toBe(true);
+    const title = chipTitle(chip());
+    expect(title.startsWith("apps/web/src/checkout.tsx:L13-L14 · “+ const qr")).toBe(true);
+    expect(title.endsWith(" · check the QR")).toBe(true);
+    // a note on any other text is as it was
+    expect(chipTitle(noteChip("Pay by QR", "ask", SHOP, "n1")!)).toBe("“Pay by QR” · ask");
+    const html = renderToString(createElement(CarriedChips, { chatKey: "buddy", scope: SHOP, list: [chip()] }));
+    expect(html).toContain("src/checkout.tsx:L13-L14");
+    expect(html).toContain('title="apps/web/src/checkout.tsx:L13-L14');
+  });
+
+  it("is kept like any chip, across a restart, and adding it sends nothing: it waits above the box until the person sends", () => {
+    const mem = new Mem();
+    setCarryStorage(mem);
+    expect(carry("agent:s7", chip())).toBeNull();
+    // the only thing it touched is what the box keeps beside the unsent text
+    expect([...mem.data.keys()]).toEqual([CARRY_KEY]);
+    setCarryStorage(mem);
+    expect(getCarried("agent:s7")).toEqual([chip()]);
+    // it goes out only when a message is made of it (Send), and a chip made under another account is left out as any is
+    expect(withCarried("", getCarried("agent:s7"), SHOP)).toContain("> apps/web/src/checkout.tsx:L13-L14");
+    expect(withCarried("", getCarried("agent:s7"), { shop: "other" })).toBe("");
+  });
+
+  it("reads back a saved place only as far as it can be trusted", () => {
+    const save = (at: unknown) => parseCarry(JSON.stringify({ k: [{ kind: "note", id: "n", quote: "q", more: 0, note: "", scope: SHOP, at }] })).k?.[0];
+    const good = { file: "src/a.ts", range: { from: 3, to: 5, side: "mixed" } };
+    expect(save(good)).toMatchObject({ at: good });
+    // a range that cannot be right is dropped and the file stays; no file, no place
+    for (const range of [{ from: 5, to: 3, side: "new" }, { from: 0, to: 1, side: "new" }, { from: 1.5, to: 2, side: "new" }, { from: 1, to: 2, side: "left" }, "x"]) {
+      expect(save({ file: "src/a.ts", range })).toMatchObject({ at: { file: "src/a.ts" } });
+      expect((save({ file: "src/a.ts", range }) as { at: { range?: unknown } }).at.range).toBeUndefined();
+    }
+    for (const at of [null, "src/a.ts", [], { file: "" }, { file: 3 }, { range: good.range }]) expect((save(at) as { at?: unknown }).at, JSON.stringify(at)).toBeUndefined();
+    // the chip is a note either way
+    expect(save({ file: "x" })).toMatchObject({ kind: "note", quote: "q" });
   });
 });

@@ -15,6 +15,8 @@ import type { ImportApp, ImportProfile } from "./term/import";
 import { type GitView } from "../code/moved";
 import { MOCK_MOVED, MOCK_MOVED_ROOT } from "../code/mockMoved";
 import { type KeptLane, type LaneCleaned, type LaneLanded, type LaneMade, type LaneReleased, type LaneRemoveAsk, type LaneRemoved } from "../code/laneBranch";
+import { readLaneFolder, readLaneReview } from "../code/laneFolder";
+import { readLaneRemote } from "../code/laneRemote";
 import { readAgentConfig, type AgentConfig } from "../settings/mcp/agentConfig";
 import { readPulled, readTools, type MergeMethod, type NewProjectMade, type Pulled, type RepoAsk, type ReviewAsk, type ReviewDone, type ReviewDraft, type SourceTools } from "../code/source";
 import { checkArgs, checkVars, homeVarOf, rulesOf, signinAgent, versionAgent, type ProviderPatch, type ProviderView, type SignIn } from "../settings/providers/model";
@@ -191,6 +193,13 @@ export interface MockLane {
   helper?: { job: string; lead: string };
 }
 
+/** What e2e stages for one lane's folder (item 146): the shell's own answers to `lane_diff`, `lane_review` and `lane_remote`. */
+export interface StagedFolder {
+  diff?: unknown;
+  review?: unknown;
+  remote?: unknown;
+}
+
 export type MockGlobals = MockTurnGlobals & {
   /** Free bytes the mock's disk watch reads (src/lib/disk.ts); unset = 100 GB. */
   __manutDiskFree?: number;
@@ -221,6 +230,8 @@ export type MockGlobals = MockTurnGlobals & {
   __manutMockTaken?: string[];
   /** e2e: the lanes' working folders the mock shell made (its records), as `lane_list` lists them */
   __manutLanes?: MockLane[];
+  /** e2e: the shell's answers for a lane's folder (`lane_diff`, `lane_review`, `lane_remote`), by worktree, `*` for any lane (item 146) */
+  __manutLaneFolder?: Record<string, StagedFolder>;
   /** e2e: this computer's memory in bytes, as the shell reads `hw.memsize` (item 102h); unset = 8 GB, the smallest Mac; null = it
    *  could not be read */
   __manutMemory?: number | null;
@@ -1181,9 +1192,23 @@ export class MockHost implements SessionHost, BuddyHost {
     this.log({ op: "lane.remove", path: worktree, size: changed, ...(ask.branch ? { branch: lane.branch } : {}) });
     return { removed: true, deleted: ask.branch, changed: null, ahead: null, error: null };
   }
-  async laneDiff() {
-    // a browser reads no folder: the pane shows what the chat's events say
-    return null;
+  /** A browser reads no folder: the pane shows what the chat's events say, unless e2e staged the shell's answers for a lane's folder
+   *  (`__manutLaneFolder`, by worktree, `*` for any). They are the shell's own JSON, so the page reads them as it reads the shell's. */
+  async laneDiff(worktree: string) {
+    const staged = this.stagedFolder(worktree);
+    return staged?.diff ? readLaneFolder(staged.diff) : null;
+  }
+  async laneReview(worktree: string) {
+    const staged = this.stagedFolder(worktree);
+    return staged?.review ? readLaneReview(staged.review) : null;
+  }
+  async laneRemote(worktree: string) {
+    const staged = this.stagedFolder(worktree);
+    return staged?.remote ? readLaneRemote(staged.remote) : null;
+  }
+  private stagedFolder(worktree: string): StagedFolder | undefined {
+    const all = this.g.__manutLaneFolder;
+    return all?.[worktree] ?? all?.["*"];
   }
   async laneKeys() {
     // nor what a commit would save: a commit or a push asks
